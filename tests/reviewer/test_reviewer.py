@@ -314,7 +314,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reviewer_raises_when_app_installation_token_unavailable() -> None:
+async def test_reviewer_surfaces_error_when_app_installation_token_unavailable() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -324,6 +324,9 @@ async def test_reviewer_raises_when_app_installation_token_unavailable() -> None
         },
         "metadata": {},
     }
+
+    async def _no_sleep(_delay: float) -> None:
+        return None
 
     with (
         patch(
@@ -336,14 +339,19 @@ async def test_reviewer_raises_when_app_installation_token_unavailable() -> None
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ) as mock_sandbox,
+        patch.object(reviewer.asyncio, "sleep", _no_sleep),
         patch("agent.reviewer.make_model", return_value=MagicMock()),
         patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()) as create_agent,
     ):
         await reviewer.get_reviewer_agent(config)
         prepare = create_agent.call_args.kwargs["middleware"][0]
-        with pytest.raises(RuntimeError, match="installation token unavailable"):
-            await prepare.abefore_agent({}, None)
+        update = await prepare.abefore_agent({}, None)
 
+    # A missing token no longer kills the run: it surfaces as a readable error
+    # message and leaves run_prepared=False so the run can be retried.
+    assert update is not None
+    assert update["run_prepared"] is False
+    assert "installation token unavailable" in update["messages"][0].content
     mock_sandbox.assert_not_awaited()
 
 
@@ -1534,3 +1542,33 @@ def test_reviewer_system_prompt_includes_closing_summary_contract() -> None:
     assert "dry_run" in prompt
     assert "Simulated publish (eval mode)" in prompt
     assert "thread_not_found" in prompt
+
+
+class _Conflict409(Exception):
+    def __init__(self) -> None:
+        super().__init__("sandbox already exists")
+        self.status_code = 409
+
+
+@pytest.mark.asyncio
+async def test_ensure_reviewer_sandbox_retries_after_409(monkeypatch) -> None:
+    """A sandbox-create 409 is retried and the run reaches a usable backend."""
+    configurable = {"repo": {"owner": "acme", "name": "repo"}}
+    backend = MagicMock()
+    ensure = AsyncMock(side_effect=[_Conflict409(), backend])
+    sleeps: list[float] = []
+
+    async def _no_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(reviewer, "ensure_sandbox_for_thread", ensure)
+    monkeypatch.setattr(reviewer.asyncio, "sleep", _no_sleep)
+
+    result_backend, token = await reviewer._ensure_reviewer_sandbox_for_thread(
+        "reviewer-thread-id", configurable
+    )
+
+    assert result_backend is backend
+    assert token is None
+    assert ensure.await_count == 2
+    assert sleeps == [reviewer.REVIEWER_SANDBOX_INIT_RETRY_DELAYS_SECONDS[0]]

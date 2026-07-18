@@ -920,7 +920,44 @@ class PrepareReviewerRunState(PrepareRunState):
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
 
 
+REVIEWER_SANDBOX_INIT_MAX_ATTEMPTS = 3
+REVIEWER_SANDBOX_INIT_RETRY_DELAYS_SECONDS = (1.0, 3.0)
+
+
 async def _ensure_reviewer_sandbox_for_thread(
+    thread_id: str,
+    configurable: dict[str, Any],
+) -> tuple[SandboxBackendProtocol, str | None]:
+    """Get-or-create the reviewer sandbox with bounded retry-with-backoff.
+
+    Sandbox init is idempotent per thread, so transient create errors (HTTP 409
+    name-conflict races, other 4xx/5xx, or a missing GitHub App token) are
+    retried with backoff instead of aborting the run. The underlying
+    ``ensure_sandbox_for_thread`` already treats a 409 as "reuse the existing
+    thread sandbox"; the retry here covers failures that surface before that.
+    """
+    last_exc: BaseException | None = None
+    for attempt in range(REVIEWER_SANDBOX_INIT_MAX_ATTEMPTS):
+        try:
+            return await _ensure_reviewer_sandbox_for_thread_once(thread_id, configurable)
+        except Exception as exc:
+            last_exc = exc
+            if attempt == REVIEWER_SANDBOX_INIT_MAX_ATTEMPTS - 1:
+                raise
+            delay = REVIEWER_SANDBOX_INIT_RETRY_DELAYS_SECONDS[
+                min(attempt, len(REVIEWER_SANDBOX_INIT_RETRY_DELAYS_SECONDS) - 1)
+            ]
+            logger.warning(
+                "Reviewer sandbox init failed for thread %s (%s); retrying in %.1fs",
+                thread_id,
+                type(exc).__name__,
+                delay,
+            )
+            await asyncio.sleep(delay)
+    raise last_exc if last_exc is not None else RuntimeError("unreachable sandbox retry state")
+
+
+async def _ensure_reviewer_sandbox_for_thread_once(
     thread_id: str,
     configurable: dict[str, Any],
 ) -> tuple[SandboxBackendProtocol, str | None]:

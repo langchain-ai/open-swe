@@ -50,6 +50,27 @@ async def test_prepare_latch_skips_second_call():
     assert middleware.calls == 1
 
 
+class FailingPrepareMiddleware(BasePrepareRunMiddleware):
+    async def _prepare(self, state, runtime):
+        raise RuntimeError("sandbox create 409")
+
+
+@pytest.mark.asyncio
+async def test_prepare_failure_surfaces_message_instead_of_raising():
+    middleware = FailingPrepareMiddleware()
+
+    update = await middleware.abefore_agent(
+        cast(AgentState, {"messages": []}), cast(Runtime[None], MagicMock())
+    )
+
+    assert update is not None
+    assert update["run_prepared"] is False
+    assert "run_prepared_for" not in update
+    messages = update["messages"]
+    assert len(messages) == 1
+    assert "sandbox create 409" in messages[0].content
+
+
 @pytest.mark.asyncio
 async def test_prepare_latch_reruns_when_fingerprint_changes():
     middleware = DummyPrepareMiddleware()

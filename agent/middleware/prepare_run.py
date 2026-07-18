@@ -22,6 +22,14 @@ class PrepareRunState(AgentState):
     rendered_system_prompt: NotRequired[str | None]
 
 
+def _format_prepare_failure(exc: BaseException) -> str:
+    return (
+        "Run setup failed before the agent could start "
+        f"({exc.__class__.__name__}: {exc}). This is usually a transient "
+        "sandbox or GitHub-token initialization error; retry the run."
+    )
+
+
 def _latest_message_fingerprint(state: Mapping[str, Any]) -> str | None:
     messages = state.get("messages")
     if not isinstance(messages, list) or not messages:
@@ -63,7 +71,13 @@ class BasePrepareRunMiddleware(AgentMiddleware):
             and prepared_state.get("run_prepared_for") == fingerprint
         ):
             return None
-        updates = await self._prepare(prepared_state, runtime)
+        try:
+            updates = await self._prepare(prepared_state, runtime)
+        except Exception as exc:  # surface instead of aborting with zero trajectory
+            return {
+                "run_prepared": False,
+                "messages": [SystemMessage(content=_format_prepare_failure(exc))],
+            }
         return {"run_prepared": True, "run_prepared_for": fingerprint, **updates}
 
     def _prepare_fingerprint(self, state: PrepareRunState, runtime: Runtime) -> str:  # noqa: ARG002
