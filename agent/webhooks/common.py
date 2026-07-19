@@ -85,6 +85,7 @@ from ..utils.github_token import (
     invalidate_cached_github_token,
 )
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
+from ..utils.json_types import ThreadLike, as_thread_dict
 from ..utils.linear import post_linear_trace_comment  # noqa: F401
 from ..utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from ..utils.multimodal import (
@@ -121,6 +122,7 @@ from ..utils.slack_feedback import (
     process_slack_reaction_removed,
 )
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
+from ..utils.thread_ops import queue_message_for_thread  # noqa: F401
 
 __all__ = [
     "Any",
@@ -234,6 +236,7 @@ __all__ = [
     "post_slack_trace_reply",
     "process_slack_reaction_added",
     "process_slack_reaction_removed",
+    "queue_message_for_thread",
     "react_to_github_comment",
     "react_to_linear_comment",
     "reconcile_findings_with_review_threads",
@@ -343,13 +346,15 @@ def get_repo_config_from_team_mapping(
     if "owner" in config and "name" in config:
         return config
 
-    if "projects" in config and project_name:
-        project_config = config["projects"].get(project_name)
-        if project_config:
+    projects = config.get("projects")
+    if isinstance(projects, dict) and project_name:
+        project_config = projects.get(project_name)
+        if isinstance(project_config, dict):
             return project_config
 
-    if "default" in config:
-        return config["default"]
+    default = config.get("default")
+    if isinstance(default, dict):
+        return default
 
     return fallback
 
@@ -495,8 +500,9 @@ def generate_reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
 
 
-def _extract_repo_config_from_thread(thread: dict[str, Any]) -> dict[str, str] | None:
+def _extract_repo_config_from_thread(thread: ThreadLike) -> dict[str, str] | None:
     """Extract repo config from persisted thread data."""
+    thread = as_thread_dict(thread)
     metadata = thread.get("metadata")
     if not isinstance(metadata, dict):
         return None
@@ -695,10 +701,9 @@ async def upsert_agent_thread_owner_metadata(
             logger.exception("Failed to read thread %s for owner metadata", thread_id)
         existing = None
 
+    existing_dict = as_thread_dict(existing) if existing is not None else {}
     existing_meta = (
-        existing.get("metadata")
-        if isinstance(existing, dict) and isinstance(existing.get("metadata"), dict)
-        else {}
+        existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
     if existing_meta.get("created_at_ms") is None:
         metadata["created_at_ms"] = now_ms

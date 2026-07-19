@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import shlex
+from typing import cast
 
-from deepagents.backends.protocol import ExecuteResponse
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from agent.utils.sandbox_paths import (
     aresolve_repo_dir,
@@ -69,7 +70,7 @@ def test_resolve_repo_dir_uses_provider_work_dir() -> None:
         writable_dirs={"/workspace"},
     )
 
-    repo_dir = resolve_repo_dir(backend, "open-swe")
+    repo_dir = resolve_repo_dir(cast(SandboxBackendProtocol, backend), "open-swe")
 
     assert repo_dir == "/workspace/open-swe"
     assert backend.commands == ["test -d /workspace && test -w /workspace"]
@@ -85,7 +86,7 @@ def test_resolve_sandbox_work_dir_falls_back_to_home_when_work_dir_is_not_writab
         writable_dirs={"/home/daytona"},
     )
 
-    work_dir = resolve_sandbox_work_dir(backend)
+    work_dir = resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
 
     assert work_dir == "/home/daytona"
     assert backend.commands == [
@@ -101,8 +102,8 @@ def test_resolve_sandbox_work_dir_caches_the_result() -> None:
         writable_dirs={"/workspace"},
     )
 
-    first = resolve_sandbox_work_dir(backend)
-    second = resolve_sandbox_work_dir(backend)
+    first = resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
+    second = resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
 
     assert first == "/workspace"
     assert second == "/workspace"
@@ -115,7 +116,7 @@ async def test_aresolve_repo_dir_offloads_sync_resolution() -> None:
         writable_dirs={"/home/daytona"},
     )
 
-    repo_dir = await aresolve_repo_dir(backend, "open-swe")
+    repo_dir = await aresolve_repo_dir(cast(SandboxBackendProtocol, backend), "open-swe")
 
     assert repo_dir == "/home/daytona/open-swe"
     assert backend.commands == ["test -d /home/daytona && test -w /home/daytona"]

@@ -21,8 +21,8 @@ def test_provider_model_kwargs_for_fireworks() -> None:
         "high",
         max_tokens=16_000,
     )
-    assert kwargs["max_tokens"] == 16_000
-    assert kwargs["model_kwargs"] == {"reasoning_effort": "high"}
+    assert kwargs.get("max_tokens") == 16_000
+    assert kwargs.get("model_kwargs") == {"reasoning_effort": "high"}
 
 
 def test_kimi_k2p7_is_supported() -> None:
@@ -31,11 +31,13 @@ def test_kimi_k2p7_is_supported() -> None:
         None,
     )
     assert kimi_k2p7 is not None
-    assert kimi_k2p7["efforts"] == ["low", "medium", "high"]
-    assert "none" not in kimi_k2p7["efforts"]
-    assert kimi_k2p7["default_effort"] == "high"
-    kwargs = provider_model_kwargs(kimi_k2p7["id"], "high", max_tokens=16_000)
-    assert kwargs["model_kwargs"] == {"reasoning_effort": "high"}
+    assert kimi_k2p7.get("efforts") == ["low", "medium", "high"]
+    assert "none" not in kimi_k2p7.get("efforts", [])
+    assert kimi_k2p7.get("default_effort") == "high"
+    model_id = kimi_k2p7.get("id")
+    assert isinstance(model_id, str)
+    kwargs = provider_model_kwargs(model_id, "high", max_tokens=16_000)
+    assert kwargs.get("model_kwargs") == {"reasoning_effort": "high"}
 
 
 def test_provider_model_kwargs_for_fireworks_none_disables_reasoning() -> None:
@@ -44,7 +46,7 @@ def test_provider_model_kwargs_for_fireworks_none_disables_reasoning() -> None:
         "none",
         max_tokens=16_000,
     )
-    assert kwargs["model_kwargs"] == {"reasoning_effort": "none"}
+    assert kwargs.get("model_kwargs") == {"reasoning_effort": "none"}
 
 
 def test_provider_model_kwargs_for_fireworks_unknown_effort_omits_reasoning() -> None:

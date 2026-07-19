@@ -23,9 +23,14 @@ import type { ModelOption } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
+import { ContextWindowIndicator } from "@/features/agents/components/ContextWindowIndicator"
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
-import { agentThreadKeys, invalidateAgentThreadLists } from "@/features/agents/lib/queries"
+import {
+  agentThreadKeys,
+  invalidateAgentThreadLists,
+} from "@/features/agents/lib/queries"
 import { formatModelSelection } from "@/features/agents/lib/provider/useModelOptions"
+import { formatTokenCount } from "@/features/agents/lib/contextUsage"
 import { IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -37,7 +42,11 @@ interface SubmitButtonProps {
   onSubmit: () => void
 }
 
-function PlainSubmitButton({ canSubmit, submitting, onSubmit }: SubmitButtonProps) {
+function PlainSubmitButton({
+  canSubmit,
+  submitting,
+  onSubmit,
+}: SubmitButtonProps) {
   return (
     <IconButton
       type="button"
@@ -129,6 +138,11 @@ export interface CloudPromptBarProps {
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
+  contextUsage?: {
+    usedTokens?: number | null
+    contextWindow?: number | null
+    hasMessages?: boolean
+  }
 }
 
 function fileToImageChunk(file: File): Promise<ImageChunk | null> {
@@ -144,11 +158,11 @@ function fileToImageChunk(file: File): Promise<ImageChunk | null> {
       resolve(
         base64
           ? {
-            kind: "image",
-            base64,
-            mimeType: file.type,
-            fileName: file.name,
-          }
+              kind: "image",
+              base64,
+              mimeType: file.type,
+              fileName: file.name,
+            }
           : null
       )
     }
@@ -172,6 +186,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   onRepoChange,
   planMode = false,
   onPlanModeChange,
+  contextUsage,
 }: CloudPromptBarProps) {
   const [value, setValue] = useState("")
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
@@ -201,9 +216,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
 
   const selectedModelSupportsImages = useMemo(() => {
     if (!selection || pendingImages.length === 0) return true
-    return models.some(
-      (m) => m.id === selection.modelId && m.supports_images
-    )
+    return models.some((m) => m.id === selection.modelId && m.supports_images)
   }, [selection, pendingImages.length, models])
 
   const canSubmit =
@@ -415,9 +428,9 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
 
         {!selectedModelSupportsImages && (
           <div className="mb-2 rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel-2)] px-3 py-1.5 text-xs text-[color:var(--ui-text-muted)]">
-            The selected model does not support image input. Remove the
-            image{pendingImages.length > 1 ? "s" : ""} or switch to a
-            vision-enabled model to send.
+            The selected model does not support image input. Remove the image
+            {pendingImages.length > 1 ? "s" : ""} or switch to a vision-enabled
+            model to send.
           </div>
         )}
 
@@ -457,6 +470,8 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
                     !!selection &&
                     selection.modelId === combo.modelId &&
                     selection.effort === combo.effort
+                  const model = models.find((m) => m.id === combo.modelId)
+                  const contextWindow = model?.context_window
                   return (
                     <button
                       key={`${combo.modelId}::${combo.effort}`}
@@ -472,7 +487,12 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
                           : "text-[color:var(--ui-text-muted)]"
                       )}
                     >
-                      {formatModelSelection(models, combo)}
+                      <span>{formatModelSelection(models, combo)}</span>
+                      {typeof contextWindow === "number" && (
+                        <span className="pl-1 text-[color:var(--ui-text-dim)]">
+                          {formatTokenCount(contextWindow)} context
+                        </span>
+                      )}
                       {selected && (
                         <span className="ml-auto pl-3 text-[color:var(--ui-text-dim)]">
                           ✓
@@ -503,12 +523,20 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             </button>
           )}
 
+          <span className="ml-auto" />
+          <ContextWindowIndicator
+            usedTokens={contextUsage?.usedTokens}
+            contextWindow={contextUsage?.contextWindow}
+            hasMessages={contextUsage?.hasMessages}
+            compact={compact}
+          />
+
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
             aria-label="Attach images"
-            className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-full text-[color:var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)] disabled:cursor-default disabled:opacity-40"
+            className="flex size-7 shrink-0 items-center justify-center rounded-full text-[color:var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)] disabled:cursor-default disabled:opacity-40"
           >
             <ImagePlus className="size-4" />
           </button>

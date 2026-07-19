@@ -75,6 +75,7 @@ async def test_edit_file_stamps_full_file_diff(register_backend) -> None:
 
     result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
 
+    assert isinstance(result, ToolMessage)
     assert result.artifact == {
         "diff": {
             "filePath": "/repo/a.py",
@@ -99,6 +100,7 @@ async def test_edit_file_replace_all(register_backend) -> None:
 
     result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
 
+    assert isinstance(result, ToolMessage)
     assert result.artifact["diff"]["newContent"] == "y y y"
 
 
@@ -114,6 +116,7 @@ async def test_edit_file_missing_old_string_skips(register_backend) -> None:
 
     result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
 
+    assert isinstance(result, ToolMessage)
     assert result.artifact is None
 
 
@@ -127,6 +130,7 @@ async def test_write_file_new_file(register_backend) -> None:
 
     result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
 
+    assert isinstance(result, ToolMessage)
     assert result.artifact == {
         "diff": {
             "filePath": "/repo/new.py",
@@ -147,6 +151,7 @@ async def test_write_file_overwrite(register_backend) -> None:
 
     result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
 
+    assert isinstance(result, ToolMessage)
     assert result.artifact["diff"]["originalContent"] == "old content\n"
     assert result.artifact["diff"]["newContent"] == "new content\n"
     assert result.artifact["diff"]["isNewFile"] is False
@@ -162,6 +167,7 @@ async def test_non_edit_tool_is_untouched(register_backend) -> None:
 
     result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
 
+    assert isinstance(result, ToolMessage)
     assert result.artifact is None
     assert backend.reads == []
 
@@ -178,6 +184,7 @@ async def test_error_result_is_not_stamped(register_backend) -> None:
 
     result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
 
+    assert isinstance(result, ToolMessage)
     assert result.artifact is None
 
 
@@ -193,6 +200,7 @@ async def test_missing_backend_is_graceful() -> None:
 
     result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
 
+    assert isinstance(result, ToolMessage)
     assert result.artifact is None
 
 
@@ -208,6 +216,7 @@ async def test_binary_read_skips(register_backend) -> None:
 
     result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
 
+    assert isinstance(result, ToolMessage)
     assert result.artifact is None
 
 
@@ -225,5 +234,6 @@ async def test_existing_artifact_is_merged(register_backend) -> None:
 
     result = await ToolArtifactMiddleware().awrap_tool_call(request, handler)
 
+    assert isinstance(result, ToolMessage)
     assert result.artifact["existing"] == "kept"
     assert result.artifact["diff"]["newContent"] == "NEW\n"

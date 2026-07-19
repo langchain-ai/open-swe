@@ -40,5 +40,8 @@ export default defineConfig({
     url: `${baseURL}/mock/github/data`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
+    // Deterministic busy window for the interrupt-debounce spec: the fake LLM
+    // holds the first run open this long so follow-ups reliably land mid-run.
+    env: { ...process.env, E2E_BUSY_HOLD_SECONDS: "20" },
   },
 });

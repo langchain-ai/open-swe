@@ -46,5 +46,5 @@ def test_provider_model_kwargs_for_google() -> None:
         "high",
         max_tokens=16_000,
     )
-    assert kwargs["max_tokens"] == 16_000
-    assert kwargs["thinking_level"] == "high"
+    assert kwargs.get("max_tokens") == 16_000
+    assert kwargs.get("thinking_level") == "high"

@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.6.12",
+    "deepagents==0.7.0a7",
     "fastapi>=0.139.0",
     "uvicorn>=0.50.2",
     "httpx>=0.28.1",
@@ -41,6 +41,13 @@ dev = [
     "Pygments>=2.20.0",
 ]
 
+[tool.uv]
+# The langchain-{e2b,daytona,modal,runloop} sandbox integrations still declare a
+# conservative `deepagents<0.7.0` upper bound, but the 0.7.0 alpha keeps the
+# public API they rely on (SandboxBackendProtocol / BaseSandbox) backward
+# compatible. Override the transitive bound so we can track the latest alpha.
+override-dependencies = ["deepagents==0.7.0a7"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -72,3 +79,12 @@ ignore = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.basedpyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+include = ["agent", "tests"]
+exclude = ["**/node_modules", "**/__pycache__", ".venv", "ui", "**/.*"]
+reportMissingTypeStubs = false

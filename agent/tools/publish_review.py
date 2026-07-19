@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 from langgraph.config import get_config
@@ -304,13 +305,13 @@ async def _publish_review_async(
     )
 
     inline_comments: list[dict[str, Any]] = []
-    eligible_with_payload: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    eligible_with_payload: list[tuple[Finding, dict[str, Any]]] = []
     for finding in eligible:
         payload = render_inline_comment_payload(finding)
         if payload is None:
             continue
         inline_comments.append(payload)
-        eligible_with_payload.append((dict(finding), payload))
+        eligible_with_payload.append((finding, payload))
 
     # With nothing new to surface, skip the "no issues found" summary if Open
     # SWE has already reviewed this PR — the user already saw the previous
@@ -603,7 +604,7 @@ def _str_list(value: Any) -> list[str]:
     return [item for item in value if isinstance(item, str) and item]
 
 
-def _comment_ids_for_finding(finding: dict[str, Any]) -> list[int]:
+def _comment_ids_for_finding(finding: Finding) -> list[int]:
     comment_ids = _int_list(finding.get("github_review_comment_ids"))
     comment_id = finding.get("github_review_comment_id")
     if isinstance(comment_id, int) and comment_id not in comment_ids:
@@ -611,7 +612,7 @@ def _comment_ids_for_finding(finding: dict[str, Any]) -> list[int]:
     return comment_ids
 
 
-def _thread_ids_for_finding(finding: dict[str, Any]) -> list[str]:
+def _thread_ids_for_finding(finding: Finding) -> list[str]:
     thread_ids = _str_list(finding.get("github_review_thread_ids"))
     thread_id = finding.get("github_review_thread_id")
     if isinstance(thread_id, str) and thread_id and thread_id not in thread_ids:
@@ -643,7 +644,7 @@ async def _backfill_findings_from_pr_threads(
 
 def _missing_comment_ids_for_published_findings(
     findings: list[Finding],
-    eligible_with_payload: list[tuple[dict[str, Any], dict[str, Any]]],
+    eligible_with_payload: list[tuple[Finding, dict[str, Any]]],
 ) -> bool:
     finding_ids = {
         finding.get("id")
@@ -710,7 +711,7 @@ def _apply_comment_ids(
 
 
 def _comment_id_by_finding_id(
-    eligible_with_payload: list[tuple[dict[str, Any], dict[str, Any]]],
+    eligible_with_payload: list[tuple[Finding, dict[str, Any]]],
     comment_records: list[dict[str, Any]],
 ) -> dict[str, int]:
     """Map each surfaced finding id to its GitHub comment id via the marker.
@@ -746,7 +747,7 @@ async def _record_review_publication(
     *,
     thread_id: str,
     review_id: int,
-    inline_with_payload: list[tuple[dict[str, Any], dict[str, Any]]],
+    inline_with_payload: list[tuple[Finding, dict[str, Any]]],
     comment_records: list[dict[str, Any]],
     langgraph_run_id: str | None,
 ) -> None:
@@ -789,7 +790,7 @@ async def _resolve_diff_line_set(
     pr_number: int,
     token: str,
     state: dict[str, Any] | None = None,
-) -> dict[str, set[int]] | None:
+) -> dict[str, dict[str, set[int]]] | None:
     """Return the new-side line set for the PR diff, fetching it if needed.
 
     Reviewer runs clear ``configurable['diff_line_set']`` before the agent
@@ -816,14 +817,14 @@ async def _resolve_diff_line_set(
 
 
 async def _filter_against_pr_diff(
-    eligible_with_payload: list[tuple[dict[str, Any], dict[str, Any]]],
+    eligible_with_payload: list[tuple[Finding, dict[str, Any]]],
     *,
     owner: str,
     repo: str,
     pr_number: int,
     token: str,
     state: dict[str, Any] | None = None,
-) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], list[str]]:
+) -> tuple[list[tuple[Finding, dict[str, Any]]], list[str]]:
     """Drop findings whose path/line range is not in the current PR diff.
 
     Returns ``(valid_with_payload, dropped_finding_ids)``. When the diff
@@ -837,7 +838,7 @@ async def _filter_against_pr_diff(
     if diff_line_set is None:
         return list(eligible_with_payload), []
 
-    valid: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    valid: list[tuple[Finding, dict[str, Any]]] = []
     dropped: list[str] = []
     for finding, payload in eligible_with_payload:
         path = payload.get("path")
@@ -881,6 +882,10 @@ async def _maybe_post_slack_completion_reply(
     slack_ref = get_thread_slack_ref(metadata)
     if slack_ref is None:
         return
+    channel_id = slack_ref.get("channel_id")
+    thread_ts = slack_ref.get("thread_ts")
+    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+        return
 
     if surfaced_count == 0:
         headline = "*Open SWE Review*: No issues found."
@@ -893,7 +898,7 @@ async def _maybe_post_slack_completion_reply(
         review_url = f"{review_url}#pullrequestreview-{review_id}"
     text = f"{headline} <{review_url}|View review>"
 
-    await post_slack_thread_reply(slack_ref["channel_id"], slack_ref["thread_ts"], text)
+    await post_slack_thread_reply(channel_id, thread_ts, text)
 
 
 async def _store_thread_ids_on_findings(
@@ -965,7 +970,7 @@ async def _resolve_threads_for_resolved_findings(
     repo: str,
     pr_number: int,
     token: str,
-    findings: list[dict[str, Any]],
+    findings: list[Finding],
 ) -> int:
     """Resolve GitHub review threads for findings that just transitioned to resolved.
 
@@ -1057,7 +1062,7 @@ async def _resolve_threads_for_resolved_findings(
     return resolved_count
 
 
-def _current_run_id(config: dict[str, Any]) -> str | None:
+def _current_run_id(config: Mapping[str, Any]) -> str | None:
     candidates = [config.get("run_id")]
     configurable = config.get("configurable")
     if isinstance(configurable, dict):

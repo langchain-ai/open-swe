@@ -12,12 +12,15 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import {
   AgentGitPanel,
   PANEL_MIN_CHAT_WIDTH,
-  readStoredPanelCollapsed,
-  writeStoredPanelCollapsed,
 } from "@/features/agents/components/AgentGitPanel"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
+import {
+  readStoredPanelCollapsed,
+  writeStoredPanelCollapsed,
+} from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
+import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
@@ -87,6 +90,13 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const [planMode, setPlanMode] = useState<boolean | null>(null)
   const activePlanMode = planMode ?? thread.planMode ?? false
+  const activeModel = models.find(
+    (model) => model.id === activeSelection?.modelId
+  )
+  const usedTokens = useMemo(
+    () => latestContextTokens(stream.messages),
+    [stream.messages]
+  )
 
   // Own the git panel's collapsed state so the plan banner can reserve space for
   // the floating expand button the panel renders while collapsed.
@@ -137,6 +147,19 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           <div className="border-b border-[var(--ui-border)] bg-[var(--ui-danger)]/10 px-4 py-2 text-xs text-[var(--ui-danger)]">
             The last run hit an error before it could finish. Send another
             message to retry.
+            {thread.traceUrl && (
+              <>
+                {" "}
+                <a
+                  href={thread.traceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium underline underline-offset-2"
+                >
+                  Open trace
+                </a>
+              </>
+            )}
           </div>
         )}
         <WorkflowApprovalCard
@@ -205,6 +228,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   onSelectionChange={setSelection}
                   planMode={activePlanMode}
                   onPlanModeChange={setPlanMode}
+                  contextUsage={{
+                    usedTokens,
+                    contextWindow: activeModel?.context_window ?? null,
+                    hasMessages,
+                  }}
                 />
               </div>
             </div>
@@ -236,6 +264,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 models={models}
                 selection={activeSelection}
                 onSelectionChange={setSelection}
+                contextUsage={{
+                  usedTokens,
+                  contextWindow: activeModel?.context_window ?? null,
+                  hasMessages,
+                }}
               />
             </div>
           </div>

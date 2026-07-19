@@ -12,12 +12,13 @@ import logging
 import os
 import warnings
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any
+from typing import Any, Literal, cast
 
 logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
+from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
@@ -32,6 +33,7 @@ from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langsmith.sandbox import SandboxClientError
 
@@ -77,13 +79,13 @@ from .middleware import (
     TimeoutWrapupMiddleware,
     ToolArtifactMiddleware,
     ToolErrorMiddleware,
-    WorkflowPushGuardMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
     refresh_github_proxy_before_model,
     task_on_failure,
     task_retry_on,
 )
+from .middleware.prepare_run import PrepareRunState
 from .prompt import construct_system_prompt
 from .runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -104,6 +106,7 @@ from .tools import (
     linear_get_issue,
     linear_get_issue_comments,
     linear_list_teams,
+    linear_search_issues,
     linear_update_issue,
     open_pull_request,
     report_platform_issue,
@@ -125,12 +128,9 @@ from .utils.authorship import (
 )
 from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
-from .utils.github_app import (
-    PROXY_TOKEN_PERMISSION_LADDER,
-    PermissionMap,
-    get_github_app_installation_token_with_expiry,
-)
+from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_proxy import record_proxy_token_expiry
+from .utils.json_types import as_json_object
 from .utils.model import (
     DEFAULT_LLM_REASONING,
     ModelKwargs,
@@ -229,37 +229,12 @@ async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProt
 
 async def _resolve_proxy_token(
     github_proxy_token: str | None,
-    *,
-    permissions: PermissionMap | None = None,
-) -> tuple[str | None, str | None, PermissionMap | None]:
-    """Resolve the proxy token, its expiry, and the effective permission scope."""
+) -> tuple[str | None, str | None, None]:
+    """Resolve the proxy token and its expiry."""
     if github_proxy_token:
         return github_proxy_token, None, None
-    if permissions is not None:
-        token, expires_at = await get_github_app_installation_token_with_expiry(
-            permissions=permissions
-        )
-        return token, expires_at, permissions
-
-    # Walk from the richest scope to the guaranteed core so an installation that
-    # hasn't granted workflows:write / actions:read degrades instead of failing.
-    ladder = PROXY_TOKEN_PERMISSION_LADDER
-    last = len(ladder) - 1
-    for index, scope in enumerate(ladder):
-        token, expires_at = await get_github_app_installation_token_with_expiry(
-            permissions=scope,
-            log_errors=index == last,
-        )
-        if not token:
-            continue
-        if index:
-            logger.warning(
-                "GitHub proxy token minted with reduced scope %s; installation is "
-                "missing higher-privilege grants",
-                sorted(scope),
-            )
-        return token, expires_at, scope
-    return None, None, None
+    token, expires_at = await get_github_app_installation_token_with_expiry()
+    return token, expires_at, None
 
 
 async def _resolve_snapshot_id_for_repo(repo: dict[str, str] | None) -> str | None:
@@ -665,7 +640,7 @@ async def _load_corridor_mcp_tools() -> list[Any]:
     )
 
 
-async def _cached_team_default_model_pair(kind: str):
+async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
     return await ttl_cache.cached(
         f"team-default-model-pair:{kind}:{id(get_team_default_model_pair)}",
         60,
@@ -752,12 +727,14 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "effort": self._effort,
         }
 
-    async def _prepare(self, state: dict[str, Any], runtime: object) -> dict[str, Any]:  # noqa: ARG002
+    async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         configurable = (self._config or {}).get("configurable") or {}
         prompt_default_repo = await _resolve_prompt_default_repo(configurable)
         triggering_user_identity_task = asyncio.create_task(
-            asyncio.to_thread(resolve_triggering_user_identity, self._config, github_token)
+            asyncio.to_thread(
+                resolve_triggering_user_identity, as_json_object(self._config), github_token
+            )
         )
         sandbox_task = asyncio.create_task(
             ensure_sandbox_for_thread(self._thread_id, repo=prompt_default_repo)
@@ -814,7 +791,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
-    thread_id = config["configurable"].get("thread_id", None)
+    configurable = config.get("configurable") or {}
+    thread_id = configurable.get("thread_id")
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
@@ -825,8 +803,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(config)
 
-    profile_login = resolve_github_login(config)
-    configurable = (config or {}).get("configurable") or {}
+    profile_login = resolve_github_login(as_json_object(config))
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
     team_defaults, use_gateway, profile, fable_enabled = await asyncio.gather(
@@ -836,7 +813,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         _cached_fable_enabled(),
     )
 
-    linear_issue = config["configurable"].get("linear_issue", {})
+    linear_issue = as_json_object(configurable.get("linear_issue"))
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
@@ -932,9 +909,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
-    source = (
-        configurable.get("source") if isinstance(configurable.get("source"), str) else "dashboard"
-    )
+    source_value = configurable.get("source")
+    source = source_value if isinstance(source_value, str) else "dashboard"
     user_email = configurable.get("user_email")
     user_email = user_email if isinstance(user_email, str) else ""
 
@@ -995,6 +971,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             linear_get_issue,
             linear_get_issue_comments,
             linear_list_teams,
+            linear_search_issues,
             linear_update_issue,
             open_pull_request,
             request_pr_review,
@@ -1014,46 +991,48 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
         backend=backend_factory,
-        middleware=[
-            PrepareAgentRunMiddleware(
-                thread_id=thread_id,
-                config=config,
-                profile_login=profile_login,
-                model_id=model_id,
-                effort=profile_effort,
-                source=source,
-                user_email=user_email,
-                linear_project_id=linear_project_id,
-                linear_issue_number=linear_issue_number,
-                create_prs=always_create_prs,
-                plan_mode=plan_mode,
-                corridor_enabled=bool(corridor_tools),
-            ),
-            SanitizeToolInputsMiddleware(),
-            ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-            ToolErrorMiddleware(),
-            SubdirAgentsReadMiddleware(),
-            ToolRetryMiddleware(
-                max_retries=2,
-                tools=["task"],
-                retry_on=task_retry_on,
-                on_failure=task_on_failure,
-                initial_delay=1.0,
-                max_delay=10.0,
-            ),
-            ToolArtifactMiddleware(),
-            PullRequestCreationGuardMiddleware(),
-            WorkflowPushGuardMiddleware(),
-            refresh_github_proxy_before_model,
-            check_message_queue_before_model,
-            SlackAssistantStatusMiddleware(),
-            TimeoutWrapupMiddleware(),
-            notify_step_limit_reached,
-            *fallback_middleware,
-            *plan_mode_middleware,
-            SanitizeFireworksMessagesMiddleware(),
-            SanitizeThinkingBlocksMiddleware(),
-        ],
+        middleware=cast(
+            list[AgentMiddleware[Any, Any, Any]],
+            [
+                PrepareAgentRunMiddleware(
+                    thread_id=thread_id,
+                    config=config,
+                    profile_login=profile_login,
+                    model_id=model_id,
+                    effort=profile_effort,
+                    source=source,
+                    user_email=user_email,
+                    linear_project_id=linear_project_id,
+                    linear_issue_number=linear_issue_number,
+                    create_prs=always_create_prs,
+                    plan_mode=plan_mode,
+                    corridor_enabled=bool(corridor_tools),
+                ),
+                SanitizeToolInputsMiddleware(),
+                ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
+                ToolErrorMiddleware(),
+                SubdirAgentsReadMiddleware(),
+                ToolRetryMiddleware(
+                    max_retries=2,
+                    tools=["task"],
+                    retry_on=task_retry_on,
+                    on_failure=task_on_failure,
+                    initial_delay=1.0,
+                    max_delay=10.0,
+                ),
+                ToolArtifactMiddleware(),
+                PullRequestCreationGuardMiddleware(),
+                refresh_github_proxy_before_model,
+                check_message_queue_before_model,
+                SlackAssistantStatusMiddleware(),
+                TimeoutWrapupMiddleware(),
+                notify_step_limit_reached,
+                *fallback_middleware,
+                *plan_mode_middleware,
+                SanitizeFireworksMessagesMiddleware(),
+                SanitizeThinkingBlocksMiddleware(),
+            ],
+        ),
     ).with_config(config)
 
 

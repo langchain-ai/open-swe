@@ -37,7 +37,7 @@ def _pr_payload(
     }
 
 
-def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: Any) -> None:
+def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: MagicMock) -> AsyncMock:
     monkeypatch.setattr(
         webhook_common,
         "get_github_app_installation_token_with_expiry",
@@ -47,8 +47,10 @@ def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: Any) -> N
         webhook_common, "_ensure_thread_exists_for_metadata", AsyncMock(return_value=True)
     )
     monkeypatch.setattr(webhook_common, "cache_github_token_for_thread", MagicMock())
-    monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", AsyncMock())
+    set_metadata = AsyncMock()
+    monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", set_metadata)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
+    return set_metadata
 
 
 @pytest.mark.asyncio
@@ -62,6 +64,7 @@ async def test_pr_ready_non_draft_triggers_run(monkeypatch: pytest.MonkeyPatch) 
     await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=False))
 
     fake_client.runs.create.assert_awaited_once()
+    assert fake_client.runs.create.await_args is not None
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["source"] == "github"
     assert kwargs["config"]["configurable"]["pr_number"] == 7
@@ -90,6 +93,7 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
     )
 
     get_token.assert_awaited_once_with(repository_ids=[123])
+    assert fake_client.runs.create.await_args is not None
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is False
 
@@ -116,6 +120,7 @@ async def test_pr_ready_private_repo_uses_full_reviewer_token(
     )
 
     get_token.assert_awaited_once_with()
+    assert fake_client.runs.create.await_args is not None
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is True
 
@@ -168,6 +173,7 @@ async def test_pr_ready_for_review_skips_when_head_already_reviewed(
     fake_client.runs.create.assert_not_called()
     get_token.assert_not_awaited()
     set_metadata.assert_awaited_once()
+    assert set_metadata.await_args is not None
     assert set_metadata.await_args.kwargs["watch"] is True
 
 
@@ -177,7 +183,7 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
 ) -> None:
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
-    _patch_dispatch_deps(monkeypatch, fake_client)
+    set_metadata = _patch_dispatch_deps(monkeypatch, fake_client)
     monkeypatch.setattr(
         webhook_common,
         "_get_thread_metadata_safe",
@@ -197,6 +203,7 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
     )
 
     fake_client.runs.create.assert_awaited_once()
+    assert fake_client.runs.create.await_args is not None
     _, kwargs = fake_client.runs.create.await_args
     configurable = kwargs["config"]["configurable"]
     assert configurable["re_review"] is True
@@ -205,7 +212,7 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
     assert "marked ready for review" in kwargs["input"]["messages"][0]["content"]
     head_sha_writes = [
         c.kwargs.get("head_sha")
-        for c in webhook_common.set_reviewer_thread_metadata.await_args_list
+        for c in set_metadata.await_args_list
         if c.kwargs.get("head_sha") is not None
     ]
     assert "headsha" in head_sha_writes

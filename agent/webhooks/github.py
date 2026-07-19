@@ -805,18 +805,18 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     comment = payload.get("comment", {})
     if not isinstance(comment, dict):
         return
-    reply_body = comment.get("body") if isinstance(comment.get("body"), str) else ""
+    raw_reply_body = comment.get("body")
+    reply_body = raw_reply_body if isinstance(raw_reply_body, str) else ""
     reply_author = sender_login if isinstance(sender_login, str) else "unknown"
     reply_comment_id = comment.get("id") if isinstance(comment.get("id"), int) else None
+    raw_created_at = comment.get("created_at")
     interaction: FindingInteraction = {
         "kind": "human_reply",
         "github_comment_id": reply_comment_id,
         "github_parent_comment_id": parent_comment_id,
         "author": reply_author,
         "body": reply_body,
-        "created_at": comment.get("created_at")
-        if isinstance(comment.get("created_at"), str)
-        else "",
+        "created_at": raw_created_at if isinstance(raw_created_at, str) else "",
         "needs_reassessment": True,
     }
     await common.append_finding_interaction(thread_id, finding_id, interaction)

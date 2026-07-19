@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -424,7 +425,9 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str | No
     )
 
 
-async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[str, str | None]:
+async def resolve_github_token(
+    config: Mapping[str, Any] | RunnableConfig, thread_id: str
+) -> tuple[str, str | None]:
     """Resolve a GitHub token from the run config based on the source.
 
     Routes to the correct auth method depending on the source. Sources that
@@ -439,7 +442,9 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
     Raises:
         RuntimeError: If source is missing or token resolution fails.
     """
-    configurable = config["configurable"]
+    configurable = config.get("configurable")
+    if not isinstance(configurable, Mapping):
+        raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing configurable state")
     source = configurable.get("source")
     if not source:
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)

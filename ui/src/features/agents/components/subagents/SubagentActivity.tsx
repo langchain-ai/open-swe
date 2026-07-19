@@ -1,9 +1,7 @@
 import { useStreamContext as useAgentThreadStream, useToolCalls } from "@langchain/react"
 import { Check, Loader2, X } from "lucide-react"
 
-function humanizeToolName(name: string): string {
-  return name.replace(/_/g, " ").trim() || "tool"
-}
+import { humanizeToolName } from "@/features/agents/lib/toolNames"
 
 /**
  * Live status for a single subagent, read straight from the SDK's scoped

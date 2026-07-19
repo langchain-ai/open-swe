@@ -14,6 +14,7 @@ _TOOL_MODULES = {
     "linear_get_issue": ".linear_get_issue",
     "linear_get_issue_comments": ".linear_get_issue_comments",
     "linear_list_teams": ".linear_list_teams",
+    "linear_search_issues": ".linear_search_issues",
     "linear_update_issue": ".linear_update_issue",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
@@ -47,6 +48,7 @@ __all__ = [
     "linear_get_issue",
     "linear_get_issue_comments",
     "linear_list_teams",
+    "linear_search_issues",
     "linear_update_issue",
     "list_findings",
     "list_review_findings",
@@ -80,6 +82,7 @@ if TYPE_CHECKING:
     from .linear_get_issue import linear_get_issue
     from .linear_get_issue_comments import linear_get_issue_comments
     from .linear_list_teams import linear_list_teams
+    from .linear_search_issues import linear_search_issues
     from .linear_update_issue import linear_update_issue
     from .list_findings import list_findings
     from .list_review_findings import list_review_findings

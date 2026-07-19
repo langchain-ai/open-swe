@@ -44,6 +44,9 @@ export function AgentsHome() {
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const activeSelection = selection ?? defaultSelection
+  const activeModel = models.find(
+    (model) => model.id === activeSelection?.modelId
+  )
   const [planMode, setPlanMode] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
@@ -129,6 +132,9 @@ export function AgentsHome() {
             onRepoChange={setRepoOverride}
             planMode={planMode}
             onPlanModeChange={setPlanMode}
+            contextUsage={{
+              contextWindow: activeModel?.context_window ?? null,
+            }}
           />
         </div>
       </div>

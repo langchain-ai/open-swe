@@ -11,6 +11,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import Any, cast
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from langchain_core.tools import BaseTool
@@ -89,16 +90,19 @@ async def _build_mcp_tools(config: CorridorMCPConfig) -> list[BaseTool]:
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
     client = MultiServerMCPClient(
-        {
-            "corridor": {
-                "transport": "http",
-                "url": config.url,
-                "headers": {
-                    "Authorization": f"Bearer {config.token}",
-                },
-                "timeout": timedelta(seconds=_MCP_TIMEOUT_SECONDS),
-            }
-        }
+        cast(
+            Any,
+            {
+                "corridor": {
+                    "transport": "http",
+                    "url": config.url,
+                    "headers": {
+                        "Authorization": f"Bearer {config.token}",
+                    },
+                    "timeout": timedelta(seconds=_MCP_TIMEOUT_SECONDS),
+                }
+            },
+        )
     )
     return await client.get_tools()
 

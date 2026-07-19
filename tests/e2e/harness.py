@@ -88,6 +88,26 @@ async def control_state() -> JSONResponse:
     )
 
 
+@app.get("/control/queued")
+async def control_queued(thread_id: str = "") -> JSONResponse:
+    """Count the follow-ups parked on a busy thread's message queue.
+
+    While the agent is busy, debounced follow-ups accumulate here (namespace
+    ``("queue", thread_id)``) until the active run drains them together at its
+    next model call. Lets the E2E assert coalescing instead of per-message runs."""
+    from langgraph_sdk import get_client
+
+    value: Any = None
+    try:
+        client = get_client(url=os.environ["LANGGRAPH_URL"])
+        item = await client.store.get_item(("queue", thread_id), key="pending_messages")
+        value = item.get("value") if item else None
+    except Exception:  # noqa: BLE001
+        value = None
+    messages = value.get("messages") if isinstance(value, dict) else None
+    return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
+
+
 @app.post("/mock/slack/send")
 async def slack_send(request: Request) -> JSONResponse:
     """Simulate a user posting in Slack: store the message, then deliver the
@@ -101,24 +121,34 @@ async def slack_send(request: Request) -> JSONResponse:
     user_id = str(form.get("user") or TEST_USERS[0]["slack_id"])
     channel = str(form.get("channel") or ("D_DEMO" if channel_type == "im" else DEMO_CHANNEL))
 
-    ts = fakes.new_thread_ts()
+    # ``thread_ts`` replies into an existing thread (a distinct message ts under
+    # the same thread); omitting it opens a fresh thread, as the mock UI does.
+    reply_thread_ts = str(form.get("thread_ts") or "")
+    if reply_thread_ts:
+        thread_ts = reply_thread_ts
+        event_ts = fakes.add_slack_message(
+            channel, thread_ts, user=user_id, text=text, is_bot=False
+        )
+    else:
+        thread_ts = fakes.new_thread_ts()
+        fakes.add_slack_message(channel, thread_ts, user=user_id, text=text, is_bot=False)
+        event_ts = thread_ts
     CURRENT_THREAD["channel"] = channel
-    CURRENT_THREAD["thread_ts"] = ts
-    fakes.add_slack_message(channel, ts, user=user_id, text=text, is_bot=False)
+    CURRENT_THREAD["thread_ts"] = thread_ts
 
     event = {
         "type": "app_mention" if mention_bot else "message",
         "channel": channel,
         "user": user_id,
         "text": text,
-        "ts": ts,
-        "thread_ts": ts,
+        "ts": event_ts,
+        "thread_ts": thread_ts,
     }
     if channel_type:
         event["channel_type"] = channel_type
     payload = {
         "type": "event_callback",
-        "event_id": f"Ev{ts}",
+        "event_id": f"Ev{event_ts}",
         "authorizations": [{"user_id": BOT_USER_ID}],
         "event": event,
     }
@@ -140,8 +170,8 @@ async def slack_send(request: Request) -> JSONResponse:
         )
     return JSONResponse(
         {
-            "thread_ts": ts,
-            "thread_id": generate_thread_id_from_slack_thread(channel, ts),
+            "thread_ts": thread_ts,
+            "thread_id": generate_thread_id_from_slack_thread(channel, thread_ts),
             "webhook_status": resp.status_code,
             "webhook": resp.json(),
         }
@@ -332,7 +362,9 @@ async def mock_users() -> JSONResponse:
 
 @app.get("/mock/slack/messages")
 async def slack_messages() -> JSONResponse:
-    msgs = fakes.slack_messages(CURRENT_THREAD["channel"])
+    channel = CURRENT_THREAD["channel"]
+    assert channel is not None
+    msgs = fakes.slack_messages(channel)
     return JSONResponse(
         [
             {

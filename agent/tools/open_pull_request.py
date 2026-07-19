@@ -477,11 +477,12 @@ async def _record_pr_telemetry(
         merged = bool(details.get("merged"))
         is_draft = bool(details.get("draft", pr.get("draft")))
         state = details.get("state") if isinstance(details.get("state"), str) else "open"
-        additions = details.get("additions") if isinstance(details.get("additions"), int) else 0
-        deletions = details.get("deletions") if isinstance(details.get("deletions"), int) else 0
-        changed_files = (
-            details.get("changed_files") if isinstance(details.get("changed_files"), int) else 0
-        )
+        additions_value = details.get("additions")
+        additions = additions_value if isinstance(additions_value, int) else 0
+        deletions_value = details.get("deletions")
+        deletions = deletions_value if isinstance(deletions_value, int) else 0
+        changed_files_value = details.get("changed_files")
+        changed_files = changed_files_value if isinstance(changed_files_value, int) else 0
         await record_agent_pr_usage(
             thread_id=thread_id if isinstance(thread_id, str) else None,
             github_login=github_login,
