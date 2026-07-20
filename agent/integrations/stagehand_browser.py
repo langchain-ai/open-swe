@@ -31,6 +31,7 @@ operate on the same live page. Always finish with ``browser_close``.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 from typing import Any
@@ -46,6 +47,10 @@ _DEFAULT_MODEL = "anthropic/claude-sonnet-4-5"
 # thread_id -> (client, session)
 _SESSIONS: dict[str, tuple[Any, Any]] = {}
 _LOCK = asyncio.Lock()
+
+
+class BrowserNavigationBlocked(RuntimeError):
+    pass
 
 
 def _is_local() -> bool:
@@ -129,6 +134,142 @@ def _browserbase_session_create_params() -> dict[str, Any]:
     return {"project_id": project_id} if project_id else {}
 
 
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _safe_attr(obj: Any, name: str) -> Any:
+    try:
+        return getattr(obj, name)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _callable_attr(obj: Any, name: str) -> Any:
+    value = _safe_attr(obj, name)
+    return value if callable(value) else None
+
+
+def _request_url(route: Any, request: Any | None = None) -> str | None:
+    request = request or _safe_attr(route, "request")
+    if callable(request):
+        request = request()
+    url = _safe_attr(request, "url") if request is not None else None
+    if isinstance(url, str) and url:
+        return url
+    url = _safe_attr(route, "url")
+    return url if isinstance(url, str) and url else None
+
+
+async def _continue_route(route: Any) -> None:
+    continue_ = _callable_attr(route, "continue_") or _callable_attr(route, "fallback")
+    if continue_ is not None:
+        await _maybe_await(continue_())
+
+
+async def _abort_route(route: Any) -> None:
+    abort = _callable_attr(route, "abort")
+    if abort is not None:
+        await _maybe_await(abort())
+
+
+def _mark_blocked_request(session: Any, url: str, reason: str) -> None:
+    try:
+        session._open_swe_blocked_request = (url, reason)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _clear_blocked_request(session: Any) -> None:
+    try:
+        if hasattr(session, "_open_swe_blocked_request"):
+            delattr(session, "_open_swe_blocked_request")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _blocked_request_error(session: Any) -> str | None:
+    blocked = _safe_attr(session, "_open_swe_blocked_request")
+    if isinstance(blocked, tuple) and len(blocked) == 2:
+        url, reason = blocked
+        return f"blocked browser request to {url}: {reason}"
+    return None
+
+
+def _guard_targets(session: Any) -> list[Any]:
+    targets: list[Any] = []
+    for candidate in (
+        session,
+        _safe_attr(session, "page"),
+        _safe_attr(session, "context"),
+        _safe_attr(session, "browser_context"),
+        _safe_attr(_safe_attr(session, "data"), "page"),
+        _safe_attr(_safe_attr(session, "data"), "context"),
+        _safe_attr(_safe_attr(session, "data"), "browser_context"),
+    ):
+        if candidate is None or any(candidate is target for target in targets):
+            continue
+        targets.append(candidate)
+    return targets
+
+
+async def _install_browser_url_guard(session: Any) -> None:
+    async def guarded_route(route: Any, request: Any | None = None) -> None:
+        url = _request_url(route, request)
+        if not url:
+            await _continue_route(route)
+            return
+        safe, reason = is_url_safe(url)
+        if safe:
+            await _continue_route(route)
+            return
+        _mark_blocked_request(session, url, reason)
+        logger.warning("Blocked unsafe browser request to %s: %s", url, reason)
+        await _abort_route(route)
+
+    installed = False
+    for target in _guard_targets(session):
+        if _safe_attr(target, "_open_swe_url_guard_installed"):
+            installed = True
+            continue
+        route = _callable_attr(target, "route")
+        if route is None:
+            continue
+        try:
+            await _maybe_await(route("**/*", guarded_route))
+            target._open_swe_url_guard_installed = True
+            installed = True
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to install browser URL guard on %r", target, exc_info=True)
+    if not installed:
+        logger.warning("Stagehand session does not expose a browser request hook for URL guarding")
+
+
+def _current_page_url(session: Any) -> str | None:
+    for target in _guard_targets(session):
+        url = _safe_attr(target, "url")
+        if isinstance(url, str) and url and url != "about:blank":
+            return url
+    return None
+
+
+async def _raise_if_browser_blocked(session: Any, operation: str) -> None:
+    blocked_error = _blocked_request_error(session)
+    if blocked_error:
+        await browser_close()
+        raise BrowserNavigationBlocked(f"{operation} blocked: {blocked_error}")
+
+    current_url = _current_page_url(session)
+    if not current_url:
+        return
+    safe, reason = is_url_safe(current_url)
+    if not safe:
+        await browser_close()
+        raise BrowserNavigationBlocked(f"{operation} blocked after navigation: {reason}")
+
+
 async def _get_session(create: bool = True) -> Any:
     """Return the live Stagehand session for this thread, creating one if needed."""
     thread_id = _thread_id()
@@ -144,6 +285,7 @@ async def _get_session(create: bool = True) -> Any:
         if browserbase_session_create_params:
             session_kwargs["browserbase_session_create_params"] = browserbase_session_create_params
         session = await client.sessions.start(**session_kwargs)
+        await _install_browser_url_guard(session)
         _SESSIONS[thread_id] = (client, session)
         logger.info("Started Stagehand session %s for thread %s", session.id, thread_id)
         return session
@@ -175,8 +317,12 @@ async def browser_navigate(url: str) -> dict[str, Any]:
         if not safe:
             return {"success": False, "error": f"browser_navigate blocked: {reason}"}
         session = await _get_session()
+        _clear_blocked_request(session)
         await session.navigate(url=url)
+        await _raise_if_browser_blocked(session, "browser_navigate")
         return {"success": True, "url": url, **_session_meta(session)}
+    except BrowserNavigationBlocked as e:
+        return {"success": False, "error": str(e)}
     except Exception as e:  # noqa: BLE001
         return {"success": False, "error": f"browser_navigate failed: {e!s}"}
 
@@ -198,8 +344,12 @@ async def browser_act(action: str) -> dict[str, Any]:
         session = await _get_session(create=False)
         if session is None:
             return {"success": False, "error": "No active browser. Call browser_navigate first."}
+        _clear_blocked_request(session)
         result = await session.act(input=action)
+        await _raise_if_browser_blocked(session, "browser_act")
         return {"success": True, "result": _unwrap_result(_to_jsonable(result))}
+    except BrowserNavigationBlocked as e:
+        return {"success": False, "error": str(e)}
     except Exception as e:  # noqa: BLE001
         return {"success": False, "error": f"browser_act failed: {e!s}"}
 
