@@ -162,6 +162,7 @@ export interface AgentSchedule {
   prompt: string
   schedule: string
   repo: string | null
+  slackChannelId?: string | null
   model: string
   effort?: string | null
   enabled: boolean

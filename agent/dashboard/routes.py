@@ -6,6 +6,7 @@ import hmac
 import logging
 import os
 from typing import Any, Literal
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -59,7 +60,12 @@ from .oauth import (
     require_session,
     sanitize_redirect_to,
 )
-from .options import FABLE_MODEL_IDS, SUPPORTED_MODELS, gate_fable_model
+from .options import (
+    FABLE_MODEL_IDS,
+    SUPPORTED_MODELS,
+    gate_fable_model,
+    models_with_profile_context_windows,
+)
 from .profiles import (
     ProfileUpdate,
     get_profile,
@@ -251,7 +257,7 @@ def _frontend_base_url() -> str:
     return v
 
 
-def _cookie_security() -> tuple[bool, str]:
+def _cookie_security() -> tuple[bool, Literal["lax", "none"]]:
     """Cookie ``secure``/``samesite`` flags derived from the API scheme.
 
     Production serves the API over HTTPS and the dashboard is a separate
@@ -357,12 +363,14 @@ async def auth_login(
         nonce_hash=hash_state_nonce(nonce),
     )
     redirect_uri = f"{_api_base_url()}/dashboard/api/auth/callback"
-    url = (
-        "https://github.com/login/oauth/authorize"
-        f"?client_id={client_id}"
-        f"&redirect_uri={redirect_uri}"
-        f"&state={state}"
+    query = urlencode(
+        {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "state": state,
+        }
     )
+    url = f"https://github.com/login/oauth/authorize?{query}"
     response = RedirectResponse(url, status_code=302)
     _set_state_cookie(response, nonce)
     return response
@@ -443,7 +451,7 @@ async def options() -> dict[str, Any]:
         else [m for m in SUPPORTED_MODELS if m["id"] not in FABLE_MODEL_IDS]
     )
     return {
-        "models": models,
+        "models": models_with_profile_context_windows(models),
         "default_agent_model": agent_model,
         "default_agent_reasoning_effort": agent_effort,
         "default_agent_subagent_model": subagent_model,

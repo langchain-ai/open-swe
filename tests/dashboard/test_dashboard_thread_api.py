@@ -1,6 +1,7 @@
 import base64
 import json
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -732,7 +733,8 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
             }
 
         async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
-            captured.setdefault("updates", []).append(metadata)
+            updates = cast(list[dict[str, object]], captured.setdefault("updates", []))
+            updates.append(metadata)
 
     class FakeClient:
         threads = FakeThreads()
@@ -1003,7 +1005,8 @@ async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
         thread_api.ThreadMessageBody(content="ship it"),
     )
 
-    assert captured["payload"]["text"] == "@teammate: ship it"
+    payload = cast(dict[str, object], captured["payload"])
+    assert payload["text"] == "@teammate: ship it"
 
 
 async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> None:
@@ -1039,7 +1042,8 @@ async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> N
         thread_api.ThreadMessageBody(content="ship it"),
     )
 
-    assert captured["payload"]["text"] == "ship it"
+    payload = cast(dict[str, object], captured["payload"])
+    assert payload["text"] == "ship it"
 
 
 def test_thread_summary_exposes_resolved_state() -> None:
@@ -1287,7 +1291,7 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     page_size = thread_api._THREADS_SEARCH_PAGE
     threads = _make_threads(page_size + 50, resolved_before=page_size)
     for thread in threads:
-        thread["metadata"]["latest_run_status"] = "success"
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
     offsets: list[int] = []
     run_list_calls = 0
 
@@ -1360,9 +1364,9 @@ async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(mo
 
 async def test_list_dashboard_threads_page_refreshes_only_unsettled_threads(monkeypatch) -> None:
     threads = _make_threads(3, resolved_before=0)
-    threads[0]["metadata"]["latest_run_status"] = "success"
-    threads[1]["metadata"]["latest_run_status"] = "pending"
-    threads[2]["metadata"]["latest_run_status"] = "error"
+    cast(dict[str, object], threads[0]["metadata"])["latest_run_status"] = "success"
+    cast(dict[str, object], threads[1]["metadata"])["latest_run_status"] = "pending"
+    cast(dict[str, object], threads[2]["metadata"])["latest_run_status"] = "error"
     run_list_thread_ids: list[str] = []
     updates: list[dict[str, object]] = []
 
@@ -1399,7 +1403,7 @@ async def test_list_dashboard_threads_page_refreshes_only_unsettled_threads(monk
 async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -> None:
     threads = _make_threads(2, resolved_before=0)
     for thread in threads:
-        thread["metadata"]["source"] = "slack"
+        cast(dict[str, object], thread["metadata"])["source"] = "slack"
     run_statuses = {"t0": "success", "t1": "error"}
     run_list_thread_ids: list[str] = []
 
@@ -1494,6 +1498,8 @@ async def test_options_includes_fable_when_enabled() -> None:
     ):
         payload = await routes.options()
     assert _FABLE in [m["id"] for m in payload["models"]]
+    gpt_5_5 = next(m for m in payload["models"] if m["id"] == _VISION_MODEL)
+    assert gpt_5_5["context_window"] == 1_050_000
 
 
 @pytest.mark.asyncio

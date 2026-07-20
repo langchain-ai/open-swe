@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import httpx
@@ -10,8 +10,10 @@ import pytest
 from fireworks import AsyncFireworks
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 from agent.utils import gateway, model
+from agent.utils.model import OpenAIReasoning
 
 _GATEWAY_ENV_VARS = (
     "LANGSMITH_API_KEY",
@@ -83,7 +85,7 @@ async def test_openai_sdk_uses_gateway_responses_path() -> None:
     try:
         chat_model = ChatOpenAI(
             model="gpt-5.6-sol",
-            api_key="dummy",
+            api_key=SecretStr("dummy"),
             base_url="https://gateway.smith.langchain.com/openai/v1",
             use_responses_api=True,
             http_async_client=http_client,
@@ -200,7 +202,7 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
     try:
         chat_model = ChatFireworks(
             model="accounts/fireworks/models/glm-5p2",
-            api_key="dummy",
+            api_key=SecretStr("dummy"),
             base_url="https://gateway.smith.langchain.com/fireworks",
             max_retries=0,
         )
@@ -364,7 +366,7 @@ def test_make_model_gateway_openai_chat_completions_optout_converts_reasoning(
         model.make_model(
             "openai:gpt-5.6-sol",
             use_gateway=True,
-            reasoning={"effort": "high", "summary": "auto"},
+            reasoning=cast(OpenAIReasoning, {"effort": "high", "summary": "auto"}),
         )
     assert captured["use_responses_api"] is False
     assert captured["reasoning_effort"] == "high"
@@ -395,7 +397,7 @@ def test_make_model_gateway_openai_responses_keeps_reasoning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    reasoning = {"effort": "high", "summary": "auto"}
+    reasoning = cast(OpenAIReasoning, {"effort": "high", "summary": "auto"})
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
         model.make_model("openai:gpt-5.6-sol", use_gateway=True, reasoning=reasoning)

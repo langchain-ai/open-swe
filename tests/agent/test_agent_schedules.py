@@ -116,6 +116,9 @@ def auth(monkeypatch) -> None:  # noqa: ANN001
     async def fake_require_repo_access_for_user(login: str, full_name: str) -> str:
         return "gho_token"
 
+    async def fake_slack_id_for_login(login: str | None) -> str | None:
+        return "UALICE" if login == "alice" else None
+
     monkeypatch.setattr(schedules, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(schedules, "get_profile", fake_get_profile)
     monkeypatch.setattr(schedules, "_resolve_run_email", fake_resolve_run_email)
@@ -123,6 +126,7 @@ def auth(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
         schedules, "require_repo_access_for_user", fake_require_repo_access_for_user
     )
+    monkeypatch.setattr(schedules, "slack_id_for_login", fake_slack_id_for_login)
 
 
 def test_cron_validation_rejects_non_five_field_expression() -> None:
@@ -136,18 +140,30 @@ def test_cron_validation_accepts_steps_ranges_and_lists() -> None:
     assert body.schedule == "*/15 9-17 * * 1,3,5"
 
 
+def test_slack_channel_validation_normalizes_ids() -> None:
+    body = ScheduleCreateBody(
+        prompt="hello", schedule="0 9 * * *", slack_channel_id=" c0123456789 "
+    )
+
+    assert body.slack_channel_id == "C0123456789"
+    with pytest.raises(ValidationError):
+        ScheduleCreateBody(prompt="hello", schedule="0 9 * * *", slack_channel_id="#general")
+
+
 async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
         name="Daily report",
         prompt="Summarize merged PRs",
         schedule="0 9 * * 1-5",
         repo="langchain-ai/open-swe",
+        slack_channel_id="C0123456789",
     )
 
     result = await schedules.create_agent_schedule("alice", body, email="alice@example.com")
 
     assert result["name"] == "Daily report"
     assert result["enabled"] is True
+    assert result["slackChannelId"] == "C0123456789"
     assert result["cronId"] == "cron_1"
     created = fake_client.crons.created[0]
     assert created["assistant_id"] == "scheduler"
@@ -269,6 +285,35 @@ async def test_update_agent_schedule_rechecks_repo_access(fake_client, auth, mon
     assert result["repo"] == "langchain-ai/open-swe"
 
 
+async def test_update_agent_schedule_clears_slack_channel(fake_client) -> None:  # noqa: ANN001
+    record = {
+        "id": "sched_1",
+        "name": "Daily",
+        "prompt": "Run daily",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "slack_channel_id": "C0123456789",
+        "model": "Default",
+        "effort": None,
+        "enabled": True,
+        "cron_id": "cron_old",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    result = await schedules.update_agent_schedule(
+        "sched_1",
+        "alice",
+        ScheduleUpdateBody(slack_channel_id=None),
+        email="alice@example.com",
+    )
+
+    assert result["slackChannelId"] is None
+
+
 async def test_update_agent_schedule_pause_deletes_cron(fake_client) -> None:  # noqa: ANN001
     record = {
         "id": "sched_1",
@@ -377,3 +422,94 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client,
     stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
     assert stored["last_thread_id"] == thread_id
     assert stored["last_run_id"] == "run_123"
+
+
+async def test_launch_scheduled_agent_run_connects_slack_thread(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    record = {
+        "id": "sched_1",
+        "name": "Linear queue",
+        "prompt": "Work the next Linear issue",
+        "schedule": "*/15 * * * *",
+        "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "slack_channel_id": "C0123456789",
+        "model": "Default",
+        "effort": None,
+        "base_branch": "main",
+        "branch_prefix": "open-swe",
+        "enabled": True,
+        "cron_id": "cron_1",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+    posted: dict[str, Any] = {}
+
+    async def fake_post(channel_id: str, text: str, **kwargs: Any) -> tuple[str, None]:
+        posted.update({"channel_id": channel_id, "text": text, "kwargs": kwargs})
+        return "1784302353.900029", None
+
+    monkeypatch.setattr(schedules, "post_slack_top_level_message_with_ts", fake_post)
+
+    result = await schedules.launch_scheduled_agent_run("sched_1")
+
+    expected_thread_id = schedules.generate_thread_id_from_slack_thread(
+        "C0123456789", "1784302353.900029"
+    )
+    assert result["thread_id"] == expected_thread_id
+    assert posted["channel_id"] == "C0123456789"
+    assert "Linear queue" in posted["text"]
+    metadata = fake_client.threads.created[0]["metadata"]
+    slack_thread = metadata["source_context"]["slack_thread"]
+    assert slack_thread["channel_id"] == "C0123456789"
+    assert slack_thread["thread_ts"] == "1784302353.900029"
+    assert slack_thread["triggering_user_id"] == "UALICE"
+    run = fake_client.runs.created[0]
+    assert run["config"]["configurable"]["slack_thread"] == slack_thread
+    assert "slack_thread_reply" in run["input"]["messages"][0]["content"]
+    mapping = fake_client.store.items[
+        (("slack_run_map", "C0123456789"), "thread:1784302353.900029")
+    ]
+    assert mapping["run_id"] == "run_123"
+
+
+async def test_launch_scheduled_agent_run_stops_when_slack_post_fails(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    record = {
+        "id": "sched_1",
+        "name": "Linear queue",
+        "prompt": "Work the next Linear issue",
+        "schedule": "*/15 * * * *",
+        "repo": None,
+        "slack_channel_id": "C0123456789",
+        "model": "Default",
+        "effort": None,
+        "enabled": True,
+        "cron_id": "cron_1",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    async def fake_post(*args: Any, **kwargs: Any) -> tuple[None, str]:
+        return None, "not_in_channel"
+
+    monkeypatch.setattr(schedules, "post_slack_top_level_message_with_ts", fake_post)
+
+    result = await schedules.launch_scheduled_agent_run("sched_1")
+
+    assert result == {
+        "status": "error",
+        "schedule_id": "sched_1",
+        "error": "Slack post failed: not_in_channel",
+    }
+    assert fake_client.threads.created == []
+    assert fake_client.runs.created == []
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert stored["last_error"] == "Slack post failed: not_in_channel"

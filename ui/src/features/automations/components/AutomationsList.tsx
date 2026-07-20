@@ -186,6 +186,7 @@ function AutomationRow({ schedule }: { schedule: AgentSchedule }) {
             {describeCron(schedule.schedule)}
           </span>
           {schedule.repo && <span>{schedule.repo}</span>}
+          {schedule.slackChannelId && <span>{schedule.slackChannelId}</span>}
           <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
         </div>
       </div>

@@ -133,76 +133,110 @@ async def get_issue(issue_id: str) -> dict[str, Any]:
 
 
 async def search_issues(
-    query: str,
+    query: str | None = None,
     team_id: str | None = None,
+    filters: dict[str, Any] | None = None,
     limit: int = 10,
     include_archived: bool = False,
     include_comments: bool = False,
     after: str | None = None,
 ) -> dict[str, Any]:
-    """Search Linear issues by free-text query."""
-    query = query.strip()
-    if not query:
-        return {"error": "Search query must not be empty"}
+    """Search Linear issues by text, structured filters, or both."""
+    query = (query or "").strip()
+    issue_filter = dict(filters or {})
+    if team_id:
+        team_filter = {"team": {"id": {"eq": team_id}}}
+        issue_filter = {"and": [issue_filter, team_filter]} if issue_filter else team_filter
+    if not query and not issue_filter:
+        return {"error": "Search query or filters must be provided"}
     if not 1 <= limit <= 50:
         return {"error": "Search limit must be between 1 and 50"}
 
-    search_query = """
-    query SearchIssues(
-        $query: String!
-        $filter: IssueFilter
-        $limit: Int!
-        $includeArchived: Boolean
-        $includeComments: Boolean
-        $after: String
-    ) {
-        searchIssues(
-            term: $query
-            filter: $filter
-            first: $limit
-            includeArchived: $includeArchived
-            includeComments: $includeComments
-            after: $after
-        ) {
-            totalCount
-            pageInfo {
-                hasNextPage
-                endCursor
-            }
-            nodes {
-                id
-                identifier
-                title
-                priority
-                priorityLabel
-                state { id name type }
-                assignee { id name email }
-                team { id name key }
-                project { id name }
-                labels { nodes { id name } }
-                createdAt
-                updatedAt
-                archivedAt
-                url
-            }
+    connection_fields = """
+        totalCount
+        pageInfo {
+            hasNextPage
+            endCursor
         }
-    }
+        nodes {
+            id
+            identifier
+            title
+            priority
+            priorityLabel
+            state { id name type }
+            assignee { id name email }
+            team { id name key }
+            project { id name }
+            labels { nodes { id name } }
+            createdAt
+            updatedAt
+            archivedAt
+            url
+        }
     """
-    result = await _graphql_request(
-        search_query,
-        {
+    if query:
+        graphql_query = f"""
+        query SearchIssues(
+            $query: String!
+            $filter: IssueFilter
+            $limit: Int!
+            $includeArchived: Boolean
+            $includeComments: Boolean
+            $after: String
+        ) {{
+            searchIssues(
+                term: $query
+                filter: $filter
+                first: $limit
+                includeArchived: $includeArchived
+                includeComments: $includeComments
+                after: $after
+            ) {{
+                {connection_fields}
+            }}
+        }}
+        """
+        variables = {
             "query": query,
-            "filter": {"team": {"id": {"eq": team_id}}} if team_id else None,
+            "filter": issue_filter or None,
             "limit": limit,
             "includeArchived": include_archived,
             "includeComments": include_comments,
             "after": after,
-        },
-    )
+        }
+        connection_name = "searchIssues"
+    else:
+        graphql_query = f"""
+        query FilterIssues(
+            $filter: IssueFilter!
+            $limit: Int!
+            $includeArchived: Boolean
+            $after: String
+        ) {{
+            issues(
+                filter: $filter
+                first: $limit
+                includeArchived: $includeArchived
+                after: $after
+            ) {{
+                {connection_fields}
+            }}
+        }}
+        """
+        variables = {
+            "filter": issue_filter,
+            "limit": limit,
+            "includeArchived": include_archived,
+            "after": after,
+        }
+        connection_name = "issues"
+
+    result = await _graphql_request(graphql_query, variables)
     if "error" in result:
         return result
 
-    search_results = result.get("searchIssues", {})
+    search_results = result.get(connection_name, {})
     return {
         "issues": search_results.get("nodes", []),
         "total_count": search_results.get("totalCount", 0),

@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Mapping
 from typing import Any
 
 from langgraph_sdk import get_client
@@ -34,7 +35,7 @@ def _reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{owner}/{repo}/pr/{pr_number}/reviewer"))
 
 
-def _read_active_reactions(item: dict[str, Any] | None) -> set[str]:
+def _read_active_reactions(item: Mapping[str, Any] | None) -> set[str]:
     if not item:
         return set()
     value = item.get("value")

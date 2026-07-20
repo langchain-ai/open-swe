@@ -69,8 +69,10 @@ async def test_slack_processing_error_posts_dashboard_link(
     assert isinstance(update["metadata"]["updated_at_ms"], int)
     set_status.assert_awaited_once_with("C1", "123.45", status="")
     post_reply.assert_awaited_once()
-    assert post_reply.await_args.args[:2] == ("C1", "123.45")
-    assert "<https://ui/t1|Open SWE Web>" in post_reply.await_args.args[2]
+    await_args = post_reply.await_args
+    assert await_args is not None
+    assert await_args.args[:2] == ("C1", "123.45")
+    assert "<https://ui/t1|Open SWE Web>" in await_args.args[2]
 
 
 async def test_natural_language_plan_approval_uses_shared_approval_flow(
@@ -293,7 +295,9 @@ async def test_dispatch_or_queue_dispatches_when_idle(
 
     assert run == {"run_id": "run-1"}
     queue.assert_not_awaited()
-    assert dispatch.await_args.args[1] == blocks
+    await_args = dispatch.await_args
+    assert await_args is not None
+    assert await_args.args[1] == blocks
 
 
 @pytest.mark.asyncio

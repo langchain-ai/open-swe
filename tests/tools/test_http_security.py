@@ -5,6 +5,7 @@ import json
 import socket as real_socket
 import sys
 import types
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
@@ -12,7 +13,7 @@ import httpx
 import pytest
 
 exa_py_stub = types.ModuleType("exa_py")
-exa_py_stub.Exa = object
+exa_py_stub.__dict__["Exa"] = object
 sys.modules.setdefault("exa_py", exa_py_stub)
 
 importlib.import_module("agent.tools.fetch_url")
@@ -57,7 +58,11 @@ class FakeResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise httpx.HTTPStatusError(f"{self.status_code} error", request=None, response=None)
+            request = httpx.Request("GET", self.url)
+            response = httpx.Response(self.status_code, request=request)
+            raise httpx.HTTPStatusError(
+                f"{self.status_code} error", request=request, response=response
+            )
 
 
 class FakeAsyncClient:
@@ -85,7 +90,11 @@ class FakeAsyncClient:
         return self._responder(method, url, **kwargs)
 
 
-def _install_client(monkeypatch, module, responder) -> type:
+def _install_client(
+    monkeypatch: pytest.MonkeyPatch,
+    module: types.ModuleType,
+    responder: Callable[..., FakeResponse],
+) -> Callable[..., FakeAsyncClient]:
     def factory(*args: Any, **kwargs: Any) -> FakeAsyncClient:
         return FakeAsyncClient(responder, *args, **kwargs)
 

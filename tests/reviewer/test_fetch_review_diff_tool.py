@@ -56,6 +56,7 @@ async def test_fetch_review_diff_returns_metadata_without_diff_body() -> None:
         "cached": True,
     }
     assert diff_text not in str(result)
+    assert mock_materialize.await_args is not None
     assert mock_materialize.await_args.kwargs["work_dir"] == "/workspace/repo"
     assert mock_materialize.await_args.kwargs["merge_base"] is True
 
@@ -98,6 +99,7 @@ async def test_fetch_review_diff_uses_incremental_range_for_re_review() -> None:
         result = await fetch_review_diff()
 
     assert result["base_sha"] == "b" * 40
+    assert mock_materialize.await_args is not None
     assert mock_materialize.await_args.kwargs == {
         "work_dir": "/workspace/repo",
         "base_ref": "b" * 40,

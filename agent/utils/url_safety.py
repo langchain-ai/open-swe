@@ -113,6 +113,7 @@ async def request_with_safe_redirects(
     request_kwargs = dict(kwargs)
     caller_headers = dict(request_kwargs.pop("headers", None) or {})
     caller_extensions = dict(request_kwargs.pop("extensions", None) or {})
+    response: httpx.Response | None = None
 
     for redirect_count in range(_MAX_REDIRECTS + 1):
         is_safe, reason, hostname, addr_infos = resolve_and_validate(current_url)
@@ -140,6 +141,8 @@ async def request_with_safe_redirects(
                 if address_index == len(pinned_ips) - 1:
                     raise
 
+        if response is None:
+            raise httpx.ConnectError("No response received from pinned address")
         if response.status_code not in _REDIRECT_CODES:
             return response, None
 

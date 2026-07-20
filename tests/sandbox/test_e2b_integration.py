@@ -34,10 +34,10 @@ def _load_e2b_module(monkeypatch):
     _FakeSandbox.connect_calls = []
 
     fake_e2b = types.ModuleType("e2b")
-    fake_e2b.Sandbox = _FakeSandbox
+    fake_e2b.__dict__["Sandbox"] = _FakeSandbox
 
     fake_langchain_e2b = types.ModuleType("langchain_e2b")
-    fake_langchain_e2b.E2BSandbox = _FakeE2BSandbox
+    fake_langchain_e2b.__dict__["E2BSandbox"] = _FakeE2BSandbox
 
     monkeypatch.setitem(sys.modules, "e2b", fake_e2b)
     monkeypatch.setitem(sys.modules, "langchain_e2b", fake_langchain_e2b)

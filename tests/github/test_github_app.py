@@ -147,35 +147,6 @@ async def test_installation_token_can_be_scoped_to_repository_ids(
     assert _FakeAsyncClient.last_post["json"] == {"repository_ids": [123]}
 
 
-def test_runtime_proxy_token_permissions_include_workflows_and_optional_actions() -> None:
-    assert github_app.BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS["workflows"] == "write"
-    assert "actions" not in github_app.BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS
-    assert github_app.RUNTIME_PROXY_TOKEN_PERMISSIONS["workflows"] == "write"
-    assert github_app.RUNTIME_PROXY_TOKEN_PERMISSIONS["actions"] == "read"
-    assert github_app.RUNTIME_PROXY_TOKEN_PERMISSIONS.get("actions") != "write"
-
-
-def test_core_proxy_token_permissions_exclude_optional_grants() -> None:
-    """The terminal ladder rung must only ask for install-time permissions."""
-    core = github_app.CORE_RUNTIME_PROXY_TOKEN_PERMISSIONS
-    assert "workflows" not in core
-    assert "actions" not in core
-    assert core["contents"] == "write"
-
-
-def test_proxy_token_ladder_descends_to_core() -> None:
-    """Ladder goes most→least privileged so a missing grant degrades gracefully."""
-    ladder = github_app.PROXY_TOKEN_PERMISSION_LADDER
-    assert ladder == (
-        github_app.RUNTIME_PROXY_TOKEN_PERMISSIONS,
-        github_app.BASE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
-        github_app.CORE_RUNTIME_PROXY_TOKEN_PERMISSIONS,
-    )
-    assert [len(scope) for scope in ladder] == sorted(
-        (len(scope) for scope in ladder), reverse=True
-    )
-
-
 @pytest.mark.asyncio
 async def test_installation_token_includes_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")

@@ -48,13 +48,34 @@ async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.Monkey
 
     assert result["status"] == "ok"
     reply.assert_awaited_once()
-    args = reply.await_args.args
+    await_args = reply.await_args
+    assert await_args is not None
+    args = await_args.args
     assert args[0] == "C1"
     assert args[1] == "123.45"
     assert "<https://ui/t1|Open SWE Web>" in args[2]
     assert client.threads.updates == [
         {"failure_reply_posted_run_id": "run-1", "failure_reply_posted_run_ids": ["run-1"]}
     ]
+
+
+@pytest.mark.asyncio
+async def test_schedule_source_with_slack_context_posts_failure_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = _slack_metadata()
+    metadata["source"] = "schedule"
+    client = _FakeClient(metadata)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+
+    result = await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error"}
+    )
+
+    assert result["status"] == "ok"
+    reply.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -128,7 +149,9 @@ async def test_linear_source_comments_on_issue(monkeypatch: pytest.MonkeyPatch) 
 
     assert result["status"] == "ok"
     comment.assert_awaited_once()
-    assert comment.await_args.args[0] == "iss_1"
+    await_args = comment.await_args
+    assert await_args is not None
+    assert await_args.args[0] == "iss_1"
 
 
 @pytest.mark.asyncio

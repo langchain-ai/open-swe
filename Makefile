@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint test tests integration_tests help run dev
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -14,7 +14,7 @@ run:
 	uv run uvicorn agent.webapp:app --reload --port 8000
 
 install:
-	uv sync
+	uv sync --extra dev
 
 ######################
 # TESTING
@@ -53,6 +53,9 @@ format:
 format-check:
 	uv run ruff format $(PYTHON_FILES) --check
 
+typecheck:
+	npx --yes basedpyright agent tests
+
 ######################
 # HELP
 ######################
@@ -61,8 +64,10 @@ help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server'
 	@echo 'run                          - run webhook server'
-	@echo 'install                      - install dependencies'
+	@echo 'install                      - install dependencies (incl. dev extras)'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
+	@echo 'typecheck                    - run basedpyright on agent/ and tests/'
 	@echo 'test                         - run unit tests'
 	@echo 'integration_tests            - run integration tests'
+	@echo '----'

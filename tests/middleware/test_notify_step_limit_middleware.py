@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain.agents.middleware import AgentState
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.middleware.notify_step_limit import notify_step_limit_reached
@@ -12,7 +13,9 @@ class TestNotifyStepLimitReached:
 
     @pytest.mark.asyncio
     async def test_posts_slack_reply_when_limit_marker_present(self) -> None:
-        state = {"messages": [AIMessage(content="Model call limits exceeded: run limit reached")]}
+        state: AgentState = {
+            "messages": [AIMessage(content="Model call limits exceeded: run limit reached")]
+        }
 
         with (
             patch(
@@ -30,12 +33,14 @@ class TestNotifyStepLimitReached:
 
         assert result is None
         mock_post.assert_awaited_once()
-        assert mock_post.await_args.args[0:2] == ("C123", "171.123")
-        assert "maximum step limit" in mock_post.await_args.args[2]
+        call_args = mock_post.await_args
+        assert call_args is not None
+        assert call_args.args[0:2] == ("C123", "171.123")
+        assert "maximum step limit" in call_args.args[2]
 
     @pytest.mark.asyncio
     async def test_posts_slack_reply_for_list_content_with_limit_marker(self) -> None:
-        state = {
+        state: AgentState = {
             "messages": [
                 AIMessage(
                     content=[
@@ -65,7 +70,7 @@ class TestNotifyStepLimitReached:
 
     @pytest.mark.asyncio
     async def test_skips_when_limit_marker_absent(self) -> None:
-        state = {"messages": [HumanMessage(content="keep going")]}
+        state: AgentState = {"messages": [HumanMessage(content="keep going")]}
 
         with patch(
             "agent.middleware.notify_step_limit.post_slack_thread_reply",
@@ -78,7 +83,9 @@ class TestNotifyStepLimitReached:
 
     @pytest.mark.asyncio
     async def test_skips_when_slack_thread_config_missing(self) -> None:
-        state = {"messages": [AIMessage(content="Model call limits exceeded: run limit reached")]}
+        state: AgentState = {
+            "messages": [AIMessage(content="Model call limits exceeded: run limit reached")]
+        }
 
         with (
             patch(
