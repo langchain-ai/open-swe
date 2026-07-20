@@ -60,7 +60,12 @@ from .oauth import (
     require_session,
     sanitize_redirect_to,
 )
-from .options import FABLE_MODEL_IDS, SUPPORTED_MODELS, gate_fable_model
+from .options import (
+    FABLE_MODEL_IDS,
+    SUPPORTED_MODELS,
+    gate_fable_model,
+    models_with_profile_context_windows,
+)
 from .profiles import (
     ProfileUpdate,
     get_profile,
@@ -446,7 +451,7 @@ async def options() -> dict[str, Any]:
         else [m for m in SUPPORTED_MODELS if m["id"] not in FABLE_MODEL_IDS]
     )
     return {
-        "models": models,
+        "models": models_with_profile_context_windows(models),
         "default_agent_model": agent_model,
         "default_agent_reasoning_effort": agent_effort,
         "default_agent_subagent_model": subagent_model,
