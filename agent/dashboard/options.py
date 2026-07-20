@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 class ModelOption(TypedDict):
@@ -11,6 +11,7 @@ class ModelOption(TypedDict):
     efforts: list[str]
     default_effort: str
     supports_images: bool
+    context_window: NotRequired[int | None]
 
 
 SUPPORTED_MODELS: list[ModelOption] = [
@@ -20,6 +21,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
+        "context_window": 200_000,
     },
     {
         "id": "anthropic:claude-sonnet-5",
@@ -27,6 +29,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
+        "context_window": 200_000,
     },
     {
         "id": "anthropic:claude-fable-5",
@@ -34,6 +37,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
+        "context_window": 200_000,
     },
     {
         "id": "openai:gpt-5.5",
@@ -41,6 +45,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["none", "low", "medium", "high", "xhigh"],
         "default_effort": "xhigh",
         "supports_images": True,
+        "context_window": 128_000,
     },
     {
         "id": "openai:gpt-5.6-sol",
@@ -48,6 +53,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["none", "low", "medium", "high", "xhigh"],
         "default_effort": "xhigh",
         "supports_images": True,
+        "context_window": 128_000,
     },
     {
         "id": "openai:gpt-5.6-terra",
@@ -55,6 +61,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["none", "low", "medium", "high", "xhigh"],
         "default_effort": "xhigh",
         "supports_images": True,
+        "context_window": 128_000,
     },
     {
         "id": "openai:gpt-5.6-luna",
@@ -62,6 +69,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["none", "low", "medium", "high", "xhigh"],
         "default_effort": "xhigh",
         "supports_images": True,
+        "context_window": 128_000,
     },
     {
         "id": "google_genai:gemini-3.5-flash",
@@ -69,6 +77,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["minimal", "low", "medium", "high"],
         "default_effort": "medium",
         "supports_images": True,
+        "context_window": 1_000_000,
     },
     {
         "id": "fireworks:accounts/fireworks/models/kimi-k2p7-code",
@@ -76,6 +85,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high"],
         "default_effort": "high",
         "supports_images": False,
+        "context_window": 256_000,
     },
     {
         "id": "fireworks:accounts/fireworks/models/deepseek-v4-pro",
@@ -83,6 +93,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": False,
+        "context_window": 128_000,
     },
     {
         "id": "fireworks:accounts/fireworks/models/glm-5p2",
@@ -90,6 +101,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["none", "high", "max"],
         "default_effort": "high",
         "supports_images": False,
+        "context_window": 128_000,
     },
 ]
 

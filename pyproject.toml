@@ -81,4 +81,3 @@ typeCheckingMode = "standard"
 include = ["agent", "tests"]
 exclude = ["**/node_modules", "**/__pycache__", ".venv", "ui", "**/.*"]
 reportMissingTypeStubs = false
-

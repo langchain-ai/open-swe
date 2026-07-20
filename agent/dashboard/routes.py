@@ -6,6 +6,7 @@ import hmac
 import logging
 import os
 from typing import Any, Literal
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -357,12 +358,14 @@ async def auth_login(
         nonce_hash=hash_state_nonce(nonce),
     )
     redirect_uri = f"{_api_base_url()}/dashboard/api/auth/callback"
-    url = (
-        "https://github.com/login/oauth/authorize"
-        f"?client_id={client_id}"
-        f"&redirect_uri={redirect_uri}"
-        f"&state={state}"
+    query = urlencode(
+        {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "state": state,
+        }
     )
+    url = f"https://github.com/login/oauth/authorize?{query}"
     response = RedirectResponse(url, status_code=302)
     _set_state_cookie(response, nonce)
     return response

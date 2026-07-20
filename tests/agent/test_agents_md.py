@@ -108,3 +108,35 @@ async def test_fetch_agents_md_returns_none_for_missing_params() -> None:
     assert result is None
     result = await agents_md.fetch_agents_md("acme", "repo", "", token="tok")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_scoped_agents_md_falls_back_to_claude_md() -> None:
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        client = MagicMock()
+        client.get = AsyncMock(
+            side_effect=[
+                _make_response(404),
+                _make_response(200, "# CLAUDE.md\nrules"),
+            ]
+        )
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+        result = await agents_md.fetch_scoped_agents_md(
+            "acme", "repo", "main", ["ui/app.py"], token="tok"
+        )
+    assert result == {"ui/CLAUDE.md": "# CLAUDE.md\nrules"}
+
+
+@pytest.mark.asyncio
+async def test_fetch_scoped_agents_md_prefers_agents_md() -> None:
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        client = MagicMock()
+        client.get = AsyncMock(return_value=_make_response(200, "# AGENTS.md\nrules"))
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+        result = await agents_md.fetch_scoped_agents_md(
+            "acme", "repo", "main", ["ui/app.py"], token="tok"
+        )
+    assert result == {"ui/AGENTS.md": "# AGENTS.md\nrules"}
+    assert client.get.await_count == 1
