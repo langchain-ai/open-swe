@@ -31,6 +31,7 @@ dependencies = [
     "langchain-google-genai>=4.2.4",
     "langchain-mcp-adapters>=0.3.0",
     "stagehand>=3.21.0",
+    "websockets>=15.0.1",
 ]
 
 [project.optional-dependencies]

@@ -39,6 +39,21 @@ def test_detects_pr_creation_fallback_commands() -> None:
     assert is_pr_creation_fallback_command(
         "curl -X POST https://api.github.com/repos/langchain-ai/open-swe/pulls -d '{}'"
     )
+    assert is_pr_creation_fallback_command("/usr/bin/gh pr create --draft")
+    assert is_pr_creation_fallback_command(
+        "/usr/bin/curl -X POST https://api.github.com/repos/langchain-ai/open-swe/pulls -d '{}'"
+    )
+    assert is_pr_creation_fallback_command("bash -c 'gh pr create --draft'")
+    assert is_pr_creation_fallback_command("GH_TOKEN=dummy sh -c 'gh pr create --draft'")
+    assert is_pr_creation_fallback_command(
+        "zsh -lc 'gh api repos/langchain-ai/open-swe/pulls -X POST -f title=x'"
+    )
+    assert is_pr_creation_fallback_command(
+        "bash -c \"curl -X POST https://api.github.com/repos/langchain-ai/open-swe/pulls -d '{}'\""
+    )
+    assert is_pr_creation_fallback_command(
+        'bash -c \'sh -c "dash -c \\"zsh -c \\\\\\"gh pr create --draft\\\\\\"\\""\''
+    )
 
 
 def test_allows_safe_pr_commands() -> None:
@@ -46,6 +61,8 @@ def test_allows_safe_pr_commands() -> None:
     assert not is_pr_creation_fallback_command("gh pr list --head open-swe/foo")
     assert not is_pr_creation_fallback_command("gh pr edit 1 --add-label ready")
     assert not is_pr_creation_fallback_command("gh pr comment 1 --body done")
+    assert not is_pr_creation_fallback_command("bash -c 'gh pr view 1 --json url'")
+    assert not is_pr_creation_fallback_command("/usr/bin/gh pr view 1 --json url")
 
 
 async def test_middleware_blocks_execute_pr_creation_fallbacks() -> None:

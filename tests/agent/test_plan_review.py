@@ -369,6 +369,14 @@ def test_save_plan_exported_and_wired() -> None:
     assert callable(save_plan)
 
 
+def test_save_plan_description_warns_about_slack_images() -> None:
+    from agent.tools import save_plan
+
+    description = save_plan.__doc__ or ""
+    assert "persist Markdown text only" in description
+    assert "post them directly in Slack" in description
+
+
 def test_plan_status_constants() -> None:
     from agent.dashboard import plan_store
 
@@ -431,6 +439,14 @@ def test_plan_mode_middleware_self_activation_via_state() -> None:
     # After enter_plan_mode sets state: the next request is filtered.
     on = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {"plan_mode": True})
     assert _names(cast(_FakeReq, mw._filter(cast(Any, on)))) == {"read_file"}
+
+
+def test_plan_mode_middleware_self_deactivation_via_state() -> None:
+    from agent.middleware import PlanModeMiddleware
+
+    mw = PlanModeMiddleware(excluded=frozenset({"write_file"}), initial=True)
+    off = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {"plan_mode": False})
+    assert _names(cast(_FakeReq, mw._filter(cast(Any, off)))) == {"read_file", "write_file"}
 
 
 # --- manual plan editing -------------------------------------------------

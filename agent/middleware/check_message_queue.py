@@ -8,7 +8,7 @@ human messages before the next model call.
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
+from typing import Any, NotRequired, cast
 
 import httpx
 from langchain.agents.middleware import AgentState, before_model
@@ -32,6 +32,7 @@ class LinearNotifyState(AgentState):
     """Extended agent state for tracking Linear notifications."""
 
     linear_messages_sent_count: int
+    plan_approval_blocked: NotRequired[bool]
 
 
 async def _resolve_thread_model_id(thread_id: str) -> str | None:
@@ -89,7 +90,16 @@ def _is_dashboard_queued_message(content: object) -> bool:
     return isinstance(content, dict) and content.get("source") == "dashboard"
 
 
-def _message_update(content_blocks: list[dict[str, Any]], thread_id: str) -> dict[str, Any] | None:
+def _dashboard_queued_message_from_owner(content: object) -> bool:
+    return isinstance(content, dict) and content.get("from_owner") is True
+
+
+def _message_update(
+    content_blocks: list[dict[str, Any]],
+    thread_id: str,
+    *,
+    plan_approval_blocked: bool | None = None,
+) -> dict[str, Any] | None:
     if not content_blocks:
         return None
     logger.info(
@@ -97,7 +107,10 @@ def _message_update(content_blocks: list[dict[str, Any]], thread_id: str) -> dic
         len(content_blocks),
         thread_id,
     )
-    return {"messages": [{"role": "user", "content": content_blocks}]}
+    update: dict[str, Any] = {"messages": [{"role": "user", "content": content_blocks}]}
+    if plan_approval_blocked is not None:
+        update["plan_approval_blocked"] = plan_approval_blocked
+    return update
 
 
 async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> str | None:
@@ -164,6 +177,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             return None
 
         content_blocks: list[dict[str, Any]] = []
+        plan_approval_blocked: bool | None = None
         pending_autofix = await _consume_pending_autofix_event(store, thread_id)
         if pending_autofix:
             content_blocks.append({"type": "text", "text": pending_autofix})
@@ -207,6 +221,10 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             content = msg.get("content")
             if _is_dashboard_queued_message(content):
                 content_blocks.append({"type": "text", "text": DASHBOARD_HANDOFF_INSTRUCTION})
+                if _dashboard_queued_message_from_owner(content):
+                    plan_approval_blocked = False
+                elif plan_approval_blocked is None:
+                    plan_approval_blocked = True
             if isinstance(content, dict) and (
                 "text" in content or "image_urls" in content or "images" in content
             ):
@@ -222,7 +240,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                 logger.debug("Queued message contains text content")
                 content_blocks.append({"type": "text", "text": content})
 
-        return _message_update(content_blocks, thread_id)  # noqa: TRY300
+        return _message_update(
+            content_blocks, thread_id, plan_approval_blocked=plan_approval_blocked
+        )  # noqa: TRY300
     except Exception:
         logger.exception("Error in check_message_queue_before_model")
     return None

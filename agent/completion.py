@@ -123,8 +123,8 @@ async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: 
     ctx = ctx if isinstance(ctx, dict) else {}
     text = _failure_text(status)
 
-    if source == "slack":
-        slack_thread = ctx.get("slack_thread")
+    slack_thread = ctx.get("slack_thread")
+    if source == "slack" or isinstance(slack_thread, dict):
         if isinstance(slack_thread, dict):
             channel_id = slack_thread.get("channel_id")
             thread_ts = slack_thread.get("thread_ts")

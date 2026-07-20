@@ -558,7 +558,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         await common.reconcile_findings_with_review_threads(thread_id, threads)
     except Exception:
         common.logger.warning(
-            "Could not sync review threads before push re-review for %s", thread_id
+            "Could not sync review threads before push re-review for %s",
+            thread_id,
+            exc_info=True,
         )
 
     pr_meta: ReviewerPRMeta = {

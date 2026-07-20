@@ -15,8 +15,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import posixpath
+import re
 import shlex
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
@@ -27,6 +29,19 @@ CLONE_TIMEOUT_SECONDS = 240
 DEFAULT_SKILL_DIRS = (".agents/skills", ".claude/skills")
 
 TRUSTED_SKILLS_DIRNAME = ".review-skills"
+MAIN_AGENT_SKILLS_DIRNAME = ".agent-skills"
+
+_REPO_COMPONENT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_COMMIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{40,64}$")
+_TRUSTED_REF_PREFIX = "OPEN_SWE_TRUSTED_REF="
+_SKILLS_SOURCE_PREFIX = "OPEN_SWE_SKILLS_SOURCE="
+_SKILLS_CACHE_PREFIX = "OPEN_SWE_SKILLS_CACHE="
+
+
+@dataclass(frozen=True)
+class PreparedRepoSkills:
+    trusted_ref: str = ""
+    sources: tuple[str, ...] = ()
 
 
 def _prep_command(
@@ -127,6 +142,7 @@ async def materialize_trusted_skills(
     repo_dir: str,
     trusted_ref: str,
     skill_dirs: Sequence[str] = DEFAULT_SKILL_DIRS,
+    dest_dirname: str = TRUSTED_SKILLS_DIRNAME,
 ) -> list[str]:
     """Extract skill dirs from ``trusted_ref`` into a path outside the checkout.
 
@@ -137,7 +153,7 @@ async def materialize_trusted_skills(
     """
     if not trusted_ref:
         return []
-    dest_root = posixpath.join(posixpath.dirname(repo_dir), TRUSTED_SKILLS_DIRNAME)
+    dest_root = posixpath.join(posixpath.dirname(repo_dir), dest_dirname)
     q_repo_dir = shlex.quote(repo_dir)
     q_ref = shlex.quote(trusted_ref)
 
@@ -145,14 +161,28 @@ async def materialize_trusted_skills(
     for skill_dir in skill_dirs:
         dest = posixpath.join(dest_root, skill_dir)
         q_dest = shlex.quote(dest)
+        marker = posixpath.join(dest, ".trusted-ref")
+        q_marker = shlex.quote(marker)
         q_dir = shlex.quote(skill_dir)
         depth = len(skill_dir.split("/"))
         command = (
-            f"cd {q_repo_dir} && "
-            f"git cat-file -e {q_ref}:{q_dir} 2>/dev/null && "
-            f"rm -rf {q_dest} && mkdir -p {q_dest} && "
-            f"git archive {q_ref} {q_dir} | tar -x --strip-components={depth} -C {q_dest} && "
-            f"echo {q_dest}"
+            "set -e\n"
+            f"cd {q_repo_dir}\n"
+            f"if ! git cat-file -e {q_ref}:{q_dir} 2>/dev/null; then\n"
+            f"  rm -rf {q_dest}\n"
+            "  exit 0\n"
+            "fi\n"
+            f'if [ -d {q_dest} ] && [ "$(cat {q_marker} 2>/dev/null || true)" = {q_ref} ]; then\n'
+            f"  printf '{_SKILLS_CACHE_PREFIX}hit\\n'\n"
+            "else\n"
+            f"  rm -rf {q_dest} && mkdir -p {q_dest}\n"
+            f"  git archive {q_ref} {q_dir} | "
+            f"tar -x --strip-components={depth} -C {q_dest}\n"
+            f"  printf '%s\\n' {q_ref} > {q_marker}\n"
+            f"  printf '{_SKILLS_CACHE_PREFIX}miss\\n'\n"
+            "fi\n"
+            f"chmod -R a-w {q_dest}\n"
+            f"printf '{_SKILLS_SOURCE_PREFIX}%s\\n' {q_dest}"
         )
         try:
             result = await asyncio.to_thread(sandbox_backend.execute, command)
@@ -160,6 +190,126 @@ async def materialize_trusted_skills(
             logger.warning("Failed to extract trusted skills %s", skill_dir, exc_info=True)
             continue
         output = getattr(result, "output", "") or ""
-        if dest in output.splitlines():
+        lines = output.splitlines()
+        if f"{_SKILLS_SOURCE_PREFIX}{dest}" in lines:
             sources.append(f"{dest}/")
+            cache_status = next(
+                (
+                    line.removeprefix(_SKILLS_CACHE_PREFIX)
+                    for line in lines
+                    if line.startswith(_SKILLS_CACHE_PREFIX)
+                ),
+                "unknown",
+            )
+            logger.info(
+                "Prepared trusted skill source repo=%s dir=%s cache=%s",
+                posixpath.basename(repo_dir),
+                skill_dir,
+                cache_status,
+            )
     return sources
+
+
+def _valid_repo_component(value: str) -> bool:
+    return value not in {".", ".."} and bool(_REPO_COMPONENT_RE.fullmatch(value))
+
+
+async def prepare_main_agent_repo_skills(
+    sandbox_backend: SandboxBackendProtocol,
+    *,
+    work_dir: str,
+    repo_owner: str,
+    repo_name: str,
+    base_sha: str = "",
+) -> PreparedRepoSkills:
+    """Prepare a configured repo and its trusted ``.agents/skills`` snapshot."""
+    if not _valid_repo_component(repo_owner) or not _valid_repo_component(repo_name):
+        logger.warning("Skipping repository skill preparation: invalid repository identifier")
+        return PreparedRepoSkills()
+    if base_sha and not _COMMIT_SHA_RE.fullmatch(base_sha):
+        logger.warning(
+            "Skipping repository skill preparation for %s/%s: invalid base ref",
+            repo_owner,
+            repo_name,
+        )
+        return PreparedRepoSkills()
+
+    repo_dir = posixpath.join(work_dir, repo_name)
+    full_name = f"{repo_owner}/{repo_name}"
+    canonical_url = f"https://github.com/{full_name}.git"
+    q_work_dir = shlex.quote(work_dir)
+    q_repo_dir = shlex.quote(repo_dir)
+    q_full_name = shlex.quote(full_name)
+    q_repo_name = shlex.quote(repo_name)
+    q_canonical_url = shlex.quote(canonical_url)
+    lines = [
+        "set -e",
+        f"mkdir -p {q_work_dir}",
+        f"if [ -d {q_repo_dir}/.git ]; then",
+        f"  cd {q_repo_dir}",
+        f"  git remote set-url origin {q_canonical_url}",
+        "else",
+        f"  cd {q_work_dir}",
+        f"  GH_TOKEN=dummy gh repo clone {q_full_name} {q_repo_name} -- --quiet",
+        f"  cd {q_repo_dir}",
+        "fi",
+    ]
+    if base_sha:
+        q_base_sha = shlex.quote(base_sha)
+        lines.extend(
+            [
+                f"GH_TOKEN=dummy git fetch origin {q_base_sha} --quiet",
+                f"trusted_ref=$(git rev-parse --verify {q_base_sha}^{{commit}})",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "GH_TOKEN=dummy git fetch origin HEAD --quiet",
+                "trusted_ref=$(git rev-parse --verify FETCH_HEAD^{commit})",
+            ]
+        )
+    lines.append(f"printf '{_TRUSTED_REF_PREFIX}%s\\n' \"$trusted_ref\"")
+
+    try:
+        result = await asyncio.to_thread(
+            sandbox_backend.execute,
+            "\n".join(lines),
+            timeout=CLONE_TIMEOUT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to prepare repository skills for %s/%s", repo_owner, repo_name)
+        return PreparedRepoSkills()
+    if getattr(result, "exit_code", None) not in (0, None):
+        logger.warning("Repository skill preparation failed for %s/%s", repo_owner, repo_name)
+        return PreparedRepoSkills()
+
+    output = getattr(result, "output", "") or ""
+    trusted_ref = next(
+        (
+            line.removeprefix(_TRUSTED_REF_PREFIX)
+            for line in output.splitlines()
+            if line.startswith(_TRUSTED_REF_PREFIX)
+        ),
+        "",
+    )
+    if not _COMMIT_SHA_RE.fullmatch(trusted_ref):
+        logger.warning(
+            "Repository skill preparation returned no trusted ref for %s/%s", repo_owner, repo_name
+        )
+        return PreparedRepoSkills()
+
+    sources = await materialize_trusted_skills(
+        sandbox_backend,
+        repo_dir=repo_dir,
+        trusted_ref=trusted_ref,
+        skill_dirs=(".agents/skills",),
+        dest_dirname=posixpath.join(MAIN_AGENT_SKILLS_DIRNAME, repo_owner, repo_name),
+    )
+    logger.info(
+        "Repository skill preparation complete repo=%s/%s sources=%d",
+        repo_owner,
+        repo_name,
+        len(sources),
+    )
+    return PreparedRepoSkills(trusted_ref=trusted_ref, sources=tuple(sources))

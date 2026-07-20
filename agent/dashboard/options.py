@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from collections.abc import Callable, Mapping, Sequence
+from functools import cache, lru_cache
+from importlib import import_module
+from typing import NotRequired, TypedDict, cast
 
 
 class ModelOption(TypedDict):
@@ -11,6 +14,7 @@ class ModelOption(TypedDict):
     efforts: list[str]
     default_effort: str
     supports_images: bool
+    context_window: NotRequired[int | None]
 
 
 SUPPORTED_MODELS: list[ModelOption] = [
@@ -98,6 +102,65 @@ SUPPORTED_MODEL_IDS: frozenset[str] = frozenset(m["id"] for m in SUPPORTED_MODEL
 FABLE_MODEL_IDS: frozenset[str] = frozenset(
     m["id"] for m in SUPPORTED_MODELS if m["id"].startswith("anthropic:claude-fable")
 )
+
+ProfileLoader = Callable[[str], Mapping[str, object]]
+
+# LangChain partner packages expose ``_get_default_model_profile`` — the same
+# accessor that populates ``ChatModel.profile`` from bundled models.dev data —
+# so context windows come from LangChain profiles instead of hardcoded numbers.
+_PROFILE_LOADER_MODULES: dict[str, str] = {
+    "anthropic": "langchain_anthropic.chat_models",
+    "fireworks": "langchain_fireworks.chat_models",
+    "google_genai": "langchain_google_genai.chat_models",
+    "openai": "langchain_openai.chat_models.base",
+}
+
+
+@cache
+def _profile_loader(provider: str) -> ProfileLoader | None:
+    module_path = _PROFILE_LOADER_MODULES.get(provider)
+    if module_path is None:
+        return None
+    try:
+        module = import_module(module_path)
+    except ImportError:
+        return None
+    loader = getattr(module, "_get_default_model_profile", None)
+    if not callable(loader):
+        return None
+    return cast(ProfileLoader, loader)
+
+
+@lru_cache(maxsize=512)
+def model_profile_context_window(model_id: str) -> int | None:
+    provider, _, model_name = model_id.partition(":")
+    if not provider or not model_name:
+        return None
+    loader = _profile_loader(provider)
+    if loader is None:
+        return None
+    profile = loader(model_name)
+    context_window = profile.get("max_input_tokens")
+    if isinstance(context_window, int) and context_window > 0:
+        return context_window
+    return None
+
+
+def models_with_profile_context_windows(models: Sequence[ModelOption]) -> list[ModelOption]:
+    enriched: list[ModelOption] = []
+    for model in models:
+        option: ModelOption = {
+            "id": model["id"],
+            "label": model["label"],
+            "efforts": model["efforts"],
+            "default_effort": model["default_effort"],
+            "supports_images": model["supports_images"],
+        }
+        context_window = model_profile_context_window(model["id"])
+        if context_window is not None:
+            option["context_window"] = context_window
+        enriched.append(option)
+    return enriched
 
 
 def fable_disabled_fallback(effort: object = None) -> tuple[str, str]:
