@@ -17,6 +17,7 @@ from langgraph.types import Command
 _SHELL_SEPARATORS = {";", "&&", "||", "|", "&"}
 _SHELL_EXECUTABLES = {"bash", "dash", "sh", "zsh"}
 _MAX_SHELL_EXPANSION_DEPTH = 3
+_SHELL_EXPANSION_DEPTH_LIMIT_TOKEN = "__pr_creation_guard_shell_expansion_depth_limit__"
 _GITHUB_PULLS_ENDPOINT = re.compile(r"(?:^|/)repos/[^/\s]+/[^/\s]+/pulls/?$")
 _GITHUB_PULLS_URL = re.compile(r"https://api\.github\.com/repos/[^/\s]+/[^/\s]+/pulls/?")
 _BLOCK_ERROR = (
@@ -73,8 +74,18 @@ def _shell_command_argument(tokens: list[str], shell_index: int) -> str | None:
     return None
 
 
+def _has_nested_shell_command(tokens: list[str]) -> bool:
+    return any(
+        _executable_name(token) in _SHELL_EXECUTABLES
+        and _shell_command_argument(tokens, index) is not None
+        for index, token in enumerate(tokens)
+    )
+
+
 def _expand_nested_shell_tokens(tokens: list[str], depth: int = 0) -> list[str]:
     if depth >= _MAX_SHELL_EXPANSION_DEPTH:
+        if _has_nested_shell_command(tokens):
+            return [*tokens, _SHELL_EXPANSION_DEPTH_LIMIT_TOKEN]
         return tokens
 
     expanded = list(tokens)
@@ -220,7 +231,8 @@ def _contains_direct_pull_create(tokens: list[str]) -> bool:
 def is_pr_creation_fallback_command(command: str) -> bool:
     tokens = _shell_tokens(command)
     return (
-        _contains_gh_pr_create(tokens)
+        _SHELL_EXPANSION_DEPTH_LIMIT_TOKEN in tokens
+        or _contains_gh_pr_create(tokens)
         or _contains_gh_api_pull_create(tokens)
         or _contains_direct_pull_create(tokens)
     )

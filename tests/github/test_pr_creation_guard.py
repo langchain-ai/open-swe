@@ -51,6 +51,9 @@ def test_detects_pr_creation_fallback_commands() -> None:
     assert is_pr_creation_fallback_command(
         "bash -c \"curl -X POST https://api.github.com/repos/langchain-ai/open-swe/pulls -d '{}'\""
     )
+    assert is_pr_creation_fallback_command(
+        'bash -c \'sh -c "dash -c \\"zsh -c \\\\\\"gh pr create --draft\\\\\\"\\""\''
+    )
 
 
 def test_allows_safe_pr_commands() -> None:
