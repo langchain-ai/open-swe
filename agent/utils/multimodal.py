@@ -10,11 +10,18 @@ import re
 from urllib.parse import urlparse
 
 import httpx
-from langchain_core.messages.content import ImageContentBlock, create_image_block
+from langchain_core.messages.content import (
+    ImageContentBlock,
+    TextContentBlock,
+    create_image_block,
+    create_text_block,
+)
 
 from .url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
+
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 IMAGE_MARKDOWN_RE = re.compile(r"!\[[^\]]*\]\((https?://[^\s)]+)\)")
 IMAGE_URL_RE = re.compile(
@@ -82,8 +89,8 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
 async def fetch_image_block(
     image_url: str,
     client: httpx.AsyncClient,
-) -> ImageContentBlock | None:
-    """Fetch image bytes and build an image content block."""
+) -> ImageContentBlock | TextContentBlock | None:
+    """Fetch image bytes and build a model content block."""
     try:
         logger.debug("Fetching image from %s", image_url)
         response, blocked = await request_with_safe_redirects(
@@ -119,6 +126,15 @@ async def fetch_image_block(
                 image_url,
             )
             return None
+        if len(response.content) > _MAX_IMAGE_BYTES:
+            logger.warning(
+                "Image %s exceeds the %d-byte limit; skipping image",
+                image_url,
+                _MAX_IMAGE_BYTES,
+            )
+            return create_text_block(
+                "An attached image was skipped because it exceeded the 10 MiB size limit."
+            )
 
         encoded = base64.b64encode(response.content).decode("ascii")
         logger.info(
