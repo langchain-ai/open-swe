@@ -98,6 +98,7 @@ from .runtime.constants import (
 )
 from .runtime.execution import graph_loaded_for_execution
 from .tools import (
+    approve_plan,
     enter_plan_mode,
     fetch_url,
     http_request,
@@ -1020,6 +1021,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             http_request,
             fetch_url,
             web_search,
+            approve_plan,
             enter_plan_mode,
             save_plan,
             linear_comment,
