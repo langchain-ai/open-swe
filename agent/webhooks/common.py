@@ -955,6 +955,9 @@ def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
         logger.warning("LINEAR_WEBHOOK_SECRET is not configured — rejecting webhook request")
         return False
 
+    if not signature:
+        return False
+
     expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
     return hmac.compare_digest(expected, signature)
