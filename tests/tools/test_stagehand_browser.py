@@ -1,3 +1,6 @@
+import asyncio
+import json
+
 import pytest
 
 from agent.integrations import stagehand_browser
@@ -78,10 +81,15 @@ class FakePage:
         return route
 
 
+class FakeData:
+    cdp_url = None
+
+
 class FakeSession:
     id = "session-123"
 
     def __init__(self) -> None:
+        self.data = FakeData()
         self.page = FakePage()
         self.ended = False
 
@@ -92,8 +100,46 @@ class FakeSession:
         self.page.url = input
         return {"result": "ok"}
 
+    async def observe(self, instruction: str) -> dict[str, object]:
+        return {"result": instruction}
+
+    async def extract(
+        self, instruction: str, schema: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        return {"result": {"instruction": instruction, "schema": schema}}
+
     async def end(self) -> None:
         self.ended = True
+
+
+class FakeCDPWebSocket:
+    def __init__(self) -> None:
+        self.sent: list[dict[str, object]] = []
+        self.incoming: asyncio.Queue[str | None] = asyncio.Queue()
+        self.closed = False
+
+    def __aiter__(self) -> "FakeCDPWebSocket":
+        return self
+
+    async def __anext__(self) -> str:
+        message = await self.incoming.get()
+        if message is None:
+            raise StopAsyncIteration
+        return message
+
+    async def send(self, message: str) -> None:
+        parsed = json.loads(message)
+        self.sent.append(parsed)
+        message_id = parsed.get("id")
+        if isinstance(message_id, int):
+            await self.incoming.put(json.dumps({"id": message_id, "result": {}}))
+
+    async def close(self) -> None:
+        self.closed = True
+        await self.incoming.put(None)
+
+    async def emit(self, message: dict[str, object]) -> None:
+        await self.incoming.put(json.dumps(message))
 
 
 @pytest.mark.asyncio
@@ -106,6 +152,49 @@ async def test_browser_url_guard_aborts_internal_browser_requests() -> None:
     assert route.aborted is True
     assert route.continued is False
     assert stagehand_browser._blocked_request_error(session) is not None
+
+
+@pytest.mark.asyncio
+async def test_cdp_browser_url_guard_blocks_real_stagehand_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    session.data.cdp_url = "ws://browser.example/devtools/browser/session-123"
+    del session.page
+    websocket = FakeCDPWebSocket()
+
+    async def connect_cdp_websocket(_cdp_url: str) -> FakeCDPWebSocket:
+        return websocket
+
+    monkeypatch.setattr(stagehand_browser, "_connect_cdp_websocket", connect_cdp_websocket)
+
+    await stagehand_browser._install_browser_url_guard(session)
+    await websocket.emit(
+        {
+            "method": "Target.attachedToTarget",
+            "params": {
+                "sessionId": "cdp-session-1",
+                "targetInfo": {"type": "page", "url": "https://example.com/"},
+            },
+        }
+    )
+    await websocket.emit(
+        {
+            "method": "Fetch.requestPaused",
+            "sessionId": "cdp-session-1",
+            "params": {
+                "requestId": "request-1",
+                "request": {"url": "http://169.254.169.254/latest/meta-data/"},
+            },
+        }
+    )
+    await asyncio.sleep(0)
+
+    assert stagehand_browser._blocked_request_error(session) is not None
+    assert any(message["method"] == "Fetch.enable" for message in websocket.sent)
+    assert any(message["method"] == "Fetch.failRequest" for message in websocket.sent)
+
+    await session._open_swe_cdp_guard.close()
 
 
 @pytest.mark.asyncio
@@ -168,4 +257,26 @@ async def test_browser_act_reports_unsafe_final_url(monkeypatch: pytest.MonkeyPa
 
     assert result["success"] is False
     assert "blocked after navigation" in result["error"]
+    assert session.ended is True
+
+
+@pytest.mark.asyncio
+async def test_browser_act_fails_on_existing_blocked_background_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    stagehand_browser._mark_blocked_request(
+        session, "http://169.254.169.254/latest/meta-data/", "metadata endpoint"
+    )
+
+    async def get_session(*_args: object, **_kwargs: object) -> FakeSession:
+        return session
+
+    monkeypatch.setattr(stagehand_browser, "_get_session", get_session)
+    stagehand_browser._SESSIONS["default"] = (object(), session)
+
+    result = await stagehand_browser.browser_act("click continue")
+
+    assert result["success"] is False
+    assert "blocked browser request" in result["error"]
     assert session.ended is True

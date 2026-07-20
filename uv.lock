@@ -2062,6 +2062,7 @@ dependencies = [
     { name = "pyjwt" },
     { name = "stagehand" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -2102,6 +2103,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.20" },
     { name = "stagehand", specifier = ">=3.21.0" },
     { name = "uvicorn", specifier = ">=0.50.2" },
+    { name = "websockets", specifier = ">=15.0.1" },
 ]
 provides-extras = ["dev"]
 
