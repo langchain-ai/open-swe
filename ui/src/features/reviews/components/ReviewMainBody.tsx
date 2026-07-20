@@ -1262,7 +1262,12 @@ function ReviewBodyInner({
                     deletions: detail.pr.deletions,
                   }}
                 />
-                <div className="mt-4 rounded-lg border border-border bg-card p-4">
+                <div
+                  className={cn(
+                    "mt-4 rounded-lg border border-border p-4",
+                    embedded ? "bg-[var(--ui-surface)]" : "bg-card"
+                  )}
+                >
                   {detail.pr.body ? (
                     <Markdown
                       content={detail.pr.body}
