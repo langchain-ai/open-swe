@@ -2,14 +2,17 @@ import os
 import re
 from typing import Any
 
+from fastapi import HTTPException
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from ..dashboard.repo_access import require_repo_access_for_user
 from ..dispatch import dispatch_agent_run
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack import post_slack_top_level_message_with_ts, store_slack_run_mapping
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
+from ..webhooks.common import _is_repo_allowed
 
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
@@ -174,6 +177,42 @@ async def slack_start_new_thread(
             "success": False,
             "error": "default_repo must be a simple owner/name repository string",
         }
+
+    if default_repo and default_repo.strip() and repo is not None:
+        if not _is_repo_allowed(repo):
+            return {
+                "success": False,
+                "error": (
+                    f"Repository {repo['owner']}/{repo['name']} is not on the deployment allowlist"
+                ),
+            }
+        github_login = configurable.get("github_login")
+        if not isinstance(github_login, str) or not github_login.strip():
+            return {
+                "success": False,
+                "error": (
+                    "Cannot verify access to the requested repository: no github_login on the "
+                    "parent thread"
+                ),
+            }
+        try:
+            await require_repo_access_for_user(
+                github_login.strip(), f"{repo['owner']}/{repo['name']}"
+            )
+        except HTTPException as exc:
+            return {
+                "success": False,
+                "error": (
+                    f"Access to repository {repo['owner']}/{repo['name']} denied: {exc.detail}"
+                ),
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "success": False,
+                "error": (
+                    f"Failed to verify access to repository {repo['owner']}/{repo['name']}: {exc}"
+                ),
+            }
 
     message_ts, slack_error = await post_slack_top_level_message_with_ts(
         channel_id.strip(),
