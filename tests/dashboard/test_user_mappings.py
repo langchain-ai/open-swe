@@ -51,6 +51,7 @@ async def test_upsert_and_bidirectional_lookup(fake_store: _FakeStore) -> None:
     )
     # Login lookups are case-insensitive; email is normalized to lowercase.
     assert await um.email_for_login("octocat") == "octo@example.com"
+    assert await um.slack_id_for_login("octocat") == "U123"
     assert await um.login_for_email("octo@example.com") == "Octocat"
     assert await um.login_for_slack_id("U123") == "Octocat"
 
@@ -72,6 +73,7 @@ async def test_pending_status_not_trusted(fake_store: _FakeStore) -> None:
     um.clear_cache()
     await um.refresh_cache()
     assert um.is_login_mapped("newbie") is False
+    assert await um.slack_id_for_login("newbie") is None
 
 
 @pytest.mark.asyncio

@@ -60,6 +60,25 @@ async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_schedule_source_with_slack_context_posts_failure_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = _slack_metadata()
+    metadata["source"] = "schedule"
+    client = _FakeClient(metadata)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+
+    result = await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error"}
+    )
+
+    assert result["status"] == "ok"
+    reply.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_success_status_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeClient(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)

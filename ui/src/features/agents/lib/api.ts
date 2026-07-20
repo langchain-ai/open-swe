@@ -31,6 +31,7 @@ export interface ScheduleCreateRequest {
   schedule: string
   name?: string | null
   repo?: string | null
+  slack_channel_id?: string | null
   model_id?: string | null
   effort?: string | null
 }
@@ -40,6 +41,7 @@ export interface ScheduleUpdateRequest {
   schedule?: string | null
   name?: string | null
   repo?: string | null
+  slack_channel_id?: string | null
   model_id?: string | null
   effort?: string | null
   enabled?: boolean | null
