@@ -230,26 +230,40 @@ class _CDPBrowserURLGuard:
         self._next_id = 0
         self._pending: dict[int, asyncio.Future[Any]] = {}
         self._attached_sessions: set[str] = set()
+        self._protected_target_ids: set[str] = set()
+        self._configuration_tasks: set[asyncio.Task[None]] = set()
+        self._fetch_tasks: dict[str, asyncio.Task[None]] = {}
+        self._failure: BaseException | None = None
 
     async def start(self) -> None:
-        self._ws = await _connect_cdp_websocket(self._cdp_url)
-        self._task = asyncio.create_task(self._run())
-        await self._send(
-            "Target.setAutoAttach",
-            {
-                "autoAttach": True,
-                "waitForDebuggerOnStart": False,
-                "flatten": True,
-            },
-        )
-        await self._send("Target.setDiscoverTargets", {"discover": True})
-        targets = await self._send("Target.getTargets")
-        if isinstance(targets, dict):
-            for target_info in targets.get("targetInfos", []):
-                if isinstance(target_info, dict):
-                    await self._attach_to_target(target_info, wait_for_fetch=True)
+        try:
+            self._ws = await _connect_cdp_websocket(self._cdp_url)
+            self._task = asyncio.create_task(self._run())
+            await self._send(
+                "Target.setAutoAttach",
+                {
+                    "autoAttach": True,
+                    "waitForDebuggerOnStart": True,
+                    "flatten": True,
+                },
+            )
+            await self._send("Target.setDiscoverTargets", {"discover": True})
+            await self._protect_initial_targets()
+        except BaseException:
+            await self.close()
+            raise
 
     async def close(self) -> None:
+        for task in self._configuration_tasks:
+            task.cancel()
+        for task in self._fetch_tasks.values():
+            task.cancel()
+        if self._configuration_tasks:
+            await asyncio.gather(*self._configuration_tasks, return_exceptions=True)
+        if self._fetch_tasks:
+            await asyncio.gather(*self._fetch_tasks.values(), return_exceptions=True)
+        self._configuration_tasks.clear()
+        self._fetch_tasks.clear()
         if self._task is not None:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -303,13 +317,16 @@ class _CDPBrowserURLGuard:
         *,
         session_id: str | None,
     ) -> None:
+        websocket = self._ws
+        if websocket is None:
+            raise RuntimeError("CDP websocket is not connected")
         message: dict[str, Any] = {"id": message_id, "method": method}
         if params is not None:
             message["params"] = params
         if session_id is not None:
             message["sessionId"] = session_id
         async with self._send_lock:
-            await self._ws.send(json.dumps(message))
+            await websocket.send(json.dumps(message))
 
     async def _run(self) -> None:
         assert self._ws is not None
@@ -333,6 +350,7 @@ class _CDPBrowserURLGuard:
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001
+            self._failure = e
             logger.debug("CDP browser URL guard stopped", exc_info=True)
             for future in self._pending.values():
                 if not future.done():
@@ -351,13 +369,13 @@ class _CDPBrowserURLGuard:
                 if isinstance(url, str):
                     _set_current_page_url(self._session, url)
                 target_type = target_info.get("type")
-                if target_type in {"page", "iframe", "webview"}:
-                    await self._enable_fetch(session_id)
-            return
-        if method == "Target.targetCreated":
-            target_info = params.get("targetInfo")
-            if isinstance(target_info, dict):
-                await self._attach_to_target(target_info)
+                waiting_for_debugger = params.get("waitingForDebugger") is True
+                if target_type in {"page", "iframe", "webview"} or waiting_for_debugger:
+                    self._schedule_target_configuration(
+                        session_id,
+                        target_info,
+                        waiting_for_debugger=waiting_for_debugger,
+                    )
             return
         if method == "Target.targetInfoChanged":
             target_info = params.get("targetInfo")
@@ -378,9 +396,49 @@ class _CDPBrowserURLGuard:
             if isinstance(session_id, str):
                 await self._handle_paused_request(session_id, params)
 
-    async def _attach_to_target(
-        self, target_info: dict[str, Any], *, wait_for_fetch: bool = False
-    ) -> None:
+    async def _protect_initial_targets(self) -> None:
+        targets = await self._target_infos()
+        for target_info in targets:
+            try:
+                await self._attach_to_target(target_info)
+            except Exception:  # noqa: BLE001
+                logger.debug("Initial CDP target disappeared before attachment", exc_info=True)
+        await self._wait_for_configuration_tasks()
+        self._raise_if_failed()
+
+        current_targets = await self._target_infos()
+        for target_info in current_targets:
+            target_id = target_info.get("targetId")
+            if not isinstance(target_id, str) or target_id in self._protected_target_ids:
+                continue
+            try:
+                await self._attach_to_target(target_info)
+            except Exception:  # noqa: BLE001
+                logger.debug("CDP target could not be protected", exc_info=True)
+        await self._wait_for_configuration_tasks()
+        self._raise_if_failed()
+
+        unprotected = {
+            target_info["targetId"]
+            for target_info in current_targets
+            if isinstance(target_info.get("targetId"), str)
+            and target_info["targetId"] not in self._protected_target_ids
+        }
+        if not self._attached_sessions or unprotected:
+            raise RuntimeError("CDP URL guard did not protect every live browser target")
+
+    async def _target_infos(self) -> list[dict[str, Any]]:
+        targets = await self._send("Target.getTargets")
+        if not isinstance(targets, dict):
+            return []
+        return [
+            target_info
+            for target_info in targets.get("targetInfos", [])
+            if isinstance(target_info, dict)
+            and target_info.get("type") in {"page", "iframe", "webview"}
+        ]
+
+    async def _attach_to_target(self, target_info: dict[str, Any]) -> None:
         target_type = target_info.get("type")
         target_id = target_info.get("targetId")
         url = target_info.get("url")
@@ -388,31 +446,29 @@ class _CDPBrowserURLGuard:
             _set_current_page_url(self._session, url)
         if target_type not in {"page", "iframe", "webview"} or not isinstance(target_id, str):
             return
-        if not wait_for_fetch:
-            await self._send_fire_and_forget(
-                "Target.attachToTarget",
-                {"targetId": target_id, "flatten": True},
-            )
-            return
         result = await self._send(
             "Target.attachToTarget",
             {"targetId": target_id, "flatten": True},
         )
         session_id = result.get("sessionId") if isinstance(result, dict) else None
         if isinstance(session_id, str):
-            await self._enable_fetch(session_id, wait=True)
+            await self._enable_fetch(session_id)
+            self._protected_target_ids.add(target_id)
 
-    async def _enable_fetch(self, session_id: str, *, wait: bool = False) -> None:
+    async def _enable_fetch(self, session_id: str) -> None:
         if session_id in self._attached_sessions:
             return
-        if not wait:
-            await self._send_fire_and_forget("Page.enable", session_id=session_id)
-            await self._send_fire_and_forget(
-                "Fetch.enable",
-                {"patterns": [{"urlPattern": "*"}]},
-                session_id=session_id,
-            )
-            return
+        task = self._fetch_tasks.get(session_id)
+        if task is None:
+            task = asyncio.create_task(self._enable_fetch_commands(session_id))
+            self._fetch_tasks[session_id] = task
+        try:
+            await asyncio.shield(task)
+        finally:
+            if task.done():
+                self._fetch_tasks.pop(session_id, None)
+
+    async def _enable_fetch_commands(self, session_id: str) -> None:
         await self._send("Page.enable", session_id=session_id)
         await self._send(
             "Fetch.enable",
@@ -420,6 +476,61 @@ class _CDPBrowserURLGuard:
             session_id=session_id,
         )
         self._attached_sessions.add(session_id)
+
+    def _schedule_target_configuration(
+        self,
+        session_id: str,
+        target_info: dict[str, Any],
+        *,
+        waiting_for_debugger: bool,
+    ) -> None:
+        task = asyncio.create_task(
+            self._configure_attached_target(
+                session_id,
+                target_info,
+                waiting_for_debugger=waiting_for_debugger,
+            )
+        )
+        self._configuration_tasks.add(task)
+        task.add_done_callback(self._configuration_finished)
+
+    async def _configure_attached_target(
+        self,
+        session_id: str,
+        target_info: dict[str, Any],
+        *,
+        waiting_for_debugger: bool,
+    ) -> None:
+        if target_info.get("type") in {"page", "iframe", "webview"}:
+            await self._enable_fetch(session_id)
+            target_id = target_info.get("targetId")
+            if isinstance(target_id, str):
+                self._protected_target_ids.add(target_id)
+        if waiting_for_debugger:
+            await self._send("Runtime.runIfWaitingForDebugger", session_id=session_id)
+
+    def _configuration_finished(self, task: asyncio.Task[None]) -> None:
+        self._configuration_tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            self._failure = error
+
+    async def _wait_for_configuration_tasks(self) -> None:
+        while self._configuration_tasks:
+            await asyncio.gather(*tuple(self._configuration_tasks), return_exceptions=True)
+
+    def _raise_if_failed(self) -> None:
+        if self._failure is not None:
+            raise RuntimeError("CDP URL guard failed") from self._failure
+
+    def failure(self) -> BaseException | None:
+        if self._failure is not None:
+            return self._failure
+        if self._task is not None and self._task.done() and not self._task.cancelled():
+            return self._task.exception() or RuntimeError("CDP URL guard stopped")
+        return None
 
     async def _handle_paused_request(self, session_id: str, params: dict[str, Any]) -> None:
         request_id = params.get("requestId")
@@ -465,12 +576,15 @@ async def _install_browser_url_guard(session: Any) -> None:
     installed = False
     cdp_url = _cdp_url(session)
     if cdp_url is not None and not _safe_attr(session, "_open_swe_cdp_guard"):
+        cdp_guard: _CDPBrowserURLGuard | None = None
         try:
             cdp_guard = _CDPBrowserURLGuard(session, cdp_url)
             await cdp_guard.start()
             session._open_swe_cdp_guard = cdp_guard
             installed = True
         except Exception:  # noqa: BLE001
+            if cdp_guard is not None:
+                await cdp_guard.close()
             logger.warning("Failed to install CDP browser URL guard", exc_info=True)
 
     async def guarded_route(route: Any, request: Any | None = None) -> None:
@@ -500,7 +614,9 @@ async def _install_browser_url_guard(session: Any) -> None:
         except Exception:  # noqa: BLE001
             logger.debug("Failed to install browser URL guard on %r", target, exc_info=True)
     if not installed:
-        logger.warning("Stagehand session does not expose a browser request hook for URL guarding")
+        raise BrowserNavigationBlocked(
+            "Stagehand session does not expose a working browser request hook for URL guarding"
+        )
 
 
 def _current_page_url(session: Any) -> str | None:
@@ -515,6 +631,12 @@ def _current_page_url(session: Any) -> str | None:
 
 
 async def _raise_if_browser_blocked(session: Any, operation: str) -> None:
+    cdp_guard = _safe_attr(session, "_open_swe_cdp_guard")
+    guard_failure = cdp_guard.failure() if isinstance(cdp_guard, _CDPBrowserURLGuard) else None
+    if guard_failure is not None:
+        await browser_close()
+        raise BrowserNavigationBlocked(f"{operation} blocked: browser URL guard failed")
+
     blocked_error = _blocked_request_error(session)
     if blocked_error:
         await browser_close()
@@ -549,7 +671,14 @@ async def _get_session(create: bool = True) -> Any:
         if browserbase_session_create_params:
             session_kwargs["browserbase_session_create_params"] = browserbase_session_create_params
         session = await client.sessions.start(**session_kwargs)
-        await _install_browser_url_guard(session)
+        try:
+            await _install_browser_url_guard(session)
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await session.end()
+            with contextlib.suppress(Exception):
+                await client.close()
+            raise
         _SESSIONS[thread_id] = (client, session)
         logger.info("Started Stagehand session %s for thread %s", session.id, thread_id)
         return session

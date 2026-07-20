@@ -1,5 +1,6 @@
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 
 import pytest
 
@@ -68,9 +69,11 @@ class FakeRoute:
 class FakePage:
     def __init__(self) -> None:
         self.url = "about:blank"
-        self.handler = None
+        self.handler: Callable[[FakeRoute, FakeRequest], Awaitable[None]] | None = None
 
-    async def route(self, pattern: str, handler: object) -> None:
+    async def route(
+        self, pattern: str, handler: Callable[[FakeRoute, FakeRequest], Awaitable[None]]
+    ) -> None:
         self.pattern = pattern
         self.handler = handler
 
@@ -82,11 +85,12 @@ class FakePage:
 
 
 class FakeData:
-    cdp_url = None
+    cdp_url: str | None = None
 
 
 class FakeSession:
     id = "session-123"
+    _open_swe_cdp_guard: stagehand_browser._CDPBrowserURLGuard
 
     def __init__(self) -> None:
         self.data = FakeData()
@@ -117,6 +121,10 @@ class FakeCDPWebSocket:
         self.sent: list[dict[str, object]] = []
         self.incoming: asyncio.Queue[str | None] = asyncio.Queue()
         self.responses: dict[str, dict[str, object]] = {}
+        self.response_sequences: dict[str, list[dict[str, object]]] = {}
+        self.method_errors: dict[str, dict[str, object]] = {}
+        self.target_errors: dict[str, dict[str, object]] = {}
+        self.target_responses: dict[str, dict[str, object]] = {}
         self.held_methods: set[str] = set()
         self.closed = False
 
@@ -142,7 +150,25 @@ class FakeCDPWebSocket:
         message_id = parsed.get("id")
         if not isinstance(message_id, int):
             return
-        result = self.responses.get(method, {}) if isinstance(method, str) else {}
+        if isinstance(method, str) and method in self.method_errors:
+            await self.incoming.put(
+                json.dumps({"id": message_id, "error": self.method_errors[method]})
+            )
+            return
+        params = parsed.get("params")
+        target_id = params.get("targetId") if isinstance(params, dict) else None
+        if method == "Target.attachToTarget" and isinstance(target_id, str):
+            error = self.target_errors.get(target_id)
+            if error is not None:
+                await self.incoming.put(json.dumps({"id": message_id, "error": error}))
+                return
+            result = self.target_responses.get(
+                target_id, self.responses.get("Target.attachToTarget", {})
+            )
+        elif isinstance(method, str) and self.response_sequences.get(method):
+            result = self.response_sequences[method].pop(0)
+        else:
+            result = self.responses.get(method, {}) if isinstance(method, str) else {}
         await self.incoming.put(json.dumps({"id": message_id, "result": result}))
 
     async def respond_to_method(self, method: str) -> None:
@@ -180,6 +206,16 @@ async def test_cdp_browser_url_guard_blocks_real_stagehand_requests(
     session.data.cdp_url = "ws://browser.example/devtools/browser/session-123"
     del session.page
     websocket = FakeCDPWebSocket()
+    websocket.responses["Target.getTargets"] = {
+        "targetInfos": [
+            {
+                "targetId": "initial-target",
+                "type": "page",
+                "url": "about:blank",
+            }
+        ]
+    }
+    websocket.target_responses["initial-target"] = {"sessionId": "cdp-session-initial"}
 
     async def connect_cdp_websocket(_cdp_url: str) -> FakeCDPWebSocket:
         return websocket
@@ -192,10 +228,19 @@ async def test_cdp_browser_url_guard_blocks_real_stagehand_requests(
             "method": "Target.attachedToTarget",
             "params": {
                 "sessionId": "cdp-session-1",
-                "targetInfo": {"type": "page", "url": "https://example.com/"},
+                "targetInfo": {
+                    "targetId": "new-target",
+                    "type": "page",
+                    "url": "https://example.com/",
+                },
+                "waitingForDebugger": True,
             },
         }
     )
+    for _ in range(100):
+        if "cdp-session-1" in session._open_swe_cdp_guard._attached_sessions:
+            break
+        await asyncio.sleep(0.01)
     await websocket.emit(
         {
             "method": "Fetch.requestPaused",
@@ -256,6 +301,91 @@ async def test_cdp_browser_url_guard_waits_for_initial_fetch_enable(
     assert "cdp-session-1" in session._open_swe_cdp_guard._attached_sessions
 
     await session._open_swe_cdp_guard.close()
+
+
+@pytest.mark.asyncio
+async def test_cdp_browser_url_guard_ignores_stale_initial_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    session.data.cdp_url = "ws://browser.example/devtools/browser/session-123"
+    del session.page
+    websocket = FakeCDPWebSocket()
+    stale_target = {"targetId": "stale-target", "type": "page", "url": "about:blank"}
+    live_target = {"targetId": "live-target", "type": "page", "url": "about:blank"}
+    websocket.response_sequences["Target.getTargets"] = [
+        {"targetInfos": [stale_target, live_target]},
+        {"targetInfos": [live_target]},
+    ]
+    websocket.target_errors["stale-target"] = {
+        "code": -32602,
+        "message": "No target with given id found",
+    }
+    websocket.target_responses["live-target"] = {"sessionId": "cdp-session-live"}
+
+    async def connect_cdp_websocket(_cdp_url: str) -> FakeCDPWebSocket:
+        return websocket
+
+    monkeypatch.setattr(stagehand_browser, "_connect_cdp_websocket", connect_cdp_websocket)
+
+    await stagehand_browser._install_browser_url_guard(session)
+
+    guard = session._open_swe_cdp_guard
+    assert guard._protected_target_ids == {"live-target"}
+    assert "cdp-session-live" in guard._attached_sessions
+    assert any(
+        message["method"] == "Target.setAutoAttach"
+        and isinstance((params := message.get("params")), dict)
+        and params.get("waitForDebuggerOnStart") is True
+        for message in websocket.sent
+    )
+
+    await guard.close()
+
+
+@pytest.mark.asyncio
+async def test_get_session_fails_closed_when_fetch_interception_cannot_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    session.data.cdp_url = "ws://browser.example/devtools/browser/session-123"
+    del session.page
+    websocket = FakeCDPWebSocket()
+    live_target = {"targetId": "live-target", "type": "page", "url": "about:blank"}
+    websocket.responses["Target.getTargets"] = {"targetInfos": [live_target]}
+    websocket.target_responses["live-target"] = {"sessionId": "cdp-session-live"}
+    websocket.method_errors["Fetch.enable"] = {
+        "code": -32000,
+        "message": "Fetch interception unavailable",
+    }
+
+    class FakeSessions:
+        async def start(self, **_kwargs: object) -> FakeSession:
+            return session
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.sessions = FakeSessions()
+            self.closed = False
+
+        async def close(self) -> None:
+            self.closed = True
+
+    client = FakeClient()
+
+    async def connect_cdp_websocket(_cdp_url: str) -> FakeCDPWebSocket:
+        return websocket
+
+    monkeypatch.setattr(stagehand_browser, "_connect_cdp_websocket", connect_cdp_websocket)
+    monkeypatch.setattr(stagehand_browser, "_build_client", lambda: client)
+
+    with pytest.raises(stagehand_browser.BrowserNavigationBlocked):
+        await stagehand_browser._get_session()
+
+    assert session.ended is True
+    assert client.closed is True
+    assert websocket.closed is True
+    assert stagehand_browser._SESSIONS == {}
 
 
 @pytest.mark.asyncio
