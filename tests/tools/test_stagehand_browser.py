@@ -116,6 +116,8 @@ class FakeCDPWebSocket:
     def __init__(self) -> None:
         self.sent: list[dict[str, object]] = []
         self.incoming: asyncio.Queue[str | None] = asyncio.Queue()
+        self.responses: dict[str, dict[str, object]] = {}
+        self.held_methods: set[str] = set()
         self.closed = False
 
     def __aiter__(self) -> "FakeCDPWebSocket":
@@ -130,9 +132,25 @@ class FakeCDPWebSocket:
     async def send(self, message: str) -> None:
         parsed = json.loads(message)
         self.sent.append(parsed)
+        method = parsed.get("method")
+        if isinstance(method, str) and method in self.held_methods:
+            return
+        await self.respond(parsed)
+
+    async def respond(self, parsed: dict[str, object]) -> None:
+        method = parsed.get("method")
         message_id = parsed.get("id")
-        if isinstance(message_id, int):
-            await self.incoming.put(json.dumps({"id": message_id, "result": {}}))
+        if not isinstance(message_id, int):
+            return
+        result = self.responses.get(method, {}) if isinstance(method, str) else {}
+        await self.incoming.put(json.dumps({"id": message_id, "result": result}))
+
+    async def respond_to_method(self, method: str) -> None:
+        for message in self.sent:
+            if message.get("method") == method:
+                await self.respond(message)
+                return
+        raise AssertionError(f"No CDP message sent for {method}")
 
     async def close(self) -> None:
         self.closed = True
@@ -193,6 +211,49 @@ async def test_cdp_browser_url_guard_blocks_real_stagehand_requests(
     assert stagehand_browser._blocked_request_error(session) is not None
     assert any(message["method"] == "Fetch.enable" for message in websocket.sent)
     assert any(message["method"] == "Fetch.failRequest" for message in websocket.sent)
+
+    await session._open_swe_cdp_guard.close()
+
+
+@pytest.mark.asyncio
+async def test_cdp_browser_url_guard_waits_for_initial_fetch_enable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    session.data.cdp_url = "ws://browser.example/devtools/browser/session-123"
+    del session.page
+    websocket = FakeCDPWebSocket()
+    websocket.responses["Target.getTargets"] = {
+        "targetInfos": [
+            {
+                "targetId": "target-1",
+                "type": "page",
+                "url": "about:blank",
+            }
+        ]
+    }
+    websocket.responses["Target.attachToTarget"] = {"sessionId": "cdp-session-1"}
+    websocket.held_methods.add("Fetch.enable")
+
+    async def connect_cdp_websocket(_cdp_url: str) -> FakeCDPWebSocket:
+        return websocket
+
+    monkeypatch.setattr(stagehand_browser, "_connect_cdp_websocket", connect_cdp_websocket)
+
+    install_task = asyncio.create_task(stagehand_browser._install_browser_url_guard(session))
+    for _ in range(100):
+        if any(message["method"] == "Fetch.enable" for message in websocket.sent):
+            break
+        await asyncio.sleep(0.01)
+
+    assert install_task.done() is False
+    assert any(message["method"] == "Fetch.enable" for message in websocket.sent)
+
+    websocket.held_methods.remove("Fetch.enable")
+    await websocket.respond_to_method("Fetch.enable")
+    await install_task
+
+    assert "cdp-session-1" in session._open_swe_cdp_guard._attached_sessions
 
     await session._open_swe_cdp_guard.close()
 

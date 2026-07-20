@@ -247,7 +247,7 @@ class _CDPBrowserURLGuard:
         if isinstance(targets, dict):
             for target_info in targets.get("targetInfos", []):
                 if isinstance(target_info, dict):
-                    await self._attach_to_target(target_info)
+                    await self._attach_to_target(target_info, wait_for_fetch=True)
 
     async def close(self) -> None:
         if self._task is not None:
@@ -378,7 +378,9 @@ class _CDPBrowserURLGuard:
             if isinstance(session_id, str):
                 await self._handle_paused_request(session_id, params)
 
-    async def _attach_to_target(self, target_info: dict[str, Any]) -> None:
+    async def _attach_to_target(
+        self, target_info: dict[str, Any], *, wait_for_fetch: bool = False
+    ) -> None:
         target_type = target_info.get("type")
         target_id = target_info.get("targetId")
         url = target_info.get("url")
@@ -386,21 +388,38 @@ class _CDPBrowserURLGuard:
             _set_current_page_url(self._session, url)
         if target_type not in {"page", "iframe", "webview"} or not isinstance(target_id, str):
             return
-        await self._send_fire_and_forget(
+        if not wait_for_fetch:
+            await self._send_fire_and_forget(
+                "Target.attachToTarget",
+                {"targetId": target_id, "flatten": True},
+            )
+            return
+        result = await self._send(
             "Target.attachToTarget",
             {"targetId": target_id, "flatten": True},
         )
+        session_id = result.get("sessionId") if isinstance(result, dict) else None
+        if isinstance(session_id, str):
+            await self._enable_fetch(session_id, wait=True)
 
-    async def _enable_fetch(self, session_id: str) -> None:
+    async def _enable_fetch(self, session_id: str, *, wait: bool = False) -> None:
         if session_id in self._attached_sessions:
             return
-        self._attached_sessions.add(session_id)
-        await self._send_fire_and_forget("Page.enable", session_id=session_id)
-        await self._send_fire_and_forget(
+        if not wait:
+            await self._send_fire_and_forget("Page.enable", session_id=session_id)
+            await self._send_fire_and_forget(
+                "Fetch.enable",
+                {"patterns": [{"urlPattern": "*"}]},
+                session_id=session_id,
+            )
+            return
+        await self._send("Page.enable", session_id=session_id)
+        await self._send(
             "Fetch.enable",
             {"patterns": [{"urlPattern": "*"}]},
             session_id=session_id,
         )
+        self._attached_sessions.add(session_id)
 
     async def _handle_paused_request(self, session_id: str, params: dict[str, Any]) -> None:
         request_id = params.get("requestId")
