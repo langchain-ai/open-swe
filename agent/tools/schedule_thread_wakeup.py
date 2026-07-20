@@ -8,6 +8,7 @@ from typing import Any
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
+from langgraph_sdk.schema import Config
 
 from ..utils.thread_ops import langgraph_url
 
@@ -124,7 +125,7 @@ async def _create_wakeup_cron(
     client = get_client(url=langgraph_url())
     schedule = _build_one_shot_cron(fire_time)
     end_time = fire_time + timedelta(seconds=_END_TIME_PADDING_SECONDS)
-    run_config: dict[str, Any] = {"configurable": configurable}
+    run_config: Config = {"configurable": configurable}
     cron = await client.crons.create_for_thread(
         thread_id,
         _AGENT_ASSISTANT_ID,

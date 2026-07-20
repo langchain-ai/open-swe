@@ -10,7 +10,7 @@ def test_deferred_error_model_binds_tools_without_raising() -> None:
     model = DeferredErrorModel(error_message="missing key", model_id="openai:gpt-5")
 
     assert model.bind_tools([]) is model
-    assert model._get_ls_params()["ls_model_name"] == "openai:gpt-5"
+    assert model._get_ls_params().get("ls_model_name") == "openai:gpt-5"
 
 
 def test_deferred_error_model_raises_on_first_call() -> None:

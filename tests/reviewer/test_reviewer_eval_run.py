@@ -164,8 +164,8 @@ def test_resolve_config_prefers_cli_then_env_then_toml() -> None:
             }
         )
 
-    assert config["dataset_name"] == "dataset-config"
-    assert config["experiment_prefix"] == "experiment-cli"
-    assert config["model_id"] == "openai:gpt-5.6-sol"
-    assert config["reasoning_effort"] == "xhigh"
-    assert config["langsmith_project"] == "project-env"
+    assert config.get("dataset_name") == "dataset-config"
+    assert config.get("experiment_prefix") == "experiment-cli"
+    assert config.get("model_id") == "openai:gpt-5.6-sol"
+    assert config.get("reasoning_effort") == "xhigh"
+    assert config.get("langsmith_project") == "project-env"

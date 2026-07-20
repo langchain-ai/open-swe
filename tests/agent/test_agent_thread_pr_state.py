@@ -61,8 +61,10 @@ async def test_update_agent_thread_pr_state_updates_matching_thread() -> None:
 
     fake_client.threads.search.assert_awaited_once()
     fake_client.threads.update.assert_awaited_once()
-    assert fake_client.threads.update.await_args.kwargs["thread_id"] == "t1"
-    assert fake_client.threads.update.await_args.kwargs["metadata"] == {"pr_state": "closed"}
+    call_args = fake_client.threads.update.await_args
+    assert call_args is not None
+    assert call_args.kwargs["thread_id"] == "t1"
+    assert call_args.kwargs["metadata"] == {"pr_state": "closed"}
 
 
 @pytest.mark.asyncio

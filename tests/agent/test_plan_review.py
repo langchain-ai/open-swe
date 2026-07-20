@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -418,7 +418,7 @@ def test_plan_mode_middleware_initial_always_filters() -> None:
 
     mw = PlanModeMiddleware(excluded=frozenset({"write_file"}), initial=True)
     req = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {})
-    assert _names(mw._filter(req)) == {"read_file"}
+    assert _names(cast(_FakeReq, mw._filter(cast(Any, req)))) == {"read_file"}
 
 
 def test_plan_mode_middleware_self_activation_via_state() -> None:
@@ -427,10 +427,10 @@ def test_plan_mode_middleware_self_activation_via_state() -> None:
     mw = PlanModeMiddleware(excluded=frozenset({"write_file"}), initial=False)
     # Plan mode not yet active: nothing filtered.
     off = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {})
-    assert _names(mw._filter(off)) == {"read_file", "write_file"}
+    assert _names(cast(_FakeReq, mw._filter(cast(Any, off)))) == {"read_file", "write_file"}
     # After enter_plan_mode sets state: the next request is filtered.
     on = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {"plan_mode": True})
-    assert _names(mw._filter(on)) == {"read_file"}
+    assert _names(cast(_FakeReq, mw._filter(cast(Any, on)))) == {"read_file"}
 
 
 # --- manual plan editing -------------------------------------------------

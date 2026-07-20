@@ -14,6 +14,7 @@ from langgraph_sdk import get_client
 
 from ..review.findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
+from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
 
 USAGE_THREAD_NAMESPACE: list[str] = ["agent_usage", "threads"]
 USAGE_PR_NAMESPACE: list[str] = ["agent_usage", "prs"]
@@ -50,7 +51,11 @@ def _period_cutoff_ms(period: str) -> int | None:
 
 
 def _normalize_period(period: str | None) -> Period:
-    return period if period in {"7d", "30d", "all"} else "30d"
+    if period == "7d":
+        return "7d"
+    if period == "all":
+        return "all"
+    return "30d"
 
 
 def _record_from_item(item: Any) -> dict[str, Any] | None:
@@ -424,7 +429,7 @@ async def refresh_usage_leaderboard_cache(period: str | None = "30d") -> dict[st
 
 
 def _is_finding_surfaced(finding: dict[str, Any]) -> bool:
-    surface = finding.get("surface") if isinstance(finding.get("surface"), dict) else {}
+    surface = as_json_object(finding.get("surface"))
     state = surface.get("state")
     if state in {"surfaced", "resolve_pending", "resolved"}:
         return True
@@ -440,7 +445,7 @@ def _is_finding_surfaced(finding: dict[str, Any]) -> bool:
 def _is_finding_resolved_by_us(finding: dict[str, Any]) -> bool:
     if finding.get("status") != "resolved" or not _is_finding_surfaced(finding):
         return False
-    surface = finding.get("surface") if isinstance(finding.get("surface"), dict) else {}
+    surface = as_json_object(finding.get("surface"))
     return bool(
         surface.get("state") == "resolved"
         or finding.get("github_thread_resolved")
@@ -449,7 +454,7 @@ def _is_finding_resolved_by_us(finding: dict[str, Any]) -> bool:
     )
 
 
-def _thread_created_at_ms(thread: dict[str, Any], metadata: dict[str, Any]) -> int:
+def _thread_created_at_ms(thread: ThreadLike, metadata: dict[str, Any]) -> int:
     timestamp = _thread_explicit_created_at_ms(thread, metadata)
     if timestamp:
         return timestamp
@@ -465,7 +470,7 @@ def _thread_created_at_ms(thread: dict[str, Any], metadata: dict[str, Any]) -> i
     return _now_ms()
 
 
-def _thread_explicit_created_at_ms(thread: dict[str, Any], metadata: dict[str, Any]) -> int:
+def _thread_explicit_created_at_ms(thread: ThreadLike, metadata: dict[str, Any]) -> int:
     for source in (
         metadata.get("created_at_ms"),
         metadata.get("created_at"),
@@ -502,8 +507,8 @@ async def _iter_reviewer_thread_pages(cutoff_ms: int | None):
             last_thread = next(
                 (thread for thread in reversed(page) if isinstance(thread, dict)), None
             )
-            metadata = last_thread.get("metadata") if isinstance(last_thread, dict) else None
-            if isinstance(metadata, dict):
+            if last_thread is not None:
+                metadata = thread_metadata(last_thread)
                 last_created_at_ms = _thread_explicit_created_at_ms(last_thread, metadata)
                 if last_created_at_ms and last_created_at_ms < cutoff_ms:
                     return
@@ -528,7 +533,7 @@ async def _build_reviewer_stats_snapshot(period: Period) -> dict[str, Any]:
         for thread in page:
             if not isinstance(thread, dict):
                 continue
-            metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+            metadata = thread_metadata(thread)
             if cutoff_ms is not None and _thread_created_at_ms(thread, metadata) < cutoff_ms:
                 continue
 

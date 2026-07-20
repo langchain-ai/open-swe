@@ -11,9 +11,10 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 from langchain.agents.middleware.types import AgentMiddleware, AgentState
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolCall, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
@@ -38,7 +39,7 @@ def _coerce_int(value: object) -> int | None:
     return None
 
 
-def _sanitize_read_file_args(args: dict) -> dict:
+def _sanitize_read_file_args(args: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of *args* with integer fields coerced where needed."""
     sanitized = dict(args)
     for field in _READ_FILE_INT_FIELDS:
@@ -67,10 +68,12 @@ class SanitizeToolInputsMiddleware(AgentMiddleware):
         if not isinstance(tool_call, dict) or tool_call.get("name") != "read_file":
             return request
         args = tool_call.get("args", {})
+        if not isinstance(args, dict):
+            return request
         sanitized_args = _sanitize_read_file_args(args)
         if sanitized_args is args:
             return request
-        new_tool_call = {**tool_call, "args": sanitized_args}
+        new_tool_call = cast(ToolCall, {**tool_call, "args": sanitized_args})
         return request.override(tool_call=new_tool_call)
 
     async def awrap_tool_call(

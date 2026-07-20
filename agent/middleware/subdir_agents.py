@@ -133,8 +133,8 @@ def _can_append_reminder(result: ToolMessage | Command) -> bool:
 
 
 def _append_reminder(result: ToolMessage | Command, reminder: str | None) -> ToolMessage | Command:
-    if reminder is not None and _can_append_reminder(result):
-        result.content = f"{result.content}\n\n{reminder}"
+    if reminder is not None and isinstance(result, ToolMessage) and _can_append_reminder(result):
+        return result.model_copy(update={"content": f"{result.content}\n\n{reminder}"})
     return result
 
 

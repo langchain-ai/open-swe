@@ -293,5 +293,7 @@ async def test_reconcile_records_latest_human_reply_after_bot_comment() -> None:
 
     assert result[0]["github_review_thread_id"] == "THREAD_1"
     assert result[0]["last_human_reply_author"] == "human"
-    assert "not valid" in result[0]["last_human_reply_body"]
+    reply_body = result[0]["last_human_reply_body"]
+    assert isinstance(reply_body, str)
+    assert "not valid" in reply_body
     replace.assert_awaited_once()

@@ -115,21 +115,25 @@ class SandboxBackendProxy(SandboxBackendProtocol):
         pattern: str,
         path: str | None = None,
         glob: str | None = None,
+        *,
+        max_count: int | None = None,
     ) -> GrepResult:
-        return self._get_backend().grep(pattern, path, glob)
+        return self._get_backend().grep(pattern, path, glob, max_count=max_count)
 
     async def agrep(
         self,
         pattern: str,
         path: str | None = None,
         glob: str | None = None,
+        *,
+        max_count: int | None = None,
     ) -> GrepResult:
-        return await (await self._aget_backend()).agrep(pattern, path, glob)
+        return await (await self._aget_backend()).agrep(pattern, path, glob, max_count=max_count)
 
-    def glob(self, pattern: str, path: str = "/") -> GlobResult:
+    def glob(self, pattern: str, path: str | None = None) -> GlobResult:
         return self._get_backend().glob(pattern, path)
 
-    async def aglob(self, pattern: str, path: str = "/") -> GlobResult:
+    async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
         return await (await self._aget_backend()).aglob(pattern, path)
 
     def write(self, file_path: str, content: str) -> WriteResult:

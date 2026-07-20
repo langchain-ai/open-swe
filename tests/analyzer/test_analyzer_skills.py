@@ -39,6 +39,7 @@ def test_bundled_skill_md_parse() -> None:
     for skill in ANALYZER_MODES.values():
         path = SKILLS_DIR / skill / "SKILL.md"
         meta = _parse_skill_metadata(path.read_text(), str(path), path.parent.name)
+        assert meta is not None
         assert meta["name"] == skill
         assert meta["description"].strip()
 

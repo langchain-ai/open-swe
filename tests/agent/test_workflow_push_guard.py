@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from deepagents.backends.protocol import SandboxBackendProtocol
+from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 
 from agent.middleware import workflow_push_guard as guard
+from agent.utils.sandbox_state import SandboxBackendProxy
 
 
 class _Response:
@@ -182,7 +185,9 @@ def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
 async def test_unapproved_workflow_push_blocks_and_posts_slack(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    guard.SANDBOX_BACKENDS["thread-1"] = _Backend()
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+        cast(SandboxBackendProtocol, _Backend()), thread_id="thread-1"
+    )
     posted: dict[str, Any] = {}
 
     async def fake_approved(thread_id: str, fingerprint: str) -> bool:
@@ -217,7 +222,9 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
         called = True
         return ToolMessage(content="pushed", tool_call_id="call-1")
 
-    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(_Request(), handler)
+    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(ToolCallRequest, _Request()), handler
+    )
 
     assert called is False
     assert isinstance(result, ToolMessage)
@@ -238,7 +245,9 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
 async def test_approved_workflow_push_runs_fixed_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    guard.SANDBOX_BACKENDS["thread-1"] = _Backend()
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+        cast(SandboxBackendProtocol, _Backend()), thread_id="thread-1"
+    )
 
     async def fake_approved(thread_id: str, fingerprint: str) -> bool:
         return True
@@ -252,7 +261,9 @@ async def test_approved_workflow_push_runs_fixed_command(
         pushed_command = request.tool_call["args"]["command"]
         return ToolMessage(content="pushed", tool_call_id="call-1")
 
-    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(_Request(), handler)
+    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(ToolCallRequest, _Request()), handler
+    )
 
     assert isinstance(result, ToolMessage)
     assert result.content == "pushed"
@@ -263,7 +274,9 @@ async def test_approved_workflow_push_runs_fixed_command(
 
 
 async def test_non_workflow_push_runs_without_approval(monkeypatch: pytest.MonkeyPatch) -> None:
-    guard.SANDBOX_BACKENDS["thread-1"] = _Backend(workflow_files="")
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+        cast(SandboxBackendProtocol, _Backend(workflow_files="")), thread_id="thread-1"
+    )
     called = False
 
     async def fail_approval(*args: Any, **kwargs: Any) -> bool:
@@ -276,7 +289,9 @@ async def test_non_workflow_push_runs_without_approval(monkeypatch: pytest.Monke
         called = True
         return ToolMessage(content="pushed", tool_call_id="call-1")
 
-    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(_Request(), handler)
+    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(ToolCallRequest, _Request()), handler
+    )
 
     assert called is True
     assert isinstance(result, ToolMessage)

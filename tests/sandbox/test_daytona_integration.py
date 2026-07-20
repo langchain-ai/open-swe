@@ -23,12 +23,12 @@ class _FakeDaytonaSandbox:
 
 def _load_daytona_module(monkeypatch):
     fake_daytona = types.ModuleType("daytona")
-    fake_daytona.CreateSandboxFromSnapshotParams = _FakeCreateSandboxFromSnapshotParams
-    fake_daytona.DaytonaConfig = _FakeDaytonaConfig
-    fake_daytona.Daytona = object
+    fake_daytona.__dict__["CreateSandboxFromSnapshotParams"] = _FakeCreateSandboxFromSnapshotParams
+    fake_daytona.__dict__["DaytonaConfig"] = _FakeDaytonaConfig
+    fake_daytona.__dict__["Daytona"] = object
 
     fake_langchain_daytona = types.ModuleType("langchain_daytona")
-    fake_langchain_daytona.DaytonaSandbox = _FakeDaytonaSandbox
+    fake_langchain_daytona.__dict__["DaytonaSandbox"] = _FakeDaytonaSandbox
 
     monkeypatch.setitem(sys.modules, "daytona", fake_daytona)
     monkeypatch.setitem(sys.modules, "langchain_daytona", fake_langchain_daytona)

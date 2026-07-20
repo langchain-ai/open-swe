@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import base64
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from langchain.agents.middleware import AgentMiddleware, AgentState
+from langchain_core.runnables import RunnableConfig
+from langgraph.runtime import Runtime
 
 from agent.integrations.langsmith import _configure_github_proxy
 from agent.utils.github_app import (
@@ -130,6 +134,34 @@ class TestConfigureGithubProxy:
             headers = mock_client.patch.call_args.kwargs["headers"]
             assert headers == {"X-API-Key": "my-api-key"}
 
+    async def test_sandbox_overrides_take_precedence(self) -> None:
+        """SANDBOX_LANGSMITH_* override the shared key/endpoint for the proxy call."""
+        with (
+            patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch.dict(
+                "os.environ",
+                {
+                    "LANGSMITH_API_KEY": "shared-key",
+                    "LANGSMITH_ENDPOINT": "https://shared.smith.langchain.com",
+                    "SANDBOX_LANGSMITH_API_KEY": "sandbox-key",
+                    "SANDBOX_LANGSMITH_ENDPOINT": "https://sandbox.smith.langchain.com",
+                },
+            ),
+        ):
+            mock_client = MagicMock()
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_client.patch = AsyncMock(return_value=mock_response)
+            _mock_async_client(mock_client_cls, mock_client)
+
+            await _configure_github_proxy("sandbox-abc", "token")
+
+            assert (
+                mock_client.patch.call_args.args[0]
+                == "https://sandbox.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
+            )
+            assert mock_client.patch.call_args.kwargs["headers"] == {"X-API-Key": "sandbox-key"}
+
     async def test_retries_transient_http_error(self) -> None:
         """Transient proxy API errors should be retried on the same sandbox."""
         request = httpx.Request(
@@ -212,9 +244,9 @@ class TestCreateSandboxWithProxy:
 
             mock_create.assert_called_once_with(snapshot_id=None)
             mock_proxy.assert_called_once_with("sandbox-123", "ghs_install")
-            assert (
-                mock_get_token.await_args.kwargs["permissions"] == RUNTIME_PROXY_TOKEN_PERMISSIONS
-            )
+            await_args = mock_get_token.await_args
+            assert await_args is not None
+            assert await_args.kwargs["permissions"] == RUNTIME_PROXY_TOKEN_PERMISSIONS
 
     @pytest.mark.asyncio
     async def test_falls_back_when_optional_actions_permission_is_unavailable(self) -> None:
@@ -351,15 +383,18 @@ class TestRefreshProxyOnSandboxReuse:
     """Tests for refreshing GitHub proxy auth on sandbox reuse."""
 
     @staticmethod
-    def _execution_config() -> dict:
-        return {
-            "configurable": {
-                "__is_for_execution__": True,
-                "thread_id": "thread-123",
-                "repo": {"owner": "langchain-ai", "name": "open-swe"},
+    def _execution_config() -> RunnableConfig:
+        return cast(
+            RunnableConfig,
+            {
+                "configurable": {
+                    "__is_for_execution__": True,
+                    "thread_id": "thread-123",
+                    "repo": {"owner": "langchain-ai", "name": "open-swe"},
+                },
+                "metadata": {},
             },
-            "metadata": {},
-        }
+        )
 
     @staticmethod
     def _async_client_mock(status: str) -> MagicMock:
@@ -425,8 +460,11 @@ class TestRefreshProxyOnSandboxReuse:
             from agent.server import get_agent
 
             await get_agent(config)
-            prepare = captured["middleware"][0]
-            await prepare.abefore_agent({}, None)
+            prepare = cast(AgentMiddleware, cast(list[object], captured["middleware"])[0])
+            await prepare.abefore_agent(
+                cast(AgentState[object], {"messages": []}),
+                cast(Runtime[None], MagicMock()),
+            )
 
             mock_proxy.assert_called_once_with("sandbox-cached", "ghs_fresh")
 
@@ -477,8 +515,11 @@ class TestRefreshProxyOnSandboxReuse:
             from agent.server import get_agent
 
             await get_agent(config)
-            prepare = captured["middleware"][0]
-            await prepare.abefore_agent({}, None)
+            prepare = cast(AgentMiddleware, cast(list[object], captured["middleware"])[0])
+            await prepare.abefore_agent(
+                cast(AgentState[object], {"messages": []}),
+                cast(Runtime[None], MagicMock()),
+            )
 
             mock_create.assert_called_once_with("sandbox-existing")
             mock_proxy.assert_called_once_with("sandbox-existing", "ghs_fresh")

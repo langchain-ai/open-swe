@@ -69,6 +69,8 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
+For `langsmith`, sandboxes default to the same LangSmith credentials as tracing. To run sandboxes against a **different** LangSmith workspace, set `SANDBOX_LANGSMITH_API_KEY` (falls back to `LANGSMITH_API_KEY` / `LANGSMITH_API_KEY_PROD`) and optionally `SANDBOX_LANGSMITH_ENDPOINT` (falls back to `LANGSMITH_ENDPOINT`). These apply to sandbox create/connect/delete, the GitHub proxy config, and repo snapshot builds — the `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in whichever workspace these credentials point at.
+
 ### Adding a new sandbox provider
 
 1. **Create an integration file** at `agent/integrations/my_provider.py` with a factory function matching this signature:

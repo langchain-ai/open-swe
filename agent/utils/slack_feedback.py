@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Mapping
 from typing import Any
 
 from langgraph_sdk import get_client
@@ -32,7 +33,7 @@ _REACTION_STATE_NAMESPACE = "slack_reaction_state"
 _REACTION_EVENT_NAMESPACE = "slack_reaction_events"
 
 
-def _read_active_reactions(item: dict[str, Any] | None) -> set[str]:
+def _read_active_reactions(item: Mapping[str, Any] | None) -> set[str]:
     if not item:
         return set()
     value = item.get("value")

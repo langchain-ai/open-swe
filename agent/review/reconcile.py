@@ -210,14 +210,17 @@ def _sync_latest_human_reply(
         return False
 
     latest = replies[-1]
-    body = latest.get("body") if isinstance(latest.get("body"), str) else ""
+    raw_body = latest.get("body")
+    body = raw_body if isinstance(raw_body, str) else ""
     if len(body) > 1000:
         body = body[:1000] + "\n...[truncated]"
-    created_at = latest.get("created_at") if isinstance(latest.get("created_at"), str) else ""
+    raw_created_at = latest.get("created_at")
+    created_at = raw_created_at if isinstance(raw_created_at, str) else ""
     if finding.get("last_human_reply_at") == created_at:
         return False
 
-    author = latest.get("author") if isinstance(latest.get("author"), str) else ""
+    raw_author = latest.get("author")
+    author = raw_author if isinstance(raw_author, str) else ""
     finding["last_human_reply_at"] = created_at
     finding["last_human_reply_author"] = author
     finding["last_human_reply_body"] = body

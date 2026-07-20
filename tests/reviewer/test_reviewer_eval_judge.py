@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
+
+from langsmith.schemas import Example, Run
 
 from evals.reviewer import judge
 
@@ -64,7 +67,7 @@ def test_judge_match_deduplicates_and_persists_full_matrix() -> None:
         return _result(golden.get("comment") == "first" and candidate.get("file") == "a.py", 0.8)
 
     with patch("evals.reviewer.judge._judge_pair", side_effect=_pair):
-        result = judge.judge_match(run, example)
+        result = judge.judge_match(cast(Run, run), cast(Example, example))
 
     by_key = {item["key"]: item for item in result["results"]}
     assert len(calls) == 4
@@ -102,8 +105,8 @@ def test_aggregate_pr_reports_synthetic_and_medium_plus_metrics() -> None:
         "medium_plus_recall": 1.0,
         "medium_plus_f1": 1.0,
     }
-    judge._record_counts(uuid4(), {**base, "is_synthetic": False})
-    judge._record_counts(uuid4(), {**base, "is_synthetic": True})
+    judge._record_counts(uuid4(), cast(judge.ExampleCounts, {**base, "is_synthetic": False}))
+    judge._record_counts(uuid4(), cast(judge.ExampleCounts, {**base, "is_synthetic": True}))
 
     result = judge.aggregate_pr([], [])
 

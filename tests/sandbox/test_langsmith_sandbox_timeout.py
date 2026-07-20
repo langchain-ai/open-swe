@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from langsmith.sandbox import CommandTimeoutError, SandboxConnectionError
@@ -48,7 +48,7 @@ def _backend(
     handle: _FakeHandle, *, run_raises: Exception | None = None
 ) -> TimeoutLangSmithSandbox:
     sb = TimeoutLangSmithSandbox.__new__(TimeoutLangSmithSandbox)
-    sb._sandbox = _FakeSandbox(handle, run_raises=run_raises)
+    object.__setattr__(sb, "_sandbox", _FakeSandbox(handle, run_raises=run_raises))
     sb._default_timeout = 30 * 60
     return sb
 
@@ -67,7 +67,8 @@ async def test_aexecute_kills_on_client_timeout() -> None:
     assert resp.exit_code == 124
     assert "killed" in resp.output
     assert handle.killed
-    assert sb._sandbox.run_calls[0]["wait"] is False
+    sandbox = cast(_FakeSandbox, sb._sandbox)
+    assert sandbox.run_calls[0]["wait"] is False
 
 
 async def test_aexecute_success_combines_streams() -> None:

@@ -1,3 +1,4 @@
+import { humanizeToolName } from "@/features/agents/lib/toolNames";
 import type { AcpToolKind } from "@/features/agents/lib/types";
 
 function stripProjectPath(path: string, projectPath?: string): string {
@@ -27,7 +28,15 @@ function normalizedToolName(title: string): string {
 }
 
 function humanizeToolTitle(title: string): string {
-  return title.replace(/_/g, " ").trim() || "Tool";
+  const trimmed = title.trim();
+  if (!trimmed) return "Tool";
+
+  const [name, ...rest] = trimmed.split(/\s+/);
+  const suffix = rest.join(" ");
+  if (name && suffix && /^(?:[./~]|[a-z]+:\/\/)/i.test(suffix)) {
+    return `${humanizeToolName(name)} ${suffix}`;
+  }
+  return humanizeToolName(trimmed);
 }
 
 export function formatToolDisplay(

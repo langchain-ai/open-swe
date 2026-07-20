@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 from agent.webhooks import linear as linear_webhook
@@ -126,7 +126,9 @@ def test_linear_issue_prompt_mentions_pr_references_and_conventions() -> None:
         {"owner": "langchain-ai", "name": "open-swe"},
     )
 
-    prompt = content[0]["text"]
+    blocks = cast(list[object], content)
+    block = cast(dict[str, object], blocks[0])
+    prompt = cast(str, block["text"])
     assert "https://linear.app/x/issue/OS-42" in prompt
     assert "PR description links back to this Linear ticket" in prompt
     assert "repository's PR conventions" in prompt

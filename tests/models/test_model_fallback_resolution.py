@@ -34,7 +34,9 @@ def test_provider_fallback_uses_default_effort_when_unsupported() -> None:
 
 
 def test_provider_fallback_resolves_openai_within_provider() -> None:
-    model, effort = provider_fallback_pair("openai:gpt-5-legacy", "low")
+    fallback = provider_fallback_pair("openai:gpt-5-legacy", "low")
+    assert fallback is not None
+    model, effort = fallback
     assert model == "openai:gpt-5.5"
     assert effort == "low"
 

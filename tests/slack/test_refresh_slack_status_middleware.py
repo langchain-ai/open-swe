@@ -34,8 +34,10 @@ class TestSlackAssistantStatusMiddleware:
 
         assert result is None
         mock_set.assert_awaited_once()
-        args = mock_set.await_args.args
-        kwargs = mock_set.await_args.kwargs
+        await_args = mock_set.await_args
+        assert await_args is not None
+        args = await_args.args
+        kwargs = await_args.kwargs
         assert args == ("C1", "1.0")
         assert kwargs["status"] == DEFAULT_ASSISTANT_STATUS
         assert kwargs["loading_messages"] == list(DEFAULT_LOADING_MESSAGES)
@@ -53,8 +55,10 @@ class TestSlackAssistantStatusMiddleware:
             result = await middleware.aafter_agent({"messages": []}, self._runtime())
 
         assert result is None
-        assert mock_set.await_args.kwargs["status"] == ""
-        assert mock_set.await_args.kwargs["loading_messages"] is None
+        await_args = mock_set.await_args
+        assert await_args is not None
+        assert await_args.kwargs["status"] == ""
+        assert await_args.kwargs["loading_messages"] is None
 
     @pytest.mark.asyncio
     async def test_model_call_uses_contextual_status_from_last_tool_call(self) -> None:

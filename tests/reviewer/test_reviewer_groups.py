@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.language_models import BaseChatModel
 
 from agent.review.groups import (
     _build_prompt,
@@ -57,7 +58,9 @@ async def test_generate_diff_groups_partitions() -> None:
             _DiffGroupModel(title="Bar change", summary="Edits bar", files=["bar.py"]),
         ]
     )
-    groups = await generate_diff_groups(diff_text=_DIFF, model=_FakeModel(result))
+    groups = await generate_diff_groups(
+        diff_text=_DIFF, model=cast(BaseChatModel, _FakeModel(result))
+    )
     assert groups == [
         {"title": "Foo change", "summary": "Edits foo", "files": ["foo.py"]},
         {"title": "Bar change", "summary": "Edits bar", "files": ["bar.py"]},
@@ -77,7 +80,9 @@ async def test_generate_diff_groups_dedupes_and_drops_unknown() -> None:
             _DiffGroupModel(title="", summary="ignored", files=["bar.py"]),
         ]
     )
-    groups = await generate_diff_groups(diff_text=_DIFF, model=_FakeModel(result))
+    groups = await generate_diff_groups(
+        diff_text=_DIFF, model=cast(BaseChatModel, _FakeModel(result))
+    )
     # foo.py only in the first group, bar.py only in the second; the untitled
     # group and the unknown path are dropped.
     assert groups == [
@@ -88,12 +93,16 @@ async def test_generate_diff_groups_dedupes_and_drops_unknown() -> None:
 
 @pytest.mark.asyncio
 async def test_generate_diff_groups_empty_diff_returns_empty() -> None:
-    assert await generate_diff_groups(diff_text="", model=_FakeModel(None)) == []
+    assert (
+        await generate_diff_groups(diff_text="", model=cast(BaseChatModel, _FakeModel(None))) == []
+    )
 
 
 @pytest.mark.asyncio
 async def test_generate_diff_groups_llm_failure_returns_none() -> None:
-    groups = await generate_diff_groups(diff_text=_DIFF, model=_FakeModel(None, raises=True))
+    groups = await generate_diff_groups(
+        diff_text=_DIFF, model=cast(BaseChatModel, _FakeModel(None, raises=True))
+    )
     assert groups is None
 
 

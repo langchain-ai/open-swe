@@ -248,7 +248,9 @@ async def test_run_snapshot_build_success_marks_ready() -> None:
         await run_snapshot_build("acme/repo")
 
     assert statuses[-1][0] == "ready"
-    assert statuses[-1][1]["snapshot_id"] == "snap-new"
+    extra = statuses[-1][1]
+    assert extra is not None
+    assert extra["snapshot_id"] == "snap-new"
 
 
 @pytest.mark.asyncio

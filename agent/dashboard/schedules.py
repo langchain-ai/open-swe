@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
+from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
 from ..dispatch import create_durable_run
@@ -223,12 +224,11 @@ async def _ensure_dashboard_github_token(login: str) -> None:
         raise HTTPException(401, "github token unavailable, re-login required")
 
 
-def _build_cron_config(record: dict[str, Any]) -> dict[str, Any]:
+def _build_cron_config(record: dict[str, Any]) -> Config:
     return {
         "configurable": {
             "schedule_id": record["id"],
         },
-        "metadata": _agent_version_metadata(),
     }
 
 
@@ -242,6 +242,7 @@ async def _create_cron(record: dict[str, Any]) -> str:
             "kind": "agent_schedule",
             "schedule_id": record["id"],
             "github_login": record.get("created_by"),
+            **_agent_version_metadata(),
         },
     )
     cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)

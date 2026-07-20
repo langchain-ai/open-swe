@@ -1,7 +1,9 @@
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from fastapi import BackgroundTasks
+from starlette.requests import Request
 
 from agent.utils import slack_feedback
 from agent.utils.slack_feedback import (
@@ -224,7 +226,10 @@ async def test_slack_webhook_queues_reaction_added(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
 
-    response = await slack_routes.slack_webhook(_FakeRequest(payload), background_tasks)
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)),
+        cast(BackgroundTasks, background_tasks),
+    )
 
     assert response == {"status": "accepted", "message": "Reaction feedback queued"}
     assert background_tasks.tasks == [(webhook_common.process_slack_reaction_added, (event, "Ev1"))]
@@ -238,7 +243,10 @@ async def test_slack_webhook_queues_reaction_removed(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
 
-    response = await slack_routes.slack_webhook(_FakeRequest(payload), background_tasks)
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)),
+        cast(BackgroundTasks, background_tasks),
+    )
 
     assert response == {"status": "accepted", "message": "Reaction removal queued"}
     assert background_tasks.tasks == [
@@ -254,7 +262,10 @@ async def test_slack_webhook_ignores_untracked_reaction(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
 
-    response = await slack_routes.slack_webhook(_FakeRequest(payload), background_tasks)
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)),
+        cast(BackgroundTasks, background_tasks),
+    )
 
     assert response == {"status": "ignored", "reason": "Reaction not tracked for feedback"}
     assert background_tasks.tasks == []

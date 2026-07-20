@@ -49,10 +49,13 @@ class ProfileUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_stale_model_pairs(self) -> ProfileUpdate:
-        self.default_model, self.reasoning_effort = _normalize_stale_model_pair(
+        model, effort = _normalize_stale_model_pair(
             self.default_model,
             self.reasoning_effort,
         )
+        self.default_model = model
+        if effort is not None:
+            self.reasoning_effort = effort
         if self.default_subagent_model is not None:
             self.default_subagent_model, self.subagent_reasoning_effort = (
                 _normalize_stale_model_pair(
@@ -289,7 +292,8 @@ async def _refresh_stored_token(login: str, record: dict[str, Any]) -> tuple[str
     except Exception as exc:  # noqa: BLE001
         logger.warning("GitHub token refresh failed for %s", login, exc_info=True)
         return None, is_unrecoverable_refresh_error(exc)
-    email = record.get("email") if isinstance(record.get("email"), str) else ""
+    email_value = record.get("email")
+    email = email_value if isinstance(email_value, str) else ""
     await upsert_access_token_from_github_response(login, email, data)
     access_token = data.get("access_token")
     return (access_token if isinstance(access_token, str) else None), False

@@ -110,7 +110,8 @@ def _call_path_method(provider: Any, method_name: str) -> str | None:
         return None
 
     try:
-        return _normalize_path(method())
+        value = method()
+        return _normalize_path(value if isinstance(value, str) else None)
     except Exception:
         logger.debug("Failed to call %s on %s", method_name, type(provider).__name__, exc_info=True)
         return None

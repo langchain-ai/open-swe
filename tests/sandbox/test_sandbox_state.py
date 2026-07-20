@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
-from deepagents.backends.protocol import ExecuteResponse
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from agent.utils.sandbox_state import (
     SANDBOX_BACKENDS,
@@ -78,7 +80,10 @@ async def test_sandbox_proxy_uses_registered_reconnect_once(
 
     monkeypatch.setattr("agent.utils.sandbox_state.create_sandbox", create_sandbox)
 
-    proxy = get_or_create_sandbox_backend_proxy(thread_id, reconnect=reconnect)
+    proxy = get_or_create_sandbox_backend_proxy(
+        thread_id,
+        reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
+    )
     results = await asyncio.gather(*(proxy.aexecute(f"cmd-{idx}") for idx in range(5)))
 
     assert reconnected == [thread_id]

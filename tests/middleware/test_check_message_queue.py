@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from agent.middleware.check_message_queue import (
     DASHBOARD_HANDOFF_MARKER,
+    LinearNotifyState,
     _build_blocks_from_payload,
     check_message_queue_before_model,
 )
@@ -49,7 +50,9 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
         ),
         patch("agent.middleware.check_message_queue.get_store", return_value=store),
     ):
-        result = await check_message_queue_before_model.abefore_model({}, MagicMock())
+        result = await check_message_queue_before_model.abefore_model(
+            cast(LinearNotifyState, {"messages": []}), MagicMock()
+        )
 
     assert result is not None
     message = result["messages"][0]
@@ -77,7 +80,9 @@ async def test_check_message_queue_injects_pending_autofix_event() -> None:
         ),
         patch("agent.middleware.check_message_queue.get_store", return_value=store),
     ):
-        result = await check_message_queue_before_model.abefore_model({}, MagicMock())
+        result = await check_message_queue_before_model.abefore_model(
+            cast(LinearNotifyState, {"messages": []}), MagicMock()
+        )
 
     assert result is not None
     message = result["messages"][0]

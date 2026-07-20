@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.messages import BaseMessage, SystemMessage
@@ -28,7 +29,9 @@ def _configured_timeout_seconds() -> int:
     return value if value > 0 else _DEFAULT_TIMEOUT_SECONDS
 
 
-def _content_with_instruction(message: BaseMessage | None, instruction: str) -> str | list[object]:
+def _content_with_instruction(
+    message: BaseMessage | None, instruction: str
+) -> str | list[str | dict[Any, Any]]:
     if message is None:
         return instruction
     content = message.content

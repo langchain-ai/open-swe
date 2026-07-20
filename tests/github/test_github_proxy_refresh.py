@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain.agents.middleware import AgentState
 
 from agent.utils import github_proxy
 from agent.utils.github_proxy import (
@@ -18,7 +21,7 @@ from agent.utils.github_proxy import (
 
 
 @pytest.fixture(autouse=True)
-def _clear_state() -> None:
+def _clear_state() -> Generator[None, None, None]:
     github_proxy._PROXY_TOKEN_EXPIRY.clear()
     yield
     github_proxy._PROXY_TOKEN_EXPIRY.clear()
@@ -49,7 +52,7 @@ class TestProxyTokenNeedsRefresh:
     def test_fallback_ttl_when_expiry_unknown(self) -> None:
         now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         record_proxy_token_expiry("thread-1", None)
-        github_proxy._PROXY_TOKEN_EXPIRY["thread-1"] = (None, now, None)
+        github_proxy._PROXY_TOKEN_EXPIRY["thread-1"] = (None, now, None, ())
         assert proxy_token_needs_refresh("thread-1", now=now) is False
         later = now + PROXY_TOKEN_FALLBACK_TTL
         assert proxy_token_needs_refresh("thread-1", now=later) is True
@@ -175,7 +178,9 @@ class TestRefreshGithubProxyMiddleware:
                 new=AsyncMock(return_value=True),
             ) as mock_refresh,
         ):
-            result = await refresh_github_proxy_before_model.abefore_model({}, MagicMock())
+            result = await refresh_github_proxy_before_model.abefore_model(
+                cast(AgentState, {}), MagicMock()
+            )
 
         assert result is None
         mock_refresh.assert_awaited_once_with("thread-9")
@@ -194,7 +199,9 @@ class TestRefreshGithubProxyMiddleware:
                 new=AsyncMock(),
             ) as mock_refresh,
         ):
-            result = await refresh_github_proxy_before_model.abefore_model({}, MagicMock())
+            result = await refresh_github_proxy_before_model.abefore_model(
+                cast(AgentState, {}), MagicMock()
+            )
 
         assert result is None
         mock_refresh.assert_not_called()
@@ -213,6 +220,8 @@ class TestRefreshGithubProxyMiddleware:
                 new=AsyncMock(side_effect=RuntimeError("boom")),
             ),
         ):
-            result = await refresh_github_proxy_before_model.abefore_model({}, MagicMock())
+            result = await refresh_github_proxy_before_model.abefore_model(
+                cast(AgentState, {}), MagicMock()
+            )
 
         assert result is None

@@ -2,7 +2,7 @@ from typing import Any
 from uuid import uuid4
 
 from langchain.agents.middleware import AgentState, after_model
-from langchain_core.messages import AnyMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
@@ -77,6 +77,8 @@ def _is_dashboard_source() -> bool:
 @after_model
 def ensure_no_empty_msg(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
     last_msg = state["messages"][-1]
+    if not isinstance(last_msg, AIMessage):
+        return None
     has_contents = bool(last_msg.text)
     has_tool_calls = bool(last_msg.tool_calls)
     if not has_tool_calls and not has_contents:

@@ -259,8 +259,15 @@ async def exchange_notion_code(code: str, flow: dict[str, Any]) -> dict[str, Any
     client_id = flow.get("client_id")
     redirect_uri = flow.get("redirect_uri")
     code_verifier = flow.get("code_verifier")
-    if not all(
-        isinstance(v, str) and v for v in (token_endpoint, client_id, redirect_uri, code_verifier)
+    if (
+        not isinstance(token_endpoint, str)
+        or not token_endpoint
+        or not isinstance(client_id, str)
+        or not client_id
+        or not isinstance(redirect_uri, str)
+        or not redirect_uri
+        or not isinstance(code_verifier, str)
+        or not code_verifier
     ):
         raise NotionOAuthError(400, "stored Notion OAuth flow is incomplete")
     _require_notion_https_url(token_endpoint, "token endpoint")

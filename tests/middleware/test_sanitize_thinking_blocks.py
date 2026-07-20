@@ -1,23 +1,25 @@
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.middleware.sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 
 
-def _make_request(messages: list[object], model: object | None = None) -> MagicMock:
+def _make_request(messages: list[object], model: object | None = None) -> ModelRequest[None]:
     request = MagicMock()
     request.model = model or MagicMock(spec=ChatAnthropic)
     request.messages = messages
-    return request
+    return cast(ModelRequest[None], request)
 
 
-async def _noop_handler(_req: object) -> object:
-    return MagicMock()
+async def _noop_handler(_req: ModelRequest[None]) -> ModelResponse[Any]:
+    return cast(ModelResponse[Any], MagicMock())
 
 
 class TestSanitizeThinkingBlocksMiddleware:
@@ -32,9 +34,9 @@ class TestSanitizeThinkingBlocksMiddleware:
         request = _make_request([message])
         response = MagicMock()
 
-        async def handler(req: object) -> object:
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             assert req is request
-            return response
+            return cast(ModelResponse[Any], response)
 
         result = await SanitizeThinkingBlocksMiddleware().awrap_model_call(request, handler)
 
@@ -63,9 +65,9 @@ class TestSanitizeThinkingBlocksMiddleware:
         request = _make_request([HumanMessage(content="hi"), message])
         response = MagicMock()
 
-        async def handler(req: object) -> object:
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             assert req is request
-            return response
+            return cast(ModelResponse[Any], response)
 
         result = await SanitizeThinkingBlocksMiddleware().awrap_model_call(request, handler)
 

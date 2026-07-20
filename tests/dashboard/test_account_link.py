@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 import pytest
 
 from agent.webhooks import common as webhook_common
+
+
+class _Reply(TypedDict):
+    channel_id: str
+    thread_ts: str
+    text: str
 
 
 @pytest.fixture(autouse=True)
@@ -19,9 +27,9 @@ def test_account_link_prompt_posts_generic_token_free_link(
     import asyncio
 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
-    calls: dict[str, object] = {}
+    calls: dict[str, _Reply] = {}
 
-    async def fake_reply(channel_id, thread_ts, text):
+    async def fake_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         calls["reply"] = {"channel_id": channel_id, "thread_ts": thread_ts, "text": text}
         return True
 
@@ -30,20 +38,21 @@ def test_account_link_prompt_posts_generic_token_free_link(
     asyncio.run(
         webhook_common._post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="unlinked")
     )
-    assert calls["reply"]["channel_id"] == "C1"
-    assert calls["reply"]["thread_ts"] == "1.1"
-    assert "https://app.example.com/my-settings" in calls["reply"]["text"]
+    reply = calls["reply"]
+    assert reply["channel_id"] == "C1"
+    assert reply["thread_ts"] == "1.1"
+    assert "https://app.example.com/my-settings" in reply["text"]
     # No signed account-link token may appear in the public thread.
-    assert "link=" not in calls["reply"]["text"]
+    assert "link=" not in reply["text"]
 
 
 def test_account_link_prompt_revoked_wording(monkeypatch: pytest.MonkeyPatch) -> None:
     import asyncio
 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
-    calls: dict[str, object] = {}
+    calls: dict[str, str] = {}
 
-    async def fake_reply(channel_id, thread_ts, text):
+    async def fake_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         calls["text"] = text
         return True
 
@@ -52,8 +61,9 @@ def test_account_link_prompt_revoked_wording(monkeypatch: pytest.MonkeyPatch) ->
     asyncio.run(
         webhook_common._post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="revoked")
     )
-    assert "no longer valid" in calls["text"]
-    assert "link=" not in calls["text"]
+    text = calls["text"]
+    assert "no longer valid" in text
+    assert "link=" not in text
 
 
 def test_account_link_prompt_skips_when_dashboard_url_unset(
@@ -64,7 +74,7 @@ def test_account_link_prompt_skips_when_dashboard_url_unset(
     monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
     posted = False
 
-    async def fake_reply(channel_id, thread_ts, text):
+    async def fake_reply(channel_id: str, thread_ts: str, text: str) -> bool:
         nonlocal posted
         posted = True
         return True

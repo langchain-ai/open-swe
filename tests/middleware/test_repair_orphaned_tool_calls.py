@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.middleware.repair_orphaned_tool_calls import (
@@ -12,11 +14,11 @@ from agent.middleware.repair_orphaned_tool_calls import (
 )
 
 
-def _make_request(messages: list[object]) -> MagicMock:
+def _make_request(messages: list[object]) -> ModelRequest[None]:
     request = MagicMock()
     request.model = MagicMock()
     request.messages = messages
-    return request
+    return cast(ModelRequest[None], request)
 
 
 def _ai_with_tool_call(call_id: str, name: str = "execute") -> AIMessage:
@@ -26,8 +28,8 @@ def _ai_with_tool_call(call_id: str, name: str = "execute") -> AIMessage:
     )
 
 
-async def _noop_handler(_req: object) -> object:
-    return MagicMock()
+async def _noop_handler(_req: ModelRequest[None]) -> ModelResponse[Any]:
+    return cast(ModelResponse[Any], MagicMock())
 
 
 class TestRepairOrphanedToolCallsMiddleware:
@@ -38,8 +40,8 @@ class TestRepairOrphanedToolCallsMiddleware:
         request = _make_request([HumanMessage(content="hi"), ai, follow_up])
         response = MagicMock()
 
-        async def handler(_req: object) -> object:
-            return response
+        async def handler(_req: ModelRequest[None]) -> ModelResponse[Any]:
+            return cast(ModelResponse[Any], response)
 
         result = await RepairOrphanedToolCallsMiddleware().awrap_model_call(request, handler)
 
@@ -51,6 +53,7 @@ class TestRepairOrphanedToolCallsMiddleware:
         assert synthetic.tool_call_id == "call_1"
         assert synthetic.status == "error"
         assert messages[3] is follow_up
+        assert isinstance(synthetic.content, str)
         payload = json.loads(synthetic.content)
         assert payload["recovery"] == INTERRUPTED_TOOL_RECOVERY
         assert payload["name"] == "execute"
@@ -109,9 +112,9 @@ class TestRepairOrphanedToolCallsMiddleware:
         request = _make_request([ai, HumanMessage(content="hi")])
         response = MagicMock()
 
-        async def handler(req: object) -> object:
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             assert req is request
-            return response
+            return cast(ModelResponse[Any], response)
 
         result = await RepairOrphanedToolCallsMiddleware().awrap_model_call(request, handler)
 

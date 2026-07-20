@@ -9,10 +9,10 @@ import re
 import shlex
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from langchain.agents.middleware.types import AgentMiddleware, AgentState
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolCall, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
@@ -421,8 +421,7 @@ def _blocked_message(
 
 
 def _tool_message_for_request(message: ToolMessage, request: ToolCallRequest) -> ToolMessage:
-    message.tool_call_id = _tool_call_id(request)
-    return message
+    return message.model_copy(update={"tool_call_id": _tool_call_id(request)})
 
 
 def _override_execute_command(request: ToolCallRequest, command: str) -> ToolCallRequest:
@@ -431,7 +430,7 @@ def _override_execute_command(request: ToolCallRequest, command: str) -> ToolCal
         return request
     args = dict(_tool_args(request))
     args["command"] = command
-    return request.override(tool_call={**dict(tool_call), "args": args})
+    return request.override(tool_call=cast(ToolCall, {**dict(tool_call), "args": args}))
 
 
 def _approval_slack_message(change: WorkflowPushChange, approval_url: str | None = None) -> str:

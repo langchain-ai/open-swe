@@ -18,16 +18,18 @@ from __future__ import annotations
 
 import logging
 import warnings
-from typing import Any
+from typing import Any, cast
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
+from langgraph.runtime import Runtime
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
 from .dashboard.options import (
@@ -48,6 +50,7 @@ from .middleware import (
     SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
 )
+from .middleware.prepare_run import PrepareRunState
 from .runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
@@ -148,8 +151,8 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
             else None,
         }
 
-    async def _prepare(self, state: dict, runtime: object) -> dict:  # noqa: ARG002
-        configurable = self._config["configurable"]
+    async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        configurable = self._config.get("configurable") or {}
         repo_owner = str(configurable.get("chat_repo_owner") or "")
         repo_name = str(configurable.get("chat_repo_name") or "")
         pr_number = configurable.get("chat_pr_number")
@@ -167,7 +170,7 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
         }
 
 
-async def _resolve_chat_model(configurable: dict) -> tuple[str, str]:
+async def _resolve_chat_model(configurable: dict[str, Any]) -> tuple[str, str]:
     model_id = configurable.get("chat_model_id")
     effort = configurable.get("chat_effort")
     if (
@@ -183,13 +186,15 @@ async def _resolve_chat_model(configurable: dict) -> tuple[str, str]:
 
 async def get_chat_agent(config: RunnableConfig) -> Pregel:
     """Get a read-only PR chat agent. No sandbox; PR context comes via config."""
-    thread_id = config["configurable"].get("thread_id")
-    config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
+    config = config.copy()
+    configurable = dict(config.get("configurable") or {})
+    config["configurable"] = configurable
+    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
+    thread_id = configurable.get("thread_id")
 
     if thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
-    configurable = config["configurable"]
     model_id, effort = await _resolve_chat_model(configurable)
     model_id, effort = gate_fable_model(
         model_id, effort, fable_enabled=await get_team_fable_enabled()
@@ -212,15 +217,18 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
             web_search,
             fetch_url,
         ],
-        middleware=[
-            PrepareChatRunMiddleware(config=config),
-            SanitizeToolInputsMiddleware(),
-            ModelCallLimitMiddleware(run_limit=CHAT_MODEL_CALL_LIMIT, exit_behavior="end"),
-            ToolErrorMiddleware(),
-            ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),
-            SanitizeFireworksMessagesMiddleware(),
-            SanitizeThinkingBlocksMiddleware(),
-        ],
+        middleware=cast(
+            list[AgentMiddleware[Any, Any, Any]],
+            [
+                PrepareChatRunMiddleware(config=config),
+                SanitizeToolInputsMiddleware(),
+                ModelCallLimitMiddleware(run_limit=CHAT_MODEL_CALL_LIMIT, exit_behavior="end"),
+                ToolErrorMiddleware(),
+                ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),
+                SanitizeFireworksMessagesMiddleware(),
+                SanitizeThinkingBlocksMiddleware(),
+            ],
+        ),
     ).with_config(config)
 
 

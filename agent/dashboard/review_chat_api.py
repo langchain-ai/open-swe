@@ -22,6 +22,7 @@ from fastapi import HTTPException
 from ..review.diff import fetch_pr_diff
 from ..review.findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
+from ..utils.json_types import as_json_object
 from ..utils.thread_ops import langgraph_client, langgraph_url
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort
 from .review_api import classify_finding, get_pr_head_sha, get_review, reviewer_thread_id
@@ -99,7 +100,7 @@ async def list_review_chat_threads(
     for thread in threads or []:
         if not isinstance(thread, dict):
             continue
-        metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+        metadata = as_json_object(thread.get("metadata"))
         thread_id = thread.get("thread_id") or thread.get("id")
         if not isinstance(thread_id, str):
             continue
@@ -154,7 +155,7 @@ def _derive_title(params: dict[str, Any]) -> str:
 
 
 def _render_overview(review: dict[str, Any]) -> str:
-    pr = review.get("pr") if isinstance(review.get("pr"), dict) else {}
+    pr = as_json_object(review.get("pr"))
     lines = [
         f"# {review.get('title') or 'Pull request'} (#{review.get('number')})",
         "",
@@ -205,7 +206,7 @@ def _render_findings(findings: list[dict[str, Any]]) -> str:
 
 
 def _review_head_sha(review: dict[str, Any]) -> str:
-    pr = review.get("pr") if isinstance(review.get("pr"), dict) else {}
+    pr = as_json_object(review.get("pr"))
     return str(pr.get("head_sha") or review.get("head_sha") or "")
 
 
@@ -227,7 +228,12 @@ async def _build_pr_context(
 
     if review is None:
         review = await get_review(owner, repo, pr_number)
-    findings = review.get("findings") if isinstance(review.get("findings"), list) else []
+    raw_findings = review.get("findings")
+    findings = (
+        [finding for finding in raw_findings if isinstance(finding, dict)]
+        if isinstance(raw_findings, list)
+        else []
+    )
     head_sha = _review_head_sha(review)
     diff = await fetch_pr_diff(owner=owner, repo=repo, pr_number=pr_number, token=token) or ""
     if len(diff) > _MAX_DIFF_CHARS:
@@ -246,7 +252,7 @@ async def _get_chat_thread_metadata(thread_id: str) -> dict[str, Any] | None:
         thread = await client.threads.get(thread_id)
     except Exception:  # noqa: BLE001
         return None
-    return thread.get("metadata") if isinstance(thread, dict) else None
+    return as_json_object(thread.get("metadata")) if isinstance(thread, dict) else None
 
 
 async def assert_chat_thread_access(

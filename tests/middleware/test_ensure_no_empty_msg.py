@@ -1,6 +1,8 @@
+from typing import Any
 from unittest.mock import MagicMock, patch
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain.agents.middleware import AgentState
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 
 from agent.middleware.check_message_queue import DASHBOARD_HANDOFF_INSTRUCTION
 from agent.middleware.ensure_no_empty_msg import (
@@ -13,7 +15,7 @@ from agent.middleware.ensure_no_empty_msg import (
 
 class TestGetEveryMessageSinceLastHuman:
     def test_returns_messages_after_last_human(self) -> None:
-        state = {
+        state: AgentState[Any] = {
             "messages": [
                 HumanMessage(content="first human"),
                 AIMessage(content="ai response"),
@@ -28,7 +30,7 @@ class TestGetEveryMessageSinceLastHuman:
         assert result[0].content == "final ai"
 
     def test_returns_all_messages_when_no_human(self) -> None:
-        state = {
+        state: AgentState[Any] = {
             "messages": [
                 AIMessage(content="ai 1"),
                 AIMessage(content="ai 2"),
@@ -42,7 +44,7 @@ class TestGetEveryMessageSinceLastHuman:
         assert result[1].content == "ai 2"
 
     def test_returns_empty_when_human_is_last(self) -> None:
-        state = {
+        state: AgentState[Any] = {
             "messages": [
                 AIMessage(content="ai response"),
                 HumanMessage(content="human last"),
@@ -54,7 +56,7 @@ class TestGetEveryMessageSinceLastHuman:
         assert len(result) == 0
 
     def test_returns_multiple_messages_after_human(self) -> None:
-        state = {
+        state: AgentState[Any] = {
             "messages": [
                 HumanMessage(content="human"),
                 AIMessage(content="ai 1"),
@@ -73,21 +75,21 @@ class TestGetEveryMessageSinceLastHuman:
 
 class TestCheckIfModelMessagedUser:
     def test_returns_true_for_slack_thread_reply(self) -> None:
-        messages = [
+        messages: list[AnyMessage] = [
             ToolMessage(content="sent", tool_call_id="123", name="slack_thread_reply"),
         ]
 
         assert check_if_model_messaged_user(messages) is True
 
     def test_returns_true_for_linear_comment(self) -> None:
-        messages = [
+        messages: list[AnyMessage] = [
             ToolMessage(content="commented", tool_call_id="123", name="linear_comment"),
         ]
 
         assert check_if_model_messaged_user(messages) is True
 
     def test_returns_false_for_other_tools(self) -> None:
-        messages = [
+        messages: list[AnyMessage] = [
             ToolMessage(content="result", tool_call_id="123", name="bash"),
             ToolMessage(content="result", tool_call_id="456", name="read_file"),
         ]
@@ -100,14 +102,14 @@ class TestCheckIfModelMessagedUser:
 
 class TestCheckIfConfirmingCompletion:
     def test_returns_true_when_confirming_completion_called(self) -> None:
-        messages = [
+        messages: list[AnyMessage] = [
             ToolMessage(content="confirmed", tool_call_id="123", name="confirming_completion"),
         ]
 
         assert check_if_confirming_completion(messages) is True
 
     def test_returns_false_for_other_tools(self) -> None:
-        messages = [
+        messages: list[AnyMessage] = [
             ToolMessage(content="result", tool_call_id="123", name="bash"),
         ]
 
@@ -133,7 +135,7 @@ class TestEnsureNoEmptyMsgNotify:
 
     def test_returns_none_when_user_messaged(self) -> None:
         empty_ai = AIMessage(content="")
-        state = {
+        state: AgentState[Any] = {
             "messages": [
                 HumanMessage(content="fix the bug"),
                 ToolMessage(content="message sent", tool_call_id="1", name="slack_thread_reply"),
@@ -147,7 +149,7 @@ class TestEnsureNoEmptyMsgNotify:
 
     def test_returns_none_with_linear_comment(self) -> None:
         empty_ai = AIMessage(content="")
-        state = {
+        state: AgentState[Any] = {
             "messages": [
                 HumanMessage(content="fix the bug"),
                 ToolMessage(content="commented", tool_call_id="1", name="linear_comment"),
@@ -161,7 +163,7 @@ class TestEnsureNoEmptyMsgNotify:
 
     def test_injects_no_op_when_user_not_messaged(self) -> None:
         empty_ai = AIMessage(content="")
-        state = {
+        state: AgentState[Any] = {
             "messages": [
                 HumanMessage(content="fix the bug"),
                 ToolMessage(content="result", tool_call_id="1", name="bash"),
@@ -177,7 +179,7 @@ class TestEnsureNoEmptyMsgNotify:
 
     def test_returns_none_when_only_user_messaged(self) -> None:
         empty_ai = AIMessage(content="")
-        state = {
+        state: AgentState[Any] = {
             "messages": [
                 HumanMessage(content="fix the bug"),
                 ToolMessage(content="message sent", tool_call_id="1", name="slack_thread_reply"),
@@ -191,7 +193,7 @@ class TestEnsureNoEmptyMsgNotify:
 
     def test_skips_confirming_completion_for_dashboard_source(self) -> None:
         ai = AIMessage(content="Hi! How can I help?")
-        state = {
+        state: AgentState[Any] = {
             "messages": [
                 HumanMessage(content="hello"),
                 ai,
@@ -209,7 +211,7 @@ class TestEnsureNoEmptyMsgNotify:
 
     def test_skips_confirming_completion_for_dashboard_handoff(self) -> None:
         ai = AIMessage(content="Done in web.")
-        state = {
+        state: AgentState[Any] = {
             "messages": [
                 HumanMessage(
                     content=[

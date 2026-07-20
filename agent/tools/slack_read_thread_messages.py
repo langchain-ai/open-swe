@@ -15,7 +15,7 @@ async def _fetch_and_format(channel_id: str, message_ts: str) -> dict[str, Any]:
         return {"success": False, "messages": []}
 
     user_ids = [
-        msg.get("user") for msg in messages if isinstance(msg.get("user"), str) and msg.get("user")
+        user_id for msg in messages if isinstance(user_id := msg.get("user"), str) and user_id
     ]
     user_names = await get_slack_user_names(user_ids) if user_ids else {}
 

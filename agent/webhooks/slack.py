@@ -7,10 +7,12 @@ object (``common.X``) so tests that monkeypatch them keep working.
 import asyncio
 import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from langchain_core.messages.content import create_text_block
+
+from agent.utils.json_types import as_json_object
 
 from . import common
 
@@ -71,6 +73,86 @@ def _is_natural_language_plan_approval(text: str) -> bool:
     if any(f" {phrase} " in padded for phrase in _PLAN_APPROVAL_NEGATIONS):
         return False
     return any(f" {phrase} " in padded for phrase in _PLAN_APPROVAL_PHRASES)
+
+
+async def _slack_thread_allows_untagged_reply(
+    channel_id: str, thread_ts: str, text: str, bot_user_id: str
+) -> bool:
+    """Allow an untagged follow-up when Open SWE and exactly one human share the thread.
+
+    Skipped when the message mentions any user other than Open SWE, so tagging a
+    different person still hands the turn to them rather than the agent.
+    """
+    if not channel_id or not thread_ts or not bot_user_id:
+        return False
+
+    mentioned = set(re.findall(r"<@([A-Z0-9_]+)", text or ""))
+    if any(user_id != bot_user_id for user_id in mentioned):
+        return False
+
+    messages = await common.fetch_slack_thread_messages(channel_id, thread_ts)
+    bot_participated = False
+    humans: set[str] = set()
+    for message in messages:
+        author = message.get("user")
+        if author == bot_user_id:
+            bot_participated = True
+            continue
+        # Skip other apps (GitHub/CI bots) — they are neither Open SWE nor a human participant.
+        if message.get("bot_id"):
+            continue
+        if isinstance(author, str) and author:
+            humans.add(author)
+
+    return bot_participated and len(humans) == 1
+
+
+async def _slack_thread_is_busy(client: Any, thread_id: str) -> bool:
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        common.logger.debug(
+            "Could not read Slack thread status for %s; treating as idle", thread_id, exc_info=True
+        )
+        return False
+    status = thread.get("status") if isinstance(thread, dict) else None
+    return status == "busy"
+
+
+async def _dispatch_or_queue_slack_run(
+    client: Any,
+    thread_id: str,
+    content_blocks: list[dict[str, Any]],
+    configurable: dict[str, Any],
+    *,
+    is_first_mention: bool,
+    explicitly_tagged: bool,
+) -> dict[str, Any] | None:
+    """Start a run, or coalesce onto the thread queue if one is already in flight.
+
+    An explicit @-mention always interrupts immediately (the active run halts and
+    resumes with the new message). Only untagged follow-ups are debounced: while
+    the agent is busy they are parked on the store queue and picked up together at
+    its next model call (via ``check_message_queue_before_model``). Returns the run
+    dict, or ``None`` when the message was queued.
+    """
+    if (
+        not explicitly_tagged
+        and not is_first_mention
+        and await _slack_thread_is_busy(client, thread_id)
+    ):
+        await common.queue_message_for_thread(thread_id, content_blocks)
+        return None
+    return as_json_object(
+        await common.dispatch_agent_run(
+            thread_id,
+            content_blocks,
+            configurable,
+            source="slack",
+            metadata=common._AGENT_VERSION_METADATA,
+            client=client,
+        )
+    )
 
 
 async def _slack_user_can_reply_to_ready_plan(
@@ -337,7 +419,7 @@ async def _process_slack_mention_impl(
         "Use `slack_read_thread_messages` to read any Slack messages by providing channel_id "
         "and message_ts."
     )
-    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+    content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
 
     image_urls = common.dedupe_urls(
         [url for msg in context_messages for url in common.extract_image_urls(msg.get("text", ""))]
@@ -375,7 +457,7 @@ async def _process_slack_mention_impl(
             for image_url in image_urls:
                 image_block = await common.fetch_image_block(image_url, http_client)
                 if image_block:
-                    content_blocks.append(image_block)
+                    content_blocks.append(cast(dict[str, Any], image_block))
 
     # Open SWE opens PRs as the triggering user, so a run only proceeds when we
     # have a valid user GitHub token. Users who have never signed in with

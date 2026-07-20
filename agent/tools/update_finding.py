@@ -178,7 +178,7 @@ async def update_finding(
         from .resolve_finding_thread import resolve_finding_thread
 
         resolve_result = await resolve_finding_thread(
-            finding_id, status=status, note=normalized_note
+            finding_id, status=status, note=normalized_note or ""
         )
         if not resolve_result.get("success"):
             return {

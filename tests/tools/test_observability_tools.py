@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 
 from agent import server
@@ -222,8 +223,8 @@ async def test_observability_authorized_gates_on_admin(monkeypatch: pytest.Monke
     monkeypatch.delenv("OBSERVABILITY_AUTHORIZED_EMAILS", raising=False)
     monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
 
-    admin_config = {"configurable": {"user_email": "admin@example.com"}}
-    other_config = {"configurable": {"user_email": "attacker@example.com"}}
+    admin_config = cast(RunnableConfig, {"configurable": {"user_email": "admin@example.com"}})
+    other_config = cast(RunnableConfig, {"configurable": {"user_email": "attacker@example.com"}})
 
     assert await server._observability_authorized(admin_config, None) is True
     assert await server._observability_authorized(other_config, None) is False
@@ -235,7 +236,7 @@ async def test_observability_authorized_allowlist(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("OBSERVABILITY_AUTHORIZED_EMAILS", "trusted@example.com")
     monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
 
-    config = {"configurable": {"user_email": "trusted@example.com"}}
+    config = cast(RunnableConfig, {"configurable": {"user_email": "trusted@example.com"}})
     assert await server._observability_authorized(config, None) is True
 
 
@@ -251,7 +252,7 @@ async def test_observability_authorized_resolves_login_email(
         AsyncMock(side_effect=lambda login: "dev@example.com" if login else None),
     )
 
-    config = {"configurable": {"github_login": "dev"}}
+    config = cast(RunnableConfig, {"configurable": {"github_login": "dev"}})
     assert await server._observability_authorized(config, "dev") is True
 
 
@@ -263,5 +264,5 @@ async def test_observability_authorized_accepts_admin_login(
     monkeypatch.delenv("OBSERVABILITY_AUTHORIZED_EMAILS", raising=False)
     monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
 
-    config = {"configurable": {"github_login": "dev"}}
+    config = cast(RunnableConfig, {"configurable": {"github_login": "dev"}})
     assert await server._observability_authorized(config, "dev") is True

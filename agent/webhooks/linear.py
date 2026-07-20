@@ -4,7 +4,7 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from langchain_core.messages.content import create_text_block
@@ -169,7 +169,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         ".changelog/README.md, and nearby docs before choosing the PR title/body format. "
         f"When you're done, commit and push your changes. {tag_instruction}"
     )
-    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+    content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
 
     # Resolve the GitHub login from the Linear email via the same user-mapping
     # store Slack uses, so PRs open *as the triggering user* and the thread is
@@ -198,7 +198,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             for image_url in image_urls:
                 image_block = await common.fetch_image_block(image_url, client)
                 if image_block:
-                    content_blocks.append(image_block)
+                    content_blocks.append(cast(dict[str, Any], image_block))
         common.logger.info("Built %d content block(s) for prompt", len(content_blocks))
 
     linear_project_id = ""

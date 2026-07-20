@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.middleware.sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
 
 
-def _make_request(messages: list[object], model: object | None = None) -> MagicMock:
+def _make_request(messages: list[object], model: object | None = None) -> ModelRequest[None]:
     request = MagicMock()
     request.model = model
     request.messages = messages
-    return request
+    return cast(ModelRequest[None], request)
 
 
 def _fireworks_model() -> MagicMock:
@@ -24,8 +26,8 @@ def _fireworks_model() -> MagicMock:
     return MagicMock(spec=ChatFireworks)
 
 
-async def _noop_handler(_req: object) -> object:
-    return MagicMock()
+async def _noop_handler(_req: ModelRequest[None]) -> ModelResponse[Any]:
+    return cast(ModelResponse[Any], MagicMock())
 
 
 class TestSanitizeFireworksMessagesMiddleware:
@@ -43,9 +45,9 @@ class TestSanitizeFireworksMessagesMiddleware:
         )
         response = MagicMock()
 
-        async def handler(req: object) -> object:
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             assert req is request
-            return response
+            return cast(ModelResponse[Any], response)
 
         result = await SanitizeFireworksMessagesMiddleware().awrap_model_call(request, handler)
 

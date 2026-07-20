@@ -15,10 +15,11 @@ from __future__ import annotations
 import logging
 import os
 import warnings
-from typing import Any
+from typing import Any, cast
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
+from langgraph.runtime import Runtime
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -28,12 +29,14 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
 from .dashboard.team_settings import get_effective_gateway_enabled
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     BasePrepareRunMiddleware,
+    PrepareRunState,
     SanitizeToolInputsMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
@@ -131,10 +134,10 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
             "mode": configurable.get("analyzer_mode") if isinstance(configurable, dict) else None,
         }
 
-    async def _prepare(self, state: dict, runtime: object) -> dict:  # noqa: ARG002
+    async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         sandbox_backend = await ensure_sandbox_for_thread(self._thread_id)
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
-        configurable = self._config["configurable"]
+        configurable = self._config.get("configurable") or {}
         full_name = str(configurable.get("review_style_full_name") or "owner/repo")
         owner, _, name = full_name.partition("/")
         samples_text = str(configurable.get("review_style_samples_text") or "")
@@ -160,7 +163,8 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
 
 
 async def get_analyzer(config: RunnableConfig) -> Pregel:
-    thread_id = config["configurable"].get("thread_id")
+    configurable = config.get("configurable") or {}
+    thread_id = configurable.get("thread_id")
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
     if thread_id is None or not graph_loaded_for_execution(config):
@@ -188,16 +192,19 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
         tools=[save_review_style_prompt, read_finding_outcomes],
         backend=backend_factory,
         skills=[SKILLS_ROUTE],
-        middleware=[
-            PrepareAnalyzerRunMiddleware(thread_id=thread_id, config=config),
-            SanitizeToolInputsMiddleware(),
-            ModelCallLimitMiddleware(
-                run_limit=STYLE_ANALYZER_MODEL_CALL_LIMIT,
-                exit_behavior="end",
-            ),
-            ToolErrorMiddleware(),
-            TimeoutWrapupMiddleware(),
-        ],
+        middleware=cast(
+            list[AgentMiddleware[Any, Any, Any]],
+            [
+                PrepareAnalyzerRunMiddleware(thread_id=thread_id, config=config),
+                SanitizeToolInputsMiddleware(),
+                ModelCallLimitMiddleware(
+                    run_limit=STYLE_ANALYZER_MODEL_CALL_LIMIT,
+                    exit_behavior="end",
+                ),
+                ToolErrorMiddleware(),
+                TimeoutWrapupMiddleware(),
+            ],
+        ),
     ).with_config(config)
 
 
