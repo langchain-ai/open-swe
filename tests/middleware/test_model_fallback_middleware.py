@@ -50,6 +50,20 @@ def _anthropic_model_not_available_error() -> anthropic.BadRequestError:
     return anthropic.BadRequestError("model unavailable", response=response, body=body)
 
 
+def _gateway_policy_block_error() -> anthropic.APIStatusError:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx.Response(
+        403,
+        request=request,
+        json={"error": {"message": "request blocked by gateway policies: pol_abc123"}},
+    )
+    return anthropic.APIStatusError(
+        "request blocked by gateway policies: pol_abc123",
+        response=response,
+        body=response.json(),
+    )
+
+
 def _make_request() -> ModelRequest[None]:
     request = MagicMock()
     request.override = MagicMock(return_value=MagicMock(name="overridden_request"))
@@ -161,6 +175,22 @@ class TestModelFallbackMiddleware:
         assert isinstance(result, AIMessage)
         assert "selected Anthropic model is not available" in result.text
         assert "data retention enabled" in result.text
+
+    @pytest.mark.asyncio
+    async def test_async_surfaces_gateway_policy_block(self) -> None:
+        """Gateway-policy-block rejections surface a message instead of crashing the run."""
+        middleware = ModelFallbackMiddleware(MagicMock())
+        calls: list[object] = []
+
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
+            calls.append(req)
+            raise _gateway_policy_block_error()
+
+        result = await middleware.awrap_model_call(_make_request(), handler)
+
+        assert len(calls) == 1
+        assert isinstance(result, AIMessage)
+        assert "blocked by an LLM Gateway policy" in result.text
 
     @pytest.mark.asyncio
     async def test_async_retries_primary_after_fallback_failure(self) -> None:

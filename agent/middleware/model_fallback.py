@@ -99,6 +99,19 @@ def _nested_str(data: dict[str, Any], *keys: str) -> str | None:
 
 
 def _provider_access_error_message(exc: BaseException) -> str | None:
+    # Gateway policy blocks (spend/PII/secrets guard) are non-retryable 4xx
+    # rejections: retrying re-triggers the same policy, so surface them rather
+    # than routing through _should_fallback (which would re-raise into a crash).
+    if isinstance(exc, (anthropic.APIStatusError, openai.APIStatusError)):
+        text = str(exc)
+        if "blocked by gateway policies" in text:
+            return (
+                "This model request was blocked by an LLM Gateway policy "
+                "(spend, PII, or secrets guard). This is a policy/config issue, "
+                "not a problem with your task. Ask a workspace admin to review the "
+                f"gateway policy, then retrigger the run. Details: {text}"
+            )
+
     if isinstance(exc, anthropic.BadRequestError):
         body = _error_body(exc)
         error_code = _nested_str(body, "error", "details", "error_code")
