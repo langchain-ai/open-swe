@@ -92,6 +92,8 @@ jobs:
             FILE_LIST=$(echo "$CONFLICT_FILES" | sed 's/^/- `/' | sed 's/$/`/')
             BODY="Upstream merge has UNRESOLVED conflicts requiring manual review — rerere had no recorded resolution for these.
 
+            **⚠️ Do NOT squash and merge this PR** — use a regular merge commit so upstream history is preserved. Squashing breaks future syncs.
+
             **Conflicted files:**
             ${FILE_LIST}
 
@@ -102,5 +104,7 @@ jobs:
           else
             gh pr create --repo aeteq/open-swe --head sync-upstream --base main \
               --title "chore: sync with upstream" \
-              --body "Upstream merged cleanly (or auto-resolved via rerere)."
+              --body "Upstream merged cleanly (or auto-resolved via rerere).
+
+            **⚠️ Do NOT squash and merge this PR** — use a regular merge commit so upstream history is preserved. Squashing breaks future syncs."
           fi
