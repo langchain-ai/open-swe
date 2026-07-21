@@ -616,6 +616,46 @@ def _review_autofix_finding_detail(finding: Finding) -> str:
     return f"[{severity}] {file_path}:{line if isinstance(line, int) else '?'} — {title}: {description}"
 
 
+async def _verify_pr_head_is_local_branch(
+    *, owner: str, repo: str, pr_number: int, branch_name: str, token: str
+) -> None:
+    """Require the PR's head to be ``branch_name`` in ``owner/repo`` itself.
+
+    Branch names are only unique within one repository, so the thread-metadata
+    branch check in ``_thread_matches_review_pr`` is meaningful only when this
+    PR's head actually lives in the enrolled repository. A fork can carry any
+    branch name — including a copy of another thread's — so fork-headed PRs
+    never dispatch auto-fix (implementation threads always push their branches
+    to the enrolled repository). Raises on mismatch and on any fetch failure:
+    an unverifiable head fails closed.
+    """
+    from ..utils.github_http import GITHUB_API_BASE, github_client, github_request
+
+    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}"
+    async with github_client(token=token) as client:
+        response = await github_request(client, "GET", url)
+        response.raise_for_status()
+        payload = response.json()
+    head_raw = payload.get("head") if isinstance(payload, dict) else None
+    head: dict[str, Any] = head_raw if isinstance(head_raw, dict) else {}
+    repo_raw = head.get("repo")
+    head_repo: dict[str, Any] = repo_raw if isinstance(repo_raw, dict) else {}
+    head_repo_full_name = head_repo.get("full_name")
+    if not (
+        isinstance(head_repo_full_name, str)
+        and head_repo_full_name.lower() == f"{owner}/{repo}".lower()
+    ):
+        raise RuntimeError(
+            f"PR #{pr_number} head repo {head_repo_full_name!r} is not {owner}/{repo}; "
+            "refusing auto-fix dispatch for fork-headed pull requests"
+        )
+    if head.get("ref") != branch_name:
+        raise RuntimeError(
+            f"PR #{pr_number} head ref {head.get('ref')!r} does not match branch "
+            f"{branch_name!r}; refusing auto-fix dispatch"
+        )
+
+
 def _thread_matches_review_pr(
     thread: Mapping[str, Any], owner: str, repo: str, branch_name: str
 ) -> bool:
@@ -690,6 +730,9 @@ async def _maybe_dispatch_review_autofix(
             return
         if await is_pr_autofix_disabled(owner, repo, pr_number):
             return
+        await _verify_pr_head_is_local_branch(
+            owner=owner, repo=repo, pr_number=pr_number, branch_name=branch_name, token=token
+        )
         client = dispatch_client()
         implementation_thread_id, thread = await _resolve_review_autofix_thread(
             client, owner, repo, branch_name

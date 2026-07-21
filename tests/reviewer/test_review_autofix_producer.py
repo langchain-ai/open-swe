@@ -105,6 +105,15 @@ def _autofix_profile_enabled() -> Iterator[None]:
         yield
 
 
+@pytest.fixture(autouse=True)
+def _pr_head_verified() -> Iterator[None]:
+    with patch(
+        "agent.tools.publish_review._verify_pr_head_is_local_branch",
+        AsyncMock(return_value=None),
+    ):
+        yield
+
+
 @contextmanager
 def _autofix_dependencies(store: _Store) -> Iterator[None]:
     with (
@@ -416,6 +425,101 @@ async def test_review_autofix_cycle_read_failure_skips_dispatch() -> None:
     assert status_args is not None
     assert status_args.kwargs["title"] == "Auto-fix dispatch failed"
     assert status_args.kwargs["summary"].endswith(": RuntimeError")
+
+
+# Captured before the autouse fixture patches the module attribute.
+from agent.tools.publish_review import (  # noqa: E402
+    _verify_pr_head_is_local_branch as _real_verify_pr_head,
+)
+
+
+def _pr_payload(full_name: str, ref: str) -> dict[str, Any]:
+    return {"head": {"repo": {"full_name": full_name}, "ref": ref}}
+
+
+def _patched_pr_fetch(payload: dict[str, Any]):  # noqa: ANN202
+    from contextlib import asynccontextmanager
+
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.json = MagicMock(return_value=payload)
+
+    @asynccontextmanager
+    async def fake_client(**_kwargs: Any):  # noqa: ANN202
+        yield MagicMock()
+
+    return (
+        patch("agent.utils.github_http.github_client", fake_client),
+        patch("agent.utils.github_http.github_request", AsyncMock(return_value=response)),
+    )
+
+
+async def test_verify_pr_head_accepts_local_branch() -> None:
+    client_patch, request_patch = _patched_pr_fetch(_pr_payload("o/r", _BRANCH))
+    with client_patch, request_patch:
+        await _real_verify_pr_head(owner="o", repo="r", pr_number=7, branch_name=_BRANCH, token="t")
+
+
+async def test_verify_pr_head_rejects_fork_head() -> None:
+    # A fork can carry any branch name, including a copy of a victim thread's.
+    client_patch, request_patch = _patched_pr_fetch(_pr_payload("attacker/fork", _BRANCH))
+    with client_patch, request_patch:
+        with pytest.raises(RuntimeError, match="fork-headed"):
+            await _real_verify_pr_head(
+                owner="o", repo="r", pr_number=7, branch_name=_BRANCH, token="t"
+            )
+
+
+async def test_verify_pr_head_rejects_mismatched_ref() -> None:
+    client_patch, request_patch = _patched_pr_fetch(_pr_payload("o/r", "other-branch"))
+    with client_patch, request_patch:
+        with pytest.raises(RuntimeError, match="does not match branch"):
+            await _real_verify_pr_head(
+                owner="o", repo="r", pr_number=7, branch_name=_BRANCH, token="t"
+            )
+
+
+async def test_review_autofix_unverifiable_pr_head_skips_dispatch() -> None:
+    from agent.tools.publish_review import _maybe_dispatch_review_autofix
+
+    dispatch = AsyncMock()
+    status = AsyncMock(return_value=True)
+    with (
+        patch(
+            "agent.tools.publish_review.get_team_autofix_settings",
+            AsyncMock(return_value=(True, "medium")),
+        ),
+        patch(
+            "agent.tools.publish_review.is_review_repo_enabled",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "agent.tools.publish_review.is_pr_autofix_disabled",
+            AsyncMock(return_value=False),
+        ),
+        patch(
+            "agent.tools.publish_review._verify_pr_head_is_local_branch",
+            AsyncMock(side_effect=RuntimeError("head repo mismatch")),
+        ),
+        patch("agent.tools.publish_review.dispatch_client", return_value=_client()),
+        patch("agent.tools.publish_review.dispatch_agent_run", dispatch),
+        patch("agent.tools.publish_review.post_autofix_status_check", status),
+    ):
+        await _maybe_dispatch_review_autofix(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="head-sha",
+            branch_name=_BRANCH,
+            token="token",
+            surfaced_findings=[_finding()],
+        )
+
+    dispatch.assert_not_awaited()
+    status.assert_awaited_once()
+    status_args = status.await_args
+    assert status_args is not None
+    assert status_args.kwargs["title"] == "Auto-fix dispatch failed"
 
 
 def test_thread_match_rejects_forged_and_foreign_threads() -> None:
