@@ -13,7 +13,6 @@ import httpx
 from langchain_core.messages.content import create_text_block
 
 from agent.utils.json_types import as_json_object
-from agent.utils.langsmith import get_langsmith_trace_url
 
 from . import common
 
