@@ -788,6 +788,7 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
     post_review = AsyncMock()
     set_metadata = AsyncMock()
     resolve_threads = AsyncMock(return_value=1)
+    autofix = AsyncMock()
 
     with (
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
@@ -802,6 +803,7 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
             "agent.tools.publish_review._maybe_post_slack_completion_reply",
             new_callable=AsyncMock,
         ),
+        patch("agent.tools.publish_review._maybe_dispatch_review_autofix", autofix),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -822,6 +824,7 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
     assert result["surfaced_count"] == 0
     assert result["resolved_thread_count"] == 1
     assert result["skipped_empty_re_review"] is True
+    autofix.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

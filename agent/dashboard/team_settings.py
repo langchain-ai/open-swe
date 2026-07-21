@@ -43,6 +43,11 @@ class TeamSettingsUpdate(BaseModel):
     # Tri-state LLM Gateway toggle: True/False is authoritative, None inherits the
     # LANGSMITH_GATEWAY_ENABLED deployment default.
     gateway_enabled: bool | None = None
+    # Review auto-fix opt-in. Tri-state like gateway_enabled: None preserves the
+    # stored value, so a client that doesn't render these fields cannot silently
+    # erase the opt-in by saving unrelated settings.
+    autofix_enabled: bool | None = None
+    autofix_severity_threshold: Literal["low", "medium", "high", "critical"] | None = None
     fable_enabled: bool = False
     review_tracing_project: str | None = None
     org_guidelines: str | None = None
@@ -246,6 +251,8 @@ def _default_settings() -> dict[str, Any]:
         "pr_summaries": True,
         "review_trace_links": True,
         "gateway_enabled": None,
+        "autofix_enabled": False,
+        "autofix_severity_threshold": "medium",
         "fable_enabled": False,
         "review_tracing_project": None,
         "org_guidelines": None,
@@ -269,18 +276,19 @@ def _default_settings() -> dict[str, Any]:
     }
 
 
-async def get_team_settings() -> dict[str, Any]:
-    defaults = _default_settings()
+async def _get_stored_team_settings() -> dict[str, Any]:
     try:
         item = await _client().store.get_item(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY)
     except Exception as e:
         logger.debug("team settings lookup failed: %s", e)
-        return defaults
-    if item is None:
-        return defaults
+        return {}
     value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    if not isinstance(value, dict):
-        return defaults
+    return value if isinstance(value, dict) else {}
+
+
+async def get_team_settings() -> dict[str, Any]:
+    defaults = _default_settings()
+    value = await _get_stored_team_settings()
     # Skip None-valued model fields so legacy records (or PUTs that cleared the
     # selection) still surface the hardcoded default instead of a null.
     overlay = {k: v for k, v in value.items() if v is not None}
@@ -297,11 +305,24 @@ async def get_team_settings() -> dict[str, Any]:
 
 
 async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
+    stored = await _get_stored_team_settings()
     value: dict[str, Any] = {
         "review_draft_prs": update.review_draft_prs,
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
         "gateway_enabled": update.gateway_enabled,
+        # None preserves the stored opt-in: saving unrelated settings from a
+        # client that doesn't send these fields must not disable auto-fix.
+        "autofix_enabled": (
+            update.autofix_enabled
+            if update.autofix_enabled is not None
+            else stored.get("autofix_enabled")
+        ),
+        "autofix_severity_threshold": (
+            update.autofix_severity_threshold
+            if update.autofix_severity_threshold is not None
+            else stored.get("autofix_severity_threshold")
+        ),
         "fable_enabled": update.fable_enabled,
         "review_tracing_project": update.review_tracing_project,
         "org_guidelines": update.org_guidelines,
@@ -415,6 +436,15 @@ async def get_team_default_grouping_model() -> tuple[str, str]:
         settings.get("default_reviewer_subagent_model"),
         settings.get("default_reviewer_subagent_reasoning_effort"),
     )
+
+
+async def get_team_autofix_settings() -> tuple[bool, str]:
+    """Return the review auto-fix enabled flag and severity threshold."""
+    settings = await get_team_settings()
+    threshold = settings.get("autofix_severity_threshold")
+    if threshold not in ("low", "medium", "high", "critical"):
+        threshold = "medium"
+    return settings.get("autofix_enabled") is True, threshold
 
 
 async def get_team_review_trace_links_enabled() -> bool:

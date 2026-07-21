@@ -2,17 +2,31 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Annotated, Any
 
-from langgraph.config import get_config
+from langgraph.config import get_config, get_store
 from langgraph.prebuilt import InjectedState
 
-from ..dashboard.team_settings import get_team_review_trace_links_enabled
+from ..dashboard.agent_overrides import load_profile
+from ..dashboard.autofix_state import (
+    get_pr_autofix_cycle_count,
+    is_pr_autofix_disabled,
+    set_pr_autofix_cycle_count,
+)
+from ..dashboard.enabled_repos import is_review_repo_enabled
+from ..dashboard.team_settings import (
+    get_team_autofix_settings,
+    get_team_review_trace_links_enabled,
+)
+from ..dispatch import dispatch_agent_run, dispatch_client
 from ..review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from ..review.findings import (
+    DEFAULT_FINDING_TITLE,
     REVIEW_FINDING_CAP,
     REVIEWER_EVAL_PUBLICATION_KEY,
+    REVIEWER_THREAD_KIND,
     SEVERITY_ORDER,
     Finding,
     ReviewerThreadMissingError,
@@ -47,8 +61,13 @@ from ..review.publish import (
     settle_review_check_run,
 )
 from ..review.reconcile import reconcile_findings_with_review_threads
-from ..utils.dashboard_links import dashboard_review_url
-from ..utils.github_checks import review_check_blocking_enabled, review_check_conclusion
+from ..utils.dashboard_links import dashboard_review_url, dashboard_thread_url
+from ..utils.github_checks import (
+    post_autofix_status_check,
+    review_check_blocking_enabled,
+    review_check_conclusion,
+)
+from ..utils.github_comments import get_thread_id_from_branch
 from ..utils.github_token import (
     GitHubAuthError,
     get_github_token,
@@ -57,6 +76,11 @@ from ..utils.github_token import (
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack import post_slack_thread_reply
 from ..utils.tracing import REVIEW_TRACING_PROJECT
+
+logger = logging.getLogger(__name__)
+
+_AUTOFIX_MAX_CYCLES = 2
+_AUTOFIX_NUDGE = "Process the pending Open SWE review auto-fix event for this pull request."
 
 
 async def publish_review(
@@ -109,6 +133,8 @@ async def publish_review(
     pr_number = configurable.get("pr_number")
     head_sha = configurable.get("head_sha")
     is_re_review = bool(configurable.get("re_review"))
+    raw_branch_name = configurable.get("branch_name")
+    branch_name = raw_branch_name if isinstance(raw_branch_name, str) else ""
 
     if (
         not isinstance(repo_config, dict)
@@ -156,6 +182,7 @@ async def publish_review(
             severity_threshold=_cast_severity(severity_threshold),
             cap=REVIEW_FINDING_CAP,
             is_re_review=is_re_review,
+            branch_name=branch_name,
             langgraph_run_id=_current_run_id(config),
             trace_link_config_override=configurable.get("review_trace_link_enabled"),
             state=state,
@@ -268,6 +295,7 @@ async def _publish_review_async(
     severity_threshold: Severity,
     cap: int,
     is_re_review: bool,
+    branch_name: str = "",
     langgraph_run_id: str | None = None,
     trace_link_config_override: object = None,
     state: dict[str, Any] | None = None,
@@ -552,6 +580,16 @@ async def _publish_review_async(
         title=check_title,
         summary=check_summary,
     )
+    if review_id is not None and eligible_with_payload:
+        await _maybe_dispatch_review_autofix(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            branch_name=branch_name,
+            token=token,
+            surfaced_findings=[finding for finding, _payload in eligible_with_payload],
+        )
 
     result: dict[str, Any] = {
         "success": True,
@@ -567,6 +605,200 @@ async def _publish_review_async(
             "call update_finding to fix or resolve them."
         )
     return result
+
+
+def _review_autofix_finding_detail(finding: Finding) -> str:
+    severity = str(finding.get("severity") or "medium").upper()
+    file_path = str(finding.get("file") or "unknown file")
+    line = finding.get("end_line")
+    title = str(finding.get("title") or DEFAULT_FINDING_TITLE)
+    description = str(finding.get("description") or "").strip()
+    return f"[{severity}] {file_path}:{line if isinstance(line, int) else '?'} — {title}: {description}"
+
+
+def _thread_matches_review_pr(
+    thread: Mapping[str, Any], owner: str, repo: str, branch_name: str
+) -> bool:
+    """Reject threads that did not produce this PR's branch.
+
+    Agent thread UUIDs are embedded in branch names, and branch names are
+    author-controlled, so the UUID alone must never select a dispatch target:
+    the resolved thread's own persisted metadata has to point back at the same
+    branch (and repository, when the thread recorded one).
+    """
+    metadata = thread.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return False
+    if metadata.get("kind") == REVIEWER_THREAD_KIND:
+        return False
+    if metadata.get("branch_name") != branch_name:
+        return False
+    repo_config = metadata.get("repo")
+    if isinstance(repo_config, Mapping) and (
+        str(repo_config.get("owner", "")).lower() != owner.lower()
+        or str(repo_config.get("name", "")).lower() != repo.lower()
+    ):
+        return False
+    return True
+
+
+async def _resolve_review_autofix_thread(
+    client: Any, owner: str, repo: str, branch_name: str
+) -> tuple[str, dict[str, Any]]:
+    thread_id = get_thread_id_from_branch(branch_name)
+    if thread_id:
+        thread = await client.threads.get(thread_id)
+        if not _thread_matches_review_pr(thread, owner, repo, branch_name):
+            raise RuntimeError(
+                f"thread {thread_id} does not match {owner}/{repo} branch {branch_name!r}; "
+                "refusing auto-fix dispatch"
+            )
+        return thread_id, thread
+    threads = await client.threads.search(metadata={"branch_name": branch_name}, limit=10)
+    for thread in threads:
+        if _thread_matches_review_pr(thread, owner, repo, branch_name):
+            return thread["thread_id"], thread
+    raise RuntimeError(f"could not resolve implementation thread from branch {branch_name!r}")
+
+
+async def _maybe_dispatch_review_autofix(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    branch_name: str,
+    token: str,
+    surfaced_findings: list[Finding],
+) -> None:
+    enabled, threshold = await get_team_autofix_settings()
+    if not enabled:
+        return
+    severity_rank = SEVERITY_ORDER[_cast_severity(threshold)]
+    qualifying_findings = [
+        finding
+        for finding in surfaced_findings
+        if SEVERITY_ORDER.get(finding.get("severity", "low"), 0) >= severity_rank
+    ]
+    if not qualifying_findings:
+        return
+
+    implementation_thread_id: str | None = None
+    pr_url = f"https://github.com/{owner}/{repo}/pull/{pr_number}"
+    try:
+        if not await is_review_repo_enabled(owner, repo):
+            return
+        if await is_pr_autofix_disabled(owner, repo, pr_number):
+            return
+        client = dispatch_client()
+        implementation_thread_id, thread = await _resolve_review_autofix_thread(
+            client, owner, repo, branch_name
+        )
+        metadata = thread["metadata"]
+        github_login = metadata.get("github_login")
+        if github_login:
+            profile = await load_profile(github_login)
+            if isinstance(profile, dict) and profile.get("auto_fix_ci") is False:
+                return
+        source = metadata.get("source")
+        if not source:
+            raise RuntimeError(
+                f"implementation thread {implementation_thread_id} has no source metadata"
+            )
+        configurable: dict[str, Any] = {
+            "thread_id": implementation_thread_id,
+            "source": source,
+            "repo": {"owner": owner, "name": repo},
+            "pr_number": pr_number,
+            "pr_url": pr_url,
+            "head_sha": head_sha,
+        }
+        for metadata_key, configurable_key in (
+            ("github_login", "github_login"),
+            ("triggering_user_email", "user_email"),
+        ):
+            value = metadata.get(metadata_key)
+            if value is not None:
+                configurable[configurable_key] = value
+        source_context = metadata.get("source_context")
+        if isinstance(source_context, dict):
+            for key in ("slack_thread", "linear_issue", "github_issue"):
+                value = source_context.get(key)
+                if isinstance(value, dict):
+                    configurable[key] = value
+
+        cycle_count = await get_pr_autofix_cycle_count(owner, repo, pr_number)
+        if cycle_count >= _AUTOFIX_MAX_CYCLES:
+            await post_autofix_status_check(
+                owner=owner,
+                repo=repo,
+                head_sha=head_sha,
+                token=token,
+                title="Auto-fix cycle limit reached",
+                summary=(
+                    "Open SWE did not dispatch another fix run because this pull request "
+                    f"has reached the {_AUTOFIX_MAX_CYCLES}-cycle limit."
+                ),
+                details_url=dashboard_thread_url(implementation_thread_id),
+            )
+            return
+
+        details = [
+            f"PR: {pr_url}",
+            f"Head SHA: {head_sha}",
+            *[_review_autofix_finding_detail(finding) for finding in qualifying_findings],
+        ]
+        store = get_store()
+        pending_namespace = ("autofix", implementation_thread_id)
+        await store.aput(
+            pending_namespace,
+            "pending_event",
+            {"reason": "Open SWE Review surfaced findings for auto-fix.", "details": details},
+        )
+        next_cycle = cycle_count + 1
+        try:
+            await dispatch_agent_run(
+                implementation_thread_id,
+                _AUTOFIX_NUDGE,
+                configurable,
+                source="review_autofix",
+                client=client,
+            )
+        except BaseException:
+            # Accepted runs may outlive cancellation; pending_event is best-effort PR context.
+            await store.adelete(pending_namespace, "pending_event")
+            raise
+        # Deliberate ordering: count the cycle only after dispatch succeeds, so a
+        # transient dispatch failure never burns the small cycle budget. The
+        # opposite race (dispatch accepted, count write fails) at worst allows one
+        # extra cycle, and while the store is down later publishes fail closed on
+        # the cycle read anyway.
+        await set_pr_autofix_cycle_count(owner, repo, pr_number, next_cycle)
+        await post_autofix_status_check(
+            owner=owner,
+            repo=repo,
+            head_sha=head_sha,
+            token=token,
+            title=f"Auto-fix cycle {next_cycle} dispatched",
+            summary=(
+                f"Open SWE dispatched auto-fix cycle {next_cycle} of {_AUTOFIX_MAX_CYCLES} "
+                f"for {len(qualifying_findings)} newly surfaced review finding(s)."
+            ),
+            details_url=dashboard_thread_url(implementation_thread_id),
+        )
+    except Exception as exc:
+        logger.exception("Review auto-fix producer failed for %s/%s#%s", owner, repo, pr_number)
+        await post_autofix_status_check(
+            owner=owner,
+            repo=repo,
+            head_sha=head_sha,
+            token=token,
+            title="Auto-fix dispatch failed",
+            summary=f"Open SWE could not dispatch auto-fix for {pr_url}: {type(exc).__name__}",
+            details_url=(
+                dashboard_thread_url(implementation_thread_id) if implementation_thread_id else None
+            ),
+        )
 
 
 async def _open_swe_already_reviewed(
