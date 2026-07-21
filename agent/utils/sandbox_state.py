@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 
 from deepagents.backends.protocol import (
     EditResult,
+    ExecuteOffloadResult,
     ExecuteResponse,
     FileDownloadResponse,
     FileUploadResponse,
@@ -17,7 +18,9 @@ from deepagents.backends.protocol import (
     ReadResult,
     SandboxBackendProtocol,
     WriteResult,
+    execute_accepts_timeout,
 )
+from deepagents.backends.sandbox import BaseSandbox
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
@@ -26,8 +29,15 @@ from .sandbox import create_sandbox
 logger = logging.getLogger(__name__)
 
 
-class SandboxBackendProxy(SandboxBackendProtocol):
-    """Stable per-thread backend handle whose target can be replaced."""
+class SandboxBackendProxy(BaseSandbox):
+    """Stable per-thread backend handle whose target can be replaced.
+
+    Subclasses ``BaseSandbox`` (not just the protocol) so ``FilesystemMiddleware``
+    recognizes it as capture-at-source capable: its ``_resolve_capture`` gates the
+    ``execute`` offload path on ``isinstance(backend, BaseSandbox)``. Without this
+    the tool falls back to plain ``execute`` and the command's entire stdout is
+    pulled into the worker process, bypassing the in-sandbox size cap.
+    """
 
     def __init__(
         self,
@@ -179,6 +189,70 @@ class SandboxBackendProxy(SandboxBackendProtocol):
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         return await (await self._aget_backend()).aexecute(command, timeout=timeout)
+
+    def execute_with_offload(
+        self,
+        command: str,
+        capture_path: str,
+        *,
+        max_inline_bytes: int,
+        max_capture_bytes: int | None = None,
+        timeout: int | None = None,
+    ) -> ExecuteOffloadResult:
+        # Delegate to the live backend so each provider's own capture-offload
+        # behavior (enable_capture_offload, shell wrapper) is honored.
+        backend = self._get_backend()
+        offload = getattr(backend, "execute_with_offload", None)
+        if offload is None:
+            return ExecuteOffloadResult(
+                offloaded=False, response=self._plain(backend, command, timeout)
+            )
+        return offload(
+            command,
+            capture_path,
+            max_inline_bytes=max_inline_bytes,
+            max_capture_bytes=max_capture_bytes,
+            timeout=timeout,
+        )
+
+    async def aexecute_with_offload(
+        self,
+        command: str,
+        capture_path: str,
+        *,
+        max_inline_bytes: int,
+        max_capture_bytes: int | None = None,
+        timeout: int | None = None,  # noqa: ASYNC109 - forwarded to backend, not an asyncio contract
+    ) -> ExecuteOffloadResult:
+        backend = await self._aget_backend()
+        offload = getattr(backend, "aexecute_with_offload", None)
+        if offload is None:
+            return ExecuteOffloadResult(
+                offloaded=False, response=await self._aplain(backend, command, timeout)
+            )
+        return await offload(
+            command,
+            capture_path,
+            max_inline_bytes=max_inline_bytes,
+            max_capture_bytes=max_capture_bytes,
+            timeout=timeout,
+        )
+
+    @staticmethod
+    def _plain(
+        backend: SandboxBackendProtocol, command: str, timeout: int | None
+    ) -> ExecuteResponse:
+        if timeout is not None and execute_accepts_timeout(type(backend)):
+            return backend.execute(command, timeout=timeout)
+        return backend.execute(command)
+
+    @staticmethod
+    async def _aplain(
+        backend: SandboxBackendProtocol, command: str, timeout: int | None
+    ) -> ExecuteResponse:
+        if timeout is not None and execute_accepts_timeout(type(backend)):
+            return await backend.aexecute(command, timeout=timeout)
+        return await backend.aexecute(command)
 
 
 # Thread ID -> stable SandboxBackendProxy, shared between server.py and middleware.
