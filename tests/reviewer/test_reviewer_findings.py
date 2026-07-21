@@ -436,3 +436,65 @@ async def test_set_reviewer_thread_metadata_raises_domain_error_when_thread_miss
     with patch("agent.review.findings.get_client", return_value=fake_client):
         with pytest.raises(ReviewerThreadMissingError):
             await set_reviewer_thread_metadata("tid", last_reviewed_sha="sha")
+
+
+@pytest.mark.asyncio
+async def test_append_finding_succeeds_after_transient_missing_thread_repair() -> None:
+    """A missing reviewer thread is recreated from the current run and the
+    finding still persists — no do-not-retry blocker is raised."""
+    fake_client = AsyncMock()
+    fake_client.threads.get.side_effect = [_not_found(), {"metadata": {"kind": "reviewer"}}]
+
+    with (
+        patch("agent.review.findings.get_client", return_value=fake_client),
+        patch("agent.review.findings.get_thread_id_from_runtime", return_value="tid"),
+    ):
+        result = await append_finding("tid", _f(id="f_new"))
+
+    assert result["created"] is True
+    assert result["finding"]["id"] == "f_new"
+    fake_client.threads.create.assert_awaited_once()
+    fake_client.threads.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_replace_findings_preserves_concurrent_findings_on_repair() -> None:
+    """A thread recreated concurrently keeps its own findings; repair must not
+    clobber them with a blind overwrite."""
+    concurrent = _f(id="f_concurrent")
+    fake_client = AsyncMock()
+    fake_client.threads.update.side_effect = [_not_found("PATCH"), None]
+    fake_client.threads.get.side_effect = [
+        {"metadata": {}},
+        {"metadata": {"findings": [concurrent]}},
+    ]
+
+    with (
+        patch("agent.review.findings.get_client", return_value=fake_client),
+        patch("agent.review.findings.get_thread_id_from_runtime", return_value="tid"),
+    ):
+        await replace_findings("tid", [_f(id="f_a")])
+
+    # Only the failed update was attempted; the concurrent findings were left intact.
+    assert fake_client.threads.update.await_count == 1
+    fake_client.threads.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_unrecoverable_missing_storage_raises_clear_blocker() -> None:
+    """When the runtime is not bound to the missing thread, repair is impossible
+    and the domain error surfaces so the tool wrapper returns a blocker."""
+    from agent.review.findings import ReviewerThreadMissingError
+
+    fake_client = AsyncMock()
+    fake_client.threads.get.side_effect = _not_found()
+
+    with (
+        patch("agent.review.findings.get_client", return_value=fake_client),
+        patch("agent.review.findings.get_thread_id_from_runtime", return_value="other"),
+    ):
+        with pytest.raises(ReviewerThreadMissingError) as excinfo:
+            await append_finding("tid", _f(id="f_new"))
+
+    assert excinfo.value.thread_id == "tid"
+    fake_client.threads.create.assert_not_called()

@@ -353,9 +353,49 @@ async def _get_thread_metadata_strict(thread_id: str) -> dict[str, Any]:
     try:
         thread = await client.threads.get(thread_id)
     except LangGraphSDKNotFoundError as exc:
+        repaired = await _repair_missing_reviewer_thread(thread_id)
+        if repaired is not None:
+            return repaired
         raise ReviewerThreadMissingError(thread_id, exc) from exc
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     return metadata if isinstance(metadata, dict) else {}
+
+
+async def _repair_missing_reviewer_thread(
+    thread_id: str,
+    *,
+    findings: list[Finding] | None = None,
+) -> dict[str, Any] | None:
+    """Recreate reviewer thread metadata for a missing thread, or return ``None``.
+
+    Only attempts a repair when the current LangGraph runtime is bound to this
+    same ``thread_id`` — otherwise we'd be inventing storage for an unrelated
+    thread. Uses ``if_exists="do_nothing"`` so a thread recreated concurrently
+    keeps its findings instead of being overwritten, then re-reads whatever
+    metadata now exists so an existing findings list is preserved.
+    """
+    try:
+        if get_thread_id_from_runtime() != thread_id:
+            return None
+    except RuntimeError:
+        return None
+
+    client = get_client()
+    metadata: dict[str, Any] = {"kind": REVIEWER_THREAD_KIND}
+    if findings is not None:
+        metadata["findings"] = findings
+    try:
+        await client.threads.create(
+            thread_id=thread_id,
+            metadata=metadata,
+            if_exists="do_nothing",
+        )
+        thread = await client.threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to repair missing reviewer thread %s", thread_id)
+        return None
+    repaired = thread.get("metadata") if isinstance(thread, dict) else None
+    return repaired if isinstance(repaired, dict) else {}
 
 
 async def resolve_review_head_sha(thread_id: str, configurable: dict[str, Any]) -> str:
@@ -407,7 +447,13 @@ async def _replace_findings_unlocked(thread_id: str, findings: list[Finding]) ->
     try:
         await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
     except LangGraphSDKNotFoundError as exc:
-        raise ReviewerThreadMissingError(thread_id, exc) from exc
+        repaired = await _repair_missing_reviewer_thread(thread_id, findings=findings)
+        if repaired is None:
+            raise ReviewerThreadMissingError(thread_id, exc) from exc
+        # A thread recreated concurrently keeps its own findings; only fill an
+        # empty list so we never clobber a concurrent update.
+        if not _coerce_findings_list(repaired.get("findings")):
+            await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
 
 
 def thread_missing_tool_result(exc: ReviewerThreadMissingError) -> dict[str, Any]:

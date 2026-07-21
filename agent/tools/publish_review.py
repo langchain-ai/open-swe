@@ -18,6 +18,7 @@ from ..review.findings import (
     ReviewerThreadMissingError,
     Severity,
     _coerce_surface,
+    _repair_missing_reviewer_thread,
     filter_findings_for_publish,
     get_thread_id_from_runtime,
     get_thread_last_reviewed_sha,
@@ -146,22 +147,23 @@ async def publish_review(
     if not token:
         return {"success": False, "error": "No GitHub token available"}
 
+    publish_kwargs: dict[str, Any] = {
+        "owner": str(repo_config["owner"]),
+        "repo": str(repo_config["name"]),
+        "pr_number": pr_number,
+        "head_sha": head_sha,
+        "token": token,
+        "severity_threshold": _cast_severity(severity_threshold),
+        "cap": REVIEW_FINDING_CAP,
+        "is_re_review": is_re_review,
+        "langgraph_run_id": _current_run_id(config),
+        "trace_link_config_override": configurable.get("review_trace_link_enabled"),
+        "state": state,
+    }
     try:
-        return await _publish_review_async(
-            owner=str(repo_config["owner"]),
-            repo=str(repo_config["name"]),
-            pr_number=pr_number,
-            head_sha=head_sha,
-            token=token,
-            severity_threshold=_cast_severity(severity_threshold),
-            cap=REVIEW_FINDING_CAP,
-            is_re_review=is_re_review,
-            langgraph_run_id=_current_run_id(config),
-            trace_link_config_override=configurable.get("review_trace_link_enabled"),
-            state=state,
-        )
+        return await _publish_review_async(**publish_kwargs)
     except ReviewerThreadMissingError as exc:
-        return thread_missing_tool_result(exc)
+        return await _publish_from_current_run_fallback_or_blocker(exc, publish_kwargs)
     except GitHubAuthError as exc:
         thread_id = get_thread_id_from_runtime()
         if thread_id:
@@ -178,6 +180,26 @@ async def publish_review(
 
 def _cast_severity(value: str) -> Severity:
     return value  # type: ignore[return-value]
+
+
+async def _publish_from_current_run_fallback_or_blocker(
+    exc: ReviewerThreadMissingError,
+    publish_kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Repair missing findings storage and re-publish, else return the blocker.
+
+    When findings storage reports ``thread_not_found`` we first try to rehydrate
+    the reviewer thread from the current run so any findings accumulated this run
+    can still reach GitHub. Only when both the repair and a re-publish fail do we
+    fall back to the do-not-retry ``thread_not_found`` result.
+    """
+    thread_id = get_thread_id_from_runtime()
+    if not thread_id or await _repair_missing_reviewer_thread(thread_id) is None:
+        return thread_missing_tool_result(exc)
+    try:
+        return await _publish_review_async(**publish_kwargs)
+    except ReviewerThreadMissingError as retry_exc:
+        return thread_missing_tool_result(retry_exc)
 
 
 async def _resolve_review_trace_url(thread_id: str, config_override: object) -> str | None:

@@ -2299,6 +2299,11 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
             },
         ),
         patch("agent.tools.publish_review.get_github_token", return_value="token"),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review._repair_missing_reviewer_thread",
+            AsyncMock(return_value=None),
+        ),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
     ):
         result = await publish_review()
@@ -2307,3 +2312,47 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
     assert result["error"] == "thread_not_found"
     assert result["thread_id"] == "tid"
     assert "Do not retry" in result["note"]
+    # Unrecoverable storage must not loop: publish is attempted exactly once.
+    assert publish_async.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_review_surfaces_current_run_findings_after_repair() -> None:
+    """When findings storage reports thread_not_found but the thread can be
+    rehydrated from the current run, publish_review still surfaces findings."""
+    from agent.review.findings import ReviewerThreadMissingError
+    from agent.tools.publish_review import publish_review
+
+    publish_async = AsyncMock(
+        side_effect=[
+            ReviewerThreadMissingError("tid", RuntimeError("thread tid not found")),
+            {"success": True, "review_id": 321, "surfaced_count": 1},
+        ]
+    )
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "thread_id": "tid",
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "sha",
+                },
+                "metadata": {},
+            },
+        ),
+        patch("agent.tools.publish_review.get_github_token", return_value="token"),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review._repair_missing_reviewer_thread",
+            AsyncMock(return_value={"kind": "reviewer"}),
+        ),
+        patch("agent.tools.publish_review._publish_review_async", publish_async),
+    ):
+        result = await publish_review()
+
+    assert result["success"] is True
+    assert result["review_id"] == 321
+    assert result["surfaced_count"] == 1
+    assert publish_async.await_count == 2
