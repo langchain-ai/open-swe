@@ -60,6 +60,165 @@ async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_reviewer_error_settles_tracked_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    metadata = {
+        "kind": "reviewer",
+        "review_check_run_id": 42,
+        "pr": {"owner": "acme", "name": "widgets"},
+        "source": "schedule",
+    }
+    client = _FakeClient(metadata)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        completion, "get_github_app_installation_token", AsyncMock(return_value="token")
+    )
+    settle = AsyncMock()
+    monkeypatch.setattr(completion, "settle_review_check_run", settle)
+
+    result = await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error"}
+    )
+
+    assert result["status"] == "ignored"
+    settle.assert_awaited_once_with(
+        thread_id="t1",
+        owner="acme",
+        repo="widgets",
+        token="token",
+        conclusion="neutral",
+        title="Review did not complete",
+        summary=(
+            "The Open SWE review run ended without publishing a review. "
+            "Re-trigger the review by pushing a commit or re-requesting it."
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_reviewer_error_preserves_pending_check_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "kind": "reviewer",
+        "review_check_run_id": 42,
+        "review_check_pending_result": {
+            "conclusion": "success",
+            "title": "Found 1 potential issue",
+            "summary": "Open SWE surfaced 1 potential issue.",
+        },
+        "pr": {"owner": "acme", "name": "widgets"},
+        "source": "schedule",
+    }
+    client = _FakeClient(metadata)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        completion, "get_github_app_installation_token", AsyncMock(return_value="token")
+    )
+    settle = AsyncMock()
+    monkeypatch.setattr(completion, "settle_review_check_run", settle)
+
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error"}
+    )
+
+    settle.assert_awaited_once_with(
+        thread_id="t1",
+        owner="acme",
+        repo="widgets",
+        token="token",
+        conclusion="success",
+        title="Found 1 potential issue",
+        summary="Open SWE surfaced 1 potential issue.",
+    )
+
+
+@pytest.mark.asyncio
+async def test_ordinary_agent_error_does_not_settle_review_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = _slack_metadata()
+    metadata["review_check_run_id"] = 42
+    client = _FakeClient(metadata)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", AsyncMock(return_value=True))
+    token = AsyncMock(return_value="token")
+    settle = AsyncMock()
+    monkeypatch.setattr(completion, "get_github_app_installation_token", token)
+    monkeypatch.setattr(completion, "settle_review_check_run", settle)
+
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error"}
+    )
+
+    token.assert_not_awaited()
+    settle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata, token",
+    [
+        ({"kind": "reviewer", "pr": {"owner": "acme", "name": "widgets"}}, "token"),
+        ({"kind": "reviewer", "review_check_run_id": 42}, "token"),
+        (
+            {
+                "kind": "reviewer",
+                "review_check_run_id": 42,
+                "pr": {"owner": "acme", "name": "widgets"},
+            },
+            None,
+        ),
+    ],
+)
+async def test_reviewer_cleanup_skips_missing_metadata_or_token(
+    monkeypatch: pytest.MonkeyPatch,
+    metadata: dict[str, Any],
+    token: str | None,
+) -> None:
+    client = _FakeClient(metadata | {"source": "schedule"})
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        completion, "get_github_app_installation_token", AsyncMock(return_value=token)
+    )
+    settle = AsyncMock()
+    monkeypatch.setattr(completion, "settle_review_check_run", settle)
+
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "timeout"}
+    )
+
+    settle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = _slack_metadata() | {
+        "kind": "reviewer",
+        "review_check_run_id": 42,
+        "pr": {"owner": "acme", "name": "widgets"},
+    }
+    client = _FakeClient(metadata)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        completion, "get_github_app_installation_token", AsyncMock(return_value="token")
+    )
+    monkeypatch.setattr(
+        completion, "settle_review_check_run", AsyncMock(side_effect=RuntimeError("boom"))
+    )
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+
+    result = await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error"}
+    )
+
+    assert result["status"] == "ok"
+    reply.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_schedule_source_with_slack_context_posts_failure_reply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

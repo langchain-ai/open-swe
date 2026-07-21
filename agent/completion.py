@@ -19,6 +19,8 @@ import logging
 import os
 from typing import Any
 
+from .review.findings import REVIEWER_THREAD_KIND
+from .review.publish import settle_review_check_run
 from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import post_github_comment
@@ -76,6 +78,55 @@ def _failure_text(status: str, dashboard_url: str | None = None) -> str:
     if dashboard_url:
         text += f" You can view the error in <{dashboard_url}|Open SWE Web>."
     return text
+
+
+async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]) -> None:
+    """Best-effort cleanup for reviewer checks left open by graph failures."""
+    if metadata.get("kind") != REVIEWER_THREAD_KIND:
+        return
+    if not isinstance(metadata.get("review_check_run_id"), int):
+        return
+    pr = metadata.get("pr")
+    if not isinstance(pr, dict):
+        return
+    owner = pr.get("owner")
+    repo = pr.get("name")
+    if not isinstance(owner, str) or not owner or not isinstance(repo, str) or not repo:
+        return
+    try:
+        token = await get_github_app_installation_token()
+        if not token:
+            logger.warning("run-complete: no GitHub token to settle review check for %s", thread_id)
+            return
+        pending = metadata.get("review_check_pending_result")
+        if isinstance(pending, dict) and pending.get("conclusion") in {
+            "success",
+            "neutral",
+            "failure",
+        }:
+            conclusion = pending["conclusion"]
+            title = str(pending.get("title") or "Review completed")
+            summary = str(pending.get("summary") or "")
+        else:
+            conclusion = "neutral"
+            title = "Review did not complete"
+            summary = (
+                "The Open SWE review run ended without publishing a review. "
+                "Re-trigger the review by pushing a commit or re-requesting it."
+            )
+        await settle_review_check_run(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            token=token,
+            conclusion=conclusion,
+            title=title,
+            summary=summary,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "run-complete: could not settle review check for %s", thread_id, exc_info=True
+        )
 
 
 async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: str) -> bool:
@@ -164,6 +215,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
+    await _settle_failed_reviewer_check(thread_id, metadata)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.
