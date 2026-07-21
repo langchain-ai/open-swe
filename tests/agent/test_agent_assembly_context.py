@@ -15,6 +15,7 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent.server import get_agent
+from agent.utils.repo_prep import PreparedRepoSkills
 
 
 class _DummyAgent:
@@ -59,6 +60,19 @@ async def _capture_create_deep_agent_kwargs() -> dict[str, object]:
             return_value="/workspace",
         ),
         patch(
+            "agent.server._resolve_prompt_default_repo",
+            new_callable=AsyncMock,
+            return_value={"owner": "acme", "name": "widget"},
+        ),
+        patch(
+            "agent.server.prepare_main_agent_repo_skills",
+            new_callable=AsyncMock,
+            return_value=PreparedRepoSkills(
+                trusted_ref="a" * 40,
+                sources=("/workspace/.agent-skills/acme/widget/.agents/skills/",),
+            ),
+        ),
+        patch(
             "agent.server.get_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
@@ -80,6 +94,23 @@ async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() ->
     # The backend is what enables deepagents' auto-wired FilesystemMiddleware
     # eviction + SummarizationMiddleware offloading.
     assert callable(captured["backend"])
+
+
+@pytest.mark.asyncio
+async def test_agent_and_general_purpose_subagent_share_repo_skills() -> None:
+    captured = await _capture_create_deep_agent_kwargs()
+    expected = ["/workspace/.agent-skills/acme/widget/.agents/skills/"]
+
+    assert captured["skills"] == expected
+    subagents = captured["subagents"]
+    assert isinstance(subagents, list)
+    general_purpose = next(
+        subagent for subagent in subagents if subagent["name"] == "general-purpose"
+    )
+    assert general_purpose["skills"] == expected
+    browser = next((subagent for subagent in subagents if subagent["name"] == "browser"), None)
+    if browser is not None:
+        assert "skills" not in browser
 
 
 @pytest.mark.asyncio

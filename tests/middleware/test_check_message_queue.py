@@ -59,7 +59,36 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
     assert message["role"] == "user"
     assert DASHBOARD_HANDOFF_MARKER in message["content"][0]["text"]
     assert message["content"][1] == {"type": "text", "text": "continue in web"}
+    assert result["plan_approval_blocked"] is True
     assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
+
+
+@pytest.mark.asyncio
+async def test_check_message_queue_allows_owner_dashboard_approval() -> None:
+    store = _FakeStore(
+        {
+            (("queue", "thread-1"), "pending_messages"): {
+                "messages": [
+                    {"content": {"text": "go ahead", "source": "dashboard", "from_owner": True}},
+                ]
+            }
+        }
+    )
+
+    with (
+        patch(
+            "agent.middleware.check_message_queue.get_config",
+            return_value={"configurable": {"thread_id": "thread-1"}},
+        ),
+        patch("agent.middleware.check_message_queue.get_store", return_value=store),
+    ):
+        result = await check_message_queue_before_model.abefore_model(
+            cast(LinearNotifyState, {"messages": []}), MagicMock()
+        )
+
+    assert result is not None
+    assert result["plan_approval_blocked"] is False
+    assert result["messages"][0]["content"][1] == {"type": "text", "text": "go ahead"}
 
 
 @pytest.mark.asyncio
