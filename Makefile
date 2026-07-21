@@ -14,7 +14,7 @@ run:
 	uv run uvicorn agent.webapp:app --reload --port 8000
 
 install:
-	uv sync
+	uv sync --extra dev
 
 ######################
 # TESTING

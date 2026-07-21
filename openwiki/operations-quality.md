@@ -31,7 +31,7 @@ The UI has independent `pnpm` scripts in `ui/package.json`: `dev`, `build`, `tes
 | Python tests | `tests/` is organized by agent, dashboard, auth, GitHub, Slack, reviewer, sandbox, tools, middleware, and webhooks. | `make test` or `uv run pytest -vvv tests/reviewer/...` |
 | UI tests | Vitest tests sit near UI utilities/components. | `cd ui && pnpm run test` |
 | UI static checks | TypeScript, ESLint, and Vite build validate client integration. | `cd ui && pnpm run typecheck && pnpm run lint && pnpm run build` |
-| E2E | Playwright drives a real runtime and built dashboard around fake external SaaS/LLM boundaries. | `cd tests/e2e && npm install && npx playwright test` |
+| E2E | Playwright drives a real runtime and built dashboard around fake external SaaS/LLM boundaries. | `cd tests/e2e && npm install && npx playwright install chromium && npx playwright test` |
 | Reviewer quality | LangSmith benchmark compares published review findings to a frozen reference dataset. | `uv run python -m evals.reviewer.run_eval --limit 3` |
 
 The E2E harness is deliberately high signal: it runs actual webhooks, agent graph, tools, middleware, a local temporary sandbox, and local git. Only the LLM and external GitHub/Slack HTTP boundaries are faked. It also builds the real dashboard and uses a real signed session cookie. This verifies the cross-domain behavior described in [workflows](workflows.md) and [dashboard](dashboard.md).
