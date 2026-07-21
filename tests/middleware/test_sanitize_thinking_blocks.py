@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -20,6 +21,18 @@ def _make_request(messages: list[object], model: object | None = None) -> ModelR
 
 async def _noop_handler(_req: ModelRequest[None]) -> ModelResponse[Any]:
     return cast(ModelResponse[Any], MagicMock())
+
+
+def _response_handler(
+    messages: list[object],
+) -> Callable[[ModelRequest[None]], Awaitable[ModelResponse[Any]]]:
+    response = MagicMock()
+    response.result = messages
+
+    async def handler(_req: ModelRequest[None]) -> ModelResponse[Any]:
+        return cast(ModelResponse[Any], response)
+
+    return handler
 
 
 class TestSanitizeThinkingBlocksMiddleware:
@@ -73,6 +86,27 @@ class TestSanitizeThinkingBlocksMiddleware:
 
         assert result is response
         assert message.content == [{"type": "text", "text": "ok"}]
+
+    @pytest.mark.asyncio
+    async def test_strips_serialized_reasoning_prefix_from_response(self) -> None:
+        final = AIMessage(content='{"reasoning":"","type":"reasoning"}Here is the review summary.')
+        request = _make_request([HumanMessage(content="review")])
+        handler = _response_handler([final])
+
+        await SanitizeThinkingBlocksMiddleware().awrap_model_call(request, handler)
+
+        assert final.content == "Here is the review summary."
+
+    @pytest.mark.asyncio
+    async def test_preserves_legitimate_json_review_content(self) -> None:
+        review_json = '{"reasoning":"non-empty","type":"reasoning"} and a summary'
+        final = AIMessage(content=review_json)
+        request = _make_request([HumanMessage(content="review")])
+        handler = _response_handler([final])
+
+        await SanitizeThinkingBlocksMiddleware().awrap_model_call(request, handler)
+
+        assert final.content == review_json
 
     @pytest.mark.asyncio
     async def test_ignores_non_anthropic_models(self) -> None:
