@@ -70,6 +70,8 @@ jobs:
               echo "conflicts<<$EOF_DELIM" >> $GITHUB_OUTPUT
               echo "$REMAINING" >> $GITHUB_OUTPUT
               echo "$EOF_DELIM" >> $GITHUB_OUTPUT
+              git merge --abort
+              git checkout -B sync-upstream upstream/main
             fi
           fi
 
