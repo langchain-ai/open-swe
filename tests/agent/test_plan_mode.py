@@ -33,7 +33,8 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
         "linear_delete_issue",
     ):
         assert tool in excluded
-    # Read-only tools and plan-file editing tools must stay available.
+    # Read-only tools, plan-file editing tools, and explicit plan approval stay available.
+    assert "approve_plan" not in excluded
     assert "read_file" not in excluded
     assert "write_file" not in excluded
     assert "edit_file" not in excluded
@@ -195,6 +196,156 @@ def test_enter_plan_mode_exported() -> None:
     from agent.tools import enter_plan_mode
 
     assert callable(enter_plan_mode)
+
+
+async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+
+    from langchain_core.messages import ToolMessage
+    from langgraph.types import Command
+
+    from agent.tools import approve_plan as approve_plan_export
+
+    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
+
+    assert callable(approve_plan_export)
+
+    saved: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        approve_plan_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "t1",
+                "github_login": "octo",
+                "user_email": "octo@example.com",
+                "plan_mode": True,
+            }
+        },
+    )
+
+    async def fake_thread_metadata(thread_id: str) -> dict[str, Any]:
+        assert thread_id == "t1"
+        return {
+            "source": "dashboard",
+            "github_login": "octo",
+            "triggering_user_email": "octo@example.com",
+            "plan_mode": True,
+            "plan_status": "ready",
+        }
+
+    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
+        assert raise_on_error is True
+        return {"markdown": "# Plan\n\nDo it", "status": "ready"}
+
+    async def fake_list_comments(
+        thread_id: str, *, raise_on_error: bool = False
+    ) -> list[dict[str, Any]]:
+        assert raise_on_error is True
+        return [{"author": "Alice", "body": "add tests"}]
+
+    async def fake_set_status(thread_id: str, status: str, *, plan_mode: Any = None) -> None:
+        saved.update(thread_id=thread_id, status=status, plan_mode=plan_mode)
+
+    monkeypatch.setattr(approve_plan_tool, "_thread_metadata", fake_thread_metadata)
+    monkeypatch.setattr(approve_plan_tool, "get_plan_content", fake_get_content)
+    monkeypatch.setattr(approve_plan_tool, "list_plan_comments", fake_list_comments)
+    monkeypatch.setattr(approve_plan_tool, "set_plan_status", fake_set_status)
+
+    result = await approve_plan_tool.approve_plan(
+        state={"plan_mode": True},
+        tool_call_id="call-1",
+    )
+
+    assert isinstance(result, Command)
+    assert result.update is not None
+    assert result.update["plan_mode"] is False
+    assert saved == {"thread_id": "t1", "status": "approved", "plan_mode": False}
+    messages = result.update["messages"]
+    assert len(messages) == 1
+    assert isinstance(messages[0], ToolMessage)
+    assert messages[0].tool_call_id == "call-1"
+    assert "# Plan" in messages[0].content
+    assert "add tests" in messages[0].content
+
+
+async def test_approve_plan_tool_rejects_non_owner_followup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
+
+    monkeypatch.setattr(
+        approve_plan_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "t1",
+                "github_login": "octo",
+                "user_email": "octo@example.com",
+                "plan_mode": True,
+            }
+        },
+    )
+
+    async def fake_thread_metadata(thread_id: str) -> dict[str, Any]:
+        return {
+            "source": "dashboard",
+            "github_login": "octo",
+            "triggering_user_email": "octo@example.com",
+            "plan_mode": True,
+        }
+
+    monkeypatch.setattr(approve_plan_tool, "_thread_metadata", fake_thread_metadata)
+
+    result = await approve_plan_tool.approve_plan(
+        state={"plan_mode": True, "plan_approval_blocked": True},
+        tool_call_id="call-1",
+    )
+
+    assert isinstance(result, dict)
+    assert result["success"] is False
+    assert "non-owner" in result["error"]
+
+
+async def test_approve_plan_tool_rejects_non_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+
+    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
+
+    monkeypatch.setattr(
+        approve_plan_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "t1",
+                "github_login": "other",
+                "user_email": "other@example.com",
+                "plan_mode": True,
+            }
+        },
+    )
+
+    async def fake_thread_metadata(thread_id: str) -> dict[str, Any]:
+        return {
+            "source": "dashboard",
+            "github_login": "octo",
+            "triggering_user_email": "octo@example.com",
+            "plan_mode": True,
+        }
+
+    monkeypatch.setattr(approve_plan_tool, "_thread_metadata", fake_thread_metadata)
+
+    result = await approve_plan_tool.approve_plan(
+        state={"plan_mode": True},
+        tool_call_id="call-1",
+    )
+
+    assert isinstance(result, dict)
+    assert result["success"] is False
+    assert "owner" in result["error"]
 
 
 @pytest.mark.parametrize(

@@ -1369,7 +1369,11 @@ async def send_dashboard_message(
     active_model = _metadata_model_id(metadata) if body.images else None
     content = _user_message_content(prompt, body.images, model_id=active_model)
     await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    queue_payload: dict[str, Any] = {"text": prompt, "source": _DASHBOARD_SOURCE}
+    queue_payload: dict[str, Any] = {
+        "text": prompt,
+        "source": _DASHBOARD_SOURCE,
+        "from_owner": _user_owns_thread(metadata, login, email),
+    }
     if isinstance(content, list):
         queue_payload["images"] = [
             block for block in content if isinstance(block, dict) and block.get("type") != "text"
