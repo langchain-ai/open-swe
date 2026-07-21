@@ -1,0 +1,16 @@
+openwiki/operations-quality.md
+  h_33f63fd75d0bd5 34
+Makefile
+  h_33f63fd75d0bd5 17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "2d3147d8e9d6bf4e2bae7bd147920fb1cff3719c",
+  "prompts": {},
+  "humans": {
+    "h_33f63fd75d0bd5": {
+      "author": "bracesproul <braceasproul@gmail.com>"
+    }
+  }
+}
