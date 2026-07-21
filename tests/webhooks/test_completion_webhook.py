@@ -95,6 +95,44 @@ async def test_reviewer_error_settles_tracked_check(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_reviewer_error_preserves_pending_check_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "kind": "reviewer",
+        "review_check_run_id": 42,
+        "review_check_pending_result": {
+            "conclusion": "success",
+            "title": "Found 1 potential issue",
+            "summary": "Open SWE surfaced 1 potential issue.",
+        },
+        "pr": {"owner": "acme", "name": "widgets"},
+        "source": "schedule",
+    }
+    client = _FakeClient(metadata)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        completion, "get_github_app_installation_token", AsyncMock(return_value="token")
+    )
+    settle = AsyncMock()
+    monkeypatch.setattr(completion, "settle_review_check_run", settle)
+
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error"}
+    )
+
+    settle.assert_awaited_once_with(
+        thread_id="t1",
+        owner="acme",
+        repo="widgets",
+        token="token",
+        conclusion="success",
+        title="Found 1 potential issue",
+        summary="Open SWE surfaced 1 potential issue.",
+    )
+
+
+@pytest.mark.asyncio
 async def test_ordinary_agent_error_does_not_settle_review_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

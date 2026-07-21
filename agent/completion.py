@@ -98,17 +98,30 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
         if not token:
             logger.warning("run-complete: no GitHub token to settle review check for %s", thread_id)
             return
+        pending = metadata.get("review_check_pending_result")
+        if isinstance(pending, dict) and pending.get("conclusion") in {
+            "success",
+            "neutral",
+            "failure",
+        }:
+            conclusion = pending["conclusion"]
+            title = str(pending.get("title") or "Review completed")
+            summary = str(pending.get("summary") or "")
+        else:
+            conclusion = "neutral"
+            title = "Review did not complete"
+            summary = (
+                "The Open SWE review run ended without publishing a review. "
+                "Re-trigger the review by pushing a commit or re-requesting it."
+            )
         await settle_review_check_run(
             thread_id=thread_id,
             owner=owner,
             repo=repo,
             token=token,
-            conclusion="neutral",
-            title="Review did not complete",
-            summary=(
-                "The Open SWE review run ended without publishing a review. "
-                "Re-trigger the review by pushing a commit or re-requesting it."
-            ),
+            conclusion=conclusion,
+            title=title,
+            summary=summary,
         )
     except Exception:  # noqa: BLE001
         logger.warning(
