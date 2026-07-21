@@ -45,6 +45,20 @@ async def test_autofix_invalid_values_fail_closed() -> None:
         assert await get_team_autofix_settings() == (False, "medium")
 
 
+@pytest.mark.asyncio
+async def test_autofix_settings_survive_team_settings_scrub() -> None:
+    # Regression (caught live by canary 3): get_team_settings carries a
+    # stale-field purge that previously deleted the autofix keys from every
+    # response, so the accessor read the opt-in as permanently off. This test
+    # goes through the REAL get_team_settings — mocking it hides the scrub.
+    with patch(
+        "agent.dashboard.team_settings._get_stored_team_settings",
+        new_callable=AsyncMock,
+        return_value={"autofix_enabled": True, "autofix_severity_threshold": "high"},
+    ):
+        assert await get_team_autofix_settings() == (True, "high")
+
+
 # --- upsert: unrelated saves must not erase the opt-in ---
 
 

@@ -293,11 +293,12 @@ async def get_team_settings() -> dict[str, Any]:
     # selection) still surface the hardcoded default instead of a null.
     overlay = {k: v for k, v in value.items() if v is not None}
     merged = {**defaults, **overlay}
+    # autofix_enabled / autofix_severity_threshold were in this stale-field
+    # purge from an older settings shape; they are supported typed settings
+    # again (review auto-fix opt-in) and must survive the response.
     for stale_field in (
         "trigger_mode",
         "autofix_mode",
-        "autofix_severity_threshold",
-        "autofix_enabled",
         "review_author_context_enabled",
     ):
         merged.pop(stale_field, None)
