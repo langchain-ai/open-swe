@@ -48,7 +48,7 @@ from ..review.publish import (
 )
 from ..review.reconcile import reconcile_findings_with_review_threads
 from ..utils.dashboard_links import dashboard_review_url
-from ..utils.github_checks import review_check_conclusion
+from ..utils.github_checks import review_check_blocking_enabled, review_check_conclusion
 from ..utils.github_token import (
     GitHubAuthError,
     get_github_token,
@@ -192,6 +192,20 @@ async def _resolve_review_trace_url(thread_id: str, config_override: object) -> 
 
 def _is_reviewer_eval_mode(configurable: dict[str, Any]) -> bool:
     return configurable.get("reviewer_eval") is True or configurable.get("eval") is True
+
+
+async def _review_check_finding_count(thread_id: str, newly_posted_count: int) -> int:
+    # Blocking checks count all standing findings; informational checks preserve publish-time count.
+    if not review_check_blocking_enabled():
+        return newly_posted_count
+    findings = await list_findings_async(thread_id)
+    return sum(
+        1
+        for finding in findings
+        if finding.get("status", "open") == "open"
+        and isinstance((surface := finding.get("surface")), dict)
+        and surface.get("state") in {"surfaced", "resolve_pending"}
+    )
 
 
 async def _publish_review_eval_dry_run_async(
@@ -340,7 +354,8 @@ async def _publish_review_async(
         )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
-        conclusion, check_title, check_summary = review_check_conclusion(0)
+        check_finding_count = await _review_check_finding_count(thread_id, 0)
+        conclusion, check_title, check_summary = review_check_conclusion(check_finding_count)
         await settle_review_check_run(
             thread_id=thread_id,
             owner=owner,
@@ -526,7 +541,8 @@ async def _publish_review_async(
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
-    conclusion, check_title, check_summary = review_check_conclusion(len(inline_comments))
+    check_finding_count = await _review_check_finding_count(thread_id, len(inline_comments))
+    conclusion, check_title, check_summary = review_check_conclusion(check_finding_count)
     await settle_review_check_run(
         thread_id=thread_id,
         owner=owner,
