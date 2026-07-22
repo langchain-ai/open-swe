@@ -517,8 +517,11 @@ REVIEWER_OUTCOMES_DATASET=""
 PUBLIC_REPO_ORG_GATE=""
 
 # === Sandbox (optional) ===
-# Provider: langsmith (default), modal, daytona, runloop, e2b, or local. See CUSTOMIZATION.md.
+# Provider: langsmith (default), tenki, modal, daytona, runloop, e2b, or local. See CUSTOMIZATION.md.
 SANDBOX_TYPE="langsmith"
+TENKI_API_KEY=""                       # Required when SANDBOX_TYPE=tenki
+TENKI_SANDBOX_PROJECT_ID=""             # Required when SANDBOX_TYPE=tenki
+TENKI_SANDBOX_IMAGE=""                  # Optional Tenki image; defaults to Tenki's sandbox image
 DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith (see step 4c)
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 32 GiB)
 DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)

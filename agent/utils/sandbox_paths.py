@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import posixpath
 import shlex
@@ -27,8 +26,11 @@ def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: str) ->
 
 
 async def aresolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: str) -> str:
-    """Async wrapper around resolve_repo_dir for use in event-loop code."""
-    return await asyncio.to_thread(resolve_repo_dir, sandbox_backend, repo_name)
+    """Resolve the repository directory without blocking the event loop."""
+    if not repo_name:
+        raise ValueError("repo_name must be a non-empty string")
+    work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+    return posixpath.join(work_dir, repo_name)
 
 
 def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
@@ -51,8 +53,52 @@ def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
 
 
 async def aresolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
-    """Async wrapper around resolve_sandbox_work_dir for use in event-loop code."""
-    return await asyncio.to_thread(resolve_sandbox_work_dir, sandbox_backend)
+    """Resolve a writable base directory using async sandbox operations."""
+    cached_work_dir = getattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, None)
+    if isinstance(cached_work_dir, str) and cached_work_dir:
+        return cached_work_dir
+
+    checked_candidates: list[str] = []
+    seen: set[str] = set()
+
+    async def check(candidate: str | None) -> str | None:
+        if not candidate or candidate in seen:
+            return None
+        seen.add(candidate)
+        checked_candidates.append(candidate)
+        safe_directory = shlex.quote(candidate)
+        result = await sandbox_backend.aexecute(
+            f"test -d {safe_directory} && test -w {safe_directory}"
+        )
+        if result.exit_code == 0:
+            _cache_work_dir(sandbox_backend, candidate)
+            return candidate
+        return None
+
+    for candidate in _iter_provider_paths(sandbox_backend, "get_work_dir"):
+        if work_dir := await check(candidate):
+            return work_dir
+
+    result = await sandbox_backend.aexecute("pwd")
+    if work_dir := await check(_normalize_path(result.output) if result.exit_code == 0 else None):
+        return work_dir
+
+    for candidate in _iter_provider_paths(
+        sandbox_backend,
+        "get_user_home_dir",
+        "get_user_root_dir",
+    ):
+        if work_dir := await check(candidate):
+            return work_dir
+
+    result = await sandbox_backend.aexecute("printf '%s' \"$HOME\"")
+    if work_dir := await check(_normalize_path(result.output) if result.exit_code == 0 else None):
+        return work_dir
+
+    msg = "Failed to resolve a writable sandbox work directory"
+    if checked_candidates:
+        msg = f"{msg}. Candidates checked: {', '.join(checked_candidates)}"
+    raise RuntimeError(msg)
 
 
 def _iter_work_dir_candidates(

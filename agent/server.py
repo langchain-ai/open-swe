@@ -30,7 +30,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 from deepagents import create_deep_agent
 from deepagents.backends import LangSmithSandbox
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
@@ -263,18 +263,30 @@ async def _create_sandbox_with_proxy(
     repo: dict[str, str] | None = None,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
+    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+    token: str | None = None
+    expires_at: str | None = None
+    permissions = None
+    if sandbox_type in {"langsmith", "tenki"}:
+        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
+        if not token:
+            msg = "Cannot configure sandbox GitHub auth: installation token is unavailable"
+            logger.error(msg)
+            raise ValueError(msg)
+
     snapshot_id = await _resolve_snapshot_id_for_repo(repo)
     sandbox_backend = await create_sandbox(snapshot_id=snapshot_id)
 
-    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
-    if sandbox_type == "langsmith":
-        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
-        if not token:
-            msg = "Cannot configure proxy: GitHub App installation token is unavailable"
-            logger.error(msg)
-            raise ValueError(msg)
-        await _start_langsmith_sandbox_if_needed(sandbox_backend)
-        await _configure_github_proxy(sandbox_backend.id, token)
+    if token:
+        if sandbox_type == "langsmith":
+            await _start_langsmith_sandbox_if_needed(sandbox_backend)
+            await _configure_github_proxy(sandbox_backend.id, token)
+        else:
+            current_backend = unwrap_sandbox_backend(sandbox_backend)
+            set_github_token = getattr(current_backend, "set_github_token", None)
+            if not callable(set_github_token):
+                raise TypeError("Tenki sandbox backend cannot receive GitHub credentials")
+            set_github_token(token)
         record_proxy_token_expiry(
             thread_id,
             expires_at,
@@ -292,19 +304,32 @@ async def _refresh_github_proxy(
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
 ) -> None:
-    """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+    """Refresh GitHub credentials for reused LangSmith and Tenki sandboxes."""
+    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+    if sandbox_type not in {"langsmith", "tenki"}:
         return
 
     token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
     if not token:
         logger.warning(
-            "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
+            "Skipping GitHub auth refresh for sandbox %s: installation token unavailable",
             sandbox_backend.id,
         )
         return
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
+    if sandbox_type == "tenki":
+        set_github_token = getattr(current_backend, "set_github_token", None)
+        if not callable(set_github_token):
+            raise TypeError("Tenki sandbox backend cannot receive GitHub credentials")
+        set_github_token(token)
+        record_proxy_token_expiry(
+            thread_id,
+            expires_at,
+            repositories=github_proxy_repositories,
+            permissions=permissions,
+        )
+        return
     await _start_langsmith_sandbox_if_needed(current_backend)
     await _configure_github_proxy(current_backend.id, token)
     record_proxy_token_expiry(
@@ -322,7 +347,7 @@ async def _refresh_github_proxy_or_recreate(
     github_proxy_repositories: Sequence[str] | None = None,
     repo: dict[str, str] | None = None,
 ) -> SandboxBackendProtocol:
-    """Refresh proxy credentials, recreating stale LangSmith sandboxes on failure."""
+    """Refresh GitHub credentials, recreating stale sandboxes on failure."""
     try:
         await _refresh_github_proxy(
             sandbox_backend,
@@ -332,7 +357,7 @@ async def _refresh_github_proxy_or_recreate(
         )
     except Exception:  # noqa: BLE001
         logger.warning(
-            "Failed to refresh GitHub proxy for sandbox %s on thread %s, recreating sandbox",
+            "Failed to refresh GitHub auth for sandbox %s on thread %s, recreating sandbox",
             sandbox_backend.id,
             thread_id,
             exc_info=True,
@@ -347,11 +372,22 @@ async def _refresh_github_proxy_or_recreate(
 
 
 async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
-    await asyncio.to_thread(
-        sandbox_backend.execute,
+    command = (
         f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
-        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'",
+        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'"
     )
+    if os.getenv("SANDBOX_TYPE", "langsmith") == "tenki":
+        command += " && gh auth setup-git"
+    await _execute_sandbox_command(sandbox_backend, command)
+
+
+async def _execute_sandbox_command(
+    sandbox_backend: SandboxBackendProtocol,
+    command: str,
+) -> ExecuteResponse:
+    if os.getenv("SANDBOX_TYPE", "langsmith") == "tenki":
+        return await sandbox_backend.aexecute(command)
+    return await asyncio.to_thread(sandbox_backend.execute, command)
 
 
 async def _recreate_sandbox(
@@ -392,7 +428,7 @@ async def check_or_recreate_sandbox(
     Returns the original backend if healthy, or a new one if recreated.
     """
     try:
-        await asyncio.to_thread(sandbox_backend.execute, "echo ok")
+        await _execute_sandbox_command(sandbox_backend, "echo ok")
     except SandboxClientError:
         logger.warning(
             "Cached sandbox is no longer reachable for thread %s, recreating",
@@ -420,13 +456,14 @@ async def ensure_sandbox_for_thread(
     never provisions two sandboxes concurrently — no cross-process sentinel is
     needed):
 
-    1. Cached in memory -> ping; recreate on ``SandboxClientError``; refresh proxy.
-    2. Metadata has an id -> reconnect; recreate on failure; refresh proxy.
+    1. Cached in memory -> ping; recreate on ``SandboxClientError``; refresh GitHub auth.
+    2. Metadata has an id -> reconnect; recreate on failure; refresh GitHub auth.
     3. No sandbox at all -> create one and persist the id.
 
-    For LangSmith sandboxes, also refreshes the GitHub App proxy auth. When
-    ``repo`` has a ``ready`` repo-scoped snapshot, newly created sandboxes boot
-    from it; otherwise the configured ``DEFAULT_SANDBOX_SNAPSHOT_ID`` is used.
+    For LangSmith sandboxes, refreshes the GitHub App proxy auth. Tenki receives
+    the same short-lived token per command without storing it in the sandbox.
+    When ``repo`` has a ``ready`` repo-scoped snapshot, newly created LangSmith
+    sandboxes boot from it; otherwise ``DEFAULT_SANDBOX_SNAPSHOT_ID`` is used.
     Re-applies git identity every run because reused/reconnected sandboxes can
     lose their ``--global`` config, and Vercel preview deploys reject commits
     whose author email can't be resolved to a GitHub account.

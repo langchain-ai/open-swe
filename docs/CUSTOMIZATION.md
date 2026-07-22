@@ -61,6 +61,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `SANDBOX_TYPE` | Integration file | Required env vars |
 |---|---|---|
 | `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
+| `tenki` | `agent/integrations/tenki.py` | `TENKI_API_KEY`, `TENKI_SANDBOX_PROJECT_ID`, `SANDBOX_TYPE="tenki"`, optional `TENKI_SANDBOX_IMAGE` |
 | `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
 | `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
 | `e2b` | `agent/integrations/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
@@ -68,6 +69,8 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
+
+Tenki uses the native async `tenki-sandbox>=0.4.0` client. Open SWE supplies a fresh GitHub installation token to each command without persisting it in the sandbox, and automatically resumes paused sandboxes when reconnecting. `TENKI_SANDBOX_START_TIMEOUT_SECONDS` (default `180`) and `TENKI_SANDBOX_COMMAND_TIMEOUT_SECONDS` (default `1800`) can tune its timeouts.
 
 For `langsmith`, sandboxes default to the same LangSmith credentials as tracing. To run sandboxes against a **different** LangSmith workspace, set `SANDBOX_LANGSMITH_API_KEY` (falls back to `LANGSMITH_API_KEY` / `LANGSMITH_API_KEY_PROD`) and optionally `SANDBOX_LANGSMITH_ENDPOINT` (falls back to `LANGSMITH_ENDPOINT`). These apply to sandbox create/connect/delete, the GitHub proxy config, and repo snapshot builds — the `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in whichever workspace these credentials point at.
 

@@ -11,12 +11,15 @@ SandboxFactory = Callable[..., Any]
 
 SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "langsmith": ("agent.integrations.langsmith", "create_langsmith_sandbox"),
+    "tenki": ("agent.integrations.tenki", "create_tenki_sandbox"),
     "daytona": ("agent.integrations.daytona", "create_daytona_sandbox"),
     "modal": ("agent.integrations.modal", "create_modal_sandbox"),
     "runloop": ("agent.integrations.runloop", "create_runloop_sandbox"),
     "e2b": ("agent.integrations.e2b", "create_e2b_sandbox"),
     "local": ("agent.integrations.local", "create_local_sandbox"),
 }
+
+ASYNC_SANDBOX_TYPES = {"langsmith", "tenki"}
 
 
 def _load_sandbox_factory(sandbox_type: str) -> SandboxFactory:
@@ -39,10 +42,10 @@ async def create_sandbox(
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
-    Supported values: langsmith (default), daytona, modal, runloop, e2b, local.
+    Supported values: langsmith (default), tenki, daytona, modal, runloop, e2b, local.
 
-    The langsmith provider provisions natively async; the other providers wrap
-    sync SDKs and are bridged onto the event loop with ``asyncio.to_thread``.
+    LangSmith and Tenki provision natively async; providers with sync SDKs are
+    bridged onto the event loop with ``asyncio.to_thread``.
 
     Args:
         sandbox_id: Optional existing sandbox ID to reconnect to.
@@ -55,9 +58,10 @@ async def create_sandbox(
     """
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     factory = _load_sandbox_factory(sandbox_type)
-    if sandbox_type == "langsmith":
+    if sandbox_type in ASYNC_SANDBOX_TYPES:
         if snapshot_id is not None:
-            return await factory(sandbox_id, snapshot_id=snapshot_id)
+            if sandbox_type == "langsmith":
+                return await factory(sandbox_id, snapshot_id=snapshot_id)
         return await factory(sandbox_id)
     return await asyncio.to_thread(factory, sandbox_id)
 
@@ -74,3 +78,7 @@ def validate_sandbox_startup_config() -> None:
         from agent.integrations.langsmith import LangSmithProvider
 
         LangSmithProvider.validate_startup_config()
+    elif sandbox_type == "tenki":
+        from agent.integrations.tenki import validate_tenki_startup_config
+
+        validate_tenki_startup_config()

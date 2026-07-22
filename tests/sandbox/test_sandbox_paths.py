@@ -63,6 +63,9 @@ class _FakeSandboxBackend:
 
         return ExecuteResponse(output="", exit_code=1, truncated=False)
 
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        return self.execute(command, timeout=timeout)
+
 
 def test_resolve_repo_dir_uses_provider_work_dir() -> None:
     backend = _FakeSandboxBackend(
@@ -110,7 +113,7 @@ def test_resolve_sandbox_work_dir_caches_the_result() -> None:
     assert backend.commands == ["test -d /workspace && test -w /workspace"]
 
 
-async def test_aresolve_repo_dir_offloads_sync_resolution() -> None:
+async def test_aresolve_repo_dir_uses_async_resolution() -> None:
     backend = _FakeSandboxBackend(
         provider=_FakeProvider(work_dir="/home/daytona"),
         writable_dirs={"/home/daytona"},

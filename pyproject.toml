@@ -32,6 +32,7 @@ dependencies = [
     "langchain-mcp-adapters>=0.3.0",
     "stagehand>=3.21.0",
     "websockets>=15.0.1",
+    "tenki-sandbox>=0.4.0",
 ]
 
 [project.optional-dependencies]
