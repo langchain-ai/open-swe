@@ -746,7 +746,7 @@ async def _sidebar_active_thread_summary(
     login: str,
     email: str | None,
     include_all: bool,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any], bool] | None:
     if not active_thread_id or active_thread_id in visible_thread_ids:
         return None
     thread = fallback_threads.get(active_thread_id)
@@ -767,12 +767,13 @@ async def _sidebar_active_thread_summary(
             _assert_thread_readable(metadata)
         except HTTPException:
             return None
-    return await _summarize_thread(
+    summary = await _summarize_thread(
         client,
         thread,
         owner_login=None if include_all else login,
         owner_email=None if include_all else email,
     )
+    return summary, _is_thread_resolved(metadata)
 
 
 async def list_dashboard_threads_sidebar(
@@ -854,15 +855,31 @@ async def list_dashboard_threads_sidebar(
         ),
     )
     active_has_more = len(active_candidates) > safe_active_limit
+    resolved_has_more = len(resolved_candidates) > safe_resolved_limit
     if active_thread:
-        active_items = [
-            active_thread,
-            *[item for item in active_items if item["id"] != active_thread["id"]],
-        ]
-        resolved_items = [item for item in resolved_items if item["id"] != active_thread["id"]]
-        if len(active_items) > safe_active_limit:
-            active_items = active_items[:safe_active_limit]
-            active_has_more = True
+        active_thread_summary, is_resolved_active_thread = active_thread
+        if is_resolved_active_thread:
+            resolved_items = [
+                active_thread_summary,
+                *[item for item in resolved_items if item["id"] != active_thread_summary["id"]],
+            ]
+            active_items = [
+                item for item in active_items if item["id"] != active_thread_summary["id"]
+            ]
+            if len(resolved_items) > safe_resolved_limit:
+                resolved_items = resolved_items[:safe_resolved_limit]
+                resolved_has_more = True
+        else:
+            active_items = [
+                active_thread_summary,
+                *[item for item in active_items if item["id"] != active_thread_summary["id"]],
+            ]
+            resolved_items = [
+                item for item in resolved_items if item["id"] != active_thread_summary["id"]
+            ]
+            if len(active_items) > safe_active_limit:
+                active_items = active_items[:safe_active_limit]
+                active_has_more = True
     return {
         "active": {
             "items": active_items,
@@ -872,7 +889,7 @@ async def list_dashboard_threads_sidebar(
         "resolved": {
             "items": resolved_items,
             "limit": safe_resolved_limit,
-            "hasMore": len(resolved_candidates) > safe_resolved_limit,
+            "hasMore": resolved_has_more,
         },
     }
 

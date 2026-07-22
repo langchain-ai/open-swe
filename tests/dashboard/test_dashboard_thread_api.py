@@ -1414,6 +1414,61 @@ async def test_list_dashboard_threads_sidebar_includes_readable_active_thread(
     assert shared["sandboxId"] == "sandbox-123"
 
 
+async def test_list_dashboard_threads_sidebar_keeps_resolved_active_thread_resolved(
+    monkeypatch,
+) -> None:
+    threads = _make_threads(1, resolved_before=0)
+    shared_thread = {
+        "thread_id": "shared-resolved-thread",
+        "metadata": {
+            "source": "slack",
+            "github_login": "teammate",
+            "title": "Resolved teammate thread",
+            "updated_at_ms": 100,
+            "latest_run_status": "success",
+            "resolved": True,
+            "sandbox_id": "sandbox-456",
+        },
+    }
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            assert select == thread_api._THREAD_LIST_SELECT
+            return threads[offset : offset + limit]
+
+        async def get(self, thread_id):
+            assert thread_id == "shared-resolved-thread"
+            return shared_thread
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat",
+        email=None,
+        active_limit=5,
+        resolved_limit=5,
+        active_thread_id="shared-resolved-thread",
+    )
+
+    assert [item["id"] for item in result["active"]["items"]] == ["t0"]
+    assert [item["id"] for item in result["resolved"]["items"]] == ["shared-resolved-thread"]
+    shared = result["resolved"]["items"][0]
+    assert shared["isOwner"] is False
+    assert shared["resolved"] is True
+    assert shared["sandboxId"] == "sandbox-456"
+
+
 async def test_list_dashboard_threads_sidebar_ignores_unreadable_active_thread(
     monkeypatch,
 ) -> None:
