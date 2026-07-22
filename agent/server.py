@@ -68,6 +68,7 @@ from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
+    InvalidUpdateGuardMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
@@ -1075,6 +1076,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     prepared_sandbox_backend=prepared_sandbox_backend,
                     prepared_work_dir=prepared_work_dir,
                 ),
+                InvalidUpdateGuardMiddleware(),
                 *(
                     [
                         TrustedSkillsMiddleware(

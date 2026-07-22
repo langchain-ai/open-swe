@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, NotRequired, cast
+from typing import Annotated, Any, NotRequired, cast
 
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState, SkillsStateUpdate
 from langgraph.graph.state import RunnableConfig
@@ -10,8 +10,16 @@ from langgraph.runtime import Runtime
 logger = logging.getLogger(__name__)
 
 
+def _merge_trusted_skills_ref(existing: str | None, incoming: str | None) -> str | None:
+    """Fan-in reducer that merges concurrent trusted_skills_ref writes (last-write-wins)."""
+    return incoming if incoming is not None else existing
+
+
 class TrustedSkillsState(SkillsState):
-    trusted_skills_ref: NotRequired[str]
+    # Fan-out subagents (parallel `task` steps) each load skills and write this
+    # key in the same superstep; without a reducer LangGraph raises
+    # INVALID_CONCURRENT_GRAPH_UPDATE and aborts the whole run.
+    trusted_skills_ref: NotRequired[Annotated[str, _merge_trusted_skills_ref]]
 
 
 class TrustedSkillsMiddleware(SkillsMiddleware):

@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from deepagents.middleware.skills import SkillsMiddleware
+from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
+from langgraph.types import Send
 
-from agent.middleware.trusted_skills import TrustedSkillsMiddleware, TrustedSkillsState
+from agent.middleware.trusted_skills import (
+    TrustedSkillsMiddleware,
+    TrustedSkillsState,
+    _merge_trusted_skills_ref,
+)
 
 
 async def test_trusted_skills_reload_when_ref_changes() -> None:
@@ -62,3 +69,32 @@ async def test_trusted_skills_reuse_metadata_for_unchanged_ref() -> None:
 
     assert update is None
     load.assert_not_awaited()
+
+
+def test_merge_trusted_skills_ref_last_write_wins() -> None:
+    assert _merge_trusted_skills_ref("a" * 40, "b" * 40) == "b" * 40
+    assert _merge_trusted_skills_ref("a" * 40, None) == "a" * 40
+    assert _merge_trusted_skills_ref(None, "b" * 40) == "b" * 40
+
+
+async def test_trusted_skills_ref_merges_concurrent_updates() -> None:
+    """Two concurrent writes to trusted_skills_ref in one step must merge, not raise."""
+    ref = "c" * 40
+
+    def fan_out(_state: TrustedSkillsState) -> list[Send]:
+        return [Send("writer", {"n": 1}), Send("writer", {"n": 2})]
+
+    def writer(_payload: dict[str, Any]) -> dict[str, Any]:
+        return {"trusted_skills_ref": ref}
+
+    graph = (
+        StateGraph(TrustedSkillsState)
+        .add_node("writer", writer)
+        .add_conditional_edges(START, fan_out, ["writer"])
+        .add_edge("writer", END)
+        .compile()
+    )
+
+    result = await graph.ainvoke({"messages": []})
+
+    assert result["trusted_skills_ref"] == ref
