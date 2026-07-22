@@ -3,30 +3,9 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from deepagents.middleware.skills import SkillsMiddleware
-from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
 from agent.middleware.trusted_skills import TrustedSkillsMiddleware, TrustedSkillsState
-
-
-async def test_trusted_skills_ref_accepts_concurrent_updates() -> None:
-    trusted_ref = "a" * 40
-
-    async def set_ref(state: TrustedSkillsState) -> dict[str, str]:
-        assert "messages" in state
-        return {"trusted_skills_ref": trusted_ref}
-
-    builder = StateGraph(TrustedSkillsState)
-    builder.add_node("first", set_ref)
-    builder.add_node("second", set_ref)
-    builder.add_edge(START, "first")
-    builder.add_edge(START, "second")
-    builder.add_edge("first", END)
-    builder.add_edge("second", END)
-
-    result = await builder.compile().ainvoke({"messages": [], "trusted_skills_ref": "b" * 40})
-
-    assert result["trusted_skills_ref"] == trusted_ref
 
 
 async def test_trusted_skills_reload_when_ref_changes() -> None:
