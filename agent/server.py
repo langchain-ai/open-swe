@@ -79,7 +79,6 @@ from .middleware import (
     TimeoutWrapupMiddleware,
     ToolArtifactMiddleware,
     ToolErrorMiddleware,
-    TrustedSkillsMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
     refresh_github_proxy_before_model,
@@ -140,7 +139,6 @@ from .utils.model import (
     make_model,
     provider_model_kwargs,
 )
-from .utils.repo_prep import prepare_main_agent_repo_skills
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .utils.sandbox_state import (
@@ -513,31 +511,13 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
 )
 
 
-def _general_purpose_subagent(
-    model: BaseChatModel,
-    skill_sources: list[str],
-    trusted_ref: str,
-    backend_factory: Callable[..., SandboxBackendProtocol],
-) -> SubAgent:
-    subagent: SubAgent = {
+def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
+    return {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": GENERAL_PURPOSE_SUBAGENT["description"],
         "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
     }
-    if skill_sources:
-        subagent["skills"] = skill_sources
-        subagent["middleware"] = cast(
-            list[AgentMiddleware[Any, Any, Any]],
-            [
-                TrustedSkillsMiddleware(
-                    backend=backend_factory,
-                    sources=skill_sources,
-                    trusted_ref=trusted_ref,
-                )
-            ],
-        )
-    return subagent
 
 
 BROWSER_SUBAGENT_DESCRIPTION = (
@@ -717,8 +697,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         create_prs: bool,
         plan_mode: bool,
         corridor_enabled: bool,
-        prepared_sandbox_backend: SandboxBackendProtocol | None = None,
-        prepared_work_dir: str | None = None,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
@@ -732,8 +710,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._create_prs = create_prs
         self._plan_mode = plan_mode
         self._corridor_enabled = corridor_enabled
-        self._prepared_sandbox_backend = prepared_sandbox_backend
-        self._prepared_work_dir = prepared_work_dir
 
     def _prepare_config_fingerprint(self) -> Any:
         configurable = (self._config or {}).get("configurable") or {}
@@ -756,19 +732,15 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 resolve_triggering_user_identity, as_json_object(self._config), github_token
             )
         )
-        if self._prepared_sandbox_backend is None:
-            sandbox_task = asyncio.create_task(
-                ensure_sandbox_for_thread(self._thread_id, repo=prompt_default_repo)
-            )
-            triggering_user_identity, sandbox_backend = await asyncio.gather(
-                triggering_user_identity_task,
-                sandbox_task,
-            )
-        else:
-            triggering_user_identity = await triggering_user_identity_task
-            sandbox_backend = self._prepared_sandbox_backend
+        sandbox_task = asyncio.create_task(
+            ensure_sandbox_for_thread(self._thread_id, repo=prompt_default_repo)
+        )
+        triggering_user_identity, sandbox_backend = await asyncio.gather(
+            triggering_user_identity_task,
+            sandbox_task,
+        )
         del github_token
-        work_dir = self._prepared_work_dir or await aresolve_sandbox_work_dir(sandbox_backend)
+        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
         repo_custom_instructions = await _resolve_repo_custom_instructions(prompt_default_repo)
 
         try:
@@ -973,40 +945,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ),
         )
 
-    skill_sources: list[str] = []
-    trusted_skills_ref = ""
-    prepared_sandbox_backend: SandboxBackendProtocol | None = None
-    prepared_work_dir: str | None = None
-    prompt_default_repo = await _resolve_prompt_default_repo(configurable)
-    if prompt_default_repo:
-        repo_owner = prompt_default_repo.get("owner", "")
-        repo_name = prompt_default_repo.get("name", "")
-        base_sha_value = configurable.get("base_sha")
-        base_sha = base_sha_value if isinstance(base_sha_value, str) else ""
-        try:
-            sandbox_backend = await ensure_sandbox_for_thread(
-                thread_id,
-                repo=prompt_default_repo,
-            )
-            work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
-            prepared_sandbox_backend = sandbox_backend
-            prepared_work_dir = work_dir
-            prepared_skills = await prepare_main_agent_repo_skills(
-                sandbox_backend,
-                work_dir=work_dir,
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                base_sha=base_sha,
-            )
-            skill_sources = list(prepared_skills.sources)
-            trusted_skills_ref = prepared_skills.trusted_ref
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Continuing without repository skills for %s/%s",
-                repo_owner,
-                repo_name,
-            )
-
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     subagent_model = _make_model_or_defer(
@@ -1046,15 +984,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             *notion_tools,
         ],
         subagents=[
-            _general_purpose_subagent(
-                subagent_model,
-                skill_sources,
-                trusted_skills_ref,
-                backend_factory,
-            ),
+            _general_purpose_subagent(subagent_model),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
-        skills=skill_sources or None,
         backend=backend_factory,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
@@ -1072,19 +1004,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     create_prs=always_create_prs,
                     plan_mode=plan_mode,
                     corridor_enabled=bool(corridor_tools),
-                    prepared_sandbox_backend=prepared_sandbox_backend,
-                    prepared_work_dir=prepared_work_dir,
-                ),
-                *(
-                    [
-                        TrustedSkillsMiddleware(
-                            backend=backend_factory,
-                            sources=skill_sources,
-                            trusted_ref=trusted_skills_ref,
-                        )
-                    ]
-                    if skill_sources
-                    else []
                 ),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),

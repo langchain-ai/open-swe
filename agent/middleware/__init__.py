@@ -26,7 +26,6 @@ _MIDDLEWARE_MODULES = {
     "TimeoutWrapupMiddleware": ".timeout_wrapup",
     "ToolArtifactMiddleware": ".tool_artifact",
     "ToolErrorMiddleware": ".tool_error_handler",
-    "TrustedSkillsMiddleware": ".trusted_skills",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
 }
 
@@ -44,7 +43,6 @@ __all__ = [
     "SubdirAgentsReadMiddleware",
     "ToolArtifactMiddleware",
     "ToolErrorMiddleware",
-    "TrustedSkillsMiddleware",
     "TimeoutWrapupMiddleware",
     "WorkflowPushGuardMiddleware",
     "SandboxCircuitBreakerMiddleware",
@@ -80,7 +78,6 @@ if TYPE_CHECKING:
     from .timeout_wrapup import TimeoutWrapupMiddleware
     from .tool_artifact import ToolArtifactMiddleware
     from .tool_error_handler import ToolErrorMiddleware
-    from .trusted_skills import TrustedSkillsMiddleware
     from .workflow_push_guard import WorkflowPushGuardMiddleware
 
 
