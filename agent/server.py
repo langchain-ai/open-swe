@@ -525,7 +525,6 @@ def _general_purpose_subagent(
         "model": model,
     }
     if skill_sources:
-        subagent["skills"] = skill_sources
         subagent["middleware"] = cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
@@ -1052,7 +1051,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
-        skills=skill_sources or None,
         backend=backend_factory,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
