@@ -111,7 +111,7 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const { prefs, setGroup, setCompact, setFilters, resetFilters } =
     useSidebarPrefs()
-  const sidebar = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT)
+  const sidebar = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT, activeThreadId)
   const activeThreads = sidebar.data?.active.items ?? []
   const resolvedThreads = sidebar.data?.resolved.items ?? []
   const resolvedHasMore = sidebar.data?.resolved.hasMore ?? false
