@@ -67,6 +67,11 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
 | `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
+The local provider uses the host's GitHub CLI authentication instead of the
+LangSmith GitHub proxy. Run `gh auth login` on the host before starting Open SWE;
+commands written as `GH_TOKEN=dummy gh ...` are automatically routed to that
+host authentication.
+
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
 For `langsmith`, sandboxes default to the same LangSmith credentials as tracing. To run sandboxes against a **different** LangSmith workspace, set `SANDBOX_LANGSMITH_API_KEY` (falls back to `LANGSMITH_API_KEY` / `LANGSMITH_API_KEY_PROD`) and optionally `SANDBOX_LANGSMITH_ENDPOINT` (falls back to `LANGSMITH_ENDPOINT`). These apply to sandbox create/connect/delete, the GitHub proxy config, and repo snapshot builds — the `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in whichever workspace these credentials point at.
@@ -175,6 +180,23 @@ return create_deep_agent(
     ...
 )
 ```
+
+### Routing OpenAI models through a local proxy
+
+Set `OPENAI_BASE_URL` to route direct OpenAI model calls through an OpenAI-compatible
+Responses API endpoint. `OPENAI_API_KEY` should contain the bearer value expected by
+that proxy:
+
+```bash
+OPENAI_BASE_URL="http://127.0.0.1:8318/v1"
+OPENAI_API_KEY="<local-proxy-bearer-key>"
+LLM_MODEL_ID="openai:gpt-5.6-sol"
+```
+
+For VibeProxy, keep the server bound to loopback and use the API key generated in its
+effective configuration. Open SWE sends requests to VibeProxy but does not copy or
+manage the underlying Codex OAuth credentials. LangSmith Gateway routing, when enabled,
+still takes precedence over this direct-provider URL.
 
 ### Using different models per context
 

@@ -89,6 +89,10 @@ class ModelKwargs(TypedDict, total=False):
 _ANTHROPIC_EFFORTS: set[AnthropicEffort] = {"low", "medium", "high", "xhigh", "max"}
 
 
+def _direct_openai_base_url() -> str:
+    return os.environ.get("OPENAI_BASE_URL", "").strip().rstrip("/") or OPENAI_RESPONSES_WS_BASE_URL
+
+
 def _coerce_openai_chat_completions_kwargs(model_kwargs: dict[str, object]) -> None:
     if model_kwargs.get("use_responses_api") is not False:
         return
@@ -124,8 +128,9 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
 
     if model_id.startswith("openai:"):
         # Direct-provider default: Responses API over the OpenAI websocket base.
-        # Gateway routing overrides this below (an HTTP(S) proxy can't carry wss).
-        model_kwargs["base_url"] = OPENAI_RESPONSES_WS_BASE_URL
+        # OPENAI_BASE_URL supports OpenAI-compatible local proxies. Gateway
+        # routing overrides either direct base below.
+        model_kwargs["base_url"] = _direct_openai_base_url()
         model_kwargs["use_responses_api"] = True
 
     enabled = gateway_env_default() if use_gateway is None else use_gateway

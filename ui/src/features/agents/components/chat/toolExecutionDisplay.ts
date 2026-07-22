@@ -1,5 +1,5 @@
-import { humanizeToolName } from "@/features/agents/lib/toolNames";
 import type { AcpToolKind } from "@/features/agents/lib/types";
+import { humanizeToolName } from "@/features/agents/lib/toolNames";
 
 function stripProjectPath(path: string, projectPath?: string): string {
   if (!projectPath || !path.startsWith(projectPath)) return path;

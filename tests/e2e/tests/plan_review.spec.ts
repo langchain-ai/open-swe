@@ -19,10 +19,19 @@ import {
 const OWNER = { login: "alice", email: "alice@example.com" };
 const COLLABORATOR = { login: "bob", email: "bob@example.com" };
 
-async function botMessages(request: APIRequestContext): Promise<Array<string>> {
+async function botMessages(
+  request: APIRequestContext,
+  threadTs: string,
+): Promise<Array<string>> {
   const res = await request.get("/mock/slack/messages");
-  const msgs = (await res.json()) as Array<{ text: string; is_bot: boolean }>;
-  return msgs.filter((m) => m.is_bot).map((m) => m.text);
+  const msgs = (await res.json()) as Array<{
+    text: string;
+    is_bot: boolean;
+    thread_ts: string;
+  }>;
+  return msgs
+    .filter((m) => m.is_bot && m.thread_ts === threadTs)
+    .map((m) => m.text);
 }
 
 async function addComment(
@@ -56,10 +65,13 @@ test.describe("Plan review (HTTP comments)", () => {
         mention_bot: true,
       },
     });
-    const { thread_id: threadId } = (await send.json()) as {
-      thread_id: string;
-    };
+    const { thread_id: threadId, thread_ts: threadTs } =
+      (await send.json()) as {
+        thread_id: string;
+        thread_ts: string;
+      };
     expect(threadId).toBeTruthy();
+    expect(threadTs).toBeTruthy();
     const planPath = `/agents/${threadId}/plan`;
 
     // 1a. enter_plan_mode must actually engage, not error out. Its Command must
@@ -87,12 +99,12 @@ test.describe("Plan review (HTTP comments)", () => {
 
     // 2. The agent shares the plan-review link, then announces the plan is ready.
     await expect
-      .poll(async () => (await botMessages(request)).join("\n"), {
+      .poll(async () => (await botMessages(request, threadTs)).join("\n"), {
         timeout: 60_000,
       })
       .toMatch(/\/agents\/[^/]+\/plan\b/);
     await expect
-      .poll(async () => (await botMessages(request)).join("\n"), {
+      .poll(async () => (await botMessages(request, threadTs)).join("\n"), {
         timeout: 60_000,
       })
       .toMatch(/ready for review/i);
@@ -185,7 +197,11 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(collab.getByTestId("reject-plan")).toBeVisible();
 
     // Collaborator leaves feedback with Ctrl+Enter.
-    await addComment(collab, "Reviewer: please also add a docstring.", "control");
+    await addComment(
+      collab,
+      "Reviewer: please also add a docstring.",
+      "control",
+    );
     await expect(collab.getByTestId("plan-comment")).toHaveCount(2);
 
     // 6. The owner sees the collaborator's comment (polled), then approves and
@@ -200,11 +216,13 @@ test.describe("Plan review (HTTP comments)", () => {
     //    echoing the reviewers' feedback — which proves the comments were stored
     //    and harvested server-side on approve.
     await expect
-      .poll(async () => (await botMessages(request)).join("\n"), {
+      .poll(async () => (await botMessages(request, threadTs)).join("\n"), {
         timeout: 90_000,
       })
       .toMatch(/\/pull\//);
-    expect((await botMessages(request)).join("\n")).toMatch(/docstring/);
+    expect((await botMessages(request, threadTs)).join("\n")).toMatch(
+      /docstring/,
+    );
 
     const prs = (await (
       await request.get("/mock/github/data")
