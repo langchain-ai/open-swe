@@ -662,8 +662,24 @@ async def _upsert_slack_thread_repo_metadata(
         )
 
 
+def _existing_slack_permalink(
+    existing_metadata: dict[str, Any], channel_id: str, thread_ts: str
+) -> str | None:
+    source_context = existing_metadata.get("source_context")
+    if not isinstance(source_context, dict):
+        return None
+    slack_thread = source_context.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return None
+    if slack_thread.get("channel_id") != channel_id or slack_thread.get("thread_ts") != thread_ts:
+        return None
+    permalink = slack_thread.get("permalink")
+    return permalink.strip() if isinstance(permalink, str) and permalink.strip() else None
+
+
 async def _source_context_with_slack_permalink(
     source_context: dict[str, Any],
+    existing_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     enriched = dict(source_context)
     slack_thread = enriched.get("slack_thread")
@@ -684,11 +700,17 @@ async def _source_context_with_slack_permalink(
     if not isinstance(thread_ts, str) or not thread_ts.strip():
         return enriched
 
+    normalized_channel_id = channel_id.strip()
+    normalized_thread_ts = thread_ts.strip()
     try:
-        permalink = await get_slack_permalink(channel_id.strip(), thread_ts.strip())
+        permalink = await get_slack_permalink(normalized_channel_id, normalized_thread_ts)
     except Exception:  # noqa: BLE001
         logger.debug("Failed to resolve Slack permalink for thread metadata", exc_info=True)
         permalink = None
+    if not permalink and existing_metadata:
+        permalink = _existing_slack_permalink(
+            existing_metadata, normalized_channel_id, normalized_thread_ts
+        )
     if permalink:
         enriched_slack_thread["permalink"] = permalink
         enriched["slack_thread"] = enriched_slack_thread
@@ -724,8 +746,6 @@ async def upsert_agent_thread_owner_metadata(
         metadata["triggering_user_email"] = user_email.strip().lower()
     if title:
         metadata["title"] = title[:80]
-    if source_context:
-        metadata["source_context"] = await _source_context_with_slack_permalink(source_context)
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
@@ -739,6 +759,10 @@ async def upsert_agent_thread_owner_metadata(
     existing_meta = (
         existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
+    if source_context:
+        metadata["source_context"] = await _source_context_with_slack_permalink(
+            source_context, existing_meta
+        )
     if existing_meta.get("created_at_ms") is None:
         metadata["created_at_ms"] = now_ms
     if existing_meta.get("title") and "title" in metadata:
