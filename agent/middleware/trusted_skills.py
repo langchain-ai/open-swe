@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, NotRequired, cast
+from typing import Annotated, Any, NotRequired, cast
 
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState, SkillsStateUpdate
 from langgraph.graph.state import RunnableConfig
@@ -10,8 +10,12 @@ from langgraph.runtime import Runtime
 logger = logging.getLogger(__name__)
 
 
+def _take_latest_ref(_current: str, incoming: str) -> str:
+    return incoming
+
+
 class TrustedSkillsState(SkillsState):
-    trusted_skills_ref: NotRequired[str]
+    trusted_skills_ref: NotRequired[Annotated[str, _take_latest_ref]]
 
 
 class TrustedSkillsMiddleware(SkillsMiddleware):
