@@ -187,7 +187,7 @@ client = SandboxClient(api_key="<your key>")
 snapshot = client.create_snapshot(
     name="open-swe",
     docker_image="johanneslangchain/open-swe-sandbox:gh-cli-amd64",  # built from ./Dockerfile
-    fs_capacity_bytes=32 * 1024**3,
+    fs_capacity_bytes=128 * 1024**3,
 )
 print(snapshot.id)
 ```
@@ -204,16 +204,16 @@ Then set the resulting UUID in your environment:
 
 ```bash
 DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"
-# Optional; overrides the snapshot's root FS size at sandbox boot. Default is 32 GiB.
-DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="34359738368"
+# Optional; overrides the snapshot's root FS size at sandbox boot. Default is 128 GiB.
+DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="137438953472"
 # Optional; number of vCPUs per sandbox. Default is 4.
 DEFAULT_SANDBOX_VCPUS="4"
-# Optional; memory in bytes per sandbox. Default is 15 GiB.
-DEFAULT_SANDBOX_MEM_BYTES="16106127360"
+# Optional; memory in bytes per sandbox. Default is 16 GiB.
+DEFAULT_SANDBOX_MEM_BYTES="17179869184"
 # Optional; auto-stop a sandbox after this many seconds of inactivity. Default is 7200 (2 hours). 0 disables.
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"
-# Optional; delete a stopped sandbox after this many seconds. Default is 86400 (24 hours). 0 disables.
-DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="86400"
+# Optional; delete a stopped sandbox after this many seconds. Default is 1209600 (14 days). 0 disables.
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="1209600"
 # Optional; required only for the admin Repository Snapshots page/template generator.
 REPO_SNAPSHOT_BASE_IMAGE="<your-docker-hub>/<name-of-your-image>"
 ```
@@ -520,11 +520,11 @@ PUBLIC_REPO_ORG_GATE=""
 # Provider: langsmith (default), modal, daytona, runloop, e2b, or local. See CUSTOMIZATION.md.
 SANDBOX_TYPE="langsmith"
 DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith (see step 4c)
-DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 32 GiB)
+DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 128 GiB)
 DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
-DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 15 GiB)
+DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 16 GiB)
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS=""    # Auto-stop after N seconds idle (default: 7200; 0 disables)
-DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS=""  # Delete N seconds after stop (default: 86400; 0 disables)
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS=""  # Delete N seconds after stop (default: 1209600; 0 disables)
 
 # === Token Encryption ===
 TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32
