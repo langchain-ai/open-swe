@@ -3,11 +3,8 @@ import os
 import shlex
 from importlib import resources
 from pathlib import Path
-from typing import Any, cast
 
 from deepagents import HarnessProfile, register_harness_profile
-from langchain.agents.middleware import TodoListMiddleware
-from langchain.agents.middleware.types import AgentMiddleware, AgentState
 
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -31,12 +28,7 @@ def _harness_excluded_tools() -> frozenset[str]:
     return frozenset() if _env_flag(ENABLE_TODOS_ENV_VAR) else frozenset({"write_todos"})
 
 
-def _harness_excluded_middleware() -> frozenset[type[TodoListMiddleware]]:
-    return frozenset() if _env_flag(ENABLE_TODOS_ENV_VAR) else frozenset({TodoListMiddleware})
-
-
 HARNESS_EXCLUDED_TOOLS: frozenset[str] = _harness_excluded_tools()
-HARNESS_EXCLUDED_MIDDLEWARE: frozenset[type[TodoListMiddleware]] = _harness_excluded_middleware()
 
 # Provider keys the harness profile is registered under. deepagents resolves a
 # pre-built model's profile by `provider:identifier` then a provider-only
@@ -416,10 +408,6 @@ def register_open_swe_harness_profile() -> None:
     profile = HarnessProfile(
         base_system_prompt=OPEN_SWE_SHARED_BASE,
         excluded_tools=HARNESS_EXCLUDED_TOOLS,
-        excluded_middleware=cast(
-            frozenset[type[AgentMiddleware[AgentState[Any], None, Any]] | str],
-            HARNESS_EXCLUDED_MIDDLEWARE,
-        ),
     )
     for key in HARNESS_PROFILE_KEYS:
         register_harness_profile(key, profile)
