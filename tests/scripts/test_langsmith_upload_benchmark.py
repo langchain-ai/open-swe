@@ -11,6 +11,7 @@ from scripts.langsmith_upload_benchmark import (
     make_run,
     merge_before_serialization,
     multipart_parts,
+    preconvert_models,
     run_case,
     stream_multipart,
 )
@@ -35,6 +36,16 @@ def test_streaming_multipart_matches_toolbelt_encoder() -> None:
 
     assert prototype == baseline
     assert compress_chunks([prototype]) == compress_chunks(stream_multipart(operation))
+
+
+def test_preconvert_models_reuses_shared_pydantic_conversion() -> None:
+    run = make_run(4096, "pydantic")
+    shared_state = run["inputs"]["state"]
+
+    converted = preconvert_models(run)
+
+    assert converted["inputs"]["state"] is converted["outputs"]["state"]
+    assert converted["inputs"]["state"] == shared_state.model_dump()
 
 
 def test_merge_before_serialization_preserves_patch_semantics() -> None:
@@ -64,7 +75,20 @@ def test_measurement_is_machine_readable_and_tracks_connection_reuse() -> None:
         byte_budget=None,
     )
 
+    streaming = run_case(
+        "upload-streaming",
+        workload="dict",
+        size_bytes=4096,
+        workers=1,
+        iterations=2,
+        compression=False,
+        byte_budget=4096,
+    )
+
     payload = json.loads(json.dumps(measurement.__dict__))
     assert payload["requests"] == 2
     assert payload["connections"] == 1
     assert payload["output_bytes"] >= payload["input_bytes"]
+    assert streaming.requests == 2
+    assert streaming.connections == 1
+    assert streaming.max_in_flight_bytes == 4096

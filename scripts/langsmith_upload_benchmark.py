@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
-from typing import Any
+from typing import Any, ClassVar
 
 import requests
 import zstandard
@@ -34,9 +34,15 @@ BOUNDARY = "open-swe-langsmith-benchmark"
 
 
 class TraceState(BaseModel):
+    dump_calls: ClassVar[int] = 0
+
     messages: list[dict[str, str]]
     files: dict[str, str]
     metadata: dict[str, int | str]
+
+    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        type(self).dump_calls += 1
+        return super().model_dump(*args, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -59,6 +65,7 @@ class Measurement:
     byte_budget_bytes: int | None
     max_in_flight_bytes: int
     allocation_hotspots: tuple[str, ...]
+    model_dump_calls: int
     requests: int = 0
     connections: int = 0
 
@@ -104,14 +111,23 @@ class SinkHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_POST(self) -> None:
-        remaining = int(self.headers.get("Content-Length", "0"))
         received = 0
-        while remaining:
-            chunk = self.rfile.read(min(remaining, 64 * 1024))
-            if not chunk:
-                break
-            received += len(chunk)
-            remaining -= len(chunk)
+        if self.headers.get("Transfer-Encoding") == "chunked":
+            while True:
+                chunk_size = int(self.rfile.readline().strip(), 16)
+                if chunk_size == 0:
+                    self.rfile.readline()
+                    break
+                received += len(self.rfile.read(chunk_size))
+                self.rfile.read(2)
+        else:
+            remaining = int(self.headers.get("Content-Length", "0"))
+            while remaining:
+                chunk = self.rfile.read(min(remaining, 64 * 1024))
+                if not chunk:
+                    break
+                received += len(chunk)
+                remaining -= len(chunk)
         state = self.server.state  # type: ignore[attr-defined]
         with state.lock:
             state.requests += 1
@@ -206,6 +222,22 @@ def compress_chunks(chunks: Iterable[bytes]) -> bytes:
     return output.getvalue()
 
 
+def preconvert_models(obj: Any, cache: dict[int, Any] | None = None) -> Any:
+    cache = {} if cache is None else cache
+    if isinstance(obj, BaseModel):
+        identity = id(obj)
+        if identity not in cache:
+            cache[identity] = preconvert_models(obj.model_dump(mode="json"), cache)
+        return cache[identity]
+    if isinstance(obj, dict):
+        return {key: preconvert_models(value, cache) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [preconvert_models(value, cache) for value in obj]
+    if isinstance(obj, tuple):
+        return tuple(preconvert_models(value, cache) for value in obj)
+    return obj
+
+
 def merge_before_serialization(create: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     merged = create.copy()
     for key, value in patch.items():
@@ -229,18 +261,20 @@ def _measure(
     gc.collect()
     rss_before = current_rss_bytes()
     peak_before = peak_rss_bytes()
+    TraceState.dump_calls = 0
     tracemalloc.start()
     started = time.perf_counter()
     budget = WeightedSemaphore(byte_budget) if byte_budget else None
+    estimated_work_bytes = size_bytes * 2 + 4096
 
     def invoke(sequence: int) -> tuple[int, int]:
         if budget:
-            budget.acquire(size_bytes)
+            budget.acquire(estimated_work_bytes)
         try:
             return operation(sequence)
         finally:
             if budget:
-                budget.release(size_bytes)
+                budget.release(estimated_work_bytes)
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         results = list(executor.map(invoke, range(iterations)))
@@ -274,8 +308,9 @@ def _measure(
         output_bytes=output_bytes,
         byte_amplification=output_bytes / input_bytes if input_bytes else 0.0,
         byte_budget_bytes=byte_budget,
-        max_in_flight_bytes=budget.peak_used if budget else workers * size_bytes,
+        max_in_flight_bytes=budget.peak_used if budget else workers * estimated_work_bytes,
         allocation_hotspots=hotspots,
+        model_dump_calls=TraceState.dump_calls,
         requests=requests_count,
         connections=connections_count,
     )
@@ -290,10 +325,14 @@ def run_case(
     compression: bool,
     byte_budget: int | None,
 ) -> Measurement:
-    if stage == "serialize":
+    runs = [make_run(size_bytes, workload, sequence) for sequence in range(iterations)]
+    if stage in {"serialize", "serialize-preconverted"}:
 
         def operation(sequence: int) -> tuple[int, int]:
-            serialized = serialize_run_dict("post", make_run(size_bytes, workload, sequence))
+            run = runs[sequence]
+            if stage == "serialize-preconverted":
+                run = preconvert_models(run)
+            serialized = serialize_run_dict("post", run)
             return size_bytes * 2, serialized.calculate_serialized_size()
 
         return _measure(
@@ -316,7 +355,7 @@ def run_case(
     if stage in multipart_stages:
 
         def operation(sequence: int) -> tuple[int, int]:
-            serialized = serialize_run_dict("post", make_run(size_bytes, workload, sequence))
+            serialized = serialize_run_dict("post", runs[sequence])
             serialized_size = serialized.calculate_serialized_size()
             if stage == "multipart":
                 body = drain_encoder(multipart_parts(serialized))
@@ -343,7 +382,7 @@ def run_case(
             byte_budget=byte_budget,
         )
 
-    if stage == "upload":
+    if stage in {"upload", "upload-streaming"}:
         server = SinkServer(("127.0.0.1", 0))
         server_thread = threading.Thread(target=server.serve_forever, daemon=True)
         server_thread.start()
@@ -351,16 +390,24 @@ def run_case(
         endpoint = f"http://127.0.0.1:{server.server_port}/runs/multipart"
 
         def operation(sequence: int) -> tuple[int, int]:
-            serialized = serialize_run_dict("post", make_run(size_bytes, workload, sequence))
-            encoder = MultipartEncoder(multipart_parts(serialized), boundary=BOUNDARY)
+            serialized = serialize_run_dict("post", runs[sequence])
+            if stage == "upload-streaming":
+                wire_size = sum(len(chunk) for chunk in stream_multipart(serialized))
+                data: Any = stream_multipart(serialized)
+                content_type = f"multipart/form-data; boundary={BOUNDARY}"
+            else:
+                encoder = MultipartEncoder(multipart_parts(serialized), boundary=BOUNDARY)
+                wire_size = encoder.len
+                data = encoder
+                content_type = encoder.content_type
             response = session.post(
                 endpoint,
-                data=encoder,
-                headers={"Content-Type": encoder.content_type},
+                data=data,
+                headers={"Content-Type": content_type},
                 timeout=60,
             )
             response.raise_for_status()
-            return serialized.calculate_serialized_size(), encoder.len
+            return serialized.calculate_serialized_size(), wire_size
 
         try:
             return _measure(
@@ -391,7 +438,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--stages",
-        default="serialize,multipart,streaming,compression-buffered,compression-streaming,upload",
+        default=(
+            "serialize,serialize-preconverted,multipart,streaming,compression-buffered,"
+            "compression-streaming,upload,upload-streaming"
+        ),
     )
     parser.add_argument("--sizes-mib", default="1,5,20")
     parser.add_argument("--workers", default="1,4,16,32")
