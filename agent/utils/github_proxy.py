@@ -111,14 +111,73 @@ def proxy_token_needs_refresh(thread_id: str | None, *, now: datetime | None = N
     return (current - recorded_at) >= PROXY_TOKEN_FALLBACK_TTL
 
 
+async def configure_sandbox_github_auth(sandbox_backend: SandboxBackendProtocol, token: str) -> None:
+    """Configure secure GitHub authentication in the sandbox for non-LangSmith sandboxes."""
+    import shlex
+    import asyncio
+
+    py_cmd = (
+        "import os, re, subprocess; "
+        "home = os.path.expanduser('~'); "
+        "token_file = os.path.join(home, '.github-token'); "
+        f"with open(token_file, 'w') as f: f.write('{token}');\n"
+        "os.chmod(token_file, 0o600);\n"
+        "gh_config_dir = os.path.join(home, '.config', 'gh'); "
+        "os.makedirs(gh_config_dir, exist_ok=True); "
+        "hosts_file = os.path.join(gh_config_dir, 'hosts.yml'); "
+        "with open(hosts_file, 'w') as f: "
+        f"    f.write('github.com:\\n    oauth_token: {token}\\n    user: x-access-token\\n');\n"
+        "os.chmod(hosts_file, 0o600);\n"
+        "helper_file = os.path.join(home, '.git-credential-openswe'); "
+        "helper_content = ("
+        "    '#!/usr/bin/env python3\\n' "
+        "    'import sys, os\\n' "
+        "    'lines = sys.stdin.read().splitlines()\\n' "
+        "    'host = \"\"\\n' "
+        "    'for line in lines:\\n' "
+        "    '    if line.startswith(\"host=\"):\\n' "
+        "    '        host = line.split(\"=\", 1)[1].strip()\\n' "
+        "    'if host == \"github.com\":\\n' "
+        "    '    token_file = os.path.expanduser(\"~/.github-token\")\\n' "
+        "    '    if os.path.exists(token_file):\\n' "
+        "    '        with open(token_file, \"r\") as f:\\n' "
+        "    '            token = f.read().strip()\\n' "
+        "    '        print(\"username=x-access-token\")\\n' "
+        "    '        print(f\"password={token}\")\\n' "
+        "); "
+        "with open(helper_file, 'w') as f: f.write(helper_content);\n"
+        "os.chmod(helper_file, 0o755);\n"
+        f"subprocess.run(['git', 'config', '--global', 'credential.helper', helper_file], check=True);\n"
+        "root_dir = os.environ.get('LOCAL_SANDBOX_ROOT_DIR') or '/workspace'; "
+        "if os.path.exists(root_dir): "
+        "    for root, dirs, files in os.walk(root_dir): "
+        "        if '.git' in dirs: "
+        "            repo_dir = os.path.join(root); "
+        "            try: "
+        "                url = subprocess.check_output(['git', 'remote', 'get-url', 'origin'], cwd=repo_dir, text=True).strip(); "
+        "                match = re.search(r'github\\.com/([^/]+)/([^/]+?)(?:\\.git)?$', url); "
+        "                if match: "
+        "                    owner, repo = match.groups(); "
+        "                    clean_url = f\"https://github.com/{owner}/{repo}.git\"; "
+        "                    subprocess.run(['git', 'remote', 'set-url', 'origin', clean_url], cwd=repo_dir, check=True); "
+        "            except Exception: "
+        "                pass"
+    )
+    cmd = f"python3 -c {shlex.quote(py_cmd)} 2>/dev/null || python -c {shlex.quote(py_cmd)}"
+    try:
+        await asyncio.to_thread(sandbox_backend.execute, cmd)
+    except Exception:
+        logger.warning("Failed to configure sandbox secure github auth", exc_info=True)
+
+
 async def refresh_proxy_token(
     thread_id: str | None,
     *,
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
 ) -> bool:
-    """Re-configure a LangSmith sandbox proxy with a freshly minted token."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith" or not thread_id:
+    """Refresh the GitHub token and re-configure proxy or git remote credentials in the sandbox."""
+    if not thread_id:
         return False
 
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
@@ -137,32 +196,44 @@ async def refresh_proxy_token(
         token_kwargs["permissions"] = dict(permission_key)
     token, expires_at = await get_github_app_installation_token_with_expiry(**token_kwargs)
     if not token:
-        logger.warning("Proxy token refresh for thread %s failed: no installation token", thread_id)
+        logger.warning("Token refresh for thread %s failed: no installation token", thread_id)
         return False
 
-    from ..integrations.langsmith import _configure_github_proxy
-
-    current_backend = unwrap_sandbox_backend(sandbox_backend)
-    await _configure_github_proxy(current_backend.id, token)
+    # Store the refreshed token in the thread cache so auth queries retrieve it
     record_proxy_token_expiry(
         thread_id,
         expires_at,
         repositories=effective_repositories,
         permissions=dict(permission_key) if permission_key else None,
     )
-    logger.info("Refreshed GitHub proxy token for thread %s", thread_id)
+    from .github_token import cache_github_token_for_thread
+    cache_github_token_for_thread(
+        thread_id,
+        token,
+        expires_at=expires_at,
+        is_bot_token=True,
+    )
+
+    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+    if sandbox_type == "langsmith":
+        from ..integrations.langsmith import _configure_github_proxy
+        current_backend = unwrap_sandbox_backend(sandbox_backend)
+        await _configure_github_proxy(current_backend.id, token)
+    else:
+        await configure_sandbox_github_auth(sandbox_backend, token)
+
+    logger.info("Refreshed GitHub token for thread %s", thread_id)
     return True
 
 
 async def maybe_refresh_proxy_token(thread_id: str | None, *, now: datetime | None = None) -> bool:
-    """Re-configure the sandbox proxy with a fresh token when near expiry.
+    """Re-configure the sandbox proxy/git credentials with a fresh token when near expiry.
 
-    Returns True when a refresh was performed. Only applies to LangSmith
-    sandboxes; other providers don't use the proxy.
+    Returns True when a refresh was performed.
     """
     if not thread_id or not proxy_token_needs_refresh(thread_id, now=now):
         return False
     refreshed = await refresh_proxy_token(thread_id)
     if refreshed:
-        logger.info("Refreshed GitHub proxy token for thread %s before expiry", thread_id)
+        logger.info("Refreshed GitHub token for thread %s before expiry", thread_id)
     return refreshed

@@ -65,16 +65,34 @@ class SanitizeToolInputsMiddleware(AgentMiddleware):
 
     def _sanitize_request(self, request: ToolCallRequest) -> ToolCallRequest:
         tool_call = request.tool_call
-        if not isinstance(tool_call, dict) or tool_call.get("name") != "read_file":
+        if not isinstance(tool_call, dict):
             return request
-        args = tool_call.get("args", {})
-        if not isinstance(args, dict):
-            return request
-        sanitized_args = _sanitize_read_file_args(args)
-        if sanitized_args is args:
-            return request
-        new_tool_call = cast(ToolCall, {**tool_call, "args": sanitized_args})
-        return request.override(tool_call=new_tool_call)
+
+        name = tool_call.get("name")
+        if name == "read_file":
+            args = tool_call.get("args", {})
+            sanitized_args = _sanitize_read_file_args(args)
+            if sanitized_args is not args:
+                new_tool_call = {**tool_call, "args": sanitized_args}
+                return request.override(tool_call=new_tool_call)
+        elif name == "execute":
+            import os
+            if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+                args = tool_call.get("args", {})
+                command = args.get("command")
+                if isinstance(command, str) and ("GH_TOKEN=dummy" in command or "GITHUB_TOKEN=dummy" in command):
+                    # Strip the dummy token environment variables.
+                    # This ensures we never format a live token into the command string.
+                    # The commands will instead use the secure git credential helper and hosts.yml config.
+                    import re
+                    new_command = command
+                    new_command = re.sub(r'\bGH_TOKEN=dummy\s*', '', new_command)
+                    new_command = re.sub(r'\bGITHUB_TOKEN=dummy\s*', '', new_command)
+                    if new_command != command:
+                        new_tool_call = {**tool_call, "args": {**args, "command": new_command}}
+                        return request.override(tool_call=new_tool_call)
+
+        return request
 
     async def awrap_tool_call(
         self,

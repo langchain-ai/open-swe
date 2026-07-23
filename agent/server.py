@@ -265,20 +265,25 @@ async def _create_sandbox_with_proxy(
     sandbox_backend = await create_sandbox(snapshot_id=snapshot_id)
 
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
-    if sandbox_type == "langsmith":
-        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
-        if not token:
-            msg = "Cannot configure proxy: GitHub App installation token is unavailable"
-            logger.error(msg)
-            raise ValueError(msg)
-        await _start_langsmith_sandbox_if_needed(sandbox_backend)
-        await _configure_github_proxy(sandbox_backend.id, token)
+    token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
+    if token:
+        if sandbox_type == "langsmith":
+            await _start_langsmith_sandbox_if_needed(sandbox_backend)
+            await _configure_github_proxy(sandbox_backend.id, token)
+        else:
+            from .utils.github_proxy import configure_sandbox_github_auth
+            await configure_sandbox_github_auth(sandbox_backend, token)
+
         record_proxy_token_expiry(
             thread_id,
             expires_at,
             repositories=github_proxy_repositories,
             permissions=permissions,
         )
+    elif sandbox_type == "langsmith":
+        msg = "Cannot configure proxy: GitHub App installation token is unavailable"
+        logger.error(msg)
+        raise ValueError(msg)
 
     return sandbox_backend
 
