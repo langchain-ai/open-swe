@@ -28,18 +28,28 @@ def _key(owner: str, repo: str, pr_number: int) -> str:
 
 
 async def is_pr_autofix_disabled(owner: str, repo: str, pr_number: int) -> bool:
-    """Return whether auto-fix has been turned off for a specific PR."""
-    try:
-        item = await _client().store.get_item(
-            AUTOFIX_PR_STATE_NAMESPACE, _key(owner, repo, pr_number)
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.debug("autofix PR state lookup failed: %s", e)
-        return False
+    """Return whether auto-fix has been turned off for a specific PR.
+
+    Lookup errors propagate: an explicit opt-out is a safety control, so a
+    store failure must abort automatic dispatch rather than read as opted-in.
+    """
+    item = await _client().store.get_item(AUTOFIX_PR_STATE_NAMESPACE, _key(owner, repo, pr_number))
     if item is None:
         return False
     value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
     return bool(value.get("disabled")) if isinstance(value, dict) else False
+
+
+async def get_pr_autofix_cycle_count(owner: str, repo: str, pr_number: int) -> int:
+    """Return the number of review auto-fix cycles dispatched for a PR."""
+    item = await _client().store.get_item(
+        AUTOFIX_PR_STATE_NAMESPACE,
+        f"{_key(owner, repo, pr_number)}:review_autofix_cycles",
+    )
+    if item is None:
+        return 0
+    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
+    return int(value.get("cycle_count", 0)) if isinstance(value, dict) else 0
 
 
 async def set_pr_autofix_disabled(owner: str, repo: str, pr_number: int, disabled: bool) -> None:
@@ -48,4 +58,15 @@ async def set_pr_autofix_disabled(owner: str, repo: str, pr_number: int, disable
         AUTOFIX_PR_STATE_NAMESPACE,
         _key(owner, repo, pr_number),
         {"disabled": disabled, "updated_at": datetime.now(UTC).isoformat()},
+    )
+
+
+async def set_pr_autofix_cycle_count(
+    owner: str, repo: str, pr_number: int, cycle_count: int
+) -> None:
+    """Persist the review auto-fix cycle count for a PR."""
+    await _client().store.put_item(
+        AUTOFIX_PR_STATE_NAMESPACE,
+        f"{_key(owner, repo, pr_number)}:review_autofix_cycles",
+        {"cycle_count": cycle_count, "updated_at": datetime.now(UTC).isoformat()},
     )

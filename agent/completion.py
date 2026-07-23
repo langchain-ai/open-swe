@@ -23,6 +23,7 @@ from .review.findings import REVIEWER_THREAD_KIND
 from .review.publish import settle_review_check_run
 from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import get_github_app_installation_token
+from .utils.github_checks import incomplete_review_check_result
 from .utils.github_comments import post_github_comment
 from .utils.linear import comment_on_linear_issue
 from .utils.slack import post_slack_thread_reply
@@ -108,12 +109,7 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
             title = str(pending.get("title") or "Review completed")
             summary = str(pending.get("summary") or "")
         else:
-            conclusion = "neutral"
-            title = "Review did not complete"
-            summary = (
-                "The Open SWE review run ended without publishing a review. "
-                "Re-trigger the review by pushing a commit or re-requesting it."
-            )
+            conclusion, title, summary = incomplete_review_check_result()
         await settle_review_check_run(
             thread_id=thread_id,
             owner=owner,

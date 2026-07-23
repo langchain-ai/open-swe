@@ -12,6 +12,7 @@ break review dispatch or publish.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -153,18 +154,36 @@ async def post_autofix_status_check(
     return True
 
 
-def review_check_conclusion(surfaced_count: int) -> tuple[CheckConclusion, str, str]:
-    """Map a publish result to (conclusion, title, summary).
+def review_check_blocking_enabled() -> bool:
+    """Return whether surfaced findings should fail the review check.
 
-    Always ``success`` so the check is informational and non-blocking, and so
-    GitHub groups it under "successful checks" rather than a confusing
-    "neutral check". The finding count is surfaced in the title; the findings
-    themselves are posted as PR comments.
+    Deliberately env-scoped (deployment-level merge policy) rather than a team
+    setting: whoever operates branch protection owns this toggle.
     """
+    return os.getenv("REVIEW_CHECK_BLOCKING", "").lower() in {"1", "true", "yes"}
+
+
+def incomplete_review_check_result() -> tuple[CheckConclusion, str, str]:
+    """Conclusion for a review run that ended without publishing.
+
+    Shared by every settle path (after-agent middleware and the run-completion
+    handler) so an unfinished review cannot satisfy a blocking check through
+    one path while failing it through another.
+    """
+    return (
+        "failure" if review_check_blocking_enabled() else "neutral",
+        "Review did not complete",
+        "The Open SWE review run ended without publishing a review. "
+        "Re-trigger the review by pushing a commit or re-requesting it.",
+    )
+
+
+def review_check_conclusion(surfaced_count: int) -> tuple[CheckConclusion, str, str]:
+    """Map a publish result to (conclusion, title, summary)."""
     if surfaced_count > 0:
         issue_word = "issue" if surfaced_count == 1 else "issues"
         return (
-            "success",
+            "failure" if review_check_blocking_enabled() else "success",
             f"Found {surfaced_count} potential {issue_word}",
             f"Open SWE surfaced {surfaced_count} potential {issue_word} on this pull request.",
         )
