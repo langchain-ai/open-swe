@@ -13,8 +13,11 @@ import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
 
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
-  sidebar: (params: { activeLimit: number; resolvedLimit: number }) =>
-    ["agent-threads", "lists", "sidebar", params] as const,
+  sidebar: (params: {
+    activeLimit: number
+    resolvedLimit: number
+    activeThreadId?: string
+  }) => ["agent-threads", "lists", "sidebar", params] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
   workflowApprovals: (threadId: string) =>
@@ -93,10 +96,14 @@ function sidebarRefetchInterval(query: { state: { data?: SidebarThreads } }) {
     : false
 }
 
-export function useSidebarThreads(resolvedLimit: number) {
+export function useSidebarThreads(
+  resolvedLimit: number,
+  activeThreadId?: string
+) {
   const params = {
     activeLimit: SIDEBAR_ACTIVE_LIMIT,
     resolvedLimit,
+    activeThreadId,
   }
   return useQuery({
     queryKey: agentThreadKeys.sidebar(params),
