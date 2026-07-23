@@ -6,6 +6,9 @@ resolution-markers = [
     "python_full_version < '3.14'",
 ]
 
+[manifest]
+overrides = [{ name = "deepagents", specifier = "==0.7.0a7" }]
+
 [[package]]
 name = "aiofiles"
 version = "24.1.0"
@@ -662,7 +665,7 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.6.12"
+version = "0.7.0a7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
@@ -672,9 +675,9 @@ dependencies = [
     { name = "langsmith" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e0/db/a6acdc72a9e90c3f07ed10de35c951734a02d4facb693bb59684ad368801/deepagents-0.6.12.tar.gz", hash = "sha256:1f281c0bc5a63132f62e2ee345c1dc593b23188da6e23016401f6879fbe54b5f", size = 211364, upload-time = "2026-06-25T17:26:52.775Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bc/0f/728afa9f34868657cd282624d96eb4afb5b1882826d19ee7795887a1a985/deepagents-0.7.0a7.tar.gz", hash = "sha256:023dbf08c7161215a274c69c0cf084c4b8a47eed1d156f71ac3ef4a87d1ac156", size = 271948, upload-time = "2026-07-14T04:49:10.883Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/98/49/af7219b3c13520fee047bb807cfaefba17f8e4584c551d946773589a4f08/deepagents-0.6.12-py3-none-any.whl", hash = "sha256:28b8fa0119ca0a689e3e18e288c4634e4046062acfc87a1cb34289d3af3a1c88", size = 236120, upload-time = "2026-06-25T17:26:51.736Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/f0/39e7a327baf4f597624ce024d3d59968d7068f0216f0e8469e952fc8a574/deepagents-0.7.0a7-py3-none-any.whl", hash = "sha256:5c2080e3f630c200abed416748fd9fa3e12bc954d5052ea14ba84fee76d5698b", size = 297251, upload-time = "2026-07-14T04:49:09.569Z" },
 ]
 
 [[package]]
@@ -1424,16 +1427,16 @@ wheels = [
 
 [[package]]
 name = "langchain"
-version = "1.3.11"
+version = "1.3.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-core" },
     { name = "langgraph" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b9/a2/91a7197c604a3ce1b774b3c10dd114c3c745c6186a304fc2573b3f94d400/langchain-1.3.11.tar.gz", hash = "sha256:f3cf9cd4d2329b1a03eb8fd92b9d73e4e58a4d52570d67725fc77fbe0f104b32", size = 633374, upload-time = "2026-06-22T23:00:33.44Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/68/a6dbad9c22df4087a0f9e79ddd46226c442b30128bfeee538d5889492a73/langchain-1.3.14.tar.gz", hash = "sha256:1b6696c72ba3bbbce54d745e0180742c9f6ece8bbc59ed5a46c3e20b9a435929", size = 645181, upload-time = "2026-07-16T13:28:18.29Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/a4/3a181967294f8876362cc4ba36840d50b8286fa23bb3f5e602b69eb3cb1e/langchain-1.3.11-py3-none-any.whl", hash = "sha256:7ae011f95a09b22feea1e8ae4e43f0b6164aebf4c61b8ad845b45f72ff3a90a2", size = 133639, upload-time = "2026-06-22T23:00:31.619Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/ec/0f942e78a621f8e3162ff1ed24284f469aaf51fb4607ee5831c626f2b2bc/langchain-1.3.14-py3-none-any.whl", hash = "sha256:4d10dbe91005952cddd56d0dc77aa108964da6bae90ab20063653957e901f782", size = 139560, upload-time = "2026-07-16T13:28:16.498Z" },
 ]
 
 [[package]]
@@ -2073,7 +2076,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=49.0.0" },
-    { name = "deepagents", specifier = "==0.6.12" },
+    { name = "deepagents", specifier = "==0.7.0a7" },
     { name = "exa-py", specifier = ">=2.16.0" },
     { name = "fastapi", specifier = ">=0.139.0" },
     { name = "fireworks-ai", specifier = ">=1.2.0a86" },
