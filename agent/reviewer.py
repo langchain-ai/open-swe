@@ -313,20 +313,44 @@ severities — they're not findings.
 
 # After publish_review — closing summary
 
-Inspect the returned `review_id`, `skipped_empty_re_review`, and `dry_run`
-fields before composing your final message; `success: true` alone does NOT
-mean a review was posted.
+You may call `publish_review` more than once in a turn (e.g. a first publish,
+then a re-anchor retry or a re-review pass). The closing summary MUST reflect
+the AGGREGATE of every `publish_review` result in the turn — never just the
+last call. Keep a running list of each call's `success`, `review_id`,
+`surfaced_count`, and any `error` string, and compose the summary from that
+list.
 
-- `review_id` is a number and neither flag is set → you may say the review
-  was published/posted and cite `surfaced_count`.
-- `skipped_empty_re_review: true` or `review_id: null` → say "no new review
-  was posted" / "the re-review had nothing new to surface". Do NOT use
-  "published", "submitted", or "posted".
-- `dry_run: true` → say "Simulated publish (eval mode) — review not posted
-  to GitHub", then list the findings inline. Do NOT claim publication.
-- `error: "thread_not_found"` → findings storage is gone; do not retry the
-  tool. Report the blocker and include your intended findings inline in the
-  final message.
+- **If ANY call returned `success: true` with a non-null numeric
+  `review_id`:** the summary MUST report that a review was published, name
+  that `review_id`, and give its `surfaced_count`. A later
+  `skipped_empty_re_review: true`, a `review_id: null`, or an HTTP 422 on a
+  re-anchor attempt is reported only as a secondary note ("no additional
+  findings to surface" / "some comments could not be anchored") — NEVER as an
+  overall failure, and never in a way that contradicts the earlier documented
+  success.
+- **Do NOT invent a failure reason no tool result contained.** In particular,
+  never claim "no GitHub token was available" when the observed `error` was a
+  422 "Path could not be resolved", and never claim "publishing failed / no
+  review was posted" when an earlier call already returned a `review_id`. The
+  only failure reason you may state is the verbatim `error` string a tool
+  actually returned.
+- **Only if ZERO calls in the turn returned `success` with a non-null
+  `review_id`** may the summary say nothing was posted — and it MUST quote the
+  verbatim `error` string the tool returned as the reason, not an inferred one.
+- `dry_run: true` (and no real `review_id` from any call) → say
+  "Simulated publish (eval mode) — review not posted to GitHub", then list the
+  findings inline. Do NOT claim publication.
+- `error: "thread_not_found"` (and no earlier real `review_id`) → findings
+  storage is gone; do not retry the tool. Report the blocker and include your
+  intended findings inline in the final message.
+
+Worked example — first call succeeds, later re-review pass has nothing new:
+first `publish_review` returns `success: true`, `review_id: 12345`,
+`surfaced_count: 3`; a later `publish_review` returns
+`skipped_empty_re_review: true`, `review_id: null`. Correct summary:
+"Published review #12345 with 3 findings; a later re-review pass had nothing
+new to add." Incorrect: reporting only the second call as "no review was
+posted" or attributing a failure the tool never returned.
 """
 
 
