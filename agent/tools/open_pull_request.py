@@ -500,23 +500,27 @@ async def _record_pr_telemetry(
             merged=merged,
         )
         if isinstance(thread_id, str) and thread_id:
-            await get_client().threads.update(
-                thread_id=thread_id,
-                metadata={
-                    "agent_kind": "agent",
-                    "pr_url": pr_url if isinstance(pr_url, str) else "",
-                    "pr_number": pr_number,
-                    "pr_state": derive_pr_state(state=state, merged=merged, draft=is_draft),
-                    "pr_title": details.get("title") or pr.get("title"),
-                    "branch_name": head,
-                    "base_branch": base,
-                    "diff_stats": {
-                        "files": changed_files,
-                        "additions": additions,
-                        "deletions": deletions,
-                    },
+            repo_private = None
+            base_repo = details.get("base", {}).get("repo")
+            if isinstance(base_repo, dict) and isinstance(base_repo.get("private"), bool):
+                repo_private = base_repo["private"]
+            metadata: dict[str, Any] = {
+                "agent_kind": "agent",
+                "pr_url": pr_url if isinstance(pr_url, str) else "",
+                "pr_number": pr_number,
+                "pr_state": derive_pr_state(state=state, merged=merged, draft=is_draft),
+                "pr_title": details.get("title") or pr.get("title"),
+                "branch_name": head,
+                "base_branch": base,
+                "diff_stats": {
+                    "files": changed_files,
+                    "additions": additions,
+                    "deletions": deletions,
                 },
-            )
+            }
+            if repo_private is not None:
+                metadata["repo_private"] = repo_private
+            await get_client().threads.update(thread_id=thread_id, metadata=metadata)
     except Exception:
         logger.debug(
             "Failed to record PR usage for %s/%s#%s", owner, repo, pr_number, exc_info=True
@@ -549,10 +553,13 @@ async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[st
         slack_thread = configurable.get("slack_thread") or {}
         channel_id = slack_thread.get("channel_id")
         thread_ts = slack_thread.get("thread_ts")
-        if channel_id and thread_ts:
-            permalink = await get_slack_permalink(channel_id, thread_ts)
-            if permalink:
-                lines.append(f"- Slack thread: {permalink}")
+        permalink = slack_thread.get("permalink")
+        if not isinstance(permalink, str) or not permalink.strip():
+            permalink = None
+            if channel_id and thread_ts:
+                permalink = await get_slack_permalink(channel_id, thread_ts)
+        if isinstance(permalink, str) and permalink.strip():
+            lines.append(f"- Slack thread: {permalink.strip()}")
     elif source == "linear":
         linear_issue = configurable.get("linear_issue") or {}
         url = linear_issue.get("url")

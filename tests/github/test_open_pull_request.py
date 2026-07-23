@@ -380,6 +380,35 @@ def test_appends_slack_reference_for_private_repo(monkeypatch: pytest.MonkeyPatc
     assert "- Slack thread: https://slack.example/p1" in sent_body
 
 
+def test_uses_stored_slack_permalink_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "slack",
+            "slack_thread": {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "permalink": "https://slack.example/stored",
+            },
+        },
+    )
+    _stub_token(monkeypatch)
+
+    async def fail_permalink(*_args: Any, **_kwargs: Any) -> str:
+        raise AssertionError("stored permalink should be used")
+
+    monkeypatch.setattr(opr, "get_slack_permalink", fail_permalink)
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
+        get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": True})},
+    )
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body")
+
+    assert "- Slack thread: https://slack.example/stored" in client.post_calls[0]["json"]["body"]
+
+
 def test_appends_plan_reference_from_thread_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     _set_config(monkeypatch, {"source": "dashboard", "thread_id": "thread-1"})
@@ -475,7 +504,7 @@ def test_plan_reference_survives_source_reference_failure(
     assert client.post_calls
 
 
-def test_no_reference_for_public_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_omits_slack_reference_for_public_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(
         monkeypatch,
         {
@@ -499,7 +528,7 @@ def test_no_reference_for_public_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client.post_calls[0]["json"]["body"] == "original body"
 
 
-def test_public_repo_appends_plan_but_not_source_reference(
+def test_public_repo_appends_plan_but_not_slack_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
