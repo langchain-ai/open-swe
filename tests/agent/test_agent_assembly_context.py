@@ -15,6 +15,7 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent.server import get_agent
+from agent.utils.sandbox_state import SandboxBackendProxy
 
 
 class _DummyAgent:
@@ -78,8 +79,11 @@ async def _capture_create_deep_agent_kwargs() -> dict[str, object]:
 async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     # The backend is what enables deepagents' auto-wired FilesystemMiddleware
-    # eviction + SummarizationMiddleware offloading.
-    assert callable(captured["backend"])
+    # eviction + SummarizationMiddleware offloading. deepagents 0.7 requires an
+    # initialized backend instance, not a factory callable.
+    backend = captured["backend"]
+    assert isinstance(backend, SandboxBackendProxy)
+    assert not callable(backend)
 
 
 @pytest.mark.asyncio

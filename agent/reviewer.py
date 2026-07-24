@@ -1378,8 +1378,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         )
         return sandbox_backend
 
-    def backend_factory(_runtime: object, _thread_id: str = thread_id):
-        return get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
+    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
 
     return create_deep_agent(
         model=reviewer_model,
@@ -1397,7 +1396,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             http_request,
         ],
         subagents=[_reviewer_subagent(reviewer_subagent_model)],
-        backend=backend_factory,
+        backend=backend,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [

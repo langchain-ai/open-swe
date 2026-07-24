@@ -820,8 +820,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
         return await ensure_sandbox_for_thread(_thread_id, repo=prompt_default_repo)
 
-    def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
-        return _get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
+    backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
@@ -987,7 +986,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             _general_purpose_subagent(subagent_model),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
-        backend=backend_factory,
+        backend=backend,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
