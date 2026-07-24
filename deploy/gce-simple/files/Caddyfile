@@ -1,0 +1,24 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Backend: webhooks, dashboard API, health. Everything else is the static UI.
+	handle /webhooks/* {
+		reverse_proxy backend:2024
+	}
+	handle /dashboard/api/* {
+		reverse_proxy backend:2024
+	}
+	handle /health {
+		reverse_proxy backend:2024
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /_shell.html
+		file_server
+	}
+}

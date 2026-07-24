@@ -1,0 +1,65 @@
+# Single-box Open SWE stack: backend (LangGraph in-memory server), a one-shot UI
+# build, and Caddy terminating TLS via Let's Encrypt. Build contexts are relative
+# to this file; the repo root is three levels up.
+services:
+  backend:
+    build:
+      context: ../../..
+      dockerfile: deploy/gce-simple/files/Dockerfile.backend
+    restart: unless-stopped
+    env_file:
+      - /opt/open-swe/.env
+    volumes:
+      - /opt/open-swe/.env:/app/.env:ro
+      # langgraph dev's inmem runtime persists checkpoints, store, and the run
+      # queue here (pickled, flushed every ~10s) and reloads on boot. Keeping it
+      # on a volume is what lets run state survive a container restart/rebuild.
+      - langgraph_data:/app/.langgraph_api
+    expose:
+      - "2024"
+
+  ui-build:
+    image: node:22-slim
+    working_dir: /app/ui
+    environment:
+      # Empty => same-origin /dashboard/api/* (Caddy proxies it to the backend).
+      VITE_DASHBOARD_API_BASE_URL: ""
+    volumes:
+      - ../../..:/app
+      - ui_dist:/dist
+    command:
+      - sh
+      - -c
+      - >
+        corepack enable &&
+        corepack prepare pnpm@11.9.0 --activate &&
+        pnpm install --frozen-lockfile &&
+        pnpm run build &&
+        rm -rf /dist/* &&
+        cp -a .output/public/. /dist/
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+      ui-build:
+        condition: service_completed_successfully
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ui_dist:/srv:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  ui_dist:
+  caddy_data:
+  caddy_config:
+  langgraph_data:

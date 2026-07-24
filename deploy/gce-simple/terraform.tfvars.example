@@ -1,0 +1,16 @@
+project_id = "my-gcp-project"
+region     = "us-central1"
+zone       = "us-central1-a"
+
+domain     = "open-swe.example.com"
+acme_email = "you@example.com"
+
+# Restrict SSH in production, e.g. ["203.0.113.10/32"].
+ssh_source_ranges = ["0.0.0.0/0"]
+
+# Optional: pin a ref other than main.
+# repo_ref = "v1.2.3"
+
+# Optional: seed the .env secret from Terraform instead of gcloud. Leave unset
+# to keep secrets out of Terraform state.
+# env_secret_content = file("${path.module}/.env")

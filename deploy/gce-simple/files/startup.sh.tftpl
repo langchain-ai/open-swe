@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euxo pipefail
+
+APP_DIR=/opt/open-swe
+SRC_DIR="$APP_DIR/src"
+COMPOSE_DIR="$SRC_DIR/deploy/gce-simple/files"
+
+install -d "$APP_DIR"
+
+# Docker + compose plugin (idempotent across reboots).
+if ! command -v docker >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y ca-certificates curl git
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+    > /etc/apt/sources.list.d/docker.list
+  apt-get update
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  systemctl enable --now docker
+fi
+
+# Clone or update the repo at the pinned ref.
+if [ -d "$SRC_DIR/.git" ]; then
+  git -C "$SRC_DIR" fetch --depth 1 origin "${repo_ref}"
+  git -C "$SRC_DIR" checkout FETCH_HEAD
+else
+  git clone --depth 1 --branch "${repo_ref}" "${repo_url}" "$SRC_DIR" \
+    || git clone "${repo_url}" "$SRC_DIR"
+  git -C "$SRC_DIR" checkout "${repo_ref}"
+fi
+
+# Fetch the backend .env from Secret Manager using the instance service account.
+# Uses the metadata server + REST API so no gcloud install is required. Waits
+# for the secret to have a version (it may be added out-of-band shortly after
+# apply), so the instance self-heals rather than failing the whole boot.
+fetch_env() {
+  local token
+  token="$(curl -s -H 'Metadata-Flavor: Google' \
+    'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')"
+  curl -sf -H "Authorization: Bearer $token" \
+    "https://secretmanager.googleapis.com/v1/projects/${project_id}/secrets/${secret_id}/versions/latest:access" \
+    | python3 -c 'import sys,json,base64; d=json.load(sys.stdin)["payload"]["data"]; sys.stdout.write(base64.b64decode(d).decode())' \
+    > "$APP_DIR/.env"
+  [ -s "$APP_DIR/.env" ]
+}
+
+for _ in $(seq 1 60); do
+  if fetch_env; then break; fi
+  echo "waiting for Secret Manager version projects/${project_id}/secrets/${secret_id} ..."
+  sleep 15
+done
+
+# Domain + ACME email for Caddy come from Terraform, appended so they always win.
+{
+  echo ""
+  echo "DOMAIN=${domain}"
+  echo "ACME_EMAIL=${acme_email}"
+} >> "$APP_DIR/.env"
+
+cd "$COMPOSE_DIR"
+docker compose --env-file "$APP_DIR/.env" up -d --build
