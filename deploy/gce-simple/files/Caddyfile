@@ -5,7 +5,7 @@
 {$DOMAIN} {
 	encode zstd gzip
 
-	# Backend: webhooks, dashboard API, health. Everything else is the static UI.
+	# Backend: webhooks, dashboard API, health.
 	handle /webhooks/* {
 		reverse_proxy backend:2024
 	}
@@ -16,9 +16,8 @@
 		reverse_proxy backend:2024
 	}
 
+	# Everything else: the dashboard UI (TanStack Start SSR server).
 	handle {
-		root * /srv
-		try_files {path} /_shell.html
-		file_server
+		reverse_proxy ui:3000
 	}
 }

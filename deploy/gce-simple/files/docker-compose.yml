@@ -1,6 +1,7 @@
-# Single-box Open SWE stack: backend (LangGraph in-memory server), a one-shot UI
-# build, and Caddy terminating TLS via Let's Encrypt. Build contexts are relative
-# to this file; the repo root is three levels up.
+# Single-box Open SWE stack: backend (LangGraph in-memory server), the dashboard
+# UI (TanStack Start SSR node server), and Caddy terminating TLS via Let's
+# Encrypt. Build contexts are relative to this file; the repo root is three
+# levels up.
 services:
   backend:
     build:
@@ -26,7 +27,6 @@ services:
       VITE_DASHBOARD_API_BASE_URL: ""
     volumes:
       - ../../..:/app
-      - ui_dist:/dist
     command:
       - sh
       - -c
@@ -34,9 +34,24 @@ services:
         corepack enable &&
         corepack prepare pnpm@11.9.0 --activate &&
         pnpm install --frozen-lockfile &&
-        pnpm run build &&
-        rm -rf /dist/* &&
-        cp -a .output/public/. /dist/
+        pnpm run build
+
+  ui:
+    image: node:22-slim
+    working_dir: /app/ui
+    restart: unless-stopped
+    depends_on:
+      ui-build:
+        condition: service_completed_successfully
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      NITRO_PORT: "3000"
+    volumes:
+      - ../../..:/app
+    command: ["node", ".output/server/index.mjs"]
+    expose:
+      - "3000"
 
   caddy:
     image: caddy:2
@@ -44,8 +59,8 @@ services:
     depends_on:
       backend:
         condition: service_started
-      ui-build:
-        condition: service_completed_successfully
+      ui:
+        condition: service_started
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
@@ -54,12 +69,10 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ui_dist:/srv:ro
       - caddy_data:/data
       - caddy_config:/config
 
 volumes:
-  ui_dist:
   caddy_data:
   caddy_config:
   langgraph_data:

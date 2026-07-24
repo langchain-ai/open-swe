@@ -24,20 +24,26 @@ and horizontal scale use LangGraph Platform (Postgres + Redis); see
 - A Secret Manager secret (`<name>-env`) holding the backend `.env`.
 
 At boot the instance installs Docker, clones the repo at `repo_ref`, pulls the
-`.env` from Secret Manager, and runs `docker compose up` for three services:
-`backend` (LangGraph `:2024`), `ui-build` (one-shot `pnpm build`), and `caddy`.
+`.env` from Secret Manager, and runs `docker compose up` for four services:
+`backend` (LangGraph `:2024`), `ui-build` (one-shot `pnpm build`), `ui` (the
+TanStack Start SSR node server on `:3000`), and `caddy`.
 
 ## Request routing (single domain)
 
-Caddy serves the built UI as static files and reverse-proxies the backend paths,
-mirroring the same-origin setup in `ui/vercel.json`:
+Caddy reverse-proxies the backend paths and sends everything else to the UI
+server (same-origin, so `/dashboard/api/*` needs no CORS):
 
 | Path | Target |
 |---|---|
 | `/webhooks/*` | backend `:2024` (GitHub / Linear / Slack) |
 | `/dashboard/api/*` | backend `:2024` (dashboard API + OAuth) |
 | `/health` | backend `:2024` |
-| everything else | static UI (`_shell.html` SPA fallback) |
+| everything else | UI SSR server `:3000` |
+
+The UI is a TanStack Start SPA-mode app served by its own node server
+(`.output/server/index.mjs`) rather than as static files — the static
+`.output/public` build relies on a prerender shell that Vercel generates but a
+headless build does not.
 
 ## Usage
 
