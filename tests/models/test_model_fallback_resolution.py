@@ -23,7 +23,7 @@ from agent.dashboard.team_settings import (
 )
 
 STALE_ANTHROPIC = "anthropic:claude-opus-4-7"
-SUPPORTED_ANTHROPIC = "anthropic:claude-opus-4-8"
+SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5"
 
 
 def test_provider_fallback_preserves_provider_and_effort() -> None:
@@ -225,7 +225,7 @@ def test_gate_fable_passthrough_when_enabled() -> None:
 
 def test_gate_fable_swaps_to_opus_when_disabled() -> None:
     assert gate_fable_model("anthropic:claude-fable-5", "high", fable_enabled=False) == (
-        "anthropic:claude-opus-4-8",
+        SUPPORTED_ANTHROPIC,
         "high",
     )
 
@@ -239,6 +239,6 @@ def test_gate_fable_leaves_non_fable_ids_alone() -> None:
 
 def test_fable_disabled_fallback_is_non_fable_anthropic() -> None:
     model, effort = fable_disabled_fallback("high")
-    assert model == "anthropic:claude-opus-4-8"
+    assert model == SUPPORTED_ANTHROPIC
     assert model not in FABLE_MODEL_IDS
     assert effort == "high"
