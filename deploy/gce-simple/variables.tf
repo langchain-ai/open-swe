@@ -62,19 +62,22 @@ variable "repo_ref" {
   default     = "main"
 }
 
-variable "env_secret_content" {
+variable "kms_keyring_name" {
   type        = string
-  description = <<-EOT
-    Optional contents of the backend .env file. When set, Terraform stores it as
-    the first version of the Secret Manager secret. Leave empty to manage the
-    secret payload out-of-band (recommended) so it never lands in Terraform state:
+  description = "Name of the KMS key ring holding the SOPS key (created if absent)."
+  default     = "sops-ring"
+}
 
-      gcloud secrets versions add <name>-env --data-file=.env
+variable "kms_key_name" {
+  type        = string
+  description = "Name of the SOPS KMS crypto key."
+  default     = "sops-key"
+}
 
-    Either way the instance fetches the latest version at boot.
-  EOT
-  default     = ""
-  sensitive   = true
+variable "sops_operators" {
+  type        = list(string)
+  description = "IAM members granted encrypt+decrypt on the SOPS key so they can edit secrets locally with `sops` (e.g. [\"user:you@example.com\"])."
+  default     = []
 }
 
 variable "labels" {

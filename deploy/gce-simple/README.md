@@ -45,33 +45,44 @@ The UI is a TanStack Start SPA-mode app served by its own node server
 `.output/public` build relies on a prerender shell that Vercel generates but a
 headless build does not.
 
+## Secrets (SOPS + GCP KMS)
+
+The backend `.env` is generated on the box from a single SOPS-encrypted file,
+`secrets.enc.yaml` (a flat `KEY: value` map of the env vars). It is encrypted
+with a GCP KMS key — the one root of trust — so:
+
+- The VM decrypts it at boot using its service account's KMS access. No secret
+  material lives in Terraform state, instance metadata (ciphertext only), or a
+  Secret Manager blob.
+- You edit it with `sops secrets.enc.yaml` (decrypts in your editor, re-encrypts
+  on save). `.sops.yaml` pins the KMS key; `sops_operators` grants your identity
+  encrypt+decrypt.
+- `secrets.enc.yaml` is gitignored here (per-deployment) but is safe to store in
+  a private repo or GCS if you want it versioned.
+
+`DOMAIN` / `ACME_EMAIL` are appended from Terraform at boot — don't put them in
+the file. `DASHBOARD_API_BASE_URL` / `DASHBOARD_BASE_URL` must be `https://<domain>`.
+
 ## Usage
 
 ```bash
 cd deploy/gce-simple
-cp terraform.tfvars.example terraform.tfvars   # edit project_id, domain, acme_email
+cp terraform.tfvars.example terraform.tfvars   # edit project_id, domain, acme_email, sops_operators
 terraform init
-terraform apply
+terraform apply                                # creates the KMS key first
+
+# author secrets, then ship them:
+sops secrets.enc.yaml                          # create/edit the KEY: value map
+terraform apply                                # pushes ciphertext to the VM via metadata
 ```
 
-Then, using the outputs:
+Then:
 
-1. **DNS** — create an A record for your `domain` pointing at `instance_ip`.
-   Caddy can only issue the TLS cert once the domain resolves to the instance.
-2. **Backend env** — fill in `files/env.example`, save it as `.env`, and load it:
-   ```bash
-   gcloud secrets versions add "$(terraform output -raw env_secret_name)" \
-     --data-file=.env --project=<project>
-   ```
-   (Or set `env_secret_content` in `terraform.tfvars` to have Terraform seed it —
-   at the cost of the value landing in Terraform state.)
-3. Point your GitHub App / Slack / Linear webhook URLs at
+1. **DNS** — create an A record for your `domain` at `instance_ip` (skip when
+   using the auto `nip.io` domain). Caddy issues the TLS cert once it resolves.
+2. Point your GitHub App / Slack / Linear webhook URLs at
    `https://<domain>/webhooks/{github,slack,linear}` and the dashboard OAuth
    callback at `https://<domain>/dashboard/api/auth/callback`.
-
-The `.env` must set `DASHBOARD_API_BASE_URL` / `DASHBOARD_BASE_URL` to
-`https://<domain>`; `DOMAIN` and `ACME_EMAIL` are appended automatically from
-Terraform at boot.
 
 ## Updating
 

@@ -11,6 +11,6 @@ ssh_source_ranges = ["0.0.0.0/0"]
 # Optional: pin a ref other than main.
 # repo_ref = "v1.2.3"
 
-# Optional: seed the .env secret from Terraform instead of gcloud. Leave unset
-# to keep secrets out of Terraform state.
-# env_secret_content = file("${path.module}/.env")
+# IAM members who can edit secrets locally with `sops` (encrypt+decrypt on the
+# SOPS KMS key). The VM itself only needs decrypt and is granted automatically.
+sops_operators = ["user:you@example.com"]

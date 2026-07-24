@@ -11,3 +11,8 @@ override.tf.json
 
 # Local backend env (secrets).
 .env
+
+# SOPS-encrypted secrets are per-deployment; keep them out of this OSS repo.
+# (Ciphertext is safe to store elsewhere — a private repo, GCS — if you want.)
+secrets.enc.yaml
+secrets.yaml

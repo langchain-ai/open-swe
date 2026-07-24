@@ -32,31 +32,38 @@ else
   git -C "$SRC_DIR" checkout "${repo_ref}"
 fi
 
-# Fetch the backend .env from Secret Manager using the instance service account.
-# Uses the metadata server + REST API so no gcloud install is required. Waits
-# for the secret to have a version (it may be added out-of-band shortly after
-# apply), so the instance self-heals rather than failing the whole boot.
-fetch_env() {
-  local token
-  token="$(curl -s -H 'Metadata-Flavor: Google' \
-    'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
-    | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')"
-  curl -sf -H "Authorization: Bearer $token" \
-    "https://secretmanager.googleapis.com/v1/projects/${project_id}/secrets/${secret_id}/versions/latest:access" \
-    | python3 -c 'import sys,json,base64; d=json.load(sys.stdin)["payload"]["data"]; sys.stdout.write(base64.b64decode(d).decode())' \
-    > "$APP_DIR/.env"
-  [ -s "$APP_DIR/.env" ]
+# SOPS for decrypting the secrets file (KMS-backed, via the instance SA's ADC).
+if ! command -v sops >/dev/null 2>&1; then
+  arch="$(dpkg --print-architecture)"
+  curl -fsSL "https://github.com/getsops/sops/releases/download/v3.11.0/sops-v3.11.0.linux-$${arch}" -o /usr/local/bin/sops
+  chmod 0755 /usr/local/bin/sops
+fi
+
+# The SOPS-encrypted secrets arrive as instance metadata. It may be empty on the
+# very first apply (before the file exists); wait for it so the instance
+# self-heals once `terraform apply` ships the ciphertext.
+meta() {
+  curl -sf -H 'Metadata-Flavor: Google' \
+    "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1"
 }
 
 for _ in $(seq 1 60); do
-  if fetch_env; then break; fi
-  echo "waiting for Secret Manager version projects/${project_id}/secrets/${secret_id} ..."
+  if meta sops-secrets > "$APP_DIR/secrets.enc.yaml" && [ -s "$APP_DIR/secrets.enc.yaml" ]; then
+    break
+  fi
+  echo "waiting for sops-secrets metadata ..."
   sleep 15
 done
 
+# Decrypt to JSON, then emit a .env. json.dumps quotes each value and escapes
+# newlines, so multiline secrets (the GitHub App private key) round-trip via
+# python-dotenv's double-quote escape handling when langgraph loads .env.
+sops -d --output-type json "$APP_DIR/secrets.enc.yaml" \
+  | python3 -c 'import sys,json; d=json.load(sys.stdin); sys.stdout.write("".join(f"{k}={json.dumps(str(v))}\n" for k,v in d.items()))' \
+  > "$APP_DIR/.env"
+
 # Domain + ACME email for Caddy come from Terraform, appended so they always win.
 {
-  echo ""
   echo "DOMAIN=${domain}"
   echo "ACME_EMAIL=${acme_email}"
 } >> "$APP_DIR/.env"

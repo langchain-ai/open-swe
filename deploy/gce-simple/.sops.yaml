@@ -1,0 +1,3 @@
+creation_rules:
+  - path_regex: secrets\.enc\.yaml$
+    gcp_kms: projects/langchain-test-387119/locations/global/keyRings/sops-ring/cryptoKeys/sops-key

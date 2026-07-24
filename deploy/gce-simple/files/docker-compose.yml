@@ -8,8 +8,8 @@ services:
       context: ../../..
       dockerfile: deploy/gce-simple/files/Dockerfile.backend
     restart: unless-stopped
-    env_file:
-      - /opt/open-swe/.env
+    # No env_file: langgraph loads /app/.env itself (python-dotenv), which
+    # correctly expands the escaped newlines in the multiline GitHub App key.
     volumes:
       - /opt/open-swe/.env:/app/.env:ro
       # langgraph dev's inmem runtime persists checkpoints, store, and the run

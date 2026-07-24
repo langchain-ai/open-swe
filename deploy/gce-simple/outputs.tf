@@ -18,17 +18,18 @@ output "instance_name" {
   value       = google_compute_instance.this.name
 }
 
-output "env_secret_name" {
-  description = "Secret Manager secret holding the backend .env. Add a version with: gcloud secrets versions add <name> --data-file=.env"
-  value       = google_secret_manager_secret.env.secret_id
+output "sops_kms_key" {
+  description = "KMS key the SOPS secrets file is encrypted with (referenced in .sops.yaml)."
+  value       = google_kms_crypto_key.sops.id
 }
 
 output "next_steps" {
   description = "What to do after apply."
   value       = <<-EOT
     1. DNS: ${var.domain != "" ? "create an A record for ${var.domain} -> ${google_compute_address.this.address}" : "none needed — using ${local.effective_domain}"}
-    2. Add the backend env (if not passed via env_secret_content):
-         gcloud secrets versions add ${google_secret_manager_secret.env.secret_id} --data-file=.env --project=${var.project_id}
+    2. Edit secrets and re-apply to ship them:
+         sops secrets.enc.yaml         # (create/edit; KMS-encrypted)
+         terraform apply               # pushes ciphertext to instance metadata
     3. SSH in and watch boot:
          gcloud compute ssh ${var.name} --zone=${var.zone} --project=${var.project_id}
          sudo journalctl -u google-startup-scripts -f
