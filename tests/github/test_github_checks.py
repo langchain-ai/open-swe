@@ -146,18 +146,85 @@ async def test_post_autofix_status_check_completes_neutral(
     assert body["details_url"] == "https://example.com/thread"
 
 
-def test_review_check_conclusion_mapping() -> None:
-    conclusion, title, _ = github_checks.review_check_conclusion(0)
-    assert conclusion == "success"
-    assert title == "No issues found"
+@pytest.mark.parametrize(
+    ("flag", "surfaced_count", "expected"),
+    [
+        (
+            None,
+            0,
+            (
+                "success",
+                "No issues found",
+                "Open SWE reviewed this pull request and found no issues.",
+            ),
+        ),
+        (
+            None,
+            3,
+            (
+                "success",
+                "Found 3 potential issues",
+                "Open SWE surfaced 3 potential issues on this pull request.",
+            ),
+        ),
+        (
+            "true",
+            0,
+            (
+                "success",
+                "No issues found",
+                "Open SWE reviewed this pull request and found no issues.",
+            ),
+        ),
+        (
+            "true",
+            1,
+            (
+                "failure",
+                "Found 1 potential issue",
+                "Open SWE surfaced 1 potential issue on this pull request.",
+            ),
+        ),
+        (
+            "TRUE",
+            2,
+            (
+                "failure",
+                "Found 2 potential issues",
+                "Open SWE surfaced 2 potential issues on this pull request.",
+            ),
+        ),
+        (
+            "false",
+            2,
+            (
+                "success",
+                "Found 2 potential issues",
+                "Open SWE surfaced 2 potential issues on this pull request.",
+            ),
+        ),
+    ],
+    ids=[
+        "flag-unset-zero-findings-success",
+        "flag-unset-three-findings-success",
+        "flag-true-zero-findings-success",
+        "flag-true-one-finding-failure",
+        "flag-uppercase-true-two-findings-failure",
+        "flag-false-two-findings-success",
+    ],
+)
+def test_review_check_conclusion_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+    flag: str | None,
+    surfaced_count: int,
+    expected: tuple[str, str, str],
+) -> None:
+    if flag is None:
+        monkeypatch.delenv("REVIEW_CHECK_BLOCKING", raising=False)
+    else:
+        monkeypatch.setenv("REVIEW_CHECK_BLOCKING", flag)
 
-    conclusion, title, _ = github_checks.review_check_conclusion(1)
-    assert conclusion == "success"
-    assert "1 potential issue" in title
-
-    conclusion, title, _ = github_checks.review_check_conclusion(3)
-    assert conclusion == "success"
-    assert "3 potential issues" in title
+    assert github_checks.review_check_conclusion(surfaced_count) == expected
 
 
 async def test_settle_review_check_run_noop_without_tracked_id(
