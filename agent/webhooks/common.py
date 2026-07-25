@@ -1104,13 +1104,19 @@ async def _reviewer_token_for_repo(
     repo_private: bool | None,
     repo_id: int | None = None,
 ) -> tuple[str | None, str | None]:
+    owner = repo_config.get("owner")
+    repo_name = repo_config.get("name")
+    target_repo = f"{owner}/{repo_name}" if owner and repo_name else None
     if repo_private is False:
         if repo_id is not None:
-            return await get_github_app_installation_token_with_expiry(repository_ids=[repo_id])
-        repo_name = repo_config.get("name")
+            return await get_github_app_installation_token_with_expiry(
+                target_repo=target_repo, repository_ids=[repo_id]
+            )
         if repo_name:
-            return await get_github_app_installation_token_with_expiry(repositories=[repo_name])
-    return await get_github_app_installation_token_with_expiry()
+            return await get_github_app_installation_token_with_expiry(
+                target_repo=target_repo, repositories=[repo_name]
+            )
+    return await get_github_app_installation_token_with_expiry(target_repo=target_repo)
 
 
 async def _store_current_reviewer_run_id(thread_id: str, run: Any) -> None:
@@ -1374,24 +1380,30 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
 
 
-async def _refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:
+async def _refresh_thread_github_token_after_401(
+    thread_id: str, email: str, target_repo: str | None = None
+) -> str | None:
     """Invalidate the cached token after a 401 and try to resolve a fresh one."""
     logger.warning(
         "GitHub returned 401 for thread %s; invalidating cached token and re-resolving",
         thread_id,
     )
     await invalidate_cached_github_token(thread_id)
-    return await _get_or_resolve_thread_github_token(thread_id, email)
+    return await _get_or_resolve_thread_github_token(thread_id, email, target_repo)
 
 
-async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
+async def _get_or_resolve_thread_github_token(
+    thread_id: str, email: str, target_repo: str | None = None
+) -> str | None:
     """Resolve and cache a GitHub token for a thread when available.
 
     In bot-token-only mode, returns a fresh GitHub App installation token
     instead of resolving per-user OAuth tokens.
     """
     if is_bot_token_only_mode():
-        bot_token, expires_at = await get_github_app_installation_token_with_expiry()
+        bot_token, expires_at = await get_github_app_installation_token_with_expiry(
+            target_repo=target_repo
+        )
         if bot_token:
             cache_github_token_for_thread(
                 thread_id, bot_token, expires_at=expires_at, is_bot_token=True

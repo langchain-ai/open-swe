@@ -864,8 +864,15 @@ async def _ensure_reviewer_sandbox_for_thread(
     github_token: str | None = None
     if configurable.get("source"):
         repo_name_for_token = str(repo_config.get("name") or "")
+        repo_owner_for_token = str(repo_config.get("owner") or "")
+        target_repo = (
+            f"{repo_owner_for_token}/{repo_name_for_token}"
+            if repo_owner_for_token and repo_name_for_token
+            else None
+        )
         github_token, expires_at = await get_github_app_installation_token_with_expiry(
-            repositories=[repo_name_for_token] if repo_name_for_token else None
+            target_repo=target_repo,
+            repositories=[repo_name_for_token] if repo_name_for_token else None,
         )
         if not github_token:
             raise RuntimeError(

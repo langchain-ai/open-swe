@@ -104,7 +104,7 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
         _pr_payload(action="opened", draft=False, private=False)
     )
 
-    get_token.assert_awaited_once_with(repository_ids=[123])
+    get_token.assert_awaited_once_with(target_repo="lc/repo", repository_ids=[123])
     assert fake_client.runs.create.await_args is not None
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is False
@@ -131,7 +131,7 @@ async def test_pr_ready_private_repo_uses_full_reviewer_token(
         _pr_payload(action="opened", draft=False, private=True)
     )
 
-    get_token.assert_awaited_once_with()
+    get_token.assert_awaited_once_with(target_repo="lc/repo")
     assert fake_client.runs.create.await_args is not None
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is True

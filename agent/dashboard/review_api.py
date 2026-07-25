@@ -34,8 +34,8 @@ _GITHUB_API = "https://api.github.com"
 _GITHUB_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
 
-async def _require_app_token() -> str:
-    token = await get_github_app_installation_token()
+async def _require_app_token(owner: str, repo: str) -> str:
+    token = await get_github_app_installation_token(target_repo=f"{owner}/{repo}")
     if not token:
         raise HTTPException(503, "GitHub App token unavailable")
     return token
@@ -396,7 +396,7 @@ async def get_pr_head_sha(owner: str, repo: str, pr_number: int) -> str:
     detect whether the PR head has moved (e.g. the chat staleness check).
     """
     try:
-        token = await _require_app_token()
+        token = await _require_app_token(owner, repo)
         payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
     except HTTPException:
         return ""
@@ -493,7 +493,7 @@ async def list_review_comments(owner: str, repo: str, pr_number: int) -> dict[st
     full list (bounded by ``_MAX_REVIEW_COMMENT_PAGES``) so older comments aren't
     silently dropped.
     """
-    token = await _require_app_token()
+    token = await _require_app_token(owner, repo)
     comments: list[dict[str, Any]] = []
     for page in range(1, _MAX_REVIEW_COMMENT_PAGES + 1):
         raw = await _github_get(
@@ -528,7 +528,7 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     if not summary:
         raise HTTPException(404, "review not found")
 
-    token = await _require_app_token()
+    token = await _require_app_token(owner, repo)
     pr_payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
     details = _serialize_pr_details(pr_payload if isinstance(pr_payload, dict) else {})
     head_sha = details["head_sha"] or summary["head_sha"]
@@ -564,7 +564,7 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, An
     Uses the App installation token so the diff is available regardless of who
     is viewing the review. The client renders these with pierre's MultiFileDiff.
     """
-    token = await _require_app_token()
+    token = await _require_app_token(owner, repo)
     async with httpx.AsyncClient(headers=github_headers(token), timeout=_GITHUB_TIMEOUT) as client:
         diff = await build_pr_diff_files(client, f"{owner}/{repo}", pr_number)
     files = diff["files"]
@@ -653,7 +653,7 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
     the GitHub host allowlist and a public-IP check before it is contacted.
     """
     _validate_image_url(url)
-    token = await _require_app_token()
+    token = await _require_app_token(owner, repo)
     await _require_image_in_pr(owner, repo, pr_number, url, token)
     headers = {"Authorization": f"Bearer {token}", "Accept": "image/*"}
 
@@ -728,7 +728,7 @@ async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dic
         number=pr_number,
         url=f"https://github.com/{owner}/{repo}/pull/{pr_number}",
     )
-    token, _ = await get_github_app_installation_token_with_expiry()
+    token, _ = await get_github_app_installation_token_with_expiry(target_repo=f"{owner}/{repo}")
     if not token:
         raise HTTPException(502, "No GitHub App token available")
     pr_metadata = await fetch_github_pr_metadata(pr_ref, token=token)

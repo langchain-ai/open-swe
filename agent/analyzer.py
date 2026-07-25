@@ -135,16 +135,24 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
-        sandbox_backend = await ensure_sandbox_for_thread(self._thread_id)
-        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
         configurable = self._config.get("configurable") or {}
         full_name = str(configurable.get("review_style_full_name") or "owner/repo")
         owner, _, name = full_name.partition("/")
+        repo = {"owner": owner, "name": name} if owner and name else None
+        configured_token = configurable.get("review_style_github_token")
+        github_token = (
+            configured_token if isinstance(configured_token, str) and configured_token else None
+        )
+        sandbox_backend = await ensure_sandbox_for_thread(
+            self._thread_id, github_proxy_token=github_token, repo=repo
+        )
+        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
         samples_text = str(configurable.get("review_style_samples_text") or "")
         mode = str(configurable.get("analyzer_mode") or "bootstrap")
-        github_token = configurable.get("review_style_github_token")
         if not (isinstance(github_token, str) and github_token):
-            github_token = await get_github_app_installation_token()
+            github_token = await get_github_app_installation_token(
+                target_repo=full_name if owner and name else None
+            )
         if isinstance(github_token, str) and github_token:
             await _configure_sandbox_github_proxy(sandbox_backend, github_token)
         system_prompt = STYLE_ANALYZER_PROMPT.format(
@@ -170,8 +178,20 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     if thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
+    full_name = str(configurable.get("review_style_full_name") or "")
+    owner, _, name = full_name.partition("/")
+    analyzer_repo = {"owner": owner, "name": name} if owner and name else None
+    configured_token = configurable.get("review_style_github_token")
+    analyzer_github_token = (
+        configured_token if isinstance(configured_token, str) and configured_token else None
+    )
+
     async def reconnect_backend(_thread_id: str = thread_id):
-        return await ensure_sandbox_for_thread(_thread_id)
+        return await ensure_sandbox_for_thread(
+            _thread_id,
+            github_proxy_token=analyzer_github_token,
+            repo=analyzer_repo,
+        )
 
     def backend_factory(_runtime: object, _thread_id: str = thread_id):
         default_backend = get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)

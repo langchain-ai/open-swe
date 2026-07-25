@@ -36,7 +36,7 @@ _PR_CREATED_FALSE = False
 _AUTO_MERGE_METADATA_LOCKS: dict[str, asyncio.Lock] = {}
 
 
-async def _resolve_pr_author_token() -> tuple[str | None, str]:
+async def _resolve_pr_author_token(owner: str, repo: str) -> tuple[str | None, str]:
     """Return ``(token, kind)`` for opening the PR.
 
     Prefers the triggering user's OAuth token (so the PR is created *as them*)
@@ -61,7 +61,7 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
             return user_token, "user"
         logger.info("No valid user token for %s; opening PR as open-swe[bot]", github_login.strip())
 
-    return await get_github_app_installation_token(), "bot"
+    return await get_github_app_installation_token(target_repo=f"{owner}/{repo}"), "bot"
 
 
 def _auth_headers(token: str) -> dict[str, str]:
@@ -727,7 +727,7 @@ async def _open_pull_request(
 ) -> dict[str, Any]:
     configurable = _configurable()
     auto_merge_requested = await _resolve_auto_merge_eligibility(configurable, state)
-    token, kind = await _resolve_pr_author_token()
+    token, kind = await _resolve_pr_author_token(owner, repo)
     if not token:
         return _failure_payload(
             code="no_github_token",

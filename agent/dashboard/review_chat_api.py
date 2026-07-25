@@ -385,7 +385,9 @@ async def _enrich_chat_command(
 
     if needs_seed:
         try:
-            token = await get_github_app_installation_token(repositories=[repo])
+            token = await get_github_app_installation_token(
+                target_repo=f"{owner}/{repo}", repositories=[repo]
+            )
             if not token:
                 raise HTTPException(503, "GitHub App token unavailable")
             pr_files, head_sha = await _build_pr_context(

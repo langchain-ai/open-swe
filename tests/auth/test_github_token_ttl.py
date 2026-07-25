@@ -247,7 +247,9 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
 
     tokens = iter(["stale-token", "fresh-token"])
 
-    async def fake_get_or_resolve(thread_id: str, email: str) -> str | None:
+    async def fake_get_or_resolve(
+        thread_id: str, email: str, target_repo: str | None = None
+    ) -> str | None:
         token = next(tokens)
         resolves.append(token)
         return token

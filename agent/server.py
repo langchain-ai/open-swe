@@ -242,11 +242,20 @@ async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProt
 
 async def _resolve_proxy_token(
     github_proxy_token: str | None,
+    repo: dict[str, str] | None = None,
 ) -> tuple[str | None, str | None, None]:
     """Resolve the proxy token and its expiry."""
     if github_proxy_token:
         return github_proxy_token, None, None
-    token, expires_at = await get_github_app_installation_token_with_expiry()
+    owner = repo.get("owner") if repo else None
+    name = repo.get("name") if repo else None
+    target_repo = f"{owner}/{name}" if owner and name else None
+    if target_repo:
+        token, expires_at = await get_github_app_installation_token_with_expiry(
+            target_repo=target_repo
+        )
+    else:
+        token, expires_at = await get_github_app_installation_token_with_expiry()
     return token, expires_at, None
 
 
@@ -278,7 +287,7 @@ async def _create_sandbox_with_proxy(
 
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     if sandbox_type == "langsmith":
-        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
+        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token, repo)
         if not token:
             msg = "Cannot configure proxy: GitHub App installation token is unavailable"
             logger.error(msg)
@@ -290,6 +299,7 @@ async def _create_sandbox_with_proxy(
             expires_at,
             repositories=github_proxy_repositories,
             permissions=permissions,
+            target_repo=f"{repo['owner']}/{repo['name']}" if repo else None,
         )
 
     return sandbox_backend
@@ -301,12 +311,13 @@ async def _refresh_github_proxy(
     *,
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
+    repo: dict[str, str] | None = None,
 ) -> None:
     """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
         return
 
-    token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
+    token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token, repo)
     if not token:
         logger.warning(
             "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
@@ -322,6 +333,7 @@ async def _refresh_github_proxy(
         expires_at,
         repositories=github_proxy_repositories,
         permissions=permissions,
+        target_repo=f"{repo['owner']}/{repo['name']}" if repo else None,
     )
 
 
@@ -339,6 +351,7 @@ async def _refresh_github_proxy_or_recreate(
             github_proxy_token,
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
+            repo=repo,
         )
     except Exception:  # noqa: BLE001
         logger.warning(

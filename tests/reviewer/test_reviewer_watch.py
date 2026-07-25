@@ -328,7 +328,7 @@ async def test_reviewer_token_for_repo_public_scopes_by_id() -> None:
             {"owner": "lc", "name": "repo"}, repo_private=False, repo_id=123
         )
     assert (token, expires) == ("scoped", "exp")
-    get_token.assert_awaited_once_with(repository_ids=[123])
+    get_token.assert_awaited_once_with(target_repo="lc/repo", repository_ids=[123])
 
 
 @pytest.mark.asyncio
@@ -338,7 +338,7 @@ async def test_reviewer_token_for_repo_public_scopes_by_name_without_id() -> Non
         await webhook_common._reviewer_token_for_repo(
             {"owner": "lc", "name": "repo"}, repo_private=False, repo_id=None
         )
-    get_token.assert_awaited_once_with(repositories=["repo"])
+    get_token.assert_awaited_once_with(target_repo="lc/repo", repositories=["repo"])
 
 
 @pytest.mark.asyncio
@@ -348,7 +348,7 @@ async def test_reviewer_token_for_repo_private_uses_full_token() -> None:
         await webhook_common._reviewer_token_for_repo(
             {"owner": "lc", "name": "repo"}, repo_private=True, repo_id=123
         )
-    get_token.assert_awaited_once_with()
+    get_token.assert_awaited_once_with(target_repo="lc/repo")
 
 
 @pytest.mark.asyncio
@@ -358,7 +358,7 @@ async def test_reviewer_token_for_repo_unknown_privacy_uses_full_token() -> None
         await webhook_common._reviewer_token_for_repo(
             {"owner": "lc", "name": "repo"}, repo_private=None, repo_id=123
         )
-    get_token.assert_awaited_once_with()
+    get_token.assert_awaited_once_with(target_repo="lc/repo")
 
 
 @pytest.mark.asyncio
@@ -410,7 +410,7 @@ async def test_push_event_public_repo_uses_scoped_token() -> None:
     ):
         await github_webhooks.process_github_push_event(payload)
 
-    get_token.assert_awaited_once_with(repository_ids=[123])
+    get_token.assert_awaited_once_with(target_repo="lc/repo", repository_ids=[123])
     assert fake_client.runs.create.await_args is not None
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is False
@@ -465,7 +465,10 @@ async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> No
     ):
         await github_webhooks.process_github_push_event(payload)
 
-    assert get_token.await_args_list == [call(), call(repository_ids=[456])]
+    assert get_token.await_args_list == [
+        call(target_repo="lc/repo"),
+        call(target_repo="lc/repo", repository_ids=[456]),
+    ]
     assert fake_client.runs.create.await_args is not None
     _, kwargs = fake_client.runs.create.await_args
     assert kwargs["config"]["configurable"]["repo_private"] is False

@@ -408,9 +408,13 @@ async def _resolve_dashboard_user_token(
     )
 
 
-async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str | None]:
+async def _resolve_bot_installation_token(
+    thread_id: str, target_repo: str | None = None
+) -> tuple[str, str | None]:
     """Get a GitHub App installation token and cache it for the thread."""
-    bot_token, expires_at = await get_github_app_installation_token_with_expiry()
+    bot_token, expires_at = await get_github_app_installation_token_with_expiry(
+        target_repo=target_repo
+    )
     if not bot_token:
         raise RuntimeError(
             "Bot-token-only mode is active (LANGSMITH_API_KEY_PROD set without "
@@ -451,6 +455,13 @@ async def resolve_github_token(
         raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing source")
 
     github_login = configurable.get("github_login")
+    repo_config = configurable.get("repo")
+    target_repo: str | None = None
+    if isinstance(repo_config, Mapping):
+        owner = repo_config.get("owner")
+        name = repo_config.get("name")
+        if isinstance(owner, str) and owner and isinstance(name, str) and name:
+            target_repo = f"{owner}/{name}"
 
     # Per-user OAuth from the dashboard store wins even in bot-token-only mode,
     # for sources that carry a mapped GitHub login (Slack, Linear, dashboard).
@@ -470,10 +481,14 @@ async def resolve_github_token(
         # No valid user token. In bot-token-only mode fall back to the bot so the
         # deployment stays functional; otherwise block and require auth.
         if is_bot_token_only_mode():
+            if target_repo:
+                return await _resolve_bot_installation_token(thread_id, target_repo)
             return await _resolve_bot_installation_token(thread_id)
         raise GitHubUserAuthRequired(source, github_login)
 
     if is_bot_token_only_mode():
+        if target_repo:
+            return await _resolve_bot_installation_token(thread_id, target_repo)
         return await _resolve_bot_installation_token(thread_id)
 
     try:

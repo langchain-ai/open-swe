@@ -186,11 +186,16 @@ async def _post_unrecoverable_notification(config: Mapping[str, Any]) -> None:
 
     github_target = _get_github_target(configurable)
     if github_target is not None:
-        token = get_github_token(config) or await get_github_app_installation_token()
+        repo, issue_number = github_target
+        owner = repo.get("owner")
+        name = repo.get("name")
+        target_repo = f"{owner}/{name}" if owner and name else None
+        token = get_github_token(config) or await get_github_app_installation_token(
+            target_repo=target_repo
+        )
         if not token:
             logger.info("No GitHub token available for sandbox circuit breaker notification")
             return
-        repo, issue_number = github_target
         await post_github_comment(
             repo,
             issue_number,

@@ -54,10 +54,10 @@ def apply() -> None:
 
         server.make_model = _fake_make_model
 
-    async def _dummy_install_token_with_expiry() -> tuple[str, str | None]:
+    async def _dummy_install_token_with_expiry(**_kwargs: object) -> tuple[str, str | None]:
         return "dummy-installation-token", None
 
-    async def _dummy_install_token() -> str:
+    async def _dummy_install_token(**_kwargs: object) -> str:
         return "dummy-installation-token"
 
     auth.get_github_app_installation_token_with_expiry = _dummy_install_token_with_expiry

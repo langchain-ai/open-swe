@@ -105,7 +105,7 @@ def test_image_content_type_allowlist_excludes_svg():
 
 @pytest.mark.asyncio
 async def test_get_pr_head_sha_returns_head(monkeypatch):
-    async def fake_token():
+    async def fake_token(*_args: str):
         return "tok"
 
     async def fake_get(path, token, **kwargs):
@@ -119,7 +119,7 @@ async def test_get_pr_head_sha_returns_head(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_pr_head_sha_empty_on_failure(monkeypatch):
-    async def fake_token():
+    async def fake_token(*_args: str):
         return "tok"
 
     async def fake_get(path, token, **kwargs):

@@ -122,6 +122,8 @@ After creating the app:
 
 > **Note**: The installation page may prompt you to authenticate with LangSmith. If you haven't set up LangSmith yet (step 4), that's fine — you can still grab the Installation ID from the URL and complete the OAuth setup later.
 
+The app may be installed on multiple organizations or personal accounts. When Open SWE knows the target repository, it asks GitHub which installation covers that `owner/repo`; `GITHUB_APP_INSTALLATION_ID` remains the fallback for operations without repository context. Local-provider credential shims can set `GITHUB_APP_TARGET_REPO=owner/repo` for each invocation. Repository selection precedence is: explicit library argument, `GITHUB_APP_TARGET_REPO`, then the pinned installation ID.
+
 ## 4. Set up LangSmith
 
 Open SWE uses [LangSmith](https://smith.langchain.com/) for:
@@ -432,7 +434,8 @@ GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
 ...
 -----END RSA PRIVATE KEY-----
 "
-GITHUB_APP_INSTALLATION_ID=""          # From step 3d
+GITHUB_APP_INSTALLATION_ID=""          # Fallback from step 3d when no target repo is known
+# GITHUB_APP_TARGET_REPO="owner/repo"     # Optional per-invocation context for local shims
 
 # === GitHub Webhook (required) ===
 GITHUB_WEBHOOK_SECRET=""               # The secret you generated in step 3b
@@ -679,7 +682,8 @@ Alternatively, you can run the dashboard as a direct cross-origin client: set `V
 
 ### GitHub authentication errors
 
-- Verify `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_APP_INSTALLATION_ID` are set correctly
+- Verify `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are set correctly; repo-less operations also require `GITHUB_APP_INSTALLATION_ID`
+- For local credential shims, verify `GITHUB_APP_TARGET_REPO` is the canonical `owner/repo`; a repo-specific lookup fails closed instead of using the pinned installation
 - Ensure the GitHub App is installed on the target repositories
 - Check that the private key includes the full `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines
 

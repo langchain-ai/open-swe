@@ -157,7 +157,8 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
         repo_name = str(configurable.get("chat_repo_name") or "")
         pr_number = configurable.get("chat_pr_number")
         token = await get_github_app_installation_token(
-            repositories=[repo_name] if repo_name else None
+            target_repo=f"{repo_owner}/{repo_name}" if repo_owner and repo_name else None,
+            repositories=[repo_name] if repo_name else None,
         )
         if isinstance(token, str) and token:
             configurable["chat_github_token"] = token

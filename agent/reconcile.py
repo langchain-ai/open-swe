@@ -242,7 +242,9 @@ async def reconcile_auto_merge_prs(
         counts["threads_checked"] += 1
         try:
             token = await get_github_app_installation_token(
-                repositories=[repo], permissions={"contents": "write", "pull_requests": "write"}
+                target_repo=f"{owner}/{repo}",
+                repositories=[repo],
+                permissions={"contents": "write", "pull_requests": "write"},
             )
             if not token:
                 raise RuntimeError("GitHub App token unavailable")

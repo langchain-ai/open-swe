@@ -52,7 +52,7 @@ class TestProxyTokenNeedsRefresh:
     def test_fallback_ttl_when_expiry_unknown(self) -> None:
         now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         record_proxy_token_expiry("thread-1", None)
-        github_proxy._PROXY_TOKEN_EXPIRY["thread-1"] = (None, now, None, ())
+        github_proxy._PROXY_TOKEN_EXPIRY["thread-1"] = (None, now, None, (), None)
         assert proxy_token_needs_refresh("thread-1", now=now) is False
         later = now + PROXY_TOKEN_FALLBACK_TTL
         assert proxy_token_needs_refresh("thread-1", now=later) is True
@@ -111,14 +111,22 @@ class TestMaybeRefreshProxyToken:
 
         assert result is True
         mock_configure.assert_called_once_with("sb-1", "ghs_new")
-        expires_at, _recorded, _scope, permissions = github_proxy._PROXY_TOKEN_EXPIRY["thread-1"]
+        expires_at, _recorded, _scope, permissions, target_repo = github_proxy._PROXY_TOKEN_EXPIRY[
+            "thread-1"
+        ]
         assert expires_at == datetime(2025, 1, 1, 13, 0, 0, tzinfo=UTC)
         assert permissions == ()
+        assert target_repo is None
 
     @pytest.mark.asyncio
     async def test_preserves_repo_scope_on_refresh(self) -> None:
         now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
-        record_proxy_token_expiry("thread-1", now + timedelta(minutes=1), repositories=["open-swe"])
+        record_proxy_token_expiry(
+            "thread-1",
+            now + timedelta(minutes=1),
+            repositories=["open-swe"],
+            target_repo="langchain-ai/open-swe",
+        )
         backend = MagicMock(id="sb-1")
         token_mock = AsyncMock(return_value=("ghs_new", "2025-01-01T13:00:00Z"))
 
@@ -137,10 +145,15 @@ class TestMaybeRefreshProxyToken:
             result = await maybe_refresh_proxy_token("thread-1", now=now)
 
         assert result is True
-        token_mock.assert_awaited_once_with(repositories=["open-swe"])
-        _expires, _recorded, scope, permissions = github_proxy._PROXY_TOKEN_EXPIRY["thread-1"]
+        token_mock.assert_awaited_once_with(
+            repositories=["open-swe"], target_repo="langchain-ai/open-swe"
+        )
+        _expires, _recorded, scope, permissions, target_repo = github_proxy._PROXY_TOKEN_EXPIRY[
+            "thread-1"
+        ]
         assert scope == ("open-swe",)
         assert permissions == ()
+        assert target_repo == "langchain-ai/open-swe"
 
     @pytest.mark.asyncio
     async def test_no_refresh_when_token_unavailable(self) -> None:

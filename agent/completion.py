@@ -95,7 +95,7 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
     if not isinstance(owner, str) or not owner or not isinstance(repo, str) or not repo:
         return
     try:
-        token = await get_github_app_installation_token()
+        token = await get_github_app_installation_token(target_repo=f"{owner}/{repo}")
         if not token:
             logger.warning("run-complete: no GitHub token to settle review check for %s", thread_id)
             return
@@ -158,7 +158,10 @@ async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: 
             if isinstance(github_issue, dict):
                 number = github_issue.get("number")
         if isinstance(repo_config, dict) and isinstance(number, int):
-            token = await get_github_app_installation_token()
+            owner = repo_config.get("owner")
+            repo = repo_config.get("name")
+            target_repo = f"{owner}/{repo}" if owner and repo else None
+            token = await get_github_app_installation_token(target_repo=target_repo)
             if token:
                 return await post_github_comment(repo_config, number, text, token=token)
         return False

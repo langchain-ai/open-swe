@@ -319,17 +319,20 @@ async def _refresh_pr_records(records: list[dict[str, Any]]) -> list[dict[str, A
     ][:_MAX_PR_REFRESH_PER_REQUEST]
     if not stale_indexes:
         return records
-    token = await get_github_app_installation_token()
-    if not token:
-        return records
-
     refreshed = list(records)
     semaphore = asyncio.Semaphore(_PR_REFRESH_CONCURRENCY)
 
     async def refresh_one(index: int, client: httpx.AsyncClient) -> tuple[int, dict[str, Any]]:
         async with semaphore:
             try:
-                return index, await _refresh_pr_record(client, token, records[index])
+                record = records[index]
+                owner = record.get("owner")
+                repo = record.get("repo")
+                target_repo = f"{owner}/{repo}" if owner and repo else None
+                token = await get_github_app_installation_token(target_repo=target_repo)
+                if not token:
+                    return index, record
+                return index, await _refresh_pr_record(client, token, record)
             except Exception:
                 logger.debug("Failed to refresh usage PR record", exc_info=True)
                 return index, records[index]

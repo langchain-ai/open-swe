@@ -361,7 +361,7 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     async def fake_get_thread_metadata_safe(_thread_id: str) -> dict[str, object]:
         return {"kind": webhook_common.REVIEWER_THREAD_KIND}
 
-    async def fake_get_token_with_expiry() -> tuple[str, str]:
+    async def fake_get_token_with_expiry(**_kwargs: object) -> tuple[str, str]:
         return "app-token", "2026-01-01T00:00:00Z"
 
     def fake_cache_token(thread_id: str, token: str, *, expires_at: str | None = None) -> None:
@@ -457,7 +457,7 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     async def fake_get_thread_metadata_safe(_thread_id: str) -> dict[str, object]:
         return {"kind": webhook_common.REVIEWER_THREAD_KIND}
 
-    async def fake_get_token_with_expiry() -> tuple[str, str]:
+    async def fake_get_token_with_expiry(**_kwargs: object) -> tuple[str, str]:
         return "app-token", "2026-01-01T00:00:00Z"
 
     def fake_cache_token(_thread_id: str, _token: str, *, expires_at: str | None = None) -> None:
@@ -1051,7 +1051,9 @@ def test_slack_webhook_ignores_unmentioned_non_plan_reply(monkeypatch) -> None:
 def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_get_github_app_installation_token_with_expiry() -> tuple[str | None, str | None]:
+    async def fake_get_github_app_installation_token_with_expiry(
+        **_kwargs: object,
+    ) -> tuple[str | None, str | None]:
         return "app-token", None
 
     def fake_cache_github_token(
@@ -1162,10 +1164,12 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(
         auto_review_checked = True
         return False
 
-    async def fake_get_github_app_installation_token() -> str | None:
+    async def fake_get_github_app_installation_token(**_kwargs: object) -> str | None:
         return "app-token"
 
-    async def fake_get_github_app_installation_token_with_expiry() -> tuple[str | None, str | None]:
+    async def fake_get_github_app_installation_token_with_expiry(
+        **_kwargs: object,
+    ) -> tuple[str | None, str | None]:
         return "app-token", None
 
     async def fake_fetch_github_pr_metadata(
@@ -1393,12 +1397,14 @@ def test_process_github_pr_comment_without_email_skips(
 def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
+    async def fake_get_or_resolve_thread_github_token(
+        thread_id: str, email: str, target_repo: str | None = None
+    ) -> str | None:
         captured["thread_id"] = thread_id
         captured["email"] = email
         return "user-token"
 
-    async def fake_get_github_app_installation_token() -> str | None:
+    async def fake_get_github_app_installation_token(**_kwargs: object) -> str | None:
         return None
 
     async def fake_react_to_github_comment(
@@ -1476,10 +1482,12 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
 def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
+    async def fake_get_or_resolve_thread_github_token(
+        thread_id: str, email: str, target_repo: str | None = None
+    ) -> str | None:
         return "user-token"
 
-    async def fake_get_github_app_installation_token() -> str | None:
+    async def fake_get_github_app_installation_token(**_kwargs: object) -> str | None:
         return None
 
     async def fake_react_to_github_comment(

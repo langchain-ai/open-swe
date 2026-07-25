@@ -101,7 +101,9 @@ async def trigger_pr_review_from_ref(
 
     # Full token to read PR metadata (privacy/id aren't in the trigger ref);
     # re-scoped below once we know whether the repo is public.
-    app_token, app_token_expires_at = await common.get_github_app_installation_token_with_expiry()
+    app_token, app_token_expires_at = await common.get_github_app_installation_token_with_expiry(
+        target_repo=f"{pr_ref.owner}/{pr_ref.repo}"
+    )
     if not app_token:
         common.logger.warning("No GitHub App token available for PR reviewer request")
         return {"success": False, "error": "No GitHub App token available"}
@@ -669,6 +671,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         comment_id,
         node_id,
     ) = await common.extract_pr_context(payload, event_type)
+    target_repo = f"{repo_config.get('owner', '')}/{repo_config.get('name', '')}"
     github_user_id = payload.get("sender", {}).get("id")
 
     common.logger.info(
@@ -710,7 +713,9 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     email = await common.email_for_login(github_login) or ""
     if email:
-        github_token = await common._get_or_resolve_thread_github_token(thread_id, email)
+        github_token = await common._get_or_resolve_thread_github_token(
+            thread_id, email, target_repo
+        )
     else:
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return
@@ -730,7 +735,9 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
                 node_id=node_id,
             )
         except GitHubAuthError:
-            github_token = await common._refresh_thread_github_token_after_401(thread_id, email)
+            github_token = await common._refresh_thread_github_token_after_401(
+                thread_id, email, target_repo
+            )
             if not github_token:
                 common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
                 return
@@ -752,7 +759,9 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
             repo_config, pr_number, token=github_token
         )
     except GitHubAuthError:
-        github_token = await common._refresh_thread_github_token_after_401(thread_id, email)
+        github_token = await common._refresh_thread_github_token_after_401(
+            thread_id, email, target_repo
+        )
         if not github_token:
             common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
             return
@@ -905,6 +914,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         "owner": repo.get("owner", {}).get("login", ""),
         "name": repo.get("name", ""),
     }
+    target_repo = f"{repo_config['owner']}/{repo_config['name']}"
 
     issue_id = str(issue.get("id", ""))
     issue_number = issue.get("number")
@@ -934,8 +944,8 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
     thread_id = common.generate_thread_id_from_github_issue(issue_id)
     existing_thread = await common._thread_exists(thread_id)
-    github_token = await common._get_or_resolve_thread_github_token(thread_id, email)
-    app_token = await common.get_github_app_installation_token()
+    github_token = await common._get_or_resolve_thread_github_token(thread_id, email, target_repo)
+    app_token = await common.get_github_app_installation_token(target_repo=target_repo)
     reaction_token = github_token or app_token
     comment = payload.get("comment", {})
     comment_id = comment.get("id")
@@ -953,7 +963,9 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
                     token=reaction_token,
                 )
             except GitHubAuthError:
-                github_token = await common._refresh_thread_github_token_after_401(thread_id, email)
+                github_token = await common._refresh_thread_github_token_after_401(
+                    thread_id, email, target_repo
+                )
                 reaction_token = github_token or app_token
                 reacted = False
                 if reaction_token:
@@ -987,7 +999,9 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
                 repo_config, issue_number, token=github_token or app_token
             )
         except GitHubAuthError:
-            github_token = await common._refresh_thread_github_token_after_401(thread_id, email)
+            github_token = await common._refresh_thread_github_token_after_401(
+                thread_id, email, target_repo
+            )
             comments = await common.fetch_issue_comments(
                 repo_config, issue_number, token=github_token or app_token
             )
