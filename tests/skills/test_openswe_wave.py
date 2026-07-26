@@ -602,6 +602,8 @@ def test_skill_contains_all_deliverables_and_closeout_wording() -> None:
     for heading in (
         "## Dispatch",
         "## Approval",
+        "## Reject",
+        "## Nudge",
         "## Spot-audit",
         "## Closeout",
         "## OSWE-100 tally",

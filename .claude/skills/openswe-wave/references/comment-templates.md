@@ -29,6 +29,26 @@ Clarifications:
 Run <focused tests>, `make lint`, and `make typecheck`. Open the normal PR with the Linear reference and standalone `Closes <TICKET>`. Let Open SWE Review and required CI run; do not directly merge or bypass gates.
 ```
 
+## Reject
+
+```markdown
+@openswe Plan not approved for <TICKET>. Revise the plan and repost for review — do not implement.
+
+Blocking rulings:
+- <ruling, with the evidence that refutes the plan step>
+
+Required corrections:
+- <specific change the revised plan must contain>
+
+Scope is unchanged: <scope>. Post the revised plan in this thread and hold for approval.
+```
+
+## Nudge
+
+```markdown
+@openswe Status check on <TICKET>: no visible progress for <minutes> minutes. Post a brief status update in this thread (current step, and the blocker if you are blocked).
+```
+
 ## Spot-audit
 
 ```markdown

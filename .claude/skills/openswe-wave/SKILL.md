@@ -20,6 +20,16 @@ export LANGSMITH_API_KEY=...
 
 `GH_TOKEN=dummy` is correct inside an Open SWE sandbox because the GitHub proxy injects the installation token. Outside that environment, set a token accepted by `gh`.
 
+Live paths require the Python modules `httpx` and `langgraph_sdk`. The imports are lazy: `httpx` gates Linear GraphQL calls, while `langgraph_sdk` gates LangGraph thread and run reads. Fixture and replay paths (`replay --fixture`, `recover --fixture`, and `trace-digest --fixture`) and `--help` do not require either module.
+
+On studio2, run live commands with the control-plane interpreter at `/opt/mobilyze/open-swe-control-plane/current/.venv/bin/python`. On another machine, use `uv` with `--no-project` so it does not resolve the target checkout before adding the live-path dependencies:
+
+```bash
+uv run --no-project --with httpx --with langgraph-sdk python \
+  .claude/skills/openswe-wave/scripts/wave-monitor watch \
+  --issue-id <linear-uuid> --repo <owner/repo> --pr-number <number>
+```
+
 ## Workflow
 
 1. Use `scripts/anchor-sweep <ref> <ticket-file>` before dispatch. Treat present/moved/missing as mechanical evidence only; inspect semantic drift yourself.
@@ -28,7 +38,9 @@ export LANGSMITH_API_KEY=...
 4. Start the quiet monitor after dispatch:
 
 ```bash
-.claude/skills/openswe-wave/scripts/wave-monitor watch   --issue-id <linear-uuid> --repo <owner/repo> --pr-number <number>
+/opt/mobilyze/open-swe-control-plane/current/.venv/bin/python \
+  .claude/skills/openswe-wave/scripts/wave-monitor watch \
+  --issue-id <linear-uuid> --repo <owner/repo> --pr-number <number>
 ```
 
 The first sample is a silent baseline. The only emitted wake nodes are:
