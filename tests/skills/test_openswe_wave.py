@@ -26,6 +26,42 @@ def fixture(name: str) -> dict[str, Any]:
     return json.loads((FIXTURES / name).read_text())
 
 
+def _watch_snapshot(
+    state: str | None,
+    *,
+    observed_at: str,
+    comments: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "linear": {
+            "viewer": {"id": "session"},
+            "issue": {"comments": {"nodes": comments or []}},
+        },
+        "langgraph": {"thread": {"metadata": {}}, "runs": []},
+        "pr": {"state": state} if state else {},
+        "pr_number": 53 if state else None,
+        "unresolved_review_thread_ids": [],
+        "latest_run_status": None,
+        "latest_run_at": None,
+        "error_run_ids": [],
+        "observed_at": observed_at,
+    }
+
+
+def _watch_args(*, pr_number: int | None, iterations: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        issue_id="issue",
+        repo="owner/repo",
+        thread_id="thread",
+        pr_number=pr_number,
+        session_user_id="session",
+        iterations=iterations,
+        interval=0,
+        run_stall_seconds=1800,
+        apply=False,
+    )
+
+
 def test_wave_two_replay_reduces_wakes_and_suppresses_self() -> None:
     recorded = fixture("oswe-79-events.json")
 
@@ -412,6 +448,155 @@ def test_monitor_can_start_before_pr_creation(monkeypatch: pytest.MonkeyPatch) -
 
     assert snapshot["pr"] == {}
     assert snapshot["pr_number"] is None
+
+
+def test_terminal_state_ignores_absent_pr_without_latching() -> None:
+    emitted_states: set[str] = set()
+
+    event = wave.terminal_pr_state_event({"pr": {}}, emitted_states)
+
+    assert event is None
+    assert emitted_states == set()
+
+
+def test_watch_emits_terminal_merged_once_for_explicit_already_merged_pr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline_comments = [
+        {
+            "id": "baseline-plan",
+            "body": "/plan ready for review",
+            "createdAt": "baseline-comment",
+            "user": {"id": "operator"},
+        }
+    ]
+    snapshots = iter(
+        [
+            _watch_snapshot("MERGED", observed_at="baseline", comments=baseline_comments),
+            _watch_snapshot("MERGED", observed_at="poll-1", comments=baseline_comments),
+            _watch_snapshot("MERGED", observed_at="poll-2", comments=baseline_comments),
+        ]
+    )
+    emitted: list[dict[str, Any]] = []
+    monkeypatch.setattr(wave, "live_snapshot", lambda *_args: next(snapshots))
+    monkeypatch.setattr(wave, "monitor_recovery", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(wave.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(wave, "emit", lambda payload, **_kwargs: emitted.append(payload))
+
+    result = wave.cmd_watch(_watch_args(pr_number=53, iterations=2))
+
+    assert result == 0
+    assert [item["wake_node"] for item in emitted] == ["terminal_merged"]
+
+
+def test_watch_discovers_already_merged_pr_from_thread_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    github_numbers: list[int] = []
+    recovery_numbers: list[int] = []
+    emitted: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        wave,
+        "linear_snapshot",
+        lambda _issue: {"viewer": {"id": "session"}, "issue": {"comments": {"nodes": []}}},
+    )
+    monkeypatch.setattr(
+        wave,
+        "langgraph_snapshot",
+        lambda _thread: {"thread": {"metadata": {"pr_number": 53}}, "runs": []},
+    )
+
+    def github_snapshot(_repo: str, number: int) -> dict[str, Any]:
+        github_numbers.append(number)
+        return {"state": "MERGED", "reviewThreads": {"nodes": []}}
+
+    def monitor_recovery(snapshot: dict[str, Any], **_kwargs: Any) -> None:
+        recovery_numbers.append(snapshot["pr_number"])
+
+    monkeypatch.setattr(wave, "github_pr_snapshot", github_snapshot)
+    monkeypatch.setattr(wave, "monitor_recovery", monitor_recovery)
+    monkeypatch.setattr(wave.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(wave, "emit", lambda payload, **_kwargs: emitted.append(payload))
+
+    result = wave.cmd_watch(_watch_args(pr_number=None, iterations=1))
+
+    assert result == 0
+    assert github_numbers == [53, 53]
+    assert recovery_numbers == [53]
+    assert [item["wake_node"] for item in emitted] == ["terminal_merged"]
+
+
+def test_watch_emits_terminal_closed_for_already_closed_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshots = iter(
+        [
+            _watch_snapshot("CLOSED", observed_at="baseline"),
+            _watch_snapshot("CLOSED", observed_at="poll-1"),
+        ]
+    )
+    emitted: list[dict[str, Any]] = []
+    monkeypatch.setattr(wave, "live_snapshot", lambda *_args: next(snapshots))
+    monkeypatch.setattr(wave, "monitor_recovery", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(wave.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(wave, "emit", lambda payload, **_kwargs: emitted.append(payload))
+
+    result = wave.cmd_watch(_watch_args(pr_number=53, iterations=1))
+
+    assert result == 0
+    assert [item["wake_node"] for item in emitted] == ["terminal_closed"]
+
+
+def test_watch_emits_live_open_to_merged_transition_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshots = iter(
+        [
+            _watch_snapshot("OPEN", observed_at="baseline"),
+            _watch_snapshot("MERGED", observed_at="poll-1"),
+            _watch_snapshot("MERGED", observed_at="poll-2"),
+        ]
+    )
+    emitted: list[dict[str, Any]] = []
+    monkeypatch.setattr(wave, "live_snapshot", lambda *_args: next(snapshots))
+    monkeypatch.setattr(wave, "monitor_recovery", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(wave.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(wave, "emit", lambda payload, **_kwargs: emitted.append(payload))
+
+    result = wave.cmd_watch(_watch_args(pr_number=53, iterations=2))
+
+    assert result == 0
+    assert [item["wake_node"] for item in emitted] == ["terminal_merged"]
+
+
+def test_failed_poll_does_not_latch_later_terminal_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshots: list[dict[str, Any] | Exception] = [
+        _watch_snapshot("OPEN", observed_at="baseline"),
+        wave.WaveOpsError("transient"),
+        _watch_snapshot("MERGED", observed_at="poll-2"),
+    ]
+    emitted: list[dict[str, Any]] = []
+
+    def live_snapshot(*_args: Any) -> dict[str, Any]:
+        snapshot = snapshots.pop(0)
+        if isinstance(snapshot, Exception):
+            raise snapshot
+        return snapshot
+
+    monkeypatch.setattr(wave, "live_snapshot", live_snapshot)
+    monkeypatch.setattr(wave, "monitor_recovery", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(wave.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(wave, "emit", lambda payload, **_kwargs: emitted.append(payload))
+
+    result = wave.cmd_watch(_watch_args(pr_number=53, iterations=2))
+
+    assert result == 0
+    assert [item["wake_node"] for item in emitted] == [
+        "unhandled_condition",
+        "terminal_merged",
+    ]
 
 
 def test_anchor_sweep_reports_present_moved_and_missing(tmp_path: Path) -> None:

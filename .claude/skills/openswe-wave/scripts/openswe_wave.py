@@ -411,19 +411,27 @@ def comments_to_events(
     return events
 
 
+def terminal_pr_state_event(
+    snapshot: dict[str, Any], emitted_states: set[str]
+) -> dict[str, Any] | None:
+    """Return a terminal PR observation unless its wake was already emitted."""
+    pr = snapshot.get("pr") or {}
+    state = str(pr.get("state") or "")
+    events = {
+        "MERGED": {"kind": "merged", "source": "github", "summary": "PR merged"},
+        "CLOSED": {"kind": "closed", "source": "github", "summary": "PR closed"},
+    }
+    event = events.get(state)
+    if event is None or state in emitted_states:
+        return None
+    return event
+
+
 def snapshot_transition_events(
     previous: dict[str, Any], current: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """Normalize GitHub and LangGraph state transitions."""
+    """Normalize review-thread and LangGraph run transitions."""
     events: list[dict[str, Any]] = []
-    old_pr = previous.get("pr") or {}
-    new_pr = current.get("pr") or {}
-    old_state = old_pr.get("state")
-    new_state = new_pr.get("state")
-    if old_state != new_state and new_state == "MERGED":
-        events.append({"kind": "merged", "source": "github", "summary": "PR merged"})
-    elif old_state != new_state and new_state == "CLOSED":
-        events.append({"kind": "closed", "source": "github", "summary": "PR closed"})
     old_threads = set(previous.get("unresolved_review_thread_ids") or [])
     new_threads = set(current.get("unresolved_review_thread_ids") or [])
     added_threads = sorted(new_threads - old_threads)
@@ -1143,6 +1151,17 @@ def cmd_watch(args: argparse.Namespace) -> int:
             ((previous["linear"].get("issue") or {}).get("comments") or {}).get("nodes") or []
         )
     }
+    terminal_states_emitted: set[str] = set()
+    terminal_event = terminal_pr_state_event(previous, terminal_states_emitted)
+    if terminal_event:
+        poll_id = str(previous.get("observed_at") or "baseline")
+        result = replay_events(assign_poll_id([terminal_event], poll_id), viewer_id)
+        for wake in result["wakes"]:
+            emit(wake, pretty=False)
+            if wake["wake_node"] == "terminal_merged":
+                terminal_states_emitted.add("MERGED")
+            elif wake["wake_node"] == "terminal_closed":
+                terminal_states_emitted.add("CLOSED")
     iterations = 0
     last_recovery_fingerprint: str | None = None
     active_unhandled: set[str] = set()
@@ -1155,6 +1174,9 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 "nodes"
             ) or []
             events = comments_to_events(comments, viewer_id, known_ids)
+            terminal_event = terminal_pr_state_event(current, terminal_states_emitted)
+            if terminal_event:
+                events.append(terminal_event)
             events.extend(snapshot_transition_events(previous, current))
             stale = liveness_event(previous, current, args.run_stall_seconds)
             if stale:
@@ -1219,6 +1241,10 @@ def cmd_watch(args: argparse.Namespace) -> int:
             result = replay_events(events, viewer_id)
             for wake in result["wakes"]:
                 emit(wake, pretty=False)
+                if wake["wake_node"] == "terminal_merged":
+                    terminal_states_emitted.add("MERGED")
+                elif wake["wake_node"] == "terminal_closed":
+                    terminal_states_emitted.add("CLOSED")
             known_ids.update(str(item.get("id")) for item in comments)
             previous = current
             last_poll_error = None
