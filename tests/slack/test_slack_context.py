@@ -52,6 +52,62 @@ def test_generate_thread_id_from_slack_thread_is_deterministic() -> None:
     assert len(first) == 36
 
 
+def test_source_context_preserves_existing_slack_permalink_on_lookup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_get_slack_permalink(channel_id: str, thread_ts: str) -> str | None:
+        assert channel_id == "C123"
+        assert thread_ts == "1700000000.000100"
+        return None
+
+    monkeypatch.setattr(webhook_common, "get_slack_permalink", fake_get_slack_permalink)
+
+    enriched = asyncio.run(
+        webhook_common._source_context_with_slack_permalink(
+            {"slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"}},
+            {
+                "source_context": {
+                    "slack_thread": {
+                        "channel_id": "C123",
+                        "thread_ts": "1700000000.000100",
+                        "permalink": "https://slack.example/existing",
+                    }
+                }
+            },
+        )
+    )
+
+    slack_thread = cast(dict[str, object], enriched["slack_thread"])
+    assert slack_thread["permalink"] == "https://slack.example/existing"
+
+
+def test_source_context_does_not_reuse_permalink_for_different_slack_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_get_slack_permalink(_channel_id: str, _thread_ts: str) -> str | None:
+        return None
+
+    monkeypatch.setattr(webhook_common, "get_slack_permalink", fake_get_slack_permalink)
+
+    enriched = asyncio.run(
+        webhook_common._source_context_with_slack_permalink(
+            {"slack_thread": {"channel_id": "C999", "thread_ts": "1700000000.000999"}},
+            {
+                "source_context": {
+                    "slack_thread": {
+                        "channel_id": "C123",
+                        "thread_ts": "1700000000.000100",
+                        "permalink": "https://slack.example/existing",
+                    }
+                }
+            },
+        )
+    )
+
+    slack_thread = cast(dict[str, object], enriched["slack_thread"])
+    assert "permalink" not in slack_thread
+
+
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
     bot_user_id = "UBOT"
     messages = [

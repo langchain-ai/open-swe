@@ -88,6 +88,14 @@ async def control_state() -> JSONResponse:
     )
 
 
+@app.post("/control/repo-private")
+async def control_repo_private(request: Request) -> JSONResponse:
+    body = await request.json()
+    value = bool(body.get("private", False))
+    fakes.set_repo_private(value)
+    return JSONResponse({"ok": True, "private": value})
+
+
 @app.get("/control/queued")
 async def control_queued(thread_id: str = "") -> JSONResponse:
     """Count the follow-ups parked on a busy thread's message queue.
@@ -454,7 +462,7 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "body": pr["body"],
         "user": {"login": pr["author"]},
         "head": {"ref": pr["head"]},
-        "base": {"ref": pr["base"]},
+        "base": {"ref": pr["base"], "repo": {"private": fakes.repo_private()}},
         "additions": pr["additions"],
         "deletions": pr["deletions"],
         "changed_files": len(pr["files"]),
@@ -463,7 +471,7 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/fake-gh/repos/{owner}/{repo}")
 async def gh_get_repo(owner: str, repo: str) -> JSONResponse:
-    return JSONResponse({"full_name": f"{owner}/{repo}", "private": False})
+    return JSONResponse({"full_name": f"{owner}/{repo}", "private": fakes.repo_private()})
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/branches/{branch:path}")

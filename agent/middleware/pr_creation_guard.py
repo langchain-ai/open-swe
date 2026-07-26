@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 from collections.abc import Awaitable, Callable, Mapping
@@ -14,6 +15,9 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
 _SHELL_SEPARATORS = {";", "&&", "||", "|", "&"}
+_SHELL_EXECUTABLES = {"bash", "dash", "sh", "zsh"}
+_MAX_SHELL_EXPANSION_DEPTH = 3
+_SHELL_EXPANSION_DEPTH_LIMIT_TOKEN = "__pr_creation_guard_shell_expansion_depth_limit__"
 _GITHUB_PULLS_ENDPOINT = re.compile(r"(?:^|/)repos/[^/\s]+/[^/\s]+/pulls/?$")
 _GITHUB_PULLS_URL = re.compile(r"https://api\.github\.com/repos/[^/\s]+/[^/\s]+/pulls/?")
 _BLOCK_ERROR = (
@@ -46,11 +50,57 @@ def _tool_call_id(request: ToolCallRequest) -> str | None:
     return None
 
 
-def _shell_tokens(command: str) -> list[str]:
+def _split_shell_tokens(command: str) -> list[str]:
     try:
         return shlex.split(command, posix=True)
     except ValueError:
         return command.split()
+
+
+def _executable_name(token: str) -> str:
+    return os.path.basename(token.strip("'\""))
+
+
+def _shell_command_argument(tokens: list[str], shell_index: int) -> str | None:
+    for index, token in enumerate(tokens[shell_index + 1 :], start=shell_index + 1):
+        if token in _SHELL_SEPARATORS:
+            return None
+        if token == "-c" or (
+            token.startswith("-") and not token.startswith("--") and "c" in token[1:]
+        ):
+            if index + 1 < len(tokens) and tokens[index + 1] not in _SHELL_SEPARATORS:
+                return tokens[index + 1]
+            return None
+    return None
+
+
+def _has_nested_shell_command(tokens: list[str]) -> bool:
+    return any(
+        _executable_name(token) in _SHELL_EXECUTABLES
+        and _shell_command_argument(tokens, index) is not None
+        for index, token in enumerate(tokens)
+    )
+
+
+def _expand_nested_shell_tokens(tokens: list[str], depth: int = 0) -> list[str]:
+    if depth >= _MAX_SHELL_EXPANSION_DEPTH:
+        if _has_nested_shell_command(tokens):
+            return [*tokens, _SHELL_EXPANSION_DEPTH_LIMIT_TOKEN]
+        return tokens
+
+    expanded = list(tokens)
+    for index, token in enumerate(tokens):
+        if _executable_name(token) not in _SHELL_EXECUTABLES:
+            continue
+        inner_command = _shell_command_argument(tokens, index)
+        if inner_command is None:
+            continue
+        expanded.extend(_expand_nested_shell_tokens(_split_shell_tokens(inner_command), depth + 1))
+    return expanded
+
+
+def _shell_tokens(command: str) -> list[str]:
+    return _expand_nested_shell_tokens(_split_shell_tokens(command))
 
 
 def _is_assignment(token: str) -> bool:
@@ -69,7 +119,7 @@ def _gh_subtokens(tokens: list[str], index: int) -> list[str]:
 
 def _contains_gh_pr_create(tokens: list[str]) -> bool:
     for index, token in enumerate(tokens):
-        if token != "gh":
+        if _executable_name(token) != "gh":
             continue
         subtokens = _gh_subtokens(tokens, index)
         for offset, subtoken in enumerate(subtokens[:-1]):
@@ -136,7 +186,7 @@ def _gh_api_uses_post_or_body(subtokens: list[str]) -> bool:
 
 def _contains_gh_api_pull_create(tokens: list[str]) -> bool:
     for index, token in enumerate(tokens):
-        if token != "gh":
+        if _executable_name(token) != "gh":
             continue
         subtokens = _gh_subtokens(tokens, index)
         if "api" not in subtokens:
@@ -153,7 +203,7 @@ def _contains_gh_api_pull_create(tokens: list[str]) -> bool:
 
 def _contains_direct_pull_create(tokens: list[str]) -> bool:
     for index, token in enumerate(tokens):
-        if token != "curl":
+        if _executable_name(token) != "curl":
             continue
         subtokens: list[str] = []
         for candidate in tokens[index + 1 :]:
@@ -181,7 +231,8 @@ def _contains_direct_pull_create(tokens: list[str]) -> bool:
 def is_pr_creation_fallback_command(command: str) -> bool:
     tokens = _shell_tokens(command)
     return (
-        _contains_gh_pr_create(tokens)
+        _SHELL_EXPANSION_DEPTH_LIMIT_TOKEN in tokens
+        or _contains_gh_pr_create(tokens)
         or _contains_gh_api_pull_create(tokens)
         or _contains_direct_pull_create(tokens)
     )

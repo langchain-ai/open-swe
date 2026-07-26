@@ -43,7 +43,10 @@ async def save_plan(
     shared content.
 
     Write the content in standard Markdown — headings, bullet/numbered lists, and
-    fenced code blocks all render.
+    fenced code blocks all render. Shared responses persist Markdown text only;
+    they do not upload or serve sandbox-local or relative image files. If images
+    or screenshots are needed for a Slack response, post them directly in Slack
+    instead of relying on the shared response page.
 
     Args:
         plan_file_path: Path to the Markdown plan file in the sandbox.

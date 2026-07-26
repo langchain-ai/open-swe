@@ -234,6 +234,7 @@ export interface AgentThread {
   createdAt: number
   updatedAt: number
   traceUrl?: string | null
+  sourceUrl?: string | null
   sandboxId?: string | null
   messages: Array<Message>
   queuedMessages?: Array<QueuedThreadMessage>

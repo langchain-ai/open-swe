@@ -173,9 +173,8 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     async def reconnect_backend(_thread_id: str = thread_id):
         return await ensure_sandbox_for_thread(_thread_id)
 
-    def backend_factory(_runtime: object, _thread_id: str = thread_id):
-        default_backend = get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
-        return CompositeBackend(default=default_backend, routes={SKILLS_ROUTE: StateBackend()})
+    default_backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    backend = CompositeBackend(default=default_backend, routes={SKILLS_ROUTE: StateBackend()})
 
     model_id = DEFAULT_LLM_MODEL_ID
     use_gateway = await _cached_gateway_enabled()
@@ -190,7 +189,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
         model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
         system_prompt="",
         tools=[save_review_style_prompt, read_finding_outcomes],
-        backend=backend_factory,
+        backend=backend,
         skills=[SKILLS_ROUTE],
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],

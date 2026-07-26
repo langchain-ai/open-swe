@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
+    "approve_plan": ".approve_plan",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
@@ -38,6 +39,7 @@ _TOOL_MODULES = {
 
 __all__ = [
     "add_finding",
+    "approve_plan",
     "enter_plan_mode",
     "fetch_review_diff",
     "fetch_url",
@@ -72,6 +74,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from .add_finding import add_finding
+    from .approve_plan import approve_plan
     from .enter_plan_mode import enter_plan_mode
     from .fetch_review_diff import fetch_review_diff
     from .fetch_url import fetch_url

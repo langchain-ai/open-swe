@@ -97,6 +97,7 @@ from .runtime.constants import (
 )
 from .runtime.execution import graph_loaded_for_execution
 from .tools import (
+    approve_plan,
     enter_plan_mode,
     fetch_url,
     http_request,
@@ -824,8 +825,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
         return await ensure_sandbox_for_thread(_thread_id, repo=prompt_default_repo)
 
-    def backend_factory(_runtime: object, _thread_id: str = thread_id) -> SandboxBackendProtocol:
-        return _get_cached_sandbox_backend(_thread_id, reconnect=reconnect_backend)
+    backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
@@ -963,6 +963,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             http_request,
             fetch_url,
             web_search,
+            approve_plan,
             enter_plan_mode,
             save_plan,
             linear_comment,
@@ -990,7 +991,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             _general_purpose_subagent(subagent_model),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
-        backend=backend_factory,
+        backend=backend,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [

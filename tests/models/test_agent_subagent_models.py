@@ -208,6 +208,6 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
         await get_agent(config)
 
     # Fable was scrubbed to Opus for both main and subagent; effort preserved.
-    assert make_model.call_args_list[0].args == ("anthropic:claude-opus-4-8",)
+    assert make_model.call_args_list[0].args == ("anthropic:claude-opus-5",)
     assert make_model.call_args_list[0].kwargs["effort"] == "high"
-    assert make_model.call_args_list[1].args == ("anthropic:claude-opus-4-8",)
+    assert make_model.call_args_list[1].args == ("anthropic:claude-opus-5",)
