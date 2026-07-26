@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+import time
+from dataclasses import dataclass
+from typing import Any, Literal
 
 import httpx
 
@@ -14,36 +16,187 @@ from .http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
-LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 LINEAR_API_URL = "https://api.linear.app/graphql"
+LINEAR_OAUTH_URL = "https://api.linear.app/oauth/token"
+_TOKEN_EXPIRY_SKEW_SECONDS = 60.0
+_TOKEN_CACHE: tuple[str, float] | None = None
+_WARNED_CONFIGURATIONS: set[str] = set()
 
 
-def _headers() -> dict[str, str]:
-    return {
-        "Authorization": LINEAR_API_KEY,
-        "Content-Type": "application/json",
-    }
+class LinearAuthError(RuntimeError):
+    """Safe Linear credential configuration or exchange failure."""
+
+
+@dataclass(frozen=True)
+class LinearAuth:
+    headers: dict[str, str]
+    mode: Literal["app", "legacy"]
+
+
+def _monotonic() -> float:
+    return time.monotonic()
+
+
+def clear_linear_token_cache() -> None:
+    """Drop cached Linear authentication state."""
+    global _TOKEN_CACHE
+    _TOKEN_CACHE = None
+    _WARNED_CONFIGURATIONS.clear()
+
+
+def invalidate_linear_app_token() -> None:
+    global _TOKEN_CACHE
+    _TOKEN_CACHE = None
+
+
+def _warn_once(key: str, message: str) -> None:
+    if key not in _WARNED_CONFIGURATIONS:
+        logger.warning(message)
+        _WARNED_CONFIGURATIONS.add(key)
+
+
+def _linear_credentials() -> tuple[Literal["app", "legacy"], str, str]:
+    client_id = os.environ.get("LINEAR_CLIENT_ID", "")
+    client_secret = os.environ.get("LINEAR_CLIENT_SECRET", "")
+    api_key = os.environ.get("LINEAR_API_KEY", "")
+    has_client_id = bool(client_id.strip())
+    has_client_secret = bool(client_secret.strip())
+
+    if has_client_id != has_client_secret:
+        raise LinearAuthError(
+            "LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET must both be set for Linear app mode"
+        )
+    if has_client_id and has_client_secret:
+        if api_key.strip():
+            _warn_once(
+                "ignored-legacy",
+                "LINEAR_API_KEY is ignored because Linear app credentials are configured",
+            )
+        return "app", client_id, client_secret
+    if api_key.strip():
+        _warn_once(
+            "legacy",
+            "LINEAR_API_KEY authentication is deprecated; configure "
+            "LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET",
+        )
+        return "legacy", api_key, ""
+    raise LinearAuthError(
+        "Configure LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET, or deprecated LINEAR_API_KEY"
+    )
+
+
+async def _mint_linear_app_token(client_id: str, client_secret: str) -> tuple[str, float]:
+    global _TOKEN_CACHE
+    try:
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+            response = await http_client.post(
+                LINEAR_OAUTH_URL,
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "scope": "read,write",
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except Exception as exc:
+        raise LinearAuthError("Failed to obtain Linear app token") from exc
+
+    token = payload.get("access_token") if isinstance(payload, dict) else None
+    expires_in = payload.get("expires_in") if isinstance(payload, dict) else None
+    if (
+        not isinstance(token, str)
+        or not token
+        or isinstance(expires_in, bool)
+        or not isinstance(expires_in, int | float)
+        or expires_in <= 0
+    ):
+        raise LinearAuthError("Failed to obtain Linear app token")
+
+    good_until = _monotonic() + max(0.0, float(expires_in) - _TOKEN_EXPIRY_SKEW_SECONDS)
+    _TOKEN_CACHE = (token, good_until)
+    return token, good_until
+
+
+async def get_linear_auth() -> LinearAuth:
+    """Resolve the configured Linear authorization header."""
+    mode, credential, secret = _linear_credentials()
+    if mode == "legacy":
+        return LinearAuth(headers={"Authorization": credential}, mode=mode)
+
+    cached = _TOKEN_CACHE
+    if cached is not None and _monotonic() < cached[1]:
+        token = cached[0]
+    else:
+        invalidate_linear_app_token()
+        token, _ = await _mint_linear_app_token(credential, secret)
+    return LinearAuth(headers={"Authorization": f"Bearer {token}"}, mode=mode)
+
+
+def _redact(value: Any, secrets: tuple[str, ...]) -> Any:
+    if isinstance(value, str):
+        redacted = value
+        for secret in secrets:
+            if secret:
+                redacted = redacted.replace(secret, "[REDACTED]")
+        return redacted
+    if isinstance(value, list):
+        return [_redact(item, secrets) for item in value]
+    if isinstance(value, dict):
+        return {key: _redact(item, secrets) for key, item in value.items()}
+    return value
 
 
 async def _graphql_request(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
     """Execute a GraphQL request against the Linear API."""
-    if not LINEAR_API_KEY:
-        return {"error": "LINEAR_API_KEY is not set"}
+    try:
+        auth = await get_linear_auth()
+    except LinearAuthError as exc:
+        return {"error": str(exc)}
 
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    payload = {"query": query, "variables": variables or {}}
+    for attempt in range(2):
         try:
-            response = await http_client.post(
-                LINEAR_API_URL,
-                headers=_headers(),
-                json={"query": query, "variables": variables or {}},
-            )
-            response.raise_for_status()
+            async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+                response = await http_client.post(
+                    LINEAR_API_URL,
+                    headers={**auth.headers, "Content-Type": "application/json"},
+                    json=payload,
+                )
+        except Exception:  # noqa: BLE001
+            return {"error": "Linear API request failed"}
+
+        if response.status_code == 401 and auth.mode == "app" and attempt == 0:
+            invalidate_linear_app_token()
+            try:
+                auth = await get_linear_auth()
+            except LinearAuthError as exc:
+                return {"error": str(exc)}
+            continue
+        if response.status_code >= 400:
+            return {"error": f"Linear API request failed with status {response.status_code}"}
+
+        try:
             result = response.json()
-            if result.get("errors"):
-                return {"error": result["errors"]}
-            return result.get("data", {})
-        except Exception as e:  # noqa: BLE001
-            return {"error": str(e)}
+        except ValueError:
+            return {"error": "Linear API returned an invalid response"}
+        if not isinstance(result, dict):
+            return {"error": "Linear API returned an invalid response"}
+        if result.get("errors"):
+            secret_values = tuple(
+                value
+                for value in (
+                    os.environ.get("LINEAR_CLIENT_SECRET", ""),
+                    auth.headers.get("Authorization", "").removeprefix("Bearer "),
+                )
+                if value
+            )
+            return {"error": _redact(result["errors"], secret_values)}
+        data = result.get("data", {})
+        return data if isinstance(data, dict) else {}
+
+    return {"error": "Linear API request failed with status 401"}
 
 
 async def comment_on_linear_issue(

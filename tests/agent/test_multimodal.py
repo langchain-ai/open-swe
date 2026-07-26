@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import socket
 from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import urlparse
 
 import httpx
 
 import agent.utils.multimodal as multimodal
 import agent.utils.url_safety as url_safety
+from agent.utils.linear import LinearAuth
 from agent.utils.multimodal import (
     extract_image_urls,
     fetch_image_block,
@@ -172,6 +174,8 @@ def _patch_image_dns(monkeypatch: Any) -> None:
             "example.com",
             "files.slack.com",
             "private.files.slack.com",
+            "uploads.linear.app",
+            "private.uploads.linear.app",
         }
         ip = "93.184.216.34" if host in public_hosts else host
         return [_addr_info(ip, port)]
@@ -376,3 +380,213 @@ async def test_fetch_image_block_keeps_auth_within_slack_host_family(monkeypatch
     assert all(
         call["headers"]["Authorization"] == "Bearer test-slack-token" for call in client.calls
     )
+
+
+async def test_fetch_image_block_keeps_legacy_linear_auth_within_upload_host_family(
+    monkeypatch: Any,
+) -> None:
+    _patch_image_dns(monkeypatch)
+    monkeypatch.setenv("LINEAR_API_KEY", "legacy-linear-key")
+    monkeypatch.delenv("LINEAR_CLIENT_ID", raising=False)
+    monkeypatch.delenv("LINEAR_CLIENT_SECRET", raising=False)
+    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        host = kwargs["headers"]["Host"]
+        if host == "uploads.linear.app":
+            return FakeImageResponse(
+                status_code=302,
+                url=url,
+                headers={"Location": "https://private.uploads.linear.app/image.png"},
+            )
+        if host == "private.uploads.linear.app":
+            return FakeImageResponse(
+                status_code=302,
+                url=url,
+                headers={"Location": "https://cdn.example.com/image.png"},
+            )
+        return FakeImageResponse(
+            status_code=200,
+            url=url,
+            headers={"Content-Type": "image/png"},
+            content=b"png",
+        )
+
+    client = FakeImageClient(responder)
+
+    result = await fetch_image_block(
+        "https://uploads.linear.app/image.png", cast(httpx.AsyncClient, client)
+    )
+
+    assert result == {"base64": "cG5n", "mime_type": "image/png"}
+    assert client.calls[0]["headers"]["Authorization"] == "legacy-linear-key"
+    assert client.calls[1]["headers"]["Authorization"] == "legacy-linear-key"
+    assert "Authorization" not in client.calls[2]["headers"]
+
+
+async def test_fetch_image_block_does_not_send_linear_auth_after_http_downgrade(
+    monkeypatch: Any,
+) -> None:
+    _patch_image_dns(monkeypatch)
+    auth = AsyncMock(return_value=LinearAuth({"Authorization": "Bearer app-token"}, "app"))
+    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        if urlparse(url).scheme == "https":
+            assert kwargs["headers"]["Authorization"] == "Bearer app-token"
+            return FakeImageResponse(
+                status_code=302,
+                url=url,
+                headers={"Location": "http://uploads.linear.app/image.png"},
+            )
+        assert "Authorization" not in kwargs["headers"]
+        return FakeImageResponse(
+            status_code=200,
+            url=url,
+            headers={"Content-Type": "image/png"},
+            content=b"png",
+        )
+
+    client = FakeImageClient(responder)
+    with patch.object(multimodal, "get_linear_auth", auth):
+        result = await fetch_image_block(
+            "https://uploads.linear.app/image.png", cast(httpx.AsyncClient, client)
+        )
+
+    assert result == {"base64": "cG5n", "mime_type": "image/png"}
+    assert len(client.calls) == 2
+
+
+async def test_fetch_image_block_retries_linear_app_auth_once_on_401(monkeypatch: Any) -> None:
+    _patch_image_dns(monkeypatch)
+    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+    auth = AsyncMock(
+        side_effect=[
+            LinearAuth({"Authorization": "Bearer token-1"}, "app"),
+            LinearAuth({"Authorization": "Bearer token-2"}, "app"),
+        ]
+    )
+    invalidate = MagicMock()
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        if kwargs["headers"]["Authorization"] == "Bearer token-1":
+            return FakeImageResponse(status_code=401, url=url)
+        return FakeImageResponse(
+            status_code=200,
+            url=url,
+            headers={"Content-Type": "image/png"},
+            content=b"png",
+        )
+
+    client = FakeImageClient(responder)
+    with (
+        patch.object(multimodal, "get_linear_auth", auth),
+        patch.object(multimodal, "invalidate_linear_app_token", invalidate),
+    ):
+        result = await fetch_image_block(
+            "https://uploads.linear.app/image.png", cast(httpx.AsyncClient, client)
+        )
+
+    assert result == {"base64": "cG5n", "mime_type": "image/png"}
+    assert [call["headers"]["Authorization"] for call in client.calls] == [
+        "Bearer token-1",
+        "Bearer token-2",
+    ]
+    assert auth.await_count == 2
+    invalidate.assert_called_once_with()
+
+
+async def test_fetch_image_block_redacts_linear_token_from_transport_logs(
+    monkeypatch: Any,
+    caplog: Any,
+) -> None:
+    _patch_image_dns(monkeypatch)
+    auth = AsyncMock(return_value=LinearAuth({"Authorization": "Bearer secret-app-token"}, "app"))
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        raise RuntimeError("transport failed with secret-app-token")
+
+    with patch.object(multimodal, "get_linear_auth", auth):
+        result = await fetch_image_block(
+            "https://uploads.linear.app/image.png",
+            cast(httpx.AsyncClient, FakeImageClient(responder)),
+        )
+
+    assert result is None
+    assert "secret-app-token" not in caplog.text
+
+
+async def test_fetch_image_block_does_not_retry_legacy_linear_401(monkeypatch: Any) -> None:
+    _patch_image_dns(monkeypatch)
+    auth = AsyncMock(return_value=LinearAuth({"Authorization": "legacy-key"}, "legacy"))
+    invalidate = MagicMock()
+    client = FakeImageClient(
+        lambda method, url, **kwargs: FakeImageResponse(status_code=401, url=url)
+    )
+
+    with (
+        patch.object(multimodal, "get_linear_auth", auth),
+        patch.object(multimodal, "invalidate_linear_app_token", invalidate),
+    ):
+        result = await fetch_image_block(
+            "https://uploads.linear.app/image.png", cast(httpx.AsyncClient, client)
+        )
+
+    assert result is None
+    assert len(client.calls) == 1
+    assert auth.await_count == 1
+    invalidate.assert_not_called()
+
+
+async def test_fetch_image_block_does_not_retry_linear_app_403(monkeypatch: Any) -> None:
+    _patch_image_dns(monkeypatch)
+    auth = AsyncMock(return_value=LinearAuth({"Authorization": "Bearer token"}, "app"))
+    invalidate = MagicMock()
+    client = FakeImageClient(
+        lambda method, url, **kwargs: FakeImageResponse(status_code=403, url=url)
+    )
+
+    with (
+        patch.object(multimodal, "get_linear_auth", auth),
+        patch.object(multimodal, "invalidate_linear_app_token", invalidate),
+    ):
+        result = await fetch_image_block(
+            "https://uploads.linear.app/image.png", cast(httpx.AsyncClient, client)
+        )
+
+    assert result is None
+    assert len(client.calls) == 1
+    assert auth.await_count == 1
+    invalidate.assert_not_called()
+
+
+async def test_fetch_image_block_does_not_retry_401_after_untrusted_redirect(
+    monkeypatch: Any,
+) -> None:
+    _patch_image_dns(monkeypatch)
+    auth = AsyncMock(return_value=LinearAuth({"Authorization": "Bearer token"}, "app"))
+    invalidate = MagicMock()
+
+    def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
+        if kwargs["headers"]["Host"] == "uploads.linear.app":
+            return FakeImageResponse(
+                status_code=302,
+                url=url,
+                headers={"Location": "https://cdn.example.com/image.png"},
+            )
+        return FakeImageResponse(status_code=401, url=url)
+
+    client = FakeImageClient(responder)
+    with (
+        patch.object(multimodal, "get_linear_auth", auth),
+        patch.object(multimodal, "invalidate_linear_app_token", invalidate),
+    ):
+        result = await fetch_image_block(
+            "https://uploads.linear.app/image.png", cast(httpx.AsyncClient, client)
+        )
+
+    assert result is None
+    assert len(client.calls) == 2
+    assert "Authorization" not in client.calls[1]["headers"]
+    assert auth.await_count == 1
+    invalidate.assert_not_called()

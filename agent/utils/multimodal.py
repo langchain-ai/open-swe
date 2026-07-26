@@ -7,6 +7,7 @@ import logging
 import mimetypes
 import os
 import re
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -17,6 +18,12 @@ from langchain_core.messages.content import (
     create_text_block,
 )
 
+from .linear import (
+    LinearAuth,
+    LinearAuthError,
+    get_linear_auth,
+    invalidate_linear_app_token,
+)
 from .url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
@@ -63,27 +70,80 @@ def _image_provider(image_url: str) -> str | None:
     return None
 
 
-def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str, str] | None:
+def _image_auth_headers_for_url(
+    original_url: str,
+    current_url: str,
+    linear_auth: LinearAuth | None = None,
+) -> dict[str, str] | None:
     provider = _image_provider(original_url)
     if provider is None or _image_provider(current_url) != provider:
         return None
     if provider == "linear":
-        linear_api_key = os.environ.get("LINEAR_API_KEY", "")
-        if linear_api_key:
-            return {"Authorization": linear_api_key}
-        logger.warning(
-            "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
-            current_url,
-        )
-    else:
-        slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
-        if slack_bot_token:
-            return {"Authorization": f"Bearer {slack_bot_token}"}
-        logger.warning(
-            "SLACK_BOT_TOKEN not set; cannot authenticate image fetch for %s",
-            current_url,
-        )
+        if urlparse(current_url).scheme != "https":
+            return None
+        return linear_auth.headers if linear_auth else None
+
+    slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+    if slack_bot_token:
+        return {"Authorization": f"Bearer {slack_bot_token}"}
+    logger.warning(
+        "SLACK_BOT_TOKEN not set; cannot authenticate image fetch for %s",
+        current_url,
+    )
     return None
+
+
+async def _request_image(
+    image_url: str,
+    client: httpx.AsyncClient,
+) -> tuple[httpx.Response | None, dict[str, Any] | None]:
+    linear_auth: LinearAuth | None = None
+    if _image_provider(image_url) == "linear":
+        try:
+            linear_auth = await get_linear_auth()
+        except LinearAuthError as exc:
+            logger.warning("Cannot authenticate Linear image fetch: %s", exc)
+            return None, None
+
+    response: httpx.Response | None = None
+    blocked: dict[str, Any] | None = None
+    for attempt in range(2):
+        last_hop_had_auth = False
+
+        def headers_for_url(
+            original_url: str,
+            current_url: str,
+            auth: LinearAuth | None = linear_auth,
+        ) -> dict[str, str] | None:
+            nonlocal last_hop_had_auth
+            headers = _image_auth_headers_for_url(original_url, current_url, auth)
+            last_hop_had_auth = bool(headers and "Authorization" in headers)
+            return headers
+
+        response, blocked = await request_with_safe_redirects(
+            client,
+            "GET",
+            image_url,
+            headers_for_url=headers_for_url,
+        )
+        if (
+            response is not None
+            and response.status_code == 401
+            and linear_auth is not None
+            and linear_auth.mode == "app"
+            and last_hop_had_auth
+            and attempt == 0
+        ):
+            invalidate_linear_app_token()
+            try:
+                linear_auth = await get_linear_auth()
+            except LinearAuthError as exc:
+                logger.warning("Cannot renew Linear image authentication: %s", exc)
+                return None, None
+            continue
+        return response, blocked
+
+    return response, blocked
 
 
 async def fetch_image_block(
@@ -93,12 +153,7 @@ async def fetch_image_block(
     """Fetch image bytes and build a model content block."""
     try:
         logger.debug("Fetching image from %s", image_url)
-        response, blocked = await request_with_safe_redirects(
-            client,
-            "GET",
-            image_url,
-            headers_for_url=_image_auth_headers_for_url,
-        )
+        response, blocked = await _request_image(image_url, client)
         if blocked:
             logger.warning(
                 "Refusing to fetch image (SSRF guard) %s: %s", image_url, blocked["content"]
@@ -145,7 +200,10 @@ async def fetch_image_block(
         )
         return create_image_block(base64=encoded, mime_type=content_type)
     except Exception:
-        logger.exception("Failed to fetch image from %s", image_url)
+        if _image_provider(image_url) == "linear":
+            logger.warning("Failed to fetch Linear image from %s", image_url)
+        else:
+            logger.exception("Failed to fetch image from %s", image_url)
         return None
 
 

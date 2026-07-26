@@ -254,6 +254,17 @@ async def test_explicit_repo_persist_failure_does_not_schedule_run() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bot_actor_comment_is_ignored_without_dispatch() -> None:
+    payload = _payload()
+    payload["data"]["botActor"] = {"id": "bot-1", "name": "Open SWE"}
+    with patch("agent.webhooks.common.verify_linear_signature", return_value=True):
+        result, background_tasks = await _invoke(payload)
+
+    assert result == {"status": "ignored", "reason": "Comment is from a bot"}
+    background_tasks.add_task.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_non_mention_comment_remains_silent() -> None:
     post_failure = AsyncMock()
     with (

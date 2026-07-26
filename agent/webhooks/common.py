@@ -87,7 +87,7 @@ from ..utils.github_token import (
 )
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.json_types import ThreadLike, as_thread_dict
-from ..utils.linear import post_linear_trace_comment  # noqa: F401
+from ..utils.linear import _graphql_request, post_linear_trace_comment  # noqa: F401
 from ..utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from ..utils.multimodal import (
     dedupe_urls,  # noqa: F401
@@ -321,7 +321,6 @@ ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
     if repo.strip()
 )
 
-LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 
 _GITHUB_BOT_MESSAGE_PREFIXES = (
     "🔐 **GitHub Authentication Required**",
@@ -362,20 +361,7 @@ def get_repo_config_from_team_mapping(
 
 
 async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
-    """Add an emoji reaction to a Linear comment.
-
-    Args:
-        comment_id: The Linear comment ID
-        emoji: The emoji to react with (default: eyes 👀)
-
-    Returns:
-        True if successful, False otherwise
-    """
-    if not LINEAR_API_KEY:
-        return False
-
-    url = "https://api.linear.app/graphql"
-
+    """Add an emoji reaction to a Linear comment."""
     mutation = """
     mutation ReactionCreate($commentId: String!, $emoji: String!) {
         reactionCreate(input: { commentId: $commentId, emoji: $emoji }) {
@@ -383,41 +369,15 @@ async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
         }
     }
     """
-
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        try:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": mutation,
-                    "variables": {"commentId": comment_id, "emoji": emoji},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-            return bool(result.get("data", {}).get("reactionCreate", {}).get("success"))
-        except Exception:  # noqa: BLE001
-            return False
+    result = await _graphql_request(
+        mutation,
+        {"commentId": comment_id, "emoji": emoji},
+    )
+    return bool(result.get("reactionCreate", {}).get("success"))
 
 
 async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
-    """Fetch full issue details from Linear API including description and comments.
-
-    Args:
-        issue_id: The Linear issue ID
-
-    Returns:
-        Full issue data dict, or None if fetch failed
-    """
-    if not LINEAR_API_KEY:
-        return None
-
-    url = "https://api.linear.app/graphql"
-
+    """Fetch full issue details from Linear API including description and comments."""
     query = """
     query GetIssue($issueId: String!) {
         issue(id: $issueId) {
@@ -450,26 +410,11 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
         }
     }
     """
-
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        try:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": query,
-                    "variables": {"issueId": issue_id},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-
-            return result.get("data", {}).get("issue")
-        except httpx.HTTPError:
-            return None
+    result = await _graphql_request(query, {"issueId": issue_id})
+    if "error" in result:
+        return None
+    issue = result.get("issue")
+    return issue if isinstance(issue, dict) else None
 
 
 def generate_thread_id_from_issue(issue_id: str) -> str:
