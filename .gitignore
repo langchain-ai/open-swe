@@ -70,3 +70,5 @@ __pycache__/
 .eggs/
 
 # 
+# Operator dogfood logs (openswe-run/openswe-wave) live beside the checkout
+handoffs/

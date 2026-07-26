@@ -388,21 +388,20 @@ SIBLING_WAVE_SCRIPTS = SKILL_DIR.parent / "openswe-wave" / "scripts"
 
 
 def wave_scripts_dir() -> Path:
-    """Where the wave scripts live: vendored beside us, else the sibling skill.
+    """Where the wave scripts live: beside us if copied there, else the sibling skill.
 
-    Installed copies vendor them (see `install`). An in-repo checkout deliberately
-    does not — committing them would duplicate the tracked openswe-wave and
-    reintroduce the drift the installer exists to prevent — so fall back to the
-    sibling skill, which makes this skill runnable in place from a checkout.
+    The supported deployment is a git checkout with the skill directories
+    symlinked into ~/.claude/skills, so the sibling resolution is the normal
+    path; a stray copied layout still works via the first branch.
     """
     if (SCRIPTS_DIR / "openswe_wave.py").is_file():
         return SCRIPTS_DIR
     if (SIBLING_WAVE_SCRIPTS / "openswe_wave.py").is_file():
         return SIBLING_WAVE_SCRIPTS
     raise RunError(
-        "openswe_wave.py is neither vendored beside this script nor present at "
-        f"{SIBLING_WAVE_SCRIPTS}. Run this skill's `install`, or check out "
-        "openswe-wave alongside it."
+        "openswe_wave.py is neither beside this script nor present at "
+        f"{SIBLING_WAVE_SCRIPTS}. Deploy from a git checkout of the repo so the "
+        "sibling openswe-wave skill is present (see SKILL.md, Deployment)."
     )
 
 

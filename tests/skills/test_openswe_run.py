@@ -37,9 +37,8 @@ def test_entry_point_is_executable_and_self_describes() -> None:
 def test_every_reference_named_in_skill_md_resolves() -> None:
     """A doc that points at a missing reference is a broken skill, not a typo.
 
-    Tracked references live here; vendored ones (the adjudication checklist)
-    only exist beside us after `install`, so in a checkout they resolve from
-    the sibling openswe-wave, the same fallback the scripts use.
+    Tracked references live here; the adjudication checklist resolves from the
+    sibling openswe-wave, the same fallback the scripts use.
     """
     skill_md = (SKILL / "SKILL.md").read_text()
 
@@ -52,11 +51,8 @@ def test_every_reference_named_in_skill_md_resolves() -> None:
 
 
 def test_wave_assets_resolve_from_the_sibling_skill_in_a_checkout() -> None:
-    """Only source files are tracked; the wave assets come from the sibling skill.
-
-    Without this fallback the skill is unrunnable from a checkout, because the
-    vendored copies only exist after `install`.
-    """
+    """The wave assets come from the sibling skill; without this fallback the
+    skill is unrunnable from a checkout."""
     assert not (SKILL / "scripts/openswe_wave.py").exists()
 
     resolved = run.wave_scripts_dir()
@@ -66,27 +62,6 @@ def test_wave_assets_resolve_from_the_sibling_skill_in_a_checkout() -> None:
     assert resolved.resolve() == (WAVE_SKILL / "scripts").resolve()
     assert (resolved / "openswe_wave.py").is_file()
     assert (resolved / "wave-monitor").is_file()
-
-
-def test_installer_manifest_matches_the_tracked_and_vendored_split() -> None:
-    """The manifest is the vendoring contract; drift here breaks installed copies."""
-    manifest = set(
-        re.search(r'^MANIFEST="([^"]+)"', (SKILL / "install").read_text(), re.M).group(1).split()
-    )
-    tracked = {
-        str(path.relative_to(SKILL))
-        for path in SKILL.rglob("*")
-        if path.is_file() and path.name != "install" and "__pycache__" not in path.parts
-    }
-    vendored = {
-        "scripts/openswe_wave.py",
-        "scripts/wave-monitor",
-        "references/adjudication-checklist.md",
-    }
-
-    assert manifest == tracked | vendored
-    for name in vendored:
-        assert (WAVE_SKILL / name).is_file(), f"wave source is missing {name}"
 
 
 def test_wave_symbols_the_script_calls_still_exist() -> None:
@@ -137,7 +112,7 @@ def test_no_operator_home_path_is_hardcoded_in_the_source() -> None:
     what must not appear is a literal one baked into the source."""
     assert run.DEFAULT_STABLE_ROOT.startswith(str(Path.home()))
 
-    for path in (SCRIPT_PATH, SKILL / "SKILL.md", SKILL / "install"):
+    for path in (SCRIPT_PATH, SKILL / "SKILL.md"):
         assert not re.search(r"/(Users|home)/[a-z]", path.read_text()), (
             f"{path.name} hardcodes an operator home directory"
         )
