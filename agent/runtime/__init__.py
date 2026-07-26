@@ -9,7 +9,6 @@ from .sandbox import (
     configure_git_identity,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
-    recreate_sandbox,
 )
 
 __all__ = [
@@ -21,5 +20,4 @@ __all__ = [
     "ensure_sandbox_for_thread",
     "get_cached_sandbox_backend",
     "graph_loaded_for_execution",
-    "recreate_sandbox",
 ]

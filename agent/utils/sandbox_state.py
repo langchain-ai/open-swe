@@ -29,6 +29,22 @@ from .sandbox import create_sandbox
 logger = logging.getLogger(__name__)
 
 
+class SandboxUnrecoverableError(RuntimeError):
+    """The thread's sandbox is gone.
+
+    Never recovered by creating a replacement: the sandbox holds the agent's
+    only copy of its working tree, so a fresh one would silently discard
+    uncommitted work while the agent carried on believing it was still there.
+    """
+
+    def __init__(self, thread_id: str, sandbox_id: str | None, cause: str) -> None:
+        self.thread_id = thread_id
+        self.sandbox_id = sandbox_id
+        super().__init__(
+            f"Sandbox {sandbox_id or '<unknown>'} for thread {thread_id} is unrecoverable: {cause}"
+        )
+
+
 class SandboxBackendProxy(BaseSandbox):
     """Stable per-thread backend handle whose target can be replaced.
 

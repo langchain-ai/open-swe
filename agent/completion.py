@@ -27,6 +27,7 @@ from .utils.github_comments import post_github_comment
 from .utils.linear import comment_on_linear_issue
 from .utils.slack import post_slack_thread_reply
 from .utils.thread_ops import langgraph_client
+from .utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +72,9 @@ def _failure_text(status: str, dashboard_url: str | None = None) -> str:
         reason = "was interrupted before it could finish"
     else:
         reason = "hit an unexpected error"
-    text = (
-        f"⚠️ I wasn't able to finish that — the run {reason}. "
-        "Send another message and I'll pick it back up."
+    text = warning(
+        f"Open SWE wasn't able to finish that — the run {reason}. "
+        "Send another message and it will pick this back up."
     )
     if dashboard_url:
         text += f" You can view the error in <{dashboard_url}|Open SWE Web>."

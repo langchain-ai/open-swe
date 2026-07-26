@@ -15,6 +15,7 @@ from langchain_core.messages.content import create_text_block
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 
+from ..utils.user_messages import warning
 from . import common
 
 _PLAN_APPROVAL_PHRASES = {
@@ -311,9 +312,9 @@ async def _notify_slack_processing_error(
         common.logger.debug("Could not clear Slack assistant status", exc_info=True)
 
     dashboard_url = common.dashboard_thread_url(thread_id)
-    message = (
-        "⚠️ I hit an unexpected error while handling this Slack thread. "
-        "Send another message and I'll try again."
+    message = warning(
+        "Open SWE hit an unexpected error while handling this Slack thread. "
+        "Send another message and it will try again."
     )
     if dashboard_url:
         message += f" You can view the error in <{dashboard_url}|Open SWE Web>."

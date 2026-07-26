@@ -86,6 +86,7 @@ from .middleware import (
     task_retry_on,
 )
 from .middleware.prepare_run import PrepareRunState
+from .middleware.sandbox_circuit_breaker import post_sandbox_unrecoverable_notification
 from .prompt import construct_system_prompt
 from .runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -143,6 +144,8 @@ from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .utils.sandbox_state import (
     SANDBOX_BACKENDS,
+    SandboxUnrecoverableError,
+    clear_sandbox_backend,
     get_or_create_sandbox_backend_proxy,
     get_sandbox_id_from_metadata,
     set_sandbox_backend,
@@ -313,14 +316,13 @@ async def _refresh_github_proxy(
     )
 
 
-async def _refresh_github_proxy_or_recreate(
+async def _refresh_github_proxy_or_fail(
     sandbox_backend: SandboxBackendProtocol,
     thread_id: str,
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
-    repo: dict[str, str] | None = None,
 ) -> SandboxBackendProtocol:
-    """Refresh proxy credentials, recreating stale LangSmith sandboxes on failure."""
+    """Refresh proxy credentials; a sandbox we can't reconfigure is unrecoverable."""
     try:
         await _refresh_github_proxy(
             sandbox_backend,
@@ -328,19 +330,14 @@ async def _refresh_github_proxy_or_recreate(
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
         )
-    except Exception:  # noqa: BLE001
+    except Exception as exc:
         logger.warning(
-            "Failed to refresh GitHub proxy for sandbox %s on thread %s, recreating sandbox",
+            "Failed to refresh GitHub proxy for sandbox %s on thread %s",
             sandbox_backend.id,
             thread_id,
             exc_info=True,
         )
-        return await _recreate_sandbox(
-            thread_id,
-            github_proxy_token=github_proxy_token,
-            github_proxy_repositories=github_proxy_repositories,
-            repo=repo,
-        )
+        raise SandboxUnrecoverableError(thread_id, sandbox_backend.id, str(exc)) from exc
     return sandbox_backend
 
 
@@ -352,56 +349,16 @@ async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> No
     )
 
 
-async def _recreate_sandbox(
-    thread_id: str,
-    *,
-    github_proxy_token: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-    repo: dict[str, str] | None = None,
-) -> SandboxBackendProtocol:
-    """Create a fresh sandbox (with proxy auth) after a connection failure.
-
-    The agent is responsible for cloning repos via tools.
-    """
-    return set_sandbox_backend(
-        thread_id,
-        await _create_sandbox_with_proxy(
-            github_proxy_token,
-            thread_id=thread_id,
-            github_proxy_repositories=github_proxy_repositories,
-            repo=repo,
-        ),
-    )
-
-
-async def check_or_recreate_sandbox(
+async def check_sandbox_reachable(
     sandbox_backend: SandboxBackendProtocol,
     thread_id: str,
-    github_proxy_token: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-    repo: dict[str, str] | None = None,
 ) -> SandboxBackendProtocol:
-    """Check if a cached sandbox is reachable; recreate it if not.
-
-    Pings the sandbox with a lightweight command. If the sandbox is
-    unreachable (SandboxClientError), it is torn down and a fresh one
-    is created via _recreate_sandbox.
-
-    Returns the original backend if healthy, or a new one if recreated.
-    """
+    """Ping a cached sandbox; an unreachable one is unrecoverable, not replaceable."""
     try:
         await asyncio.to_thread(sandbox_backend.execute, "echo ok")
-    except SandboxClientError:
-        logger.warning(
-            "Cached sandbox is no longer reachable for thread %s, recreating",
-            thread_id,
-        )
-        sandbox_backend = await _recreate_sandbox(
-            thread_id,
-            github_proxy_token=github_proxy_token,
-            github_proxy_repositories=github_proxy_repositories,
-            repo=repo,
-        )
+    except SandboxClientError as exc:
+        logger.warning("Cached sandbox is no longer reachable for thread %s", thread_id)
+        raise SandboxUnrecoverableError(thread_id, sandbox_backend.id, str(exc)) from exc
     return sandbox_backend
 
 
@@ -418,9 +375,14 @@ async def ensure_sandbox_for_thread(
     never provisions two sandboxes concurrently — no cross-process sentinel is
     needed):
 
-    1. Cached in memory -> ping; recreate on ``SandboxClientError``; refresh proxy.
-    2. Metadata has an id -> reconnect; recreate on failure; refresh proxy.
+    1. Cached in memory -> ping, then refresh proxy.
+    2. Metadata has an id -> reconnect, then refresh proxy.
     3. No sandbox at all -> create one and persist the id.
+
+    Only case 3 creates. A sandbox that exists but can't be reached raises
+    ``SandboxUnrecoverableError`` instead of being replaced — a replacement is
+    empty, and swapping one in silently destroys whatever the agent had not yet
+    committed.
 
     For LangSmith sandboxes, also refreshes the GitHub App proxy auth. When
     ``repo`` has a ``ready`` repo-scoped snapshot, newly created sandboxes boot
@@ -436,14 +398,10 @@ async def ensure_sandbox_for_thread(
 
     if sandbox_backend:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
-        original_sandbox_id = sandbox_backend.id
-        sandbox_backend = await check_or_recreate_sandbox(
-            sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories, repo
+        sandbox_backend = await check_sandbox_reachable(sandbox_backend, thread_id)
+        sandbox_backend = await _refresh_github_proxy_or_fail(
+            sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
         )
-        if sandbox_backend.id == original_sandbox_id:
-            sandbox_backend = await _refresh_github_proxy_or_recreate(
-                sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories, repo
-            )
     elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
         sandbox_backend = await _create_sandbox_with_proxy(
@@ -457,23 +415,13 @@ async def ensure_sandbox_for_thread(
         logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
             sandbox_backend = await create_sandbox(sandbox_id)
-        except Exception:
-            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
-            sandbox_backend = await _create_sandbox_with_proxy(
-                github_proxy_token,
-                thread_id=thread_id,
-                github_proxy_repositories=github_proxy_repositories,
-                repo=repo,
-            )
-        else:
-            original_sandbox_id = sandbox_backend.id
-            sandbox_backend = await check_or_recreate_sandbox(
-                sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories, repo
-            )
-            if sandbox_backend.id == original_sandbox_id:
-                sandbox_backend = await _refresh_github_proxy_or_recreate(
-                    sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories, repo
-                )
+        except Exception as exc:
+            logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
+            raise SandboxUnrecoverableError(thread_id, sandbox_id, str(exc)) from exc
+        sandbox_backend = await check_sandbox_reachable(sandbox_backend, thread_id)
+        sandbox_backend = await _refresh_github_proxy_or_fail(
+            sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
+        )
 
     sandbox_backend = set_sandbox_backend(thread_id, sandbox_backend)
 
@@ -572,7 +520,6 @@ def _get_cached_sandbox_backend(
 
 get_cached_sandbox_backend = _get_cached_sandbox_backend
 configure_git_identity = _configure_git_identity
-recreate_sandbox = _recreate_sandbox
 
 
 async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -735,10 +682,19 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         sandbox_task = asyncio.create_task(
             ensure_sandbox_for_thread(self._thread_id, repo=prompt_default_repo)
         )
-        triggering_user_identity, sandbox_backend = await asyncio.gather(
-            triggering_user_identity_task,
-            sandbox_task,
-        )
+        try:
+            triggering_user_identity, sandbox_backend = await asyncio.gather(
+                triggering_user_identity_task,
+                sandbox_task,
+            )
+        except SandboxUnrecoverableError as exc:
+            # The run is about to die with no sandbox; make sure the user hears
+            # why rather than getting silence.
+            clear_sandbox_backend(self._thread_id)
+            await post_sandbox_unrecoverable_notification(
+                self._config or {}, sandbox_id=exc.sandbox_id
+            )
+            raise
         del github_token
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
         repo_custom_instructions = await _resolve_repo_custom_instructions(prompt_default_repo)

@@ -368,7 +368,7 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value="/workspace",
             ),
             patch(
-                "agent.server.check_or_recreate_sandbox",
+                "agent.server.check_sandbox_reachable",
                 new_callable=AsyncMock,
                 return_value=mock_sandbox,
             ),
@@ -450,10 +450,13 @@ class TestRefreshProxyOnSandboxReuse:
             mock_proxy.assert_called_once_with("sandbox-existing", "ghs_fresh")
 
     @pytest.mark.asyncio
-    async def test_proxy_refresh_failure_recreates_sandbox(self) -> None:
-        """A stale sandbox whose proxy cannot be patched should be replaced."""
+    async def test_proxy_refresh_failure_raises_instead_of_replacing(self) -> None:
+        """A sandbox we can't reconfigure is unrecoverable, never swapped out.
+
+        Replacing it would hand the agent an empty filesystem and discard any
+        work the old sandbox still held.
+        """
         mock_sandbox = MagicMock(id="sandbox-stale")
-        replacement_sandbox = MagicMock(id="sandbox-replacement")
         request = httpx.Request(
             "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-stale"
         )
@@ -474,25 +477,17 @@ class TestRefreshProxyOnSandboxReuse:
                     response=response,
                 ),
             ) as mock_proxy,
-            patch(
-                "agent.server._recreate_sandbox",
-                new_callable=AsyncMock,
-                return_value=replacement_sandbox,
-            ) as mock_recreate,
+            patch("agent.server._create_sandbox_with_proxy", new_callable=AsyncMock) as mock_create,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
-            from agent.server import _refresh_github_proxy_or_recreate
+            from agent.server import SandboxUnrecoverableError, _refresh_github_proxy_or_fail
 
-            sandbox = await _refresh_github_proxy_or_recreate(mock_sandbox, "thread-123")
+            with pytest.raises(SandboxUnrecoverableError) as excinfo:
+                await _refresh_github_proxy_or_fail(mock_sandbox, "thread-123")
 
-            assert sandbox is replacement_sandbox
+            assert excinfo.value.sandbox_id == "sandbox-stale"
             mock_proxy.assert_called_once_with("sandbox-stale", "ghs_fresh")
-            mock_recreate.assert_awaited_once_with(
-                "thread-123",
-                github_proxy_token=None,
-                github_proxy_repositories=None,
-                repo=None,
-            )
+            mock_create.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_starts_stopped_langsmith_sandbox_before_proxy_refresh(self) -> None:
