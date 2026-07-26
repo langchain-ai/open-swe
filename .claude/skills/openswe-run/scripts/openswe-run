@@ -1,0 +1,833 @@
+#!/usr/bin/env python3
+"""openswe-run: dispatch one Open SWE ticket via the Linear-comment path and watch it.
+
+Token-frugal single-run sibling of openswe-wave. Run state changes go through
+@openswe Linear comments (product path); runs are never created, resumed, or
+mutated through the LangGraph API. The exceptions are `approve` and `reject`,
+which transition the plan record exactly as the dashboard's endpoints do,
+because a comment alone leaves the run merge-ineligible (draft PR, auto-merge
+never armed). Every command appends evidence to <stable-root>/handoffs/.
+
+Stdlib-only. The openswe_wave module is imported for its pure classifiers and
+live watching subprocesses wave-monitor, both taken from this skill's vendored
+copies or, in a checkout, the sibling openswe-wave. They run under a resolved
+interpreter (control-plane venv or uv) because their live paths need httpx +
+langgraph_sdk, absent from system python3 (see dogfood log 2026-07-26).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import select
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+from collections import deque
+from datetime import UTC, datetime
+from pathlib import Path
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
+SKILL_DIR = SCRIPTS_DIR.parent
+DEFAULT_STABLE_ROOT = str(Path.home() / "projects" / "open-swe")
+LINEAR_URL = "https://api.linear.app/graphql"
+LOCAL_LANGGRAPH_URL = "http://127.0.0.1:2029"
+CONTROL_PLANE_PYTHON = "/opt/mobilyze/open-swe-control-plane/current/.venv/bin/python"
+WAKE_TIMEOUT_EXIT = 3
+CHILD_FAILURE_EXIT = 4
+# Matches unfilled template placeholders like <TICKET> or <owner/repo>; the
+# ':' exclusion spares autolinks like <https://...>.
+PLACEHOLDER_RE = re.compile(r"<[A-Za-z][^>:\n]*>")
+
+DISPATCH_TEMPLATE = """@openswe repo {repo} — Execute {ticket} only.
+
+Enter plan mode first. Re-anchor all cited paths and symbols against `{ref}`, state any refuted premise as a Challenge, and do not implement until approval is posted in this Linear thread.
+
+Required scope: {scope}.
+Boundaries: {boundaries}.
+Verification: {verify}.
+PR body: include the Linear reference and `Closes {ticket}` as a standalone line. Let normal Open SWE Review and required CI run; do not directly merge or bypass gates.
+"""
+
+NUDGE_TEMPLATE = """@openswe Status check on {ticket}: no visible progress for {minutes} minutes. Post a brief status update in this thread (current step, and the blocker if you are blocked)."""
+
+
+class RunError(RuntimeError):
+    """A named, actionable failure. Message must tell the caller what to run."""
+
+
+def now_iso() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def stable_root() -> Path:
+    return Path(os.environ.get("OPENSWE_STABLE_ROOT") or DEFAULT_STABLE_ROOT)
+
+
+# --------------------------------------------------------------------------- dogfood log
+
+
+def ensure_handoffs() -> Path:
+    """Create <stable-root>/handoffs/ and keep it gitignored, whatever the target repo."""
+    root = stable_root()
+    handoffs = root / "handoffs"
+    handoffs.mkdir(parents=True, exist_ok=True)
+    gitignore = root / ".gitignore"
+    line = "handoffs/"
+    existing = gitignore.read_text() if gitignore.exists() else ""
+    if line not in existing.splitlines():
+        with gitignore.open("a") as fh:
+            if existing and not existing.endswith("\n"):
+                fh.write("\n")
+            fh.write(line + "\n")
+    return handoffs
+
+
+def log_path(ticket: str) -> Path:
+    day = datetime.now(UTC).strftime("%Y%m%d")
+    return ensure_handoffs() / f"{ticket.upper()}-{day}-run.md"
+
+
+def dogfood(ticket: str, tag: str, text: str) -> None:
+    """Append one evidence line to the run's dogfood log."""
+    path = log_path(ticket)
+    if not path.exists():
+        header = (
+            f"# openswe-run dogfood log — {ticket.upper()}\n\n"
+            f"Started {now_iso()} on {os.uname().nodename} by openswe-run.\n"
+            f"Purpose: evidence of process/substrate/ergonomics issues while running Open SWE.\n"
+            f"Tags: [cmd] actions, [wake] monitor wakes, [note] observations, "
+            f"[ISSUE] dogfood findings, [error] failures.\n\n"
+        )
+        path.write_text(header)
+    clean = " ".join(text.split())
+    with path.open("a") as fh:
+        fh.write(f"- {now_iso()} [{tag}] {clean}\n")
+
+
+# --------------------------------------------------------------------------- linear (urllib)
+
+
+def linear_gql(query: str, variables: dict) -> dict:
+    key = os.environ.get("LINEAR_API_KEY")
+    if not key:
+        raise RunError("LINEAR_API_KEY is not set. Set it with: export LINEAR_API_KEY=...")
+    payload = json.dumps({"query": query, "variables": variables}).encode()
+    request = urllib.request.Request(
+        LINEAR_URL,
+        data=payload,
+        headers={"Authorization": key, "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = json.loads(response.read())
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise RunError(f"Linear request failed: {exc}") from exc
+    if data.get("errors"):
+        raise RunError(f"Linear GraphQL returned errors: {data['errors']}")
+    return data.get("data") or {}
+
+
+ISSUE_QUERY = """
+query RunIssue($id: String!) {
+  issue(id: $id) { id identifier title url }
+}
+"""
+
+SNAPSHOT_QUERY = """
+query RunSnapshot($id: String!, $cursor: String) {
+  viewer { id name }
+  issue(id: $id) {
+    id identifier
+    comments(first: 100, after: $cursor) {
+      nodes { id body createdAt user { id name } }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"""
+
+
+def resolve_issue(ticket: str) -> dict:
+    issue = linear_gql(ISSUE_QUERY, {"id": ticket}).get("issue")
+    if not issue:
+        raise RunError(f"Linear issue {ticket} was not found")
+    return issue
+
+
+def linear_snapshot(issue_id: str) -> dict:
+    """Viewer identity plus every comment (paginated), stdlib transport."""
+    variables: dict = {"id": issue_id}
+    comments: list[dict] = []
+    viewer: dict = {}
+    while True:
+        data = linear_gql(SNAPSHOT_QUERY, variables)
+        issue = data.get("issue")
+        if not issue:
+            raise RunError(f"Linear issue {issue_id} was not returned")
+        viewer = viewer or (data.get("viewer") or {})
+        connection = issue.get("comments") or {}
+        comments.extend(node for node in connection.get("nodes") or [] if isinstance(node, dict))
+        page = connection.get("pageInfo") or {}
+        if not page.get("hasNextPage"):
+            return {"viewer": viewer, "comments": comments}
+        variables = {"id": issue_id, "cursor": page.get("endCursor")}
+
+
+def post_comment(issue_id: str, body: str) -> None:
+    mutation = """
+    mutation RunComment($input: CommentCreateInput!) {
+      commentCreate(input: $input) { success comment { id } }
+    }
+    """
+    result = linear_gql(mutation, {"input": {"issueId": issue_id, "body": body}})
+    if (result.get("commentCreate") or {}).get("success") is not True:
+        raise RunError("Linear comment was not accepted")
+
+
+# --------------------------------------------------------------------------- environment
+
+
+def probe_local_langgraph() -> bool:
+    try:
+        with urllib.request.urlopen(f"{LOCAL_LANGGRAPH_URL}/ok", timeout=3) as response:
+            return bool(json.loads(response.read()).get("ok"))
+    except Exception:
+        return False
+
+
+def ensure_env(ticket: str, *, langgraph: bool, github: bool) -> list[str]:
+    """Fail fast with copy-pasteable exports; auto-derive what is safely derivable."""
+    notes: list[str] = []
+    if not os.environ.get("LINEAR_API_KEY"):
+        raise RunError("LINEAR_API_KEY is not set. Set it with: export LINEAR_API_KEY=...")
+    if langgraph and not os.environ.get("LANGGRAPH_URL"):
+        if probe_local_langgraph():
+            os.environ["LANGGRAPH_URL"] = LOCAL_LANGGRAPH_URL
+            notes.append(f"auto-set LANGGRAPH_URL={LOCAL_LANGGRAPH_URL} (local /ok probe passed)")
+        else:
+            raise RunError(
+                "LANGGRAPH_URL is not set and the local control plane did not answer. "
+                "Set it with: export LANGGRAPH_URL=http://127.0.0.1:2029 "
+                "(off studio2, tunnel first: ssh -N -L 2029:127.0.0.1:2029 studio2)"
+            )
+    if github and not os.environ.get("GH_TOKEN"):
+        token = ""
+        if shutil.which("gh"):
+            probe = subprocess.run(
+                ["gh", "auth", "token"], capture_output=True, text=True, check=False
+            )
+            token = probe.stdout.strip() if probe.returncode == 0 else ""
+        if token:
+            os.environ["GH_TOKEN"] = token
+            notes.append("auto-derived GH_TOKEN from `gh auth token`")
+        else:
+            raise RunError(
+                "GH_TOKEN is not set and `gh auth token` produced nothing. "
+                "Set it with: export GH_TOKEN=$(gh auth token)  # or a PAT with repo scope"
+            )
+    for note in notes:
+        dogfood(ticket, "note", note)
+    return notes
+
+
+def resolve_monitor_python() -> list[str]:
+    """Interpreter for the vendored wave-monitor (needs httpx + langgraph_sdk)."""
+    override = os.environ.get("OPENSWE_RUN_PYTHON")
+    if override:
+        return [override]
+    if Path(CONTROL_PLANE_PYTHON).exists():
+        return [CONTROL_PLANE_PYTHON]
+    if shutil.which("uv"):
+        # --no-project: this runs from the target repo checkout, and without it uv
+        # resolves that repo's pyproject first and fails before installing these.
+        return [
+            "uv",
+            "run",
+            "--no-project",
+            "--with",
+            "httpx",
+            "--with",
+            "langgraph-sdk",
+            "python",
+        ]
+    raise RunError(
+        "No interpreter with httpx + langgraph_sdk. Fix one of: "
+        f"export OPENSWE_RUN_PYTHON=<python-with-deps>; install the control plane venv "
+        f"({CONTROL_PLANE_PYTHON}); or install uv (brew install uv)."
+    )
+
+
+# Statuses the product refuses to transition (plan_api._reject_shared_content, and
+# its 409 on editing a settled plan). Mirrored here so this path is no more
+# permissive than the dashboard's.
+PLAN_STATUS_LOCKED = ("shared", "cancelled")
+PLAN_RESULT_SENTINEL = "OPENSWE_PLAN_RESULT "
+
+PLAN_STATUS_SNIPPET = r"""
+import asyncio, json, os
+from langgraph_sdk import get_client
+
+NAMESPACE = ("plan", "content")
+SENTINEL = "OPENSWE_PLAN_RESULT "
+LOCKED = ("shared", "cancelled")
+THREAD = os.environ["OPENSWE_PLAN_THREAD"]
+STATUS = os.environ["OPENSWE_PLAN_STATUS"]
+PLAN_MODE = os.environ["OPENSWE_PLAN_MODE"] == "1"
+URL = os.environ.get("LANGGRAPH_URL") or "http://127.0.0.1:2029"
+
+
+def _value(item):
+    return (item.get("value") if isinstance(item, dict) else item) or {}
+
+
+class Refused(Exception):
+    pass
+
+
+async def main():
+    client = get_client(url=URL)
+    # A missing item comes back as HTTP 200 with a null body, not a 404, so an
+    # absent plan is indistinguishable from an empty one here — refuse both
+    # rather than fabricate a record the product never stored.
+    existing = _value(await client.store.get_item(NAMESPACE, THREAD))
+    previous = existing.get("status")
+    if not existing or not str(existing.get("markdown") or "").strip():
+        raise Refused(
+            "no plan record with content is stored for this thread; the agent may "
+            "have posted its plan to Linear without landing a save_plan write"
+        )
+    if previous in LOCKED:
+        raise Refused(f"refusing to transition a {previous!r} plan")
+    record = {"markdown": existing["markdown"], "status": STATUS}
+    plan_file_path = existing.get("plan_file_path")
+    if isinstance(plan_file_path, str) and plan_file_path:
+        record["plan_file_path"] = plan_file_path
+    await client.store.put_item(NAMESPACE, THREAD, record)
+    confirmed = _value(await client.store.get_item(NAMESPACE, THREAD)).get("status")
+    # Metadata mirrors the record for the dashboard's benefit; the product treats
+    # this as best-effort (plan_store._merge_thread_metadata swallows it), and the
+    # record above is what decides eligibility. Never fail the write over it.
+    metadata_ok = True
+    try:
+        await client.threads.update(
+            thread_id=THREAD, metadata={"plan_status": STATUS, "plan_mode": PLAN_MODE}
+        )
+    except Exception:
+        metadata_ok = False
+    print(SENTINEL + json.dumps(
+        {"previous": previous, "status": confirmed, "metadata_ok": metadata_ok}
+    ))
+
+
+try:
+    asyncio.run(main())
+except Refused as exc:
+    print(SENTINEL + json.dumps({"refused": str(exc)}))
+    raise SystemExit(3)
+"""
+
+
+def set_plan_status(thread_id: str, status: str, *, plan_mode: bool) -> dict:
+    """Transition the product's plan record, as the dashboard's endpoints do.
+
+    An @openswe comment makes the agent act but never transitions this record,
+    and the product reads it to decide `auto_merge_eligible`. Left untransitioned,
+    the run is computed merge-ineligible: the PR opens as a draft and auto-merge
+    is never armed. This writes what `set_plan_status(...)` writes in the product.
+
+    Callers must do this before the comment that dispatches: eligibility is
+    resolved at run creation (server.py `_auto_merge_eligible`) and re-checked
+    when the PR is opened (`open_pull_request`), so a later write is too late.
+    """
+    command = [*resolve_monitor_python(), "-c", PLAN_STATUS_SNIPPET]
+    environ = {
+        **os.environ,
+        "OPENSWE_PLAN_THREAD": thread_id,
+        "OPENSWE_PLAN_STATUS": status,
+        "OPENSWE_PLAN_MODE": "1" if plan_mode else "0",
+    }
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, env=environ, timeout=300)
+    except subprocess.TimeoutExpired as exc:
+        raise RunError(
+            f"Plan-status write to {status!r} timed out against thread {thread_id}. "
+            "It may still have landed — re-read the plan before retrying."
+        ) from exc
+    payload = {}
+    for line in reversed(result.stdout.splitlines()):
+        if not line.startswith(PLAN_RESULT_SENTINEL):
+            continue
+        candidate = json.loads(line[len(PLAN_RESULT_SENTINEL) :])
+        if isinstance(candidate, dict):
+            payload = candidate
+            break
+    if payload.get("refused"):
+        raise RunError(f"Plan store refused the {status!r} transition: {payload['refused']}")
+    if result.returncode != 0:
+        raise RunError(
+            f"Could not set the plan record to {status!r} on thread {thread_id}, so the "
+            "run would be computed merge-ineligible. Refusing to continue. "
+            f"Error: {result.stderr.strip()[-400:]}"
+        )
+    if payload.get("status") != status:
+        raise RunError(
+            f"Plan store did not accept the {status!r} transition for thread "
+            f"{thread_id} (status is {payload.get('status')!r})."
+        )
+    return payload
+
+
+SIBLING_WAVE_SCRIPTS = SKILL_DIR.parent / "openswe-wave" / "scripts"
+
+
+def wave_scripts_dir() -> Path:
+    """Where the wave scripts live: vendored beside us, else the sibling skill.
+
+    Installed copies vendor them (see `install`). An in-repo checkout deliberately
+    does not — committing them would duplicate the tracked openswe-wave and
+    reintroduce the drift the installer exists to prevent — so fall back to the
+    sibling skill, which makes this skill runnable in place from a checkout.
+    """
+    if (SCRIPTS_DIR / "openswe_wave.py").is_file():
+        return SCRIPTS_DIR
+    if (SIBLING_WAVE_SCRIPTS / "openswe_wave.py").is_file():
+        return SIBLING_WAVE_SCRIPTS
+    raise RunError(
+        "openswe_wave.py is neither vendored beside this script nor present at "
+        f"{SIBLING_WAVE_SCRIPTS}. Run this skill's `install`, or check out "
+        "openswe-wave alongside it."
+    )
+
+
+def import_wave_module():
+    """Import openswe_wave (pure classifiers only; lazy net deps)."""
+    sys.path.insert(0, str(wave_scripts_dir()))
+    try:
+        import openswe_wave  # noqa: PLC0415
+    except ModuleNotFoundError as exc:
+        raise RunError(
+            f"openswe_wave.py was found under {wave_scripts_dir()} but could not be imported: {exc}"
+        ) from exc
+    return openswe_wave
+
+
+# --------------------------------------------------------------------------- guards
+
+
+def read_body(args: argparse.Namespace) -> str:
+    if getattr(args, "body_file", None):
+        text = sys.stdin.read() if args.body_file == "-" else Path(args.body_file).read_text()
+    else:
+        raise RunError("Provide --body-file <path> (or --body-file - to read stdin)")
+    if not text.strip():
+        raise RunError("Comment body is empty")
+    return text
+
+
+def guard_placeholders(ticket: str, body: str, force: bool) -> None:
+    leftovers = sorted(set(PLACEHOLDER_RE.findall(body)))
+    if leftovers and not force:
+        raise RunError(
+            f"Body still contains unfilled template placeholders: {', '.join(leftovers)}. "
+            "Fill them in, or pass --force if they are intentional."
+        )
+    if leftovers and force:
+        dogfood(ticket, "note", f"--force posted body with placeholders: {', '.join(leftovers)}")
+
+
+# --------------------------------------------------------------------------- commands
+
+
+def cmd_env(args: argparse.Namespace) -> int:
+    report = {
+        "linear_api_key": bool(os.environ.get("LINEAR_API_KEY")),
+        "langgraph_url": os.environ.get("LANGGRAPH_URL")
+        or (LOCAL_LANGGRAPH_URL if probe_local_langgraph() else None),
+        "gh_token": bool(os.environ.get("GH_TOKEN")) or bool(shutil.which("gh")),
+        "stable_root": str(stable_root()),
+        "handoffs": str(ensure_handoffs()),
+    }
+    try:
+        report["monitor_python"] = " ".join(resolve_monitor_python())
+    except RunError as exc:
+        report["monitor_python"] = f"UNRESOLVED: {exc}"
+    missing = [k for k in ("linear_api_key", "langgraph_url", "gh_token") if not report[k]]
+    report["ready"] = not missing and not str(report["monitor_python"]).startswith("UNRESOLVED")
+    print(json.dumps(report, indent=2))
+    return 0 if report["ready"] else 2
+
+
+def cmd_start(args: argparse.Namespace) -> int:
+    ensure_env(args.ticket, langgraph=False, github=False)
+    issue = resolve_issue(args.ticket)
+    if args.body_file:
+        body = read_body(args)
+    else:
+        body = DISPATCH_TEMPLATE.format(
+            repo=args.repo,
+            ticket=issue["identifier"],
+            ref=args.ref,
+            scope=args.scope or f"execute {issue['identifier']} exactly as ticketed",
+            boundaries=args.boundaries or f"no changes beyond {issue['identifier']}'s stated scope",
+            verify=args.verify or "focused tests, `make lint`, and `make typecheck`",
+        )
+    guard_placeholders(args.ticket, body, args.force)
+    wave = import_wave_module()
+    result = {
+        "identifier": issue["identifier"],
+        "issue_id": issue["id"],
+        "issue_url": issue["url"],
+        "thread_id": wave.derive_linear_thread_id(issue["id"]),
+        "repo": args.repo,
+        "dispatched": not args.dry_run,
+    }
+    if args.dry_run:
+        result["body"] = body
+        print(json.dumps(result, indent=2))
+        return 0
+    post_comment(issue["id"], body)
+    dogfood(args.ticket, "cmd", f"dispatched {issue['identifier']} to {args.repo} ({issue['url']})")
+    print(json.dumps(result))
+    return 0
+
+
+def _spawn_monitor(args: argparse.Namespace, issue_id: str) -> tuple[subprocess.Popen, deque]:
+    command = [
+        *resolve_monitor_python(),
+        str(wave_scripts_dir() / "wave-monitor"),
+        "watch",
+        "--issue-id",
+        issue_id,
+        "--repo",
+        args.repo,
+        "--interval",
+        str(args.interval),
+    ]
+    if args.pr_number:
+        command.extend(["--pr-number", str(args.pr_number)])
+    process = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+    )
+    stderr_tail: deque = deque(maxlen=40)
+    threading.Thread(
+        target=lambda: [stderr_tail.append(line) for line in process.stderr], daemon=True
+    ).start()
+    return process, stderr_tail
+
+
+def _emit_wake(ticket: str, wake: dict, source: str) -> None:
+    dogfood(
+        ticket, "wake", f"{wake.get('wake_node')} via {source}: {wake.get('summary', '')[:200]}"
+    )
+    print(json.dumps(wake, sort_keys=True, default=str))
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    """Exit-on-first-wake watch. Healthy monitors are silent; wakes are one JSON line."""
+    ensure_env(args.ticket, langgraph=True, github=True)
+    wave = import_wave_module()
+    issue = resolve_issue(args.ticket)
+    issue_id = issue["id"]
+    baseline = linear_snapshot(issue_id)
+    viewer_id = str((baseline["viewer"] or {}).get("id") or "")
+    if not viewer_id:
+        raise RunError("Could not discover the Linear viewer identity for self-suppression")
+    known_ids = {str(comment.get("id")) for comment in baseline["comments"]}
+    dogfood(
+        args.ticket,
+        "cmd",
+        f"watch started (interval {args.interval}s, timeout {args.timeout_min}m, "
+        f"baseline {len(known_ids)} comments)",
+    )
+    process, stderr_tail = _spawn_monitor(args, issue_id)
+    deadline = time.monotonic() + args.timeout_min * 60
+    next_heartbeat = time.monotonic() + args.heartbeat_min * 60
+    restarts = 0
+    buffered = ""
+    while True:
+        if time.monotonic() >= deadline:
+            process.terminate()
+            wake = {
+                "wake_node": "watch_timeout",
+                "summary": f"no wake within {args.timeout_min} minutes; monitor stopped",
+                "evidence": {"issue_id": issue_id, "identifier": issue["identifier"]},
+            }
+            _emit_wake(args.ticket, wake, "wrapper-timeout")
+            return WAKE_TIMEOUT_EXIT
+
+        ready, _, _ = select.select([process.stdout], [], [], 5)
+        if ready:
+            line = process.stdout.readline()
+            if line:
+                buffered = line.strip()
+                try:
+                    wake = json.loads(buffered)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(wake, dict) and wake.get("wake_node"):
+                    _emit_wake(args.ticket, wake, "wave-monitor")
+                    if not args.follow:
+                        process.terminate()
+                        return 0
+
+        if process.poll() is not None:
+            tail = "".join(list(stderr_tail)[-8:]).strip()
+            dogfood(
+                args.ticket,
+                "error",
+                f"wave-monitor exited rc={process.returncode} unexpectedly; stderr tail: {tail[:400]}",
+            )
+            restarts += 1
+            if restarts > args.max_restarts:
+                print(
+                    json.dumps(
+                        {
+                            "wake_node": "unhandled_condition",
+                            "summary": f"wave-monitor died {restarts} times; last rc={process.returncode}",
+                            "evidence": {"stderr_tail": tail},
+                        }
+                    )
+                )
+                return CHILD_FAILURE_EXIT
+            process, stderr_tail = _spawn_monitor(args, issue_id)
+            continue
+
+        if time.monotonic() >= next_heartbeat:
+            next_heartbeat = time.monotonic() + args.heartbeat_min * 60
+            snapshot = linear_snapshot(issue_id)
+            events = wave.comments_to_events(snapshot["comments"], viewer_id, known_ids)
+            result = wave.replay_events(events, viewer_id)
+            fresh_wakes = result.get("wakes") or []
+            if fresh_wakes:
+                # The child should have printed these within ~2 poll intervals. If we
+                # see them first, the child is wedged (OSWE-136 signature): kill it,
+                # surface the wake ourselves, and leave the evidence in the log.
+                oldest = min(
+                    str(event.get("poll_id") or "")
+                    for wake in fresh_wakes
+                    for event in wake["evidence"]
+                )
+                dogfood(
+                    args.ticket,
+                    "ISSUE",
+                    f"wrapper heartbeat saw wake-worthy comments (oldest {oldest}) that "
+                    f"wave-monitor did not report within {args.heartbeat_min}m — presumed "
+                    f"hung network read (OSWE-136); killed and surfaced wake from wrapper",
+                )
+                process.terminate()
+                _emit_wake(args.ticket, fresh_wakes[0], "wrapper-reconcile")
+                if not args.follow:
+                    return 0
+                process, stderr_tail = _spawn_monitor(args, issue_id)
+            known_ids.update(str(comment.get("id")) for comment in snapshot["comments"])
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    ensure_env(args.ticket, langgraph=False, github=False)
+    issue = resolve_issue(args.ticket)
+    snapshot = linear_snapshot(issue["id"])
+    viewer_id = str((snapshot["viewer"] or {}).get("id") or "")
+    others = [c for c in snapshot["comments"] if str((c.get("user") or {}).get("id")) != viewer_id]
+    for comment in others[-args.last :]:
+        user = (comment.get("user") or {}).get("name")
+        print(f"----- {user} at {comment.get('createdAt')} -----")
+        print(comment.get("body") or "")
+    if not others:
+        print("(no non-viewer comments yet)")
+    return 0
+
+
+def _post_prepared(
+    args: argparse.Namespace, action: str, body: str, issue: dict | None = None
+) -> int:
+    issue = issue or resolve_issue(args.ticket)
+    guard_placeholders(args.ticket, body, getattr(args, "force", False))
+    post_comment(issue["id"], body)
+    dogfood(args.ticket, "cmd", f"{action} posted on {issue['identifier']}: {body[:160]}")
+    print(json.dumps({"identifier": issue["identifier"], "posted": action}))
+    return 0
+
+
+def cmd_approve(args: argparse.Namespace) -> int:
+    ensure_env(args.ticket, langgraph=True, github=False)
+    if not args.adjudicated:
+        raise RunError(
+            "Refusing to approve without adjudication. Read references/adjudication-checklist.md, "
+            "record your rulings in the approval body, then re-run with --adjudicated."
+        )
+    body = read_body(args)
+    if "@openswe" not in body.lower():
+        raise RunError("Approval must mention @openswe or the webhook will not deliver it")
+    # Everything that can reject this approval runs BEFORE the plan-record write.
+    # The write is not undone by `reject`, so a body refused after it would leave
+    # the plan approved with no dispatching comment — and the next comment on the
+    # issue, of any kind, would then run against an approved plan.
+    issue = resolve_issue(args.ticket)
+    guard_placeholders(args.ticket, body, getattr(args, "force", False))
+    thread_id = import_wave_module().derive_linear_thread_id(issue["id"])
+    state = set_plan_status(thread_id, "approved", plan_mode=False)
+    dogfood(
+        args.ticket,
+        "cmd",
+        f"plan record {state.get('previous')!r} -> 'approved' on thread {thread_id}"
+        + ("" if state.get("metadata_ok") else " (thread metadata mirror failed)"),
+    )
+    return _post_prepared(args, "approval", body, issue=issue)
+
+
+def cmd_reject(args: argparse.Namespace) -> int:
+    ensure_env(args.ticket, langgraph=True, github=False)
+    body = read_body(args)
+    if "@openswe" not in body.lower():
+        raise RunError("Rejection must mention @openswe or the webhook will not deliver it")
+    issue = resolve_issue(args.ticket)
+    guard_placeholders(args.ticket, body, getattr(args, "force", False))
+    thread_id = import_wave_module().derive_linear_thread_id(issue["id"])
+    # Send the record back to revising, as the dashboard's reject endpoint does.
+    # Without this a rejection posted after an approval would leave the plan
+    # approved, and the resulting run would arm auto-merge on a rejected plan.
+    state = set_plan_status(thread_id, "revising", plan_mode=True)
+    dogfood(
+        args.ticket,
+        "cmd",
+        f"plan record {state.get('previous')!r} -> 'revising' on thread {thread_id}",
+    )
+    return _post_prepared(args, "rejection", body, issue=issue)
+
+
+def cmd_comment(args: argparse.Namespace) -> int:
+    ensure_env(args.ticket, langgraph=False, github=False)
+    return _post_prepared(args, "comment", read_body(args))
+
+
+def cmd_nudge(args: argparse.Namespace) -> int:
+    ensure_env(args.ticket, langgraph=False, github=False)
+    issue = resolve_issue(args.ticket)
+    body = NUDGE_TEMPLATE.format(ticket=issue["identifier"], minutes=args.minutes)
+    return _post_prepared(args, "nudge", body)
+
+
+def cmd_log(args: argparse.Namespace) -> int:
+    tag = "ISSUE" if args.issue else "note"
+    dogfood(args.ticket, tag, args.text)
+    print(str(log_path(args.ticket)))
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    path = log_path(args.ticket)
+    if not path.exists():
+        candidates = sorted(ensure_handoffs().glob(f"{args.ticket.upper()}-*-run.md"))
+        if not candidates:
+            raise RunError(f"No dogfood log found for {args.ticket} under {ensure_handoffs()}")
+        path = candidates[-1]
+    entries = [line for line in path.read_text().splitlines() if line.startswith("- ")]
+    issues = [line for line in entries if "[ISSUE]" in line]
+    wakes = [line for line in entries if "[wake]" in line]
+    print(f"log: {path}")
+    print(f"wakes ({len(wakes)}):")
+    for line in wakes:
+        print(f"  {line}")
+    print(f"dogfood issues ({len(issues)}):")
+    for line in issues:
+        print(f"  {line}")
+    if not issues:
+        print("  (none recorded — say so explicitly in the chat summary)")
+    print("Reminder: end the run by summarizing these issues in chat output.")
+    return 0
+
+
+# --------------------------------------------------------------------------- main
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="openswe-run", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("env", help="preflight report; rc 0 when ready").set_defaults(func=cmd_env)
+
+    start = sub.add_parser("start", help="dispatch one ticket via @openswe Linear comment")
+    start.add_argument("--ticket", required=True)
+    start.add_argument("--repo", required=True, help="owner/repo the run should target")
+    start.add_argument("--ref", default="main")
+    start.add_argument("--scope")
+    start.add_argument("--boundaries")
+    start.add_argument("--verify")
+    start.add_argument("--body-file", help="full custom dispatch body ('-' for stdin)")
+    start.add_argument("--dry-run", action="store_true")
+    start.add_argument("--force", action="store_true")
+    start.set_defaults(func=cmd_start)
+
+    watch = sub.add_parser("watch", help="block until one wake; prints a single JSON line")
+    watch.add_argument("--ticket", required=True)
+    watch.add_argument("--repo", required=True)
+    watch.add_argument("--pr-number", type=int)
+    watch.add_argument("--interval", type=float, default=60)
+    watch.add_argument("--timeout-min", type=float, default=480)
+    watch.add_argument("--heartbeat-min", type=float, default=10)
+    watch.add_argument("--max-restarts", type=int, default=2)
+    watch.add_argument("--follow", action="store_true", help="stream wakes instead of exiting")
+    watch.set_defaults(func=cmd_watch)
+
+    plan = sub.add_parser("plan", help="print recent non-viewer comments (the posted plan)")
+    plan.add_argument("--ticket", required=True)
+    plan.add_argument("--last", type=int, default=1)
+    plan.set_defaults(func=cmd_plan)
+
+    approve = sub.add_parser("approve", help="post plan approval (requires --adjudicated)")
+    approve.add_argument("--ticket", required=True)
+    approve.add_argument("--body-file", required=True)
+    approve.add_argument("--adjudicated", action="store_true")
+    approve.add_argument("--force", action="store_true")
+    approve.set_defaults(func=cmd_approve)
+
+    reject = sub.add_parser("reject", help="post plan rejection with corrections")
+    reject.add_argument("--ticket", required=True)
+    reject.add_argument("--body-file", required=True)
+    reject.add_argument("--force", action="store_true")
+    reject.set_defaults(func=cmd_reject)
+
+    comment = sub.add_parser("comment", help="post a mid-run message to the agent")
+    comment.add_argument("--ticket", required=True)
+    comment.add_argument("--body-file", required=True)
+    comment.add_argument("--force", action="store_true")
+    comment.set_defaults(func=cmd_comment)
+
+    nudge = sub.add_parser("nudge", help="post the one allowed stall nudge")
+    nudge.add_argument("--ticket", required=True)
+    nudge.add_argument("--minutes", type=int, default=30)
+    nudge.set_defaults(func=cmd_nudge)
+
+    log = sub.add_parser("log", help="append a note or [ISSUE] to the dogfood log")
+    log.add_argument("--ticket", required=True)
+    log.add_argument("--issue", action="store_true", help="tag as a dogfood ISSUE finding")
+    log.add_argument("text")
+    log.set_defaults(func=cmd_log)
+
+    report = sub.add_parser("report", help="print wakes + dogfood issues for the chat summary")
+    report.add_argument("--ticket", required=True)
+    report.set_defaults(func=cmd_report)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        return args.func(args)
+    except RunError as exc:
+        print(f"openswe-run: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

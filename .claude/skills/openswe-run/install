@@ -1,0 +1,104 @@
+#!/bin/bash
+# Install openswe-run byte-identically into ~/.claude/skills and ~/.codex/skills.
+#
+# Vendors the wave scripts (openswe_wave.py, wave-monitor) and the adjudication
+# checklist from an openswe-wave source at install time, so installed copies are
+# self-contained and there is exactly one place drift can be reintroduced: here.
+# Re-running is idempotent and is the upgrade path.
+#
+# Usage: install [--wave-source DIR]
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WAVE_SOURCE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --wave-source)
+      [[ $# -ge 2 ]] || { echo "install: --wave-source requires a directory" >&2; exit 2; }
+      WAVE_SOURCE="$2"; shift 2 ;;
+    *) echo "install: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+fail() { echo "install: $*" >&2; exit 1; }
+
+# Resolve the wave source: explicit flag > sibling skill (in-repo .claude/skills layout)
+# > skill next to a stable clone > user install.
+if [[ -z "$WAVE_SOURCE" ]]; then
+  for candidate in \
+    "$HERE/../openswe-wave" \
+    "$HERE/../../.claude/skills/openswe-wave" \
+    "$HOME/.claude/skills/openswe-wave"; do
+    if [[ -f "$candidate/scripts/openswe_wave.py" ]]; then
+      WAVE_SOURCE="$(cd "$candidate" && pwd)"
+      break
+    fi
+  done
+fi
+[[ -n "$WAVE_SOURCE" ]] || fail "no openswe-wave source found; pass --wave-source DIR"
+for needed in scripts/openswe_wave.py scripts/wave-monitor references/adjudication-checklist.md; do
+  [[ -f "$WAVE_SOURCE/$needed" ]] || fail "wave source $WAVE_SOURCE is missing $needed"
+done
+
+# Stage the complete, self-contained skill.
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+mkdir -p "$STAGE/scripts" "$STAGE/references"
+cp "$HERE/SKILL.md" "$STAGE/SKILL.md"
+cp "$HERE/scripts/openswe-run" "$STAGE/scripts/openswe-run"
+cp "$HERE/references/run-templates.md" "$STAGE/references/run-templates.md"
+cp "$WAVE_SOURCE/scripts/openswe_wave.py" "$STAGE/scripts/openswe_wave.py"
+cp "$WAVE_SOURCE/scripts/wave-monitor" "$STAGE/scripts/wave-monitor"
+cp "$WAVE_SOURCE/references/adjudication-checklist.md" "$STAGE/references/adjudication-checklist.md"
+chmod +x "$STAGE/scripts/openswe-run" "$STAGE/scripts/wave-monitor"
+
+MANIFEST="SKILL.md scripts/openswe-run scripts/openswe_wave.py scripts/wave-monitor references/run-templates.md references/adjudication-checklist.md"
+
+install_to() {
+  local target="$1"
+  mkdir -p "$target/scripts" "$target/references"
+  local file
+  for file in $MANIFEST; do
+    cp "$STAGE/$file" "$target/$file"
+  done
+  # cp preserves an existing destination's mode, so re-assert the bits every
+  # documented invocation depends on rather than inheriting a stale one.
+  chmod +x "$target/scripts/openswe-run" "$target/scripts/wave-monitor"
+  # Verify byte-identity of every manifest file; fail loudly on any partial copy.
+  for file in $MANIFEST; do
+    cmp -s "$STAGE/$file" "$target/$file" || fail "verification failed: $target/$file differs after copy"
+  done
+  for file in scripts/openswe-run scripts/wave-monitor; do
+    [[ -x "$target/$file" ]] || fail "verification failed: $target/$file is not executable"
+  done
+  # Nothing extra may shadow the manifest (stale files from older installs).
+  # Scoped to the two directories the manifest owns, and skipping dot-entries:
+  # a target that is also a checkout must keep its .git, and the sweep must not
+  # delete this installer if someone copied the source tree into place.
+  local stray relative
+  while IFS= read -r stray; do
+    relative="${stray#"$target"/}"
+    case "$relative" in
+      .*|*/.*) continue ;;
+    esac
+    local keep=0
+    local file
+    for file in $MANIFEST; do
+      [[ "$relative" == "$file" ]] && { keep=1; break; }
+    done
+    (( keep )) || { echo "install: removing stale file ${stray}" >&2; rm -f "$stray"; }
+  done < <(find "$target/scripts" "$target/references" -type f ! -path "*/__pycache__/*" 2>/dev/null)
+  rm -rf "$target/scripts/__pycache__"
+}
+
+for target in "$HOME/.claude/skills/openswe-run" "${CODEX_HOME:-$HOME/.codex}/skills/openswe-run"; do
+  install_to "$target"
+  echo "installed: $target ($(echo $MANIFEST | wc -w | tr -d ' ') files, byte-verified)"
+done
+
+# Final cross-check: the two installs must match each other exactly.
+for file in $MANIFEST; do
+  cmp -s "$HOME/.claude/skills/openswe-run/$file" "${CODEX_HOME:-$HOME/.codex}/skills/openswe-run/$file" \
+    || fail "cross-verification failed: $file differs between claude and codex installs"
+done
+echo "verified: claude and codex copies are byte-identical (wave source: $WAVE_SOURCE)"
