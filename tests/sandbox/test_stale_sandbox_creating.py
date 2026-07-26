@@ -73,12 +73,12 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
             return_value=existing_backend,
         ) as connect_sandbox,
         patch(
-            "agent.server.check_or_recreate_sandbox",
+            "agent.server.check_sandbox_reachable",
             new_callable=AsyncMock,
             side_effect=passthrough,
         ),
         patch(
-            "agent.server._refresh_github_proxy_or_recreate",
+            "agent.server._refresh_github_proxy_or_fail",
             new_callable=AsyncMock,
             side_effect=passthrough,
         ) as refresh_proxy,
@@ -124,12 +124,12 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
             return_value=existing_backend,
         ) as connect_sandbox,
         patch(
-            "agent.server.check_or_recreate_sandbox",
+            "agent.server.check_sandbox_reachable",
             new_callable=AsyncMock,
             side_effect=passthrough,
         ),
         patch(
-            "agent.server._refresh_github_proxy_or_recreate",
+            "agent.server._refresh_github_proxy_or_fail",
             new_callable=AsyncMock,
             side_effect=passthrough,
         ) as refresh_proxy,

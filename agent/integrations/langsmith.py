@@ -290,22 +290,6 @@ async def _wait_for_reconnected_sandbox(
         last_sandbox = await client.get_sandbox(name=sandbox_id)
 
 
-async def _release_sandbox_name(client: AsyncSandboxClient, name: str | None) -> None:
-    """Best-effort delete of any existing sandbox holding ``name``.
-
-    Sandbox names are unique in LangSmith and thread-deterministic, so the only
-    box that can hold this name is this thread's own — typically a dead one
-    (idle-stopped past its TTL) we're recreating. Provisioning is serialized per
-    thread, so this never races a live box. Without this, recreate would 409.
-    """
-    if not name:
-        return
-    try:
-        await client.delete_sandbox(name)
-    except Exception as exc:  # noqa: BLE001 - name is free if nothing to delete
-        logger.debug("No pre-existing sandbox %s to release (%s)", name, type(exc).__name__)
-
-
 async def _create_sandbox_with_retry(
     client: AsyncSandboxClient,
     *,
@@ -595,7 +579,14 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
 
 
 class SandboxProvider(ABC):
-    """Interface for creating and deleting sandbox backends."""
+    """Interface for creating sandbox backends.
+
+    Intentionally has no delete. A sandbox holds the agent's only copy of its
+    working tree, and callers cannot reliably tell a free name from one held by
+    a live box — thread metadata reads and writes both fail open to "no sandbox".
+    Reclamation is the platform's job, via the idle TTL and delete-after-stop
+    set at create time.
+    """
 
     @abstractmethod
     async def get_or_create(
@@ -605,16 +596,6 @@ class SandboxProvider(ABC):
         **kwargs: Any,
     ) -> SandboxBackendProtocol:
         """Get an existing sandbox, or create one if needed."""
-        raise NotImplementedError
-
-    @abstractmethod
-    async def delete(
-        self,
-        *,
-        sandbox_id: str,
-        **kwargs: Any,
-    ) -> None:
-        """Delete a sandbox by id."""
         raise NotImplementedError
 
 
@@ -719,7 +700,6 @@ class LangSmithProvider(SandboxProvider):
                 raise ValueError(msg)
 
             _install_create_extra_fields(client, _get_sandbox_create_extra_fields())
-            await _release_sandbox_name(client, name)
 
             try:
                 sandbox = await _create_sandbox_with_retry(
@@ -738,10 +718,3 @@ class LangSmithProvider(SandboxProvider):
                 raise RuntimeError(msg) from e
 
             return TimeoutLangSmithSandbox(sandbox.to_sync())
-
-    async def delete(self, *, sandbox_id: str, **kwargs: Any) -> None:
-        """Delete a LangSmith sandbox."""
-        async with AsyncSandboxClient(
-            api_key=self._api_key, api_endpoint=self._api_endpoint
-        ) as client:
-            await client.delete_sandbox(sandbox_id)

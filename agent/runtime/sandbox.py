@@ -34,20 +34,3 @@ async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> Non
     from agent.server import configure_git_identity as configure
 
     await configure(sandbox_backend)
-
-
-async def recreate_sandbox(
-    thread_id: str,
-    *,
-    github_proxy_token: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-    repo: dict[str, str] | None = None,
-) -> SandboxBackendProtocol:
-    from agent.server import recreate_sandbox as recreate
-
-    return await recreate(
-        thread_id,
-        github_proxy_token=github_proxy_token,
-        github_proxy_repositories=github_proxy_repositories,
-        repo=repo,
-    )

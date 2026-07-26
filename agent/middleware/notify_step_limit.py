@@ -11,6 +11,7 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
 from ..utils.slack import post_slack_thread_reply
+from ..utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +74,10 @@ async def notify_step_limit_reached(
         logger.info("No Slack thread config — cannot send step-limit notification")
         return None
 
-    message = (
-        "I've reached my maximum step limit and had to stop. "
+    message = warning(
+        "Open SWE reached its maximum step limit and had to stop. "
         "The task may be incomplete. You can retry with a more focused request, "
-        "or ask me to continue from where I left off."
+        "or ask it to continue from where it left off."
     )
 
     try:
