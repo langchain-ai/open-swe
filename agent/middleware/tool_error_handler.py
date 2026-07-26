@@ -24,12 +24,12 @@ from langsmith.sandbox import SandboxClientError
 from ..utils.sandbox_state import clear_sandbox_backend
 from .sandbox_circuit_breaker import (
     extract_sandbox_id,
-    post_sandbox_unrecoverable_notification,
+    post_sandbox_unreachable_notification,
 )
 
 logger = logging.getLogger(__name__)
 
-SANDBOX_UNRECOVERABLE = "sandbox_unrecoverable"
+SANDBOX_UNREACHABLE = "sandbox_unreachable"
 
 
 def _get_name(candidate: object) -> str | None:
@@ -66,7 +66,7 @@ def _to_error_payload(e: Exception, request: ToolCallRequest | None = None) -> d
     return data
 
 
-def _to_sandbox_unrecoverable_payload(
+def _to_sandbox_unreachable_payload(
     e: SandboxClientError,
     request: ToolCallRequest | None = None,
 ) -> dict[str, str]:
@@ -76,7 +76,7 @@ def _to_sandbox_unrecoverable_payload(
         "status": "error",
         "error_type": e.__class__.__name__,
         "previous_error": str(e),
-        "recovery": SANDBOX_UNRECOVERABLE,
+        "recovery": SANDBOX_UNREACHABLE,
         "error": (
             f"The sandbox for this thread{which} stopped responding. It will not be "
             "replaced automatically: a fresh sandbox is empty, so swapping one in "
@@ -123,11 +123,11 @@ def _get_thread_id(request: ToolCallRequest) -> str | None:
     return thread_id if isinstance(thread_id, str) and thread_id else None
 
 
-def _sandbox_unrecoverable_tool_message(
+def _sandbox_unreachable_tool_message(
     e: SandboxClientError,
     request: ToolCallRequest,
 ) -> ToolMessage:
-    data = _to_sandbox_unrecoverable_payload(e, request)
+    data = _to_sandbox_unreachable_payload(e, request)
     return ToolMessage(
         content=json.dumps(data),
         tool_call_id=_get_tool_call_id(request),
@@ -169,12 +169,12 @@ class ToolErrorMiddleware(AgentMiddleware):
             config = _get_run_config(request)
             if config is not None:
                 try:
-                    await post_sandbox_unrecoverable_notification(
+                    await post_sandbox_unreachable_notification(
                         config, sandbox_id=extract_sandbox_id(str(e))
                     )
                 except Exception:
                     logger.exception("Failed to notify user of dead sandbox for %s", thread_id)
-            return _sandbox_unrecoverable_tool_message(e, request)
+            return _sandbox_unreachable_tool_message(e, request)
         except Exception as e:
             logger.exception("Error during tool call handling; request=%r", request)
             return _generic_error_tool_message(e, request)

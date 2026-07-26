@@ -70,7 +70,7 @@ async def test_sandbox_client_error_notifies_and_never_recreates() -> None:
     try:
         with (
             patch(
-                "agent.middleware.tool_error_handler.post_sandbox_unrecoverable_notification",
+                "agent.middleware.tool_error_handler.post_sandbox_unreachable_notification",
                 new_callable=AsyncMock,
             ) as mock_notify,
             patch("agent.server._create_sandbox_with_proxy", new_callable=AsyncMock) as mock_create,
@@ -87,7 +87,7 @@ async def test_sandbox_client_error_notifies_and_never_recreates() -> None:
         payload = json.loads(result.content)
         assert payload["status"] == "error"
         assert payload["error_type"] == "SandboxClientError"
-        assert payload["recovery"] == "sandbox_unrecoverable"
+        assert payload["recovery"] == "sandbox_unreachable"
         assert payload["previous_error"] == "Sandbox request timed out: sb-dead"
         assert "will not be replaced" in payload["error"]
     finally:

@@ -1,4 +1,4 @@
-"""Circuit breaker for repeated unrecoverable sandbox failures."""
+"""Circuit breaker for runs stuck retrying an unreachable sandbox."""
 
 from __future__ import annotations
 
@@ -181,7 +181,7 @@ def _get_github_target(configurable: Mapping[str, Any]) -> tuple[dict[str, str],
     return None
 
 
-async def post_sandbox_unrecoverable_notification(
+async def post_sandbox_unreachable_notification(
     config: Mapping[str, Any],
     *,
     sandbox_id: str | None = None,
@@ -268,7 +268,7 @@ class SandboxCircuitBreakerMiddleware(AgentMiddleware[AgentState, Any]):
 
         try:
             config = get_config()
-            await post_sandbox_unrecoverable_notification(
+            await post_sandbox_unreachable_notification(
                 config, sandbox_id=extract_sandbox_id(content)
             )
         except Exception:

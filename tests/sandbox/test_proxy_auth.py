@@ -451,7 +451,7 @@ class TestRefreshProxyOnSandboxReuse:
 
     @pytest.mark.asyncio
     async def test_proxy_refresh_failure_raises_instead_of_replacing(self) -> None:
-        """A sandbox we can't reconfigure is unrecoverable, never swapped out.
+        """A sandbox we can't reconfigure fails the run, and is never swapped out.
 
         Replacing it would hand the agent an empty filesystem and discard any
         work the old sandbox still held.
@@ -480,9 +480,9 @@ class TestRefreshProxyOnSandboxReuse:
             patch("agent.server._create_sandbox_with_proxy", new_callable=AsyncMock) as mock_create,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
-            from agent.server import SandboxUnrecoverableError, _refresh_github_proxy_or_fail
+            from agent.server import SandboxUnreachableError, _refresh_github_proxy_or_fail
 
-            with pytest.raises(SandboxUnrecoverableError) as excinfo:
+            with pytest.raises(SandboxUnreachableError) as excinfo:
                 await _refresh_github_proxy_or_fail(mock_sandbox, "thread-123")
 
             assert excinfo.value.sandbox_id == "sandbox-stale"

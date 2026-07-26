@@ -86,7 +86,7 @@ from .middleware import (
     task_retry_on,
 )
 from .middleware.prepare_run import PrepareRunState
-from .middleware.sandbox_circuit_breaker import post_sandbox_unrecoverable_notification
+from .middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from .prompt import construct_system_prompt
 from .runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -144,7 +144,7 @@ from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .utils.sandbox_state import (
     SANDBOX_BACKENDS,
-    SandboxUnrecoverableError,
+    SandboxUnreachableError,
     clear_sandbox_backend,
     get_or_create_sandbox_backend_proxy,
     get_sandbox_id_from_metadata,
@@ -322,7 +322,7 @@ async def _refresh_github_proxy_or_fail(
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
 ) -> SandboxBackendProtocol:
-    """Refresh proxy credentials; a sandbox we can't reconfigure is unrecoverable."""
+    """Refresh proxy credentials; a sandbox we can't reconfigure is unreachable."""
     try:
         await _refresh_github_proxy(
             sandbox_backend,
@@ -337,7 +337,7 @@ async def _refresh_github_proxy_or_fail(
             thread_id,
             exc_info=True,
         )
-        raise SandboxUnrecoverableError(thread_id, sandbox_backend.id, str(exc)) from exc
+        raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
     return sandbox_backend
 
 
@@ -353,12 +353,12 @@ async def check_sandbox_reachable(
     sandbox_backend: SandboxBackendProtocol,
     thread_id: str,
 ) -> SandboxBackendProtocol:
-    """Ping a cached sandbox; an unreachable one is unrecoverable, not replaceable."""
+    """Ping a cached sandbox; an unreachable one fails the run, never gets replaced."""
     try:
         await asyncio.to_thread(sandbox_backend.execute, "echo ok")
     except SandboxClientError as exc:
         logger.warning("Cached sandbox is no longer reachable for thread %s", thread_id)
-        raise SandboxUnrecoverableError(thread_id, sandbox_backend.id, str(exc)) from exc
+        raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
     return sandbox_backend
 
 
@@ -380,7 +380,7 @@ async def ensure_sandbox_for_thread(
     3. No sandbox at all -> create one and persist the id.
 
     Only case 3 creates. A sandbox that exists but can't be reached raises
-    ``SandboxUnrecoverableError`` instead of being replaced — a replacement is
+    ``SandboxUnreachableError`` instead of being replaced — a replacement is
     empty, and swapping one in silently destroys whatever the agent had not yet
     committed.
 
@@ -417,7 +417,7 @@ async def ensure_sandbox_for_thread(
             sandbox_backend = await create_sandbox(sandbox_id)
         except Exception as exc:
             logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
-            raise SandboxUnrecoverableError(thread_id, sandbox_id, str(exc)) from exc
+            raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
         sandbox_backend = await check_sandbox_reachable(sandbox_backend, thread_id)
         sandbox_backend = await _refresh_github_proxy_or_fail(
             sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
@@ -687,11 +687,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 triggering_user_identity_task,
                 sandbox_task,
             )
-        except SandboxUnrecoverableError as exc:
+        except SandboxUnreachableError as exc:
             # The run is about to die with no sandbox; make sure the user hears
             # why rather than getting silence.
             clear_sandbox_backend(self._thread_id)
-            await post_sandbox_unrecoverable_notification(
+            await post_sandbox_unreachable_notification(
                 self._config or {}, sandbox_id=exc.sandbox_id
             )
             raise
