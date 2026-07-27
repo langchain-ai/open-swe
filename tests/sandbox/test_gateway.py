@@ -103,7 +103,7 @@ def test_anthropic_overrides_have_no_responses_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    overrides = gateway.gateway_overrides("anthropic:claude-opus-4-8")
+    overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
     assert overrides == {
         "base_url": "https://gateway.smith.langchain.com/anthropic",
         "api_key": "ls-key",
@@ -242,7 +242,7 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
 
 def test_google_genai_routes_to_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    overrides = gateway.gateway_overrides("google_genai:gemini-3.5-flash")
+    overrides = gateway.gateway_overrides("google_genai:gemini-3.6-flash")
     assert overrides == {
         "base_url": "https://gateway.smith.langchain.com/gemini",
         "api_key": "ls-key",
@@ -261,7 +261,7 @@ def test_missing_api_key_passes_through(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_prod_key_used_as_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "ls-prod-key")
-    overrides = gateway.gateway_overrides("anthropic:claude-opus-4-8")
+    overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
     assert overrides is not None
     assert overrides["api_key"] == "ls-prod-key"
 
@@ -269,7 +269,7 @@ def test_prod_key_used_as_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_prod_key_preferred_over_platform_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-platform-key")
     monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "ls-prod-key")
-    overrides = gateway.gateway_overrides("anthropic:claude-opus-4-8")
+    overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
     assert overrides is not None
     assert overrides["api_key"] == "ls-prod-key"
 
@@ -278,7 +278,7 @@ def test_gateway_key_preferred_over_prod_key(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-platform-key")
     monkeypatch.setenv("LANGSMITH_API_KEY_PROD", "ls-prod-key")
     monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "ls-gateway-key")
-    overrides = gateway.gateway_overrides("anthropic:claude-opus-4-8")
+    overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
     assert overrides is not None
     assert overrides["api_key"] == "ls-gateway-key"
 
@@ -286,7 +286,7 @@ def test_gateway_key_preferred_over_prod_key(monkeypatch: pytest.MonkeyPatch) ->
 def test_base_url_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
     monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gw.internal.example.com/")
-    overrides = gateway.gateway_overrides("anthropic:claude-opus-4-8")
+    overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
     assert overrides is not None
     # Trailing slash is stripped, then the provider path is appended.
     assert overrides["base_url"] == "https://gw.internal.example.com/anthropic"
@@ -413,7 +413,7 @@ def test_make_model_gateway_follows_env_default(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
-        model.make_model("anthropic:claude-opus-4-8")  # use_gateway=None -> env default
+        model.make_model("anthropic:claude-opus-5")  # use_gateway=None -> env default
     assert captured["base_url"] == "https://gateway.smith.langchain.com/anthropic"
     assert captured["api_key"] == "ls-key"
 
@@ -422,7 +422,7 @@ def test_make_model_gateway_google_genai(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
     captured, fake = _capture_init_chat_model()
     with patch.object(model, "init_chat_model", fake):
-        model.make_model("google_genai:gemini-3.5-flash", use_gateway=True)
+        model.make_model("google_genai:gemini-3.6-flash", use_gateway=True)
     assert captured["base_url"] == "https://gateway.smith.langchain.com/gemini"
     assert captured["api_key"] == "ls-key"
 

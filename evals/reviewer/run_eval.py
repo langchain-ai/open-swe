@@ -79,7 +79,7 @@ DEFAULT_CONFIG: ReviewerEvalConfig = {
     "langgraph_url": "",
     "langsmith_project": DEFAULT_LANGSMITH_PROJECT,
     "assistant_id": "reviewer",
-    "model_id": "google_genai:gemini-3.5-flash",
+    "model_id": "google_genai:gemini-3.6-flash",
     "reasoning_effort": "medium",
     "score_mode": "surfaced_findings",
     "severity_threshold": "low",

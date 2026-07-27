@@ -48,6 +48,7 @@ from .dashboard.agent_overrides import (
 from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.options import (
     SUPPORTED_MODEL_IDS,
+    canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
@@ -87,7 +88,7 @@ from .middleware import (
 )
 from .middleware.prepare_run import PrepareRunState
 from .middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from .prompt import construct_system_prompt
+from .prompt import OPEN_SWE_SHARED_BASE, construct_system_prompt
 from .runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
@@ -463,7 +464,10 @@ def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
     return {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": GENERAL_PURPOSE_SUBAGENT["description"],
-        "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        # Deep Agents' default GP prompt covers only task mechanics; the shared
+        # base carries the Open SWE identity and conventions (gh proxy usage,
+        # tool-call cadence) that delegated work also needs.
+        "system_prompt": OPEN_SWE_SHARED_BASE + "\n\n" + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
     }
 
@@ -809,6 +813,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     per_thread_model = configurable.get("agent_model_id")
     per_thread_effort = configurable.get("agent_effort")
+    canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
+    if canonical_per_thread is not None:
+        per_thread_model, per_thread_effort = canonical_per_thread
     if (
         isinstance(per_thread_model, str)
         and per_thread_model in SUPPORTED_MODEL_IDS

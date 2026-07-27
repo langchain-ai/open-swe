@@ -1,11 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useState } from "react"
 import { Link, useNavigate } from "@tanstack/react-router"
-import {
-  CaretDownIcon,
-  CheckIcon,
-  ClockIcon,
-  TrashIcon,
-} from "@phosphor-icons/react"
+import { ClockIcon, TrashIcon } from "@phosphor-icons/react"
 
 import type { ModelOption } from "@/lib/api"
 import type { AgentSchedule } from "@/features/agents/lib/types"
@@ -21,12 +16,9 @@ import {
   useDeleteAgentSchedule,
   useUpdateAgentSchedule,
 } from "@/features/agents/lib/queries"
-import {
-  formatModelSelection,
-  useModelOptions,
-} from "@/features/agents/lib/provider/useModelOptions"
+import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
+import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useRepos } from "@/lib/profile"
-import { cn } from "@/lib/utils"
 
 interface AutomationEditorProps {
   mode: "create" | "edit"
@@ -297,85 +289,5 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
     <h2 className="mt-8 mb-2 text-xs font-medium text-[var(--ui-text-muted)]">
       {children}
     </h2>
-  )
-}
-
-function ModelPicker({
-  models,
-  selection,
-  onSelectionChange,
-}: {
-  models: Array<ModelOption>
-  selection: ModelSelection | null
-  onSelectionChange: (next: ModelSelection) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  const combos = useMemo<Array<ModelSelection>>(() => {
-    const list: Array<ModelSelection> = []
-    for (const model of models) {
-      for (const effort of model.efforts) {
-        list.push({ modelId: model.id, effort })
-      }
-    }
-    return list
-  }, [models])
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
-
-  const disabled = combos.length === 0
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-1 text-xs text-[var(--ui-text-muted)] transition-opacity hover:opacity-80 disabled:opacity-60"
-      >
-        <span>{formatModelSelection(models, selection)}</span>
-        {!disabled && <CaretDownIcon className="size-3.5 opacity-60" />}
-      </button>
-      {open && combos.length > 0 && (
-        <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 overflow-y-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] py-1 shadow-lg">
-          {combos.map((combo) => {
-            const selected =
-              !!selection &&
-              selection.modelId === combo.modelId &&
-              selection.effort === combo.effort
-            return (
-              <button
-                key={`${combo.modelId}::${combo.effort}`}
-                type="button"
-                onClick={() => {
-                  onSelectionChange(combo)
-                  setOpen(false)
-                }}
-                className={cn(
-                  "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs whitespace-nowrap transition-colors hover:bg-[var(--ui-panel-2)]",
-                  selected
-                    ? "text-[var(--ui-text)]"
-                    : "text-[var(--ui-text-muted)]"
-                )}
-              >
-                {formatModelSelection(models, combo)}
-                {selected && (
-                  <CheckIcon className="ml-auto size-3.5 text-[var(--ui-text-dim)]" />
-                )}
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
   )
 }
