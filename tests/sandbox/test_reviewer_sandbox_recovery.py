@@ -90,6 +90,39 @@ async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() ->
 
 
 @pytest.mark.asyncio
+async def test_failed_replacement_still_raises_sandbox_unreachable() -> None:
+    thread_id = "thread-reviewer-replacement-fails"
+    SANDBOX_BACKENDS.clear()
+
+    with (
+        patch(
+            "agent.server.get_sandbox_id_from_metadata",
+            new_callable=AsyncMock,
+            return_value="sandbox-deleted",
+        ),
+        patch(
+            "agent.server.create_sandbox",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
+        ),
+        patch(
+            "agent.server._create_sandbox_with_proxy",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("sandbox API outage"),
+        ),
+        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.server.client.threads.update", new_callable=AsyncMock),
+        pytest.raises(SandboxUnreachableError) as excinfo,
+    ):
+        await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
+
+    # Typed, so the reviewer still recognizes it and notifies on the PR.
+    assert excinfo.value.sandbox_id == "sandbox-deleted"
+    assert "sandbox API outage" in str(excinfo.value)
+    SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
 async def test_unreachable_sandbox_still_fails_by_default() -> None:
     thread_id = "thread-agent-dead-sandbox"
     SANDBOX_BACKENDS.clear()

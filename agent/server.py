@@ -455,12 +455,25 @@ async def ensure_sandbox_for_thread(
                 exc.sandbox_id,
                 thread_id,
             )
-            sandbox_backend = await _create_sandbox_with_proxy(
-                github_proxy_token,
-                thread_id=thread_id,
-                github_proxy_repositories=github_proxy_repositories,
-                repo=repo,
-            )
+            try:
+                sandbox_backend = await _create_sandbox_with_proxy(
+                    github_proxy_token,
+                    thread_id=thread_id,
+                    github_proxy_repositories=github_proxy_repositories,
+                    repo=repo,
+                )
+            except Exception as create_exc:
+                # Keep the failure typed so callers still recognize "this run has no
+                # sandbox" and can notify the user.
+                logger.warning(
+                    "Failed to replace unreachable sandbox %s for thread %s",
+                    exc.sandbox_id,
+                    thread_id,
+                    exc_info=True,
+                )
+                raise SandboxUnreachableError(
+                    thread_id, exc.sandbox_id, str(create_exc)
+                ) from create_exc
             logger.info("Replacement sandbox created: %s", sandbox_backend.id)
 
     sandbox_backend = set_sandbox_backend(thread_id, sandbox_backend)
