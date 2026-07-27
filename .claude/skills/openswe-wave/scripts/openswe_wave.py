@@ -8,10 +8,12 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,10 +30,17 @@ WAKE_NODES = (
 AGENT_BOT_LOGIN = "mobilyze-open-swe-studio2"
 ACTION_MARKER_PREFIX = "openswe-wave-action"
 LINEAR_URL = "https://api.linear.app/graphql"
+HTTP_TIMEOUT_SECONDS = 30.0
+COMMAND_TIMEOUT_SECONDS = 60.0
+MAX_PAGINATION_PAGES = 100
 
 
 class WaveOpsError(RuntimeError):
     """A named, actionable operator-tool failure."""
+
+
+class _PollDeadlineError(WaveOpsError):
+    """A poll iteration exceeded its deadline."""
 
 
 @dataclass(frozen=True)
@@ -74,23 +83,82 @@ def derive_linear_thread_id(issue_id: str) -> str:
     return f"{value[:8]}-{value[8:12]}-{value[12:16]}-{value[16:20]}-{value[20:32]}"
 
 
-def _run(command: Sequence[str], *, cwd: str | None = None) -> subprocess.CompletedProcess[str]:
+def _bounded_timeout(ceiling: float, deadline: float | None, operation: str) -> float:
+    """Return the timeout remaining before an optional monotonic deadline."""
+    if deadline is None:
+        return ceiling
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise _PollDeadlineError(f"{operation} exceeded the poll deadline")
+    return min(ceiling, remaining)
+
+
+@contextmanager
+def _wall_clock_deadline(deadline: float, operation: str) -> Iterator[None]:
+    """Interrupt an iteration when its monotonic deadline expires."""
+    remaining = _bounded_timeout(float("inf"), deadline, operation)
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    started = time.monotonic()
+
+    def raise_deadline(_signum: int, _frame: Any) -> None:
+        raise _PollDeadlineError(f"{operation} exceeded the poll deadline")
+
+    signal.signal(signal.SIGALRM, raise_deadline)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, remaining)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        elapsed = max(0.0, time.monotonic() - started)
+        previous_delay, previous_interval = previous_timer
+        restored_delay = previous_delay
+        if previous_delay > 0:
+            if elapsed < previous_delay:
+                restored_delay = previous_delay - elapsed
+            elif previous_interval > 0:
+                phase = (elapsed - previous_delay) % previous_interval
+                restored_delay = previous_interval - phase
+            else:
+                restored_delay = 1e-6
+        signal.setitimer(signal.ITIMER_REAL, restored_delay, previous_interval)
+
+
+def _run(
+    command: Sequence[str],
+    *,
+    cwd: str | None = None,
+    deadline: float | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Run a command and surface a concise failure."""
-    result = subprocess.run(command, cwd=cwd, text=True, capture_output=True, check=False)
+    timeout = _bounded_timeout(COMMAND_TIMEOUT_SECONDS, deadline, "Command")
+    try:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise WaveOpsError(f"Command timed out after {timeout:.1f}s ({' '.join(command)})") from exc
     if result.returncode:
         detail = (result.stderr or result.stdout).strip()
         raise WaveOpsError(f"Command failed ({' '.join(command)}): {detail}")
     return result
 
 
-def gh_graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
+def gh_graphql(
+    query: str, variables: dict[str, Any], *, deadline: float | None = None
+) -> dict[str, Any]:
     """Execute a GitHub GraphQL query through gh."""
     require_env("GH_TOKEN")
     command = ["gh", "api", "graphql", "-f", f"query={query}"]
     for key, value in variables.items():
         flag = "-F" if isinstance(value, (int, bool)) else "-f"
         command.extend([flag, f"{key}={value}"])
-    payload = json.loads(_run(command).stdout)
+    payload = json.loads(_run(command, deadline=deadline).stdout)
     if payload.get("errors"):
         raise WaveOpsError(f"GitHub GraphQL returned errors: {payload['errors']}")
     return payload.get("data", {})
@@ -154,12 +222,14 @@ def _paginate_pr_connection(
     repo: str,
     number: int,
     expected_head: str,
+    *,
+    deadline: float | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch every node from a PR GraphQL connection."""
     variables: dict[str, Any] = {"owner": owner, "repo": repo, "number": number}
     nodes: list[dict[str, Any]] = []
-    while True:
-        data = gh_graphql(query, variables)
+    for _page in range(MAX_PAGINATION_PAGES):
+        data = gh_graphql(query, variables, deadline=deadline)
         pr = (data.get("repository") or {}).get("pullRequest")
         if not isinstance(pr, dict):
             raise WaveOpsError(f"Pull request {owner}/{repo}#{number} was not returned by GitHub")
@@ -174,17 +244,20 @@ def _paginate_pr_connection(
         if not cursor:
             raise WaveOpsError(f"GitHub {connection_name} pagination did not return an end cursor")
         variables = {**variables, "cursor": cursor}
+    raise WaveOpsError(f"GitHub {connection_name} pagination exceeded {MAX_PAGINATION_PAGES} pages")
 
 
-def github_pr_snapshot(repo_slug: str, number: int) -> dict[str, Any]:
+def github_pr_snapshot(
+    repo_slug: str, number: int, *, deadline: float | None = None
+) -> dict[str, Any]:
     """Fetch the PR state, including complete queue and actor evidence, through GraphQL."""
     owner, repo = repo_slug.split("/", 1)
     variables: dict[str, Any] = {"owner": owner, "repo": repo, "number": number}
     events: list[dict[str, Any]] = []
     first_pr: dict[str, Any] | None = None
     default_branch: str | None = None
-    while True:
-        data = gh_graphql(PR_QUERY, variables)
+    for _page in range(MAX_PAGINATION_PAGES):
+        data = gh_graphql(PR_QUERY, variables, deadline=deadline)
         repository = data.get("repository") or {}
         pr = repository.get("pullRequest")
         if not isinstance(pr, dict):
@@ -203,33 +276,52 @@ def github_pr_snapshot(repo_slug: str, number: int) -> dict[str, Any]:
         if not cursor:
             raise WaveOpsError("GitHub timeline pagination did not return an end cursor")
         variables = {**variables, "cursor": cursor}
+    else:
+        raise WaveOpsError(f"GitHub timelineItems pagination exceeded {MAX_PAGINATION_PAGES} pages")
     assert first_pr is not None
     first_pr["timelineItems"] = {"nodes": events}
     first_pr["timeline_complete"] = True
     expected_head = str(first_pr.get("headRefOid") or "")
     first_pr["labels"] = {
-        "nodes": _paginate_pr_connection(LABELS_QUERY, "labels", owner, repo, number, expected_head)
+        "nodes": _paginate_pr_connection(
+            LABELS_QUERY,
+            "labels",
+            owner,
+            repo,
+            number,
+            expected_head,
+            deadline=deadline,
+        )
     }
     first_pr["reviewThreads"] = {
         "nodes": _paginate_pr_connection(
-            REVIEW_THREADS_QUERY, "reviewThreads", owner, repo, number, expected_head
+            REVIEW_THREADS_QUERY,
+            "reviewThreads",
+            owner,
+            repo,
+            number,
+            expected_head,
+            deadline=deadline,
         )
     }
     first_pr["defaultBranch"] = default_branch
     return first_pr
 
 
-def _linear_graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
+def _linear_graphql(
+    query: str, variables: dict[str, Any], *, deadline: float | None = None
+) -> dict[str, Any]:
     """Execute a Linear GraphQL request."""
     env = require_env("LINEAR_API_KEY")
     import httpx
 
+    timeout = _bounded_timeout(HTTP_TIMEOUT_SECONDS, deadline, "Linear GraphQL request")
     try:
         response = httpx.post(
             LINEAR_URL,
             headers={"Authorization": env["LINEAR_API_KEY"], "Content-Type": "application/json"},
             json={"query": query, "variables": variables},
-            timeout=30,
+            timeout=timeout,
         )
         response.raise_for_status()
         payload = response.json()
@@ -254,14 +346,14 @@ query WaveIssue($id: String!, $cursor: String) {
 """
 
 
-def linear_snapshot(issue_id: str) -> dict[str, Any]:
+def linear_snapshot(issue_id: str, *, deadline: float | None = None) -> dict[str, Any]:
     """Fetch the viewer identity and every issue comment."""
     variables: dict[str, Any] = {"id": issue_id}
     comments: list[dict[str, Any]] = []
     viewer: dict[str, Any] = {}
     first_issue: dict[str, Any] | None = None
-    while True:
-        data = _linear_graphql(LINEAR_SNAPSHOT_QUERY, variables)
+    for _page in range(MAX_PAGINATION_PAGES):
+        data = _linear_graphql(LINEAR_SNAPSHOT_QUERY, variables, deadline=deadline)
         issue = data.get("issue")
         if not isinstance(issue, dict):
             raise WaveOpsError(f"Linear issue {issue_id} was not returned")
@@ -277,41 +369,51 @@ def linear_snapshot(issue_id: str) -> dict[str, Any]:
         if not cursor:
             raise WaveOpsError("Linear comment pagination did not return an end cursor")
         variables = {**variables, "cursor": cursor}
+    else:
+        raise WaveOpsError(f"Linear comments pagination exceeded {MAX_PAGINATION_PAGES} pages")
     assert first_issue is not None
     first_issue["comments"] = {"nodes": comments}
     return {"viewer": viewer, "issue": first_issue}
 
 
-def linear_comment(issue_id: str, body: str) -> None:
+def linear_comment(issue_id: str, body: str, *, deadline: float | None = None) -> None:
     """Post an action log to a Linear issue."""
     mutation = """
     mutation WaveComment($input: CommentCreateInput!) {
       commentCreate(input: $input) { success comment { id } }
     }
     """
-    data = _linear_graphql(mutation, {"input": {"issueId": issue_id, "body": body}})
+    data = _linear_graphql(
+        mutation, {"input": {"issueId": issue_id, "body": body}}, deadline=deadline
+    )
     result = data.get("commentCreate") or {}
     if result.get("success") is not True:
         raise WaveOpsError("Linear action log was not accepted")
 
 
-async def _langgraph_snapshot(thread_id: str) -> dict[str, Any]:
+async def _langgraph_snapshot(thread_id: str, timeout: float) -> dict[str, Any]:
     """Fetch thread metadata and recent runs."""
     env = require_env("LANGGRAPH_URL")
     from langgraph_sdk import get_client
 
-    client = get_client(url=env["LANGGRAPH_URL"])
+    client = get_client(url=env["LANGGRAPH_URL"], timeout=timeout)
     try:
-        thread = await client.threads.get(thread_id)
-        runs = await client.runs.list(thread_id, limit=1000)
+        async with asyncio.timeout(timeout):
+            thread = await client.threads.get(thread_id)
+            runs = await client.runs.list(thread_id, limit=1000)
+    except _PollDeadlineError:
+        raise
+    except TimeoutError as exc:
+        raise WaveOpsError(f"LANGGRAPH_URL request timed out after {timeout:.1f}s") from exc
     except Exception as exc:
         raise WaveOpsError(f"LANGGRAPH_URL request failed: {exc}") from exc
     return {"thread": thread, "runs": runs}
 
 
-def langgraph_snapshot(thread_id: str) -> dict[str, Any]:
+def langgraph_snapshot(thread_id: str, *, deadline: float | None = None) -> dict[str, Any]:
     """Synchronously fetch the LangGraph thread snapshot."""
-    return asyncio.run(_langgraph_snapshot(thread_id))
+    timeout = _bounded_timeout(HTTP_TIMEOUT_SECONDS, deadline, "LangGraph snapshot")
+    return asyncio.run(_langgraph_snapshot(thread_id, timeout))
 
 
 def _event_node(event: dict[str, Any]) -> str | None:
@@ -475,15 +577,20 @@ def _run_observations(snapshot: dict[str, Any]) -> tuple[str | None, str | None,
 
 
 def live_snapshot(
-    issue_id: str, thread_id: str, repo: str, pr_number: int | None
+    issue_id: str,
+    thread_id: str,
+    repo: str,
+    pr_number: int | None,
+    *,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Collect one coalesced monitor snapshot."""
-    linear = linear_snapshot(issue_id)
-    langgraph = langgraph_snapshot(thread_id)
+    linear = linear_snapshot(issue_id, deadline=deadline)
+    langgraph = langgraph_snapshot(thread_id, deadline=deadline)
     metadata = (langgraph.get("thread") or {}).get("metadata") or {}
     discovered_number = pr_number or metadata.get("pr_number")
     pr = (
-        github_pr_snapshot(repo, int(discovered_number))
+        github_pr_snapshot(repo, int(discovered_number), deadline=deadline)
         if isinstance(discovered_number, int | str) and str(discovered_number).isdigit()
         else {}
     )
@@ -707,6 +814,8 @@ def apply_recovery(
     decision: RecoveryDecision,
     refresh: Callable[[], dict[str, Any]],
     before_actions: Callable[[], None] | None = None,
+    *,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Apply an eligible recovery after a fresh evidence check."""
     if not decision.eligible:
@@ -729,7 +838,7 @@ def apply_recovery(
                 "blockers": blockers,
                 "verified": False,
             }
-        _run(command)
+        _run(command, deadline=deadline)
         action_started = True
         if len(command) > 2 and command[2] == "ready":
             blockers = _recovery_stage_blockers(refresh(), decision)
@@ -747,7 +856,7 @@ def apply_recovery(
         ):
             verified = True
             break
-        time.sleep(2)
+        time.sleep(_bounded_timeout(2, deadline, "Recovery verification"))
     return {"status": "applied" if verified else "verification_failed", "verified": verified}
 
 
@@ -757,6 +866,7 @@ def monitor_recovery(
     apply: bool,
     refresh: Callable[[], dict[str, Any]],
     post_log: Callable[[str], None],
+    deadline: float | None = None,
 ) -> dict[str, Any] | None:
     """Handle one recovery observation without adding non-approved wakes."""
     decision = recovery_decision(snapshot)
@@ -800,15 +910,25 @@ def monitor_recovery(
             decision,
             refresh,
             before_actions=lambda: post_log(recovery_log(decision, "starting")),
+            deadline=deadline,
         )
+    except _PollDeadlineError:
+        raise
     except Exception as exc:
-        post_log(recovery_log(decision, f"action_failed: {exc}"))
-        return {
+        event = {
             "kind": "unhandled",
             "source": "recovery",
             "summary": f"recovery action failed: {exc}",
             "evidence": decision.evidence,
         }
+        try:
+            post_log(recovery_log(decision, f"action_failed: {exc}"))
+        except _PollDeadlineError:
+            raise
+        except Exception:
+            if deadline is None or time.monotonic() < deadline:
+                raise
+        return event
     status = str(result.get("status"))
     if status in {"applied", "verification_failed"}:
         post_log(recovery_log(decision, status))
@@ -1138,8 +1258,21 @@ def cmd_watch(args: argparse.Namespace) -> int:
     """Watch live wave state and print only approved wakes."""
     if not all((args.issue_id, args.repo)):
         raise WaveOpsError("watch needs --issue-id and --repo")
+    if args.interval <= 0:
+        raise WaveOpsError("watch needs --interval greater than zero")
     thread_id = args.thread_id or derive_linear_thread_id(args.issue_id)
-    previous = live_snapshot(args.issue_id, thread_id, args.repo, args.pr_number)
+    baseline_deadline = time.monotonic() + args.interval
+    try:
+        with _wall_clock_deadline(baseline_deadline, "Wave monitor baseline"):
+            previous = live_snapshot(
+                args.issue_id,
+                thread_id,
+                args.repo,
+                args.pr_number,
+                deadline=baseline_deadline,
+            )
+    except Exception as exc:
+        raise WaveOpsError(f"wave monitor baseline failed: {exc}") from exc
     viewer_id = args.session_user_id or str(
         (previous["linear"].get("viewer") or {}).get("id") or ""
     )
@@ -1168,86 +1301,105 @@ def cmd_watch(args: argparse.Namespace) -> int:
     last_poll_error: str | None = None
     while args.iterations == 0 or iterations < args.iterations:
         time.sleep(args.interval)
+        deadline = time.monotonic() + args.interval
         try:
-            current = live_snapshot(args.issue_id, thread_id, args.repo, args.pr_number)
-            comments = ((current["linear"].get("issue") or {}).get("comments") or {}).get(
-                "nodes"
-            ) or []
-            events = comments_to_events(comments, viewer_id, known_ids)
-            terminal_event = terminal_pr_state_event(current, terminal_states_emitted)
-            if terminal_event:
-                events.append(terminal_event)
-            events.extend(snapshot_transition_events(previous, current))
-            stale = liveness_event(previous, current, args.run_stall_seconds)
-            if stale:
-                events.append(stale)
-            pr_number = current.get("pr_number")
-            if pr_number:
-                recovery_snapshot = {
-                    "issue_id": args.issue_id,
-                    "repo": args.repo,
-                    "pr_number": pr_number,
-                    "thread_metadata": (
-                        (current["langgraph"].get("thread") or {}).get("metadata") or {}
-                    ),
-                    "pr": current.get("pr") or {},
-                    "linear_comments": comments,
-                }
-
-                def refresh(_pr_number: int = pr_number) -> dict[str, Any]:
-                    fresh = live_snapshot(args.issue_id, thread_id, args.repo, _pr_number)
-                    fresh_comments = (
-                        (fresh["linear"].get("issue") or {}).get("comments") or {}
-                    ).get("nodes") or []
-                    return {
+            with _wall_clock_deadline(deadline, "Wave monitor poll"):
+                current = live_snapshot(
+                    args.issue_id,
+                    thread_id,
+                    args.repo,
+                    args.pr_number,
+                    deadline=deadline,
+                )
+                comments = ((current["linear"].get("issue") or {}).get("comments") or {}).get(
+                    "nodes"
+                ) or []
+                events = comments_to_events(comments, viewer_id, known_ids)
+                terminal_event = terminal_pr_state_event(current, terminal_states_emitted)
+                if terminal_event:
+                    events.append(terminal_event)
+                events.extend(snapshot_transition_events(previous, current))
+                stale = liveness_event(previous, current, args.run_stall_seconds)
+                if stale:
+                    events.append(stale)
+                pr_number = current.get("pr_number")
+                if pr_number:
+                    recovery_snapshot = {
                         "issue_id": args.issue_id,
                         "repo": args.repo,
-                        "pr_number": _pr_number,
+                        "pr_number": pr_number,
                         "thread_metadata": (
-                            (fresh["langgraph"].get("thread") or {}).get("metadata") or {}
+                            (current["langgraph"].get("thread") or {}).get("metadata") or {}
                         ),
-                        "pr": fresh.get("pr") or {},
-                        "linear_comments": fresh_comments,
+                        "pr": current.get("pr") or {},
+                        "linear_comments": comments,
                     }
 
-                recovery_event = monitor_recovery(
-                    recovery_snapshot,
-                    apply=args.apply,
-                    refresh=refresh,
-                    post_log=lambda body: linear_comment(args.issue_id, body),
-                )
-                if recovery_event:
-                    fingerprint = json.dumps(recovery_event, sort_keys=True, default=str)
-                    if fingerprint != last_recovery_fingerprint:
-                        if recovery_event["kind"] == "recovery_dry_run":
-                            emit(recovery_event, pretty=False)
-                        else:
-                            events.append(recovery_event)
-                    last_recovery_fingerprint = fingerprint
-                else:
-                    last_recovery_fingerprint = None
-            poll_id = str(current.get("observed_at") or f"poll-{iterations}")
-            events = assign_poll_id(events, poll_id)
-            current_unhandled = {
-                event_fingerprint(event) for event in events if event.get("kind") == "unhandled"
-            }
-            events = [
-                event
-                for event in events
-                if event.get("kind") != "unhandled"
-                or event_fingerprint(event) not in active_unhandled
-            ]
-            active_unhandled = current_unhandled
-            result = replay_events(events, viewer_id)
-            for wake in result["wakes"]:
-                emit(wake, pretty=False)
-                if wake["wake_node"] == "terminal_merged":
-                    terminal_states_emitted.add("MERGED")
-                elif wake["wake_node"] == "terminal_closed":
-                    terminal_states_emitted.add("CLOSED")
-            known_ids.update(str(item.get("id")) for item in comments)
-            previous = current
-            last_poll_error = None
+                    def refresh(
+                        _pr_number: int = pr_number, _deadline: float = deadline
+                    ) -> dict[str, Any]:
+                        fresh = live_snapshot(
+                            args.issue_id,
+                            thread_id,
+                            args.repo,
+                            _pr_number,
+                            deadline=_deadline,
+                        )
+                        fresh_comments = (
+                            (fresh["linear"].get("issue") or {}).get("comments") or {}
+                        ).get("nodes") or []
+                        return {
+                            "issue_id": args.issue_id,
+                            "repo": args.repo,
+                            "pr_number": _pr_number,
+                            "thread_metadata": (
+                                (fresh["langgraph"].get("thread") or {}).get("metadata") or {}
+                            ),
+                            "pr": fresh.get("pr") or {},
+                            "linear_comments": fresh_comments,
+                        }
+
+                    recovery_event = monitor_recovery(
+                        recovery_snapshot,
+                        apply=args.apply,
+                        refresh=refresh,
+                        post_log=lambda body, _deadline=deadline: linear_comment(
+                            args.issue_id, body, deadline=_deadline
+                        ),
+                        deadline=deadline,
+                    )
+                    if recovery_event:
+                        fingerprint = json.dumps(recovery_event, sort_keys=True, default=str)
+                        if fingerprint != last_recovery_fingerprint:
+                            if recovery_event["kind"] == "recovery_dry_run":
+                                emit(recovery_event, pretty=False)
+                            else:
+                                events.append(recovery_event)
+                        last_recovery_fingerprint = fingerprint
+                    else:
+                        last_recovery_fingerprint = None
+                poll_id = str(current.get("observed_at") or f"poll-{iterations}")
+                events = assign_poll_id(events, poll_id)
+                current_unhandled = {
+                    event_fingerprint(event) for event in events if event.get("kind") == "unhandled"
+                }
+                events = [
+                    event
+                    for event in events
+                    if event.get("kind") != "unhandled"
+                    or event_fingerprint(event) not in active_unhandled
+                ]
+                active_unhandled = current_unhandled
+                result = replay_events(events, viewer_id)
+                for wake in result["wakes"]:
+                    emit(wake, pretty=False)
+                    if wake["wake_node"] == "terminal_merged":
+                        terminal_states_emitted.add("MERGED")
+                    elif wake["wake_node"] == "terminal_closed":
+                        terminal_states_emitted.add("CLOSED")
+                known_ids.update(str(item.get("id")) for item in comments)
+                previous = current
+                last_poll_error = None
         except Exception as exc:
             error = f"wave monitor poll failed: {exc}"
             if error != last_poll_error:

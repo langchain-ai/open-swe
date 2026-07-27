@@ -4,6 +4,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import time
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -48,18 +49,20 @@ def _watch_snapshot(
     }
 
 
-def _watch_args(*, pr_number: int | None, iterations: int) -> SimpleNamespace:
-    return SimpleNamespace(
-        issue_id="issue",
-        repo="owner/repo",
-        thread_id="thread",
-        pr_number=pr_number,
-        session_user_id="session",
-        iterations=iterations,
-        interval=0,
-        run_stall_seconds=1800,
-        apply=False,
-    )
+def _watch_args(**overrides: Any) -> SimpleNamespace:
+    values = {
+        "issue_id": "issue",
+        "thread_id": "thread",
+        "repo": "owner/repo",
+        "pr_number": None,
+        "apply": False,
+        "session_user_id": "session",
+        "interval": 0.05,
+        "iterations": 1,
+        "run_stall_seconds": 1800,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 def test_wave_two_replay_reduces_wakes_and_suppresses_self() -> None:
@@ -184,7 +187,7 @@ def test_github_snapshot_paginates_complete_actor_timeline(
 ) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
+    def fake_graphql(query: str, variables: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
         calls.append(variables)
         cursor = variables.get("cursor")
         if "WaveLabels" in query:
@@ -233,7 +236,7 @@ def test_github_snapshot_paginates_complete_actor_timeline(
 def test_linear_snapshot_paginates_all_comments(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_linear(_query: str, variables: dict[str, Any]) -> dict[str, Any]:
+    def fake_linear(_query: str, variables: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
         calls.append(variables)
         cursor = variables.get("cursor")
         return {
@@ -259,6 +262,191 @@ def test_linear_snapshot_paginates_all_comments(monkeypatch: pytest.MonkeyPatch)
         "first",
         "second",
     ]
+
+
+def test_run_uses_default_timeout_and_wraps_expiration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(kwargs)
+        if len(calls) == 2:
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(wave.subprocess, "run", fake_run)
+
+    assert wave._run(["echo", "ok"]).stdout == "ok"
+    with pytest.raises(wave.WaveOpsError, match=r"Command timed out after 60\.0s"):
+        wave._run(["sleep", "forever"])
+
+    assert [call["timeout"] for call in calls] == [60.0, 60.0]
+
+
+@pytest.mark.parametrize(
+    ("deadline", "expected_timeout"),
+    [(112.5, 12.5), (140.0, 30.0)],
+)
+def test_linear_graphql_bounds_httpx_timeout_without_network(
+    monkeypatch: pytest.MonkeyPatch, deadline: float, expected_timeout: float
+) -> None:
+    import httpx
+
+    calls: list[dict[str, Any]] = []
+
+    class Response:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, Any]:
+            return {"data": {"ok": True}}
+
+    monkeypatch.setenv("LINEAR_API_KEY", "test-key")
+    monkeypatch.setattr(wave.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *_args, **kwargs: calls.append(kwargs) or Response(),
+    )
+
+    assert wave._linear_graphql("query", {}, deadline=deadline) == {"ok": True}
+    assert calls[0]["timeout"] == expected_timeout
+
+
+def test_langgraph_snapshot_reraises_poll_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import langgraph_sdk
+
+    deadline = wave._PollDeadlineError("deadline")
+
+    async def get_thread(_thread_id: str) -> dict[str, Any]:
+        raise deadline
+
+    monkeypatch.setenv("LANGGRAPH_URL", "https://langgraph.invalid")
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda **_kwargs: SimpleNamespace(
+            threads=SimpleNamespace(get=get_thread), runs=SimpleNamespace()
+        ),
+    )
+
+    with pytest.raises(wave._PollDeadlineError) as exc_info:
+        wave.asyncio.run(wave._langgraph_snapshot("thread", 1.0))
+
+    assert exc_info.value is deadline
+
+
+def test_langgraph_snapshot_passes_remaining_timeout_and_is_aggregate_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import langgraph_sdk
+
+    client_calls: list[dict[str, Any]] = []
+
+    class Threads:
+        async def get(self, _thread_id: str) -> dict[str, Any]:
+            await wave.asyncio.sleep(0.03)
+            return {"status": "busy"}
+
+    class Runs:
+        async def list(self, _thread_id: str, *, limit: int) -> list[Any]:
+            assert limit == 1000
+            await wave.asyncio.sleep(60)
+            return []
+
+    def get_client(**kwargs: Any) -> SimpleNamespace:
+        client_calls.append(kwargs)
+        return SimpleNamespace(threads=Threads(), runs=Runs())
+
+    monkeypatch.setenv("LANGGRAPH_URL", "https://langgraph.invalid")
+    monkeypatch.setattr(langgraph_sdk, "get_client", get_client)
+    started = time.perf_counter()
+
+    with pytest.raises(wave.WaveOpsError, match="request timed out"):
+        wave.langgraph_snapshot("thread", deadline=time.monotonic() + 0.05)
+
+    assert time.perf_counter() - started < 0.5
+    assert client_calls[0]["url"] == "https://langgraph.invalid"
+    assert 0 < client_calls[0]["timeout"] <= 0.05
+
+
+@pytest.mark.parametrize("interval", [0, -1])
+def test_watch_rejects_non_positive_interval_before_snapshot(
+    monkeypatch: pytest.MonkeyPatch, interval: float
+) -> None:
+    monkeypatch.setattr(
+        wave,
+        "live_snapshot",
+        lambda *_args, **_kwargs: pytest.fail("snapshot should not run"),
+    )
+
+    with pytest.raises(wave.WaveOpsError, match="interval greater than zero"):
+        wave.cmd_watch(_watch_args(interval=interval))
+
+
+@pytest.mark.parametrize(
+    ("target", "connection_name", "expected"),
+    [
+        ("linear", None, "Linear comments pagination exceeded 2 pages"),
+        ("timeline", None, "GitHub timelineItems pagination exceeded 2 pages"),
+        ("connection", "labels", "GitHub labels pagination exceeded 2 pages"),
+        ("connection", "reviewThreads", "GitHub reviewThreads pagination exceeded 2 pages"),
+    ],
+)
+def test_pagination_guards_raise_named_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+    connection_name: str | None,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(wave, "MAX_PAGINATION_PAGES", 2)
+
+    if target == "linear":
+        monkeypatch.setattr(
+            wave,
+            "_linear_graphql",
+            lambda *_args, **_kwargs: {
+                "viewer": {},
+                "issue": {
+                    "comments": {
+                        "nodes": [],
+                        "pageInfo": {"hasNextPage": True, "endCursor": "next"},
+                    }
+                },
+            },
+        )
+    else:
+        name = connection_name or "timelineItems"
+        monkeypatch.setattr(
+            wave,
+            "gh_graphql",
+            lambda *_args, **_kwargs: {
+                "repository": {
+                    "defaultBranchRef": {"name": "main"},
+                    "pullRequest": {
+                        "headRefOid": "head",
+                        name: {
+                            "nodes": [],
+                            "pageInfo": {"hasNextPage": True, "endCursor": "next"},
+                        },
+                    },
+                }
+            },
+        )
+
+    def invoke() -> Any:
+        if target == "linear":
+            return wave.linear_snapshot("issue")
+        if target == "timeline":
+            return wave.github_pr_snapshot("owner/repo", 7)
+        assert connection_name is not None
+        return wave._paginate_pr_connection("query", connection_name, "owner", "repo", 7, "head")
+
+    with pytest.raises(wave.WaveOpsError, match=expected):
+        invoke()
 
 
 def test_green_draft_blocks_incomplete_timeline() -> None:
@@ -436,12 +624,15 @@ def test_monitor_can_start_before_pr_creation(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(
         wave,
         "linear_snapshot",
-        lambda _issue: {"viewer": {"id": "session"}, "issue": {"comments": {"nodes": []}}},
+        lambda _issue, **_kwargs: {
+            "viewer": {"id": "session"},
+            "issue": {"comments": {"nodes": []}},
+        },
     )
     monkeypatch.setattr(
         wave,
         "langgraph_snapshot",
-        lambda _thread: {"thread": {"metadata": {}}, "runs": []},
+        lambda _thread, **_kwargs: {"thread": {"metadata": {}}, "runs": []},
     )
 
     snapshot = wave.live_snapshot("issue", "thread", "owner/repo", None)
@@ -478,7 +669,7 @@ def test_watch_emits_terminal_merged_once_for_explicit_already_merged_pr(
         ]
     )
     emitted: list[dict[str, Any]] = []
-    monkeypatch.setattr(wave, "live_snapshot", lambda *_args: next(snapshots))
+    monkeypatch.setattr(wave, "live_snapshot", lambda *_args, **_kwargs: next(snapshots))
     monkeypatch.setattr(wave, "monitor_recovery", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(wave.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(wave, "emit", lambda payload, **_kwargs: emitted.append(payload))
@@ -498,15 +689,18 @@ def test_watch_discovers_already_merged_pr_from_thread_metadata(
     monkeypatch.setattr(
         wave,
         "linear_snapshot",
-        lambda _issue: {"viewer": {"id": "session"}, "issue": {"comments": {"nodes": []}}},
+        lambda _issue, **_kwargs: {
+            "viewer": {"id": "session"},
+            "issue": {"comments": {"nodes": []}},
+        },
     )
     monkeypatch.setattr(
         wave,
         "langgraph_snapshot",
-        lambda _thread: {"thread": {"metadata": {"pr_number": 53}}, "runs": []},
+        lambda _thread, **_kwargs: {"thread": {"metadata": {"pr_number": 53}}, "runs": []},
     )
 
-    def github_snapshot(_repo: str, number: int) -> dict[str, Any]:
+    def github_snapshot(_repo: str, number: int, **_kwargs: Any) -> dict[str, Any]:
         github_numbers.append(number)
         return {"state": "MERGED", "reviewThreads": {"nodes": []}}
 
@@ -536,7 +730,7 @@ def test_watch_emits_terminal_closed_for_already_closed_baseline(
         ]
     )
     emitted: list[dict[str, Any]] = []
-    monkeypatch.setattr(wave, "live_snapshot", lambda *_args: next(snapshots))
+    monkeypatch.setattr(wave, "live_snapshot", lambda *_args, **_kwargs: next(snapshots))
     monkeypatch.setattr(wave, "monitor_recovery", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(wave.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(wave, "emit", lambda payload, **_kwargs: emitted.append(payload))
@@ -558,7 +752,7 @@ def test_watch_emits_live_open_to_merged_transition_once(
         ]
     )
     emitted: list[dict[str, Any]] = []
-    monkeypatch.setattr(wave, "live_snapshot", lambda *_args: next(snapshots))
+    monkeypatch.setattr(wave, "live_snapshot", lambda *_args, **_kwargs: next(snapshots))
     monkeypatch.setattr(wave, "monitor_recovery", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(wave.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(wave, "emit", lambda payload, **_kwargs: emitted.append(payload))
@@ -579,7 +773,7 @@ def test_failed_poll_does_not_latch_later_terminal_state(
     ]
     emitted: list[dict[str, Any]] = []
 
-    def live_snapshot(*_args: Any) -> dict[str, Any]:
+    def live_snapshot(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         snapshot = snapshots.pop(0)
         if isinstance(snapshot, Exception):
             raise snapshot
@@ -799,3 +993,162 @@ def test_skill_contains_all_deliverables_and_closeout_wording() -> None:
         in templates
     )
     assert all(f"`{node}`" in skill for node in wave.WAKE_NODES)
+
+
+def test_bounded_timeout_raises_dedicated_poll_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(wave.time, "monotonic", lambda: 10.0)
+
+    with pytest.raises(wave._PollDeadlineError):
+        wave._bounded_timeout(1.0, 9.0, "operation")
+
+
+def test_wall_clock_deadline_restores_elapsed_one_shot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monotonic = iter([10.0, 10.0, 12.0])
+    timer_calls: list[tuple[float, float]] = []
+    handlers: list[Any] = []
+
+    monkeypatch.setattr(wave.time, "monotonic", lambda: next(monotonic))
+    monkeypatch.setattr(wave.signal, "getsignal", lambda _signal: "previous")
+    monkeypatch.setattr(
+        wave.signal,
+        "signal",
+        lambda _signal, handler: handlers.append(handler),
+    )
+
+    def setitimer(_which: int, delay: float, interval: float = 0.0) -> tuple[float, float]:
+        timer_calls.append((delay, interval))
+        return (1.0, 0.0) if len(timer_calls) == 1 else (0.0, 0.0)
+
+    monkeypatch.setattr(wave.signal, "setitimer", setitimer)
+
+    with wave._wall_clock_deadline(20.0, "poll"):
+        pass
+
+    assert handlers[-1] == "previous"
+    assert timer_calls[-1] == pytest.approx((1e-6, 0.0))
+
+
+def test_wall_clock_deadline_preserves_periodic_timer_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monotonic = iter([10.0, 10.0, 14.5])
+    timer_calls: list[tuple[float, float]] = []
+
+    monkeypatch.setattr(wave.time, "monotonic", lambda: next(monotonic))
+    monkeypatch.setattr(wave.signal, "getsignal", lambda _signal: "previous")
+    monkeypatch.setattr(wave.signal, "signal", lambda _signal, _handler: None)
+
+    def setitimer(_which: int, delay: float, interval: float = 0.0) -> tuple[float, float]:
+        timer_calls.append((delay, interval))
+        return (1.0, 2.0) if len(timer_calls) == 1 else (0.0, 0.0)
+
+    monkeypatch.setattr(wave.signal, "setitimer", setitimer)
+
+    with wave._wall_clock_deadline(20.0, "poll"):
+        pass
+
+    assert timer_calls[-1] == pytest.approx((0.5, 2.0))
+
+
+def test_monitor_recovery_reraises_poll_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = fixture("pr-44-queue-stall.json")
+    monkeypatch.setattr(
+        wave,
+        "apply_recovery",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(wave._PollDeadlineError("deadline")),
+    )
+
+    with pytest.raises(wave._PollDeadlineError, match="deadline"):
+        wave.monitor_recovery(
+            snapshot,
+            apply=True,
+            refresh=lambda: snapshot,
+            post_log=lambda _body: None,
+        )
+
+
+@pytest.mark.skipif(
+    not all(hasattr(wave.signal, name) for name in ("SIGALRM", "ITIMER_REAL", "setitimer")),
+    reason="POSIX setitimer is unavailable",
+)
+def test_watch_apply_recovery_deadline_uses_outer_unhandled_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recovery = fixture("pr-44-queue-stall.json")
+    snapshot = {
+        "linear": {
+            "viewer": {"id": "session"},
+            "issue": {"comments": {"nodes": []}},
+        },
+        "langgraph": {
+            "thread": {"metadata": recovery["thread_metadata"]},
+            "runs": [],
+        },
+        "pr": recovery["pr"],
+        "pr_number": recovery["pr_number"],
+        "observed_at": "2026-01-01T00:00:00+00:00",
+    }
+    snapshots = 0
+    blocked_call_finished = False
+    emitted: list[dict[str, Any]] = []
+
+    def blocking_snapshot(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal snapshots, blocked_call_finished
+        snapshots += 1
+        if snapshots <= 2:
+            return deepcopy(snapshot)
+        time.sleep(0.8)
+        blocked_call_finished = True
+        return deepcopy(snapshot)
+
+    monkeypatch.setattr(wave, "live_snapshot", blocking_snapshot)
+    monkeypatch.setattr(wave, "emit", lambda payload, **_kwargs: emitted.append(payload))
+    started = time.perf_counter()
+
+    assert wave.cmd_watch(_watch_args(apply=True)) == 0
+
+    elapsed = time.perf_counter() - started
+    assert not blocked_call_finished
+    assert elapsed < 0.7
+    assert emitted == [
+        {
+            "wake_node": "unhandled_condition",
+            "summary": "wave monitor poll failed: Wave monitor poll exceeded the poll deadline",
+            "evidence": {"issue_id": "issue", "thread_id": "thread"},
+        }
+    ]
+
+
+@pytest.mark.skipif(
+    not all(hasattr(wave.signal, name) for name in ("SIGALRM", "ITIMER_REAL", "setitimer")),
+    reason="POSIX setitimer is unavailable",
+)
+def test_watch_interrupts_blocking_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blocked_call_finished = False
+
+    def blocking_snapshot(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal blocked_call_finished
+        time.sleep(0.8)
+        blocked_call_finished = True
+        return {}
+
+    monkeypatch.setattr(wave, "live_snapshot", blocking_snapshot)
+    started = time.perf_counter()
+
+    with pytest.raises(
+        wave.WaveOpsError,
+        match="wave monitor baseline failed: Wave monitor baseline exceeded the poll deadline",
+    ):
+        wave.cmd_watch(_watch_args())
+
+    elapsed = time.perf_counter() - started
+    assert not blocked_call_finished
+    assert elapsed < 0.7
