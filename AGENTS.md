@@ -91,7 +91,7 @@ Wired into `get_agent`:
 
 Reviewer-only tools (in `agent/reviewer.py`): `add_finding`, `update_finding`, `list_findings`, `publish_review`. The review-style analyzer uses `save_review_style` (exported as `save_review_style_prompt`).
 
-Built-in deepagents tools (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `execute`, `write_todos`, `task` for subagent spawning, …) are added by `create_deep_agent` itself; don't duplicate them.
+Built-in deepagents tools (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `execute`, `task` for subagent spawning, …) are added by `create_deep_agent` itself; don't duplicate them.
 
 ### Models, profiles, and team defaults
 

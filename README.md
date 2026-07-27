@@ -75,7 +75,7 @@ Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE 
 | `slack_add_reaction` | React to Slack messages |
 | `slack_thread_reply` | Reply in Slack threads |
 
-GitHub operations are performed with `GH_TOKEN=dummy gh` inside the sandbox, backed by the LangSmith proxy. Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `write_todos`, and `task` (subagent spawning).
+GitHub operations are performed with `GH_TOKEN=dummy gh` inside the sandbox, backed by the LangSmith proxy. Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, and `task` (subagent spawning).
 
 **Optional observability tools (server-side):** Admins can connect Datadog and LangSmith from team settings (Admin → Observability credentials). When connected, the agent gains Datadog tools (via Datadog's hosted MCP server, default `toolsets=core`) and read-only LangSmith tools (`langsmith_get_trace`, `langsmith_list_runs`). These run in the LangGraph server process using credentials encrypted at rest — the sandbox never holds Datadog or LangSmith keys. They are loaded **only for runs triggered by an authorized user** (admins, plus any emails in `OBSERVABILITY_AUTHORIZED_EMAILS`), so a prompt-injected run from an untrusted contributor cannot reach team observability data. Use scoped, read-oriented keys regardless: observability data (logs, traces) is attacker-influenced content that can carry prompt injection, and the agent has network egress — the same residual-risk class as `web_search` / `fetch_url`.
 
@@ -92,7 +92,7 @@ Open SWE gathers context from two sources:
 
 Open SWE's orchestration has two layers:
 
-**Subagents:** The Deep Agents framework natively supports spawning child agents via the `task` tool. The main agent can fan out independent subtasks to isolated subagents — each with its own middleware stack, todo list, and file operations. This is similar to Ramp's child sessions for parallel work.
+**Subagents:** The Deep Agents framework natively supports spawning child agents via the `task` tool. The main agent can fan out independent subtasks to isolated subagents — each with its own middleware stack and file operations. This is similar to Ramp's child sessions for parallel work.
 
 **Middleware:** Deterministic middleware hooks run around the agent loop:
 

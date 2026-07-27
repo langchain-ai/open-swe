@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.0b1",
+    "deepagents==0.7.0b2",
     "fastapi>=0.139.0",
     "uvicorn>=0.50.2",
     "httpx>=0.28.1",
@@ -47,9 +47,9 @@ dev = [
 # conservative `deepagents<0.7.0` upper bound, but the 0.7.0 pre-release keeps
 # the public API they rely on (SandboxBackendProtocol / BaseSandbox) backward
 # compatible. Override the transitive bound so we can track the latest pre-release.
-# deepagents 0.7.0b1 requires wcmatch>=11.0, while langchain-e2b's e2b dep still
+# deepagents 0.7.0b2 requires wcmatch>=11.0, while langchain-e2b's e2b dep still
 # caps wcmatch<11.0; override it so both can resolve (the glob API is unchanged).
-override-dependencies = ["deepagents==0.7.0b1", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.0b2", "wcmatch>=11.0"]
 
 [build-system]
 requires = ["hatchling"]
