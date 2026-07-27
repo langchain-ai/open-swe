@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib.machinery
 import importlib.util
+import io
 import json
 import re
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -298,8 +301,8 @@ def test_body_hygiene_rejects_ambiguous_directives(body: str) -> None:
 def test_force_cannot_bypass_body_hygiene(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         run,
-        "handoff_snapshot",
-        lambda thread_id: pytest.fail("handoff baseline must not run after a hygiene refusal"),
+        "_post_with_handoff",
+        lambda *args, **kwargs: pytest.fail("handoff child must not start after a hygiene refusal"),
     )
     args = argparse.Namespace(ticket="ABC-1", force=True)
 
@@ -312,65 +315,181 @@ def test_force_cannot_bypass_body_hygiene(monkeypatch: pytest.MonkeyPatch) -> No
         )
 
 
-@pytest.mark.parametrize(
-    ("baseline", "current", "expected"),
-    [
-        (
-            {"thread_status": "missing", "run_ids": []},
-            {"thread_status": "busy", "run_ids": []},
-            True,
-        ),
-        (
-            {"thread_status": "idle", "run_ids": ["run-1"]},
-            {"thread_status": "busy", "run_ids": ["run-1"]},
-            True,
-        ),
-        (
-            {"thread_status": "busy", "run_ids": ["run-1"]},
-            {"thread_status": "busy", "run_ids": ["run-1"]},
-            False,
-        ),
-        (
-            {"thread_status": "busy", "run_ids": ["run-1"]},
-            {"thread_status": "busy", "run_ids": ["run-1", "run-2"]},
-            True,
-        ),
-        (
-            {"thread_status": "idle", "run_ids": ["run-1"]},
-            {"thread_status": "idle", "run_ids": ["run-1", "run-2"]},
-            True,
-        ),
-    ],
-)
-def test_handoff_success_uses_status_transition_or_new_run(
-    baseline: dict, current: dict, expected: bool
-) -> None:
-    assert run.handoff_observed(baseline, current) is expected
+def test_handoff_monitor_uses_one_sdk_import_and_recent_run_window() -> None:
+    assert run.HANDOFF_MONITOR_SNIPPET.count("from langgraph_sdk import get_client") == 1
+    assert "client = get_client(url=URL)" in run.HANDOFF_MONITOR_SNIPPET
+    assert "snapshot(client)" in run.HANDOFF_MONITOR_SNIPPET
+    assert "sys.stdin.readline()" in run.HANDOFF_MONITOR_SNIPPET
+    assert "runs.list(THREAD, limit=100)" in run.HANDOFF_MONITOR_SNIPPET
+    assert "limit=1000" not in run.HANDOFF_MONITOR_SNIPPET
 
 
-def test_handoff_timeout_reports_complete_evidence(
+def test_handoff_start_spawns_one_child_and_waits_for_baseline_sentinel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    baseline = {"thread_status": "busy", "run_ids": ["run-1"]}
-    monkeypatch.setattr(run, "handoff_snapshot", lambda thread_id: baseline)
-    moments = iter([0.0, 61.0])
-    monkeypatch.setattr(run.time, "monotonic", lambda: next(moments))
-    monkeypatch.setattr(run.time, "sleep", lambda seconds: None)
-    plan_context = {"status": "approved", "rollback": "not automatic"}
+    calls: list[tuple[list[str], dict]] = []
 
-    with pytest.raises(run.RunError) as raised:
-        run.poll_handoff("approval", "ABC-1", "thread-1", baseline, plan_context=plan_context)
+    class Stdout:
+        def readline(self) -> str:
+            return run.HANDOFF_BASELINE_SENTINEL + "child-owned baseline"
 
-    message = str(raised.value)
-    for evidence in (
-        '"action": "approval"',
-        '"ticket": "ABC-1"',
-        '"thread_id": "thread-1"',
-        '"baseline"',
-        '"final"',
-        '"plan_status_nontransactional"',
-    ):
-        assert evidence in message
+    class Process:
+        stdout = Stdout()
+
+    def popen(command, **kwargs):
+        calls.append((command, kwargs))
+        return Process()
+
+    monkeypatch.setattr(run, "resolve_monitor_python", lambda: ["python-with-sdk"])
+    monkeypatch.setattr(run.subprocess, "Popen", popen)
+    monkeypatch.setattr(run.select, "select", lambda *args: ([Process.stdout], [], []))
+
+    process = run._start_handoff_process("comment", "ABC-1", "thread-1")
+
+    assert isinstance(process, Process)
+    assert len(calls) == 1
+    assert calls[0][0] == ["python-with-sdk", "-c", run.HANDOFF_MONITOR_SNIPPET]
+
+
+@pytest.mark.parametrize("baseline_status", ["missing", "idle", "busy"])
+def test_child_preserves_handoff_success_rules(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    baseline_status: str,
+) -> None:
+    class Missing(Exception):
+        status_code = 404
+
+    if baseline_status == "missing":
+        statuses = [Missing(), {"status": "busy"}]
+        run_lists = [[]]
+    elif baseline_status == "idle":
+        statuses = [{"status": "idle"}, {"status": "busy"}]
+        run_lists = [[{"run_id": "run-1"}], [{"run_id": "run-1"}]]
+    else:
+        statuses = [{"status": "busy"}, {"status": "busy"}, {"status": "busy"}]
+        run_lists = [
+            [{"run_id": "run-1"}],
+            [{"run_id": "run-1"}],
+            [{"run_id": "run-1"}, {"run_id": "run-2"}],
+        ]
+
+    class Threads:
+        async def get(self, thread_id):
+            value = statuses.pop(0)
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+    class Runs:
+        async def list(self, thread_id, *, limit):
+            assert limit == 100
+            return run_lists.pop(0)
+
+    client = types.SimpleNamespace(threads=Threads(), runs=Runs())
+    sdk = types.ModuleType("langgraph_sdk")
+    sdk.get_client = lambda *, url: client
+    monkeypatch.setitem(sys.modules, "langgraph_sdk", sdk)
+    monkeypatch.setenv("OPENSWE_HANDOFF_THREAD", "thread-1")
+    monkeypatch.setenv("OPENSWE_HANDOFF_ACTION", "comment")
+    monkeypatch.setenv("OPENSWE_HANDOFF_TICKET", "ABC-1")
+    monkeypatch.setenv("OPENSWE_HANDOFF_PLAN_CONTEXT", "null")
+    monkeypatch.setenv("OPENSWE_HANDOFF_TIMEOUT", "1")
+    monkeypatch.setenv("OPENSWE_HANDOFF_POLL_INTERVAL", "0")
+    monkeypatch.setattr(sys, "stdin", io.StringIO("posted\n"))
+
+    exec(run.HANDOFF_MONITOR_SNIPPET, {})
+
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 2
+    result = json.loads(lines[-1][len(run.HANDOFF_RESULT_SENTINEL) :])
+    assert result["handoff"]["thread_status"] == "busy"
+    if baseline_status == "busy":
+        assert result["handoff"]["run_ids"] == ["run-1", "run-2"]
+
+
+def test_child_poll_timeout_is_aggregate_and_cancels_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cancelled = False
+    thread_reads = 0
+
+    class Threads:
+        async def get(self, thread_id):
+            nonlocal cancelled, thread_reads
+            thread_reads += 1
+            if thread_reads == 1:
+                return {"status": "idle"}
+            try:
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                cancelled = True
+                raise
+
+    class Runs:
+        async def list(self, thread_id, *, limit):
+            return []
+
+    client = types.SimpleNamespace(threads=Threads(), runs=Runs())
+    sdk = types.ModuleType("langgraph_sdk")
+    sdk.get_client = lambda *, url: client
+    monkeypatch.setitem(sys.modules, "langgraph_sdk", sdk)
+    monkeypatch.setenv("OPENSWE_HANDOFF_THREAD", "thread-1")
+    monkeypatch.setenv("OPENSWE_HANDOFF_ACTION", "comment")
+    monkeypatch.setenv("OPENSWE_HANDOFF_TICKET", "ABC-1")
+    monkeypatch.setenv("OPENSWE_HANDOFF_PLAN_CONTEXT", "null")
+    monkeypatch.setenv("OPENSWE_HANDOFF_TIMEOUT", "0.01")
+    monkeypatch.setenv("OPENSWE_HANDOFF_POLL_INTERVAL", "1")
+    monkeypatch.setattr(sys, "stdin", io.StringIO("posted\n"))
+
+    exec(run.HANDOFF_MONITOR_SNIPPET, {})
+
+    lines = capsys.readouterr().out.splitlines()
+    result = json.loads(lines[-1][len(run.HANDOFF_RESULT_SENTINEL) :])
+    assert cancelled is True
+    assert "LangGraph handoff timeout" in result["error"]
+    assert '"final": {"error": ""}' in result["error"]
+    assert "async with asyncio.timeout(remaining)" in run.HANDOFF_MONITOR_SNIPPET
+    assert (
+        "await asyncio.sleep(min(POLL_INTERVAL_SECONDS, remaining))" in run.HANDOFF_MONITOR_SNIPPET
+    )
+    assert "time.sleep(" not in run.HANDOFF_MONITOR_SNIPPET
+
+
+def test_shared_post_helper_uses_one_child_for_baseline_post_and_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class Stdin:
+        def write(self, value: str) -> None:
+            assert value == "posted\n"
+            events.append("signal")
+
+        def flush(self) -> None:
+            return None
+
+    process = types.SimpleNamespace(stdin=Stdin())
+
+    def start(*args, **kwargs):
+        events.append("baseline")
+        return process
+
+    monkeypatch.setattr(run, "_start_handoff_process", start)
+    monkeypatch.setattr(run, "post_comment", lambda *args: events.append("post"))
+    monkeypatch.setattr(
+        run,
+        "_await_handoff",
+        lambda actual_process, thread_id: (
+            events.append("poll") or {"thread_status": "busy", "run_ids": ["run-1"]}
+        ),
+    )
+
+    final = run._post_with_handoff("comment", "ABC-1", "issue-1", "@openswe Continue", "thread-1")
+
+    assert final == {"thread_status": "busy", "run_ids": ["run-1"]}
+    assert events == ["baseline", "post", "signal", "poll"]
 
 
 @pytest.mark.parametrize(
@@ -380,7 +499,7 @@ def test_handoff_timeout_reports_complete_evidence(
         (run.cmd_reject, "rejection", "revising", True),
     ],
 )
-def test_plan_actions_guard_transition_baseline_post_then_poll(
+def test_plan_actions_guard_transition_shared_baseline_post_then_poll(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     command,
@@ -417,22 +536,14 @@ def test_plan_actions_guard_transition_baseline_post_then_poll(
 
     expected_plan_mode = plan_mode
     monkeypatch.setattr(run, "set_plan_status", set_status)
-    monkeypatch.setattr(
-        run,
-        "handoff_snapshot",
-        lambda thread_id: (
-            events.append("baseline") or {"thread_status": "idle", "run_ids": ["run-1"]}
-        ),
-    )
     monkeypatch.setattr(run, "dogfood", lambda ticket, tag, message: logs.append(message))
-    monkeypatch.setattr(run, "post_comment", lambda issue_id, body: events.append("post_comment"))
 
-    def poll_handoff(actual_action: str, *args, **kwargs) -> dict:
+    def post_with_handoff(actual_action: str, *args, **kwargs) -> dict:
         assert actual_action == action
-        events.append("poll")
+        events.extend(["baseline", "post_comment", "poll"])
         return {"thread_status": "busy", "run_ids": ["run-1", "run-2"]}
 
-    monkeypatch.setattr(run, "poll_handoff", poll_handoff)
+    monkeypatch.setattr(run, "_post_with_handoff", post_with_handoff)
     args = argparse.Namespace(ticket="ABC-1", body_file="body.md", force=False, adjudicated=True)
 
     assert command(args) == 0
@@ -454,6 +565,43 @@ def test_plan_actions_guard_transition_baseline_post_then_poll(
         "post_comment",
         "poll",
     ]
+
+
+def test_timeout_annotation_exists_only_in_child_timeout_evidence() -> None:
+    assert run.HANDOFF_MONITOR_SNIPPET.count("plan_status_nontransactional") == 1
+    source = SCRIPT_PATH.read_text()
+    assert source.count("plan_status_nontransactional") == 1
+    assert 'evidence["plan_status_nontransactional"] = PLAN_CONTEXT' in source
+
+
+def test_child_timeout_result_is_reported_directly() -> None:
+    evidence = {
+        "action": "approval",
+        "ticket": "ABC-1",
+        "thread_id": "thread-1",
+        "baseline": {"thread_status": "busy", "run_ids": ["run-1"]},
+        "final": {"thread_status": "busy", "run_ids": ["run-1"]},
+        "timeout_seconds": 60.0,
+        "plan_status_nontransactional": {"status": "approved", "rollback": "not automatic"},
+    }
+
+    class Process:
+        returncode = 0
+
+        def communicate(self, timeout=None):
+            payload = {
+                "error": "LangGraph handoff timeout: " + json.dumps(evidence, sort_keys=True)
+            }
+            return run.HANDOFF_RESULT_SENTINEL + json.dumps(payload) + "\n", ""
+
+    with pytest.raises(run.RunError) as raised:
+        run._await_handoff(Process(), "thread-1")
+
+    message = str(raised.value)
+    assert '"action": "approval"' in message
+    assert '"baseline"' in message
+    assert '"final"' in message
+    assert '"plan_status_nontransactional"' in message
 
 
 def test_start_dry_run_does_not_capture_or_poll_handoff(
@@ -478,8 +626,8 @@ def test_start_dry_run_does_not_capture_or_poll_handoff(
     )
     monkeypatch.setattr(
         run,
-        "handoff_snapshot",
-        lambda thread_id: pytest.fail("dry-run must not capture a handoff baseline"),
+        "_post_with_handoff",
+        lambda *args, **kwargs: pytest.fail("dry-run must not start a handoff child"),
     )
     monkeypatch.setattr(
         run,
@@ -524,13 +672,7 @@ def test_start_success_records_handoff_in_json_and_dogfood(
         "import_wave_module",
         lambda: type("Wave", (), {"derive_linear_thread_id": lambda issue_id: "thread-1"}),
     )
-    monkeypatch.setattr(
-        run,
-        "handoff_snapshot",
-        lambda thread_id: {"thread_status": "missing", "run_ids": []},
-    )
-    monkeypatch.setattr(run, "post_comment", lambda issue_id, body: None)
-    monkeypatch.setattr(run, "poll_handoff", lambda *args, **kwargs: final)
+    monkeypatch.setattr(run, "_post_with_handoff", lambda *args, **kwargs: final)
     monkeypatch.setattr(run, "dogfood", lambda ticket, tag, message: logs.append(message))
     args = argparse.Namespace(
         ticket="ABC-1",

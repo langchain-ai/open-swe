@@ -474,13 +474,20 @@ def guard_placeholders(ticket: str, body: str, force: bool) -> None:
         dogfood(ticket, "note", f"--force posted body with placeholders: {', '.join(leftovers)}")
 
 
+HANDOFF_BASELINE_SENTINEL = "OPENSWE_HANDOFF_BASELINE "
 HANDOFF_RESULT_SENTINEL = "OPENSWE_HANDOFF_RESULT "
-HANDOFF_SNAPSHOT_SNIPPET = r"""
-import asyncio, json, os
+HANDOFF_MONITOR_SNIPPET = r"""
+import asyncio, json, os, sys, time
 from langgraph_sdk import get_client
 
-SENTINEL = "OPENSWE_HANDOFF_RESULT "
+BASELINE_SENTINEL = "OPENSWE_HANDOFF_BASELINE "
+RESULT_SENTINEL = "OPENSWE_HANDOFF_RESULT "
 THREAD = os.environ["OPENSWE_HANDOFF_THREAD"]
+ACTION = os.environ["OPENSWE_HANDOFF_ACTION"]
+TICKET = os.environ["OPENSWE_HANDOFF_TICKET"]
+PLAN_CONTEXT = json.loads(os.environ.get("OPENSWE_HANDOFF_PLAN_CONTEXT") or "null")
+TIMEOUT_SECONDS = float(os.environ["OPENSWE_HANDOFF_TIMEOUT"])
+POLL_INTERVAL_SECONDS = float(os.environ["OPENSWE_HANDOFF_POLL_INTERVAL"])
 URL = os.environ.get("LANGGRAPH_URL") or "http://127.0.0.1:2029"
 
 
@@ -493,96 +500,181 @@ def missing(exc):
     )
 
 
-async def main():
-    client = get_client(url=URL)
+async def snapshot(client):
     try:
         thread = await client.threads.get(THREAD)
     except Exception as exc:
         if missing(exc):
-            print(SENTINEL + json.dumps({"thread_status": "missing", "run_ids": []}))
-            return
+            return {"thread_status": "missing", "run_ids": []}
         raise
     if not thread:
-        print(SENTINEL + json.dumps({"thread_status": "missing", "run_ids": []}))
-        return
-    runs = await client.runs.list(THREAD, limit=1000)
+        return {"thread_status": "missing", "run_ids": []}
+    runs = await client.runs.list(THREAD, limit=100)
     run_ids = sorted(
         str(run.get("run_id") or run.get("id"))
         for run in runs
         if isinstance(run, dict) and (run.get("run_id") or run.get("id"))
     )
-    status = str((thread or {}).get("status") or "missing")
-    print(SENTINEL + json.dumps({"thread_status": status, "run_ids": run_ids}))
-
-
-asyncio.run(main())
-"""
-
-
-def handoff_snapshot(thread_id: str) -> dict:
-    command = [*resolve_monitor_python(), "-c", HANDOFF_SNAPSHOT_SNIPPET]
-    environ = {**os.environ, "OPENSWE_HANDOFF_THREAD": thread_id}
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            env=environ,
-            timeout=HANDOFF_SNAPSHOT_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RunError(f"LangGraph handoff snapshot timed out for thread {thread_id}") from exc
-    payload = None
-    for line in reversed(result.stdout.splitlines()):
-        if line.startswith(HANDOFF_RESULT_SENTINEL):
-            payload = json.loads(line[len(HANDOFF_RESULT_SENTINEL) :])
-            break
-    if result.returncode != 0 or not isinstance(payload, dict):
-        detail = result.stderr.strip()[-400:] or result.stdout.strip()[-400:]
-        raise RunError(f"LangGraph handoff snapshot failed for thread {thread_id}: {detail}")
     return {
-        "thread_status": str(payload.get("thread_status") or "missing"),
-        "run_ids": sorted(str(run_id) for run_id in payload.get("run_ids") or []),
+        "thread_status": str(thread.get("status") or "missing"),
+        "run_ids": run_ids,
     }
 
 
-def handoff_observed(baseline: dict, current: dict) -> bool:
+def observed(baseline, current):
     new_run = bool(set(current["run_ids"]) - set(baseline["run_ids"]))
     if baseline["thread_status"] == "busy":
         return new_run
     return new_run or current["thread_status"] == "busy"
 
 
-def poll_handoff(
+async def main():
+    client = get_client(url=URL)
+    baseline = await snapshot(client)
+    print(BASELINE_SENTINEL + json.dumps(baseline), flush=True)
+    sys.stdin.readline()
+    deadline = time.monotonic() + TIMEOUT_SECONDS
+    final = baseline
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            async with asyncio.timeout(remaining):
+                final = await snapshot(client)
+        except Exception as exc:
+            final = {"error": str(exc)}
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        if "error" not in final and observed(baseline, final):
+            print(RESULT_SENTINEL + json.dumps({"handoff": final}), flush=True)
+            return
+        await asyncio.sleep(min(POLL_INTERVAL_SECONDS, remaining))
+    evidence = {
+        "action": ACTION,
+        "ticket": TICKET,
+        "thread_id": THREAD,
+        "baseline": baseline,
+        "final": final,
+        "timeout_seconds": TIMEOUT_SECONDS,
+    }
+    if PLAN_CONTEXT is not None:
+        evidence["plan_status_nontransactional"] = PLAN_CONTEXT
+    print(
+        RESULT_SENTINEL
+        + json.dumps(
+            {"error": "LangGraph handoff timeout: " + json.dumps(evidence, sort_keys=True)}
+        ),
+        flush=True,
+    )
+
+
+asyncio.run(main())
+"""
+
+
+def _stop_handoff_process(process: subprocess.Popen) -> tuple[str, str]:
+    if process.poll() is None:
+        process.terminate()
+    stdout, stderr = process.communicate()
+    return stdout, stderr
+
+
+def _start_handoff_process(
     action: str,
     ticket: str,
     thread_id: str,
-    baseline: dict,
+    *,
+    plan_context: dict | None = None,
+) -> subprocess.Popen:
+    command = [*resolve_monitor_python(), "-c", HANDOFF_MONITOR_SNIPPET]
+    environ = {
+        **os.environ,
+        "OPENSWE_HANDOFF_THREAD": thread_id,
+        "OPENSWE_HANDOFF_ACTION": action,
+        "OPENSWE_HANDOFF_TICKET": ticket.upper(),
+        "OPENSWE_HANDOFF_TIMEOUT": str(HANDOFF_TIMEOUT_SECONDS),
+        "OPENSWE_HANDOFF_POLL_INTERVAL": str(HANDOFF_POLL_INTERVAL_SECONDS),
+        "OPENSWE_HANDOFF_PLAN_CONTEXT": json.dumps(plan_context),
+    }
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        env=environ,
+    )
+    assert process.stdout is not None
+    ready, _, _ = select.select([process.stdout], [], [], HANDOFF_SNAPSHOT_TIMEOUT_SECONDS)
+    if not ready:
+        stdout, stderr = _stop_handoff_process(process)
+        detail = stderr.strip()[-400:] or stdout.strip()[-400:]
+        raise RunError(
+            f"LangGraph handoff baseline timed out for thread {thread_id}"
+            + (f": {detail}" if detail else "")
+        )
+    line = process.stdout.readline().strip()
+    if not line.startswith(HANDOFF_BASELINE_SENTINEL):
+        stdout, stderr = _stop_handoff_process(process)
+        detail = stderr.strip()[-400:] or "\n".join((line, stdout.strip()))[-400:]
+        raise RunError(f"LangGraph handoff baseline failed for thread {thread_id}: {detail}")
+    return process
+
+
+def _await_handoff(process: subprocess.Popen, thread_id: str) -> dict:
+    try:
+        stdout, stderr = process.communicate(timeout=HANDOFF_TIMEOUT_SECONDS + 10)
+    except subprocess.TimeoutExpired as exc:
+        _stop_handoff_process(process)
+        raise RunError(f"LangGraph handoff monitor overran for thread {thread_id}") from exc
+    payload = None
+    for line in reversed(stdout.splitlines()):
+        if not line.startswith(HANDOFF_RESULT_SENTINEL):
+            continue
+        payload = json.loads(line[len(HANDOFF_RESULT_SENTINEL) :])
+        break
+    if not isinstance(payload, dict):
+        detail = stderr.strip()[-400:] or stdout.strip()[-400:]
+        raise RunError(f"LangGraph handoff monitor failed for thread {thread_id}: {detail}")
+    if payload.get("error"):
+        raise RunError(str(payload["error"]))
+    final = payload.get("handoff")
+    if process.returncode != 0 or not isinstance(final, dict):
+        detail = stderr.strip()[-400:] or stdout.strip()[-400:]
+        raise RunError(f"LangGraph handoff monitor failed for thread {thread_id}: {detail}")
+    return final
+
+
+def _post_with_handoff(
+    action: str,
+    ticket: str,
+    issue_id: str,
+    body: str,
+    thread_id: str,
     *,
     plan_context: dict | None = None,
 ) -> dict:
-    deadline = time.monotonic() + HANDOFF_TIMEOUT_SECONDS
-    final: dict = baseline
-    while True:
-        try:
-            final = handoff_snapshot(thread_id)
-        except RunError as exc:
-            final = {"error": str(exc)}
-        if "error" not in final and handoff_observed(baseline, final):
-            return final
-        if time.monotonic() >= deadline:
-            evidence = {
-                "action": action,
-                "ticket": ticket.upper(),
-                "thread_id": thread_id,
-                "baseline": baseline,
-                "final": final,
-                "timeout_seconds": HANDOFF_TIMEOUT_SECONDS,
-            }
-            if plan_context is not None:
-                evidence["plan_status_nontransactional"] = plan_context
-            raise RunError(f"LangGraph handoff timeout: {json.dumps(evidence, sort_keys=True)}")
-        time.sleep(HANDOFF_POLL_INTERVAL_SECONDS)
+    process = _start_handoff_process(action, ticket, thread_id, plan_context=plan_context)
+    try:
+        post_comment(issue_id, body)
+    except Exception:
+        _stop_handoff_process(process)
+        raise
+    try:
+        assert process.stdin is not None
+        process.stdin.write("posted\n")
+        process.stdin.flush()
+    except Exception as exc:
+        stdout, stderr = _stop_handoff_process(process)
+        detail = stderr.strip()[-400:] or stdout.strip()[-400:]
+        raise RunError(
+            f"Linear comment was posted, but the LangGraph handoff monitor failed "
+            f"before polling thread {thread_id}: {detail}"
+        ) from exc
+    return _await_handoff(process, thread_id)
 
 
 # --------------------------------------------------------------------------- commands
@@ -637,9 +729,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         result["body"] = body
         print(json.dumps(result, indent=2))
         return 0
-    baseline = handoff_snapshot(thread_id)
-    post_comment(issue["id"], body)
-    result["handoff"] = poll_handoff("start", args.ticket, thread_id, baseline)
+    result["handoff"] = _post_with_handoff("start", args.ticket, issue["id"], body, thread_id)
     handoff = result["handoff"]
     dogfood(
         args.ticket,
@@ -822,25 +912,14 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return 0
 
 
-def _post_after_baseline(
-    args: argparse.Namespace,
-    action: str,
-    body: str,
-    issue: dict,
-    thread_id: str,
-    baseline: dict,
-    *,
-    plan_context: dict | None = None,
+def _post_prepared(
+    args: argparse.Namespace, action: str, body: str, issue: dict | None = None
 ) -> int:
-    try:
-        post_comment(issue["id"], body)
-        final = poll_handoff(action, args.ticket, thread_id, baseline, plan_context=plan_context)
-    except RunError as exc:
-        if plan_context is None or "plan_status_nontransactional" in str(exc):
-            raise
-        raise RunError(
-            f"{exc}; plan_status_nontransactional={json.dumps(plan_context, sort_keys=True)}"
-        ) from exc
+    issue = issue or resolve_issue(args.ticket)
+    guard_body_hygiene(body)
+    guard_placeholders(args.ticket, body, getattr(args, "force", False))
+    thread_id = import_wave_module().derive_linear_thread_id(issue["id"])
+    final = _post_with_handoff(action, args.ticket, issue["id"], body, thread_id)
     dogfood(
         args.ticket,
         "cmd",
@@ -849,17 +928,6 @@ def _post_after_baseline(
     )
     print(json.dumps({"identifier": issue["identifier"], "posted": action, "handoff": final}))
     return 0
-
-
-def _post_prepared(
-    args: argparse.Namespace, action: str, body: str, issue: dict | None = None
-) -> int:
-    issue = issue or resolve_issue(args.ticket)
-    guard_body_hygiene(body)
-    guard_placeholders(args.ticket, body, getattr(args, "force", False))
-    thread_id = import_wave_module().derive_linear_thread_id(issue["id"])
-    baseline = handoff_snapshot(thread_id)
-    return _post_after_baseline(args, action, body, issue, thread_id, baseline)
 
 
 def cmd_approve(args: argparse.Namespace) -> int:
@@ -890,21 +958,22 @@ def cmd_approve(args: argparse.Namespace) -> int:
         "status": "approved",
         "rollback": "not automatic",
     }
-    try:
-        baseline = handoff_snapshot(thread_id)
-    except RunError as exc:
-        raise RunError(
-            f"{exc}; plan_status_nontransactional={json.dumps(plan_context, sort_keys=True)}"
-        ) from exc
-    return _post_after_baseline(
-        args,
+    final = _post_with_handoff(
         "approval",
+        args.ticket,
+        issue["id"],
         body,
-        issue,
         thread_id,
-        baseline,
         plan_context=plan_context,
     )
+    dogfood(
+        args.ticket,
+        "cmd",
+        f"approval posted on {issue['identifier']}; handoff "
+        f"status={final.get('thread_status')} runs={len(final.get('run_ids') or [])}: {body[:160]}",
+    )
+    print(json.dumps({"identifier": issue["identifier"], "posted": "approval", "handoff": final}))
+    return 0
 
 
 def cmd_reject(args: argparse.Namespace) -> int:
@@ -928,21 +997,22 @@ def cmd_reject(args: argparse.Namespace) -> int:
         "status": "revising",
         "rollback": "not automatic",
     }
-    try:
-        baseline = handoff_snapshot(thread_id)
-    except RunError as exc:
-        raise RunError(
-            f"{exc}; plan_status_nontransactional={json.dumps(plan_context, sort_keys=True)}"
-        ) from exc
-    return _post_after_baseline(
-        args,
+    final = _post_with_handoff(
         "rejection",
+        args.ticket,
+        issue["id"],
         body,
-        issue,
         thread_id,
-        baseline,
         plan_context=plan_context,
     )
+    dogfood(
+        args.ticket,
+        "cmd",
+        f"rejection posted on {issue['identifier']}; handoff "
+        f"status={final.get('thread_status')} runs={len(final.get('run_ids') or [])}: {body[:160]}",
+    )
+    print(json.dumps({"identifier": issue["identifier"], "posted": "rejection", "handoff": final}))
+    return 0
 
 
 def cmd_comment(args: argparse.Namespace) -> int:

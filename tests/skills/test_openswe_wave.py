@@ -1255,7 +1255,6 @@ def _status_snapshot(
             "updated_at": "2026-07-27T09:00:00Z",
             "metadata": metadata if metadata is not None else {"plan_status": status},
         },
-        "runs": [],
         "plan": plan,
         "errors": [],
     }
@@ -1266,30 +1265,16 @@ def _status_snapshot(
     [
         ({}, "non-empty JSON list"),
         ([], "non-empty JSON list"),
-        ([{"identifier": "OSWE-1"}], "missing issue_id"),
-        ([{"identifier": "bad", "issue_id": STATUS_ISSUE_IDS[0]}], "malformed identifier"),
-        ([{"identifier": "OSWE-1", "issue_id": "issue"}], "malformed issue_id"),
+        (["OSWE-1"], "row 0 must be an object"),
+        ([{"identifier": "", "issue_id": "issue"}], "malformed identifier"),
+        ([{"identifier": "OSWE-1", "issue_id": "  "}], "malformed issue_id"),
         (
-            [{"identifier": "OSWE-1", "issue_id": STATUS_ISSUE_IDS[0], "extra": True}],
-            "unexpected extra",
-        ),
-        (
-            [
-                {"identifier": "OSWE-1", "issue_id": STATUS_ISSUE_IDS[0]},
-                {"identifier": "oswe-1", "issue_id": STATUS_ISSUE_IDS[1]},
-            ],
-            "duplicates identifier",
-        ),
-        (
-            [
-                {"identifier": "OSWE-1", "issue_id": STATUS_ISSUE_IDS[0]},
-                {"identifier": "OSWE-2", "issue_id": STATUS_ISSUE_IDS[0]},
-            ],
-            "duplicates issue_id, thread_id",
+            [{"identifier": "OSWE-1", "issue_id": "issue", "thread_id": ""}],
+            "malformed thread_id",
         ),
     ],
 )
-def test_status_ticket_validation_rejects_malformed_and_duplicate_rows(
+def test_status_ticket_validation_keeps_only_required_shape_checks(
     tmp_path: Path, payload: Any, match: str
 ) -> None:
     tickets = tmp_path / "tickets.json"
@@ -1299,64 +1284,42 @@ def test_status_ticket_validation_rejects_malformed_and_duplicate_rows(
         wave.load_status_tickets(tickets)
 
 
-def test_status_ticket_validation_derives_thread_and_parser_binds(tmp_path: Path) -> None:
+def test_status_ticket_normalizes_issue_before_deriving_thread(tmp_path: Path) -> None:
     tickets = tmp_path / "tickets.json"
-    noncanonical_issue_id = "0000000000004000800000000000000A"
-    canonical_issue_id = "00000000-0000-4000-8000-00000000000a"
-    tickets.write_text(json.dumps([{"identifier": "oswe-1", "issue_id": noncanonical_issue_id}]))
+    tickets.write_text(
+        json.dumps(
+            [
+                {
+                    "identifier": " odd identifier ",
+                    "issue_id": "  NOT-A-UUID  ",
+                    "extra": True,
+                },
+                {
+                    "identifier": "odd identifier",
+                    "issue_id": "not-a-uuid",
+                    "thread_id": "  Custom-Thread-ID  ",
+                },
+            ]
+        )
+    )
 
     assert wave.load_status_tickets(tickets) == [
         {
-            "identifier": "OSWE-1",
-            "issue_id": canonical_issue_id,
-            "thread_id": wave.derive_linear_thread_id(canonical_issue_id),
-        }
+            "identifier": "ODD IDENTIFIER",
+            "issue_id": "not-a-uuid",
+            "thread_id": wave.derive_linear_thread_id("not-a-uuid"),
+        },
+        {
+            "identifier": "ODD IDENTIFIER",
+            "issue_id": "not-a-uuid",
+            "thread_id": "Custom-Thread-ID",
+        },
     ]
     args = wave.parser().parse_args(
         ["status-sweep", "--repo", "owner/repo", "--tickets", str(tickets)]
     )
     assert args.func is wave.cmd_status_sweep
     assert args.divergence_minutes == 15
-
-
-def test_status_ticket_uuid_equivalence_is_duplicate(tmp_path: Path) -> None:
-    tickets = tmp_path / "tickets.json"
-    tickets.write_text(
-        json.dumps(
-            [
-                {
-                    "identifier": "OSWE-1",
-                    "issue_id": "00000000-0000-4000-8000-00000000000a",
-                    "thread_id": "thread-1",
-                },
-                {
-                    "identifier": "OSWE-2",
-                    "issue_id": "0000000000004000800000000000000A",
-                    "thread_id": "thread-2",
-                },
-            ]
-        )
-    )
-
-    with pytest.raises(wave.WaveOpsError, match="duplicates issue_id"):
-        wave.load_status_tickets(tickets)
-
-
-def test_status_ticket_explicit_thread_id_is_trimmed_as_supplied(tmp_path: Path) -> None:
-    tickets = tmp_path / "tickets.json"
-    tickets.write_text(
-        json.dumps(
-            [
-                {
-                    "identifier": "OSWE-1",
-                    "issue_id": "0000000000004000800000000000000A",
-                    "thread_id": "  Custom-Thread-ID  ",
-                }
-            ]
-        )
-    )
-
-    assert wave.load_status_tickets(tickets)[0]["thread_id"] == "Custom-Thread-ID"
 
 
 def test_github_pr_list_is_exactly_one_repository_wide_call(
@@ -1386,7 +1349,20 @@ def test_github_pr_list_is_exactly_one_repository_wide_call(
     assert calls[0][8] == "1000"
 
 
-def test_langgraph_sweep_reads_thread_runs_and_plan_once(
+def test_github_pr_list_defers_per_item_shape_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "dummy")
+    monkeypatch.setattr(wave, "_run", lambda *_args, **_kwargs: SimpleNamespace(stdout="[null]"))
+
+    prs = wave.github_pr_list("owner/repo")
+
+    assert prs == [None]
+    with pytest.raises(AttributeError):
+        wave.match_status_pr("OSWE-1", {}, prs)
+
+
+def test_langgraph_sweep_reads_thread_and_plan_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import langgraph_sdk
@@ -1398,11 +1374,6 @@ def test_langgraph_sweep_reads_thread_runs_and_plan_once(
             calls.append(("thread", thread_id))
             return {"status": "idle"}
 
-    class Runs:
-        async def list(self, thread_id: str, *, limit: int) -> list[Any]:
-            calls.append(("runs", thread_id, limit))
-            return []
-
     class Store:
         async def get_item(self, namespace: list[str], key: str) -> dict[str, Any]:
             calls.append(("plan", namespace, key))
@@ -1412,7 +1383,7 @@ def test_langgraph_sweep_reads_thread_runs_and_plan_once(
     monkeypatch.setattr(
         langgraph_sdk,
         "get_client",
-        lambda **_kwargs: SimpleNamespace(threads=Threads(), runs=Runs(), store=Store()),
+        lambda **_kwargs: SimpleNamespace(threads=Threads(), store=Store()),
     )
 
     snapshot = wave.langgraph_sweep_snapshot("thread")
@@ -1420,7 +1391,6 @@ def test_langgraph_sweep_reads_thread_runs_and_plan_once(
     assert snapshot["errors"] == []
     assert calls == [
         ("thread", "thread"),
-        ("runs", "thread", 1000),
         ("plan", ["plan", "content"], "thread"),
     ]
 
@@ -1590,59 +1560,17 @@ def test_sibling_divergence_terminal_peers_and_missing_timestamps() -> None:
     assert "no usable stage timestamp" in rows[1]["divergence_diagnostics"][0]
 
 
-def test_status_pr_matching_validates_metadata_repository_before_number() -> None:
+def test_status_pr_matching_trusts_number_despite_repository_metadata() -> None:
     prs = [{"number": 7, "body": "Closes OSWE-1"}]
     metadata = {
         "pr_number": 7,
-        "pr_owner": "owner",
-        "pr_repo": "repo",
-        "repo_owner": "owner",
-        "repo_name": "repo",
+        "pr_owner": "other",
+        "pr_repo": "elsewhere",
+        "repo_owner": "conflicting-owner",
+        "repo_name": "conflicting-repo",
     }
 
-    assert wave.match_status_pr("OSWE-1", metadata, prs, repo_slug="owner/repo") == (prs[0], [])
-
-
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("pr_owner", "other"),
-        ("pr_repo", "other"),
-        ("repo_owner", "other"),
-        ("repo_name", "other"),
-    ],
-)
-def test_status_pr_matching_rejects_repository_metadata_mismatch(field: str, value: str) -> None:
-    prs = [{"number": 7, "body": "Closes OSWE-1"}]
-    metadata = {"pr_number": 7, "pr_owner": "owner", "pr_repo": "repo"}
-    metadata[field] = value
-
-    matched, errors = wave.match_status_pr("OSWE-1", metadata, prs, repo_slug="owner/repo")
-
-    assert matched is None
-    assert errors == [f"thread metadata {field} {value!r} does not match --repo owner/repo"]
-
-
-def test_status_pr_matching_rejects_conflicting_repository_fields() -> None:
-    prs = [{"number": 7, "body": "Closes OSWE-1"}]
-
-    matched, errors = wave.match_status_pr(
-        "OSWE-1",
-        {
-            "pr_number": 7,
-            "pr_owner": "owner",
-            "pr_repo": "repo",
-            "repo_owner": "conflicting-owner",
-            "repo_name": "repo",
-        },
-        prs,
-        repo_slug="owner/repo",
-    )
-
-    assert matched is None
-    assert errors == [
-        "thread metadata repo_owner 'conflicting-owner' does not match --repo owner/repo"
-    ]
+    assert wave.match_status_pr("OSWE-1", metadata, prs) == (prs[0], [])
 
 
 @pytest.mark.parametrize(
@@ -1658,11 +1586,6 @@ def test_status_pr_matching_rejects_conflicting_repository_fields() -> None:
             ],
             "multiple PRs",
         ),
-        (
-            {"plan_status": "approved", "pr_number": 1, "repo_name": "wrong"},
-            [{"number": 1, "body": "Closes OSWE-1"}],
-            "does not match --repo",
-        ),
     ],
 )
 def test_bad_pr_evidence_is_indeterminate_and_never_diverges(
@@ -1672,7 +1595,6 @@ def test_bad_pr_evidence_is_indeterminate_and_never_diverges(
         _status_ticket(),
         _status_snapshot("approved", metadata=metadata),
         prs,
-        repo_slug="owner/repo",
     )
     sibling = {
         **_status_ticket("OSWE-2", 1),
@@ -1706,7 +1628,7 @@ def test_status_sweep_inventory_failure_emits_every_ticket_indeterminate(
     def snapshot(thread_id: str) -> dict[str, Any]:
         calls.append(thread_id)
         if thread_id == "thread-1":
-            return {"thread": None, "runs": [], "plan": None, "errors": ["thread failed"]}
+            return {"thread": None, "plan": None, "errors": ["thread failed"]}
         return _status_snapshot("approved")
 
     monkeypatch.setattr(wave, "github_pr_list", fail_inventory)
