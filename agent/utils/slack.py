@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import logging
 import os
+import random
 import re
 import time
 from collections.abc import Mapping
@@ -441,9 +442,6 @@ async def post_slack_thread_reply_with_ts(
     blocks: list[dict[str, Any]] | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
-    dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts)
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url)
-    text = append_slack_web_link_footer(text, dashboard_url)
     return await _post_slack_message_with_ts(
         channel_id,
         text,
@@ -1040,6 +1038,27 @@ async def resolve_slack_links_in_context(
     return resolved_links_section, image_urls
 
 
+TRACE_REPLY_TIPS: tuple[str, ...] = (
+    "You can message me in this thread while I'm running — I'll pick up your follow-up before my next step.",
+    "Kick off another task in parallel — each one runs in its own isolated sandbox, no queuing.",
+    "Add `repo:owner/name` to your message to point me at a different repo for this task.",
+    "Drop an `AGENTS.md` at your repo root and I'll read it on every run — it's the easiest way to teach me your conventions.",
+    "For code-change tasks, I'll open a draft PR when it's necessary or requested and link it back here.",
+    "Tag me on a PR comment of an open-swe PR to have me address review feedback on the same branch.",
+    "I can spawn subagents for independent subtasks — useful for parallel research or fan-out work.",
+    "Click `View trace` above to watch every tool call and model response live in LangSmith.",
+    "React to my final reply with :+1: or :-1: to share feedback — it helps me get better.",
+    "Ask me to review a GitHub PR in Slack and I'll spin up the reviewer agent to leave inline comments.",
+    "Pasting a GitHub URL into your message also works to point me at a repo — no `repo:` prefix needed.",
+    "Attach screenshots or images directly in Slack or Linear — I'll read them as part of the task context.",
+    "Tag `@jarvis-aeteq` on a Linear issue and I'll pull in the full title, description, and comment thread before starting.",
+    "I also pick up `@jarvis-aeteq` mentions in GitHub issue bodies and comments — not just on PRs.",
+    "On a GitHub PR, ask me to review it and I'll hand it off to the reviewer agent for inline comments.",
+    "Each thread keeps a persistent sandbox — follow-up runs reuse the same workspace, so my context sticks around.",
+    "Paste a Slack message link from another thread and I'll fetch its content (and any images) as extra context.",
+    "Ask me to search the web — I have a `web_search` tool for finding docs, examples, and GitHub repos mid-task.",
+    "I can read, update, and create Linear issues directly — useful for filing follow-up tickets or linking work back to a project.",
+)
 TRACE_REPLY_WEB_HANDOFF_NOTICE = (
     "Conversation moved to Web — use the `Open in Web` link above for follow-ups."
 )
@@ -1048,7 +1067,7 @@ TRACE_REPLY_WEB_HANDOFF_NOTICE = (
 def _format_trace_reply(
     trace_url: str | None, dashboard_url: str | None, *, moved_to_web: bool = False
 ) -> str:
-    """Format the trace reply with status text."""
+    """Format the initial trace reply with status text."""
     links = []
     if trace_url:
         links.append(f"<{trace_url}|View trace>")
@@ -1057,7 +1076,8 @@ def _format_trace_reply(
     head = f"{' • '.join(links)}\n" if links else ""
     if moved_to_web:
         return f"{head}_{TRACE_REPLY_WEB_HANDOFF_NOTICE}_"
-    return head.rstrip()
+    tip = random.choice(TRACE_REPLY_TIPS)
+    return f"{head}_Tip: {tip}_"
 
 
 async def post_slack_trace_reply(

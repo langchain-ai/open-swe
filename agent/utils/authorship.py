@@ -10,11 +10,8 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-OPEN_SWE_BOT_NAME = "open-swe[bot]"
-# Use the open-swe user noreply address: the bot's numeric noreply
-# (215916821+open-swe[bot]@...) doesn't resolve to a GitHub account Vercel
-# accepts, which broke preview deploys on commits carrying this co-author.
-OPEN_SWE_BOT_EMAIL = "open-swe@users.noreply.github.com"
+OPEN_SWE_BOT_NAME = "jarvis-aeteq[bot]"
+OPEN_SWE_BOT_EMAIL = "jarvis-aeteq@users.noreply.github.com"
 
 PR_ATTRIBUTION_TEXT = "Made by [Open SWE]"
 PR_ATTRIBUTION_DEFAULT_URL = "https://openswe.vercel.app"
@@ -186,9 +183,11 @@ def add_pr_collaboration_note(
     legacy_footers: list[str] = []
     if identity is not None:
         legacy_footers.append(
-            f"_Opened collaboratively by {identity.pr_attribution_name} and open-swe._"
+            f"_Opened collaboratively by {identity.pr_attribution_name} and jarvis-aeteq._"
         )
-        legacy_footers.append(f"_Opened collaboratively by {identity.display_name} and open-swe._")
+        legacy_footers.append(
+            f"_Opened collaboratively by {identity.display_name} and jarvis-aeteq._"
+        )
     for legacy in legacy_footers:
         if legacy in normalized_body:
             return normalized_body.replace(legacy, note)

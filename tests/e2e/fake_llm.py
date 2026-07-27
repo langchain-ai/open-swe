@@ -9,7 +9,6 @@ the preceding tool result, exactly as a real model would.
 
 from __future__ import annotations
 
-import os
 import re
 import time
 from collections.abc import Callable
@@ -33,7 +32,6 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 # fresh shell rooted at the sandbox dir, so the clone+commit+push is bundled.
 _IMPLEMENT_SCRIPT = f"""
 set -e
-sleep 8
 rm -rf repo
 git clone "$E2E_REMOTE" repo
 cd repo
@@ -278,12 +276,6 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "implement": (
         _tool_step(
-            "Acknowledging the Slack request before starting work.",
-            "slack_thread_reply",
-            {"message": "On it!"},
-            "call-ack",
-        ),
-        _tool_step(
             "Setting up the repo and implementing the change.",
             "execute",
             {"command": _IMPLEMENT_SCRIPT},
@@ -413,11 +405,5 @@ class FakeScriptedChatModel(BaseChatModel):
             (i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1
         )
         step_index = sum(1 for m in messages[last_human + 1 :] if isinstance(m, AIMessage))
-
-        # Keep a run busy on demand so E2E can land follow-ups mid-run (exercising
-        # the interrupt-debounce path). Only the triggering message carries the
-        # marker, and only the first model call of that run blocks.
-        if step_index == 0 and "E2E_BUSY_HOLD" in context.last_text:
-            time.sleep(float(os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
         step = script[step_index] if step_index < len(script) else SCRIPT_LIBRARY["followup"][0]
         return ChatResult(generations=[ChatGeneration(message=_render_step(step, messages))])
