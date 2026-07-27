@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId
@@ -12,6 +12,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 from langgraph_sdk import get_client
+from typing_extensions import TypedDict
 
 from ..dashboard.plan_store import (
     PLAN_STATUS_APPROVED,
