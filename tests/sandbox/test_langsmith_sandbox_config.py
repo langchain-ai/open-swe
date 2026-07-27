@@ -89,6 +89,7 @@ def test_defaults_when_env_unset() -> None:
     assert vcpus == DEFAULT_SANDBOX_VCPUS
     assert mem == DEFAULT_SANDBOX_MEM_BYTES
     assert idle == DEFAULT_SANDBOX_IDLE_TTL_SECONDS
+    assert DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS == 30 * 24 * 60 * 60
     assert delete_after == DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS
 
 
