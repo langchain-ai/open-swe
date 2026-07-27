@@ -41,9 +41,20 @@ LOCAL_LANGGRAPH_URL = "http://127.0.0.1:2029"
 CONTROL_PLANE_PYTHON = "/opt/mobilyze/open-swe-control-plane/current/.venv/bin/python"
 WAKE_TIMEOUT_EXIT = 3
 CHILD_FAILURE_EXIT = 4
+HANDOFF_TIMEOUT_SECONDS = 60.0
+HANDOFF_POLL_INTERVAL_SECONDS = 2.0
+HANDOFF_SNAPSHOT_TIMEOUT_SECONDS = 10
+PHASE_TIMEOUT_MINUTES = {"plan": 30.0, "delivery": 90.0}
 # Matches unfilled template placeholders like <TICKET> or <owner/repo>; the
 # ':' exclusion spares autolinks like <https://...>.
 PLACEHOLDER_RE = re.compile(r"<[A-Za-z][^>:\n]*>")
+# Remove the mention workaround when OSWE-144 closes.
+DIRECTIVE_MENTION_RE = re.compile(r"@openswe\b", re.IGNORECASE)
+# Remove the repository-directive workaround when OSWE-166 closes.
+REPO_DIRECTIVE_RE = re.compile(
+    r"\brepo(?:\s+|:\s*)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\b",
+    re.IGNORECASE,
+)
 
 DISPATCH_TEMPLATE = """@openswe repo {repo} — Execute {ticket} only.
 
@@ -430,6 +441,28 @@ def read_body(args: argparse.Namespace) -> str:
     return text
 
 
+def guard_body_hygiene(body: str) -> None:
+    first_line = body.splitlines()[0] if body.splitlines() else ""
+    mentions = list(DIRECTIVE_MENTION_RE.finditer(body))
+    if not re.match(r"^@openswe(?:\s|$)", first_line, flags=re.IGNORECASE) or len(mentions) != 1:
+        raise RunError(
+            "Body must begin exactly with one @openswe mention on the first line; "
+            "later or duplicate mentions are refused."
+        )
+    directives = list(REPO_DIRECTIVE_RE.finditer(body))
+    allowed = re.match(
+        r"^@openswe (repo(?:\s+[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+|:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+))\b",
+        body,
+        flags=re.IGNORECASE,
+    )
+    allowed_span = allowed.span(1) if allowed else None
+    if any(match.span() != allowed_span for match in directives):
+        raise RunError(
+            "A repository directive is allowed only immediately after the first-line "
+            "@openswe mention as `repo owner/name` or `repo:owner/name`."
+        )
+
+
 def guard_placeholders(ticket: str, body: str, force: bool) -> None:
     leftovers = sorted(set(PLACEHOLDER_RE.findall(body)))
     if leftovers and not force:
@@ -439,6 +472,117 @@ def guard_placeholders(ticket: str, body: str, force: bool) -> None:
         )
     if leftovers and force:
         dogfood(ticket, "note", f"--force posted body with placeholders: {', '.join(leftovers)}")
+
+
+HANDOFF_RESULT_SENTINEL = "OPENSWE_HANDOFF_RESULT "
+HANDOFF_SNAPSHOT_SNIPPET = r"""
+import asyncio, json, os
+from langgraph_sdk import get_client
+
+SENTINEL = "OPENSWE_HANDOFF_RESULT "
+THREAD = os.environ["OPENSWE_HANDOFF_THREAD"]
+URL = os.environ.get("LANGGRAPH_URL") or "http://127.0.0.1:2029"
+
+
+def missing(exc):
+    response = getattr(exc, "response", None)
+    return (
+        getattr(exc, "status_code", None) == 404
+        or getattr(response, "status_code", None) == 404
+        or "404" in str(exc)
+    )
+
+
+async def main():
+    client = get_client(url=URL)
+    try:
+        thread = await client.threads.get(THREAD)
+    except Exception as exc:
+        if missing(exc):
+            print(SENTINEL + json.dumps({"thread_status": "missing", "run_ids": []}))
+            return
+        raise
+    if not thread:
+        print(SENTINEL + json.dumps({"thread_status": "missing", "run_ids": []}))
+        return
+    runs = await client.runs.list(THREAD, limit=1000)
+    run_ids = sorted(
+        str(run.get("run_id") or run.get("id"))
+        for run in runs
+        if isinstance(run, dict) and (run.get("run_id") or run.get("id"))
+    )
+    status = str((thread or {}).get("status") or "missing")
+    print(SENTINEL + json.dumps({"thread_status": status, "run_ids": run_ids}))
+
+
+asyncio.run(main())
+"""
+
+
+def handoff_snapshot(thread_id: str) -> dict:
+    command = [*resolve_monitor_python(), "-c", HANDOFF_SNAPSHOT_SNIPPET]
+    environ = {**os.environ, "OPENSWE_HANDOFF_THREAD": thread_id}
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            env=environ,
+            timeout=HANDOFF_SNAPSHOT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RunError(f"LangGraph handoff snapshot timed out for thread {thread_id}") from exc
+    payload = None
+    for line in reversed(result.stdout.splitlines()):
+        if line.startswith(HANDOFF_RESULT_SENTINEL):
+            payload = json.loads(line[len(HANDOFF_RESULT_SENTINEL) :])
+            break
+    if result.returncode != 0 or not isinstance(payload, dict):
+        detail = result.stderr.strip()[-400:] or result.stdout.strip()[-400:]
+        raise RunError(f"LangGraph handoff snapshot failed for thread {thread_id}: {detail}")
+    return {
+        "thread_status": str(payload.get("thread_status") or "missing"),
+        "run_ids": sorted(str(run_id) for run_id in payload.get("run_ids") or []),
+    }
+
+
+def handoff_observed(baseline: dict, current: dict) -> bool:
+    new_run = bool(set(current["run_ids"]) - set(baseline["run_ids"]))
+    if baseline["thread_status"] == "busy":
+        return new_run
+    return new_run or current["thread_status"] == "busy"
+
+
+def poll_handoff(
+    action: str,
+    ticket: str,
+    thread_id: str,
+    baseline: dict,
+    *,
+    plan_context: dict | None = None,
+) -> dict:
+    deadline = time.monotonic() + HANDOFF_TIMEOUT_SECONDS
+    final: dict = baseline
+    while True:
+        try:
+            final = handoff_snapshot(thread_id)
+        except RunError as exc:
+            final = {"error": str(exc)}
+        if "error" not in final and handoff_observed(baseline, final):
+            return final
+        if time.monotonic() >= deadline:
+            evidence = {
+                "action": action,
+                "ticket": ticket.upper(),
+                "thread_id": thread_id,
+                "baseline": baseline,
+                "final": final,
+                "timeout_seconds": HANDOFF_TIMEOUT_SECONDS,
+            }
+            if plan_context is not None:
+                evidence["plan_status_nontransactional"] = plan_context
+            raise RunError(f"LangGraph handoff timeout: {json.dumps(evidence, sort_keys=True)}")
+        time.sleep(HANDOFF_POLL_INTERVAL_SECONDS)
 
 
 # --------------------------------------------------------------------------- commands
@@ -464,7 +608,7 @@ def cmd_env(args: argparse.Namespace) -> int:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
-    ensure_env(args.ticket, langgraph=False, github=False)
+    ensure_env(args.ticket, langgraph=not args.dry_run, github=False)
     issue = resolve_issue(args.ticket)
     if args.body_file:
         body = read_body(args)
@@ -477,13 +621,15 @@ def cmd_start(args: argparse.Namespace) -> int:
             boundaries=args.boundaries or f"no changes beyond {issue['identifier']}'s stated scope",
             verify=args.verify or "focused tests, `make lint`, and `make typecheck`",
         )
+    guard_body_hygiene(body)
     guard_placeholders(args.ticket, body, args.force)
     wave = import_wave_module()
+    thread_id = wave.derive_linear_thread_id(issue["id"])
     result = {
         "identifier": issue["identifier"],
         "issue_id": issue["id"],
         "issue_url": issue["url"],
-        "thread_id": wave.derive_linear_thread_id(issue["id"]),
+        "thread_id": thread_id,
         "repo": args.repo,
         "dispatched": not args.dry_run,
     }
@@ -491,8 +637,16 @@ def cmd_start(args: argparse.Namespace) -> int:
         result["body"] = body
         print(json.dumps(result, indent=2))
         return 0
+    baseline = handoff_snapshot(thread_id)
     post_comment(issue["id"], body)
-    dogfood(args.ticket, "cmd", f"dispatched {issue['identifier']} to {args.repo} ({issue['url']})")
+    result["handoff"] = poll_handoff("start", args.ticket, thread_id, baseline)
+    handoff = result["handoff"]
+    dogfood(
+        args.ticket,
+        "cmd",
+        f"dispatched {issue['identifier']} to {args.repo} ({issue['url']}); handoff "
+        f"status={handoff.get('thread_status')} runs={len(handoff.get('run_ids') or [])}",
+    )
     print(json.dumps(result))
     return 0
 
@@ -528,12 +682,17 @@ def _emit_wake(ticket: str, wake: dict, source: str) -> None:
     print(json.dumps(wake, sort_keys=True, default=str))
 
 
+def watch_timeout_min(args: argparse.Namespace) -> float:
+    return args.timeout_min if args.timeout_min is not None else PHASE_TIMEOUT_MINUTES[args.phase]
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """Exit-on-first-wake watch. Healthy monitors are silent; wakes are one JSON line."""
     ensure_env(args.ticket, langgraph=True, github=True)
     wave = import_wave_module()
     issue = resolve_issue(args.ticket)
     issue_id = issue["id"]
+    timeout_min = watch_timeout_min(args)
     baseline = linear_snapshot(issue_id)
     viewer_id = str((baseline["viewer"] or {}).get("id") or "")
     if not viewer_id:
@@ -542,11 +701,11 @@ def cmd_watch(args: argparse.Namespace) -> int:
     dogfood(
         args.ticket,
         "cmd",
-        f"watch started (interval {args.interval}s, timeout {args.timeout_min}m, "
+        f"watch started (phase {args.phase}, interval {args.interval}s, timeout {timeout_min}m, "
         f"baseline {len(known_ids)} comments)",
     )
     process, stderr_tail = _spawn_monitor(args, issue_id)
-    deadline = time.monotonic() + args.timeout_min * 60
+    deadline = time.monotonic() + timeout_min * 60
     next_heartbeat = time.monotonic() + args.heartbeat_min * 60
     restarts = 0
     buffered = ""
@@ -555,8 +714,13 @@ def cmd_watch(args: argparse.Namespace) -> int:
             process.terminate()
             wake = {
                 "wake_node": "watch_timeout",
-                "summary": f"no wake within {args.timeout_min} minutes; monitor stopped",
-                "evidence": {"issue_id": issue_id, "identifier": issue["identifier"]},
+                "summary": (f"no {args.phase} wake within {timeout_min} minutes; monitor stopped"),
+                "evidence": {
+                    "issue_id": issue_id,
+                    "identifier": issue["identifier"],
+                    "phase": args.phase,
+                    "timeout_min": timeout_min,
+                },
             }
             _emit_wake(args.ticket, wake, "wrapper-timeout")
             return WAKE_TIMEOUT_EXIT
@@ -658,15 +822,44 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _post_after_baseline(
+    args: argparse.Namespace,
+    action: str,
+    body: str,
+    issue: dict,
+    thread_id: str,
+    baseline: dict,
+    *,
+    plan_context: dict | None = None,
+) -> int:
+    try:
+        post_comment(issue["id"], body)
+        final = poll_handoff(action, args.ticket, thread_id, baseline, plan_context=plan_context)
+    except RunError as exc:
+        if plan_context is None or "plan_status_nontransactional" in str(exc):
+            raise
+        raise RunError(
+            f"{exc}; plan_status_nontransactional={json.dumps(plan_context, sort_keys=True)}"
+        ) from exc
+    dogfood(
+        args.ticket,
+        "cmd",
+        f"{action} posted on {issue['identifier']}; handoff "
+        f"status={final.get('thread_status')} runs={len(final.get('run_ids') or [])}: {body[:160]}",
+    )
+    print(json.dumps({"identifier": issue["identifier"], "posted": action, "handoff": final}))
+    return 0
+
+
 def _post_prepared(
     args: argparse.Namespace, action: str, body: str, issue: dict | None = None
 ) -> int:
     issue = issue or resolve_issue(args.ticket)
+    guard_body_hygiene(body)
     guard_placeholders(args.ticket, body, getattr(args, "force", False))
-    post_comment(issue["id"], body)
-    dogfood(args.ticket, "cmd", f"{action} posted on {issue['identifier']}: {body[:160]}")
-    print(json.dumps({"identifier": issue["identifier"], "posted": action}))
-    return 0
+    thread_id = import_wave_module().derive_linear_thread_id(issue["id"])
+    baseline = handoff_snapshot(thread_id)
+    return _post_after_baseline(args, action, body, issue, thread_id, baseline)
 
 
 def cmd_approve(args: argparse.Namespace) -> int:
@@ -677,8 +870,7 @@ def cmd_approve(args: argparse.Namespace) -> int:
             "record your rulings in the approval body, then re-run with --adjudicated."
         )
     body = read_body(args)
-    if "@openswe" not in body.lower():
-        raise RunError("Approval must mention @openswe or the webhook will not deliver it")
+    guard_body_hygiene(body)
     # Everything that can reject this approval runs BEFORE the plan-record write.
     # The write is not undone by `reject`, so a body refused after it would leave
     # the plan approved with no dispatching comment — and the next comment on the
@@ -693,14 +885,32 @@ def cmd_approve(args: argparse.Namespace) -> int:
         f"plan record {state.get('previous')!r} -> 'approved' on thread {thread_id}"
         + ("" if state.get("metadata_ok") else " (thread metadata mirror failed)"),
     )
-    return _post_prepared(args, "approval", body, issue=issue)
+    plan_context = {
+        "previous": state.get("previous"),
+        "status": "approved",
+        "rollback": "not automatic",
+    }
+    try:
+        baseline = handoff_snapshot(thread_id)
+    except RunError as exc:
+        raise RunError(
+            f"{exc}; plan_status_nontransactional={json.dumps(plan_context, sort_keys=True)}"
+        ) from exc
+    return _post_after_baseline(
+        args,
+        "approval",
+        body,
+        issue,
+        thread_id,
+        baseline,
+        plan_context=plan_context,
+    )
 
 
 def cmd_reject(args: argparse.Namespace) -> int:
     ensure_env(args.ticket, langgraph=True, github=False)
     body = read_body(args)
-    if "@openswe" not in body.lower():
-        raise RunError("Rejection must mention @openswe or the webhook will not deliver it")
+    guard_body_hygiene(body)
     issue = resolve_issue(args.ticket)
     guard_placeholders(args.ticket, body, getattr(args, "force", False))
     thread_id = import_wave_module().derive_linear_thread_id(issue["id"])
@@ -713,16 +923,35 @@ def cmd_reject(args: argparse.Namespace) -> int:
         "cmd",
         f"plan record {state.get('previous')!r} -> 'revising' on thread {thread_id}",
     )
-    return _post_prepared(args, "rejection", body, issue=issue)
+    plan_context = {
+        "previous": state.get("previous"),
+        "status": "revising",
+        "rollback": "not automatic",
+    }
+    try:
+        baseline = handoff_snapshot(thread_id)
+    except RunError as exc:
+        raise RunError(
+            f"{exc}; plan_status_nontransactional={json.dumps(plan_context, sort_keys=True)}"
+        ) from exc
+    return _post_after_baseline(
+        args,
+        "rejection",
+        body,
+        issue,
+        thread_id,
+        baseline,
+        plan_context=plan_context,
+    )
 
 
 def cmd_comment(args: argparse.Namespace) -> int:
-    ensure_env(args.ticket, langgraph=False, github=False)
+    ensure_env(args.ticket, langgraph=True, github=False)
     return _post_prepared(args, "comment", read_body(args))
 
 
 def cmd_nudge(args: argparse.Namespace) -> int:
-    ensure_env(args.ticket, langgraph=False, github=False)
+    ensure_env(args.ticket, langgraph=True, github=False)
     issue = resolve_issue(args.ticket)
     body = NUDGE_TEMPLATE.format(ticket=issue["identifier"], minutes=args.minutes)
     return _post_prepared(args, "nudge", body)
@@ -783,8 +1012,9 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--ticket", required=True)
     watch.add_argument("--repo", required=True)
     watch.add_argument("--pr-number", type=int)
+    watch.add_argument("--phase", choices=sorted(PHASE_TIMEOUT_MINUTES), default="plan")
     watch.add_argument("--interval", type=float, default=60)
-    watch.add_argument("--timeout-min", type=float, default=480)
+    watch.add_argument("--timeout-min", type=float)
     watch.add_argument("--heartbeat-min", type=float, default=10)
     watch.add_argument("--max-restarts", type=int, default=2)
     watch.add_argument("--follow", action="store_true", help="stream wakes instead of exiting")

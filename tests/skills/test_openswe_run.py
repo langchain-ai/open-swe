@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.machinery
 import importlib.util
+import json
 import re
 import subprocess
 import sys
@@ -259,3 +260,416 @@ def test_no_operator_home_path_is_hardcoded_in_the_source() -> None:
         assert not re.search(r"/(Users|home)/[a-z]", path.read_text()), (
             f"{path.name} hardcodes an operator home directory"
         )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "@openswe Plan approved.",
+        "@openswe repo owner/name — Execute ABC-1 only.",
+        "@openswe repo:owner/name — Execute ABC-1 only.",
+        "@OpenSWE Plan approved.",
+        "@OpenSWE Repo owner/name — Execute ABC-1 only.",
+        "@OpEnSwE rEpO:owner/name — Execute ABC-1 only.",
+    ],
+)
+def test_body_hygiene_allows_only_the_first_line_directive(body: str) -> None:
+    run.guard_body_hygiene(body)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        " @openswe Plan approved.",
+        "@openswe Plan approved.\n@openswe Continue.",
+        "@openswe Plan approved.\n@OpenSWE Continue.",
+        "@openswe Plan approved.\nExample: repo owner/name",
+        "@openswe Plan approved.\nExample: RePo owner/name",
+        "@openswe Plan approved.\nExample: repo:owner/name",
+        "@openswe Plan approved.\nExample: repo: owner/name",
+        "@openswe Continue in repo owner/name.",
+    ],
+)
+def test_body_hygiene_rejects_ambiguous_directives(body: str) -> None:
+    with pytest.raises(run.RunError):
+        run.guard_body_hygiene(body)
+
+
+def test_force_cannot_bypass_body_hygiene(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        run,
+        "handoff_snapshot",
+        lambda thread_id: pytest.fail("handoff baseline must not run after a hygiene refusal"),
+    )
+    args = argparse.Namespace(ticket="ABC-1", force=True)
+
+    with pytest.raises(run.RunError, match="begin exactly"):
+        run._post_prepared(
+            args,
+            "comment",
+            "not a directive",
+            issue={"id": "issue-1", "identifier": "ABC-1"},
+        )
+
+
+@pytest.mark.parametrize(
+    ("baseline", "current", "expected"),
+    [
+        (
+            {"thread_status": "missing", "run_ids": []},
+            {"thread_status": "busy", "run_ids": []},
+            True,
+        ),
+        (
+            {"thread_status": "idle", "run_ids": ["run-1"]},
+            {"thread_status": "busy", "run_ids": ["run-1"]},
+            True,
+        ),
+        (
+            {"thread_status": "busy", "run_ids": ["run-1"]},
+            {"thread_status": "busy", "run_ids": ["run-1"]},
+            False,
+        ),
+        (
+            {"thread_status": "busy", "run_ids": ["run-1"]},
+            {"thread_status": "busy", "run_ids": ["run-1", "run-2"]},
+            True,
+        ),
+        (
+            {"thread_status": "idle", "run_ids": ["run-1"]},
+            {"thread_status": "idle", "run_ids": ["run-1", "run-2"]},
+            True,
+        ),
+    ],
+)
+def test_handoff_success_uses_status_transition_or_new_run(
+    baseline: dict, current: dict, expected: bool
+) -> None:
+    assert run.handoff_observed(baseline, current) is expected
+
+
+def test_handoff_timeout_reports_complete_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline = {"thread_status": "busy", "run_ids": ["run-1"]}
+    monkeypatch.setattr(run, "handoff_snapshot", lambda thread_id: baseline)
+    moments = iter([0.0, 61.0])
+    monkeypatch.setattr(run.time, "monotonic", lambda: next(moments))
+    monkeypatch.setattr(run.time, "sleep", lambda seconds: None)
+    plan_context = {"status": "approved", "rollback": "not automatic"}
+
+    with pytest.raises(run.RunError) as raised:
+        run.poll_handoff("approval", "ABC-1", "thread-1", baseline, plan_context=plan_context)
+
+    message = str(raised.value)
+    for evidence in (
+        '"action": "approval"',
+        '"ticket": "ABC-1"',
+        '"thread_id": "thread-1"',
+        '"baseline"',
+        '"final"',
+        '"plan_status_nontransactional"',
+    ):
+        assert evidence in message
+
+
+@pytest.mark.parametrize(
+    ("command", "action", "status", "plan_mode"),
+    [
+        (run.cmd_approve, "approval", "approved", False),
+        (run.cmd_reject, "rejection", "revising", True),
+    ],
+)
+def test_plan_actions_guard_transition_baseline_post_then_poll(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command,
+    action: str,
+    status: str,
+    plan_mode: bool,
+) -> None:
+    events: list[str] = []
+    logs: list[str] = []
+    monkeypatch.setattr(run, "ensure_env", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run, "read_body", lambda args: "@openswe Adjudication body")
+    monkeypatch.setattr(run, "guard_body_hygiene", lambda body: events.append("body_hygiene"))
+    monkeypatch.setattr(
+        run,
+        "guard_placeholders",
+        lambda ticket, body, force: events.append("placeholders"),
+    )
+    monkeypatch.setattr(
+        run,
+        "resolve_issue",
+        lambda ticket: {"id": "issue-1", "identifier": "ABC-1"},
+    )
+    monkeypatch.setattr(
+        run,
+        "import_wave_module",
+        lambda: type("Wave", (), {"derive_linear_thread_id": lambda issue_id: "thread-1"}),
+    )
+
+    def set_status(thread_id: str, actual_status: str, *, plan_mode: bool) -> dict:
+        assert actual_status == status
+        assert plan_mode is expected_plan_mode
+        events.append("plan_transition")
+        return {"previous": "ready", "status": actual_status, "metadata_ok": True}
+
+    expected_plan_mode = plan_mode
+    monkeypatch.setattr(run, "set_plan_status", set_status)
+    monkeypatch.setattr(
+        run,
+        "handoff_snapshot",
+        lambda thread_id: (
+            events.append("baseline") or {"thread_status": "idle", "run_ids": ["run-1"]}
+        ),
+    )
+    monkeypatch.setattr(run, "dogfood", lambda ticket, tag, message: logs.append(message))
+    monkeypatch.setattr(run, "post_comment", lambda issue_id, body: events.append("post_comment"))
+
+    def poll_handoff(actual_action: str, *args, **kwargs) -> dict:
+        assert actual_action == action
+        events.append("poll")
+        return {"thread_status": "busy", "run_ids": ["run-1", "run-2"]}
+
+    monkeypatch.setattr(run, "poll_handoff", poll_handoff)
+    args = argparse.Namespace(ticket="ABC-1", body_file="body.md", force=False, adjudicated=True)
+
+    assert command(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "identifier": "ABC-1",
+        "posted": action,
+        "handoff": {"thread_status": "busy", "run_ids": ["run-1", "run-2"]},
+    }
+    assert any("plan record 'ready' ->" in message for message in logs)
+    assert any(
+        f"{action} posted on ABC-1; handoff status=busy runs=2" in message for message in logs
+    )
+    assert events == [
+        "body_hygiene",
+        "placeholders",
+        "plan_transition",
+        "baseline",
+        "post_comment",
+        "poll",
+    ]
+
+
+def test_start_dry_run_does_not_capture_or_poll_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[dict] = []
+    monkeypatch.setattr(run, "ensure_env", lambda *args, **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(
+        run,
+        "resolve_issue",
+        lambda ticket: {
+            "id": "issue-1",
+            "identifier": "ABC-1",
+            "url": "https://linear.example/ABC-1",
+        },
+    )
+    monkeypatch.setattr(
+        run,
+        "import_wave_module",
+        lambda: type("Wave", (), {"derive_linear_thread_id": lambda issue_id: "thread-1"}),
+    )
+    monkeypatch.setattr(
+        run,
+        "handoff_snapshot",
+        lambda thread_id: pytest.fail("dry-run must not capture a handoff baseline"),
+    )
+    monkeypatch.setattr(
+        run,
+        "post_comment",
+        lambda issue_id, body: pytest.fail("dry-run must not post"),
+    )
+    args = argparse.Namespace(
+        ticket="ABC-1",
+        repo="owner/name",
+        ref="main",
+        scope=None,
+        boundaries=None,
+        verify=None,
+        body_file=None,
+        dry_run=True,
+        force=False,
+    )
+
+    assert run.cmd_start(args) == 0
+    capsys.readouterr()
+    assert calls == [{"langgraph": False, "github": False}]
+
+
+def test_start_success_records_handoff_in_json_and_dogfood(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    logs: list[str] = []
+    final = {"thread_status": "busy", "run_ids": ["run-1"]}
+    monkeypatch.setattr(run, "ensure_env", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        run,
+        "resolve_issue",
+        lambda ticket: {
+            "id": "issue-1",
+            "identifier": "ABC-1",
+            "url": "https://linear.example/ABC-1",
+        },
+    )
+    monkeypatch.setattr(
+        run,
+        "import_wave_module",
+        lambda: type("Wave", (), {"derive_linear_thread_id": lambda issue_id: "thread-1"}),
+    )
+    monkeypatch.setattr(
+        run,
+        "handoff_snapshot",
+        lambda thread_id: {"thread_status": "missing", "run_ids": []},
+    )
+    monkeypatch.setattr(run, "post_comment", lambda issue_id, body: None)
+    monkeypatch.setattr(run, "poll_handoff", lambda *args, **kwargs: final)
+    monkeypatch.setattr(run, "dogfood", lambda ticket, tag, message: logs.append(message))
+    args = argparse.Namespace(
+        ticket="ABC-1",
+        repo="owner/name",
+        ref="main",
+        scope=None,
+        boundaries=None,
+        verify=None,
+        body_file=None,
+        dry_run=False,
+        force=False,
+    )
+
+    assert run.cmd_start(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["handoff"] == final
+    assert logs == [
+        "dispatched ABC-1 to owner/name (https://linear.example/ABC-1); handoff status=busy runs=1"
+    ]
+
+
+def test_watch_parser_defaults_to_plan_and_keeps_timeout_override_authoritative() -> None:
+    parser = run.build_parser()
+    default = parser.parse_args(["watch", "--ticket", "ABC-1", "--repo", "owner/name"])
+    explicit = parser.parse_args(
+        [
+            "watch",
+            "--ticket",
+            "ABC-1",
+            "--repo",
+            "owner/name",
+            "--phase",
+            "delivery",
+            "--timeout-min",
+            "7.5",
+        ]
+    )
+
+    assert default.phase == "plan"
+    assert default.timeout_min is None
+    assert default.func is run.cmd_watch
+    assert run.watch_timeout_min(default) == 30.0
+    assert run.watch_timeout_min(explicit) == 7.5
+
+
+@pytest.mark.parametrize(
+    ("phase", "override", "expected"),
+    [("plan", None, 30.0), ("delivery", None, 90.0), ("plan", 7.5, 7.5)],
+)
+def test_watch_phase_defaults_and_explicit_override(
+    phase: str, override: float | None, expected: float
+) -> None:
+    args = argparse.Namespace(phase=phase, timeout_min=override)
+
+    assert run.watch_timeout_min(args) == expected
+
+
+@pytest.mark.parametrize("command_name", ["comment", "nudge"])
+def test_midrun_posts_require_langgraph_for_handoff(
+    monkeypatch: pytest.MonkeyPatch, command_name: str
+) -> None:
+    environments: list[dict] = []
+    monkeypatch.setattr(run, "ensure_env", lambda *args, **kwargs: environments.append(kwargs))
+    monkeypatch.setattr(
+        run,
+        "resolve_issue",
+        lambda ticket: {"id": "issue-1", "identifier": "ABC-1"},
+    )
+    monkeypatch.setattr(run, "read_body", lambda args: "@openswe Continue")
+    monkeypatch.setattr(run, "_post_prepared", lambda *args, **kwargs: 0)
+    if command_name == "comment":
+        args = argparse.Namespace(ticket="ABC-1", body_file="body.md", force=False)
+        result = run.cmd_comment(args)
+    else:
+        args = argparse.Namespace(ticket="ABC-1", minutes=30)
+        result = run.cmd_nudge(args)
+
+    assert result == 0
+    assert environments == [{"langgraph": True, "github": False}]
+
+
+@pytest.mark.parametrize(
+    ("phase", "override", "elapsed", "expected_timeout"),
+    [("plan", None, 1801.0, 30.0), ("delivery", 12.0, 721.0, 12.0)],
+)
+def test_watch_timeout_evidence_includes_phase_and_effective_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    override: float | None,
+    elapsed: float,
+    expected_timeout: float,
+) -> None:
+    wakes: list[dict] = []
+    logs: list[str] = []
+
+    class Process:
+        def terminate(self) -> None:
+            return None
+
+    moments = iter([0.0, 0.0, elapsed])
+    monkeypatch.setattr(run.time, "monotonic", lambda: next(moments))
+    monkeypatch.setattr(run, "ensure_env", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run, "import_wave_module", lambda: object())
+    monkeypatch.setattr(
+        run,
+        "resolve_issue",
+        lambda ticket: {"id": "issue-1", "identifier": "ABC-1"},
+    )
+    monkeypatch.setattr(
+        run,
+        "linear_snapshot",
+        lambda issue_id: {"viewer": {"id": "viewer-1"}, "comments": []},
+    )
+    monkeypatch.setattr(run, "dogfood", lambda ticket, tag, text: logs.append(text))
+    monkeypatch.setattr(run, "_spawn_monitor", lambda args, issue_id: (Process(), []))
+    monkeypatch.setattr(run, "_emit_wake", lambda ticket, wake, source: wakes.append(wake))
+    args = argparse.Namespace(
+        ticket="ABC-1",
+        repo="owner/name",
+        pr_number=None,
+        phase=phase,
+        interval=60,
+        timeout_min=override,
+        heartbeat_min=10,
+        max_restarts=2,
+        follow=False,
+    )
+
+    assert run.cmd_watch(args) == run.WAKE_TIMEOUT_EXIT
+    assert phase in logs[0]
+    assert wakes == [
+        {
+            "wake_node": "watch_timeout",
+            "summary": f"no {phase} wake within {expected_timeout} minutes; monitor stopped",
+            "evidence": {
+                "issue_id": "issue-1",
+                "identifier": "ABC-1",
+                "phase": phase,
+                "timeout_min": expected_timeout,
+            },
+        }
+    ]

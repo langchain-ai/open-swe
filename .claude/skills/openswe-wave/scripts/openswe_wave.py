@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -34,6 +35,15 @@ LINEAR_URL = "https://api.linear.app/graphql"
 HTTP_TIMEOUT_SECONDS = 30.0
 COMMAND_TIMEOUT_SECONDS = 60.0
 MAX_PAGINATION_PAGES = 100
+STATUS_SWEEP_PR_LIMIT = 1000
+STATUS_STAGE_RANK = {
+    "dispatched": 0,
+    "planned": 1,
+    "approved": 2,
+    "pr-open": 3,
+    "merged": 4,
+    "closed": 4,
+}
 
 
 class WaveOpsError(RuntimeError):
@@ -309,6 +319,35 @@ def github_pr_snapshot(
     return first_pr
 
 
+def github_pr_list(repo_slug: str) -> list[dict[str, Any]]:
+    """Fetch the repository PR inventory with one gh command."""
+    require_env("GH_TOKEN")
+    fields = "number,state,isDraft,title,body,headRefName,createdAt,closedAt,mergedAt,url"
+    result = _run(
+        [
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            repo_slug,
+            "--state",
+            "all",
+            "--limit",
+            str(STATUS_SWEEP_PR_LIMIT),
+            "--json",
+            fields,
+        ]
+    )
+    payload = json.loads(result.stdout)
+    if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
+        raise WaveOpsError("GitHub PR list returned malformed JSON")
+    if len(payload) >= STATUS_SWEEP_PR_LIMIT:
+        raise WaveOpsError(
+            f"GitHub PR list reached the {STATUS_SWEEP_PR_LIMIT}-item completeness limit"
+        )
+    return payload
+
+
 def _linear_graphql(
     query: str, variables: dict[str, Any], *, deadline: float | None = None
 ) -> dict[str, Any]:
@@ -415,6 +454,330 @@ def langgraph_snapshot(thread_id: str, *, deadline: float | None = None) -> dict
     """Synchronously fetch the LangGraph thread snapshot."""
     timeout = _bounded_timeout(HTTP_TIMEOUT_SECONDS, deadline, "LangGraph snapshot")
     return asyncio.run(_langgraph_snapshot(thread_id, timeout))
+
+
+async def _langgraph_sweep_snapshot(thread_id: str, timeout: float) -> dict[str, Any]:
+    """Fetch thread, runs, and plan-store evidence concurrently."""
+    env = require_env("LANGGRAPH_URL")
+    from langgraph_sdk import get_client
+
+    client = get_client(url=env["LANGGRAPH_URL"], timeout=timeout)
+    try:
+        async with asyncio.timeout(timeout):
+            results = await asyncio.gather(
+                client.threads.get(thread_id),
+                client.runs.list(thread_id, limit=1000),
+                client.store.get_item(["plan", "content"], thread_id),
+                return_exceptions=True,
+            )
+    except TimeoutError as exc:
+        raise WaveOpsError(f"LANGGRAPH_URL request timed out after {timeout:.1f}s") from exc
+    names = ("thread", "runs", "plan")
+    snapshot: dict[str, Any] = {"errors": []}
+    for name, result in zip(names, results, strict=True):
+        if isinstance(result, BaseException):
+            snapshot[name] = None if name != "runs" else []
+            snapshot["errors"].append(f"LangGraph {name} read failed: {result}")
+        else:
+            snapshot[name] = result
+    return snapshot
+
+
+def langgraph_sweep_snapshot(thread_id: str) -> dict[str, Any]:
+    """Synchronously fetch one ticket's sweep evidence."""
+    return asyncio.run(_langgraph_sweep_snapshot(thread_id, HTTP_TIMEOUT_SECONDS))
+
+
+def _field(value: Any, *names: str) -> Any:
+    """Read the first present mapping key or object attribute."""
+    for name in names:
+        if isinstance(value, dict) and name in value:
+            return value[name]
+        if hasattr(value, name):
+            return getattr(value, name)
+    return None
+
+
+def _timestamp(value: Any) -> datetime | None:
+    """Normalize an evidence timestamp to UTC."""
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _format_timestamp(value: datetime | None) -> str | None:
+    """Render a UTC timestamp for compact JSON output."""
+    return value.isoformat().replace("+00:00", "Z") if value else None
+
+
+def load_status_tickets(path: str | Path) -> list[dict[str, str]]:
+    """Validate and normalize the status-sweep ticket file."""
+    payload = read_json(path)
+    if not isinstance(payload, list) or not payload:
+        raise WaveOpsError("--tickets must contain a non-empty JSON list")
+    allowed = {"identifier", "issue_id", "thread_id"}
+    seen: dict[str, set[str]] = {name: set() for name in allowed}
+    tickets: list[dict[str, str]] = []
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            raise WaveOpsError(f"--tickets row {index} must be an object")
+        extra = set(item) - allowed
+        missing = {"identifier", "issue_id"} - set(item)
+        if extra or missing:
+            details = []
+            if missing:
+                details.append(f"missing {', '.join(sorted(missing))}")
+            if extra:
+                details.append(f"unexpected {', '.join(sorted(extra))}")
+            raise WaveOpsError(f"--tickets row {index} has {'; '.join(details)}")
+        identifier = item.get("identifier")
+        issue_id = item.get("issue_id")
+        thread_id = item.get("thread_id")
+        if not isinstance(identifier, str) or not re.fullmatch(
+            r"[A-Za-z][A-Za-z0-9]*-[1-9][0-9]*", identifier
+        ):
+            raise WaveOpsError(f"--tickets row {index} has malformed identifier")
+        if not isinstance(issue_id, str):
+            raise WaveOpsError(f"--tickets row {index} has malformed issue_id")
+        try:
+            canonical_issue_id = str(uuid.UUID(issue_id))
+        except (ValueError, AttributeError) as exc:
+            raise WaveOpsError(f"--tickets row {index} has malformed issue_id") from exc
+        if thread_id is not None and (not isinstance(thread_id, str) or not thread_id.strip()):
+            raise WaveOpsError(f"--tickets row {index} has malformed thread_id")
+        normalized = {
+            "identifier": identifier.upper(),
+            "issue_id": canonical_issue_id,
+            "thread_id": thread_id.strip()
+            if isinstance(thread_id, str)
+            else derive_linear_thread_id(canonical_issue_id),
+        }
+        duplicate_fields = []
+        for name, value in normalized.items():
+            key = value.casefold()
+            if key in seen[name]:
+                duplicate_fields.append(name)
+            seen[name].add(key)
+        if duplicate_fields:
+            raise WaveOpsError(
+                f"--tickets row {index} duplicates {', '.join(sorted(duplicate_fields))}"
+            )
+        tickets.append(normalized)
+    return tickets
+
+
+def _closing_line_matches(body: Any, identifier: str) -> bool:
+    """Return whether a PR body has the standalone ticket closing line."""
+    if not isinstance(body, str):
+        return False
+    pattern = rf"^[ \t]*Closes[ \t]+{re.escape(identifier)}[ \t]*$"
+    return re.search(pattern, body, flags=re.IGNORECASE | re.MULTILINE) is not None
+
+
+def match_status_pr(
+    identifier: str,
+    metadata: dict[str, Any],
+    prs: Sequence[dict[str, Any]],
+    repo_slug: str | None = None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Match a ticket to one PR using metadata before closing lines."""
+    metadata_number = metadata.get("pr_number")
+    if metadata_number is not None:
+        if repo_slug is not None:
+            owner, repo = repo_slug.split("/", 1)
+            repository_fields = (
+                ("pr_owner", owner),
+                ("pr_repo", repo),
+                ("repo_owner", owner),
+                ("repo_name", repo),
+            )
+            for field, expected in repository_fields:
+                value = metadata.get(field)
+                if value is None:
+                    continue
+                if not isinstance(value, str) or not value.strip():
+                    return None, [f"thread metadata {field} is malformed"]
+                if value.casefold() != expected.casefold():
+                    return None, [
+                        f"thread metadata {field} {value!r} does not match --repo {repo_slug}"
+                    ]
+        if isinstance(metadata_number, bool) or not str(metadata_number).isdigit():
+            return None, ["thread metadata pr_number is malformed"]
+        number = int(metadata_number)
+        matches = [pr for pr in prs if pr.get("number") == number]
+        if len(matches) != 1:
+            return None, [f"thread metadata pr_number {number} was not found in the PR list"]
+        return matches[0], []
+    matches = [pr for pr in prs if _closing_line_matches(pr.get("body"), identifier)]
+    if len(matches) > 1:
+        numbers = ", ".join(str(pr.get("number")) for pr in matches)
+        return None, [f"multiple PRs contain standalone Closes {identifier} lines: {numbers}"]
+    return (matches[0] if matches else None), []
+
+
+def _plan_stage(status: Any) -> tuple[str, str | None]:
+    """Map a plan-store or metadata status to a lifecycle stage."""
+    if status is None:
+        return "dispatched", None
+    if not isinstance(status, str):
+        return "dispatched", "plan status is malformed"
+    normalized = status.casefold()
+    if normalized == "approved":
+        return "approved", None
+    if normalized in {"ready", "revising"}:
+        return "planned", None
+    if normalized in {"planning", "shared", "cancelled"}:
+        return "dispatched", None
+    return "dispatched", f"unknown plan status {status!r}"
+
+
+def classify_status_ticket(
+    ticket: dict[str, str],
+    snapshot: dict[str, Any],
+    prs: Sequence[dict[str, Any]],
+    *,
+    repo_slug: str | None = None,
+    pr_inventory_error: str | None = None,
+) -> dict[str, Any]:
+    """Classify one ticket from its complete sweep evidence."""
+    errors = [str(error) for error in snapshot.get("errors") or []]
+    thread = snapshot.get("thread")
+    row: dict[str, Any] = {
+        **ticket,
+        "lifecycle_stage": None,
+        "stage_at": None,
+        "pr_number": None,
+        "pr_state": None,
+        "thread_status": _field(thread, "status"),
+        "errors": errors,
+        "sibling_divergence": False,
+    }
+    if pr_inventory_error is not None:
+        row["errors"].append(pr_inventory_error)
+    if thread is None:
+        row["errors"].append("thread evidence is missing")
+        return row
+    metadata = _field(thread, "metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+        row["errors"].append("thread metadata is missing or malformed")
+    if pr_inventory_error is not None:
+        return row
+    pr, pr_errors = match_status_pr(ticket["identifier"], metadata, prs, repo_slug=repo_slug)
+    row["errors"].extend(pr_errors)
+    if pr_errors:
+        return row
+    if pr is not None:
+        row["pr_number"] = pr.get("number")
+        state = str(pr.get("state") or "").upper()
+        row["pr_state"] = state or None
+        if pr.get("mergedAt") or state == "MERGED":
+            stage = "merged"
+            raw_stage_at = pr.get("mergedAt")
+        elif state == "CLOSED":
+            stage = "closed"
+            raw_stage_at = pr.get("closedAt")
+        else:
+            stage = "pr-open"
+            raw_stage_at = pr.get("createdAt")
+            if state != "OPEN":
+                row["errors"].append(f"matched PR has unknown state {state!r}")
+        stage_at = _timestamp(raw_stage_at)
+        row["lifecycle_stage"] = stage
+        row["stage_at"] = _format_timestamp(stage_at)
+        if stage_at is None:
+            row["errors"].append(f"{stage} stage timestamp is missing or malformed")
+        return row
+
+    plan_item = snapshot.get("plan")
+    plan_value = _field(plan_item, "value")
+    if not isinstance(plan_value, dict):
+        plan_value = {}
+    store_stage, store_error = _plan_stage(plan_value.get("status"))
+    metadata_stage, metadata_error = _plan_stage(metadata.get("plan_status"))
+    row["errors"].extend(error for error in (store_error, metadata_error) if error)
+    if (
+        store_stage != metadata_stage
+        and plan_value.get("status") is not None
+        and metadata.get("plan_status") is not None
+    ):
+        row["errors"].append(
+            "plan-store and thread metadata statuses map to different lifecycle stages"
+        )
+    stage = max((store_stage, metadata_stage), key=STATUS_STAGE_RANK.__getitem__)
+    row["lifecycle_stage"] = stage
+    if stage in {"planned", "approved"}:
+        stage_at = _timestamp(_field(plan_item, "updated_at", "updatedAt"))
+        row["stage_at"] = _format_timestamp(stage_at)
+        if stage_at is None:
+            row["errors"].append(f"{stage} stage timestamp is missing from the plan-store item")
+    else:
+        stage_at = _timestamp(_field(thread, "created_at", "createdAt"))
+        row["stage_at"] = _format_timestamp(stage_at)
+        if stage_at is None:
+            row["errors"].append("dispatched stage timestamp is missing from the thread")
+    return row
+
+
+def add_sibling_divergence(
+    rows: list[dict[str, Any]], threshold_minutes: float, *, now: datetime | None = None
+) -> None:
+    """Annotate lower-stage siblings when a timed leader is older than the threshold."""
+    observed_at = (now or datetime.now(UTC)).astimezone(UTC)
+    threshold_seconds = threshold_minutes * 60
+    for row in rows:
+        stage = row.get("lifecycle_stage")
+        if stage not in STATUS_STAGE_RANK:
+            continue
+        higher = [
+            candidate
+            for candidate in rows
+            if candidate is not row
+            and candidate.get("lifecycle_stage") in STATUS_STAGE_RANK
+            and STATUS_STAGE_RANK[candidate["lifecycle_stage"]] > STATUS_STAGE_RANK[stage]
+        ]
+        missing = [
+            candidate["identifier"]
+            for candidate in higher
+            if _timestamp(candidate.get("stage_at")) is None
+        ]
+        if missing:
+            row["divergence_diagnostics"] = [
+                f"higher-stage sibling {identifier} has no usable stage timestamp"
+                for identifier in missing
+            ]
+        timed = [candidate for candidate in higher if _timestamp(candidate.get("stage_at"))]
+        if not timed:
+            continue
+        leader = min(
+            timed,
+            key=lambda candidate: (
+                -STATUS_STAGE_RANK[candidate["lifecycle_stage"]],
+                _timestamp(candidate["stage_at"]),
+                rows.index(candidate),
+            ),
+        )
+        leader_at = _timestamp(leader["stage_at"])
+        assert leader_at is not None
+        lag_seconds = (observed_at - leader_at).total_seconds()
+        if lag_seconds > threshold_seconds:
+            row["sibling_divergence"] = True
+            row["divergence_from"] = {
+                "identifier": leader["identifier"],
+                "lifecycle_stage": leader["lifecycle_stage"],
+                "stage_at": leader["stage_at"],
+                "lag_minutes": round(lag_seconds / 60, 3),
+                "threshold_minutes": threshold_minutes,
+            }
 
 
 def _event_node(event: dict[str, Any]) -> str | None:
@@ -1451,6 +1814,38 @@ def cmd_watch(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_status_sweep(args: argparse.Namespace) -> int:
+    """Emit a deterministic lifecycle row for every requested ticket."""
+    if args.divergence_minutes < 0:
+        raise WaveOpsError("--divergence-minutes must be non-negative")
+    tickets = load_status_tickets(args.tickets)
+    github_error = None
+    try:
+        prs = github_pr_list(args.repo)
+    except (WaveOpsError, OSError, ValueError) as exc:
+        prs = []
+        github_error = f"GitHub PR inventory read failed: {exc}"
+    rows = []
+    for ticket in tickets:
+        try:
+            snapshot = langgraph_sweep_snapshot(ticket["thread_id"])
+        except (WaveOpsError, OSError, ValueError) as exc:
+            snapshot = {"thread": None, "runs": [], "plan": None, "errors": [str(exc)]}
+        rows.append(
+            classify_status_ticket(
+                ticket,
+                snapshot,
+                prs,
+                repo_slug=args.repo,
+                pr_inventory_error=github_error,
+            )
+        )
+    add_sibling_divergence(rows, args.divergence_minutes)
+    for row in rows:
+        emit(row, pretty=False)
+    return 2 if any(row["errors"] for row in rows) else 0
+
+
 def cmd_anchor(args: argparse.Namespace) -> int:
     """Run the anchor sweep."""
     if args.source == "-":
@@ -1506,6 +1901,12 @@ def parser() -> argparse.ArgumentParser:
     watch.add_argument("--iterations", type=int, default=0)
     watch.add_argument("--run-stall-seconds", type=int, default=1800)
     watch.set_defaults(func=cmd_watch)
+
+    sweep = sub.add_parser("status-sweep")
+    sweep.add_argument("--repo", required=True)
+    sweep.add_argument("--tickets", required=True)
+    sweep.add_argument("--divergence-minutes", type=float, default=15)
+    sweep.set_defaults(func=cmd_status_sweep)
 
     anchor = sub.add_parser("anchor-sweep")
     anchor.add_argument("ref")

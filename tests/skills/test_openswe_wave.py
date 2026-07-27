@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from copy import deepcopy
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -1221,3 +1222,525 @@ def test_watch_interrupts_blocking_baseline(
     elapsed = time.perf_counter() - started
     assert not blocked_call_finished
     assert elapsed < 0.7
+
+
+STATUS_ISSUE_IDS = (
+    "00000000-0000-4000-8000-000000000001",
+    "00000000-0000-4000-8000-000000000002",
+)
+
+
+def _status_ticket(identifier: str = "OSWE-1", index: int = 0) -> dict[str, str]:
+    return {
+        "identifier": identifier,
+        "issue_id": STATUS_ISSUE_IDS[index],
+        "thread_id": f"thread-{index}",
+    }
+
+
+def _status_snapshot(
+    status: str | None = None,
+    *,
+    created_at: str = "2026-07-27T00:00:00Z",
+    updated_at: str | None = "2026-07-27T01:00:00Z",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    plan = None
+    if status is not None:
+        plan = {"value": {"status": status}, "updated_at": updated_at}
+    return {
+        "thread": {
+            "status": "busy",
+            "created_at": created_at,
+            "updated_at": "2026-07-27T09:00:00Z",
+            "metadata": metadata if metadata is not None else {"plan_status": status},
+        },
+        "runs": [],
+        "plan": plan,
+        "errors": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "payload,match",
+    [
+        ({}, "non-empty JSON list"),
+        ([], "non-empty JSON list"),
+        ([{"identifier": "OSWE-1"}], "missing issue_id"),
+        ([{"identifier": "bad", "issue_id": STATUS_ISSUE_IDS[0]}], "malformed identifier"),
+        ([{"identifier": "OSWE-1", "issue_id": "issue"}], "malformed issue_id"),
+        (
+            [{"identifier": "OSWE-1", "issue_id": STATUS_ISSUE_IDS[0], "extra": True}],
+            "unexpected extra",
+        ),
+        (
+            [
+                {"identifier": "OSWE-1", "issue_id": STATUS_ISSUE_IDS[0]},
+                {"identifier": "oswe-1", "issue_id": STATUS_ISSUE_IDS[1]},
+            ],
+            "duplicates identifier",
+        ),
+        (
+            [
+                {"identifier": "OSWE-1", "issue_id": STATUS_ISSUE_IDS[0]},
+                {"identifier": "OSWE-2", "issue_id": STATUS_ISSUE_IDS[0]},
+            ],
+            "duplicates issue_id, thread_id",
+        ),
+    ],
+)
+def test_status_ticket_validation_rejects_malformed_and_duplicate_rows(
+    tmp_path: Path, payload: Any, match: str
+) -> None:
+    tickets = tmp_path / "tickets.json"
+    tickets.write_text(json.dumps(payload))
+
+    with pytest.raises(wave.WaveOpsError, match=match):
+        wave.load_status_tickets(tickets)
+
+
+def test_status_ticket_validation_derives_thread_and_parser_binds(tmp_path: Path) -> None:
+    tickets = tmp_path / "tickets.json"
+    noncanonical_issue_id = "0000000000004000800000000000000A"
+    canonical_issue_id = "00000000-0000-4000-8000-00000000000a"
+    tickets.write_text(json.dumps([{"identifier": "oswe-1", "issue_id": noncanonical_issue_id}]))
+
+    assert wave.load_status_tickets(tickets) == [
+        {
+            "identifier": "OSWE-1",
+            "issue_id": canonical_issue_id,
+            "thread_id": wave.derive_linear_thread_id(canonical_issue_id),
+        }
+    ]
+    args = wave.parser().parse_args(
+        ["status-sweep", "--repo", "owner/repo", "--tickets", str(tickets)]
+    )
+    assert args.func is wave.cmd_status_sweep
+    assert args.divergence_minutes == 15
+
+
+def test_status_ticket_uuid_equivalence_is_duplicate(tmp_path: Path) -> None:
+    tickets = tmp_path / "tickets.json"
+    tickets.write_text(
+        json.dumps(
+            [
+                {
+                    "identifier": "OSWE-1",
+                    "issue_id": "00000000-0000-4000-8000-00000000000a",
+                    "thread_id": "thread-1",
+                },
+                {
+                    "identifier": "OSWE-2",
+                    "issue_id": "0000000000004000800000000000000A",
+                    "thread_id": "thread-2",
+                },
+            ]
+        )
+    )
+
+    with pytest.raises(wave.WaveOpsError, match="duplicates issue_id"):
+        wave.load_status_tickets(tickets)
+
+
+def test_status_ticket_explicit_thread_id_is_trimmed_as_supplied(tmp_path: Path) -> None:
+    tickets = tmp_path / "tickets.json"
+    tickets.write_text(
+        json.dumps(
+            [
+                {
+                    "identifier": "OSWE-1",
+                    "issue_id": "0000000000004000800000000000000A",
+                    "thread_id": "  Custom-Thread-ID  ",
+                }
+            ]
+        )
+    )
+
+    assert wave.load_status_tickets(tickets)[0]["thread_id"] == "Custom-Thread-ID"
+
+
+def test_github_pr_list_is_exactly_one_repository_wide_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setenv("GH_TOKEN", "dummy")
+
+    def run(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        calls.append(command)
+        return SimpleNamespace(stdout="[]")
+
+    monkeypatch.setattr(wave, "_run", run)
+
+    assert wave.github_pr_list("owner/repo") == []
+    assert len(calls) == 1
+    assert calls[0][:8] == [
+        "gh",
+        "pr",
+        "list",
+        "--repo",
+        "owner/repo",
+        "--state",
+        "all",
+        "--limit",
+    ]
+    assert calls[0][8] == "1000"
+
+
+def test_langgraph_sweep_reads_thread_runs_and_plan_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import langgraph_sdk
+
+    calls: list[tuple[Any, ...]] = []
+
+    class Threads:
+        async def get(self, thread_id: str) -> dict[str, Any]:
+            calls.append(("thread", thread_id))
+            return {"status": "idle"}
+
+    class Runs:
+        async def list(self, thread_id: str, *, limit: int) -> list[Any]:
+            calls.append(("runs", thread_id, limit))
+            return []
+
+    class Store:
+        async def get_item(self, namespace: list[str], key: str) -> dict[str, Any]:
+            calls.append(("plan", namespace, key))
+            return {"value": {"status": "ready"}}
+
+    monkeypatch.setenv("LANGGRAPH_URL", "https://langgraph.invalid")
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda **_kwargs: SimpleNamespace(threads=Threads(), runs=Runs(), store=Store()),
+    )
+
+    snapshot = wave.langgraph_sweep_snapshot("thread")
+
+    assert snapshot["errors"] == []
+    assert calls == [
+        ("thread", "thread"),
+        ("runs", "thread", 1000),
+        ("plan", ["plan", "content"], "thread"),
+    ]
+
+
+def test_status_pr_matching_prefers_metadata_then_requires_one_closing_line() -> None:
+    prs = [
+        {"number": 1, "body": "Closes OSWE-1"},
+        {"number": 2, "body": "prefix Closes OSWE-1"},
+    ]
+
+    assert wave.match_status_pr("OSWE-1", {"pr_number": "2"}, prs) == (prs[1], [])
+    assert wave.match_status_pr("OSWE-1", {}, prs) == (prs[0], [])
+    assert wave.match_status_pr("OSWE-1", {}, [prs[0], {**prs[0], "number": 3}])[0] is None
+    assert (
+        "multiple PRs"
+        in wave.match_status_pr("OSWE-1", {}, [prs[0], {**prs[0], "number": 3}])[1][0]
+    )
+    assert wave.match_status_pr("OSWE-1", {"pr_number": 99}, prs)[0] is None
+
+
+@pytest.mark.parametrize(
+    "pr,status,expected",
+    [
+        (None, None, "dispatched"),
+        (None, "shared", "dispatched"),
+        (None, "ready", "planned"),
+        (None, "revising", "planned"),
+        (None, "approved", "approved"),
+        (
+            {"number": 1, "state": "OPEN", "createdAt": "2026-07-27T02:00:00Z"},
+            "approved",
+            "pr-open",
+        ),
+        (
+            {"number": 1, "state": "CLOSED", "closedAt": "2026-07-27T03:00:00Z"},
+            "approved",
+            "closed",
+        ),
+        (
+            {"number": 1, "state": "MERGED", "mergedAt": "2026-07-27T04:00:00Z"},
+            "approved",
+            "merged",
+        ),
+    ],
+)
+def test_status_lifecycle_precedence_and_plan_store_timestamp(
+    pr: dict[str, Any] | None, status: str | None, expected: str
+) -> None:
+    snapshot = _status_snapshot(
+        status, metadata={"plan_status": status, "pr_number": 1} if pr else None
+    )
+
+    row = wave.classify_status_ticket(_status_ticket(), snapshot, [pr] if pr else [])
+
+    assert row["lifecycle_stage"] == expected
+    if expected in {"planned", "approved"}:
+        assert row["stage_at"] == "2026-07-27T01:00:00Z"
+    assert row["stage_at"] != "2026-07-27T09:00:00Z"
+
+
+def test_status_classification_reports_ambiguous_and_missing_evidence() -> None:
+    snapshot = _status_snapshot("ready", updated_at=None, metadata={"plan_status": "approved"})
+
+    row = wave.classify_status_ticket(_status_ticket(), snapshot, [])
+
+    assert row["lifecycle_stage"] == "approved"
+    assert row["stage_at"] is None
+    assert any("different lifecycle stages" in error for error in row["errors"])
+    assert any("plan-store item" in error for error in row["errors"])
+
+
+def test_status_sweep_calls_once_per_boundary_and_emits_input_order(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tickets = tmp_path / "tickets.json"
+    tickets.write_text(
+        json.dumps(
+            [
+                {**_status_ticket("OSWE-1", 0)},
+                {**_status_ticket("OSWE-2", 1)},
+            ]
+        )
+    )
+    github_calls: list[str] = []
+    langgraph_calls: list[str] = []
+    emitted: list[tuple[dict[str, Any], bool]] = []
+    monkeypatch.setattr(
+        wave,
+        "github_pr_list",
+        lambda repo: github_calls.append(repo) or [],
+    )
+
+    def snapshot(thread_id: str) -> dict[str, Any]:
+        langgraph_calls.append(thread_id)
+        return _status_snapshot()
+
+    monkeypatch.setattr(wave, "langgraph_sweep_snapshot", snapshot)
+    monkeypatch.setattr(
+        wave, "emit", lambda payload, pretty=True: emitted.append((payload, pretty))
+    )
+
+    result = wave.cmd_status_sweep(
+        SimpleNamespace(repo="owner/repo", tickets=str(tickets), divergence_minutes=15)
+    )
+
+    assert result == 0
+    assert github_calls == ["owner/repo"]
+    assert langgraph_calls == ["thread-0", "thread-1"]
+    assert [item[0]["identifier"] for item in emitted] == ["OSWE-1", "OSWE-2"]
+    assert all(pretty is False for _, pretty in emitted)
+
+
+@pytest.mark.parametrize(
+    "age_seconds,expected",
+    [(899, False), (900, False), (901, True)],
+)
+def test_sibling_divergence_threshold_is_strict(age_seconds: int, expected: bool) -> None:
+    now = wave.datetime(2026, 7, 27, 0, 15, 1, tzinfo=wave.UTC)
+    leader_at = now - timedelta(seconds=age_seconds)
+    rows = [
+        {
+            **_status_ticket("OSWE-1", 0),
+            "lifecycle_stage": "approved",
+            "stage_at": wave._format_timestamp(leader_at),
+            "sibling_divergence": False,
+        },
+        {
+            **_status_ticket("OSWE-2", 1),
+            "lifecycle_stage": "planned",
+            "stage_at": "2026-07-27T00:00:00Z",
+            "sibling_divergence": False,
+        },
+    ]
+
+    wave.add_sibling_divergence(rows, 15, now=now)
+
+    assert rows[1]["sibling_divergence"] is expected
+
+
+def test_sibling_divergence_terminal_peers_and_missing_timestamps() -> None:
+    now = wave.datetime(2026, 7, 27, 1, 0, tzinfo=wave.UTC)
+    rows = [
+        {
+            **_status_ticket("OSWE-1", 0),
+            "lifecycle_stage": "merged",
+            "stage_at": "2026-07-27T00:00:00Z",
+            "sibling_divergence": False,
+        },
+        {
+            **_status_ticket("OSWE-2", 1),
+            "lifecycle_stage": "closed",
+            "stage_at": None,
+            "sibling_divergence": False,
+        },
+    ]
+
+    wave.add_sibling_divergence(rows, 15, now=now)
+
+    assert not rows[0]["sibling_divergence"]
+    assert not rows[1]["sibling_divergence"]
+
+    rows[0]["lifecycle_stage"] = "approved"
+    rows[1]["lifecycle_stage"] = "planned"
+    rows[0]["stage_at"] = None
+    wave.add_sibling_divergence(rows, 15, now=now)
+    assert not rows[1]["sibling_divergence"]
+    assert "no usable stage timestamp" in rows[1]["divergence_diagnostics"][0]
+
+
+def test_status_pr_matching_validates_metadata_repository_before_number() -> None:
+    prs = [{"number": 7, "body": "Closes OSWE-1"}]
+    metadata = {
+        "pr_number": 7,
+        "pr_owner": "owner",
+        "pr_repo": "repo",
+        "repo_owner": "owner",
+        "repo_name": "repo",
+    }
+
+    assert wave.match_status_pr("OSWE-1", metadata, prs, repo_slug="owner/repo") == (prs[0], [])
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("pr_owner", "other"),
+        ("pr_repo", "other"),
+        ("repo_owner", "other"),
+        ("repo_name", "other"),
+    ],
+)
+def test_status_pr_matching_rejects_repository_metadata_mismatch(field: str, value: str) -> None:
+    prs = [{"number": 7, "body": "Closes OSWE-1"}]
+    metadata = {"pr_number": 7, "pr_owner": "owner", "pr_repo": "repo"}
+    metadata[field] = value
+
+    matched, errors = wave.match_status_pr("OSWE-1", metadata, prs, repo_slug="owner/repo")
+
+    assert matched is None
+    assert errors == [f"thread metadata {field} {value!r} does not match --repo owner/repo"]
+
+
+def test_status_pr_matching_rejects_conflicting_repository_fields() -> None:
+    prs = [{"number": 7, "body": "Closes OSWE-1"}]
+
+    matched, errors = wave.match_status_pr(
+        "OSWE-1",
+        {
+            "pr_number": 7,
+            "pr_owner": "owner",
+            "pr_repo": "repo",
+            "repo_owner": "conflicting-owner",
+            "repo_name": "repo",
+        },
+        prs,
+        repo_slug="owner/repo",
+    )
+
+    assert matched is None
+    assert errors == [
+        "thread metadata repo_owner 'conflicting-owner' does not match --repo owner/repo"
+    ]
+
+
+@pytest.mark.parametrize(
+    "metadata,prs,error_fragment",
+    [
+        ({"plan_status": "approved", "pr_number": "bad"}, [], "malformed"),
+        ({"plan_status": "approved", "pr_number": 99}, [], "not found"),
+        (
+            {"plan_status": "approved"},
+            [
+                {"number": 1, "body": "Closes OSWE-1"},
+                {"number": 2, "body": "Closes OSWE-1"},
+            ],
+            "multiple PRs",
+        ),
+        (
+            {"plan_status": "approved", "pr_number": 1, "repo_name": "wrong"},
+            [{"number": 1, "body": "Closes OSWE-1"}],
+            "does not match --repo",
+        ),
+    ],
+)
+def test_bad_pr_evidence_is_indeterminate_and_never_diverges(
+    metadata: dict[str, Any], prs: list[dict[str, Any]], error_fragment: str
+) -> None:
+    row = wave.classify_status_ticket(
+        _status_ticket(),
+        _status_snapshot("approved", metadata=metadata),
+        prs,
+        repo_slug="owner/repo",
+    )
+    sibling = {
+        **_status_ticket("OSWE-2", 1),
+        "lifecycle_stage": "merged",
+        "stage_at": "2026-07-27T00:00:00Z",
+        "sibling_divergence": False,
+    }
+
+    wave.add_sibling_divergence(
+        [row, sibling], 15, now=wave.datetime(2026, 7, 27, 1, 0, tzinfo=wave.UTC)
+    )
+
+    assert row["thread_status"] == "busy"
+    assert row["lifecycle_stage"] is None
+    assert row["stage_at"] is None
+    assert row["sibling_divergence"] is False
+    assert any(error_fragment in error for error in row["errors"])
+
+
+def test_status_sweep_inventory_failure_emits_every_ticket_indeterminate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tickets = tmp_path / "tickets.json"
+    tickets.write_text(json.dumps([_status_ticket("OSWE-1", 0), _status_ticket("OSWE-2", 1)]))
+    calls: list[str] = []
+    emitted: list[dict[str, Any]] = []
+
+    def fail_inventory(_repo: str) -> list[dict[str, Any]]:
+        raise wave.WaveOpsError("inventory unavailable")
+
+    def snapshot(thread_id: str) -> dict[str, Any]:
+        calls.append(thread_id)
+        if thread_id == "thread-1":
+            return {"thread": None, "runs": [], "plan": None, "errors": ["thread failed"]}
+        return _status_snapshot("approved")
+
+    monkeypatch.setattr(wave, "github_pr_list", fail_inventory)
+    monkeypatch.setattr(wave, "langgraph_sweep_snapshot", snapshot)
+    monkeypatch.setattr(wave, "emit", lambda payload, **_kwargs: emitted.append(payload))
+
+    result = wave.cmd_status_sweep(
+        SimpleNamespace(repo="owner/repo", tickets=str(tickets), divergence_minutes=15)
+    )
+
+    assert result == 2
+    assert calls == ["thread-0", "thread-1"]
+    assert [row["identifier"] for row in emitted] == ["OSWE-1", "OSWE-2"]
+    assert [row["thread_status"] for row in emitted] == ["busy", None]
+    assert all(row["lifecycle_stage"] is None for row in emitted)
+    assert all(row["stage_at"] is None for row in emitted)
+    assert all(row["sibling_divergence"] is False for row in emitted)
+    assert all(
+        "GitHub PR inventory read failed: inventory unavailable" in row["errors"] for row in emitted
+    )
+
+
+def test_status_sweep_skill_documents_only_deterministic_contract() -> None:
+    skill = (SKILL / "SKILL.md").read_text()
+
+    for phrase in (
+        "status-sweep",
+        "`identifier`",
+        "`issue_id`",
+        "`thread_id`",
+        "one repository-wide `gh pr list --state all` read",
+        "`sibling_divergence`",
+        "defaults to 15",
+        "every operator contact",
+        "deadline",
+    ):
+        assert phrase in skill

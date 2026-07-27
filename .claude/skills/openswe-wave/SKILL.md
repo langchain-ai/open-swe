@@ -79,6 +79,18 @@ PR creation, acknowledgements, normal progress, successful recoveries, queue ent
 6. Use `scripts/trace-digest <thread>` for status, token, error, recent-activity, and prompt-size rollups.
 7. Complete the spot-audit and closeout templates. Confirm the tracker transition rather than assuming it.
 
+## Status cross-check
+
+Run this on every operator contact and at deadline boundaries to cross-check sibling progress without extending or resetting any delivery deadline:
+
+```bash
+scripts/wave-monitor status-sweep --repo owner/repo --tickets tickets.json
+```
+
+`--tickets` is exactly one non-empty JSON list of objects with `identifier`, Linear UUID `issue_id`, and optional non-empty `thread_id`; no other keys or duplicate identifiers, issue IDs, or thread IDs are accepted. Omitted thread IDs are derived from the Linear issue UUID. `--divergence-minutes` defaults to 15.
+
+The command performs one repository-wide `gh pr list --state all` read and one concurrent LangGraph thread/run/plan-store read per ticket. It writes one compact, input-ordered JSON line per ticket with `identifier`, `issue_id`, `thread_id`, `lifecycle_stage`, `stage_at`, `pr_number`, `pr_state`, `thread_status`, `errors`, and `sibling_divergence`; divergence evidence names the leading sibling, stage and timestamp, elapsed lag, and threshold. Missing, malformed, ambiguous, wrong-repository, or unavailable PR evidence leaves lifecycle stage and timestamp indeterminate and is excluded from sibling divergence rather than inferred from plan evidence. Thread metadata PR numbers are trusted first and, when metadata repository fields are present, only when they match `--repo`. Lifecycle precedence is `merged`, `closed`, `pr-open`, `approved`, `planned`, `dispatched`; merged and closed are terminal peers for sibling divergence.
+
 ## Replay and diagnostics
 
 ```bash

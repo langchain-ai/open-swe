@@ -77,6 +77,11 @@ scripts/openswe-run env
 auto-set on studio2 and `GH_TOKEN` is auto-derived from `gh auth token` when possible; both
 auto-derivations are recorded in the dogfood log.
 
+Until OSWE-152 closes, every Linear client-credentials mint must use the complete scope string
+`read,write,app:assignable,app:mentionable`. The latest client-credentials mint controls the
+effective scope, so a later `read,write` mint strips mentionability workspace-wide; recover with
+another full-scope client-credentials mint. Remove this sharp edge when OSWE-152 closes.
+
 ## 1. Dispatch
 
 ```bash
@@ -86,15 +91,26 @@ scripts/openswe-run start --ticket OSWE-123 --repo owner/repo --ref main
 Posts the standard dispatch comment (template embedded; see `references/run-templates.md`).
 Add `--scope/--boundaries/--verify` when the ticket needs sharper rails, or `--body-file` for
 a fully custom body. `--dry-run` prints the body without posting. Bodies with unfilled
-`<placeholders>` are refused. Output includes `issue_id` and the derived `thread_id`.
+`<placeholders>` are refused. Every posted body must begin with exactly one case-insensitive
+`@openswe`; an optional case-insensitive `repo owner/name` or `repo:owner/name` directive may
+appear only immediately after that mention. `--force` cannot bypass this hygiene guard. Output includes `issue_id`, the
+derived `thread_id`, and the confirmed LangGraph handoff. A missing confirmation within about
+60 seconds exits non-zero with baseline and final thread/run evidence. `--dry-run` does not poll.
 
 ## 2. Watch (background, exit-on-wake)
 
 Run in a background shell; it blocks silently and exits printing **one wake JSON line**:
 
+Use the plan deadline before approval and the delivery deadline afterward:
+
 ```bash
-scripts/openswe-run watch --ticket OSWE-123 --repo owner/repo
+scripts/openswe-run watch --ticket OSWE-123 --repo owner/repo --phase plan
+scripts/openswe-run watch --ticket OSWE-123 --repo owner/repo --phase delivery
 ```
+
+Omitting `--phase` selects `plan`. The plan phase defaults to 30 minutes and `delivery` defaults
+to 90 minutes. `--timeout-min N` explicitly overrides either default. The phase is included in
+watch-start logs and `watch_timeout` evidence.
 
 Wake nodes: `plan_posted`, `review_findings_posted`, `run_blocked`, `terminal_merged`,
 `terminal_closed`, `terminal_run_error`, `unhandled_condition`, plus wrapper-level
@@ -127,15 +143,29 @@ On `plan_posted`:
    scripts/openswe-run reject --ticket OSWE-123 --body-file reject.md
    ```
 
-4. Escalate to the operator only on a genuine reject-or-rework decision you cannot resolve
+4. Continue with the deterministic phase command that matches the decision. After approval:
+
+   ```bash
+   scripts/openswe-run watch --ticket OSWE-123 --repo owner/repo --phase delivery
+   ```
+
+   After rejection:
+
+   ```bash
+   scripts/openswe-run watch --ticket OSWE-123 --repo owner/repo --phase plan
+   ```
+
+5. Escalate to the operator only on a genuine reject-or-rework decision you cannot resolve
    from the ticket and the plan.
 
-Then loop back to step 2 (watch) until a terminal wake.
+Repeat the phase-appropriate command until a terminal wake.
 
 ## 4. Mid-run interaction
 
 A Linear comment on the issue lands in the running agent's mid-run queue:
-`scripts/openswe-run comment --ticket OSWE-123 --body-file msg.md`.
+`scripts/openswe-run comment --ticket OSWE-123 --body-file msg.md`. The posting commands
+`approve`, `reject`, `comment`, and `nudge` use the same roughly 60-second handoff confirmation
+as `start`; run the phase-appropriate `watch` command only after they return successfully.
 
 Stall rule: a liveness wake (`unhandled_condition` mentioning run staleness, threshold 30
 minutes) gets **one** nudge — `scripts/openswe-run nudge --ticket OSWE-123 --minutes 30` —
