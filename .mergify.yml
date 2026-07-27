@@ -1,0 +1,27 @@
+merge_queue:
+  mode: serial
+  max_parallel_checks: 1
+
+queue_rules:
+  - name: default
+    batch_size: 1
+    queue_conditions: []
+    merge_conditions: []
+
+merge_protections_settings:
+  reporting_method: check-runs
+  post_comment: false
+  auto_merge_conditions:
+    - or:
+        - base = main
+        - base = master
+
+merge_protections:
+  - name: Queue ready pull requests
+    description: Automatically queue non-draft pull requests targeting the default branch.
+    if:
+      - or:
+          - base = main
+          - base = master
+    success_conditions:
+      - -draft
