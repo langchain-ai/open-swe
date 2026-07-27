@@ -96,8 +96,9 @@ Run in a background shell; it blocks silently and exits printing **one wake JSON
 scripts/openswe-run watch --ticket OSWE-123 --repo owner/repo
 ```
 
-Wake nodes: `plan_posted`, `review_findings_posted`, `terminal_merged`, `terminal_closed`,
-`terminal_run_error`, `unhandled_condition`, plus wrapper-level `watch_timeout` (rc 3).
+Wake nodes: `plan_posted`, `review_findings_posted`, `run_blocked`, `terminal_merged`,
+`terminal_closed`, `terminal_run_error`, `unhandled_condition`, plus wrapper-level
+`watch_timeout` (rc 3).
 `--pr-number N` is optional; when omitted, the monitor discovers the PR from LangGraph thread metadata so PR recovery checks engage as soon as it exists.
 Known monitor sharp edges are inherited, not re-fixed here: OSWE-135 (torn reviewThreads
 read → spurious `unhandled_condition`; benign, re-watch) and OSWE-136 (hung network read;

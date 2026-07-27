@@ -93,9 +93,77 @@ def test_happy_path_replays_stay_within_five_wakes(name: str) -> None:
     assert {item["wake_node"] for item in result["wakes"]} <= set(wave.WAKE_NODES)
 
 
+def test_bear_41_blocker_comments_replay_as_run_blocked() -> None:
+    recorded = fixture("bear-41-blocker-comments.json")
+
+    events = wave.comments_to_events(
+        recorded["comments"], recorded["session_user_id"], set(recorded["known_ids"])
+    )
+    result = wave.replay_events(events, recorded["session_user_id"])
+
+    assert [event["kind"] for event in events] == ["run_blocked", "run_blocked"]
+    assert result["wake_count"] == 2
+    assert [item["wake_node"] for item in result["wakes"]] == [
+        "run_blocked",
+        "run_blocked",
+    ]
+
+
+def test_bear_41_healthy_quiet_comments_produce_zero_wakes() -> None:
+    recorded = fixture("bear-41-healthy-quiet-comments.json")
+
+    events = wave.comments_to_events(
+        recorded["comments"], recorded["session_user_id"], set(recorded["known_ids"])
+    )
+    result = wave.replay_events(events, recorded["session_user_id"])
+
+    assert [event["kind"] for event in events] == ["progress", "progress", "run_blocked"]
+    assert result["wake_count"] == 0
+    assert result["self_authored_suppressed"] == 1
+    assert result["non_actionable_ignored"] == 2
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Execution failed and I can't continue.",
+        "Pushing the branch failed with permission denied; stopping here.",
+    ],
+)
+def test_equivalent_execution_and_delivery_blockers_wake(body: str) -> None:
+    events = wave.comments_to_events(
+        [{"id": "comment", "body": body, "user": {"id": "agent"}}],
+        "operator",
+        set(),
+    )
+
+    assert events[0]["kind"] == "run_blocked"
+    assert wave.replay_events(events, "operator")["wakes"][0]["wake_node"] == "run_blocked"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "The push failed once, but the retry succeeded and the PR is open.",
+        "Delivery is blocked on CI while required checks continue.",
+        "Holding for review; no delivery failure occurred.",
+    ],
+)
+def test_incomplete_blocker_language_stays_progress(body: str) -> None:
+    events = wave.comments_to_events(
+        [{"id": "comment", "body": body, "user": {"id": "agent"}}],
+        "operator",
+        set(),
+    )
+
+    assert events[0]["kind"] == "progress"
+    assert wave.replay_events(events, "operator")["wake_count"] == 0
+
+
 def test_replay_coalesces_actionable_state_dump() -> None:
     events = [
         {"poll_id": "same", "kind": "review_findings", "summary": "finding"},
+        {"poll_id": "same", "kind": "run_blocked", "summary": "blocked"},
         {"poll_id": "same", "kind": "run_error", "summary": "error"},
     ]
 
@@ -103,12 +171,13 @@ def test_replay_coalesces_actionable_state_dump() -> None:
 
     assert result["wake_count"] == 1
     assert result["wakes"][0]["wake_node"] == "terminal_run_error"
-    assert len(result["wakes"][0]["evidence"]) == 2
+    assert len(result["wakes"][0]["evidence"]) == 3
 
 
 def test_unhandled_and_terminal_observations_beat_plan_in_same_poll() -> None:
     events = [
         {"poll_id": "same", "kind": "plan_posted"},
+        {"poll_id": "same", "kind": "run_blocked"},
         {"poll_id": "same", "kind": "merged"},
         {"poll_id": "same", "kind": "unhandled"},
     ]

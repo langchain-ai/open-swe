@@ -22,6 +22,7 @@ from typing import Any
 WAKE_NODES = (
     "plan_posted",
     "review_findings_posted",
+    "run_blocked",
     "terminal_merged",
     "terminal_closed",
     "terminal_run_error",
@@ -421,6 +422,7 @@ def _event_node(event: dict[str, Any]) -> str | None:
     mapping = {
         "plan_posted": "plan_posted",
         "review_findings": "review_findings_posted",
+        "run_blocked": "run_blocked",
         "merged": "terminal_merged",
         "closed": "terminal_closed",
         "run_error": "terminal_run_error",
@@ -483,6 +485,37 @@ def replay_events(events: Sequence[dict[str, Any]], session_user_id: str) -> dic
     }
 
 
+def _is_blocker_comment(body: str) -> bool:
+    """Return whether a comment reports a blocker and a stopped delivery attempt."""
+    normalized = " ".join(body.lower().split())
+    blocked = bool(
+        re.search(
+            r"\b(?:delivery|execution)(?: retry)? "
+            r"(?:is |is still |remains |has )?(?:blocked|failed)\b",
+            normalized,
+        )
+        or re.search(
+            r"\bpush(?:ing)?\b.{0,160}\b(?:failed|returns? 403|denied)\b",
+            normalized,
+        )
+    )
+    stopped = any(
+        marker in normalized
+        for marker in (
+            "holding without further retries",
+            "holding without retries",
+            "no pr was opened",
+            "no pr opened",
+            "cannot continue",
+            "can't continue",
+            "unable to continue",
+            "stopping here",
+            "hold — do not retry",
+        )
+    )
+    return blocked and stopped
+
+
 def comments_to_events(
     comments: Sequence[dict[str, Any]], session_user_id: str, known_ids: set[str]
 ) -> list[dict[str, Any]]:
@@ -498,6 +531,8 @@ def comments_to_events(
         kind = "progress"
         if "/plan" in lower and "plan" in lower and ("ready" in lower or "review" in lower):
             kind = "plan_posted"
+        elif _is_blocker_comment(body):
+            kind = "run_blocked"
         elif "wasn't able to finish" in lower or "unexpected error" in lower:
             kind = "run_error"
         events.append(

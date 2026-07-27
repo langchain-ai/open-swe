@@ -67,6 +67,7 @@ The first sample is a silent baseline. The only emitted wake nodes are:
 
 - `plan_posted`
 - `review_findings_posted`
+- `run_blocked`
 - `terminal_merged`
 - `terminal_closed`
 - `terminal_run_error`
