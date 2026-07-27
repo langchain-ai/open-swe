@@ -87,7 +87,7 @@ from .middleware import (
 )
 from .middleware.prepare_run import PrepareRunState
 from .middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from .prompt import construct_system_prompt
+from .prompt import OPEN_SWE_SHARED_BASE, construct_system_prompt
 from .runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
@@ -463,7 +463,10 @@ def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
     return {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": GENERAL_PURPOSE_SUBAGENT["description"],
-        "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        # Deep Agents' default GP prompt covers only task mechanics; the shared
+        # base carries the Open SWE identity and conventions (gh proxy usage,
+        # tool-call cadence) that delegated work also needs.
+        "system_prompt": OPEN_SWE_SHARED_BASE + "\n\n" + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
     }
 

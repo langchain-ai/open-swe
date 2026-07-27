@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from deepagents.middleware.filesystem import FilesystemMiddleware
 from fastapi import HTTPException
 
 from agent.dashboard import review_chat_api
@@ -647,6 +648,20 @@ def test_chat_excludes_mutating_filesystem_tools() -> None:
     from agent.chat import _EXCLUDED_TOOLS
 
     assert {"write_file", "edit_file", "delete", "execute"} <= _EXCLUDED_TOOLS
+
+
+def test_chat_general_purpose_subagent_is_read_only() -> None:
+    from agent.chat import _chat_general_purpose_subagent
+
+    spec = _chat_general_purpose_subagent()
+
+    assert spec["name"] == "general-purpose"
+    fs_middleware = [m for m in spec["middleware"] if isinstance(m, FilesystemMiddleware)]
+    assert len(fs_middleware) == 1
+    enabled = fs_middleware[0]._enabled_tools
+    assert enabled is not None
+    assert {"write_file", "edit_file", "delete", "execute"}.isdisjoint(enabled)
+    assert {"read_file", "ls", "glob", "grep"} <= enabled
 
 
 @pytest.mark.asyncio

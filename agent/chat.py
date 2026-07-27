@@ -28,6 +28,8 @@ warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
+from deepagents.middleware.filesystem import FilesystemMiddleware
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
@@ -77,6 +79,23 @@ CHAT_MODEL_CALL_LIMIT = 100
 # injected by deepagents' FilesystemMiddleware and stripped before the model sees
 # them (there is no sandbox, so ``execute`` would error anyway).
 _EXCLUDED_TOOLS = frozenset({"execute", "write_file", "edit_file", "delete"})
+
+
+def _chat_general_purpose_subagent() -> SubAgent:
+    # Deep Agents auto-adds a general-purpose subagent whose default
+    # FilesystemMiddleware would expose write_file/edit_file/delete/execute.
+    # Declaring the spec here suppresses that default and swaps in an
+    # allowlisted FilesystemMiddleware so delegated work stays read-only.
+    return {
+        "name": GENERAL_PURPOSE_SUBAGENT["name"],
+        "description": GENERAL_PURPOSE_SUBAGENT["description"],
+        "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        "middleware": cast(
+            list[AgentMiddleware[Any, Any, Any]],
+            [FilesystemMiddleware(tools=["read_file", "ls", "glob", "grep"])],
+        ),
+    }
+
 
 CHAT_PROMPT = """You are a code-review chat assistant. You help the author and reviewers \
 understand one GitHub pull request: `{repo_owner}/{repo_name}` #{pr_number}.
@@ -217,6 +236,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
             web_search,
             fetch_url,
         ],
+        subagents=[_chat_general_purpose_subagent()],
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
