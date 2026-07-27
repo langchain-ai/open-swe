@@ -23,6 +23,7 @@ from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ids import generate_thread_id_from_slack_thread
 
 from .http import DEFAULT_HTTP_TIMEOUT
+from .user_messages import WARNING_ICON
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +315,24 @@ async def set_slack_assistant_status(
             return False
 
 
+def _log_automated_warning_sent_to_slack(
+    channel_id: str,
+    thread_ts: str | None,
+    text: str,
+) -> None:
+    if not text.lstrip().startswith(WARNING_ICON):
+        return
+    if thread_ts:
+        logger.error(
+            "Sent automated warning message to Slack thread %s/%s: %s",
+            channel_id,
+            thread_ts,
+            text,
+        )
+        return
+    logger.error("Sent automated warning message to Slack channel %s: %s", channel_id, text)
+
+
 async def _post_slack_message_with_ts(
     channel_id: str,
     text: str,
@@ -360,6 +379,7 @@ async def _post_slack_message_with_ts(
                 return None, error
             message_ts = data.get("ts")
             if isinstance(message_ts, str) and message_ts:
+                _log_automated_warning_sent_to_slack(channel_id, thread_ts, text)
                 return message_ts, None
             return None, None
         except httpx.HTTPError as exc:
