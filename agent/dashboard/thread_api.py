@@ -363,6 +363,19 @@ def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("resolved") is True
 
 
+def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
+    if metadata.get("repo_private") is not True:
+        return None
+    source_context = metadata.get("source_context")
+    if not isinstance(source_context, dict):
+        return None
+    slack_thread = source_context.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return None
+    permalink = slack_thread.get("permalink")
+    return permalink.strip() if isinstance(permalink, str) and permalink.strip() else None
+
+
 def _thread_summary(
     thread: ThreadLike,
     *,
@@ -429,6 +442,7 @@ def _thread_summary(
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "isOwner": (_user_owns_thread(metadata, owner_login, owner_email) if owner_login else True),
         "traceUrl": trace_url,
+        "sourceUrl": _thread_source_url(metadata),
         "sandboxId": sandbox_id,
     }
     if isinstance(pr_number, int) and isinstance(pr_url, str):
@@ -737,12 +751,52 @@ async def list_dashboard_threads(
     return page["items"]
 
 
+async def _sidebar_active_thread_summary(
+    client: Any,
+    active_thread_id: str | None,
+    *,
+    fallback_threads: Mapping[str, ThreadLike],
+    visible_thread_ids: set[str],
+    login: str,
+    email: str | None,
+    include_all: bool,
+) -> tuple[dict[str, Any], bool] | None:
+    if not active_thread_id or active_thread_id in visible_thread_ids:
+        return None
+    thread = fallback_threads.get(active_thread_id)
+    if thread is None:
+        try:
+            fetched = await client.threads.get(active_thread_id)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "Could not fetch active sidebar thread %s", active_thread_id, exc_info=True
+            )
+            return None
+        if not isinstance(fetched, Mapping):
+            return None
+        thread = fetched
+    metadata = _thread_metadata(thread)
+    if not include_all:
+        try:
+            _assert_thread_readable(metadata)
+        except HTTPException:
+            return None
+    summary = await _summarize_thread(
+        client,
+        thread,
+        owner_login=None if include_all else login,
+        owner_email=None if include_all else email,
+    )
+    return summary, _is_thread_resolved(metadata)
+
+
 async def list_dashboard_threads_sidebar(
     login: str,
     *,
     email: str | None = None,
     active_limit: int = 50,
     resolved_limit: int = 20,
+    active_thread_id: str | None = None,
     include_all: bool = False,
 ) -> dict[str, Any]:
     client = langgraph_client()
@@ -790,7 +844,8 @@ async def list_dashboard_threads_sidebar(
     resolved_candidates = sorted(resolved_threads.values(), key=_thread_updated_ms, reverse=True)
     active_window = active_candidates[:safe_active_limit]
     resolved_window = resolved_candidates[:safe_resolved_limit]
-    active_items, resolved_items = await asyncio.gather(
+    active_ids = {thread_id for thread in active_window if (thread_id := _thread_id(thread))}
+    active_items, resolved_items, active_thread = await asyncio.gather(
         _summarize_threads(
             client,
             active_window,
@@ -803,17 +858,52 @@ async def list_dashboard_threads_sidebar(
             owner_login=None if include_all else login,
             owner_email=None if include_all else email,
         ),
+        _sidebar_active_thread_summary(
+            client,
+            active_thread_id,
+            fallback_threads={**active, **resolved_threads},
+            visible_thread_ids=active_ids,
+            login=login,
+            email=email,
+            include_all=include_all,
+        ),
     )
+    active_has_more = len(active_candidates) > safe_active_limit
+    resolved_has_more = len(resolved_candidates) > safe_resolved_limit
+    if active_thread:
+        active_thread_summary, is_resolved_active_thread = active_thread
+        if is_resolved_active_thread:
+            resolved_items = [
+                active_thread_summary,
+                *[item for item in resolved_items if item["id"] != active_thread_summary["id"]],
+            ]
+            active_items = [
+                item for item in active_items if item["id"] != active_thread_summary["id"]
+            ]
+            if len(resolved_items) > safe_resolved_limit:
+                resolved_items = resolved_items[:safe_resolved_limit]
+                resolved_has_more = True
+        else:
+            active_items = [
+                active_thread_summary,
+                *[item for item in active_items if item["id"] != active_thread_summary["id"]],
+            ]
+            resolved_items = [
+                item for item in resolved_items if item["id"] != active_thread_summary["id"]
+            ]
+            if len(active_items) > safe_active_limit:
+                active_items = active_items[:safe_active_limit]
+                active_has_more = True
     return {
         "active": {
             "items": active_items,
             "limit": safe_active_limit,
-            "hasMore": len(active_candidates) > safe_active_limit,
+            "hasMore": active_has_more,
         },
         "resolved": {
             "items": resolved_items,
             "limit": safe_resolved_limit,
-            "hasMore": len(resolved_candidates) > safe_resolved_limit,
+            "hasMore": resolved_has_more,
         },
     }
 

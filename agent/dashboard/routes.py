@@ -1513,6 +1513,7 @@ async def api_list_threads(
 async def api_list_threads_sidebar(
     active_limit: int = 50,
     resolved_limit: int = 20,
+    active_thread_id: str | None = None,
     all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
@@ -1523,6 +1524,7 @@ async def api_list_threads_sidebar(
         email=session.get("email"),
         active_limit=active_limit,
         resolved_limit=resolved_limit,
+        active_thread_id=active_thread_id,
         include_all=all,
     )
 

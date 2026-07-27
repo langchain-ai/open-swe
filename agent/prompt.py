@@ -3,11 +3,8 @@ import os
 import shlex
 from importlib import resources
 from pathlib import Path
-from typing import Any, cast
 
 from deepagents import HarnessProfile, register_harness_profile
-from langchain.agents.middleware import TodoListMiddleware
-from langchain.agents.middleware.types import AgentMiddleware, AgentState
 
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -31,12 +28,7 @@ def _harness_excluded_tools() -> frozenset[str]:
     return frozenset() if _env_flag(ENABLE_TODOS_ENV_VAR) else frozenset({"write_todos"})
 
 
-def _harness_excluded_middleware() -> frozenset[type[TodoListMiddleware]]:
-    return frozenset() if _env_flag(ENABLE_TODOS_ENV_VAR) else frozenset({TodoListMiddleware})
-
-
 HARNESS_EXCLUDED_TOOLS: frozenset[str] = _harness_excluded_tools()
-HARNESS_EXCLUDED_MIDDLEWARE: frozenset[type[TodoListMiddleware]] = _harness_excluded_middleware()
 
 # Provider keys the harness profile is registered under. deepagents resolves a
 # pre-built model's profile by `provider:identifier` then a provider-only
@@ -263,7 +255,7 @@ Steps, in order:
    ## Test Plan
    - [ ] <new/novel verification steps only — not "run existing tests">
    ```
-   For private repos, `open_pull_request` appends a `## References` section automatically; for public repos, don't reference private repos or PR/issue numbers. Commit messages: concise, focused on the "why"; default to the PR title.
+   `open_pull_request` appends a `## References` section automatically for plans, and for originating Slack/Linear/GitHub source references only on private repos. For public repos, don't manually reference private repos, Slack threads, or PR/issue numbers. Commit messages: concise, focused on the "why"; default to the PR title.
 
 3. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary plus the PR link (or branch URL if no PR): `linear_comment` (with an `@mention`) for Linear, `slack_thread_reply` for Slack, `GH_TOKEN=dummy gh issue comment`/`pr comment` for GitHub. Skip if there is no known source channel.
 
@@ -415,10 +407,6 @@ def register_open_swe_harness_profile() -> None:
     profile = HarnessProfile(
         base_system_prompt=OPEN_SWE_SHARED_BASE,
         excluded_tools=HARNESS_EXCLUDED_TOOLS,
-        excluded_middleware=cast(
-            frozenset[type[AgentMiddleware[AgentState[Any], None, Any]] | str],
-            HARNESS_EXCLUDED_MIDDLEWARE,
-        ),
     )
     for key in HARNESS_PROFILE_KEYS:
         register_harness_profile(key, profile)

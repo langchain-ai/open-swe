@@ -88,6 +88,34 @@ async def control_state() -> JSONResponse:
     )
 
 
+@app.post("/control/repo-private")
+async def control_repo_private(request: Request) -> JSONResponse:
+    body = await request.json()
+    value = bool(body.get("private", False))
+    fakes.set_repo_private(value)
+    return JSONResponse({"ok": True, "private": value})
+
+
+@app.get("/control/queued")
+async def control_queued(thread_id: str = "") -> JSONResponse:
+    """Count the follow-ups parked on a busy thread's message queue.
+
+    While the agent is busy, debounced follow-ups accumulate here (namespace
+    ``("queue", thread_id)``) until the active run drains them together at its
+    next model call. Lets the E2E assert coalescing instead of per-message runs."""
+    from langgraph_sdk import get_client
+
+    value: Any = None
+    try:
+        client = get_client(url=os.environ["LANGGRAPH_URL"])
+        item = await client.store.get_item(("queue", thread_id), key="pending_messages")
+        value = item.get("value") if item else None
+    except Exception:  # noqa: BLE001
+        value = None
+    messages = value.get("messages") if isinstance(value, dict) else None
+    return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
+
+
 @app.post("/mock/slack/send")
 async def slack_send(request: Request) -> JSONResponse:
     """Simulate a user posting in Slack: store the message, then deliver the
@@ -424,7 +452,7 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "body": pr["body"],
         "user": {"login": pr["author"]},
         "head": {"ref": pr["head"]},
-        "base": {"ref": pr["base"]},
+        "base": {"ref": pr["base"], "repo": {"private": fakes.repo_private()}},
         "additions": pr["additions"],
         "deletions": pr["deletions"],
         "changed_files": len(pr["files"]),
@@ -433,7 +461,7 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/fake-gh/repos/{owner}/{repo}")
 async def gh_get_repo(owner: str, repo: str) -> JSONResponse:
-    return JSONResponse({"full_name": f"{owner}/{repo}", "private": False})
+    return JSONResponse({"full_name": f"{owner}/{repo}", "private": fakes.repo_private()})
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/branches/{branch:path}")

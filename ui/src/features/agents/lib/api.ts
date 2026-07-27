@@ -189,6 +189,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
 function buildSidebarThreadsQuery(params: {
   activeLimit?: number
   resolvedLimit?: number
+  activeThreadId?: string
 }): string {
   const search = new URLSearchParams()
   if (params.activeLimit != null) {
@@ -196,6 +197,9 @@ function buildSidebarThreadsQuery(params: {
   }
   if (params.resolvedLimit != null) {
     search.set("resolved_limit", String(params.resolvedLimit))
+  }
+  if (params.activeThreadId) {
+    search.set("active_thread_id", params.activeThreadId)
   }
   const query = search.toString()
   return query ? `?${query}` : ""
@@ -206,6 +210,7 @@ export const agentsApi = {
   listSidebarThreads: (params: {
     activeLimit?: number
     resolvedLimit?: number
+    activeThreadId?: string
   }) =>
     agentsRequest<SidebarThreads>(
       `/threads/sidebar${buildSidebarThreadsQuery(params)}`
