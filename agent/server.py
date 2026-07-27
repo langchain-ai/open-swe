@@ -362,12 +362,38 @@ async def check_sandbox_reachable(
     return sandbox_backend
 
 
+async def _connect_existing_sandbox(
+    thread_id: str,
+    *,
+    cached: SandboxBackendProtocol | None,
+    sandbox_id: str | None,
+    github_proxy_token: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
+) -> SandboxBackendProtocol:
+    """Reuse the sandbox already bound to ``thread_id``, or fail unreachable."""
+    if cached is not None:
+        logger.info("Using cached sandbox backend for thread %s", thread_id)
+        sandbox_backend = await check_sandbox_reachable(cached, thread_id)
+    else:
+        logger.info("Connecting to existing sandbox %s", sandbox_id)
+        try:
+            sandbox_backend = await create_sandbox(str(sandbox_id))
+        except Exception as exc:
+            logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
+            raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
+        sandbox_backend = await check_sandbox_reachable(sandbox_backend, thread_id)
+    return await _refresh_github_proxy_or_fail(
+        sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
+    )
+
+
 async def ensure_sandbox_for_thread(
     thread_id: str,
     *,
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     repo: dict[str, str] | None = None,
+    allow_replacement: bool = False,
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
 
@@ -379,10 +405,17 @@ async def ensure_sandbox_for_thread(
     2. Metadata has an id -> reconnect, then refresh proxy.
     3. No sandbox at all -> create one and persist the id.
 
-    Only case 3 creates. A sandbox that exists but can't be reached raises
-    ``SandboxUnreachableError`` instead of being replaced — a replacement is
-    empty, and swapping one in silently destroys whatever the agent had not yet
-    committed.
+    By default only case 3 creates: a sandbox that exists but can't be reached
+    raises ``SandboxUnreachableError`` instead of being replaced, because a
+    replacement is empty and swapping one in silently destroys whatever the agent
+    had not yet committed.
+
+    ``allow_replacement`` opts out of that protection for callers whose sandbox
+    holds nothing but a re-derivable checkout — the read-only reviewer, which
+    re-preps the repo every run. There, refusing to replace bricks the thread
+    permanently: sandboxes are deleted once their retention window elapses, and
+    the stale id in thread metadata is what every later run keeps reconnecting
+    to. Replacing it clears that id in the metadata update below.
 
     For LangSmith sandboxes, also refreshes the GitHub App proxy auth. When
     ``repo`` has a ``ready`` repo-scoped snapshot, newly created sandboxes boot
@@ -396,13 +429,7 @@ async def ensure_sandbox_for_thread(
         sandbox_backend = None
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
 
-    if sandbox_backend:
-        logger.info("Using cached sandbox backend for thread %s", thread_id)
-        sandbox_backend = await check_sandbox_reachable(sandbox_backend, thread_id)
-        sandbox_backend = await _refresh_github_proxy_or_fail(
-            sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
-        )
-    elif sandbox_id is None:
+    if sandbox_backend is None and sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
         sandbox_backend = await _create_sandbox_with_proxy(
             github_proxy_token,
@@ -412,16 +439,29 @@ async def ensure_sandbox_for_thread(
         )
         logger.info("Sandbox created: %s", sandbox_backend.id)
     else:
-        logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
-            sandbox_backend = await create_sandbox(sandbox_id)
-        except Exception as exc:
-            logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
-            raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
-        sandbox_backend = await check_sandbox_reachable(sandbox_backend, thread_id)
-        sandbox_backend = await _refresh_github_proxy_or_fail(
-            sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
-        )
+            sandbox_backend = await _connect_existing_sandbox(
+                thread_id,
+                cached=sandbox_backend,
+                sandbox_id=sandbox_id,
+                github_proxy_token=github_proxy_token,
+                github_proxy_repositories=github_proxy_repositories,
+            )
+        except SandboxUnreachableError as exc:
+            if not allow_replacement:
+                raise
+            logger.warning(
+                "Replacing unreachable sandbox %s for thread %s",
+                exc.sandbox_id,
+                thread_id,
+            )
+            sandbox_backend = await _create_sandbox_with_proxy(
+                github_proxy_token,
+                thread_id=thread_id,
+                github_proxy_repositories=github_proxy_repositories,
+                repo=repo,
+            )
+            logger.info("Replacement sandbox created: %s", sandbox_backend.id)
 
     sandbox_backend = set_sandbox_backend(thread_id, sandbox_backend)
 

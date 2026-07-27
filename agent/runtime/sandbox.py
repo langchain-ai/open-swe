@@ -9,6 +9,7 @@ async def ensure_sandbox_for_thread(
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     repo: dict[str, str] | None = None,
+    allow_replacement: bool = False,
 ) -> SandboxBackendProtocol:
     from agent.server import ensure_sandbox_for_thread as ensure
 
@@ -17,6 +18,7 @@ async def ensure_sandbox_for_thread(
         github_proxy_token=github_proxy_token,
         github_proxy_repositories=github_proxy_repositories,
         repo=repo,
+        allow_replacement=allow_replacement,
     )
 
 
