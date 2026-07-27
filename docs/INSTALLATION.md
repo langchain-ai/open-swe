@@ -212,8 +212,8 @@ DEFAULT_SANDBOX_VCPUS="4"
 DEFAULT_SANDBOX_MEM_BYTES="17179869184"
 # Optional; auto-stop a sandbox after this many seconds of inactivity. Default is 7200 (2 hours). 0 disables.
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"
-# Optional; delete a stopped sandbox after this many seconds. Default is 1209600 (14 days). 0 disables.
-DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="1209600"
+# Optional; delete a stopped sandbox after this many seconds. Default is 2592000 (30 days). 0 disables.
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"
 # Optional; required only for the admin Repository Snapshots page/template generator.
 REPO_SNAPSHOT_BASE_IMAGE="<your-docker-hub>/<name-of-your-image>"
 ```
@@ -520,7 +520,7 @@ DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default:
 DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
 DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 16 GiB)
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS=""    # Auto-stop after N seconds idle (default: 7200; 0 disables)
-DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS=""  # Delete N seconds after stop (default: 1209600; 0 disables)
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS=""  # Delete N seconds after stop (default: 2592000; 0 disables)
 
 # === Token Encryption ===
 TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32
