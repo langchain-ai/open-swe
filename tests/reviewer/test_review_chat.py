@@ -643,6 +643,12 @@ async def test_proxy_state_rejects_foreign_thread(monkeypatch) -> None:
 # --- graph factory guard -----------------------------------------------------
 
 
+def test_chat_excludes_mutating_filesystem_tools() -> None:
+    from agent.chat import _EXCLUDED_TOOLS
+
+    assert {"write_file", "edit_file", "delete", "execute"} <= _EXCLUDED_TOOLS
+
+
 @pytest.mark.asyncio
 async def test_chat_web_search_returns_inline_results_without_sandbox(monkeypatch) -> None:
     class FakeExa:

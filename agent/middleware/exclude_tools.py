@@ -1,11 +1,8 @@
 """Hide named tools from the model without rebuilding the agent.
 
-`create_deep_agent` always wires the `task` tool when the auto-added
-general-purpose subagent is present. The reviewer agent has no use for
-subagent dispatch, so this middleware drops the named tools from the
-request before the model sees them. Mirrors the behavior of deepagents'
-own private `_ToolExclusionMiddleware` but lives here so we don't depend
-on a private import path.
+This provides per-agent tool filtering after Deep Agents injects its built-in
+tools. It mirrors Deep Agents' private `_ToolExclusionMiddleware` without
+depending on a private import path.
 """
 
 from __future__ import annotations

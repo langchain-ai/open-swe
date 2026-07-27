@@ -76,7 +76,7 @@ CHAT_MODEL_CALL_LIMIT = 100
 # Read-only: the chat agent never mutates files or runs shell commands. These are
 # injected by deepagents' FilesystemMiddleware and stripped before the model sees
 # them (there is no sandbox, so ``execute`` would error anyway).
-_EXCLUDED_TOOLS = frozenset({"execute", "write_file", "edit_file"})
+_EXCLUDED_TOOLS = frozenset({"execute", "write_file", "edit_file", "delete"})
 
 CHAT_PROMPT = """You are a code-review chat assistant. You help the author and reviewers \
 understand one GitHub pull request: `{repo_owner}/{repo_name}` #{pr_number}.
