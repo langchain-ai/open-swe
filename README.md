@@ -137,7 +137,7 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 - **Instant acknowledgement** — reacts with 👀 the moment it picks up your message
 - **Message it while it's running** — send follow-up messages mid-task and it'll pick them up before its next step
 - **Run multiple tasks in parallel** — each task runs in its own isolated cloud sandbox
-- **GitHub OAuth built-in** — authenticates with your GitHub account automatically
+- **GitHub App execution** — uses repository-scoped installation tokens, with OAuth for dashboard sign-in and access checks
 - **Opens PRs automatically** — commits changes and opens a draft PR when done, linked back to your ticket
 - **Subagent support** — the agent can spawn child agents for parallel subtasks
 - **Web dashboard** — a companion app (in `ui/`) for GitHub login, per-user model/profile settings, team defaults, enabled-repo and review-style management, user mappings, and an Agents chat UI

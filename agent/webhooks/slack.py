@@ -482,52 +482,6 @@ async def _process_slack_mention_impl(
                 if image_block:
                     content_blocks.append(cast(dict[str, Any], image_block))
 
-    # Open SWE opens PRs as the triggering user, so a run only proceeds when we
-    # have a valid user GitHub token. Users who have never signed in with
-    # GitHub, and users whose stored authorization is no longer usable, are
-    # blocked and prompted to set up via the dashboard. Bot-token-only
-    # deployments are exempt — they run on the installation token.
-    user_token: str | None = None
-    if mapped_login:
-        try:
-            user_token = await common.get_valid_access_token(mapped_login)
-        except Exception:  # noqa: BLE001
-            common.logger.debug(
-                "Failed to resolve GitHub token for %s; treating as unauthenticated",
-                mapped_login,
-                exc_info=True,
-            )
-            user_token = None
-    has_valid_user_token = bool(user_token)
-
-    if not has_valid_user_token and not common.is_bot_token_only_mode():
-        # A stored-but-unusable token means "sign in again"; no record at all
-        # means the user has never connected GitHub + Slack via the dashboard.
-        # Guard the store read like token resolution above so a transient
-        # failure still yields an actionable prompt and clears the status.
-        has_token_record = False
-        if mapped_login:
-            try:
-                has_token_record = await common.has_access_token_record(mapped_login)
-            except Exception:  # noqa: BLE001
-                common.logger.debug(
-                    "Failed to check GitHub token record for %s; prompting sign-in",
-                    mapped_login,
-                    exc_info=True,
-                )
-        reason = "revoked" if has_token_record else "unlinked"
-        common.logger.info(
-            "Blocking Slack run for thread %s: no valid user GitHub token (%s)",
-            thread_id,
-            reason,
-        )
-        if user_id:
-            await common._post_account_link_prompt(
-                channel_id, thread_ts, user_id, user_email, reason=reason
-            )
-        await common.set_slack_assistant_status(channel_id, thread_ts, status="")
-        return
-
     if await _maybe_approve_ready_plan_reply(
         thread_id, channel_id, thread_ts, user_id, user_name, clean_text
     ):

@@ -711,14 +711,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
                     "Failed to persist branch_name metadata for thread %s", thread_id
                 )
 
-    email = await common.email_for_login(github_login) or ""
-    if email:
-        github_token = await common._get_or_resolve_thread_github_token(
-            thread_id, email, target_repo
-        )
-    else:
-        common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
-        return
+    github_token = await common._get_or_resolve_thread_github_token(thread_id, target_repo)
 
     if not github_token:
         common.logger.warning("No GitHub token for thread %s, skipping", thread_id)
@@ -736,7 +729,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
             )
         except GitHubAuthError:
             github_token = await common._refresh_thread_github_token_after_401(
-                thread_id, email, target_repo
+                thread_id, target_repo
             )
             if not github_token:
                 common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
@@ -759,9 +752,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
             repo_config, pr_number, token=github_token
         )
     except GitHubAuthError:
-        github_token = await common._refresh_thread_github_token_after_401(
-            thread_id, email, target_repo
-        )
+        github_token = await common._refresh_thread_github_token_after_401(thread_id, target_repo)
         if not github_token:
             common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
             return
@@ -937,53 +928,44 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         common.logger.warning("Missing GitHub issue id/number, skipping")
         return
 
-    email = await common.email_for_login(github_login) or ""
-    if not email:
-        common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
-        return
-
     thread_id = common.generate_thread_id_from_github_issue(issue_id)
     existing_thread = await common._thread_exists(thread_id)
-    github_token = await common._get_or_resolve_thread_github_token(thread_id, email, target_repo)
-    app_token = await common.get_github_app_installation_token(target_repo=target_repo)
-    reaction_token = github_token or app_token
+    github_token = await common._get_or_resolve_thread_github_token(thread_id, target_repo)
+    if not github_token:
+        common.logger.warning("No GitHub App token for thread %s, skipping", thread_id)
+        return
     comment = payload.get("comment", {})
     comment_id = comment.get("id")
     if event_type == "issue_comment" and comment_id:
-        if not reaction_token:
-            common.logger.warning(
-                "No GitHub token available to react to issue comment %s", comment_id
+        try:
+            reacted = await common.react_to_github_comment(
+                repo_config,
+                comment_id,
+                event_type="issue_comment",
+                token=github_token,
             )
-        else:
+        except GitHubAuthError:
+            github_token = await common._refresh_thread_github_token_after_401(
+                thread_id, target_repo
+            )
+            if not github_token:
+                common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
+                return
             try:
                 reacted = await common.react_to_github_comment(
                     repo_config,
                     comment_id,
                     event_type="issue_comment",
-                    token=reaction_token,
+                    token=github_token,
                 )
             except GitHubAuthError:
-                github_token = await common._refresh_thread_github_token_after_401(
-                    thread_id, email, target_repo
+                common.logger.warning(
+                    "Re-auth still produced 401 reacting to issue comment %s",
+                    comment_id,
                 )
-                reaction_token = github_token or app_token
-                reacted = False
-                if reaction_token:
-                    try:
-                        reacted = await common.react_to_github_comment(
-                            repo_config,
-                            comment_id,
-                            event_type="issue_comment",
-                            token=reaction_token,
-                        )
-                    except GitHubAuthError:
-                        common.logger.warning(
-                            "Re-auth still produced 401 reacting to issue comment %s",
-                            comment_id,
-                        )
-                        reacted = False
-            if not reacted:
-                common.logger.warning("Failed to react to GitHub issue comment %s", comment_id)
+                return
+        if not reacted:
+            common.logger.warning("Failed to react to GitHub issue comment %s", comment_id)
 
     if existing_thread:
         if event_type == "issue_comment":
@@ -996,14 +978,17 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     else:
         try:
             comments = await common.fetch_issue_comments(
-                repo_config, issue_number, token=github_token or app_token
+                repo_config, issue_number, token=github_token
             )
         except GitHubAuthError:
             github_token = await common._refresh_thread_github_token_after_401(
-                thread_id, email, target_repo
+                thread_id, target_repo
             )
+            if not github_token:
+                common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
+                return
             comments = await common.fetch_issue_comments(
-                repo_config, issue_number, token=github_token or app_token
+                repo_config, issue_number, token=github_token
             )
         if comment_id and not any(item.get("comment_id") == comment_id for item in comments):
             comments.append(

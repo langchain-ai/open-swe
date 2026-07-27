@@ -238,6 +238,7 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     """End-to-end check: a 401 on react triggers invalidate + re-resolve."""
 
     invalidated: dict[str, int] = {"calls": 0}
+    app_cache_cleared: dict[str, int] = {"calls": 0}
     resolves: list[str] = []
     react_calls: list[str] = []
     fetch_calls: list[str] = []
@@ -247,9 +248,7 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
 
     tokens = iter(["stale-token", "fresh-token"])
 
-    async def fake_get_or_resolve(
-        thread_id: str, email: str, target_repo: str | None = None
-    ) -> str | None:
+    async def fake_get_or_resolve(thread_id: str, target_repo: str | None = None) -> str | None:
         token = next(tokens)
         resolves.append(token)
         return token
@@ -295,14 +294,14 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     monkeypatch.setattr(webhook_common, "extract_pr_context", fake_extract_pr_context)
     monkeypatch.setattr(webhook_common, "_get_or_resolve_thread_github_token", fake_get_or_resolve)
     monkeypatch.setattr(webhook_common, "invalidate_cached_github_token", fake_invalidate)
+    monkeypatch.setattr(
+        webhook_common,
+        "clear_app_token_cache",
+        lambda: app_cache_cleared.__setitem__("calls", app_cache_cleared["calls"] + 1),
+    )
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react)
     monkeypatch.setattr(webhook_common, "fetch_pr_comments_since_last_tag", fake_fetch_pr_comments)
     monkeypatch.setattr(webhook_common, "_trigger_or_queue_run", fake_trigger_or_queue_run)
-    monkeypatch.setattr(
-        webhook_common,
-        "email_for_login",
-        lambda login: asyncio.sleep(0, result="octo@example.com" if login == "octo" else None),
-    )
 
     asyncio.run(
         github_webhooks.process_github_pr_comment(
@@ -312,6 +311,7 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     )
 
     assert invalidated["calls"] == 1
+    assert app_cache_cleared["calls"] == 1
     assert resolves == ["stale-token", "fresh-token"]
     assert react_calls == ["stale-token", "fresh-token"]
     assert fetch_calls == ["fresh-token"]

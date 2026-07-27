@@ -116,128 +116,43 @@ def _open(*, title: str = "feat: x", body: str = "body") -> dict[str, Any]:
     )
 
 
-def test_uses_user_token_for_slack_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
+@pytest.mark.parametrize("source", ["slack", "linear", "dashboard", "github", "schedule"])
+def test_uses_installation_token_for_every_source(
+    monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    _set_config(monkeypatch, {"source": source, "github_login": "johannes117"})
 
     from agent.dashboard import profiles
 
-    async def fake_user_token(login: str, **_kw: Any) -> str | None:
-        assert login == "johannes117"
-        return "user-tok"
-
-    monkeypatch.setattr(profiles, "get_valid_access_token", fake_user_token)
-
-    async def fail_bot(**_kwargs: Any) -> str | None:
-        raise AssertionError("bot token should not be used when a user token exists")
-
-    monkeypatch.setattr(opr, "get_github_app_installation_token", fail_bot)
-
-    client = _FakeClient(
-        post=_FakeResponse(
-            201,
-            {"html_url": "https://x/pull/1", "number": 1, "user": {"login": "johannes117"}},
-        )
-    )
-    _install_client(monkeypatch, client)
-
-    result = _open()
-
-    assert result["success"] is True
-    assert result["created"] is True
-    assert result["url"] == "https://x/pull/1"
-    assert result["author"] == "johannes117"
-    assert result["token_kind"] == "user"
-    assert client.post_calls[0]["headers"]["Authorization"] == "Bearer user-tok"
-    assert client.post_calls[0]["json"] == {
-        "title": "feat: x",
-        "head": "open-swe/feature",
-        "base": "main",
-        "body": "body",
-        "draft": True,
-    }
-
-
-def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_config(monkeypatch, {"source": "linear", "github_login": "johannes117"})
-
-    from agent.dashboard import profiles
-
-    async def fake_user_token(login: str, **_kw: Any) -> str | None:
-        assert login == "johannes117"
-        return "user-tok"
-
-    monkeypatch.setattr(profiles, "get_valid_access_token", fake_user_token)
-
-    async def fail_bot(**_kwargs: Any) -> str | None:
-        raise AssertionError("bot token should not be used when a user token exists")
-
-    monkeypatch.setattr(opr, "get_github_app_installation_token", fail_bot)
-
-    client = _FakeClient(
-        post=_FakeResponse(
-            201,
-            {"html_url": "https://x/pull/1", "number": 1, "user": {"login": "johannes117"}},
-        )
-    )
-    _install_client(monkeypatch, client)
-
-    result = _open()
-
-    assert result["success"] is True
-    assert result["created"] is True
-    assert result["url"] == "https://x/pull/1"
-    assert result["author"] == "johannes117"
-    assert result["token_kind"] == "user"
-    assert client.post_calls[0]["headers"]["Authorization"] == "Bearer user-tok"
-
-
-def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_config(monkeypatch, {"source": "github", "github_login": "johannes117"})
-
-    from agent.dashboard import profiles
-
-    async def fail_user_token(login: str, **_kw: Any) -> str | None:
-        raise AssertionError("user token should not be resolved for github source")
+    async def fail_user_token(*_args: Any, **_kwargs: Any) -> str | None:
+        raise AssertionError("PR creation must not consult the dashboard OAuth store")
 
     monkeypatch.setattr(profiles, "get_valid_access_token", fail_user_token)
 
-    async def fake_bot(**_kwargs: Any) -> str | None:
+    async def fake_bot(*, target_repo: str) -> str:
+        assert target_repo == "langchain-ai/open-swe"
         return "bot-tok"
 
     monkeypatch.setattr(opr, "get_github_app_installation_token", fake_bot)
-
     client = _FakeClient(
         post=_FakeResponse(
-            201, {"html_url": "https://x/pull/2", "number": 2, "user": {"login": "open-swe[bot]"}}
+            201,
+            {
+                "html_url": "https://x/pull/1",
+                "number": 1,
+                "user": {"login": "open-swe[bot]"},
+            },
         )
     )
     _install_client(monkeypatch, client)
 
     result = _open()
 
+    assert result["success"] is True
+    assert result["created"] is True
+    assert result["author"] == "open-swe[bot]"
     assert result["token_kind"] == "bot"
     assert client.post_calls[0]["headers"]["Authorization"] == "Bearer bot-tok"
-
-
-def test_falls_back_to_bot_when_user_token_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
-
-    from agent.dashboard import profiles
-
-    async def no_user_token(login: str, **_kw: Any) -> str | None:
-        return None
-
-    monkeypatch.setattr(profiles, "get_valid_access_token", no_user_token)
-
-    async def fake_bot(**_kwargs: Any) -> str | None:
-        return "bot-tok"
-
-    monkeypatch.setattr(opr, "get_github_app_installation_token", fake_bot)
-
-    client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 3, "user": {}}))
-    _install_client(monkeypatch, client)
-
-    assert _open()["token_kind"] == "bot"
 
 
 def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -294,7 +209,7 @@ def test_updates_existing_pr_body_with_linear_closing_line(
     assert client.patch_calls == [
         {
             "url": "https://api.github.com/repos/langchain-ai/open-swe/pulls/9",
-            "headers": opr._auth_headers("user-tok"),
+            "headers": opr._auth_headers("bot"),
             "json": {"body": "body\n\nCloses AB-12"},
         }
     ]

@@ -99,15 +99,11 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClien
     async def fake_get_profile(login: str) -> dict[str, Any]:
         return {}
 
-    async def fake_ensure_token(login: str) -> None:
-        return None
-
     async def fake_resolve_email(login: str, profile: dict[str, Any]) -> str:
         return "octo@example.com"
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
     return client
 

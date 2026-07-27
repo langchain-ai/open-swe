@@ -1,4 +1,4 @@
-"""Open a GitHub pull request attributed to the triggering user."""
+"""Open a GitHub pull request with the GitHub App installation token."""
 
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ from ..utils.slack import get_slack_permalink
 logger = logging.getLogger(__name__)
 
 GITHUB_API = "https://api.github.com"
-_USER_TOKEN_SOURCES = ("slack", "linear", "dashboard")
 _REFERENCES_HEADING = "## References"
 _CLOSING_TITLE_RE = re.compile(r"\[closes\s+(?P<ticket>[A-Z][A-Z0-9]*-\d+)\]\s*$", re.IGNORECASE)
 _ACCESS_FAILURE_CODE = "github_app_access_missing_or_repo_not_found"
@@ -37,30 +36,7 @@ _AUTO_MERGE_METADATA_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 async def _resolve_pr_author_token(owner: str, repo: str) -> tuple[str | None, str]:
-    """Return ``(token, kind)`` for opening the PR.
-
-    Prefers the triggering user's OAuth token (so the PR is created *as them*)
-    for Slack/Linear/dashboard runs with a mapped GitHub login, resolving it by
-    login from the dashboard OAuth store. Falls back to the GitHub App
-    installation token (creator = open-swe[bot]) for GitHub-triggered runs,
-    unmapped users, or bot-token-only deployments — preserving today's behavior.
-
-    The token is resolved by login rather than read from the shared thread
-    metadata: Slack thread ids are shared across a conversation, so a cached
-    token could belong to a prior triggering user.
-    """
-    configurable = get_config().get("configurable", {})
-    source = configurable.get("source")
-    github_login = configurable.get("github_login")
-
-    if source in _USER_TOKEN_SOURCES and isinstance(github_login, str) and github_login.strip():
-        from ..dashboard.profiles import get_valid_access_token
-
-        user_token = await get_valid_access_token(github_login.strip())
-        if user_token:
-            return user_token, "user"
-        logger.info("No valid user token for %s; opening PR as open-swe[bot]", github_login.strip())
-
+    """Return the GitHub App installation token used to open the PR."""
     return await get_github_app_installation_token(target_repo=f"{owner}/{repo}"), "bot"
 
 
@@ -262,9 +238,8 @@ def _access_failure_payload(
             "to, or able to see this repository or one of the PR branches"
         ),
         suggested_action=(
-            "install or grant the Open SWE GitHub App and the triggering user's GitHub "
-            "authorization access to this repository, verify the base/head branches exist, "
-            "then ask Open SWE to retry opening the PR"
+            "install or grant the Open SWE GitHub App access to this repository, verify the "
+            "base/head branches exist, then ask Open SWE to retry opening the PR"
         ),
         branch_pushed=branch_pushed,
         failed_step=failed_step,
@@ -738,8 +713,8 @@ async def _open_pull_request(
             token_kind=kind,
             http_status=None,
             reason="No GitHub token was available to open the pull request",
-            likely_cause="the triggering user is not authorized and no GitHub App token is available",
-            suggested_action="connect GitHub authorization or install/grant the Open SWE GitHub App, then retry",
+            likely_cause="the GitHub App installation token is unavailable",
+            suggested_action="install or grant the Open SWE GitHub App access, then retry",
             branch_pushed=None,
             failed_step="resolve_pr_author_token",
         )
@@ -915,11 +890,10 @@ async def open_pull_request(
     draft: bool = True,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Open a draft GitHub pull request attributed to the triggering user.
+    """Open a draft GitHub pull request with the GitHub App installation token.
 
-    Use this to OPEN a NEW pull request (instead of `gh pr create`) so the PR is
-    created as the person who triggered the run rather than open-swe[bot]. Push
-    your branch with `git push origin <branch>` BEFORE calling this.
+    Use this to OPEN a NEW pull request instead of `gh pr create`. Push your
+    branch with `git push origin <branch>` BEFORE calling this.
 
     For everything else — updating an existing PR, marking it ready for review,
     commenting, reading status — keep using `GH_TOKEN=dummy gh`. If a PR already

@@ -153,15 +153,11 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
         assert role == "agent"
         return _VISION_MODEL, "medium"
 
-    async def fake_ensure_token(login: str) -> None:
-        return None
-
     async def fake_resolve_email(login: str, prof: dict[str, object]) -> str:
         return f"{login}@example.com"
 
     monkeypatch.setattr(thread_api, "get_profile", fake_profile)
     monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
 
 
@@ -485,15 +481,11 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
     async def fake_get_profile(login: str) -> dict[str, object]:
         return {}
 
-    async def fake_ensure_token(login: str) -> None:
-        pass
-
     async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
         return f"{login}@example.com"
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
     monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
 
     command = {
@@ -525,15 +517,11 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
     async def fake_get_profile(login: str) -> dict[str, object]:
         return {}
 
-    async def fake_ensure_token(login: str) -> None:
-        pass
-
     async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
         return f"{login}@example.com"
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
     monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
 
     command = {
@@ -567,15 +555,11 @@ async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(mon
     async def fake_get_profile(login: str) -> dict[str, object]:
         return {}
 
-    async def fake_ensure_token(login: str) -> None:
-        pass
-
     async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
         return f"{login}@example.com"
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
     monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
 
     command = {
@@ -617,15 +601,11 @@ async def test_enrich_run_start_command_does_not_attribute_owner_message(monkeyp
     async def fake_get_profile(login: str) -> dict[str, object]:
         return {}
 
-    async def fake_ensure_token(login: str) -> None:
-        pass
-
     async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
         return f"{login}@example.com"
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
     monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
 
     command = {
@@ -660,16 +640,12 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         assert login == "octocat"
         return {}
 
-    async def fake_ensure_token(login: str) -> None:
-        assert login == "octocat"
-
     async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
         assert login == "octocat"
         return "octocat@example.com"
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
     monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
 
     command = {
@@ -762,9 +738,6 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     async def fake_get_profile(login: str) -> dict[str, object]:
         return {}
 
-    async def fake_ensure_token(login: str) -> None:
-        pass
-
     async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
         return f"{login}@example.com"
 
@@ -778,7 +751,6 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
     monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
     monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(

@@ -26,6 +26,12 @@ _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 _TEST_SLACK_SECRET = "test-slack-secret"
 
 
+@pytest.fixture(autouse=True)
+def _clear_repo_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset())
+    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_REPOS", frozenset())
+
+
 def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
     """Compute the X-Hub-Signature-256 header value for raw bytes."""
     sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
@@ -1221,9 +1227,6 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(
 
     monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(
-        webhook_common, "get_github_app_installation_token", fake_get_github_app_installation_token
-    )
-    monkeypatch.setattr(
         webhook_common,
         "get_github_app_installation_token_with_expiry",
         fake_get_github_app_installation_token_with_expiry,
@@ -1346,7 +1349,7 @@ async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
     assert result["success"] is True
 
 
-def test_process_github_pr_comment_without_email_skips(
+def test_process_github_pr_comment_without_email_uses_app_token(
     monkeypatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -1362,6 +1365,10 @@ def test_process_github_pr_comment_without_email_skips(
             None,
         )
 
+    async def fake_resolve(thread_id: str, target_repo: str | None = None) -> str:
+        captured["target_repo"] = target_repo
+        return "app-token"
+
     async def fake_react(*args, **kwargs) -> bool:
         captured["reaction_token"] = kwargs["token"]
         return True
@@ -1374,9 +1381,7 @@ def test_process_github_pr_comment_without_email_skips(
         captured["triggered"] = {"args": args, "kwargs": kwargs}
 
     monkeypatch.setattr(webhook_common, "extract_pr_context", fake_extract_pr_context)
-    monkeypatch.setattr(
-        webhook_common, "email_for_login", lambda login: asyncio.sleep(0, result=None)
-    )
+    monkeypatch.setattr(webhook_common, "_get_or_resolve_thread_github_token", fake_resolve)
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react)
     monkeypatch.setattr(webhook_common, "fetch_pr_comments_since_last_tag", fake_fetch_comments)
     monkeypatch.setattr(webhook_common, "_trigger_or_queue_run", fake_trigger_or_queue_run)
@@ -1391,21 +1396,21 @@ def test_process_github_pr_comment_without_email_skips(
         )
     )
 
-    assert captured == {}
+    assert captured["target_repo"] == "langchain-ai/open-swe"
+    assert captured["reaction_token"] == "app-token"
+    assert captured["fetch_token"] == "app-token"
+    assert "triggered" in captured
 
 
-def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch) -> None:
+def test_process_github_issue_uses_app_token_for_reaction(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     async def fake_get_or_resolve_thread_github_token(
-        thread_id: str, email: str, target_repo: str | None = None
+        thread_id: str, target_repo: str | None = None
     ) -> str | None:
         captured["thread_id"] = thread_id
-        captured["email"] = email
-        return "user-token"
-
-    async def fake_get_github_app_installation_token(**_kwargs: object) -> str | None:
-        return None
+        captured["target_repo"] = target_repo
+        return "app-token"
 
     async def fake_react_to_github_comment(
         repo_config: dict[str, str],
@@ -1439,9 +1444,6 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
         fake_get_or_resolve_thread_github_token,
     )
     monkeypatch.setattr(
-        webhook_common, "get_github_app_installation_token", fake_get_github_app_installation_token
-    )
-    monkeypatch.setattr(
         webhook_common, "_thread_exists", lambda thread_id: asyncio.sleep(0, result=False)
     )
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
@@ -1473,8 +1475,9 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
         )
     )
 
-    assert captured["reaction_token"] == "user-token"
-    assert captured["fetch_token"] == "user-token"
+    assert captured["reaction_token"] == "app-token"
+    assert captured["fetch_token"] == "app-token"
+    assert captured["target_repo"] == "langchain-ai/open-swe"
     assert captured["comment_id"] == 999
     assert captured["run_created"] is True
 
@@ -1483,12 +1486,9 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     captured: dict[str, object] = {}
 
     async def fake_get_or_resolve_thread_github_token(
-        thread_id: str, email: str, target_repo: str | None = None
+        thread_id: str, target_repo: str | None = None
     ) -> str | None:
-        return "user-token"
-
-    async def fake_get_github_app_installation_token(**_kwargs: object) -> str | None:
-        return None
+        return "app-token"
 
     async def fake_react_to_github_comment(
         repo_config: dict[str, str],
@@ -1520,9 +1520,6 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
         webhook_common,
         "_get_or_resolve_thread_github_token",
         fake_get_or_resolve_thread_github_token,
-    )
-    monkeypatch.setattr(
-        webhook_common, "get_github_app_installation_token", fake_get_github_app_installation_token
     )
     monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)

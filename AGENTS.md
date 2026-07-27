@@ -105,7 +105,7 @@ Supported model IDs and per-model effort/reasoning rules live in `agent/dashboar
 
 ### Auth
 
-- **GitHub**: dual-mode. User OAuth tokens are encrypted at rest in the dashboard OAuth store and cached only in process during a run (`utils/auth.py:resolve_github_token`, `utils/github_token.py`). When no user token is available, falls back to a GitHub App installation token (`utils/github_app.py`). The installation token is also what configures the LangSmith sandbox's GitHub proxy.
+- **GitHub**: agent execution always uses repository-scoped GitHub App installation tokens (`utils/auth.py:resolve_github_token`, `utils/github_app.py`). Dashboard OAuth tokens remain encrypted at rest and are used for viewer identity and repository-access checks, not as execution credentials. Installation tokens also configure the LangSmith sandbox's GitHub proxy.
 - **Webhooks**: GitHub signatures verified in `utils/github_comments.py:verify_github_signature`; Slack/Linear handled in their respective utils.
 - **Dashboard / UI**: GitHub OAuth login lives in `agent/dashboard/oauth.py` and `routes.py` (`/auth/login`, `/auth/callback`, `/auth/logout`, `/me`).
 

@@ -261,6 +261,7 @@ class TestCreateSandboxWithProxy:
                 await _create_sandbox_with_proxy(thread_id="thread-123")
 
             mock_get_token.assert_awaited_once_with()
+            mock_create.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_skips_proxy_for_non_langsmith(self) -> None:
@@ -297,6 +298,8 @@ class TestCreateSandboxWithProxy:
 
             with pytest.raises(ValueError, match="installation token is unavailable"):
                 await _create_sandbox_with_proxy()
+
+            mock_create.assert_not_awaited()
 
 
 class _DummyAgent:
@@ -493,6 +496,26 @@ class TestRefreshProxyOnSandboxReuse:
                 github_proxy_repositories=None,
                 repo=None,
             )
+
+    @pytest.mark.asyncio
+    async def test_token_resolution_failure_does_not_recreate_sandbox(self) -> None:
+        mock_sandbox = MagicMock(id="sandbox-healthy")
+
+        with (
+            patch(
+                "agent.server._resolve_proxy_token",
+                new_callable=AsyncMock,
+                return_value=(None, None, None),
+            ),
+            patch("agent.server._recreate_sandbox", new_callable=AsyncMock) as mock_recreate,
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
+        ):
+            from agent.server import _refresh_github_proxy_or_recreate
+
+            with pytest.raises(ValueError, match="installation token is unavailable"):
+                await _refresh_github_proxy_or_recreate(mock_sandbox, "thread-123")
+
+            mock_recreate.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_starts_stopped_langsmith_sandbox_before_proxy_refresh(self) -> None:

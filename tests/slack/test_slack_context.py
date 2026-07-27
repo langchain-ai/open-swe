@@ -557,19 +557,11 @@ def _setup_slack_mention_fakes(
     async def fake_refresh_cache() -> list:
         return []
 
-    async def fake_get_valid_access_token(login):
-        return "user-token"
-
-    async def fake_post_prompt(*args, **kwargs) -> None:
-        captured["prompt"] = {"args": args, "kwargs": kwargs}
-
     monkeypatch.setattr(webhook_common, "post_slack_trace_reply", fake_post_slack_trace_reply)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClientForProcess())
     monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
     monkeypatch.setattr(webhook_common, "login_for_email", fake_login_for_email)
     monkeypatch.setattr(webhook_common, "refresh_user_mapping_cache", fake_refresh_cache)
-    monkeypatch.setattr(webhook_common, "get_valid_access_token", fake_get_valid_access_token)
-    monkeypatch.setattr(webhook_common, "_post_account_link_prompt", fake_post_prompt)
 
 
 def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
@@ -730,33 +722,21 @@ def test_process_slack_mention_skips_trace_reply_on_followup_mention(
     assert run_create["thread_id"] == expected_thread_id
 
 
-def test_process_slack_mention_unmapped_user_blocked_and_prompted(
+def test_process_slack_mention_unmapped_user_proceeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unmapped Slack user is blocked (no run) and prompted to link."""
-    from agent.dashboard import user_mappings
-
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
-    user_mappings.clear_cache()
 
-    async def fake_thread_exists(thread_id: str) -> bool:
+    async def return_none(*_args: object) -> None:
+        return None
+
+    async def thread_missing(_thread_id: str) -> bool:
         return False
 
-    async def fake_login_for_slack_id(slack_user_id):
-        return None
-
-    async def fake_login_for_email(email):
-        return None
-
-    async def fake_post_prompt(channel_id, thread_ts, user_id, user_email, reason="unlinked"):
-        captured["prompt"] = {"user_id": user_id, "user_email": user_email, "reason": reason}
-
-    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
-    monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
-    monkeypatch.setattr(webhook_common, "login_for_email", fake_login_for_email)
-    monkeypatch.setattr(webhook_common, "_post_account_link_prompt", fake_post_prompt)
-    monkeypatch.setattr(webhook_common, "is_bot_token_only_mode", lambda: False)
+    monkeypatch.setattr(webhook_common, "_thread_exists", thread_missing)
+    monkeypatch.setattr(webhook_common, "login_for_slack_id", return_none)
+    monkeypatch.setattr(webhook_common, "login_for_email", return_none)
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
@@ -772,42 +752,24 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
         )
     )
 
-    assert "run_create" not in captured
-    assert captured["prompt"] == {
-        "user_id": "U123",
-        "user_email": "mason@example.com",
-        "reason": "unlinked",
-    }
+    assert "run_create" in captured
+    assert "prompt" not in captured
 
 
-def test_process_slack_mention_mapped_user_no_token_record_prompts_setup(
+def test_process_slack_mention_mapped_user_without_oauth_proceeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A mapped user who never signed in (no token record) is prompted to set up."""
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
 
-    async def fake_thread_exists(thread_id: str) -> bool:
+    async def fake_thread_exists(_thread_id: str) -> bool:
         return False
 
-    async def fake_login_for_slack_id(slack_user_id):
+    async def fake_login_for_slack_id(slack_user_id: str) -> str | None:
         return "mason-gh" if slack_user_id == "U123" else None
 
-    async def fake_get_valid_access_token(login):
-        return None
-
-    async def fake_has_token_record(login):
-        return False
-
-    async def fake_post_prompt(channel_id, thread_ts, user_id, user_email, reason="unlinked"):
-        captured["prompt"] = {"reason": reason}
-
     monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
     monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
-    monkeypatch.setattr(webhook_common, "get_valid_access_token", fake_get_valid_access_token)
-    monkeypatch.setattr(webhook_common, "has_access_token_record", fake_has_token_record)
-    monkeypatch.setattr(webhook_common, "_post_account_link_prompt", fake_post_prompt)
-    monkeypatch.setattr(webhook_common, "is_bot_token_only_mode", lambda: False)
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
@@ -823,55 +785,8 @@ def test_process_slack_mention_mapped_user_no_token_record_prompts_setup(
         )
     )
 
-    assert "run_create" not in captured
-    assert captured["prompt"] == {"reason": "unlinked"}
-
-
-def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A user who signed in before but whose token is now unusable is told to re-auth."""
-    captured: dict[str, object] = {}
-    _setup_slack_mention_fakes(monkeypatch, captured)
-
-    async def fake_thread_exists(thread_id: str) -> bool:
-        return False
-
-    async def fake_login_for_slack_id(slack_user_id):
-        return "mason-gh" if slack_user_id == "U123" else None
-
-    async def fake_get_valid_access_token(login):
-        return None
-
-    async def fake_has_token_record(login):
-        return True
-
-    async def fake_post_prompt(channel_id, thread_ts, user_id, user_email, reason="unlinked"):
-        captured["prompt"] = {"reason": reason}
-
-    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
-    monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
-    monkeypatch.setattr(webhook_common, "get_valid_access_token", fake_get_valid_access_token)
-    monkeypatch.setattr(webhook_common, "has_access_token_record", fake_has_token_record)
-    monkeypatch.setattr(webhook_common, "_post_account_link_prompt", fake_post_prompt)
-    monkeypatch.setattr(webhook_common, "is_bot_token_only_mode", lambda: False)
-
-    asyncio.run(
-        slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000200",
-                "user_id": "U123",
-                "text": "<@UBOT> do the thing",
-                "bot_user_id": "UBOT",
-            },
-            {"owner": "langchain-ai", "name": "open-swe"},
-        )
-    )
-
-    assert "run_create" not in captured
-    assert captured["prompt"] == {"reason": "revoked"}
+    assert "run_create" in captured
+    assert "prompt" not in captured
 
 
 def test_process_slack_mention_mapped_user_with_token_runs_as_user(
@@ -921,45 +836,6 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
     # resolve to a mapping (login_for_email returns None in this harness).
     assert owner_meta["github_login"] == "mason-gh"
     assert "use_installation_token_fallback" not in configurable
-    assert "prompt" not in captured
-
-
-def test_process_slack_mention_bot_only_mode_runs_without_user_token(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """In bot-token-only mode an unmapped user still gets a run (no blocking)."""
-    captured: dict[str, object] = {}
-    _setup_slack_mention_fakes(monkeypatch, captured)
-
-    async def fake_thread_exists(thread_id: str) -> bool:
-        return False
-
-    async def fake_login_for_slack_id(slack_user_id):
-        return None
-
-    async def fake_login_for_email(email):
-        return None
-
-    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
-    monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
-    monkeypatch.setattr(webhook_common, "login_for_email", fake_login_for_email)
-    monkeypatch.setattr(webhook_common, "is_bot_token_only_mode", lambda: True)
-
-    asyncio.run(
-        slack_webhooks.process_slack_mention(
-            {
-                "channel_id": "C123",
-                "thread_ts": "1700000000.000100",
-                "event_ts": "1700000000.000200",
-                "user_id": "U123",
-                "text": "<@UBOT> do the thing",
-                "bot_user_id": "UBOT",
-            },
-            {"owner": "langchain-ai", "name": "open-swe"},
-        )
-    )
-
-    assert "run_create" in captured
     assert "prompt" not in captured
 
 

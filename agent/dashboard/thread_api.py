@@ -248,12 +248,6 @@ def _user_message_content(
     ]
 
 
-async def _ensure_dashboard_github_token(login: str) -> None:
-    token = await get_valid_access_token(login)
-    if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
-
-
 def _thread_owner_login(metadata: Mapping[str, Any]) -> str | None:
     login = metadata.get("github_login")
     return login.strip() if isinstance(login, str) and login.strip() else None
@@ -1186,8 +1180,6 @@ async def _enrich_run_start_command(
     if not isinstance(params, dict):
         params = {}
         command["params"] = params
-
-    await _ensure_dashboard_github_token(login)
 
     client_config = params.get("config")
     if not isinstance(client_config, dict):
