@@ -16,7 +16,12 @@ from ..dispatch import create_durable_run
 from ..utils.slack import post_slack_top_level_message_with_ts, store_slack_run_mapping
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
 from ..utils.thread_ops import langgraph_client
-from .options import SUPPORTED_MODEL_IDS, gate_fable_model, model_supports_effort
+from .options import (
+    SUPPORTED_MODEL_IDS,
+    canonical_model_pair,
+    gate_fable_model,
+    model_supports_effort,
+)
 from .profiles import get_profile, get_valid_access_token
 from .repo_access import repo_config_for_user, require_repo_access_for_user
 from .team_settings import get_team_fable_enabled
@@ -93,8 +98,11 @@ def _now_iso() -> str:
 def _normalize_model_choice(
     model_id: str | None, effort: str | None
 ) -> tuple[str | None, str | None]:
-    if not isinstance(model_id, str) or model_id not in SUPPORTED_MODEL_IDS:
+    if not isinstance(model_id, str):
         return None, None
+    if model_id not in SUPPORTED_MODEL_IDS:
+        canonical = canonical_model_pair(model_id, effort)
+        return canonical if canonical is not None else (None, None)
     if not isinstance(effort, str) or not model_supports_effort(model_id, effort):
         return None, None
     return model_id, effort

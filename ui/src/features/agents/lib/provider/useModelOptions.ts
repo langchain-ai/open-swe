@@ -62,8 +62,12 @@ const EFFORT_LABELS: Record<string, string> = {
   low: "Low",
   medium: "Medium",
   high: "High",
-  xhigh: "XHigh",
+  xhigh: "Extra High",
   max: "Max",
+}
+
+export function formatEffort(effort: string): string {
+  return EFFORT_LABELS[effort] ?? effort
 }
 
 export function formatModelSelection(
@@ -73,6 +77,5 @@ export function formatModelSelection(
   if (!selection) return "Default"
   const model = models.find((m) => m.id === selection.modelId)
   const modelLabel = model?.label ?? selection.modelId
-  const effortLabel = EFFORT_LABELS[selection.effort] ?? selection.effort
-  return `${modelLabel} ${effortLabel}`
+  return `${modelLabel} ${formatEffort(selection.effort)}`
 }

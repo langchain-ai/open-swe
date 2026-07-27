@@ -47,7 +47,7 @@ def test_eval_target_passes_configured_cap(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_eval_target_passes_model_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REVIEWER_EVAL_MODEL_ID", "anthropic:claude-opus-4-8")
+    monkeypatch.setenv("REVIEWER_EVAL_MODEL_ID", "anthropic:claude-opus-5")
     monkeypatch.setenv("REVIEWER_EVAL_REASONING_EFFORT", "high")
 
     configurable = target._build_configurable(
@@ -61,7 +61,7 @@ def test_eval_target_passes_model_overrides(monkeypatch: pytest.MonkeyPatch) -> 
         }
     )
 
-    assert configurable["reviewer_model_id"] == "anthropic:claude-opus-4-8"
+    assert configurable["reviewer_model_id"] == "anthropic:claude-opus-5"
     assert configurable["reviewer_reasoning_effort"] == "high"
 
 

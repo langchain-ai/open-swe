@@ -19,6 +19,7 @@ from ..utils.gateway import resolve_gateway_enabled
 from .options import (
     FABLE_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
+    canonical_model_pair,
     default_model_pair,
     gate_fable_model,
     model_supports_effort,
@@ -186,15 +187,15 @@ def _validate_model_effort_pair(model: str | None, effort: str | None, role: str
         raise ValueError(f"effort {effort!r} not supported by {role} model {model!r}")
 
 
-_RETIRED_MODEL_REPLACEMENTS: dict[str, str] = {}
-
-
 def _normalize_stale_model_pair(
     model: str | None, effort: str | None
 ) -> tuple[str | None, str | None]:
     if model is None:
         return model, effort
-    return _RETIRED_MODEL_REPLACEMENTS.get(model, model), effort
+    canonical = canonical_model_pair(model, effort)
+    if canonical is not None:
+        return canonical
+    return model, effort
 
 
 _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
