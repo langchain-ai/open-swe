@@ -10,16 +10,19 @@ Keep plan adjudication and spot-audits at full operator weight. Use these files 
 ## Deployment
 
 This skill deploys as a git checkout, never as copied files. Clone the repo once per
-machine, move any existing copied install aside (`ln -sfn` will not replace a real
-directory — it creates the link inside it and the stale copy stays active), then link:
+machine, delete any copied install and managed backup copies, then link. Do not rename
+or move copies aside: the harnesses discover those renamed directories as additional
+skills. `ln -sfn` will not replace a real directory, so deletion must happen first:
 
 ```bash
 dest=~/.claude/skills/openswe-wave
-[ -d "$dest" ] && [ ! -L "$dest" ] && mv "$dest" "$dest.pre-checkout"
-ln -sfn <checkout>/.claude/skills/openswe-wave "$dest"
+rm -rf -- "$dest" "$dest".pre-checkout* "$dest".previous.*
+ln -s <checkout>/.claude/skills/openswe-wave "$dest"
 ```
 
-(and the same into `${CODEX_HOME:-$HOME/.codex}/skills`.) Upgrade with
+(and the same into `${CODEX_HOME:-$HOME/.codex}/skills`.) On managed operator hosts,
+use `studio2-ops/bin/install-release-skills`, which performs this deletion-only
+migration for both Open SWE skills and verifies all four links. Upgrade with
 `git -C <checkout> pull` — plain `git pull` from the target repository checkout the
 setup below has you working in would pull the wrong repo. Answer "what is this
 machine running" with `git -C <checkout> rev-parse HEAD`; detect drift with

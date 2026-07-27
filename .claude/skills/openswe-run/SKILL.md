@@ -49,20 +49,22 @@ between wakes — that is the token waste this skill exists to remove.
 ## Deployment
 
 This skill deploys as a git checkout, never as copied files. Clone the repo once per
-machine, migrate any existing copied install out of the way, then symlink both skill
-directories into each surface. `ln -sfn` does **not** replace an existing real
-directory — it creates the link *inside* it and the stale copy stays active — so the
-move-aside step is mandatory on machines that ever had a copied install:
+machine, delete any existing copied install and managed backup copies, then symlink
+both skill directories into each surface. Do not rename or move copied skills aside:
+the harnesses discover those renamed directories as additional skills. `ln -sfn` does
+**not** replace an existing real directory, so deletion must happen first:
 
 ```bash
 for name in openswe-run openswe-wave; do
   dest=~/.claude/skills/$name
-  [ -d "$dest" ] && [ ! -L "$dest" ] && mv "$dest" "$dest.pre-checkout"
-  ln -sfn <checkout>/.claude/skills/$name "$dest"
+  rm -rf -- "$dest" "$dest".pre-checkout* "$dest".previous.*
+  ln -s <checkout>/.claude/skills/$name "$dest"
 done
 ```
 
-(and the same into `${CODEX_HOME:-$HOME/.codex}/skills`). The scripts resolve their
+(and the same into `${CODEX_HOME:-$HOME/.codex}/skills`). On managed operator hosts,
+use `studio2-ops/bin/install-release-skills`, which performs this deletion-only
+migration and verifies all four links. The scripts resolve their
 wave dependencies from the sibling skill in the checkout, so no vendoring or copying
 step exists. Upgrade with `git -C <checkout> pull`; provenance is
 `git -C <checkout> rev-parse HEAD`; drift is `git -C <checkout> status`.
