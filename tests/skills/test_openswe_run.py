@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import importlib.machinery
 import importlib.util
 import re
@@ -98,6 +99,148 @@ def test_dispatch_template_leaves_no_placeholder_its_own_guard_would_reject() ->
     )
 
     run.guard_placeholders("ABC-1", body, False)
+
+
+def _comment(
+    comment_id: str,
+    body: str,
+    created_at: str,
+    user_id: str,
+    user_name: str,
+) -> dict:
+    return {
+        "id": comment_id,
+        "body": body,
+        "createdAt": created_at,
+        "user": {"id": user_id, "name": user_name},
+    }
+
+
+def _plan_output(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    comments: list[dict],
+    *,
+    last: int | None = None,
+    viewer_id: str = "viewer-1",
+) -> str:
+    monkeypatch.setattr(run, "ensure_env", lambda *args, **kwargs: [])
+    monkeypatch.setattr(run, "resolve_issue", lambda ticket: {"id": "issue-1"})
+    monkeypatch.setattr(
+        run,
+        "linear_snapshot",
+        lambda issue_id: {"viewer": {"id": viewer_id}, "comments": comments},
+    )
+
+    assert run.cmd_plan(argparse.Namespace(ticket="ABC-1", last=last)) == 0
+    return capsys.readouterr().out
+
+
+def test_plan_defaults_to_all_non_viewer_comments_since_latest_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    comments = [
+        _comment(
+            "approval", "@openswe Plan approved.", "2026-07-27T21:38:30Z", "viewer-1", "Operator"
+        ),
+        _comment("plan", "## Plan\nImplement it", "2026-07-27T21:37:58Z", "agent-1", "Open SWE"),
+        _comment(
+            "progress", "Re-anchoring against main", "2026-07-27T21:34:58Z", "agent-1", "Open SWE"
+        ),
+        _comment("ack", "On it!", "2026-07-27T21:34:41Z", "agent-1", "Open SWE"),
+        _comment(
+            "dispatch",
+            "@openswe repo owner/name — Execute ABC-1 only.\n\nRequired scope: fix it.",
+            "2026-07-27T21:34:40Z",
+            "viewer-1",
+            "Operator",
+        ),
+        _comment("old", "Earlier run", "2026-07-27T20:00:00Z", "agent-1", "Open SWE"),
+    ]
+
+    output = _plan_output(monkeypatch, capsys, comments)
+
+    assert "Earlier run" not in output
+    assert output.index("On it!") < output.index("Re-anchoring against main")
+    assert output.index("Re-anchoring against main") < output.index("## Plan")
+    assert output.count("----- Open SWE at") == 3
+
+
+def test_plan_scopes_after_custom_repo_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    comments = [
+        _comment("old", "Earlier run", "2026-07-27T20:00:00Z", "agent-1", "Open SWE"),
+        _comment(
+            "dispatch",
+            "@openswe repo owner/name\n\nCustom dispatch body for ABC-1.",
+            "2026-07-27T21:34:40Z",
+            "viewer-1",
+            "Operator",
+        ),
+        _comment("ack", "On it!", "2026-07-27T21:34:41Z", "agent-1", "Open SWE"),
+        _comment("plan", "## Plan", "2026-07-27T21:37:58Z", "agent-1", "Open SWE"),
+    ]
+
+    output = _plan_output(monkeypatch, capsys, comments)
+
+    assert "Earlier run" not in output
+    assert output.index("On it!") < output.index("## Plan")
+    assert output.count("----- Open SWE at") == 2
+
+
+def test_plan_without_dispatch_falls_back_to_all_comments_with_true_authors(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    comments = [
+        _comment("agent", "## Plan", "2026-07-27T21:37:58Z", "agent-1", "Open SWE"),
+        _comment(
+            "operator", "Please revise", "2026-07-27T21:35:00Z", "operator-1", "Mobilyze Agents"
+        ),
+    ]
+
+    output = _plan_output(monkeypatch, capsys, comments, viewer_id="service-viewer")
+
+    assert output.index("Mobilyze Agents") < output.index("Open SWE")
+    assert "----- Mobilyze Agents at 2026-07-27T21:35:00Z -----" in output
+    assert "----- Open SWE at 2026-07-27T21:37:58Z -----" in output
+
+
+@pytest.mark.parametrize(
+    ("last", "expected", "excluded"),
+    [
+        (2, ["Progress", "## Plan"], ["On it!"]),
+        (10, ["On it!", "Progress", "## Plan"], []),
+    ],
+)
+def test_plan_last_narrows_the_dispatch_scoped_set(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    last: int,
+    expected: list[str],
+    excluded: list[str],
+) -> None:
+    comments = [
+        _comment("plan", "## Plan", "2026-07-27T21:37:58Z", "agent-1", "Open SWE"),
+        _comment("progress", "Progress", "2026-07-27T21:34:58Z", "agent-1", "Open SWE"),
+        _comment("ack", "On it!", "2026-07-27T21:34:41Z", "agent-1", "Open SWE"),
+        _comment(
+            "dispatch",
+            "@openswe repo owner/name — Execute ABC-1 only.",
+            "2026-07-27T21:34:40Z",
+            "viewer-1",
+            "Operator",
+        ),
+    ]
+
+    output = _plan_output(monkeypatch, capsys, comments, last=last)
+
+    positions = [output.index(body) for body in expected]
+    assert positions == sorted(positions)
+    assert all(body not in output for body in excluded)
 
 
 def test_locked_plan_statuses_match_the_products_refusals() -> None:

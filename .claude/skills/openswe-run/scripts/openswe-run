@@ -633,8 +633,23 @@ def cmd_plan(args: argparse.Namespace) -> int:
     issue = resolve_issue(args.ticket)
     snapshot = linear_snapshot(issue["id"])
     viewer_id = str((snapshot["viewer"] or {}).get("id") or "")
-    others = [c for c in snapshot["comments"] if str((c.get("user") or {}).get("id")) != viewer_id]
-    for comment in others[-args.last :]:
+    comments = sorted(
+        snapshot["comments"],
+        key=lambda comment: (str(comment.get("createdAt") or ""), str(comment.get("id") or "")),
+    )
+    dispatch = re.compile(r"^@openswe\s+repo\s+[^\s/]+/[^\s/]+\b", re.IGNORECASE)
+    start = 0
+    for index, comment in enumerate(comments):
+        if dispatch.match(str(comment.get("body") or "")):
+            start = index + 1
+    others = [
+        comment
+        for comment in comments[start:]
+        if str((comment.get("user") or {}).get("id")) != viewer_id
+    ]
+    if args.last is not None:
+        others = others[-args.last :]
+    for comment in others:
         user = (comment.get("user") or {}).get("name")
         print(f"----- {user} at {comment.get('createdAt')} -----")
         print(comment.get("body") or "")
@@ -777,7 +792,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     plan = sub.add_parser("plan", help="print recent non-viewer comments (the posted plan)")
     plan.add_argument("--ticket", required=True)
-    plan.add_argument("--last", type=int, default=1)
+    plan.add_argument("--last", type=int)
     plan.set_defaults(func=cmd_plan)
 
     approve = sub.add_parser("approve", help="post plan approval (requires --adjudicated)")
