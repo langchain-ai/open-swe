@@ -36,6 +36,7 @@ from langchain_core.language_models import BaseChatModel
 
 from .dashboard.options import (
     SUPPORTED_MODEL_IDS,
+    canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
@@ -199,6 +200,9 @@ async def _resolve_chat_model(configurable: dict[str, Any]) -> tuple[str, str]:
         and model_supports_effort(model_id, effort)
     ):
         return model_id, effort
+    canonical = canonical_model_pair(model_id, effort)
+    if canonical is not None:
+        return canonical
     # Team review-chat default, which itself inherits the Agent default if unset.
     return await _cached_team_chat_model()
 

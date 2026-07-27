@@ -1,11 +1,13 @@
 import pytest
 
-from agent.dashboard.options import SUPPORTED_MODELS
+from agent.dashboard.options import SUPPORTED_MODELS, provider_fallback_pair
 from agent.utils.model import (
     fallback_model_id_for,
     fireworks_reasoning_effort_for,
     provider_model_kwargs,
 )
+
+KIMI_K3_ID = "fireworks:accounts/fireworks/models/kimi-k3-code"
 
 
 def test_fireworks_reasoning_effort_maps_effort() -> None:
@@ -17,7 +19,7 @@ def test_fireworks_reasoning_effort_maps_effort() -> None:
 
 def test_provider_model_kwargs_for_fireworks() -> None:
     kwargs = provider_model_kwargs(
-        "fireworks:accounts/fireworks/models/kimi-k2p7-code",
+        KIMI_K3_ID,
         "high",
         max_tokens=16_000,
     )
@@ -25,19 +27,22 @@ def test_provider_model_kwargs_for_fireworks() -> None:
     assert kwargs.get("model_kwargs") == {"reasoning_effort": "high"}
 
 
-def test_kimi_k2p7_is_supported() -> None:
-    kimi_k2p7 = next(
-        (m for m in SUPPORTED_MODELS if m["id"].endswith("kimi-k2p7-code")),
-        None,
-    )
-    assert kimi_k2p7 is not None
-    assert kimi_k2p7.get("efforts") == ["low", "medium", "high"]
-    assert "none" not in kimi_k2p7.get("efforts", [])
-    assert kimi_k2p7.get("default_effort") == "high"
-    model_id = kimi_k2p7.get("id")
-    assert isinstance(model_id, str)
-    kwargs = provider_model_kwargs(model_id, "high", max_tokens=16_000)
+def test_kimi_k3_is_supported() -> None:
+    kimi_k3 = next((m for m in SUPPORTED_MODELS if m["id"] == KIMI_K3_ID), None)
+    assert kimi_k3 is not None
+    assert kimi_k3.get("label") == "Kimi K3"
+    assert kimi_k3.get("efforts") == ["low", "medium", "high"]
+    assert "none" not in kimi_k3.get("efforts", [])
+    assert kimi_k3.get("default_effort") == "high"
+    kwargs = provider_model_kwargs(KIMI_K3_ID, "high", max_tokens=16_000)
     assert kwargs.get("model_kwargs") == {"reasoning_effort": "high"}
+
+
+def test_renamed_kimi_k2p7_migrates_to_kimi_k3() -> None:
+    assert all(not m["id"].endswith("kimi-k2p7-code") for m in SUPPORTED_MODELS)
+    assert provider_fallback_pair(
+        "fireworks:accounts/fireworks/models/kimi-k2p7-code", "medium"
+    ) == (KIMI_K3_ID, "medium")
 
 
 def test_provider_model_kwargs_for_fireworks_none_disables_reasoning() -> None:
