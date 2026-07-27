@@ -8,7 +8,7 @@ resolution-markers = [
 
 [manifest]
 overrides = [
-    { name = "deepagents", specifier = "==0.7.0b1" },
+    { name = "deepagents", specifier = "==0.7.0b2" },
     { name = "wcmatch", specifier = ">=11.0" },
 ]
 
@@ -668,7 +668,7 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.7.0b1"
+version = "0.7.0b2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
@@ -678,9 +678,9 @@ dependencies = [
     { name = "langsmith" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cc/01/e6f554dbfe6219188db4b51ee96d277c4a0dbfddbc834dcb19bd87baf1d2/deepagents-0.7.0b1.tar.gz", hash = "sha256:219eff73f6641ed8c1292b61d1b1772b61ad69ab8e8259dcffa62c9a8397aee3", size = 266341, upload-time = "2026-07-23T16:16:18.734Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/42/61/1cd2455cd7645e60cdffdd7e60ae16c1d99cd355721276efc9e80aaa9a7f/deepagents-0.7.0b2.tar.gz", hash = "sha256:cc6da9edf864041008e7250f4925441e619b5fb711042580e6d9f6c17f0735cd", size = 263046, upload-time = "2026-07-24T03:55:36.585Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3f/7e/1677e806861f5ad4aa9096232f937a6d568414d1a02c0f809c29ffa60ad0/deepagents-0.7.0b1-py3-none-any.whl", hash = "sha256:0ea1e18454b9cb5107181e7d9059dcff1355e544127725e5c3fbf0290c91c9a5", size = 292176, upload-time = "2026-07-23T16:16:17.402Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/04/d1603d00b9b77a57257ac925ad7a7b32db501453da596bbcabbc013faff7/deepagents-0.7.0b2-py3-none-any.whl", hash = "sha256:088758990a290e8a5b8d7b64a800ae4a538e0198fd074ac83158a25b1c3350d7", size = 289122, upload-time = "2026-07-24T03:55:35.227Z" },
 ]
 
 [[package]]
@@ -2079,7 +2079,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=49.0.0" },
-    { name = "deepagents", specifier = "==0.7.0b1" },
+    { name = "deepagents", specifier = "==0.7.0b2" },
     { name = "exa-py", specifier = ">=2.16.0" },
     { name = "fastapi", specifier = ">=0.139.0" },
     { name = "fireworks-ai", specifier = ">=1.2.0a86" },

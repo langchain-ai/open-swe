@@ -4,8 +4,6 @@ import shlex
 from importlib import resources
 from pathlib import Path
 
-from deepagents import HarnessProfile, register_harness_profile
-
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -17,25 +15,6 @@ from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 logger = logging.getLogger(__name__)
 
 DEFAULT_PROMPT_PATH = os.environ.get("DEFAULT_PROMPT_PATH")
-ENABLE_TODOS_ENV_VAR = "OPEN_SWE_ENABLE_TODOS"
-
-
-def _env_flag(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _harness_excluded_tools() -> frozenset[str]:
-    return frozenset() if _env_flag(ENABLE_TODOS_ENV_VAR) else frozenset({"write_todos"})
-
-
-HARNESS_EXCLUDED_TOOLS: frozenset[str] = _harness_excluded_tools()
-
-# Provider keys the harness profile is registered under. deepagents resolves a
-# pre-built model's profile by `provider:identifier` then a provider-only
-# fallback, so registering per provider makes the Open SWE base prompt replace
-# deepagents' generic base regardless of which supported provider the team or
-# profile selects for the agent.
-HARNESS_PROFILE_KEYS: tuple[str, ...] = ("anthropic", "openai", "google_genai", "fireworks")
 
 
 def _load_default_prompt() -> str:
@@ -68,10 +47,8 @@ def _load_default_prompt() -> str:
     return ""
 
 
-# Static, run-invariant guidance shared by the main agent and its subagents.
-# Registered as the harness profile's `base_system_prompt`, it REPLACES
-# deepagents' generic base prompt so there is a single Open SWE voice. The
-# per-thread, main-agent-specific prompt (working dir, repo setup, PR workflow,
+# Static, run-invariant guidance for the main agent. The per-thread,
+# main-agent-specific prompt (working dir, repo setup, PR workflow,
 # source-channel reply) is layered in front of this via `construct_system_prompt`.
 OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on LangGraph and Deep Agents, operating in a remote, git-backed Linux sandbox invoked from Slack, Linear, or GitHub.
 
@@ -341,6 +318,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + "{pr_policy_override_section}"
     + "{collaboration_section}"
     + "{repo_instructions_section}"
+    + "\n\n{shared_base_section}"
 )
 
 
@@ -387,31 +365,7 @@ def construct_system_prompt(
         pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
         collaboration_section=_render_collaboration_section(triggering_user_identity, thread_url),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
+        shared_base_section=OPEN_SWE_SHARED_BASE,
         commit_identity_name=commit_identity_name,
         commit_identity_email=commit_identity_email,
     )
-
-
-def register_open_swe_harness_profile() -> None:
-    """Register Open SWE's harness profile so its base prompt replaces deepagents'.
-
-    Registered per supported provider, the profile's ``base_system_prompt``
-    (``OPEN_SWE_SHARED_BASE``) supplants deepagents' generic base prompt for the
-    main agent and its subagents, leaving a single Open SWE voice. The per-thread
-    main-agent prompt is passed by the server via
-    ``system_prompt=construct_system_prompt(...)`` and is layered in front of the
-    shared base by deepagents. The shared base is intentionally neutral (no
-    PR/commit/mutation guidance — that lives only in the main agent's per-thread
-    prompt) so it is also safe under the read-only reviewer and analyzer graphs,
-    which share these providers. Idempotent in effect: deepagents merges
-    re-registrations under the same key.
-    """
-    profile = HarnessProfile(
-        base_system_prompt=OPEN_SWE_SHARED_BASE,
-        excluded_tools=HARNESS_EXCLUDED_TOOLS,
-    )
-    for key in HARNESS_PROFILE_KEYS:
-        register_harness_profile(key, profile)
-
-
-register_open_swe_harness_profile()
