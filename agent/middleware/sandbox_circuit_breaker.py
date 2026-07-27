@@ -26,12 +26,17 @@ SANDBOX_CIRCUIT_BREAKER_THRESHOLD = 2
 
 
 def sandbox_unreachable_message(
-    *, sandbox_id: str | None = None, sandbox_name: str | None = None
+    *,
+    sandbox_id: str | None = None,
+    sandbox_name: str | None = None,
+    replacement_attempted: bool = False,
 ) -> str:
     """User-facing text for a sandbox that stopped answering.
 
     Deliberately does not claim the sandbox is gone for good — all we observed is
-    that it stopped responding, and it may come back.
+    that it stopped responding, and it may come back. ``replacement_attempted``
+    is for callers allowed to replace an unreachable sandbox (the read-only
+    reviewer), where "Open SWE will not start a replacement" would be untrue.
     """
     identifiers = [
         part
@@ -42,6 +47,12 @@ def sandbox_unreachable_message(
         if part
     ]
     which = f" ({', '.join(identifiers)})" if identifiers else ""
+    if replacement_attempted:
+        return warning(
+            f"This thread's sandbox{which} stopped responding and Open SWE could "
+            "not provision a replacement, so this run had nowhere to work. "
+            "Retrigger this thread to try again."
+        )
     return warning(
         f"This thread's sandbox{which} stopped responding, and Open SWE can't tell "
         "whether it will come back. Open SWE will not start a replacement on its "
@@ -186,13 +197,18 @@ async def post_sandbox_unreachable_notification(
     *,
     sandbox_id: str | None = None,
     sandbox_name: str | None = None,
+    replacement_attempted: bool = False,
 ) -> None:
     configurable = config.get("configurable", {})
     if not isinstance(configurable, Mapping):
         logger.info("No runtime configurable found for sandbox circuit breaker notification")
         return
 
-    message = sandbox_unreachable_message(sandbox_id=sandbox_id, sandbox_name=sandbox_name)
+    message = sandbox_unreachable_message(
+        sandbox_id=sandbox_id,
+        sandbox_name=sandbox_name,
+        replacement_attempted=replacement_attempted,
+    )
 
     slack_target = _get_slack_target(configurable)
     if slack_target is not None:
