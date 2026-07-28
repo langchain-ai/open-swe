@@ -2,6 +2,8 @@
 
 from fastapi import APIRouter
 
+from agent.utils import speedbay_linear_guard
+
 from . import common
 from . import linear as service
 
@@ -47,6 +49,13 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     if data.get("botActor"):
         common.logger.debug("Ignoring webhook: comment is from a bot")
         return {"status": "ignored", "reason": "Comment is from a bot"}
+
+    # SPEEDBAY DEVIATION (OPE-23): plain-API-key comments carry botActor: null,
+    # so the agent's own replies pass the filter above. Drop anything authored
+    # by the runtime key itself to make self-trigger loops impossible.
+    if await speedbay_linear_guard.is_self_comment(payload):
+        common.logger.info("Ignoring webhook: comment authored by the runtime Linear key")
+        return {"status": "ignored", "reason": "Comment authored by the runtime Linear key"}
 
     comment_body = data.get("body", "")
     bot_message_prefixes = [

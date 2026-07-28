@@ -214,13 +214,14 @@ Settings live in the Store, so they survive restarts but not a Store wipe.
 
 ## Upstream deviations (re-check after every merge)
 
-Two upstream-owned files carry edits. Both are marked in-code with
+The upstream-owned files below carry edits. Each is marked in-code with
 `SPEEDBAY DEVIATION` / `SPEEDBAY REGISTRATION` comments.
 
 | File | Edit | Why not elsewhere |
 |---|---|---|
 | `agent/server.py` | Import + one entry in the `get_agent()` middleware list | Sanctioned registration point; no alternative seam |
 | `agent/dashboard/options.py` | `kimi-k3-code` -> `kimi-k3` in `SUPPORTED_MODELS` and `DEPRECATED_MODEL_REPLACEMENTS` | Upstream ships a model id that does not exist on Fireworks (404 from the platform API). `SUPPORTED_MODEL_IDS` gates model selection, so it cannot be fixed from config. **File upstream so this deviation disappears.** |
+| `agent/webhooks/linear_routes.py` | Import + one guard call after the `botActor` check: drop comments authored by the runtime `LINEAR_API_KEY` (`agent/utils/speedbay_linear_guard.py`, OPE-23) | Loop prevention must run at webhook-processing time; there is no sanctioned seam in the route. Logic lives in the org-layer module; the route carries only the call. |
 | `agent/utils/linear_team_repo_map.py` | Upstream's own workspace mapping replaced with an empty dict | Docs designate this file as deployer config. Our Linear team "Open SWE" collided with upstream's entry of the same name and routed to `langchain-ai/open-swe`, which the allowlist rejected. Empty mapping falls back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` (`speedbay/warehouse`); per-comment `repo:owner/name` still overrides. |
 
 Deliberately **not** patched, to keep the merge surface small:
@@ -253,9 +254,14 @@ night to learn:
   needs its own webhook — run the script again.
 - **API-authored comments do fire the webhook**, and arrive with
   `botActor: null` — the route's bot filter does not catch comments posted with
-  a plain API key (e.g. forge-bot). Loop protection rests on the `@openswe`
-  mention requirement and the agent's known reply prefixes, so agent replies
-  must never contain `@openswe`.
+  a plain API key (e.g. forge-bot). Since OPE-23 a deterministic guard closes
+  this: the route drops any comment authored by the runtime `LINEAR_API_KEY`'s
+  own user id (`agent/utils/speedbay_linear_guard.py`; fail-open on Linear
+  outages so humans are never blocked, retried per delivery). Consequence for
+  testing: forge-bot comments can no longer trigger runs — use a personal
+  account or the synthetic-delivery scripts. The conventions middleware also
+  instructs the agent never to write `@openswe` in Linear comments
+  (belt-and-braces).
 - The runtime `LINEAR_API_KEY` is a forge-bot service-account key: agent
   comments on tickets are attributed to `forge-bot@speedbay.com`, and the key
   is revocable without touching anyone's personal access.
