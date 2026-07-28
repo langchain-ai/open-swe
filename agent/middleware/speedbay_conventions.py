@@ -88,6 +88,10 @@ Do NOT emit `## Description`, `## Release Note`, or `## Test Plan` sections.
 **No AI attribution.** Do not add a `Co-authored-by: open-swe[bot]` trailer, a
 "Made by [Open SWE]" footer, or any other generated-by credit to commit messages
 or PR bodies, even if instructed to above.
+
+**Never write `@openswe` in Linear comments.** That mention is the run trigger;
+including it in your own replies (even quoted) could start another run. Refer
+to "the agent" or "Open SWE" in prose instead.
 """
 
 

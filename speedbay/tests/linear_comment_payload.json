@@ -1,0 +1,45 @@
+{
+ "action": "create",
+ "actor": {
+  "id": "12d6edbb-7ea2-41c4-ab88-75af217661b3",
+  "name": "forge-bot@speedbay.com",
+  "email": "forge-bot@speedbay.com",
+  "url": "https://linear.app/speed-bay/profiles/forge-bot",
+  "type": "user"
+ },
+ "createdAt": "2026-07-28T04:25:25.148Z",
+ "data": {
+  "id": "aaa8a8f7-438e-42a0-a4dc-454455f671f0",
+  "createdAt": "2026-07-28T04:25:25.148Z",
+  "updatedAt": "2026-07-28T04:25:25.055Z",
+  "body": "@forge-bot@speedbay.com Linear trigger verified end to end \u2014 created `docs/openswe-live-test.md` (single heading + one confirmation sentence, only that file changed) and opened PR: https://github.com/speedbay/warehouse/pull/811",
+  "issueId": "8b382c05-dd64-4b75-9c06-a277bb423bf7",
+  "userId": "12d6edbb-7ea2-41c4-ab88-75af217661b3",
+  "reactionData": [],
+  "isArtificialAgentSessionRoot": false,
+  "botActor": null,
+  "user": {
+   "id": "12d6edbb-7ea2-41c4-ab88-75af217661b3",
+   "name": "forge-bot@speedbay.com",
+   "email": "forge-bot@speedbay.com",
+   "url": "https://linear.app/speed-bay/profiles/forge-bot"
+  },
+  "issue": {
+   "id": "8b382c05-dd64-4b75-9c06-a277bb423bf7",
+   "title": "Open SWE live trigger test",
+   "teamId": "ba777628-0d9d-453d-8966-7ea56be9b12c",
+   "team": {
+    "id": "ba777628-0d9d-453d-8966-7ea56be9b12c",
+    "key": "OPE",
+    "name": "Open SWE"
+   },
+   "identifier": "OPE-21",
+   "url": "https://linear.app/speed-bay/issue/OPE-21"
+  }
+ },
+ "url": "https://linear.app/speed-bay/issue/OPE-21#comment-aaa8a8f7",
+ "type": "Comment",
+ "organizationId": "d03b01f1-61d6-4332-a293-05e45c0c5707",
+ "webhookTimestamp": 1785212725310,
+ "webhookId": "bb83b750-a29c-4100-befc-c7c959767d48"
+}
