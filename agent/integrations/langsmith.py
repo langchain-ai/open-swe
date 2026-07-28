@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import os
+import time
 import uuid
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
@@ -20,6 +21,7 @@ from langsmith.sandbox import (
     AsyncSandboxClient,
     CommandTimeoutError,
     SandboxConnectionError,
+    SandboxOperationError,
     SandboxServerReloadError,
 )
 
@@ -49,6 +51,7 @@ PROXY_CONFIG_MAX_ATTEMPTS = 3
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+WS_SETUP_RETRY_DELAYS_SECONDS = (0.5, 1.5)
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -475,7 +478,8 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     overruns its own timeout by the grace window, kill it and surface a
     timed-out tool result instead of hanging the graph. WebSocket connect
     failures fall back to the base wait=True path, whose HTTP fallback carries
-    its own request deadline.
+    its own request deadline; a socket that closes before the command starts is
+    retried first, since nothing ran.
     """
 
     _WS_FALLBACK_ERRORS = (
@@ -517,6 +521,32 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         # which carries its own request deadline.
         return LangSmithSandbox.execute(self, command, timeout=timeout)
 
+    def _open_handle(self, command: str, effective: int) -> Any:
+        """Open a WS command handle, retrying a stream that closes pre-start.
+
+        ``run(wait=False)`` eagerly reads the "started" frame, so when the
+        dataplane accepts the upgrade and then closes the socket before sending
+        it (server rollout, recycled command daemon) the SDK raises
+        ``SandboxOperationError``. Neither the SDK's own HTTP fallback nor our
+        callers treat that as transient, so a momentary close used to kill the
+        whole run. The command provably never started, which makes re-running it
+        safe.
+        """
+        for delay in (*WS_SETUP_RETRY_DELAYS_SECONDS, None):
+            try:
+                return self._sandbox.run(command, timeout=effective, wait=False)
+            except CommandTimeoutError:
+                raise
+            except SandboxOperationError:
+                if delay is None:
+                    raise
+                logger.warning(
+                    "Sandbox WS command setup ended before start; retrying in %.1fs",
+                    delay,
+                    exc_info=True,
+                )
+                time.sleep(delay)
+
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         effective = timeout if timeout is not None else self._default_timeout
         if not effective:  # 0 / None: caller opted out of any deadline
@@ -524,8 +554,15 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         # run(wait=False) eagerly opens the WS and reads the "started" frame, so
         # connect/setup failures raise here — fall back to the base path.
         try:
-            handle = self._sandbox.run(command, timeout=effective, wait=False)
-        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
+            handle = self._open_handle(command, effective)
+        except CommandTimeoutError:
+            return self._timeout_response(effective, server_side=True)
+        except (
+            *self._WS_FALLBACK_ERRORS,
+            *SANDBOX_NOT_READY_ERRORS,
+            SandboxOperationError,
+            TimeoutError,
+        ):
             return self._base_execute(command, timeout)
         deadline = self._deadline(effective)
         pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sbx-exec")
@@ -558,10 +595,15 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         # (blocking, bounded by the SDK connect timeout); connect/setup failures
         # raise here — fall back to the base path.
         try:
-            handle = await asyncio.to_thread(
-                self._sandbox.run, command, timeout=effective, wait=False
-            )
-        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
+            handle = await asyncio.to_thread(self._open_handle, command, effective)
+        except CommandTimeoutError:
+            return self._timeout_response(effective, server_side=True)
+        except (
+            *self._WS_FALLBACK_ERRORS,
+            *SANDBOX_NOT_READY_ERRORS,
+            SandboxOperationError,
+            TimeoutError,
+        ):
             return await asyncio.to_thread(self._base_execute, command, timeout)
         deadline = self._deadline(effective)
         try:

@@ -14,7 +14,13 @@ from agent.middleware.sandbox_circuit_breaker import (
     sandbox_unreachable_message,
 )
 from agent.middleware.tool_error_handler import ToolErrorMiddleware
-from agent.utils.sandbox_state import SANDBOX_BACKENDS, clear_sandbox_backend, set_sandbox_backend
+from agent.server import PrepareAgentRunMiddleware
+from agent.utils.sandbox_state import (
+    SANDBOX_BACKENDS,
+    SandboxUnreachableError,
+    clear_sandbox_backend,
+    set_sandbox_backend,
+)
 
 
 class FakeSandboxBackend(SandboxBackendProtocol):
@@ -92,6 +98,55 @@ async def test_sandbox_client_error_notifies_and_never_recreates() -> None:
         assert "will not be replaced" in payload["error"]
     finally:
         clear_sandbox_backend("thread-1")
+
+
+@pytest.mark.asyncio
+async def test_work_dir_probe_failure_notifies_instead_of_crashing() -> None:
+    """A sandbox that pings but can't run the work-dir probe must not die silently."""
+    middleware = PrepareAgentRunMiddleware(
+        thread_id="thread-probe",
+        config={"configurable": {"thread_id": "thread-probe"}},
+        profile_login=None,
+        model_id="claude-sonnet-4-5",
+        effort=None,
+        source="slack",
+        user_email="",
+        linear_project_id="",
+        linear_issue_number="",
+        create_prs=False,
+        plan_mode=False,
+        corridor_enabled=False,
+    )
+
+    with (
+        patch(
+            "agent.server.resolve_github_token", new_callable=AsyncMock, return_value=("gh", None)
+        ),
+        patch(
+            "agent.server._resolve_prompt_default_repo", new_callable=AsyncMock, return_value=None
+        ),
+        patch("agent.server.resolve_triggering_user_identity", return_value=None),
+        patch(
+            "agent.server.ensure_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=FakeSandboxBackend("sb-quiet"),
+        ),
+        patch(
+            "agent.server.aresolve_sandbox_work_dir",
+            new_callable=AsyncMock,
+            side_effect=SandboxClientError("Command stream ended before 'started' message"),
+        ),
+        patch(
+            "agent.server.post_sandbox_unreachable_notification",
+            new_callable=AsyncMock,
+        ) as mock_notify,
+        pytest.raises(SandboxUnreachableError),
+    ):
+        await middleware._prepare(cast(Any, {"messages": []}), MagicMock())
+
+    mock_notify.assert_awaited_once()
+    assert mock_notify.await_args is not None
+    assert mock_notify.await_args.kwargs == {"sandbox_id": "sb-quiet"}
 
 
 def test_repeated_sandbox_errors_trigger_circuit_breaker_once() -> None:

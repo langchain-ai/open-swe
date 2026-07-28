@@ -7,7 +7,11 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from langsmith.sandbox import CommandTimeoutError, SandboxConnectionError
+from langsmith.sandbox import (
+    CommandTimeoutError,
+    SandboxConnectionError,
+    SandboxOperationError,
+)
 
 from agent.integrations.langsmith import TimeoutLangSmithSandbox
 
@@ -32,23 +36,39 @@ class _FakeHandle:
 
 
 class _FakeSandbox:
-    def __init__(self, handle: _FakeHandle, *, run_raises: Exception | None = None):
+    def __init__(
+        self,
+        handle: _FakeHandle,
+        *,
+        run_raises: Exception | None = None,
+        run_raises_first: int = 0,
+    ):
         self._handle = handle
         self._run_raises = run_raises
+        self._run_raises_first = run_raises_first
         self.run_calls: list[dict[str, Any]] = []
 
     def run(self, command: str, *, timeout: int, wait: bool) -> _FakeHandle:
         self.run_calls.append({"command": command, "timeout": timeout, "wait": wait})
-        if self._run_raises is not None:
+        if self._run_raises is not None and (
+            not self._run_raises_first or len(self.run_calls) <= self._run_raises_first
+        ):
             raise self._run_raises
         return self._handle
 
 
 def _backend(
-    handle: _FakeHandle, *, run_raises: Exception | None = None
+    handle: _FakeHandle,
+    *,
+    run_raises: Exception | None = None,
+    run_raises_first: int = 0,
 ) -> TimeoutLangSmithSandbox:
     sb = TimeoutLangSmithSandbox.__new__(TimeoutLangSmithSandbox)
-    object.__setattr__(sb, "_sandbox", _FakeSandbox(handle, run_raises=run_raises))
+    object.__setattr__(
+        sb,
+        "_sandbox",
+        _FakeSandbox(handle, run_raises=run_raises, run_raises_first=run_raises_first),
+    )
     sb._default_timeout = 30 * 60
     return sb
 
@@ -138,6 +158,38 @@ def test_execute_ws_connect_failure_falls_back_to_base(monkeypatch: pytest.Monke
     resp = sb.execute("git status", timeout=5)
     assert called == {"command": "git status", "timeout": 5}
     assert resp.output == "via-http"
+
+
+async def test_aexecute_retries_stream_closed_before_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agent.integrations.langsmith.WS_SETUP_RETRY_DELAYS_SECONDS", (0.0, 0.0))
+    handle = _FakeHandle(result=SimpleNamespace(stdout="out", stderr="", exit_code=0))
+    sb = _backend(
+        handle,
+        run_raises=SandboxOperationError("Command stream ended before 'started' message"),
+        run_raises_first=1,
+    )
+    resp = await sb.aexecute("git status", timeout=5)
+    assert resp.exit_code == 0
+    assert resp.output == "out"
+    assert len(cast(_FakeSandbox, sb._sandbox).run_calls) == 2
+
+
+async def test_aexecute_stream_closed_before_start_falls_back_to_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agent.integrations.langsmith.WS_SETUP_RETRY_DELAYS_SECONDS", (0.0, 0.0))
+    sb = _backend(
+        _FakeHandle(),
+        run_raises=SandboxOperationError("Command stream ended before 'started' message"),
+    )
+    called: dict[str, Any] = {}
+    _patch_base_execute(monkeypatch, called)
+    resp = await sb.aexecute("git status", timeout=5)
+    assert called["command"] == "git status"
+    assert resp.output == "via-http"
+    assert len(cast(_FakeSandbox, sb._sandbox).run_calls) == 3
 
 
 async def test_aexecute_midstream_ws_drop_falls_back_to_base(

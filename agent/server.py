@@ -753,7 +753,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
             raise
         del github_token
-        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        try:
+            work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        except (SandboxClientError, RuntimeError) as exc:
+            # The sandbox answered the reachability ping but can't run the probe
+            # commands, so the run has nowhere to work; keep the failure typed and
+            # tell the user instead of dying with an opaque traceback.
+            clear_sandbox_backend(self._thread_id)
+            await post_sandbox_unreachable_notification(
+                self._config or {}, sandbox_id=sandbox_backend.id
+            )
+            raise SandboxUnreachableError(self._thread_id, sandbox_backend.id, str(exc)) from exc
         repo_custom_instructions = await _resolve_repo_custom_instructions(prompt_default_repo)
 
         try:
