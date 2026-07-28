@@ -24,6 +24,17 @@ Two conventions are enforced, both from warehouse ``AGENTS.md``:
 Upstream's own instructions still appear earlier in the system prompt, so this
 text is written to override them explicitly rather than merely restate a
 preference.
+
+Evaluated alternative: Open SWE's documented org-conventions channel is
+``default_prompt.md`` / ``DEFAULT_PROMPT_PATH`` (docs/CUSTOMIZATION.md §5), which
+needs no code at all. Rejected because its content is injected *before*
+``COMMIT_PR_SECTION`` in the assembled prompt (agent/prompt.py), i.e. before the
+very instructions (``Co-authored-by`` trailer, "Made by [Open SWE]" footer) this
+text must countermand — an earlier instruction loses to a later one. Appending
+at the end of the system message is the only position that reliably overrides.
+Middleware mutation of the system prompt is itself a documented LangChain
+pattern (``wrap_model_call`` "may modify the request"; ``dynamic_prompt`` exists
+for the same purpose).
 """
 
 from __future__ import annotations
@@ -35,6 +46,7 @@ from langchain.agents.middleware.types import (
     ModelRequest,
     ModelResponse,
 )
+from langchain_core.messages import SystemMessage
 
 SPEEDBAY_CONVENTIONS = """
 ---
@@ -84,16 +96,25 @@ class SpeedbayConventionsMiddleware(AgentMiddleware):
 
     @staticmethod
     def _augment(request: ModelRequest) -> ModelRequest:
-        """Return the request with the conventions appended to its system message.
+        """Return a request with the conventions appended to its system message.
+
+        Follows the documented ``ModelRequest`` contract (mirrors upstream
+        ``timeout_wrapup`` / ``prepare_run``): ``system_message`` is a
+        ``SystemMessage | None``, its text is read via ``.text``, and the
+        modified request is produced with ``request.override(...)`` rather than
+        deprecated attribute assignment. String-formatting the message object
+        would serialize its repr into the prompt; ``in`` against the object
+        (rather than its text) silently defeats the idempotence check.
 
         Idempotent: repeated model calls in one run must not stack copies of the
         text, which would waste context and can confuse the model.
         """
-        existing = request.system_message or ""
+        existing = request.system_message.text if request.system_message is not None else ""
         if "Speed Bay repository conventions" in existing:
             return request
-        request.system_message = f"{existing}\n{SPEEDBAY_CONVENTIONS}"
-        return request
+        return request.override(
+            system_message=SystemMessage(content=f"{existing}\n{SPEEDBAY_CONVENTIONS}")
+        )
 
     def wrap_model_call(
         self,
