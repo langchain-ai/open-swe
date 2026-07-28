@@ -246,6 +246,50 @@ night to learn:
   The file is kept read-only (`chmod 444`) to fail such attempts loudly; if it
   shows up modified, restore it from git.
 
+## Spend limits (OPE-18)
+
+**Open SWE enforces no per-run cost cap of its own.** Nothing in the fork stops
+a looping or thrashing run from spending until it finishes or is killed by
+hand. The provider-console limits below are the only backstop; they were sized
+for the laptop phase (2026-07-28) and must be revisited before the OPE-12
+pilot's sustained spend.
+
+| Provider | Billing model | Hard cap | Alerts | Owner |
+|---|---|---|---|---|
+| Fireworks (primary — all runs bill here) | Prepaid credits, **auto-reload off** | Balance itself (~$56 at setup) | $50 / $100 / $1k / $10k spend | cbass |
+| OpenAI | Monthly limit, hard-enforced, auto-refresh off | $200/mo | 80% and 100% | cbass |
+| Anthropic | Monthly limit | $1,000/mo | email at $500 | cbass |
+| Google, Exa | Keys declared in `.env` but **empty** — no accounts in use; dependent tools fail cleanly | n/a | n/a | — |
+
+Why the OpenAI/Anthropic caps matter even though runs bill Fireworks only:
+the team default lives in the LangGraph Store, and if the Store is wiped the
+model silently reverts to `DEFAULT_MODEL_ID` (`openai:gpt-5.6-sol`), which also
+enables the OpenAI↔Anthropic fallback pair. The caps bound that config
+accident, not normal operation.
+
+### What a hit cap looks like at runtime
+
+`fireworks:` primaries get **no fallback and no retry middleware**
+(`fallback_model_id_for` returns `None` for non-OpenAI/Anthropic providers, and
+`agent/server.py` only installs `ModelFallbackMiddleware` when a fallback
+exists) — so a provider error surfaces directly and ends the run rather than
+retrying forever.
+
+Auth-failure signature (captured live with a bogus key):
+
+```
+HTTP 401
+{"error": {"message": "The API key you provided is invalid.",
+           "code": "UNAUTHORIZED", "type": "error"}}
+```
+
+An exhausted prepaid balance is expected to return an HTTP 4xx from the same
+endpoint with a quota/billing message rather than `UNAUTHORIZED`. Not yet
+observed live — when it first happens, paste the actual body here. Diagnosis
+rule: a run that dies immediately at its first model call with a 4xx from
+`api.fireworks.ai` is a **billing/cap event, not a code fault** — check the
+Fireworks balance before debugging anything.
+
 ## Known issues
 
 - **Studio graph preview 500s** — `langgraph-api` 0.10.3 substitutes
