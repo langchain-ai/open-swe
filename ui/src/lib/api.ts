@@ -611,7 +611,8 @@ export const api = {
   profile: () => request<Profile>("/profile"),
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
-  repos: () => request<ReposPayload>("/repos"),
+  repos: (options?: { refresh?: boolean }) =>
+    request<ReposPayload>(options?.refresh ? "/repos?refresh=true" : "/repos"),
   listReviewStyles: () => request<Array<ReviewStyle>>("/review-styles"),
   createReviewStyle: (full_name: string) =>
     request<ReviewStyle>("/review-styles", {

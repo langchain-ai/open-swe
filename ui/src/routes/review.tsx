@@ -4,14 +4,15 @@ import { CaretRightIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 import { IoLogoGithub } from "react-icons/io5";
 
-import type { ReposPayload, TeamSettings } from "@/lib/api";
+import type { TeamSettings } from "@/lib/api";
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
 import { RequireLogin } from "@/lib/auth-redirect";
+import { useRepos } from "@/lib/profile";
 import { useSession } from "@/lib/session";
 
 export const Route = createFileRoute("/review")({ component: ReviewPage });
@@ -189,18 +190,7 @@ function ReviewPage() {
 }
 
 function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
-  const repos = useQuery<ReposPayload>({
-    queryKey: ["repos"],
-    queryFn: async () => {
-      try {
-        return await api.repos();
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 401)
-          return { installations: [], repositories: [] };
-        throw e;
-      }
-    },
-  });
+  const repos = useRepos();
 
   const autoReview = useQuery({
     queryKey: ["autoReviewRepos"],
