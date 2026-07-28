@@ -1,6 +1,39 @@
-import { describe, expect, it } from "vitest"
+/** @vitest-environment jsdom */
 
-import { fileContentsCacheKey } from "./diffUtils"
+import { beforeEach, describe, expect, it } from "vitest"
+
+import {
+  DIFF_FIXED_LINE_HEIGHT_CSS,
+  buildDiffOptions,
+  fileContentsCacheKey,
+  readStoredDiffOverflow,
+  writeStoredDiffOverflow,
+} from "./diffUtils"
+
+beforeEach(() => window.localStorage.clear())
+
+describe("diff overflow preference", () => {
+  it("defaults to horizontal scrolling", () => {
+    expect(readStoredDiffOverflow()).toBe("scroll")
+  })
+
+  it("persists wrapping", () => {
+    writeStoredDiffOverflow("wrap")
+
+    expect(readStoredDiffOverflow()).toBe("wrap")
+  })
+
+  it("keeps fixed line heights only in scroll mode", () => {
+    const scrollOptions = buildDiffOptions("unified", "scroll", "dark")
+    const wrapOptions = buildDiffOptions("split", "wrap", "light")
+
+    expect(scrollOptions.overflow).toBe("scroll")
+    expect(scrollOptions.unsafeCSS).toContain(DIFF_FIXED_LINE_HEIGHT_CSS)
+    expect(wrapOptions.overflow).toBe("wrap")
+    expect(wrapOptions.diffStyle).toBe("split")
+    expect(wrapOptions.unsafeCSS).not.toContain(DIFF_FIXED_LINE_HEIGHT_CSS)
+  })
+})
 
 describe("fileContentsCacheKey", () => {
   it("builds a stable key from string contents", () => {
