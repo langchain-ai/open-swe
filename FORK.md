@@ -153,7 +153,8 @@ Everything we add lives in files upstream does not own:
 | `speedbay/bin/git-credential-openswe` | Git credential helper for `github.com` |
 | `speedbay/gitconfig` | Registers the credential helper; sets the bot git identity |
 | `speedbay/githooks/commit-msg` | Strips AI-attribution trailers from every commit |
-| `speedbay/run-dev.sh` | **Start the backend with this**, not bare `langgraph dev` |
+| `speedbay/run-dev.sh` | Backend launcher (env + shims); invoked by `openswe start` |
+| `speedbay/openswe` | **The lifecycle command**: `start` / `stop` / `status` — see § Operating |
 | `speedbay/set_model.py` | Reads/sets the agent's default model (no dashboard needed) |
 | `speedbay/create_linear_webhook.py` | Creates/lists the Linear trigger webhooks (needs a temp admin key) |
 | `speedbay/docker/Dockerfile.sandbox` | The sandbox image (`openswe-sandbox:dev`) the docker backend boots |
@@ -263,6 +264,19 @@ night to learn:
   `GIT_CONFIG_GLOBAL` points at (routing pushes through the host's gh auth).
   The file is kept read-only (`chmod 444`) to fail such attempts loudly; if it
   shows up modified, restore it from git.
+
+## Operating
+
+```bash
+speedbay/openswe start    # backend + tunnel, health-verified; refuses duplicates
+speedbay/openswe status   # processes, local/public health, live sandbox containers
+speedbay/openswe stop     # kills both; confirms the public URL went offline (530)
+```
+
+`start` fails fast when the docker daemon is down, when either health check
+doesn't reach 200, or when an instance is already running. Logs:
+`/tmp/openswe-backend.log`, `/tmp/openswe-tunnel.log`. Once `start` reports
+LIVE, every `@openswe` Linear comment triggers a containerized run.
 
 ## Spend limits (OPE-18)
 

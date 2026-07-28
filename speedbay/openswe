@@ -1,0 +1,88 @@
+#!/bin/sh
+# Single lifecycle command for the Open SWE deployment.
+#
+#   speedbay/openswe start    boot backend + tunnel, verify health, refuse duplicates
+#   speedbay/openswe stop     kill both, confirm the public URL went dark
+#   speedbay/openswe status   what's running, health, live sandbox containers
+#
+# Logs: /tmp/openswe-backend.log, /tmp/openswe-tunnel.log
+# ponytail: pgrep is the duplicate guard and process registry — no pidfiles,
+# no supervisor dependency. Graduate to launchd if this ever needs to survive
+# reboots.
+
+set -u
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+BACKEND_LOG=/tmp/openswe-backend.log
+TUNNEL_LOG=/tmp/openswe-tunnel.log
+PUBLIC_URL=https://openswe.speedbay.com/health
+LOCAL_URL=http://localhost:2024/health
+
+backend_pids() { pgrep -f 'langgraph dev' || true; }
+tunnel_pids()  { pgrep -f 'cloudflared tunnel run' || true; }
+
+wait_for() { # url attempts -> 0 when it answers 200
+  i=0
+  while [ $i -lt "$2" ]; do
+    [ "$(curl -s -o /dev/null -w '%{http_code}' -m 5 "$1" 2>/dev/null)" = "200" ] && return 0
+    i=$((i + 1)); sleep 2
+  done
+  return 1
+}
+
+start() {
+  if [ -n "$(backend_pids)" ] || [ -n "$(tunnel_pids)" ]; then
+    echo "already running — refusing to start duplicates:"
+    status
+    exit 1
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    echo "FAIL: docker daemon unreachable (start Docker Desktop / colima first)" >&2
+    exit 1
+  fi
+
+  echo "starting backend..."
+  (cd "$HERE" && nohup ./speedbay/run-dev.sh > "$BACKEND_LOG" 2>&1 &)
+  if ! wait_for "$LOCAL_URL" 30; then
+    echo "FAIL: backend not healthy after 60s — tail $BACKEND_LOG" >&2
+    tail -5 "$BACKEND_LOG" >&2
+    exit 1
+  fi
+  echo "backend healthy: $LOCAL_URL"
+
+  echo "starting tunnel..."
+  (cd "$HERE" && nohup cloudflared tunnel run --url http://localhost:2024 openswe > "$TUNNEL_LOG" 2>&1 &)
+  if ! wait_for "$PUBLIC_URL" 15; then
+    echo "FAIL: public URL not healthy after 30s — tail $TUNNEL_LOG" >&2
+    tail -5 "$TUNNEL_LOG" >&2
+    exit 1
+  fi
+  echo "tunnel healthy:  $PUBLIC_URL"
+  echo "LIVE — @openswe comments on Linear tickets now trigger containerized runs."
+}
+
+stop() {
+  pids="$(backend_pids) $(tunnel_pids)"
+  # shellcheck disable=SC2086
+  [ -n "${pids# }" ] && kill $pids 2>/dev/null
+  sleep 2
+  [ -n "$(backend_pids)$(tunnel_pids)" ] && { echo "FAIL: processes survived kill" >&2; exit 1; }
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 8 "$PUBLIC_URL" 2>/dev/null)"
+  echo "stopped. public URL now returns ${code:-unreachable} (offline)."
+}
+
+status() {
+  b="$(backend_pids)"; t="$(tunnel_pids)"
+  echo "backend : ${b:-not running}"
+  echo "tunnel  : ${t:-not running}"
+  echo "local   : $(curl -s -o /dev/null -w '%{http_code}' -m 3 "$LOCAL_URL" 2>/dev/null || echo down)"
+  echo "public  : $(curl -s -o /dev/null -w '%{http_code}' -m 8 "$PUBLIC_URL" 2>/dev/null || echo down)"
+  echo "sandboxes:"
+  docker ps -a --filter label=openswe.sandbox --format '  {{.Names}}  {{.Status}}' 2>/dev/null || echo "  (docker unreachable)"
+}
+
+case "${1:-}" in
+  start)  start ;;
+  stop)   stop ;;
+  status) status ;;
+  *) echo "usage: speedbay/openswe {start|stop|status}"; exit 2 ;;
+esac
