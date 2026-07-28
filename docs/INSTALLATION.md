@@ -160,10 +160,11 @@ To set up per-user OAuth:
 LangSmith sandboxes provide the isolated execution environment for each agent run. Open SWE boots each sandbox from a pre-built **snapshot** — you build the snapshot once (from a Docker image) and then reference it by UUID.
 
 (Optional) Build and Push a custom Docker Image to Docker hub
-First build and push the sandbox Docker image to a registry LangSmith can pull from. On Apple Silicon, force `linux/amd64`
+First build and push the sandbox Docker image to a registry LangSmith can pull from. The sandbox image is `Dockerfile.sandbox` — pass `-f Dockerfile.sandbox`, because the root `Dockerfile` builds the API server image instead and produces snapshots without `git`, `gh`, `sfw`, the Docker CLI, or the language runtimes agent runs need. On Apple Silicon, force `linux/amd64`
 
 ```bash
 docker buildx build \
+  -f Dockerfile.sandbox \
   --platform linux/amd64 \
   -t <your-docker-hub>/<name-of-your-image> \
   --push .
@@ -173,6 +174,7 @@ For a multi-arch tag that also runs locally on Apple Silicon:
 
 ```bash
 docker buildx build \
+  -f Dockerfile.sandbox \
   --platform linux/amd64,linux/arm64 \
   -t <your-docker-hub>/<name-of-your-image> \
   --push .
@@ -645,6 +647,7 @@ docker build -t open-swe .
 docker run \
   --env-file .env \
   -p 8123:8000 \
+  --add-host=host.docker.internal:host-gateway \
   -e DATABASE_URI="postgres://postgres:postgres@host.docker.internal:5432/postgres?sslmode=disable" \
   -e REDIS_URI="redis://host.docker.internal:6379" \
   -e LANGGRAPH_AUTH_TYPE="noop" \
@@ -652,6 +655,8 @@ docker run \
   -e DASHBOARD_API_BASE_URL="https://<your-dashboard-or-backend-url>" \
   open-swe
 ```
+
+The example above assumes Postgres and Redis run on the Docker host. `host.docker.internal` only resolves automatically on Docker Desktop, so `--add-host=host.docker.internal:host-gateway` is what makes it work on a plain Linux Docker Engine. If Postgres and Redis run as their own containers, drop the flag and point `DATABASE_URI` / `REDIS_URI` at their service names on a shared Docker network instead.
 
 Set all environment variables from step 6, plus the standalone Agent Server requirements: `DATABASE_URI`, `REDIS_URI`, `LANGSMITH_API_KEY` (unless tracing is disabled for your deployment), and `LANGGRAPH_CLOUD_LICENSE_KEY` for the production LangGraph server. Expose the container's port `8000` through your ingress. Do not use scale-to-zero hosting; background runs rely on Redis/Postgres-backed workers staying available. If the built-in LangGraph API routes are reachable from the public internet, put the service behind a private network, API gateway, or custom LangGraph auth before using `LANGGRAPH_AUTH_TYPE=noop`.
 
