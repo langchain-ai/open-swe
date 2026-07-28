@@ -6,15 +6,16 @@ from ..utils.slack import add_slack_reaction
 
 
 async def slack_add_reaction(
-    emoji: str = "eyes",
+    emoji: str,
     message_ts: str | None = None,
 ) -> dict[str, Any]:
-    """Add a reaction to a Slack message in the current Slack thread.
+    """Add a context-appropriate reaction to a Slack message in the current thread.
 
-    Use this with the default `eyes` reaction to acknowledge Slack user follow-up
-    requests while you continue working, instead of posting a perfunctory
-    confirmation reply. If `message_ts` is omitted, this reacts to the latest
-    message that triggered the run. Pass emoji names without surrounding colons.
+    Prefer `saluting_face` for taking ownership, `eyes` for active review,
+    `thinking_face` for investigation, `white_check_mark` for handled work, and
+    `tada` for genuine wins. Use common emoji that fit the message. If `message_ts`
+    is omitted, this reacts to the latest message that triggered the run. Pass
+    emoji names without surrounding colons.
     """
     config = get_config()
     configurable = config.get("configurable", {})
