@@ -2063,6 +2063,7 @@ dependencies = [
     { name = "langsmith" },
     { name = "markdownify" },
     { name = "pyjwt" },
+    { name = "runcloud-sdk" },
     { name = "stagehand" },
     { name = "uvicorn" },
     { name = "websockets" },
@@ -2104,6 +2105,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.20" },
+    { name = "runcloud-sdk", specifier = ">=0.8.0,<1" },
     { name = "stagehand", specifier = ">=3.21.0" },
     { name = "uvicorn", specifier = ">=0.50.2" },
     { name = "websockets", specifier = ">=15.0.1" },
@@ -3141,6 +3143,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/10/9b/5f14927848d2fd4aa891fd88d883788c5a7baba561c7874732364045708c/ruff-0.15.20-py3-none-win32.whl", hash = "sha256:ed65ef510e43a137207e0f01cfcf998aeddb1aeeda5c9d35023e910284d7cf21", size = 10857322, upload-time = "2026-06-25T17:20:28.612Z" },
     { url = "https://files.pythonhosted.org/packages/fa/f0/fe47c501f9dea92a26d788ff98bb5d92ed4cb4c88792c5c88af6b697dc8e/ruff-0.15.20-py3-none-win_amd64.whl", hash = "sha256:a525c81c70fb0380344dd1d8745d8cc1c890b7fc94a58d5a07bd8eb9557b8415", size = 11993274, upload-time = "2026-06-25T17:20:31.871Z" },
     { url = "https://files.pythonhosted.org/packages/d7/2b/9555445e1201d92b3195f45cdb153a0b68f24e0a4273f6e3d5ab46e212bb/ruff-0.15.20-py3-none-win_arm64.whl", hash = "sha256:2f5b2a6d614e8700388806a14996c40fab2c47b819ef57d790a34878858ed9ca", size = 11343498, upload-time = "2026-06-25T17:20:35.03Z" },
+]
+
+[[package]]
+name = "runcloud-sdk"
+version = "0.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ef/76/6ff912486761e9487564507724add278361890fdacea87fcedf3e5a27fd3/runcloud_sdk-0.8.0.tar.gz", hash = "sha256:ae0e30ce8b37e4e3595be463766e619296abbd74ec34b6c4296c2a8124f5334e", size = 13759, upload-time = "2026-07-27T21:16:51.303Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f6/62/bfe4e656058e78af24878ba7a5e5c79af01f4354c421a6cef8d2b7794af8/runcloud_sdk-0.8.0-py3-none-any.whl", hash = "sha256:9ccdbe8671f174c56acfe8e1d512d605abbffc0722bbd9cf3b79eb67db99ae99", size = 13477, upload-time = "2026-07-27T21:16:50.168Z" },
 ]
 
 [[package]]

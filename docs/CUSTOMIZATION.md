@@ -65,6 +65,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
 | `e2b` | `agent/integrations/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
 | `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
+| `runcloud` | `agent/integrations/runcloud.py` | `RUN_CLOUD_API_KEY`, `SANDBOX_TYPE="runcloud"`, optional `RUN_CLOUD_IMAGE` |
 | `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.

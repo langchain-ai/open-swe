@@ -15,6 +15,7 @@ SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "modal": ("agent.integrations.modal", "create_modal_sandbox"),
     "runloop": ("agent.integrations.runloop", "create_runloop_sandbox"),
     "e2b": ("agent.integrations.e2b", "create_e2b_sandbox"),
+    "runcloud": ("agent.integrations.runcloud", "create_runcloud_sandbox"),
     "local": ("agent.integrations.local", "create_local_sandbox"),
 }
 
@@ -39,7 +40,7 @@ async def create_sandbox(
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
-    Supported values: langsmith (default), daytona, modal, runloop, e2b, local.
+    Supported values: langsmith (default), daytona, modal, runloop, e2b, runcloud, local.
 
     The langsmith provider provisions natively async; the other providers wrap
     sync SDKs and are bridged onto the event loop with ``asyncio.to_thread``.

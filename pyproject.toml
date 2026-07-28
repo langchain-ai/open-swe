@@ -27,6 +27,7 @@ dependencies = [
     "langchain-modal>=0.0.5",
     "langchain-runloop>=0.0.6",
     "langchain-e2b==0.0.5",
+    "runcloud-sdk>=0.8.0,<1",
     "exa-py>=2.16.0",
     "langchain-google-genai>=4.2.4",
     "langchain-mcp-adapters>=0.3.0",
