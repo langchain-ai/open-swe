@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, useSyncExternalStore } from "react"
 import { preloadHighlighter } from "@pierre/diffs"
 import type {
   VirtualFileMetrics,
@@ -8,6 +8,61 @@ import type {
 import { useResolvedTheme } from "@/lib/theme"
 
 export type DiffStyle = "unified" | "split"
+export type DiffOverflow = "scroll" | "wrap"
+
+const DIFF_OVERFLOW_STORAGE_KEY = "open-swe.diff.overflow"
+const diffOverflowListeners = new Set<() => void>()
+let storageListenerAttached = false
+
+export function readStoredDiffOverflow(): DiffOverflow {
+  if (typeof window === "undefined") return "scroll"
+  return window.localStorage.getItem(DIFF_OVERFLOW_STORAGE_KEY) === "wrap"
+    ? "wrap"
+    : "scroll"
+}
+
+function subscribeToDiffOverflow(listener: () => void): () => void {
+  diffOverflowListeners.add(listener)
+  if (typeof window !== "undefined" && !storageListenerAttached) {
+    window.addEventListener("storage", handleDiffOverflowStorage)
+    storageListenerAttached = true
+  }
+  return () => {
+    diffOverflowListeners.delete(listener)
+    if (
+      typeof window !== "undefined" &&
+      storageListenerAttached &&
+      diffOverflowListeners.size === 0
+    ) {
+      window.removeEventListener("storage", handleDiffOverflowStorage)
+      storageListenerAttached = false
+    }
+  }
+}
+
+function handleDiffOverflowStorage(event: StorageEvent): void {
+  if (event.key !== DIFF_OVERFLOW_STORAGE_KEY) return
+  diffOverflowListeners.forEach((listener) => listener())
+}
+
+export function writeStoredDiffOverflow(overflow: DiffOverflow): void {
+  if (typeof window === "undefined") return
+  if (readStoredDiffOverflow() === overflow) return
+  window.localStorage.setItem(DIFF_OVERFLOW_STORAGE_KEY, overflow)
+  diffOverflowListeners.forEach((listener) => listener())
+}
+
+export function useDiffOverflow(): [
+  DiffOverflow,
+  (next: DiffOverflow) => void,
+] {
+  const overflow = useSyncExternalStore(
+    subscribeToDiffOverflow,
+    readStoredDiffOverflow,
+    (): DiffOverflow => "scroll"
+  )
+  return [overflow, writeStoredDiffOverflow]
+}
 
 export const DIFF_UNSAFE_CSS = `
 [data-diffs-header],
@@ -70,12 +125,9 @@ export const DIFF_UNSAFE_CSS = `
 [data-gutter-buffer="annotation"][data-selected-line] {
   --diffs-line-bg: var(--ui-panel) !important;
 }
+`
 
-/* Pin every code row to one exact, uniform height (kept in sync with
-   DIFF_VIRTUAL_METRICS.lineHeight below). In scroll mode code never wraps, so a
-   hard height won't clip content — it just makes the virtualizer's per-line
-   estimate match measured layout, so scroll-to lands precisely instead of
-   over/under-shooting as off-estimate rows reconcile while scrolling. */
+export const DIFF_FIXED_LINE_HEIGHT_CSS = `
 [data-line] {
   height: 18px !important;
   min-height: 18px !important;
@@ -90,7 +142,7 @@ export const diffOptions = {
   diffStyle: "unified" as const,
   overflow: "scroll" as const,
   disableFileHeader: true,
-  unsafeCSS: DIFF_UNSAFE_CSS,
+  unsafeCSS: `${DIFF_UNSAFE_CSS}${DIFF_FIXED_LINE_HEIGHT_CSS}`,
   collapsedContextThreshold: 4,
   lineDiffType: "word-alt" as const,
   maxLineDiffLength: 800,
@@ -98,12 +150,35 @@ export const diffOptions = {
   tokenizeMaxLength: 120_000,
 }
 
+export function buildDiffOptions(
+  diffStyle: DiffStyle,
+  overflow: DiffOverflow,
+  themeType: "light" | "dark"
+) {
+  return {
+    ...diffOptions,
+    themeType,
+    diffStyle,
+    overflow,
+    unsafeCSS:
+      overflow === "scroll"
+        ? `${DIFF_UNSAFE_CSS}${DIFF_FIXED_LINE_HEIGHT_CSS}`
+        : DIFF_UNSAFE_CSS,
+  }
+}
+
 export function useDiffOptions(diffStyle: DiffStyle = "unified") {
   const resolvedTheme = useResolvedTheme()
+  const [overflow] = useDiffOverflow()
   return useMemo(
-    () => ({ ...diffOptions, themeType: resolvedTheme, diffStyle }),
-    [resolvedTheme, diffStyle]
+    () => buildDiffOptions(diffStyle, overflow, resolvedTheme),
+    [resolvedTheme, diffStyle, overflow]
   )
+}
+
+export function useDiffWrap(): [boolean, (wrap: boolean) => void] {
+  const [overflow, setOverflow] = useDiffOverflow()
+  return [overflow === "wrap", (wrap) => setOverflow(wrap ? "wrap" : "scroll")]
 }
 
 // Shared virtualization + worker-pool config for <Virtualizer>/<MultiFileDiff>.
@@ -116,8 +191,8 @@ export const DIFF_VIRTUALIZER_CONFIG = {
 
 export const DIFF_VIRTUAL_METRICS = {
   hunkLineCount: 80,
-  // Must match the hard `[data-line]` height pinned in DIFF_UNSAFE_CSS so the
-  // virtualizer's pre-measurement estimate equals the measured row height.
+  // Exact in scroll mode; in wrap mode this seeds the estimate until Pierre
+  // measures the variable-height row and reconciles the virtualized layout.
   lineHeight: 18,
   diffHeaderHeight: 0,
   spacing: 8,

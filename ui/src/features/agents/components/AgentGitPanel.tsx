@@ -26,6 +26,7 @@ import { useAgentThreadPrDiff } from "@/features/agents/lib/queries"
 import { ReviewTab } from "@/features/reviews/components/ReviewTab"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
 import { buttonVariants } from "@/components/ui/button"
+import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import {
   DIFF_VIRTUALIZER_CONFIG,
   DIFF_VIRTUAL_METRICS,
@@ -532,6 +533,7 @@ export function AgentGitPanel({
                 </button>
               ))}
               <div className="ml-auto flex min-w-0 items-center gap-2">
+                {tab === "diff" && <DiffWrapToggle />}
                 {recoveryError && (
                   <span
                     title={recoveryError}

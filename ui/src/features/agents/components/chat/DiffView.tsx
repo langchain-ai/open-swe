@@ -1,40 +1,39 @@
-import { useMemo } from "react";
-import { MultiFileDiff } from "@pierre/diffs/react";
-import type { DiffData } from "@/features/agents/lib/types";
-import { diffOptions } from "@/features/agents/utils/diffUtils";
-import { countLineChanges } from "@/features/agents/utils/diffStats";
+import { useMemo } from "react"
+import { MultiFileDiff } from "@pierre/diffs/react"
+import type { DiffData } from "@/features/agents/lib/types"
+import { useDiffOptions } from "@/features/agents/utils/diffUtils"
+import { countLineChanges } from "@/features/agents/utils/diffStats"
 
 interface DiffViewProps {
-  diffData: DiffData;
+  diffData: DiffData
 }
 
 export function DiffView({ diffData }: DiffViewProps) {
-  const { originalContent, newContent, filePath, isBinary } = diffData;
-  const displayPath = filePath.split("/").pop() || filePath;
+  const diffOptions = useDiffOptions()
+  const { originalContent, newContent, filePath, isBinary } = diffData
+  const displayPath = filePath.split("/").pop() || filePath
   const stats = useMemo(
     () => countLineChanges(originalContent, newContent, filePath),
-    [filePath, newContent, originalContent],
-  );
+    [filePath, newContent, originalContent]
+  )
 
   if (isBinary) {
     return (
-      <div className="mt-2 text-gray-500 text-xs font-mono">
+      <div className="mt-2 font-mono text-xs text-gray-500">
         Binary file - diff not available
       </div>
-    );
+    )
   }
 
   if (stats.additions === 0 && stats.deletions === 0) {
     return (
-      <div className="mt-2 text-gray-500 text-xs font-mono">
-        No changes
-      </div>
-    );
+      <div className="mt-2 font-mono text-xs text-gray-500">No changes</div>
+    )
   }
 
   return (
     <div className="mt-2 font-mono text-xs">
-      <div className="flex items-center gap-2 text-gray-500 mb-1">
+      <div className="mb-1 flex items-center gap-2 text-gray-500">
         <span className="text-gray-400">{displayPath}</span>
         {diffData.isNewFile && <span>(new)</span>}
         <span className="text-green-400">+{stats.additions}</span>
@@ -48,5 +47,5 @@ export function DiffView({ diffData }: DiffViewProps) {
         />
       </div>
     </div>
-  );
+  )
 }
