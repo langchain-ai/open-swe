@@ -95,7 +95,10 @@ function StreamSubmitButton(props: SubmitButtonProps) {
         try {
           await cancelThread.mutateAsync()
         } catch {
-          // Surfaced by the mutation state; still disconnect below.
+          // Cancellation failed (transient 5xx, or a non-owner viewer). Leave
+          // the stream and the thread's status polling untouched: presenting a
+          // stopped state here would strand the UI on a still-running run.
+          return
         }
       }
       await stream.disconnect()

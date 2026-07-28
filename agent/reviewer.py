@@ -358,6 +358,9 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
         ),
         "system_prompt": REVIEWER_SUBAGENT_SYSTEM_PROMPT,
         "model": model,
+        # Subagents compile into their own graphs, so the reviewer's own
+        # middleware never wraps their model calls.
+        "middleware": cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()]),
     }
 
 

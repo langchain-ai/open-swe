@@ -10,6 +10,10 @@ _TRANSIENT_ERROR_NAMES = frozenset(
         "APIConnectionError",
         "APITimeoutError",
         "ConnectTimeout",
+        # A subagent's wedged model call (ModelCallTimeoutMiddleware). Subagents
+        # have no fallback middleware, so retrying the delegated task is the
+        # escalation path.
+        "ModelCallTimeoutError",
         "ReadTimeout",
         "TimeoutException",
         "TransportError",

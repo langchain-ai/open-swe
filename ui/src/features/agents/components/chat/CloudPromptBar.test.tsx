@@ -75,6 +75,19 @@ describe("CloudPromptBar stop button", () => {
     await waitFor(() => expect(cancelThread).toHaveBeenCalledWith("thread-1"))
   })
 
+  it("keeps the run live when cancellation fails", async () => {
+    cancelThread.mockRejectedValueOnce(new Error("502"))
+    renderPromptBar(true)
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop run" }))
+
+    await waitFor(() => expect(cancelThread).toHaveBeenCalled())
+    // No false "stopped" state: the stream stays connected so status polling
+    // (which only runs while the cached status is `running`) keeps going.
+    expect(stream.disconnect).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
+  })
+
   it("shows the send button when no run is live", () => {
     renderPromptBar(false)
 

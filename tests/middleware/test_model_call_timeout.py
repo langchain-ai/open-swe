@@ -52,6 +52,24 @@ class TestModelCallTimeoutMiddleware:
         monkeypatch.setenv("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "120")
         assert ModelCallTimeoutMiddleware()._timeout_seconds == 120
 
+    def test_every_subagent_spec_carries_the_deadline(self) -> None:
+        # Subagents compile into their own graphs, so the parent's middleware
+        # never wraps their model calls.
+        from agent.reviewer import _reviewer_subagent
+        from agent.server import _browser_subagent, _general_purpose_subagent
+
+        model = MagicMock()
+        specs = [
+            _general_purpose_subagent(model),
+            _browser_subagent(model, []),
+            _reviewer_subagent(model),
+        ]
+        for spec in specs:
+            assert any(
+                isinstance(middleware, ModelCallTimeoutMiddleware)
+                for middleware in spec.get("middleware", [])
+            ), f"{spec['name']} subagent has no model-call deadline"
+
     def test_timeout_falls_back_on_invalid_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "soon")
         assert ModelCallTimeoutMiddleware()._timeout_seconds == DEFAULT_MODEL_CALL_TIMEOUT_SECONDS

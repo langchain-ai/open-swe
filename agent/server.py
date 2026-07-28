@@ -514,6 +514,17 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
 )
 
 
+def _subagent_model_timeout_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
+    """Deadline for a subagent's own model calls.
+
+    Subagents are compiled into their own graphs, so the parent's middleware
+    never wraps them — while a delegated `task` runs, the parent is only waiting
+    on tool execution. Without this a stalled provider call inside a subagent
+    hangs the run exactly like it did in the parent.
+    """
+    return cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()])
+
+
 def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
     return {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -523,6 +534,7 @@ def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
         # tool-call cadence) that delegated work also needs.
         "system_prompt": OPEN_SWE_SHARED_BASE + "\n\n" + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
+        "middleware": _subagent_model_timeout_middleware(),
     }
 
 
@@ -565,6 +577,7 @@ def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
         "system_prompt": BROWSER_SUBAGENT_SYSTEM_PROMPT,
         "tools": tools,
         "model": model,
+        "middleware": _subagent_model_timeout_middleware(),
     }
 
 
