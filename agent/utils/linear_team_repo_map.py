@@ -1,30 +1,8 @@
 from typing import Any
 
-LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
-    "Brace's test workspace": {"owner": "langchain-ai", "name": "open-swe"},
-    "Yogesh-dev": {
-        "projects": {
-            "open-swe-v3-test": {"owner": "aran-yogesh", "name": "nimedge"},
-            "open-swe-dev-test": {"owner": "aran-yogesh", "name": "TalkBack"},
-        },
-        "default": {
-            "owner": "aran-yogesh",
-            "name": "TalkBack",
-        },  # Fallback for issues without project
-    },
-    "LangChain OSS": {
-        "projects": {
-            "deepagents": {"owner": "langchain-ai", "name": "deepagents"},
-            "langchain": {"owner": "langchain-ai", "name": "langchain"},
-        }
-    },
-    "Applied AI": {
-        "projects": {
-            "GTM Engineering": {"owner": "langchain-ai", "name": "ai-sdr"},
-        },
-        "default": {"owner": "langchain-ai", "name": "ai-sdr"},
-    },
-    "Docs": {"default": {"owner": "langchain-ai", "name": "docs"}},
-    "Open SWE": {"default": {"owner": "langchain-ai", "name": "open-swe"}},
-    "LangSmith Deployment": {"default": {"owner": "langchain-ai", "name": "langgraph-api"}},
-}
+# SPEEDBAY DEVIATION: upstream ships its own workspace's team mapping here, and
+# our Linear team "Open SWE" collided with theirs (routing to langchain-ai/open-swe,
+# which the allowlist then rejected). Docs designate this file as deployer config.
+# Empty mapping = every team falls back to DEFAULT_REPO_OWNER/DEFAULT_REPO_NAME
+# (speedbay/warehouse). Per-comment `repo:owner/name` still overrides.
+LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {}

@@ -144,6 +144,7 @@ Everything we add lives in files upstream does not own:
 | `speedbay/githooks/commit-msg` | Strips AI-attribution trailers from every commit |
 | `speedbay/run-dev.sh` | **Start the backend with this**, not bare `langgraph dev` |
 | `speedbay/set_model.py` | Reads/sets the agent's default model (no dashboard needed) |
+| `speedbay/create_linear_webhook.py` | Creates/lists the Linear trigger webhooks (needs a temp admin key) |
 | `agent/middleware/speedbay_conventions.py` | Appends warehouse's commit/PR contract to the system prompt |
 
 ### Why the local sandbox needs all this
@@ -201,6 +202,7 @@ Two upstream-owned files carry edits. Both are marked in-code with
 |---|---|---|
 | `agent/server.py` | Import + one entry in the `get_agent()` middleware list | Sanctioned registration point; no alternative seam |
 | `agent/dashboard/options.py` | `kimi-k3-code` -> `kimi-k3` in `SUPPORTED_MODELS` and `DEPRECATED_MODEL_REPLACEMENTS` | Upstream ships a model id that does not exist on Fireworks (404 from the platform API). `SUPPORTED_MODEL_IDS` gates model selection, so it cannot be fixed from config. **File upstream so this deviation disappears.** |
+| `agent/utils/linear_team_repo_map.py` | Upstream's own workspace mapping replaced with an empty dict | Docs designate this file as deployer config. Our Linear team "Open SWE" collided with upstream's entry of the same name and routed to `langchain-ai/open-swe`, which the allowlist rejected. Empty mapping falls back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` (`speedbay/warehouse`); per-comment `repo:owner/name` still overrides. |
 
 Deliberately **not** patched, to keep the merge surface small:
 
@@ -209,6 +211,39 @@ Deliberately **not** patched, to keep the merge surface small:
   it via `SpeedbayConventionsMiddleware` costs nothing at merge time.
 - `agent/utils/authorship.py` — attribution is stripped by the `commit-msg` hook
   rather than by editing the footer/trailer helpers.
+
+## Linear trigger
+
+A `@openswe` comment on a Linear ticket triggers a run. Setup facts that cost a
+night to learn:
+
+- **Linear's webhook UI no longer accepts a user-supplied secret** — it
+  generates a `lin_wh_...` value. Upstream's docs (and this fork's `.env`
+  layout) assume we choose the secret, so webhooks are created **via the API**
+  with `speedbay/create_linear_webhook.py`, passing the `LINEAR_WEBHOOK_SECRET`
+  from `.env`. A UI-created webhook's generated secret never verified against
+  our HMAC check; the API-created webhook with our own secret verified
+  immediately.
+- **Only workspace admins can manage webhooks.** The forge-bot runtime key gets
+  `Invalid role: admin required`. Use a temporary admin key
+  (`LINEAR_ADMIN_KEY` env var), then revoke it. Never store it.
+- **`allPublicTeams: true` does not cover private teams.** Each private Linear
+  team needs its own webhook (`--team KEY`). Two webhooks currently exist: one
+  for all public teams, one for the private team OPE. Both share the same
+  secret and URL.
+- **API-authored comments do fire the webhook**, and arrive with
+  `botActor: null` — the route's bot filter does not catch comments posted with
+  a plain API key (e.g. forge-bot). Loop protection rests on the `@openswe`
+  mention requirement and the agent's known reply prefixes, so agent replies
+  must never contain `@openswe`.
+- The runtime `LINEAR_API_KEY` is a forge-bot service-account key: agent
+  comments on tickets are attributed to `forge-bot@speedbay.com`, and the key
+  is revocable without touching anyone's personal access.
+- **Sandbox runs can mutate `speedbay/gitconfig`**: an agent once ran
+  `gh auth setup-git`, which rewrote the credential helper in the file
+  `GIT_CONFIG_GLOBAL` points at (routing pushes through the host's gh auth).
+  The file is kept read-only (`chmod 444`) to fail such attempts loudly; if it
+  shows up modified, restore it from git.
 
 ## Known issues
 
