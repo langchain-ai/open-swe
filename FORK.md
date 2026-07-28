@@ -19,22 +19,25 @@ Remotes: `origin` → `speedbay/open-swe`, `upstream` → `langchain-ai/open-swe
 ### Re-check after every merge
 
 Our customizations are new files, but each must be **registered** in an
-upstream-owned file. These two lines are the entire merge surface — verify both
-survived, and re-add them if a merge dropped them:
+upstream-owned file. These registrations are the entire merge surface — verify
+all survived, and re-add any a merge dropped (each is marked in-code with a
+`SPEEDBAY REGISTRATION` comment):
 
 | # | Registration | Location |
 |---|---|---|
-| 1 | `SANDBOX_FACTORIES` entry for the Docker sandbox backend | the `SANDBOX_FACTORIES` dict in `agent/utils/sandbox.py` |
+| 1 | `"docker"` entry for the Docker sandbox backend | the `SANDBOX_FACTORIES` dict in `agent/utils/sandbox.py` |
 | 2 | `SpeedbayConventionsMiddleware` (and future gate middleware) in the `middleware=[...]` list | the list inside `get_agent()` in `agent/server.py`, plus its direct import above |
+| 3 | `docker` branch calling `validate_startup_config()` | inside `validate_sandbox_startup_config()` in `agent/utils/sandbox.py` |
 
 Identified by symbol, not `file:line` — the middleware list moved from :946 to :953 on the very first upstream merge.
 
 Both are upstream's documented extension points (`docs/CUSTOMIZATION.md` §6),
 which is why they merge cleanly.
 
-Note: `validate_sandbox_startup_config()` (`agent/utils/sandbox.py:65`) validates
-**only** `SANDBOX_TYPE=langsmith`. A Docker backend gets no startup validation
-unless we add it there.
+Note: upstream's `validate_sandbox_startup_config()` (in `agent/utils/sandbox.py`)
+validates **only** `SANDBOX_TYPE=langsmith`; our `docker` branch there (the third
+registration, same file as #1) adds boot-time validation — daemon reachable and
+image present — so a misconfigured Docker setup fails at startup, not first run.
 
 ## File placement rule
 
@@ -55,7 +58,7 @@ credential-free local boot:
 | Var | Value | Why |
 |---|---|---|
 | `LANGCHAIN_TRACING_V2` | `"false"` or absent — **never `""`** | starlette casts it to bool; `""` raises `ValueError` before any app code runs |
-| `SANDBOX_TYPE` | `"local"` | default is `langsmith`, which is fail-closed without `DEFAULT_SANDBOX_SNAPSHOT_ID`. `local` has no isolation — don't leave it set once real credentials exist |
+| `SANDBOX_TYPE` | `"docker"` | default is `langsmith`, which is fail-closed without `DEFAULT_SANDBOX_SNAPSHOT_ID`. `docker` (OPE-7) runs each agent in a container from `openswe-sandbox:dev` — build it first (see `speedbay/docker/Dockerfile.sandbox`). `local` still exists but has **no isolation**; only for credential-free bring-up on a machine with no real keys |
 | `DASHBOARD_BASE_URL` | `""` | any `http://localhost*` value turns on the local-dev LLM key check (`agent/utils/model.py:295`), which requires a key for the default model |
 
 Both boot validators run in the FastAPI lifespan at `agent/api/app.py:24-25`.
@@ -115,21 +118,29 @@ If a freshly created hostname fails to resolve locally while working fine from
 `dig @1.1.1.1`, the local resolver cached an NXDOMAIN from a pre-creation
 lookup: `sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder`.
 
-### Do not install as a service
+### Unattended operation
 
-Do **not** run `cloudflared service install` until the Docker sandbox backend
-lands (OPE-7). A tunnel started at boot means a permanently public path into a
-host running `SANDBOX_TYPE=local`, which executes agent shell commands directly
-on the machine with the operator's environment inherited
-(`agent/integrations/local.py:7`). Start the tunnel when working, stop it after.
+With the Docker backend (OPE-7) live, agent commands run in per-run containers:
+no host filesystem, host env, or host credentials are reachable (negative-proof
+test in `speedbay/tests/test_docker_sandbox.py`). The blanket prohibition on
+`cloudflared service install` is therefore lifted **conditionally**: an
+always-on tunnel is acceptable only while `SANDBOX_TYPE=docker` — revert to
+start/stop-per-session if the backend is ever switched back to `local`. What
+still runs on the host regardless: the backend process itself, webhook
+handling, and token minting. Keep those in mind before leaving the machine
+unattended for long periods; the remaining laptop-phase risks are cost
+(bounded by FORK.md § Spend limits) and PR volume, both bounded per-run by
+human review before merge.
 
 ### Why Cloudflare rather than ngrok
 
-Measured `warehouse` activity is ~547 PRs/month at ~18 check runs per head SHA
-and 1.7 commits per PR, i.e. **~35k webhook events/month** once the GitHub App
-subscribes to `check_run`. ngrok's free tier caps at 20k requests/month and
-cannot reserve a chosen subdomain, while a Cloudflare named tunnel on a zone we
-already own has no request cap, a hostname we pick, and no interstitial page.
+Hostname control on a zone we already own (`openswe.speedbay.com`), no
+interstitial page, and no request cap. (An earlier version of this section
+justified the choice by event volume — ~35k webhook events/month — but that
+figure assumed a `check_run` subscription that OPE-3 establishes we must not
+create; the real figure is ~5k/month across the six handled events, which
+ngrok's free tier could also absorb. The decision stands on the qualitative
+grounds above, not on cap headroom.)
 
 ## Speed Bay org layer
 
@@ -145,6 +156,9 @@ Everything we add lives in files upstream does not own:
 | `speedbay/run-dev.sh` | **Start the backend with this**, not bare `langgraph dev` |
 | `speedbay/set_model.py` | Reads/sets the agent's default model (no dashboard needed) |
 | `speedbay/create_linear_webhook.py` | Creates/lists the Linear trigger webhooks (needs a temp admin key) |
+| `speedbay/docker/Dockerfile.sandbox` | The sandbox image (`openswe-sandbox:dev`) the docker backend boots |
+| `speedbay/tests/test_docker_sandbox.py` | Docker backend tests incl. the negative isolation proof |
+| `agent/integrations/docker_local.py` | Docker sandbox backend: per-run containers + git-auth provisioning |
 | `agent/middleware/speedbay_conventions.py` | Appends warehouse's commit/PR contract to the system prompt |
 
 ### Why the local sandbox needs all this
@@ -162,9 +176,13 @@ backend runs commands with the parent process's environment
 (`LocalShellBackend(..., inherit_env=True)`), so exporting `PATH`,
 `GIT_CONFIG_GLOBAL` and `core.hooksPath` is enough — no upstream code changes.
 
-**When the Docker backend lands, it must solve this again**: containers do not
-inherit the host environment, so the token has to be injected into the container
-(proxy, credential helper, or mounted helper script).
+The Docker backend (`agent/integrations/docker_local.py`, OPE-7) solves this
+differently — containers do not inherit host env, so at create/reconnect it
+mints a token on the host and provisions the container with a token file
+(`/opt/speedbay/token`, refreshed on reconnect since installation tokens last
+an hour), a `gh` shim at `/usr/local/bin/gh`, a read-only gitconfig whose
+credential helper reads the token file, and the attribution-stripping
+`commit-msg` hook. The App private key never enters the container.
 
 ### Bot-token-only mode requires a LangSmith placeholder
 

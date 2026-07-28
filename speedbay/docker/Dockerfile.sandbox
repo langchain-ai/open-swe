@@ -1,0 +1,59 @@
+# Open SWE sandbox image (OPE-13).
+#
+# The environment agent runs execute in: one container per run, booted by the
+# docker sandbox backend (agent/integrations/docker_local.py). Carries what the
+# agent needs (git, gh, language runtimes) — credentials are NOT baked in; the
+# backend injects a short-lived installation token at container create.
+#
+# Requirements mined from pi-forge/forge/docker/Dockerfile (sandcastle):
+# git + git-lfs + gh + uv + node. Pi itself is not installed — Open SWE is the
+# agent here, not pi.
+#
+# Build (from the fork root):
+#   docker build -f speedbay/docker/Dockerfile.sandbox -t openswe-sandbox:dev speedbay/docker
+#
+# ponytail: single-stage, apt-pinned-by-suite only. Reproducible pinning when
+# the image graduates from :dev.
+
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    git \
+    git-lfs \
+    gnupg \
+    jq \
+    less \
+    nodejs \
+    npm \
+    procps \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ripgrep \
+    unzip \
+  && git lfs install --system --skip-repo \
+  && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI from the official apt repo (arch-independent packaging).
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends gh \
+  && rm -rf /var/lib/apt/lists/*
+
+# uv/uvx for python project workflows (sandcastle parity).
+RUN curl -fsSL https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+# The agent's working root; the backend's provisioning also writes /opt/speedbay.
+RUN mkdir -p /workspace /opt/speedbay
+WORKDIR /workspace
+
+# Kept alive by the backend's `docker run -d ... sleep infinity`; this default
+# matches so a bare `docker run` behaves identically.
+CMD ["sleep", "infinity"]
