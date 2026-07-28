@@ -228,9 +228,10 @@ night to learn:
   `Invalid role: admin required`. Use a temporary admin key
   (`LINEAR_ADMIN_KEY` env var), then revoke it. Never store it.
 - **`allPublicTeams: true` does not cover private teams.** Each private Linear
-  team needs its own webhook (`--team KEY`). Two webhooks currently exist: one
-  for all public teams, one for the private team OPE. Both share the same
-  secret and URL.
+  team needs its own webhook (`--team KEY`). Six webhooks currently exist: one
+  for all public teams plus one per private team (OPE, STA, YAR, BPRESS,
+  UDLINT), all sharing the same secret and URL. A newly created private team
+  needs its own webhook — run the script again.
 - **API-authored comments do fire the webhook**, and arrive with
   `botActor: null` — the route's bot filter does not catch comments posted with
   a plain API key (e.g. forge-bot). Loop protection rests on the `@openswe`
