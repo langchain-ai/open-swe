@@ -28,7 +28,8 @@ export function useOptions() {
   })
 }
 
-export const reposQueryKey = ["repos"] as const
+/** Keyed by login so a cached list never bleeds across accounts in one SPA session. */
+export const reposQueryKey = (login: string | null) => ["repos", login] as const
 
 /** Repos change rarely; revalidate in the background rather than on every mount. */
 export const REPOS_STALE_TIME_MS = 10 * 60 * 1000
@@ -44,16 +45,17 @@ export function useRepos() {
 
   useEffect(() => {
     if (!login) return
-    if (qc.getQueryData<ReposPayload>(reposQueryKey)) return
+    const key = reposQueryKey(login)
+    if (qc.getQueryData<ReposPayload>(key)) return
     const cached = readCachedRepos(login)
     if (!cached) return
-    qc.setQueryData<ReposPayload>(reposQueryKey, cached.payload, {
+    qc.setQueryData<ReposPayload>(key, cached.payload, {
       updatedAt: cached.updatedAt,
     })
   }, [login, qc])
 
   return useQuery({
-    queryKey: reposQueryKey,
+    queryKey: reposQueryKey(login),
     queryFn: async () => {
       try {
         const payload = await api.repos()
@@ -79,7 +81,7 @@ export function useRefreshRepos() {
   return useMutation({
     mutationFn: () => api.repos({ refresh: true }),
     onSuccess: (payload) => {
-      qc.setQueryData<ReposPayload>(reposQueryKey, payload)
+      qc.setQueryData<ReposPayload>(reposQueryKey(login), payload)
       if (login) writeCachedRepos(login, payload)
     },
   })
