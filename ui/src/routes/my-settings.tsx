@@ -25,6 +25,7 @@ import {
   useSaveProfile,
 } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { clearCachedRepos } from "@/lib/repoCache"
 import { useSession } from "@/lib/session"
 import {
   notificationsEnabled,
@@ -371,6 +372,7 @@ function MySettingsPage() {
 
   const handleLogout = async () => {
     await api.logout()
+    clearCachedRepos()
     qc.setQueryData(["session"], null)
     void navigate({ to: "/login" })
   }

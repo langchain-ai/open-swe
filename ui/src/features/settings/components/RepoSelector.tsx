@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { CaretDownIcon, FolderIcon } from "@phosphor-icons/react"
+import {
+  ArrowsClockwiseIcon,
+  CaretDownIcon,
+  FolderIcon,
+} from "@phosphor-icons/react"
 
+import { useRefreshRepos } from "@/lib/profile"
 import { cn } from "@/lib/utils"
 
 type RepoOption = { full_name: string }
@@ -35,6 +40,7 @@ export function RepoSelector({
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const refresh = useRefreshRepos()
 
   const filteredRepos = useMemo(() => {
     const all = repos ?? []
@@ -78,13 +84,27 @@ export function RepoSelector({
             dropdownClassName
           )}
         >
-          <input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={searchPlaceholder}
-            className="w-full border-b border-border bg-transparent px-2 py-1.5 text-foreground outline-none placeholder:text-muted-foreground"
-          />
+          <div className="flex items-center border-b border-border">
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={searchPlaceholder}
+              className="min-w-0 flex-1 bg-transparent px-2 py-1.5 text-foreground outline-none placeholder:text-muted-foreground"
+            />
+            <button
+              type="button"
+              title="Refresh repositories"
+              aria-label="Refresh repositories"
+              disabled={refresh.isPending}
+              onClick={() => refresh.mutate()}
+              className="mr-1 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-muted disabled:cursor-default"
+            >
+              <ArrowsClockwiseIcon
+                className={cn("size-3.5", refresh.isPending && "animate-spin")}
+              />
+            </button>
+          </div>
           <div className="overflow-y-auto">
             <button
               type="button"
