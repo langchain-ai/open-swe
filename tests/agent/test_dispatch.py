@@ -82,6 +82,8 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["multitask_strategy"] == "interrupt"
     assert created["if_not_exists"] == "create"
     assert created["webhook"] == "https://app/webhooks/run-complete"
+    # Resumable by default so the dashboard can join (and stop) a run it did not start.
+    assert created["stream_resumable"] is True
     assert created["config"]["metadata"] == {"kind": "test"}
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
     assert isinstance(created["config"]["configurable"]["prepare_run_id"], str)
@@ -101,12 +103,12 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_stream_kwarg
         source="schedule",
         config={"configurable": {"prepare_run_id": "existing"}},
         stream_mode=["values"],
-        stream_resumable=True,
+        stream_resumable=False,
         client=client,
     )
 
     created = client.runs.created[0]
     assert "webhook" not in created
     assert created["stream_mode"] == ["values"]
-    assert created["stream_resumable"] is True
+    assert created["stream_resumable"] is False
     assert created["config"]["configurable"]["prepare_run_id"] == "existing"

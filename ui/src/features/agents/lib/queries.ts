@@ -117,6 +117,12 @@ export function useAgentThread(threadId: string) {
   return useQuery({
     queryKey: agentThreadKeys.detail(threadId),
     queryFn: () => agentsApi.getThread(threadId),
+    // Server truth heartbeat while a run is live. The SDK's SSE transport does
+    // not reconnect once a custom `fetch` is supplied (it needs the dashboard
+    // session cookie), so a dropped event stream must not leave the view — and
+    // its stop button — believing the run already ended.
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ? 3000 : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and bounce the route back to /agents.

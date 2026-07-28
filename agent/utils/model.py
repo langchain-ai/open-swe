@@ -13,6 +13,14 @@ OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 # primary provider a fair chance before the fallback middleware kicks in.
 DEFAULT_MAX_RETRIES = 6
 
+# Per-request deadline. Without one a stalled provider connection can park a run
+# for as long as the socket stays half-open (observed: a single call wedged for an
+# hour). Every provider we ship accepts ``timeout``; keep it generous enough for
+# max-effort reasoning on a long context, and let ``max_retries`` above turn a
+# stall into a retry instead of a dead run.
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 600.0
+_TIMEOUT_PROVIDER_PREFIXES = ("openai:", "anthropic:", "google_genai:", "fireworks:")
+
 _MODEL_CACHE: dict[
     tuple[str, bool | None, int | None, tuple[tuple[str, str], ...], int | None], Any
 ] = {}
@@ -80,6 +88,7 @@ class ModelKwargs(TypedDict, total=False):
     thinking_level: GoogleThinkingLevel | None
     temperature: float | None
     max_retries: int | None
+    timeout: float | None
     store: bool | None
     include: list[str] | None
     output_version: Literal["responses/v1"] | None
@@ -121,6 +130,8 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     """
     model_kwargs: dict[str, object] = dict(kwargs)
     model_kwargs.setdefault("max_retries", DEFAULT_MAX_RETRIES)
+    if model_id.startswith(_TIMEOUT_PROVIDER_PREFIXES):
+        model_kwargs.setdefault("timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS)
 
     if model_id.startswith("openai:"):
         # Direct-provider default: Responses API over the OpenAI websocket base.

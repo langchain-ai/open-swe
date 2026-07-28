@@ -49,6 +49,7 @@ from .dashboard.team_settings import (
 )
 from .middleware import (
     BasePrepareRunMiddleware,
+    ModelCallTimeoutMiddleware,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -357,6 +358,9 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
         ),
         "system_prompt": REVIEWER_SUBAGENT_SYSTEM_PROMPT,
         "model": model,
+        # Subagents compile into their own graphs, so the reviewer's own
+        # middleware never wraps their model calls.
+        "middleware": cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()]),
     }
 
 
@@ -1430,6 +1434,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
+                ModelCallTimeoutMiddleware(),
                 settle_review_check_on_exit,
             ],
         ),

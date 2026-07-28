@@ -26,6 +26,7 @@ import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsIn
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
+  useCancelAgentThread,
 } from "@/features/agents/lib/queries"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { IconButton } from "@/components/ui/button"
@@ -33,10 +34,17 @@ import { cn } from "@/lib/utils"
 
 const PROMPT_TEXTAREA_MAX_HEIGHT = 200
 
+export interface ActiveRun {
+  threadId: string
+  /** Server-reported run state, independent of this client's event stream. */
+  running: boolean
+}
+
 interface SubmitButtonProps {
   canSubmit: boolean
   submitting: boolean
   onSubmit: () => void
+  activeRun?: ActiveRun
 }
 
 function PlainSubmitButton({
@@ -73,13 +81,27 @@ function StreamSubmitButton(props: SubmitButtonProps) {
   const stream = useAgentThreadStream()
   const queryClient = useQueryClient()
   const [stopping, setStopping] = useState(false)
+  const threadId = props.activeRun?.threadId ?? stream.threadId ?? ""
+  const cancelThread = useCancelAgentThread(threadId)
 
   const handleStop = async () => {
     if (stopping) return
     setStopping(true)
     try {
-      await stream.stop()
-      const threadId = stream.threadId
+      // `stream.stop()` only cancels server-side when this client dispatched the
+      // run, so cancel by thread first: a run started from Slack/Linear/GitHub
+      // (or joined after a reload) has no client-side run id to cancel.
+      if (threadId) {
+        try {
+          await cancelThread.mutateAsync()
+        } catch {
+          // Cancellation failed (transient 5xx, or a non-owner viewer). Leave
+          // the stream and the thread's status polling untouched: presenting a
+          // stopped state here would strand the UI on a still-running run.
+          return
+        }
+      }
+      await stream.disconnect()
       if (threadId) {
         queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
           prev ? { ...prev, status: "interrupted" as const } : prev
@@ -91,7 +113,12 @@ function StreamSubmitButton(props: SubmitButtonProps) {
     }
   }
 
-  if (!stream.isLoading) return <PlainSubmitButton {...props} />
+  // Server truth (`activeRun.running`) matters as much as the client stream:
+  // this browser only sees `isLoading` once it observes a lifecycle event, so a
+  // run it never joined would otherwise render an unusable send button.
+  if (!stream.isLoading && !props.activeRun?.running) {
+    return <PlainSubmitButton {...props} />
+  }
 
   return (
     <IconButton
@@ -124,6 +151,8 @@ export interface CloudPromptBarProps {
   compact?: boolean
   disabled?: boolean
   busy?: boolean
+  /** Enables the stop button for the thread's live run. */
+  activeRun?: ActiveRun
   onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>
   models?: Array<ModelOption>
   selection?: ModelSelection | null
@@ -174,6 +203,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   compact = false,
   disabled = false,
   busy = false,
+  activeRun,
   onSubmit,
   models = [],
   selection = null,
@@ -465,6 +495,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             canSubmit={canSubmit}
             submitting={isSubmitting}
             onSubmit={() => void handleSubmit()}
+            activeRun={activeRun}
           />
         </div>
       </div>

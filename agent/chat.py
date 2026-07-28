@@ -48,6 +48,7 @@ from .dashboard.team_settings import (
 from .middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
+    ModelCallTimeoutMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
@@ -93,7 +94,10 @@ def _chat_general_purpose_subagent() -> SubAgent:
         "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
-            [FilesystemMiddleware(tools=["read_file", "ls", "glob", "grep"])],
+            [
+                FilesystemMiddleware(tools=["read_file", "ls", "glob", "grep"]),
+                ModelCallTimeoutMiddleware(),
+            ],
         ),
     }
 
@@ -251,6 +255,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
+                ModelCallTimeoutMiddleware(),
             ],
         ),
     ).with_config(config)

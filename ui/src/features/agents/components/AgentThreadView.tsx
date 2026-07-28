@@ -125,6 +125,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   }, [stream.messages, stream.toolCalls, stream.subagents, thread.messages])
 
   const isStreaming = thread.status === "running" || stream.isLoading
+  const activeRun = useMemo(
+    () => ({ threadId: thread.id, running: thread.status === "running" }),
+    [thread.id, thread.status]
+  )
   const queuedMessages = useMemo(
     () => visibleQueuedMessages(thread.queuedMessages, baseMessages),
     [baseMessages, thread.queuedMessages]
@@ -214,6 +218,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   placeholder="Add a follow up"
                   compact
                   busy={isStreaming}
+                  activeRun={activeRun}
                   onSubmit={(content, images) =>
                     sendMessage.mutateAsync({
                       content,
@@ -253,6 +258,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 placeholder="Send the first message"
                 compact
                 busy={isStreaming}
+                activeRun={activeRun}
                 onSubmit={(content, images) =>
                   sendMessage.mutateAsync({
                     content,
