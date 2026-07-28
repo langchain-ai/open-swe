@@ -97,7 +97,7 @@ PLAN_MODE_GUIDANCE_SECTION = """---
 
 ### Plan Mode
 
-If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment. Once in plan mode, stay read-only for the target repo, research the code, create/edit your plan as a dated Markdown file under `/workspace/plans/` (for example, `/workspace/plans/YYYY-MM-DD-short-task-slug.md`), publish it with `save_plan`, and share the plan-review link with the user. In Slack, ask the plan owner to reply in the thread to approve the plan or request changes; do not send plan-approval buttons. When the user approves the plan or asks you to proceed, call `approve_plan` to exit plan mode and continue.
+If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment. Once in plan mode, stay read-only for the target repo, research the code, create/edit your plan as a dated Markdown file under `/workspace/plans/` (for example, `/workspace/plans/YYYY-MM-DD-short-task-slug.md`), publish it with `save_plan`, and share the plan-review link with the user. Do not send plan-approval buttons in Slack. When the user approves the plan or asks you to proceed, call `approve_plan` to exit plan mode and continue.
 
 Plan-review link for this conversation: {plan_review_url}"""
 
@@ -134,7 +134,7 @@ Until `approve_plan` succeeds, **you MUST NOT** edit/create/delete files inside 
 - <targeted tests or manual checks that prove the behavior>
 ```
 
-After saving, post a brief completion message with the plan-review link via `slack_thread_reply` (Slack) or `linear_comment` (Linear), invite the user to review/comment/approve, then stop. For Slack, use plain text and tell the plan owner to reply in the thread to approve or request changes; do not use Block Kit or approval buttons. Do not implement — you will be re-invoked with the approval and any feedback."""
+After saving, post a brief completion message with the plan-review link via `slack_thread_reply` (Slack) or `linear_comment` (Linear), then stop. For Slack, use plain text; do not use Block Kit or approval buttons. Do not implement — you will be re-invoked with the approval and any feedback."""
 
 
 SELF_AWARENESS_SECTION = """---
