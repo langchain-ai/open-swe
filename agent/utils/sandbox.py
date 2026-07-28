@@ -16,6 +16,8 @@ SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "runloop": ("agent.integrations.runloop", "create_runloop_sandbox"),
     "e2b": ("agent.integrations.e2b", "create_e2b_sandbox"),
     "local": ("agent.integrations.local", "create_local_sandbox"),
+    # SPEEDBAY REGISTRATION: docker sandbox backend (OPE-7); re-check after upstream merges.
+    "docker": ("agent.integrations.docker_local", "create_docker_sandbox"),
 }
 
 
@@ -74,3 +76,8 @@ def validate_sandbox_startup_config() -> None:
         from agent.integrations.langsmith import LangSmithProvider
 
         LangSmithProvider.validate_startup_config()
+    # SPEEDBAY REGISTRATION: boot-time validation for the docker backend (OPE-7).
+    if sandbox_type == "docker":
+        from agent.integrations.docker_local import validate_startup_config
+
+        validate_startup_config()
