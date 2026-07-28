@@ -386,5 +386,6 @@ def test_natural_language_plan_approval_rejects_ambiguous_or_negative_replies(re
 def test_plan_mode_prompt_uses_plain_text_slack_approval() -> None:
     prompt = construct_system_prompt(working_dir="/work", plan_mode=True)
 
-    assert "reply naturally in the thread" in prompt
+    assert "reply in the thread" in prompt
+    assert "reply naturally" not in prompt
     assert "do not use Block Kit or approval buttons" in prompt

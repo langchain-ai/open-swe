@@ -41,7 +41,7 @@ async def slack_thread_reply(
     The user can still reply manually in the Slack thread.
 
     When a plan is ready, post a plain-text summary with the dashboard review link
-    and ask the user to reply naturally in the thread to approve it or request changes.
+    and ask the user to reply in the thread to approve it or request changes.
 
     To mention/tag a user, use Slack's mention format: <@USER_ID>.
     You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
