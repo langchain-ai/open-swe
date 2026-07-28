@@ -12,3 +12,10 @@ __pycache__
 .venv
 .DS_Store
 logs.txt
+ui/node_modules
+ui/.output
+ui/.nitro
+ui/.tanstack
+ui/dist
+ui/.vite
+ui/coverage
