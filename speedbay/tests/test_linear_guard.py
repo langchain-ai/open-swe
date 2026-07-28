@@ -85,6 +85,22 @@ def test_transient_failure_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     assert guard._resolved is False  # next call retries
 
 
+def test_failed_call_uses_concurrent_siblings_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failing first call must not fail open when a concurrent call resolved."""
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+
+    class SiblingWinsThenBoom:
+        def __init__(self, *a, **k): ...
+        async def __aenter__(self):
+            guard._resolved = True  # concurrent sibling resolved first
+            guard._cached_id = AUTHOR_ID
+            raise ConnectionError("this call's own request failed")
+        async def __aexit__(self, *a): ...
+
+    monkeypatch.setattr(guard.httpx, "AsyncClient", SiblingWinsThenBoom)
+    assert _run(guard._viewer_id()) == AUTHOR_ID
+
+
 def test_empty_payload_is_not_self(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(guard, "_viewer_id", lambda: _fixed_viewer(AUTHOR_ID))
     assert _run(guard.is_self_comment({})) is False

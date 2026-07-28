@@ -214,7 +214,7 @@ Settings live in the Store, so they survive restarts but not a Store wipe.
 
 ## Upstream deviations (re-check after every merge)
 
-Two upstream-owned files carry edits. Both are marked in-code with
+The upstream-owned files below carry edits. Each is marked in-code with
 `SPEEDBAY DEVIATION` / `SPEEDBAY REGISTRATION` comments.
 
 | File | Edit | Why not elsewhere |
