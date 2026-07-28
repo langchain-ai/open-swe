@@ -24,8 +24,10 @@ survived, and re-add them if a merge dropped them:
 
 | # | Registration | Location |
 |---|---|---|
-| 1 | `SANDBOX_FACTORIES` entry for the Docker sandbox backend | `agent/utils/sandbox.py:12` |
-| 2 | Gate middleware entry in the `middleware=[...]` list in `get_agent()` | `agent/server.py:946` (imports at `agent/server.py:69`) |
+| 1 | `SANDBOX_FACTORIES` entry for the Docker sandbox backend | the `SANDBOX_FACTORIES` dict in `agent/utils/sandbox.py` |
+| 2 | `SpeedbayConventionsMiddleware` (and future gate middleware) in the `middleware=[...]` list | the list inside `get_agent()` in `agent/server.py`, plus its direct import above |
+
+Identified by symbol, not `file:line` — the middleware list moved from :946 to :953 on the very first upstream merge.
 
 Both are upstream's documented extension points (`docs/CUSTOMIZATION.md` §6),
 which is why they merge cleanly.
@@ -128,6 +130,85 @@ and 1.7 commits per PR, i.e. **~35k webhook events/month** once the GitHub App
 subscribes to `check_run`. ngrok's free tier caps at 20k requests/month and
 cannot reserve a chosen subdomain, while a Cloudflare named tunnel on a zone we
 already own has no request cap, a hostname we pick, and no interstitial page.
+
+## Speed Bay org layer
+
+Everything we add lives in files upstream does not own:
+
+| Path | Purpose |
+|---|---|
+| `speedbay/mint_token.py` | Mints a GitHub App installation token on demand |
+| `speedbay/bin/gh` | `gh` shim; replaces the hardcoded `GH_TOKEN=dummy` with a real token |
+| `speedbay/bin/git-credential-openswe` | Git credential helper for `github.com` |
+| `speedbay/gitconfig` | Registers the credential helper; sets the bot git identity |
+| `speedbay/githooks/commit-msg` | Strips AI-attribution trailers from every commit |
+| `speedbay/run-dev.sh` | **Start the backend with this**, not bare `langgraph dev` |
+| `speedbay/set_model.py` | Reads/sets the agent's default model (no dashboard needed) |
+| `agent/middleware/speedbay_conventions.py` | Appends warehouse's commit/PR contract to the system prompt |
+
+### Why the local sandbox needs all this
+
+The agent never holds a GitHub token: upstream's prompts hardcode
+`GH_TOKEN=dummy` and expect a **sandbox proxy** to swap in a real one. That proxy
+is LangSmith-only — `refresh_proxy_token` in `agent/utils/github_proxy.py`
+returns early unless `SANDBOX_TYPE=langsmith`, and imports
+`_configure_github_proxy` from `agent/integrations/langsmith.py`. So with **any**
+other backend (local, docker, e2b, daytona, modal) every `git`/`gh` call fails
+with 401 out of the box.
+
+`speedbay/run-dev.sh` replaces the proxy with host-side credentials. The `local`
+backend runs commands with the parent process's environment
+(`LocalShellBackend(..., inherit_env=True)`), so exporting `PATH`,
+`GIT_CONFIG_GLOBAL` and `core.hooksPath` is enough — no upstream code changes.
+
+**When the Docker backend lands, it must solve this again**: containers do not
+inherit the host environment, so the token has to be injected into the container
+(proxy, credential helper, or mounted helper script).
+
+### Bot-token-only mode requires a LangSmith placeholder
+
+Counter-intuitively, running **without** LangSmith requires setting
+`LANGSMITH_API_KEY_PROD`. `is_bot_token_only_mode()` in `agent/utils/auth.py` is
+`LANGSMITH_API_KEY and not X_SERVICE_AUTH_JWT_SECRET and not USER_ID_API_KEY_MAP`;
+with the key empty the code takes the per-user OAuth path instead and dies with
+`No ls_user_id found from email ...`. The variable is fork-local (no installed
+package reads it) and on the bot path is used only as a flag, so a placeholder
+value is enough. `LANGSMITH_ENDPOINT_PROD` / `LANGSMITH_URL_PROD` point at
+`http://127.0.0.1:9` so the other five call sites that would build a real
+LangSmith client fail locally instead of reaching the network.
+
+### Choosing the model
+
+`LLM_MODEL_ID` in `.env` does **not** select the runtime model — it is read only
+by `validate_local_dev_llm_config` as a boot-time credential check. The real
+precedence is per-thread override -> user profile -> **team default**, stored in
+the LangGraph Store (`team_settings` / `default`). Use:
+
+```bash
+speedbay/set_model.py                                            # show current
+speedbay/set_model.py --list                                     # options
+speedbay/set_model.py fireworks:accounts/fireworks/models/kimi-k3
+```
+
+Settings live in the Store, so they survive restarts but not a Store wipe.
+
+## Upstream deviations (re-check after every merge)
+
+Two upstream-owned files carry edits. Both are marked in-code with
+`SPEEDBAY DEVIATION` / `SPEEDBAY REGISTRATION` comments.
+
+| File | Edit | Why not elsewhere |
+|---|---|---|
+| `agent/server.py` | Import + one entry in the `get_agent()` middleware list | Sanctioned registration point; no alternative seam |
+| `agent/dashboard/options.py` | `kimi-k3-code` -> `kimi-k3` in `SUPPORTED_MODELS` and `DEPRECATED_MODEL_REPLACEMENTS` | Upstream ships a model id that does not exist on Fireworks (404 from the platform API). `SUPPORTED_MODEL_IDS` gates model selection, so it cannot be fixed from config. **File upstream so this deviation disappears.** |
+
+Deliberately **not** patched, to keep the merge surface small:
+
+- `agent/prompt.py` — upstream's PR/commit format instructions conflict with
+  warehouse's contract, but that file takes ~70 commits per 90 days. Overriding
+  it via `SpeedbayConventionsMiddleware` costs nothing at merge time.
+- `agent/utils/authorship.py` — attribution is stripped by the `commit-msg` hook
+  rather than by editing the footer/trailer helpers.
 
 ## Known issues
 

@@ -1,0 +1,22 @@
+#!/bin/sh
+# Strip AI-attribution trailers from every commit the agent makes.
+#
+# warehouse's AGENTS.md forbids AI attribution, but upstream's collaboration
+# prompt instructs the model to append `Co-authored-by: open-swe[bot]` verbatim.
+# Prompt-level instructions lose that argument roughly half the time, so this
+# hook enforces it deterministically instead. Registered via core.hooksPath in
+# speedbay/run-dev.sh, so it applies to any repo the sandbox clones.
+set -eu
+
+MSG_FILE="$1"
+
+# Drop the bot trailer and any generated-by credit.
+grep -viE '^(co-authored-by:[[:space:]]*open-swe|generated with|made by \[open swe\])' \
+	"$MSG_FILE" > "$MSG_FILE.tmp" || true
+
+# Collapse the trailing blank lines the removal leaves behind, without relying
+# on GNU-specific tooling.
+awk 'BEGIN{blank=0} {if ($0 ~ /^[[:space:]]*$/) {blank++} else {while (blank>0) {print ""; blank--}; print}}' \
+	"$MSG_FILE.tmp" > "$MSG_FILE"
+
+rm -f "$MSG_FILE.tmp"

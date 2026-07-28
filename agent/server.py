@@ -87,6 +87,11 @@ from .middleware import (
     task_retry_on,
 )
 from .middleware.prepare_run import PrepareRunState
+
+# SPEEDBAY REGISTRATION (1 of 2 upstream touchpoints; see FORK.md). Imported from
+# the module directly rather than via .middleware's lazy registry, so
+# agent/middleware/__init__.py stays unmodified and merge-clean.
+from .middleware.speedbay_conventions import SpeedbayConventionsMiddleware
 from .middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from .prompt import OPEN_SWE_SHARED_BASE, construct_system_prompt
 from .runtime.constants import (
@@ -968,6 +973,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     corridor_enabled=bool(corridor_tools),
                 ),
                 SanitizeToolInputsMiddleware(),
+                # SPEEDBAY REGISTRATION: appends warehouse's commit/PR contract and the
+                # no-AI-attribution rule to the system prompt. Kept here rather than in
+                # agent/prompt.py so upstream's hot prompt file stays unmodified.
+                SpeedbayConventionsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
                 SubdirAgentsReadMiddleware(),

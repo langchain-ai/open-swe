@@ -68,7 +68,10 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "fireworks:accounts/fireworks/models/kimi-k3-code",
+        # SPEEDBAY DEVIATION: upstream ships "kimi-k3-code", which does not exist on
+        # Fireworks (404 from the platform API). The real model is "kimi-k3".
+        # See FORK.md; re-check after every upstream merge.
+        "id": "fireworks:accounts/fireworks/models/kimi-k3",
         "label": "Kimi K3",
         "efforts": ["low", "medium", "high"],
         "default_effort": "high",
@@ -104,8 +107,9 @@ DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = {
     "anthropic:claude-opus-4-8": "anthropic:claude-opus-5",
     "openai:gpt-5.5": "openai:gpt-5.6-sol",
     "google_genai:gemini-3.5-flash": "google_genai:gemini-3.6-flash",
+    # SPEEDBAY DEVIATION: retarget onto the real model id (see above).
     "fireworks:accounts/fireworks/models/kimi-k2p7-code": (
-        "fireworks:accounts/fireworks/models/kimi-k3-code"
+        "fireworks:accounts/fireworks/models/kimi-k3"
     ),
 }
 
