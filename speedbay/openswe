@@ -1,88 +1,161 @@
-#!/bin/sh
-# Single lifecycle command for the Open SWE deployment.
-#
-#   speedbay/openswe start    boot backend + tunnel, verify health, refuse duplicates
-#   speedbay/openswe stop     kill both, confirm the public URL went dark
-#   speedbay/openswe status   what's running, health, live sandbox containers
-#
-# Logs: /tmp/openswe-backend.log, /tmp/openswe-tunnel.log
-# ponytail: pgrep is the duplicate guard and process registry — no pidfiles,
-# no supervisor dependency. Graduate to launchd if this ever needs to survive
-# reboots.
+#!/usr/bin/env python3
+"""Single lifecycle command for the Open SWE deployment.
 
-set -u
-HERE="$(cd "$(dirname "$0")/.." && pwd)"
-BACKEND_LOG=/tmp/openswe-backend.log
-TUNNEL_LOG=/tmp/openswe-tunnel.log
-PUBLIC_URL=https://openswe.speedbay.com/health
-LOCAL_URL=http://localhost:2024/health
+    speedbay/openswe start    boot backend + tunnel, verify health, refuse duplicates
+    speedbay/openswe stop     kill both, confirm the public URL went dark
+    speedbay/openswe status   what's running, health, live sandbox containers
 
-backend_pids() { pgrep -f 'langgraph dev' || true; }
-tunnel_pids()  { pgrep -f 'cloudflared tunnel run' || true; }
+Logs: /tmp/openswe-backend.log, /tmp/openswe-tunnel.log
 
-wait_for() { # url attempts -> 0 when it answers 200
-  i=0
-  while [ $i -lt "$2" ]; do
-    [ "$(curl -s -o /dev/null -w '%{http_code}' -m 5 "$1" 2>/dev/null)" = "200" ] && return 0
-    i=$((i + 1)); sleep 2
-  done
-  return 1
-}
+Stdlib-only on purpose — runs with any python3 from any cwd, no venv needed.
+ponytail: pgrep is the duplicate guard and process registry — no pidfiles, no
+supervisor dependency. Graduate to launchd if this ever needs to survive reboots.
+"""
 
-start() {
-  if [ -n "$(backend_pids)" ] || [ -n "$(tunnel_pids)" ]; then
-    echo "already running — refusing to start duplicates:"
-    status
-    exit 1
-  fi
-  if ! docker info >/dev/null 2>&1; then
-    echo "FAIL: docker daemon unreachable (start Docker Desktop / colima first)" >&2
-    exit 1
-  fi
+import argparse
+import pathlib
+import signal
+import subprocess
+import sys
+import time
+import urllib.request
 
-  echo "starting backend..."
-  (cd "$HERE" && nohup ./speedbay/run-dev.sh > "$BACKEND_LOG" 2>&1 &)
-  if ! wait_for "$LOCAL_URL" 30; then
-    echo "FAIL: backend not healthy after 60s — tail $BACKEND_LOG" >&2
-    tail -5 "$BACKEND_LOG" >&2
-    exit 1
-  fi
-  echo "backend healthy: $LOCAL_URL"
+REPO = pathlib.Path(__file__).resolve().parent.parent
+BACKEND_LOG = "/tmp/openswe-backend.log"
+TUNNEL_LOG = "/tmp/openswe-tunnel.log"
+# The langgraph backend's bind address (langgraph dev's default port, also
+# assumed by docs/INSTALLATION.md) and the named Cloudflare tunnel that fronts
+# it (created in OPE-2; FORK.md § Webhook tunnel). The tunnel command and both
+# health checks derive from these — change them here only.
+BACKEND_URL = "http://localhost:2024"
+TUNNEL_NAME = "openswe"
+LOCAL_URL = f"{BACKEND_URL}/health"
+PUBLIC_URL = "https://openswe.speedbay.com/health"
 
-  echo "starting tunnel..."
-  (cd "$HERE" && nohup cloudflared tunnel run --url http://localhost:2024 openswe > "$TUNNEL_LOG" 2>&1 &)
-  if ! wait_for "$PUBLIC_URL" 15; then
-    echo "FAIL: public URL not healthy after 30s — tail $TUNNEL_LOG" >&2
-    tail -5 "$TUNNEL_LOG" >&2
-    exit 1
-  fi
-  echo "tunnel healthy:  $PUBLIC_URL"
-  echo "LIVE — @openswe comments on Linear tickets now trigger containerized runs."
-}
 
-stop() {
-  pids="$(backend_pids) $(tunnel_pids)"
-  # shellcheck disable=SC2086
-  [ -n "${pids# }" ] && kill $pids 2>/dev/null
-  sleep 2
-  [ -n "$(backend_pids)$(tunnel_pids)" ] && { echo "FAIL: processes survived kill" >&2; exit 1; }
-  code="$(curl -s -o /dev/null -w '%{http_code}' -m 8 "$PUBLIC_URL" 2>/dev/null)"
-  echo "stopped. public URL now returns ${code:-unreachable} (offline)."
-}
+def _pids(pattern: str) -> list[int]:
+    """PIDs whose full command line matches ``pattern`` (pgrep -f)."""
+    proc = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
+    return [int(p) for p in proc.stdout.split()]
 
-status() {
-  b="$(backend_pids)"; t="$(tunnel_pids)"
-  echo "backend : ${b:-not running}"
-  echo "tunnel  : ${t:-not running}"
-  echo "local   : $(curl -s -o /dev/null -w '%{http_code}' -m 3 "$LOCAL_URL" 2>/dev/null || echo down)"
-  echo "public  : $(curl -s -o /dev/null -w '%{http_code}' -m 8 "$PUBLIC_URL" 2>/dev/null || echo down)"
-  echo "sandboxes:"
-  docker ps -a --filter label=openswe.sandbox --format '  {{.Names}}  {{.Status}}' 2>/dev/null || echo "  (docker unreachable)"
-}
 
-case "${1:-}" in
-  start)  start ;;
-  stop)   stop ;;
-  status) status ;;
-  *) echo "usage: speedbay/openswe {start|stop|status}"; exit 2 ;;
-esac
+def backend_pids() -> list[int]:
+    return _pids("langgraph dev")
+
+
+def tunnel_pids() -> list[int]:
+    return _pids("cloudflared tunnel run")
+
+
+def _http_code(url: str, timeout: int = 5) -> str:
+    """HTTP status for ``url`` as a string; 'down' when unreachable."""
+    # Cloudflare's edge 403s the default Python-urllib user agent (bot filter),
+    # so identify as ourselves; curl passes for the same reason.
+    req = urllib.request.Request(url, headers={"User-Agent": "openswe-lifecycle/1"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return str(resp.status)
+    except urllib.error.HTTPError as e:
+        return str(e.code)
+    except Exception:
+        return "down"
+
+
+def _wait_for(url: str, attempts: int) -> bool:
+    for _ in range(attempts):
+        if _http_code(url) == "200":
+            return True
+        time.sleep(2)
+    return False
+
+
+def _spawn(cmd: list[str], log_path: str) -> None:
+    """Detach ``cmd`` with output to ``log_path``; survives this script exiting."""
+    with open(log_path, "w") as log:
+        subprocess.Popen(
+            cmd, cwd=REPO, stdout=log, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, start_new_session=True,
+        )
+
+
+def _tail(log_path: str, lines: int = 5) -> str:
+    try:
+        return "\n".join(pathlib.Path(log_path).read_text().splitlines()[-lines:])
+    except OSError:
+        # Reachable when the process never started (spawn failed before the
+        # shell opened the file) or the log was deleted; the path tells the
+        # operator where the log was expected.
+        return f"(no log at {log_path})"
+
+
+def start() -> int:
+    if backend_pids() or tunnel_pids():
+        print("already running — refusing to start duplicates:")
+        return status() or 1
+    if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
+        print("FAIL: docker daemon unreachable (start Docker Desktop / colima first)", file=sys.stderr)
+        return 1
+
+    print("starting backend...")
+    _spawn([str(REPO / "speedbay" / "run-dev.sh")], BACKEND_LOG)
+    if not _wait_for(LOCAL_URL, 30):
+        print(f"FAIL: backend not healthy after 60s — tail {BACKEND_LOG}", file=sys.stderr)
+        print(_tail(BACKEND_LOG), file=sys.stderr)
+        return 1
+    print(f"backend healthy: {LOCAL_URL}")
+
+    print("starting tunnel...")
+    _spawn(["cloudflared", "tunnel", "run", "--url", BACKEND_URL, TUNNEL_NAME], TUNNEL_LOG)
+    if not _wait_for(PUBLIC_URL, 15):
+        print(f"FAIL: public URL not healthy after 30s — tail {TUNNEL_LOG}", file=sys.stderr)
+        print(_tail(TUNNEL_LOG), file=sys.stderr)
+        return 1
+    print(f"tunnel healthy:  {PUBLIC_URL}")
+    print("LIVE — @openswe comments on Linear tickets now trigger containerized runs.")
+    return 0
+
+
+def stop() -> int:
+    for pid in backend_pids() + tunnel_pids():
+        try:
+            import os
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    time.sleep(2)
+    if backend_pids() or tunnel_pids():
+        print("FAIL: processes survived SIGTERM", file=sys.stderr)
+        return 1
+    print(f"stopped. public URL now returns {_http_code(PUBLIC_URL, timeout=8)} (offline).")
+    return 0
+
+
+def status() -> int:
+    b, t = backend_pids(), tunnel_pids()
+    print(f"backend : {' '.join(map(str, b)) or 'not running'}")
+    print(f"tunnel  : {' '.join(map(str, t)) or 'not running'}")
+    print(f"backend health  ({LOCAL_URL}): {_http_code(LOCAL_URL, timeout=3)}")
+    print(f"tunnel health   ({PUBLIC_URL}): {_http_code(PUBLIC_URL, timeout=8)}")
+    print("sandboxes:")
+    proc = subprocess.run(
+        ["docker", "ps", "-a", "--filter", "label=openswe.sandbox",
+         "--format", "  {{.Names}}  {{.Status}}"],
+        capture_output=True, text=True,
+    )
+    print(proc.stdout.rstrip() if proc.returncode == 0 and proc.stdout.strip() else "  (none)")
+    return 0
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        prog="speedbay/openswe",
+        description="Lifecycle command for the Open SWE deployment (backend + tunnel).",
+    )
+    parser.add_argument(
+        "action",
+        choices=["start", "stop", "status"],
+        help="start: boot + health-verify (refuses duplicates); "
+        "stop: kill both and confirm offline; status: processes + health + sandboxes",
+    )
+    args = parser.parse_args()
+    sys.exit({"start": start, "stop": stop, "status": status}[args.action]())
