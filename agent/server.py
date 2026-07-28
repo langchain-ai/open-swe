@@ -113,6 +113,7 @@ from .tools import (
     linear_search_issues,
     linear_update_issue,
     open_pull_request,
+    recreate_sandbox,
     report_platform_issue,
     request_pr_review,
     save_plan,
@@ -490,6 +491,40 @@ async def ensure_sandbox_for_thread(
     return sandbox_backend
 
 
+async def recreate_sandbox_for_thread(
+    thread_id: str,
+    *,
+    repo: dict[str, str] | None = None,
+) -> tuple[str, str]:
+    """Bind a thread to a fresh sandbox while preserving its previous sandbox."""
+    cached = SANDBOX_BACKENDS.get(thread_id)
+    metadata_sandbox_id = await get_sandbox_id_from_metadata(thread_id)
+    old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
+    if not old_sandbox_id:
+        raise ValueError(f"Thread {thread_id} has no sandbox to recreate")
+
+    new_sandbox = await _create_sandbox_with_proxy(
+        thread_id=thread_id,
+        repo=repo,
+    )
+    if new_sandbox.id == old_sandbox_id:
+        raise RuntimeError("Sandbox provider did not create a distinct sandbox")
+
+    await _configure_git_identity(new_sandbox)
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={"sandbox_id": new_sandbox.id},
+    )
+    set_sandbox_backend(thread_id, new_sandbox)
+    logger.info(
+        "Rebound thread %s from sandbox %s to sandbox %s",
+        thread_id,
+        old_sandbox_id,
+        new_sandbox.id,
+    )
+    return old_sandbox_id, new_sandbox.id
+
+
 # Mutating external tools hidden from the model while plan mode is active so it
 # can only research and propose a plan. File edit tools stay available so the
 # agent can draft and revise a plan under `/workspace/plans/`; prompt guidance
@@ -505,6 +540,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "task",
         "http_request",
         "open_pull_request",
+        "recreate_sandbox",
         "request_pr_review",
         "slack_start_new_thread",
         "linear_create_issue",
@@ -1001,6 +1037,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             linear_update_issue,
             open_pull_request,
             request_pr_review,
+            recreate_sandbox,
             report_platform_issue,
             schedule_thread_wakeup,
             slack_add_reaction,

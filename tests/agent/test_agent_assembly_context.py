@@ -120,6 +120,16 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_includes_recreate_sandbox_tool() -> None:
+    from agent.tools import recreate_sandbox
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert recreate_sandbox in tools
+
+
+@pytest.mark.asyncio
 async def test_task_retry_wraps_inside_tool_error_middleware() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     middleware = captured["middleware"]
