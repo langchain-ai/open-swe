@@ -69,6 +69,7 @@ from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
+    ModelCallTimeoutMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
@@ -1043,6 +1044,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *plan_mode_middleware,
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
+                # Innermost, so the deadline covers the provider call itself and a
+                # timeout escalates outward to the fallback model.
+                ModelCallTimeoutMiddleware(),
             ],
         ),
     ).with_config(config)

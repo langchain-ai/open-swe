@@ -22,6 +22,13 @@ const dashboardFetch: typeof fetch = (input, init) =>
  * omits the dashboard session cookie cross-origin, so the proxy rejects the
  * read with `401 "not authenticated"`. Override the SDK's global fetch so
  * every `Client` read carries the same credentials as the transport.
+ *
+ * Passing `fetch` to the transport is also what makes the SDK's SSE stream give
+ * up on reconnect (`maxReconnectAttempts = options.fetch != null ? 0 : 5`), and
+ * we cannot drop it — the transport's own requests would lose the session
+ * cookie. So a dropped event stream stays dropped for the life of the page, and
+ * run state must not be inferred from the stream alone: `useAgentThread` polls
+ * the thread while a run is live so the UI (and its stop button) keeps working.
  */
 overrideFetchImplementation(dashboardFetch);
 

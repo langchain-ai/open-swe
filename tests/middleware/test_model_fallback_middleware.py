@@ -12,6 +12,7 @@ import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage
 
+from agent.middleware.model_call_timeout import ModelCallTimeoutError
 from agent.middleware.model_fallback import (
     ModelFallbackMiddleware,
     _should_fallback,
@@ -80,6 +81,9 @@ class TestShouldFallback:
         response = httpx.Response(400, request=request, json={"error": {}})
         exc = anthropic.BadRequestError("bad", response=response, body={})
         assert _should_fallback(exc) is False
+
+    def test_model_call_deadline_falls_back(self) -> None:
+        assert _should_fallback(ModelCallTimeoutError("wedged")) is True
 
     def test_value_error_does_not_fall_back(self) -> None:
         assert _should_fallback(ValueError("nope")) is False

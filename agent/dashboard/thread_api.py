@@ -341,9 +341,16 @@ def _metadata_repo(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
 
 
 def _run_status_to_agent_status(thread_status: str | None, run_status: str | None) -> str:
+    # "interrupted" wins over a still-``busy`` thread: cancellation is async, so a
+    # just-cancelled thread reports busy for a moment and would otherwise look
+    # like it is still running. Callers refresh the newest run's real status
+    # first, so a follow-up run that superseded an interrupted one reads as
+    # pending/running here.
+    if run_status == "interrupted":
+        return "interrupted"
     if thread_status == "busy" or run_status in {"pending", "running"}:
         return "running"
-    if run_status in {"error", "failed", "timeout", "interrupted"}:
+    if run_status in {"error", "failed", "timeout"}:
         return "error"
     if run_status == "success":
         return "finished"
@@ -1489,6 +1496,14 @@ async def send_dashboard_message(
 async def cancel_dashboard_thread(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
+    """Interrupt every live run on a thread on behalf of its owner.
+
+    Cancels by thread rather than by ``latest_run_id`` so the stop button works
+    for runs this browser never started (Slack/Linear/GitHub triggers, CI
+    auto-fix): the client-side ``stream.stop()`` can only cancel a run it
+    dispatched itself, and cached ``latest_run_id`` metadata can lag the run the
+    platform is actually executing.
+    """
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -1498,12 +1513,11 @@ async def cancel_dashboard_thread(
     metadata = thread_metadata(thread)
     _assert_thread_owner(metadata, login, email)
 
-    run_id = metadata.get("latest_run_id")
-    if isinstance(run_id, str) and run_id:
-        try:
-            await client.runs.cancel(thread_id, run_id, wait=False)
-        except Exception:
-            logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
+    try:
+        await client.runs.cancel_many(thread_id=thread_id, status="all", action="interrupt")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to cancel active runs for thread %s", thread_id)
+        raise HTTPException(502, "failed to request thread cancellation") from exc
 
     await client.threads.update(
         thread_id=thread_id,

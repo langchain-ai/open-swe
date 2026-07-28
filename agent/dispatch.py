@@ -11,6 +11,12 @@ busy-check and the custom store-queue) with one function that always uses:
   resumes from the last checkpoint instead of losing all work.
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
   failure so every run ends with a signal even if the agent died.
+- ``stream_resumable=True`` — the run's event stream is retained so a client that
+  attaches later can replay it. Without this the dashboard cannot observe a run
+  it did not start: the v2 protocol only synthesizes the ``lifecycle: running``
+  event that drives ``stream.isLoading`` when it can replay the run's events, so
+  a Slack/Linear/GitHub-triggered run looked idle in the web UI (no stop button)
+  until it happened to emit its next event.
 """
 
 from __future__ import annotations
@@ -117,7 +123,7 @@ async def create_durable_run(
     durability: str = "sync",
     if_not_exists: str = "create",
     stream_mode: Any | None = None,
-    stream_resumable: bool | None = None,
+    stream_resumable: bool = True,
     after_seconds: int | float | None = None,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
@@ -128,13 +134,12 @@ async def create_durable_run(
         "multitask_strategy": multitask_strategy,
         "durability": durability,
         "if_not_exists": if_not_exists,
+        "stream_resumable": stream_resumable,
     }
     if COMPLETION_WEBHOOK_URL:
         create_kwargs["webhook"] = COMPLETION_WEBHOOK_URL
     if stream_mode is not None:
         create_kwargs["stream_mode"] = stream_mode
-    if stream_resumable is not None:
-        create_kwargs["stream_resumable"] = stream_resumable
     if after_seconds is not None:
         create_kwargs["after_seconds"] = after_seconds
 
