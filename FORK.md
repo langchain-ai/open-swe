@@ -161,6 +161,30 @@ Everything we add lives in files upstream does not own:
 | `speedbay/tests/test_docker_sandbox.py` | Docker backend tests incl. the negative isolation proof |
 | `agent/integrations/docker_local.py` | Docker sandbox backend: per-run containers + git-auth provisioning |
 | `agent/middleware/speedbay_conventions.py` | Appends warehouse's commit/PR contract to the system prompt |
+| `.macroscope/` | Macroscope review config (OPE-26): blocking agent-hygiene CRA, org-layer Python correctness idioms, review-scope ignore file — see below |
+
+### Macroscope review config (`.macroscope/`)
+
+The `.macroscope/` directory is org-layer: upstream has no such directory, so
+it carries **zero upstream merge surface**. It configures Macroscope's PR
+review for this fork:
+
+- `check-run-agents/agent-hygiene.md` — blocking (`conclusion: failure`) check
+  enforcing the commit/PR hygiene contract (issue-prefixed titles,
+  `Closes OPE-NNN`, four-section bodies, no AI attribution). Self-contained:
+  the rules are inlined, with an explicit exemption for upstream-authored
+  commits on upstream-sync PRs.
+- `correctness/python-idioms.md` — Speed Bay Python house style, folded into
+  the built-in Correctness review and scoped to org-layer paths only, so
+  upstream Python is never judged against our idioms.
+- `ignore.md` — Macroscope's default ignore patterns (REPLACE semantics
+  require copying them) plus fork scoping: upstream bulk we never author
+  (`ui/**`, generated `openwiki/**`) is out of review scope; upstream files we
+  may carry deviations in (`agent/**`, `tests/**`) stay in scope.
+- **Approvability: deliberately not configured.** There is no
+  `.macroscope/approvability.md` — every fork PR requires manual human
+  approval. Revisit only if this fork ever adopts warehouse's autonomous-land
+  posture.
 
 ### Why the local sandbox needs all this
 
