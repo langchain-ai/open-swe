@@ -11,11 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 async def recreate_sandbox() -> dict[str, Any]:
-    """Recreate this thread's sandbox only after the user explicitly requests it.
+    """Rebind this thread to a fresh sandbox.
 
-    Never call this proactively or as automatic recovery. The fresh sandbox has
-    none of the thread's current files or worktree state. The old sandbox is not
-    deleted, but it becomes inaccessible from this thread after the handoff.
+    The fresh sandbox has none of the thread's current files or worktree state.
+    The old sandbox is not deleted, but it becomes inaccessible from this thread
+    after the handoff.
 
     Returns ``success``, ``old_sandbox_id``, and ``new_sandbox_id`` on success.
     """

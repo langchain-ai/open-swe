@@ -63,10 +63,11 @@ async def test_recreate_sandbox_reports_failure_without_ids() -> None:
     assert result == {"success": False, "error": "creation failed"}
 
 
-def test_recreate_sandbox_requires_explicit_user_request() -> None:
+def test_recreate_sandbox_description_explains_handoff() -> None:
     assert recreate_sandbox.__doc__ is not None
-    assert "only after the user explicitly requests it" in recreate_sandbox.__doc__
-    assert "Never call this proactively or as automatic recovery" in recreate_sandbox.__doc__
+    assert "fresh sandbox has none of the thread's current files" in recreate_sandbox.__doc__
+    assert "old sandbox is not deleted" in recreate_sandbox.__doc__
+    assert "becomes inaccessible from this thread" in recreate_sandbox.__doc__
 
 
 def test_recreate_sandbox_exported() -> None:
