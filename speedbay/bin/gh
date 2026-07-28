@@ -1,0 +1,17 @@
+#!/bin/sh
+# `gh` shim that replaces the hardcoded dummy token with a real one.
+#
+# Open SWE's prompts instruct the agent to run `GH_TOKEN=dummy gh ...`, on the
+# assumption that a sandbox proxy rewrites the credential. The local backend has
+# no proxy, so the literal "dummy" reaches GitHub and every call 401s. This shim
+# sits earlier on PATH than the real gh and swaps in an installation token.
+set -eu
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+REAL_GH=/opt/homebrew/bin/gh
+
+GH_TOKEN="$("$HERE/../../.venv/bin/python" "$HERE/../mint_token.py")"
+export GH_TOKEN
+unset GITHUB_TOKEN 2>/dev/null || true
+
+exec "$REAL_GH" "$@"

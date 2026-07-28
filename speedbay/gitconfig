@@ -1,0 +1,13 @@
+# Git config used by the local sandbox, applied via GIT_CONFIG_GLOBAL in run-dev.sh.
+# Routes github.com credentials through the App-installation-token helper, so
+# clone/fetch/push work without the LangSmith sandbox proxy.
+[credential "https://github.com"]
+	helper = openswe
+	username = x-access-token
+
+[user]
+	name = open-swe[bot]
+	email = open-swe@users.noreply.github.com
+
+[safe]
+	directory = *
