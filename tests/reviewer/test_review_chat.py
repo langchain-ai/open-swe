@@ -656,7 +656,7 @@ def test_chat_general_purpose_subagent_is_read_only() -> None:
     spec = _chat_general_purpose_subagent()
 
     assert spec["name"] == "general-purpose"
-    fs_middleware = [m for m in spec["middleware"] if isinstance(m, FilesystemMiddleware)]
+    fs_middleware = [m for m in spec.get("middleware", []) if isinstance(m, FilesystemMiddleware)]
     assert len(fs_middleware) == 1
     enabled = fs_middleware[0]._enabled_tools
     assert enabled is not None
