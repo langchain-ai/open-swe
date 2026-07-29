@@ -1,13 +1,12 @@
 import json
 import os
-from collections.abc import Mapping
-from typing import Any
+from typing import Annotated, Any
 
 from langgraph.config import get_config
+from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
-from langsmith import get_current_run_tree
 
-from ..utils.run_usage import USAGE_RUN_METADATA_KEY
+from ..utils.run_usage import RunUsageSummary, summarize_run_usage
 from ..utils.slack import (
     convert_mentions_to_slack_format,
     post_slack_thread_reply_with_ts,
@@ -23,6 +22,7 @@ async def slack_thread_reply(
     message: str,
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Post a message to the current Slack thread.
 
@@ -66,8 +66,12 @@ async def slack_thread_reply(
 
     message = convert_mentions_to_slack_format(message)
     slack_blocks = blocks or _build_option_blocks(message, options)
+    usage = summarize_run_usage(state)
+    post_kwargs: dict[str, Any] = {"blocks": slack_blocks}
+    if usage is not None:
+        post_kwargs["usage"] = usage
     message_ts, slack_error = await _post_and_store_mapping(
-        channel_id, thread_ts, message, blocks=slack_blocks
+        channel_id, thread_ts, message, **post_kwargs
     )
     if message_ts is None:
         return {
@@ -163,42 +167,12 @@ async def _post_and_store_mapping(
     message: str,
     *,
     blocks: list[dict[str, Any]] | None = None,
+    usage: RunUsageSummary | None = None,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
-        channel_id, thread_ts, message, blocks=blocks
+        channel_id, thread_ts, message, blocks=blocks, usage=usage
     )
     if message_ts:
         langgraph_client = get_client(url=LANGGRAPH_URL)
-        config = get_config()
-        await store_slack_message_run_mapping(
-            langgraph_client,
-            channel_id,
-            thread_ts,
-            message_ts,
-            run_id=_current_run_id(config),
-            usage_run_id=_current_usage_run_id(config),
-        )
+        await store_slack_message_run_mapping(langgraph_client, channel_id, thread_ts, message_ts)
     return message_ts, slack_error
-
-
-def _current_usage_run_id(config: Mapping[str, Any]) -> str | None:
-    metadata = config.get("metadata")
-    if not isinstance(metadata, dict):
-        return None
-    usage_run_id = metadata.get(USAGE_RUN_METADATA_KEY)
-    return usage_run_id if isinstance(usage_run_id, str) and usage_run_id else None
-
-
-def _current_run_id(config: Mapping[str, Any]) -> str | None:
-    run_tree = get_current_run_tree()
-    trace_id = getattr(run_tree, "trace_id", None)
-    if trace_id is not None:
-        return str(trace_id)
-    candidates = [config.get("run_id")]
-    configurable = config.get("configurable")
-    if isinstance(configurable, dict):
-        candidates.append(configurable.get("run_id"))
-    for candidate in candidates:
-        if isinstance(candidate, str) and candidate:
-            return candidate
-    return None

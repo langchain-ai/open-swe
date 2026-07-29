@@ -67,18 +67,6 @@ def slack_messages(channel: str) -> list[dict[str, Any]]:
     return sorted(messages, key=lambda message: message["ts"])
 
 
-def update_slack_message(channel: str, message_ts: str, *, text: str, blocks: Any = None) -> bool:
-    for (message_channel, _thread_ts), messages in SLACK_MESSAGES.items():
-        if message_channel != channel:
-            continue
-        for message in messages:
-            if message["ts"] == message_ts:
-                message["text"] = text
-                message["blocks"] = blocks
-                return True
-    return False
-
-
 # --- GitHub ----------------------------------------------------------------
 PULLS: list[dict[str, Any]] = []
 REPO_PRIVATE = [False]

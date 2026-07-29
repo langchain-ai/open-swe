@@ -29,7 +29,7 @@ def apply() -> None:
 
     import importlib
 
-    from agent import completion, server
+    from agent import server
     from agent.utils import auth, authorship
     from agent.utils import slack as slack_utils
 
@@ -66,19 +66,6 @@ def apply() -> None:
     # Point the real PR/Slack code at the in-process fakes.
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
     slack_utils.SLACK_API_BASE_URL = FAKE_SLACK_API
-
-    async def _fake_run_usage(_run_id: str, **_kwargs: object):
-        from decimal import Decimal
-
-        from agent.utils.run_usage import RunUsageSummary
-
-        return RunUsageSummary(
-            models=("fake-scripted-model",),
-            total_tokens=12_345,
-            total_cost=Decimal("0.42"),
-        )
-
-    completion.fetch_run_usage = _fake_run_usage
 
     # Keep the triggering-user identity lookup offline; the real fallback to
     # config-derived identity (Slack name/email) still runs.

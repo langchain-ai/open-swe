@@ -14,7 +14,6 @@ from langchain_core.messages.content import create_text_block
 
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
-from agent.utils.run_usage import USAGE_RUN_METADATA_KEY
 
 from ..utils.user_messages import warning
 from . import common
@@ -603,8 +602,6 @@ async def _process_slack_mention_impl(
         thread_id,
     )
     run_id = run.get("run_id")
-    raw_usage_run_id = run.get(USAGE_RUN_METADATA_KEY)
-    usage_run_id = raw_usage_run_id if isinstance(raw_usage_run_id, str) else None
     if is_first_mention:
         await common.set_slack_assistant_status(channel_id, thread_ts)
         if isinstance(run_id, str) and run_id:
@@ -614,7 +611,6 @@ async def _process_slack_mention_impl(
                 thread_ts,
                 run_id,
                 triggering_user_id=user_id,
-                usage_run_id=usage_run_id,
             )
     else:
         common.logger.info(
@@ -628,5 +624,4 @@ async def _process_slack_mention_impl(
                 thread_ts,
                 run_id,
                 triggering_user_id=user_id,
-                usage_run_id=usage_run_id,
             )

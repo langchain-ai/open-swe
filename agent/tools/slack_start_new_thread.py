@@ -10,7 +10,6 @@ from ..dashboard.repo_access import require_repo_access_for_user
 from ..dispatch import dispatch_agent_run
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.run_usage import USAGE_RUN_METADATA_KEY
 from ..utils.slack import post_slack_top_level_message_with_ts, store_slack_run_mapping
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
 from ..webhooks.common import _is_repo_allowed
@@ -287,8 +286,6 @@ async def slack_start_new_thread(
         client=client,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else None
-    raw_usage_run_id = run.get(USAGE_RUN_METADATA_KEY) if isinstance(run, dict) else None
-    usage_run_id = raw_usage_run_id if isinstance(raw_usage_run_id, str) else None
     if isinstance(run_id, str) and run_id:
         await store_slack_run_mapping(
             client,
@@ -297,7 +294,6 @@ async def slack_start_new_thread(
             run_id,
             message_ts=message_ts,
             triggering_user_id=new_slack_thread.get("triggering_user_id") or None,
-            usage_run_id=usage_run_id,
         )
 
     return {

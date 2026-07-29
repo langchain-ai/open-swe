@@ -88,29 +88,6 @@ async def control_state() -> JSONResponse:
     )
 
 
-@app.post("/control/run-complete")
-async def control_run_complete() -> JSONResponse:
-    from langgraph_sdk import get_client
-
-    from agent.completion import handle_run_completion
-    from agent.utils.slack import lookup_slack_thread_run_mapping
-
-    channel = CURRENT_THREAD["channel"]
-    thread_ts = CURRENT_THREAD["thread_ts"]
-    if not channel or not thread_ts:
-        raise HTTPException(status_code=409, detail="No active Slack thread")
-    client = get_client(url=os.environ["LANGGRAPH_URL"])
-    mapping = await lookup_slack_thread_run_mapping(client, channel, thread_ts)
-    run_id = mapping.get("run_id") if mapping else None
-    if not isinstance(run_id, str) or not run_id:
-        raise HTTPException(status_code=409, detail="No mapped Slack run")
-    thread_id = generate_thread_id_from_slack_thread(channel, thread_ts)
-    result = await handle_run_completion(
-        {"thread_id": thread_id, "run_id": run_id, "status": "success"}
-    )
-    return JSONResponse(result)
-
-
 @app.post("/control/repo-private")
 async def control_repo_private(request: Request) -> JSONResponse:
     body = await request.json()
@@ -551,18 +528,6 @@ async def slack_post_message(request: Request) -> JSONResponse:
     return _ok({"ts": ts, "message": {"ts": ts}})
 
 
-@app.post("/fake-slack/chat.update")
-async def slack_update_message(request: Request) -> JSONResponse:
-    body = await request.json()
-    updated = fakes.update_slack_message(
-        body.get("channel", ""),
-        body.get("ts", ""),
-        text=body.get("text", ""),
-        blocks=body.get("blocks"),
-    )
-    return _ok() if updated else JSONResponse({"ok": False, "error": "message_not_found"})
-
-
 @app.post("/fake-slack/chat.postEphemeral")
 async def slack_post_ephemeral(request: Request) -> JSONResponse:
     await request.body()
@@ -629,7 +594,6 @@ async def slack_conversations_replies(channel: str = "", ts: str = "") -> JSONRe
                     "text": m["text"],
                     "ts": m["ts"],
                     "thread_ts": m["thread_ts"],
-                    "blocks": m["blocks"],
                 }
                 for m in msgs
             ]

@@ -13,7 +13,6 @@ from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
 from ..dispatch import create_durable_run
-from ..utils.run_usage import USAGE_RUN_METADATA_KEY
 from ..utils.slack import post_slack_top_level_message_with_ts, store_slack_run_mapping
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
 from ..utils.thread_ops import langgraph_client
@@ -545,8 +544,6 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
         stream_resumable=True,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
-    raw_usage_run_id = run.get(USAGE_RUN_METADATA_KEY) if isinstance(run, dict) else None
-    usage_run_id = raw_usage_run_id if isinstance(raw_usage_run_id, str) else None
     if slack_thread and isinstance(run_id, str) and run_id:
         await store_slack_run_mapping(
             client,
@@ -554,7 +551,6 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
             slack_thread["thread_ts"],
             run_id,
             message_ts=slack_thread["thread_ts"],
-            usage_run_id=usage_run_id,
         )
     now_ms = _now_ms()
     await client.threads.update(

@@ -14,7 +14,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from e2e_env import (
     BASE_BRANCH,
@@ -162,6 +162,16 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(
         content="Replying in the Slack thread with the PR link.",
         tool_calls=[{"name": "slack_thread_reply", "args": {"message": text}, "id": "call-reply"}],
+        response_metadata={"model_name": "fake-scripted-model"},
+        usage_metadata=cast(
+            Any,
+            {
+                "input_tokens": 12_000,
+                "output_tokens": 345,
+                "total_tokens": 12_345,
+                "total_cost": 0.42,
+            },
+        ),
     )
 
 

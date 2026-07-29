@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import importlib
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 slack_reply_tool = importlib.import_module("agent.tools.slack_thread_reply")
 
@@ -210,33 +210,37 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
     assert actions["elements"][0]["action_id"] == "open_swe_option_select"
 
 
-def test_current_run_id_prefers_trace_root(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _RunTree:
-        trace_id = "trace-root"
+async def test_slack_thread_reply_passes_model_reported_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
 
-    monkeypatch.setattr(slack_reply_tool, "get_current_run_tree", lambda: _RunTree())
+    async def fake_post_and_store_mapping(
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        **kwargs: Any,
+    ) -> tuple[str | None, str | None]:
+        captured.update(kwargs)
+        return "2.0", None
 
-    assert slack_reply_tool._current_run_id({"run_id": "child-run"}) == "trace-root"
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+    state = {
+        "messages": [
+            HumanMessage(content="request"),
+            AIMessage(
+                content="",
+                response_metadata={"model_name": "model-a"},
+                usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+            ),
+        ]
+    }
 
+    result = await slack_reply_tool.slack_thread_reply("Done", state=state)
 
-async def test_posted_message_is_mapped_to_current_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        slack_reply_tool,
-        "post_slack_thread_reply_with_ts",
-        AsyncMock(return_value=("2.0", None)),
-    )
-    monkeypatch.setattr(
-        slack_reply_tool,
-        "get_config",
-        lambda: {"run_id": "run-1", "configurable": {}},
-    )
-    monkeypatch.setattr(slack_reply_tool, "get_current_run_tree", lambda: None)
-    client = object()
-    monkeypatch.setattr(slack_reply_tool, "get_client", lambda **_kwargs: client)
-    store = AsyncMock()
-    monkeypatch.setattr(slack_reply_tool, "store_slack_message_run_mapping", store)
-
-    message_ts, error = await slack_reply_tool._post_and_store_mapping("C1", "1.0", "Done")
-
-    assert (message_ts, error) == ("2.0", None)
-    store.assert_awaited_once_with(client, "C1", "1.0", "2.0", run_id="run-1", usage_run_id=None)
+    assert result == {"success": True}
+    usage = captured["usage"]
+    assert usage.models == ("model-a",)
+    assert usage.total_tokens == 110
+    assert usage.total_cost is None
