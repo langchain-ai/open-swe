@@ -222,6 +222,7 @@ function MyInstructionsSection() {
     onSuccess,
     onError,
   })
+  const mutating = save.isPending || clear.isPending
 
   return (
     <SettingsSection
@@ -231,12 +232,29 @@ function MyInstructionsSection() {
       <div className="flex flex-col gap-3 p-4">
         {instructions.isLoading ? (
           <Skeleton className="h-40 w-full" />
+        ) : instructions.isError ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs text-destructive">
+              Could not load your instructions:{" "}
+              {instructions.error instanceof Error
+                ? instructions.error.message
+                : "unknown error"}
+              . Editing is disabled so a failed load can't overwrite them.
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void instructions.refetch()}
+            >
+              Retry
+            </Button>
+          </div>
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
-                disabled={!dirty || save.isPending}
+                disabled={!dirty || mutating}
                 onClick={() => void save.mutateAsync(value)}
               >
                 Save instructions
@@ -250,7 +268,7 @@ function MyInstructionsSection() {
                 size="sm"
                 variant="outline"
                 className="ml-auto"
-                disabled={clear.isPending || (!saved && !dirty)}
+                disabled={mutating || (!saved && !dirty)}
                 onClick={() => {
                   if (
                     !window.confirm(
@@ -268,6 +286,7 @@ function MyInstructionsSection() {
             <InstructionsEditor
               value={value}
               onChange={setDraft}
+              disabled={mutating}
               placeholder="e.g. Always run the linter before pushing. Prefer terse Slack updates."
             />
             {error && <p className="text-xs text-destructive">{error}</p>}
