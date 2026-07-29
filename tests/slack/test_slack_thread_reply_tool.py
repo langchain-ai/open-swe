@@ -26,7 +26,8 @@ def test_slack_thread_reply_prompt_requires_slack_only_terseness() -> None:
     assert "default to one sentence" in prompt
     assert "specific to Slack tool messages" in prompt
     assert "not normal web UI assistant messages" in prompt
-    assert "reply naturally" in prompt
+    assert "reply in the thread" in prompt
+    assert "reply naturally" not in prompt
     assert "plan_approval" not in prompt
 
 
@@ -171,7 +172,7 @@ async def test_slack_thread_reply_posts_plain_text_without_options(
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
     result = await slack_reply_tool.slack_thread_reply(
-        "Plan ready: review it and reply naturally to approve or request changes."
+        "Plan ready: review it and reply to approve or request changes."
     )
 
     assert result == {"success": True}
