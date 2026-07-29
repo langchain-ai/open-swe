@@ -23,10 +23,10 @@ dependencies = [
     "langchain-fireworks>=1.4.4",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
     "fireworks-ai>=1.2.0a86",
-    "langchain-daytona>=0.0.7",
-    "langchain-modal>=0.0.5",
-    "langchain-runloop>=0.0.6",
-    "langchain-e2b==0.0.5",
+    "langchain-daytona>=0.0.8",
+    "langchain-modal>=0.0.6",
+    "langchain-runloop>=0.0.7",
+    "langchain-e2b==0.0.6",
     "exa-py>=2.16.0",
     "langchain-google-genai>=4.2.4",
     "langchain-mcp-adapters>=0.3.0",
@@ -43,12 +43,10 @@ dev = [
 ]
 
 [tool.uv]
-# The langchain-{e2b,daytona,modal,runloop} sandbox integrations still declare a
-# conservative `deepagents<0.7.0` upper bound, but 0.7.0 keeps the public API they
-# rely on (SandboxBackendProtocol / BaseSandbox) backward compatible. Override the
-# transitive bound so we can track the latest release.
-# deepagents 0.7.0 requires wcmatch>=11.0, while langchain-e2b's e2b dep still caps
-# wcmatch<11.0; override it so both can resolve (the glob API is unchanged).
+# The externally maintained langchain-e2b integration still declares
+# `deepagents<0.7.0`, but 0.7.0 keeps the sandbox API backward compatible. Its e2b
+# dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
+# override both transitive bounds until langchain-e2b publishes compatible metadata.
 override-dependencies = ["deepagents==0.7.0", "wcmatch>=11.0"]
 
 [build-system]
