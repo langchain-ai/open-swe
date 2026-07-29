@@ -143,6 +143,11 @@ def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
     assert "not normal assistant messages shown in the web UI" in OPEN_SWE_SHARED_BASE
     assert "post a very short acknowledgement" in OPEN_SWE_SHARED_BASE
     assert "before cloning/checking out repositories" in OPEN_SWE_SHARED_BASE
+    assert "Choose a common reaction" in OPEN_SWE_SHARED_BASE
+    assert "`saluting_face` for taking ownership" in OPEN_SWE_SHARED_BASE
+    assert "Do not reflexively repeat one emoji" in OPEN_SWE_SHARED_BASE
+    assert "`dead`" not in OPEN_SWE_SHARED_BASE
+    assert "`ai-slop`" not in OPEN_SWE_SHARED_BASE
     assert "Never paste long output" in OPEN_SWE_SHARED_BASE
     assert "`save_plan`" in OPEN_SWE_SHARED_BASE
     assert "plan-review link" in OPEN_SWE_SHARED_BASE
