@@ -88,7 +88,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
             "client": client,
             "kwargs": kwargs,
         }
-        return {"run_id": "run-123"}
+        return {"run_id": "run-123", "open_swe_run_id": "usage-123"}
 
     async def fake_store_mapping(
         client: Any,
@@ -98,6 +98,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         *,
         message_ts: str | None = None,
         triggering_user_id: str | None = None,
+        usage_run_id: str | None = None,
     ) -> None:
         captured["stored_mappings"].append(
             {
@@ -107,6 +108,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
                 "run_id": run_id,
                 "message_ts": message_ts,
                 "triggering_user_id": triggering_user_id,
+                "usage_run_id": usage_run_id,
             }
         )
 
@@ -174,6 +176,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     assert "trace" not in captured
     assert [item["message_ts"] for item in captured["stored_mappings"]] == [new_ts]
     assert all(item["triggering_user_id"] == "U1" for item in captured["stored_mappings"])
+    assert all(item["usage_run_id"] == "usage-123" for item in captured["stored_mappings"])
 
 
 async def test_slack_start_new_thread_requires_slack_config(

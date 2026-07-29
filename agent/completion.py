@@ -1,19 +1,18 @@
-"""Run-completion webhook handler — guarantees every run ends with a signal.
+"""Run-completion webhook handling for failure signals and Slack usage footers.
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
-as the ``webhook`` on every dispatched run, see ``agent.dispatch``). When a run
-ends in a failure state (``error`` / ``timeout``) we post a
-short failure reply to the originating channel, so a run that died on a server
-recycle or hit a limit never leaves the user in silence.
+as the ``webhook`` on every dispatched run, see ``agent.dispatch``). Successful
+Slack runs enrich their final reply with trace usage. Runs ending in ``error`` or
+``timeout`` post a short failure reply so server recycles and limits never leave
+the user in silence.
 
-This decouples "the user gets an answer" from "the agent remembered to reply."
-The reply is idempotent per run when the webhook includes a run id. Older or
-manual payloads without a run id fall back to legacy thread-level idempotence so
-missing ids degrade dedupe instead of silencing failure replies.
+Failure replies are idempotent per run when the webhook includes a run id. Older
+or manual payloads without a run id fall back to legacy thread-level idempotence.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import os
@@ -25,7 +24,12 @@ from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import post_github_comment
 from .utils.linear import comment_on_linear_issue
-from .utils.slack import post_slack_thread_reply
+from .utils.run_usage import USAGE_RUN_METADATA_KEY, RunUsageSummary, fetch_run_usage
+from .utils.slack import (
+    lookup_slack_message_for_run,
+    post_slack_thread_reply,
+    update_slack_run_usage_footer,
+)
 from .utils.thread_ops import langgraph_client
 from .utils.user_messages import warning
 
@@ -192,20 +196,82 @@ def _failure_reply_metadata(metadata: dict[str, Any], run_id: str | None) -> dic
     }
 
 
-async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
-    """Handle a platform run-completion webhook POST.
+async def _completed_run_usage(
+    run_id: str, usage_run_id: str | None = None
+) -> RunUsageSummary | None:
+    best: RunUsageSummary | None = None
+    for delay in (0.0, 0.25, 1.0):
+        if delay:
+            await asyncio.sleep(delay)
+        usage = await fetch_run_usage(run_id, usage_run_id=usage_run_id)
+        if usage is None:
+            continue
+        if best is None or (
+            usage.total_tokens or 0,
+            len(usage.models),
+            usage.total_cost is not None,
+        ) > (
+            best.total_tokens or 0,
+            len(best.models),
+            best.total_cost is not None,
+        ):
+            best = usage
+    return best
 
-    Posts a failure reply only when the run ended in a failure state and we
-    haven't already replied for this thread.
-    """
+
+async def _update_slack_usage_footer(
+    client: Any,
+    thread_id: str,
+    run_id: str,
+    metadata: dict[str, Any],
+) -> bool:
+    source_context = metadata.get("source_context")
+    source_context = source_context if isinstance(source_context, dict) else {}
+    slack_thread = source_context.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return False
+    channel_id = slack_thread.get("channel_id")
+    thread_ts = slack_thread.get("thread_ts")
+    if not isinstance(channel_id, str) or not channel_id:
+        return False
+    if not isinstance(thread_ts, str) or not thread_ts:
+        return False
+    mapping = await lookup_slack_message_for_run(client, channel_id, run_id)
+    if not mapping:
+        return False
+    message_ts = mapping.get("message_ts")
+    mapped_thread_ts = mapping.get("thread_ts")
+    raw_usage_run_id = mapping.get(USAGE_RUN_METADATA_KEY)
+    usage_run_id = raw_usage_run_id if isinstance(raw_usage_run_id, str) else None
+    if not isinstance(message_ts, str) or not message_ts:
+        return False
+    if isinstance(mapped_thread_ts, str) and mapped_thread_ts:
+        thread_ts = mapped_thread_ts
+    usage = await _completed_run_usage(run_id, usage_run_id)
+    if usage is None:
+        return False
+    dashboard_url = dashboard_thread_url(thread_id)
+    if not dashboard_url:
+        return False
+    return await update_slack_run_usage_footer(
+        channel_id,
+        thread_ts,
+        message_ts,
+        dashboard_url,
+        usage,
+    )
+
+
+async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
+    """Handle a platform run-completion webhook POST."""
     status = payload.get("status")
     thread_id = payload.get("thread_id")
     raw_run_id = payload.get("run_id")
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
-    if status not in _TERMINAL_FAILURE_STATUSES:
-        return {"status": "ignored", "reason": f"non-failure status: {status}"}
+    if status != "success" and status not in _TERMINAL_FAILURE_STATUSES:
+        return {"status": "ignored", "reason": f"unsupported status: {status}"}
 
     client = langgraph_client()
     try:
@@ -216,6 +282,22 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
+    if status == "success":
+        if run_id is None:
+            return {"status": "ignored", "reason": "missing run_id for usage footer"}
+        try:
+            updated = await _update_slack_usage_footer(client, thread_id, run_id, metadata)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "run-complete: could not update Slack usage footer for %s",
+                thread_id,
+                exc_info=True,
+            )
+            updated = False
+        if updated:
+            return {"status": "ok", "reason": "usage footer updated"}
+        return {"status": "ignored", "reason": "usage footer unavailable"}
+
     await _settle_failed_reviewer_check(thread_id, metadata)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped

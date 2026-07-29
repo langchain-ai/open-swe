@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
 from agent import completion
+from agent.utils.run_usage import RunUsageSummary
 
 
 class _FakeThreads:
@@ -238,18 +240,60 @@ async def test_schedule_source_with_slack_context_posts_failure_reply(
 
 
 @pytest.mark.asyncio
-async def test_success_status_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_success_status_updates_slack_usage_footer(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeClient(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    update = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "_update_slack_usage_footer", update)
 
     result = await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": "success"}
     )
 
-    assert result["status"] == "ignored"
-    reply.assert_not_called()
+    assert result == {"status": "ok", "reason": "usage footer updated"}
+    update.assert_awaited_once_with(client, "t1", "run-1", _slack_metadata())
+
+
+@pytest.mark.asyncio
+async def test_success_without_usage_is_non_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient(_slack_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(completion, "_update_slack_usage_footer", AsyncMock(return_value=False))
+
+    result = await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "success"}
+    )
+
+    assert result == {"status": "ignored", "reason": "usage footer unavailable"}
+
+
+@pytest.mark.asyncio
+async def test_completed_run_usage_keeps_richest_retry_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch = AsyncMock(
+        side_effect=[
+            RunUsageSummary(models=("model-a",), total_tokens=None, total_cost=None),
+            RunUsageSummary(models=("model-a",), total_tokens=100, total_cost=None),
+            RunUsageSummary(
+                models=("model-a", "model-b"),
+                total_tokens=200,
+                total_cost=Decimal("0.04"),
+            ),
+        ]
+    )
+    monkeypatch.setattr(completion, "fetch_run_usage", fetch)
+    sleep = AsyncMock()
+    monkeypatch.setattr(completion.asyncio, "sleep", sleep)
+
+    usage = await completion._completed_run_usage("run-1")
+
+    assert usage is not None
+    assert usage.models == ("model-a", "model-b")
+    assert usage.total_tokens == 200
+    assert usage.total_cost == Decimal("0.04")
+    assert fetch.await_count == 3
+    assert [call.args[0] for call in sleep.await_args_list] == [0.25, 1.0]
 
 
 @pytest.mark.asyncio

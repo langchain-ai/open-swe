@@ -1,10 +1,13 @@
 import json
 import os
+from collections.abc import Mapping
 from typing import Any
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
+from langsmith import get_current_run_tree
 
+from ..utils.run_usage import USAGE_RUN_METADATA_KEY
 from ..utils.slack import (
     convert_mentions_to_slack_format,
     post_slack_thread_reply_with_ts,
@@ -166,5 +169,36 @@ async def _post_and_store_mapping(
     )
     if message_ts:
         langgraph_client = get_client(url=LANGGRAPH_URL)
-        await store_slack_message_run_mapping(langgraph_client, channel_id, thread_ts, message_ts)
+        config = get_config()
+        await store_slack_message_run_mapping(
+            langgraph_client,
+            channel_id,
+            thread_ts,
+            message_ts,
+            run_id=_current_run_id(config),
+            usage_run_id=_current_usage_run_id(config),
+        )
     return message_ts, slack_error
+
+
+def _current_usage_run_id(config: Mapping[str, Any]) -> str | None:
+    metadata = config.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    usage_run_id = metadata.get(USAGE_RUN_METADATA_KEY)
+    return usage_run_id if isinstance(usage_run_id, str) and usage_run_id else None
+
+
+def _current_run_id(config: Mapping[str, Any]) -> str | None:
+    run_tree = get_current_run_tree()
+    trace_id = getattr(run_tree, "trace_id", None)
+    if trace_id is not None:
+        return str(trace_id)
+    candidates = [config.get("run_id")]
+    configurable = config.get("configurable")
+    if isinstance(configurable, dict):
+        candidates.append(configurable.get("run_id"))
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -207,3 +208,35 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
     assert actions["type"] == "actions"
     assert [button["text"]["text"] for button in actions["elements"]] == ["A", "B"]
     assert actions["elements"][0]["action_id"] == "open_swe_option_select"
+
+
+def test_current_run_id_prefers_trace_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _RunTree:
+        trace_id = "trace-root"
+
+    monkeypatch.setattr(slack_reply_tool, "get_current_run_tree", lambda: _RunTree())
+
+    assert slack_reply_tool._current_run_id({"run_id": "child-run"}) == "trace-root"
+
+
+async def test_posted_message_is_mapped_to_current_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "post_slack_thread_reply_with_ts",
+        AsyncMock(return_value=("2.0", None)),
+    )
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_config",
+        lambda: {"run_id": "run-1", "configurable": {}},
+    )
+    monkeypatch.setattr(slack_reply_tool, "get_current_run_tree", lambda: None)
+    client = object()
+    monkeypatch.setattr(slack_reply_tool, "get_client", lambda **_kwargs: client)
+    store = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "store_slack_message_run_mapping", store)
+
+    message_ts, error = await slack_reply_tool._post_and_store_mapping("C1", "1.0", "Done")
+
+    assert (message_ts, error) == ("2.0", None)
+    store.assert_awaited_once_with(client, "C1", "1.0", "2.0", run_id="run-1", usage_run_id=None)

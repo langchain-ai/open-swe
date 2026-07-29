@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import importlib
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -76,7 +76,9 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
         client=client,
     )
 
-    assert run == {"run_id": "run-1"}
+    run_data = cast(dict[str, Any], run)
+    assert run_data["run_id"] == "run-1"
+    assert isinstance(run_data["open_swe_run_id"], str)
     created = client.runs.created[0]
     assert created["durability"] == "sync"
     assert created["multitask_strategy"] == "interrupt"
@@ -84,9 +86,12 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["webhook"] == "https://app/webhooks/run-complete"
     # Resumable by default so the dashboard can join (and stop) a run it did not start.
     assert created["stream_resumable"] is True
-    assert created["config"]["metadata"] == {"kind": "test"}
+    assert created["config"]["metadata"]["kind"] == "test"
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
-    assert isinstance(created["config"]["configurable"]["prepare_run_id"], str)
+    prepare_run_id = created["config"]["configurable"]["prepare_run_id"]
+    assert isinstance(prepare_run_id, str)
+    assert created["config"]["metadata"]["open_swe_run_id"] == prepare_run_id
+    assert run_data["open_swe_run_id"] == prepare_run_id
 
 
 @pytest.mark.asyncio
@@ -112,3 +117,4 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_stream_kwarg
     assert created["stream_mode"] == ["values"]
     assert created["stream_resumable"] is False
     assert created["config"]["configurable"]["prepare_run_id"] == "existing"
+    assert created["config"]["metadata"]["open_swe_run_id"] == "existing"

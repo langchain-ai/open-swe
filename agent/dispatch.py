@@ -24,12 +24,14 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
+
+from .utils.run_usage import USAGE_RUN_METADATA_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +107,11 @@ def _config_with_prepare_run_id(
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
     configurable.setdefault("prepare_run_id", str(uuid.uuid4()))
     run_config["configurable"] = configurable
-    if metadata is not None:
-        run_config["metadata"] = metadata
+    existing_metadata = run_config.get("metadata")
+    run_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
+    run_metadata.update(metadata or {})
+    run_metadata[USAGE_RUN_METADATA_KEY] = configurable["prepare_run_id"]
+    run_config["metadata"] = run_metadata
     return run_config
 
 
@@ -128,9 +133,10 @@ async def create_durable_run(
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
     client = client or dispatch_client()
+    run_config = _config_with_prepare_run_id(config, metadata)
     create_kwargs: dict[str, Any] = {
         "input": input,
-        "config": _config_with_prepare_run_id(config, metadata),
+        "config": run_config,
         "multitask_strategy": multitask_strategy,
         "durability": durability,
         "if_not_exists": if_not_exists,
@@ -144,6 +150,8 @@ async def create_durable_run(
         create_kwargs["after_seconds"] = after_seconds
 
     run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    configurable = cast(dict[str, Any], run_config["configurable"])
+    cast(dict[str, Any], run)[USAGE_RUN_METADATA_KEY] = configurable["prepare_run_id"]
     logger.info(
         "Dispatched %s run on thread %s (source=%s, run=%s)",
         assistant_id,

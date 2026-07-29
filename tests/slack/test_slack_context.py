@@ -1,9 +1,12 @@
 import asyncio
+from decimal import Decimal
 from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
 
 from agent.utils import slack as slack_utils
+from agent.utils.run_usage import RunUsageSummary
 from agent.utils.slack import (
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
@@ -360,6 +363,108 @@ def test_post_slack_thread_reply_appends_web_context_block_to_blocks(
         "elements": [{"type": "mrkdwn", "text": expected_footer}],
     }
     assert blocks[0]["text"]["text"] == "Pick one"
+
+
+def test_format_slack_web_link_footer_includes_sanitized_run_usage() -> None:
+    usage = RunUsageSummary(
+        models=("claude-opus-5", "bad<model>|name"),
+        total_tokens=12_345,
+        total_cost=Decimal("0.42"),
+    )
+
+    footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
+
+    assert footer == (
+        "<https://app.example/agents/t1|Open in Web> • "
+        "bad-model--name + claude-opus-5 • 12.3K tokens • $0.42"
+    )
+
+
+def test_usage_update_preserves_content_after_agent_supplied_web_link() -> None:
+    dashboard_url = "https://app.example/agents/t1"
+    link = slack_utils.format_slack_web_link_footer(dashboard_url)
+    posted = slack_utils.append_slack_web_link_footer(
+        f"See {link} for details that must remain", dashboard_url
+    )
+    usage = RunUsageSummary(
+        models=("claude-opus-5",),
+        total_tokens=100,
+        total_cost=Decimal("0.01"),
+    )
+
+    updated = slack_utils._replace_slack_web_link_footer(posted, dashboard_url, usage)
+
+    assert f"{link} for details that must remain" in updated
+    assert updated.endswith("claude-opus-5 • 100 tokens • $0.01")
+
+
+def test_usage_update_preserves_unrelated_context_text() -> None:
+    dashboard_url = "https://app.example/agents/t1"
+    link = slack_utils.format_slack_web_link_footer(dashboard_url)
+    blocks = [
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": f"Owner • {link} • internal"}],
+        }
+    ]
+    usage = RunUsageSummary(
+        models=("claude-opus-5",),
+        total_tokens=100,
+        total_cost=Decimal("0.01"),
+    )
+
+    updated = slack_utils._replace_slack_web_link_context_block(blocks, dashboard_url, usage)
+
+    assert updated[0] == blocks[0]
+    assert updated[-1]["elements"][0]["text"].endswith("claude-opus-5 • 100 tokens • $0.01")
+
+
+@pytest.mark.asyncio
+async def test_update_slack_run_usage_footer_preserves_message_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dashboard_url = "https://app.example/agents/t1"
+    original_footer = f"<{dashboard_url}|Open in Web>"
+    messages = [
+        {
+            "ts": "2.0",
+            "text": f"Pick one {original_footer}",
+            "blocks": [
+                {"type": "section", "text": {"type": "mrkdwn", "text": "Pick one"}},
+                {"type": "actions", "elements": [{"type": "button"}]},
+                {
+                    "type": "context",
+                    "elements": [{"type": "mrkdwn", "text": original_footer}],
+                },
+            ],
+        }
+    ]
+    monkeypatch.setattr(
+        slack_utils, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+    update = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(slack_utils, "update_slack_message", update)
+    usage = RunUsageSummary(
+        models=("claude-opus-5",),
+        total_tokens=12_345,
+        total_cost=Decimal("0.42"),
+    )
+
+    updated = await slack_utils.update_slack_run_usage_footer(
+        "C1", "1.0", "2.0", dashboard_url, usage
+    )
+
+    assert updated is True
+    await_args = update.await_args
+    assert await_args is not None
+    kwargs = await_args.kwargs
+    assert kwargs["blocks"][1] == messages[0]["blocks"][1]
+    assert kwargs["blocks"][-1]["elements"][0]["text"].endswith(
+        "claude-opus-5 • 12.3K tokens • $0.42"
+    )
+    updated_text = await_args.args[2]
+    assert updated_text.count("Open in Web") == 1
+    assert updated_text.endswith("claude-opus-5 • 12.3K tokens • $0.42")
 
 
 def test_post_slack_trace_reply_has_no_tip(monkeypatch: pytest.MonkeyPatch) -> None:
