@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -20,7 +21,6 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
-from agent.utils.thread_ids import generate_thread_id_from_slack_thread
 
 from .http import DEFAULT_HTTP_TIMEOUT
 from .user_messages import WARNING_ICON
@@ -52,6 +52,11 @@ DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
 )
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
+LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
+    "LANGGRAPH_URL_PROD", "http://localhost:2024"
+)
+_SLACK_CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+_SLACK_MESSAGE_TS_RE = re.compile(r"^[0-9]{1,20}(?:\.[0-9]{1,12})?$")
 
 
 @dataclass(frozen=True)
@@ -387,9 +392,10 @@ async def _post_slack_message_with_ts(
             return None, f"http_error: {type(exc).__name__}"
 
 
-def _slack_thread_dashboard_url(channel_id: str, thread_ts: str) -> str | None:
-    thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
-    return dashboard_thread_url(thread_id)
+async def _slack_thread_dashboard_url(
+    channel_id: str, thread_ts: str, agent_thread_id: str | None = None
+) -> str | None:
+    return dashboard_thread_url(agent_thread_id) if agent_thread_id else None
 
 
 def format_slack_web_link_footer(dashboard_url: str | None) -> str:
@@ -459,9 +465,10 @@ async def post_slack_thread_reply_with_ts(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
+    agent_thread_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
-    dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts)
+    dashboard_url = await _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
     blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url)
     text = append_slack_web_link_footer(text, dashboard_url)
     return await _post_slack_message_with_ts(
@@ -542,9 +549,13 @@ async def update_slack_message(
             return False, f"http_error: {type(exc).__name__}"
 
 
-async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+async def post_slack_thread_reply(
+    channel_id: str, thread_ts: str, text: str, *, agent_thread_id: str | None = None
+) -> bool:
     """Post a reply in a Slack thread."""
-    message_ts, _ = await post_slack_thread_reply_with_ts(channel_id, thread_ts, text)
+    message_ts, _ = await post_slack_thread_reply_with_ts(
+        channel_id, thread_ts, text, agent_thread_id=agent_thread_id
+    )
     return message_ts is not None
 
 
@@ -1092,6 +1103,7 @@ async def post_slack_trace_reply(
         _format_trace_reply(trace_url, dashboard_url),
         unfurl_links=False,
         unfurl_media=False,
+        agent_thread_id=thread_id,
     )
     return message_ts
 
@@ -1119,9 +1131,211 @@ async def update_slack_trace_reply_for_web_handoff(
     return ok
 
 
+_SLACK_THREAD_MAP_NAMESPACE = "slack_thread_map"
 _SLACK_RUN_MAP_NAMESPACE = "slack_run_map"
 _THREAD_RUN_KEY_PREFIX = "thread:"
 _MESSAGE_RUN_KEY_PREFIX = "message:"
+_SLACK_MAPPING_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+class SlackThreadMappingError(RuntimeError):
+    pass
+
+
+def _normalize_slack_location(channel_id: str, thread_ts: str) -> tuple[str, str]:
+    channel = channel_id.strip() if isinstance(channel_id, str) else ""
+    timestamp = thread_ts.strip() if isinstance(thread_ts, str) else ""
+    if not _SLACK_CHANNEL_ID_RE.fullmatch(channel):
+        raise SlackThreadMappingError("Invalid Slack channel ID")
+    if not _SLACK_MESSAGE_TS_RE.fullmatch(timestamp):
+        raise SlackThreadMappingError("Invalid Slack thread timestamp")
+    return channel, timestamp
+
+
+def _mapping_thread_id(item: Mapping[str, Any] | None) -> str | None:
+    if not item:
+        return None
+    value = item.get("value")
+    if not isinstance(value, Mapping):
+        return None
+    thread_id = value.get("thread_id")
+    return thread_id if isinstance(thread_id, str) and thread_id else None
+
+
+async def lookup_slack_thread_id(
+    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
+) -> str | None:
+    """Look up the Open SWE thread explicitly mapped to a Slack location."""
+    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
+    item = await langgraph_client.store.get_item((_SLACK_THREAD_MAP_NAMESPACE, channel), timestamp)
+    return _mapping_thread_id(item)
+
+
+async def bind_slack_thread_id(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    thread_id: str,
+) -> str:
+    """Persist an explicit Slack-location mapping without overwriting another thread."""
+    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
+    normalized_thread_id = thread_id.strip() if isinstance(thread_id, str) else ""
+    if not normalized_thread_id:
+        raise SlackThreadMappingError("Open SWE thread ID is required")
+    existing = await lookup_slack_thread_id(langgraph_client, channel, timestamp)
+    if existing and existing != normalized_thread_id:
+        raise SlackThreadMappingError("Slack location is already mapped to another thread")
+    await langgraph_client.store.put_item(
+        (_SLACK_THREAD_MAP_NAMESPACE, channel),
+        timestamp,
+        {
+            "thread_id": normalized_thread_id,
+            "channel_id": channel,
+            "thread_ts": timestamp,
+        },
+    )
+    persisted = await lookup_slack_thread_id(langgraph_client, channel, timestamp)
+    if persisted != normalized_thread_id:
+        raise SlackThreadMappingError("Slack thread mapping did not persist")
+    return normalized_thread_id
+
+
+def _thread_metadata_slack_location(thread: Mapping[str, Any]) -> tuple[str, str] | None:
+    metadata = thread.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return None
+    source_context = metadata.get("source_context")
+    if not isinstance(source_context, Mapping):
+        return None
+    slack_thread = source_context.get("slack_thread")
+    if not isinstance(slack_thread, Mapping):
+        return None
+    channel_id = slack_thread.get("channel_id")
+    thread_ts = slack_thread.get("thread_ts")
+    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+        return None
+    try:
+        return _normalize_slack_location(channel_id, thread_ts)
+    except SlackThreadMappingError:
+        return None
+
+
+async def resolve_slack_thread_id(
+    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
+) -> str:
+    """Resolve or create the explicit Open SWE thread mapping for a Slack location."""
+    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
+    lock = _SLACK_MAPPING_LOCKS.setdefault((channel, timestamp), asyncio.Lock())
+    async with lock:
+        existing = await lookup_slack_thread_id(langgraph_client, channel, timestamp)
+        if existing:
+            return existing
+
+        matches = await langgraph_client.threads.search(
+            metadata={
+                "source_context": {"slack_thread": {"channel_id": channel, "thread_ts": timestamp}}
+            },
+            limit=2,
+        )
+        matching_ids: list[str] = []
+        for thread in matches or []:
+            if not isinstance(thread, Mapping):
+                continue
+            if _thread_metadata_slack_location(thread) != (channel, timestamp):
+                continue
+            candidate = thread.get("thread_id") or thread.get("id")
+            if isinstance(candidate, str) and candidate and candidate not in matching_ids:
+                matching_ids.append(candidate)
+        if len(matching_ids) > 1:
+            raise SlackThreadMappingError("Multiple Open SWE threads match this Slack location")
+
+        candidate = matching_ids[0] if matching_ids else str(uuid.uuid4())
+        try:
+            await bind_slack_thread_id(langgraph_client, channel, timestamp, candidate)
+        except SlackThreadMappingError:
+            concurrent = await lookup_slack_thread_id(langgraph_client, channel, timestamp)
+            if concurrent:
+                return concurrent
+            raise
+        persisted = await lookup_slack_thread_id(langgraph_client, channel, timestamp)
+        if not persisted:
+            raise SlackThreadMappingError("Slack thread mapping disappeared after creation")
+        return persisted
+
+
+async def get_active_slack_thread(
+    langgraph_client: LangGraphClient,
+    thread_id: str | None,
+    fallback: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Return the active Slack location stored on an Open SWE thread."""
+    if thread_id:
+        try:
+            thread = await langgraph_client.threads.get(thread_id)
+            metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
+            source_context = (
+                metadata.get("source_context") if isinstance(metadata, Mapping) else None
+            )
+            slack_thread = (
+                source_context.get("slack_thread") if isinstance(source_context, Mapping) else None
+            )
+            if isinstance(slack_thread, Mapping):
+                location = dict(slack_thread)
+                _normalize_slack_location(
+                    str(location.get("channel_id") or ""), str(location.get("thread_ts") or "")
+                )
+                return location
+        except Exception:
+            logger.debug("Could not resolve active Slack location for thread %s", thread_id)
+    if isinstance(fallback, Mapping):
+        location = dict(fallback)
+        try:
+            _normalize_slack_location(
+                str(location.get("channel_id") or ""), str(location.get("thread_ts") or "")
+            )
+        except SlackThreadMappingError:
+            return None
+        return location
+    return None
+
+
+async def delete_slack_thread_associations(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    *,
+    expected_thread_id: str | None = None,
+) -> None:
+    """Delete all Open SWE associations for a Slack location."""
+    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
+    mapped_thread_id = await lookup_slack_thread_id(langgraph_client, channel, timestamp)
+    if expected_thread_id and mapped_thread_id and mapped_thread_id != expected_thread_id:
+        return
+    await langgraph_client.store.delete_item((_SLACK_THREAD_MAP_NAMESPACE, channel), key=timestamp)
+    namespace = (_SLACK_RUN_MAP_NAMESPACE, channel)
+    while True:
+        response = await langgraph_client.store.search_items(
+            namespace,
+            filter={"thread_ts": timestamp},
+            limit=100,
+            offset=0,
+        )
+        items = response.get("items") if isinstance(response, Mapping) else None
+        exact_items = [
+            item
+            for item in (items or [])
+            if isinstance(item, Mapping)
+            and item.get("namespace") in (list(namespace), namespace)
+            and isinstance(item.get("value"), Mapping)
+            and item["value"].get("thread_ts") == timestamp
+            and isinstance(item.get("key"), str)
+        ]
+        if not exact_items:
+            break
+        for item in exact_items:
+            await langgraph_client.store.delete_item(namespace, key=item["key"])
+    if await lookup_slack_thread_id(langgraph_client, channel, timestamp):
+        raise SlackThreadMappingError("Original Slack thread mapping was not deleted")
 
 
 def _extract_run_id_from_store_item(item: Mapping[str, Any] | None) -> str | None:

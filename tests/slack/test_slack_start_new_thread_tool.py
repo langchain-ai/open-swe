@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import importlib
+import uuid
 from typing import Any
 
 import pytest
-
-from agent.utils.thread_ids import generate_thread_id_from_slack_thread
 
 slack_breakout_tool = importlib.import_module("agent.tools.slack_start_new_thread")
 
@@ -110,8 +109,18 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
             }
         )
 
+    async def fake_bind(client: Any, channel_id: str, thread_ts: str, thread_id: str) -> str:
+        captured["binding"] = {
+            "client": client,
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+            "thread_id": thread_id,
+        }
+        return thread_id
+
     fake_client = _FakeClient(captured)
     monkeypatch.setattr(slack_breakout_tool, "get_config", _config)
+    monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", fake_bind)
     monkeypatch.setattr(slack_breakout_tool, "get_client", lambda url: fake_client)
     monkeypatch.setattr(
         slack_breakout_tool, "post_slack_top_level_message_with_ts", fake_post_top_level
@@ -132,7 +141,8 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         "Use the same repo and investigate the follow-up aspect in detail.",
     )
 
-    expected_thread_id = generate_thread_id_from_slack_thread("C1", new_ts)
+    expected_thread_id = captured["thread_create"]["thread_id"]
+    assert uuid.UUID(expected_thread_id).version == 4
     assert result == {
         "success": True,
         "thread_id": expected_thread_id,
@@ -145,6 +155,9 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     assert captured["top_level_post"]["unfurl_links"] is False
     assert captured["thread_create"]["if_exists"] == "do_nothing"
     assert captured["thread_create"]["thread_id"] == expected_thread_id
+    assert captured["binding"]["thread_id"] == expected_thread_id
+    assert captured["binding"]["channel_id"] == "C1"
+    assert captured["binding"]["thread_ts"] == new_ts
     metadata = captured["thread_update"]["metadata"]
     assert metadata["source"] == "slack"
     assert metadata["repo"] == {"owner": "langchain-ai", "name": "open-swe"}

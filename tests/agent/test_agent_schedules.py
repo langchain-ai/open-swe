@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import pytest
@@ -456,10 +457,8 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
 
     result = await schedules.launch_scheduled_agent_run("sched_1")
 
-    expected_thread_id = schedules.generate_thread_id_from_slack_thread(
-        "C0123456789", "1784302353.900029"
-    )
-    assert result["thread_id"] == expected_thread_id
+    expected_thread_id = result["thread_id"]
+    assert uuid.UUID(expected_thread_id).version == 4
     assert posted["channel_id"] == "C0123456789"
     assert "Linear queue" in posted["text"]
     metadata = fake_client.threads.created[0]["metadata"]
@@ -470,6 +469,10 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
     run = fake_client.runs.created[0]
     assert run["config"]["configurable"]["slack_thread"] == slack_thread
     assert "slack_thread_reply" in run["input"]["messages"][0]["content"]
+    association = fake_client.store.items[
+        (("slack_thread_map", "C0123456789"), "1784302353.900029")
+    ]
+    assert association["thread_id"] == expected_thread_id
     mapping = fake_client.store.items[
         (("slack_run_map", "C0123456789"), "thread:1784302353.900029")
     ]

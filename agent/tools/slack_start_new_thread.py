@@ -1,5 +1,6 @@
 import os
 import re
+import uuid
 from typing import Any
 
 from fastapi import HTTPException
@@ -10,8 +11,12 @@ from ..dashboard.repo_access import require_repo_access_for_user
 from ..dispatch import dispatch_agent_run
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.slack import post_slack_top_level_message_with_ts, store_slack_run_mapping
-from ..utils.thread_ids import generate_thread_id_from_slack_thread
+from ..utils.slack import (
+    bind_slack_thread_id,
+    get_active_slack_thread,
+    post_slack_top_level_message_with_ts,
+    store_slack_run_mapping,
+)
 from ..webhooks.common import _is_repo_allowed
 
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
@@ -153,9 +158,18 @@ async def slack_start_new_thread(
     """Start a new Open SWE thread in a top-level Slack message in the current channel."""
     config = get_config()
     configurable = config.get("configurable", {})
-    current_slack_thread = configurable.get("slack_thread")
-    if not isinstance(current_slack_thread, dict):
+    configured_slack_thread = configurable.get("slack_thread")
+    if not isinstance(configured_slack_thread, dict):
         return {"success": False, "error": "Missing slack_thread config"}
+    client = get_client(url=LANGGRAPH_URL)
+    thread_id_value = configurable.get("thread_id")
+    current_slack_thread = await get_active_slack_thread(
+        client,
+        thread_id_value if isinstance(thread_id_value, str) else None,
+        configured_slack_thread,
+    )
+    if not current_slack_thread:
+        return {"success": False, "error": "Current Slack location is unavailable"}
 
     channel_id = current_slack_thread.get("channel_id")
     current_thread_ts = current_slack_thread.get("thread_ts")
@@ -228,7 +242,8 @@ async def slack_start_new_thread(
             "hint": _failure_hint(slack_error),
         }
 
-    thread_id = generate_thread_id_from_slack_thread(channel_id.strip(), message_ts)
+    thread_id = str(uuid.uuid4())
+    await bind_slack_thread_id(client, channel_id.strip(), message_ts, thread_id)
     new_slack_thread = _new_slack_thread_context(
         current_slack_thread,
         channel_id=channel_id.strip(),
@@ -274,7 +289,6 @@ async def slack_start_new_thread(
         if value:
             new_configurable[key] = value
 
-    client = get_client(url=LANGGRAPH_URL)
     await client.threads.create(thread_id=thread_id, if_exists="do_nothing", metadata=metadata)
     await client.threads.update(thread_id=thread_id, metadata=metadata)
 

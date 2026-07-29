@@ -25,10 +25,13 @@ from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from langgraph_sdk import get_client
 
 from ..utils.slack import (
     DEFAULT_ASSISTANT_STATUS,
     DEFAULT_LOADING_MESSAGES,
+    LANGGRAPH_URL,
+    get_active_slack_thread,
     set_slack_assistant_status,
 )
 
@@ -56,6 +59,7 @@ _TOOL_STATUS: dict[str, str] = {
     "http_request": "making an HTTP request...",
     "request_pr_review": "requesting a PR review...",
     "slack_add_reaction": "reacting in Slack...",
+    "slack_move_thread": "moving the Slack thread...",
     "slack_read_thread_messages": "reading Slack history...",
     "slack_thread_reply": "drafting a Slack reply...",
     "linear_comment": "commenting on Linear...",
@@ -73,18 +77,23 @@ _TOOL_STATUS: dict[str, str] = {
 }
 
 
-def _slack_thread_from_config() -> tuple[str, str] | None:
+async def _slack_thread_from_config() -> tuple[str, str] | None:
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     slack_thread = configurable.get("slack_thread") if isinstance(configurable, dict) else None
     if not isinstance(slack_thread, dict):
         return None
-
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
-    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+    active = await get_active_slack_thread(
+        get_client(url=LANGGRAPH_URL),
+        thread_id if isinstance(thread_id, str) else None,
+        slack_thread,
+    )
+    if not active:
         return None
-    if not channel_id or not thread_ts:
+    channel_id = active.get("channel_id")
+    thread_ts = active.get("thread_ts")
+    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
         return None
     return channel_id, thread_ts
 
@@ -176,7 +185,7 @@ class SlackAssistantStatusMiddleware(AgentMiddleware):
 
     async def _try_set(self, status: str) -> None:
         try:
-            slack_thread = _slack_thread_from_config()
+            slack_thread = await _slack_thread_from_config()
             if slack_thread is None:
                 return
             channel_id, thread_ts = slack_thread
@@ -186,7 +195,7 @@ class SlackAssistantStatusMiddleware(AgentMiddleware):
 
     async def _run_with_heartbeat(self, status: str, awaitable: Awaitable[_T]) -> _T:
         try:
-            slack_thread = _slack_thread_from_config()
+            slack_thread = await _slack_thread_from_config()
         except Exception:
             logger.exception("Failed to read Slack thread config")
             return await awaitable

@@ -19,7 +19,11 @@ def _stub_purge(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _noop() -> None:
         return None
 
+    async def _active(client: Any, thread_id: str, fallback: Any) -> Any:
+        return fallback
+
     monkeypatch.setattr(wakeup_tool, "_purge_expired_wakeups_best_effort", _noop)
+    monkeypatch.setattr(wakeup_tool, "get_active_slack_thread", _active)
 
 
 class _FakeCrons:

@@ -13,8 +13,11 @@ from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
 from ..dispatch import create_durable_run
-from ..utils.slack import post_slack_top_level_message_with_ts, store_slack_run_mapping
-from ..utils.thread_ids import generate_thread_id_from_slack_thread
+from ..utils.slack import (
+    bind_slack_thread_id,
+    post_slack_top_level_message_with_ts,
+    store_slack_run_mapping,
+)
 from ..utils.thread_ops import langgraph_client
 from .options import (
     SUPPORTED_MODEL_IDS,
@@ -502,6 +505,8 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
             )
             return {"status": "unauthorized", "schedule_id": schedule_id, "error": exc.detail}
 
+    client = _client()
+    thread_id = str(uuid.uuid4())
     slack_thread: dict[str, Any] | None = None
     slack_channel_id = record.get("slack_channel_id")
     if isinstance(slack_channel_id, str) and slack_channel_id:
@@ -525,12 +530,9 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
             or "",
             "triggering_user_email": record.get("user_email") or "",
         }
-        thread_id = generate_thread_id_from_slack_thread(slack_channel_id, message_ts)
-    else:
-        thread_id = str(uuid.uuid4())
+        await bind_slack_thread_id(client, slack_channel_id, message_ts, thread_id)
 
     metadata = _agent_run_metadata(record, thread_id, slack_thread)
-    client = _client()
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     run = await create_durable_run(

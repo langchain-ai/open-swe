@@ -7,6 +7,7 @@ from langgraph_sdk import get_client
 
 from ..utils.slack import (
     convert_mentions_to_slack_format,
+    get_active_slack_thread,
     post_slack_thread_reply_with_ts,
     store_slack_message_run_mapping,
 )
@@ -49,9 +50,17 @@ async def slack_thread_reply(
     config = get_config()
     configurable = config.get("configurable", {})
     slack_thread = configurable.get("slack_thread", {})
+    thread_id = configurable.get("thread_id")
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    active = await get_active_slack_thread(
+        langgraph_client,
+        thread_id if isinstance(thread_id, str) else None,
+        slack_thread if isinstance(slack_thread, dict) else None,
+    )
+    active = active or {}
 
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
+    channel_id = active.get("channel_id")
+    thread_ts = active.get("thread_ts")
     if not channel_id or not thread_ts:
         return {
             "success": False,
@@ -64,7 +73,12 @@ async def slack_thread_reply(
     message = convert_mentions_to_slack_format(message)
     slack_blocks = blocks or _build_option_blocks(message, options)
     message_ts, slack_error = await _post_and_store_mapping(
-        channel_id, thread_ts, message, blocks=slack_blocks
+        channel_id,
+        thread_ts,
+        message,
+        blocks=slack_blocks,
+        agent_thread_id=thread_id if isinstance(thread_id, str) else None,
+        langgraph_client=langgraph_client,
     )
     if message_ts is None:
         return {
@@ -160,11 +174,17 @@ async def _post_and_store_mapping(
     message: str,
     *,
     blocks: list[dict[str, Any]] | None = None,
+    agent_thread_id: str | None = None,
+    langgraph_client: Any | None = None,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
-        channel_id, thread_ts, message, blocks=blocks
+        channel_id,
+        thread_ts,
+        message,
+        blocks=blocks,
+        agent_thread_id=agent_thread_id,
     )
     if message_ts:
-        langgraph_client = get_client(url=LANGGRAPH_URL)
-        await store_slack_message_run_mapping(langgraph_client, channel_id, thread_ts, message_ts)
+        resolved_client = langgraph_client or get_client(url=LANGGRAPH_URL)
+        await store_slack_message_run_mapping(resolved_client, channel_id, thread_ts, message_ts)
     return message_ts, slack_error

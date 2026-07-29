@@ -59,9 +59,11 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
     },
 }
 
+from langgraph_sdk import get_client  # noqa: E402
+
 from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
-from agent.utils.thread_ids import generate_thread_id_from_slack_thread  # noqa: E402
+from agent.utils.slack import lookup_slack_thread_id  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -176,10 +178,13 @@ async def slack_send(request: Request) -> JSONResponse:
                 "Content-Type": "application/json",
             },
         )
+    thread_id = await lookup_slack_thread_id(
+        get_client(url=os.environ["LANGGRAPH_URL"]), channel, thread_ts
+    )
     return JSONResponse(
         {
             "thread_ts": thread_ts,
-            "thread_id": generate_thread_id_from_slack_thread(channel, thread_ts),
+            "thread_id": thread_id,
             "webhook_status": resp.status_code,
             "webhook": resp.json(),
         }
@@ -369,13 +374,18 @@ async def mock_users() -> JSONResponse:
 
 
 @app.get("/mock/slack/messages")
-async def slack_messages() -> JSONResponse:
-    channel = CURRENT_THREAD["channel"]
-    assert channel is not None
-    msgs = fakes.slack_messages(channel)
+async def slack_messages(channel: str = "", thread_ts: str = "") -> JSONResponse:
+    selected_channel = channel or CURRENT_THREAD["channel"]
+    assert selected_channel is not None
+    msgs = (
+        fakes.slack_thread(selected_channel, thread_ts)
+        if thread_ts
+        else fakes.slack_messages(selected_channel)
+    )
     return JSONResponse(
         [
             {
+                "channel": selected_channel,
                 "user": m["user"],
                 "text": m["text"],
                 "is_bot": m["is_bot"],

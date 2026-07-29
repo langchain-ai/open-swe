@@ -750,7 +750,7 @@ async def test_approve_plan_posts_slack_approval_notice(
     async def fake_set_status(thread_id: str, status: str, *, plan_mode: Any = None) -> None:
         return None
 
-    async def fake_post(channel_id: str, thread_ts: str, text: str) -> bool:
+    async def fake_post(channel_id: str, thread_ts: str, text: str, **kwargs: Any) -> bool:
         posted.update(channel_id=channel_id, thread_ts=thread_ts, text=text)
         return True
 

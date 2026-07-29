@@ -16,6 +16,7 @@ from langchain_core.messages import ToolCall, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
+from langgraph_sdk import get_client
 
 from ..dashboard.workflow_approval import (
     ensure_workflow_push_pending,
@@ -25,7 +26,11 @@ from ..dashboard.workflow_approval import (
 from ..tools.slack_thread_reply import build_workflow_approval_blocks
 from ..utils.dashboard_links import dashboard_workflow_approval_url
 from ..utils.sandbox_state import SANDBOX_BACKENDS
-from ..utils.slack import post_slack_thread_reply_with_ts
+from ..utils.slack import (
+    LANGGRAPH_URL,
+    get_active_slack_thread,
+    post_slack_thread_reply_with_ts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -460,10 +465,16 @@ async def _post_slack_approval_if_needed(
         return
     configurable = _configurable(request)
     slack_thread = configurable.get("slack_thread")
-    if not isinstance(slack_thread, Mapping):
+    thread_id = _thread_id(request)
+    active = await get_active_slack_thread(
+        get_client(url=LANGGRAPH_URL),
+        thread_id,
+        slack_thread if isinstance(slack_thread, Mapping) else None,
+    )
+    if not active:
         return
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
+    channel_id = active.get("channel_id")
+    thread_ts = active.get("thread_ts")
     if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
         return
     message = _approval_slack_message(
@@ -474,6 +485,7 @@ async def _post_slack_approval_if_needed(
         thread_ts,
         message,
         blocks=build_workflow_approval_blocks(message, change.fingerprint),
+        agent_thread_id=thread_id,
     )
     if message_ts and not error:
         thread_id = _thread_id(request)

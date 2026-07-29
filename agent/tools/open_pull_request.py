@@ -15,7 +15,7 @@ from ..dashboard.plan_store import get_plan_content
 from ..utils.dashboard_links import dashboard_plan_url
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
-from ..utils.slack import get_slack_permalink
+from ..utils.slack import get_active_slack_thread, get_slack_permalink
 
 logger = logging.getLogger(__name__)
 
@@ -551,6 +551,13 @@ async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[st
 
     if source == "slack":
         slack_thread = configurable.get("slack_thread") or {}
+        thread_id = configurable.get("thread_id")
+        active = await get_active_slack_thread(
+            get_client(),
+            thread_id if isinstance(thread_id, str) else None,
+            slack_thread if isinstance(slack_thread, dict) else None,
+        )
+        slack_thread = active or {}
         channel_id = slack_thread.get("channel_id")
         thread_ts = slack_thread.get("thread_ts")
         permalink = slack_thread.get("permalink")

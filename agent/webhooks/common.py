@@ -97,6 +97,7 @@ from ..utils.multimodal import (
 from ..utils.repo import extract_repo_from_text
 from ..utils.slack import (
     GitHubPrRef,
+    SlackThreadMappingError,  # noqa: F401
     fetch_slack_thread_messages,  # noqa: F401
     format_slack_messages_for_prompt,  # noqa: F401
     get_slack_channel_context,
@@ -107,10 +108,12 @@ from ..utils.slack import (
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
     is_slack_channel_named,
+    lookup_slack_thread_id,  # noqa: F401
     normalize_slack_channel_context,  # noqa: F401
     post_slack_thread_reply,
     post_slack_trace_reply,  # noqa: F401
     resolve_slack_links_in_context,  # noqa: F401
+    resolve_slack_thread_id,  # noqa: F401
     select_slack_context_messages,  # noqa: F401
     set_slack_assistant_status,  # noqa: F401
     store_slack_run_mapping,  # noqa: F401
@@ -122,7 +125,6 @@ from ..utils.slack_feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
-from ..utils.thread_ids import generate_thread_id_from_slack_thread
 from ..utils.thread_ops import queue_message_for_thread  # noqa: F401
 
 __all__ = [
@@ -142,6 +144,7 @@ __all__ = [
     "SLACK_BOT_USERNAME",
     "SLACK_BOT_USER_ID",
     "SLACK_SIGNING_SECRET",
+    "SlackThreadMappingError",
     "_AGENT_VERSION_METADATA",
     "_GH_PR_AGENT_STATE_ACTIONS",
     "_GH_PR_FIRST_REVIEW_ACTIONS",
@@ -207,7 +210,6 @@ __all__ = [
     "generate_reviewer_thread_id",
     "generate_thread_id_from_github_issue",
     "generate_thread_id_from_issue",
-    "generate_thread_id_from_slack_thread",
     "get_client",
     "get_github_app_installation_token",
     "get_github_app_installation_token_with_expiry",
@@ -228,6 +230,7 @@ __all__ = [
     "logger",
     "login_for_email",
     "login_for_slack_id",
+    "lookup_slack_thread_id",
     "model_supports_images",
     "normalize_slack_channel_context",
     "parse_qs",
@@ -245,6 +248,7 @@ __all__ = [
     "resolve_agent_model_id",
     "resolve_login_from_email_async",
     "resolve_slack_links_in_context",
+    "resolve_slack_thread_id",
     "sanitize_github_comment_body",
     "select_slack_context_messages",
     "set_reviewer_thread_metadata",
@@ -785,6 +789,7 @@ async def get_slack_repo_config(
     thread_ts: str,
     slack_user_id: str | None = None,
     channel_context: dict[str, Any] | None = None,
+    thread_id: str | None = None,
 ) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs.
 
@@ -798,8 +803,8 @@ async def get_slack_repo_config(
     """
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
-    thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
     langgraph_client = get_client(url=LANGGRAPH_URL)
+    thread_id = thread_id or await resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
 
     repo_config: dict[str, str] | None = None
 
@@ -962,6 +967,7 @@ async def _post_account_link_prompt(
     user_id: str,
     user_email: str | None,
     reason: str = "unlinked",
+    agent_thread_id: str | None = None,
 ) -> None:
     """Prompt a Slack user to connect their account via the dashboard.
 
@@ -993,7 +999,7 @@ async def _post_account_link_prompt(
             "again."
         )
     try:
-        await post_slack_thread_reply(channel_id, thread_ts, text)
+        await post_slack_thread_reply(channel_id, thread_ts, text, agent_thread_id=agent_thread_id)
     except Exception:  # noqa: BLE001
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
 
