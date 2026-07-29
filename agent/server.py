@@ -117,6 +117,7 @@ from .tools import (
     report_platform_issue,
     request_pr_review,
     save_plan,
+    save_user_instructions,
     schedule_thread_wakeup,
     slack_add_reaction,
     slack_read_thread_messages,
@@ -206,6 +207,19 @@ async def _resolve_repo_custom_instructions(
         return await get_repo_agent_instructions(default_repo["owner"], default_repo["name"])
     except Exception:
         logger.debug("Failed to load repo custom agent instructions", exc_info=True)
+        return None
+
+
+async def _resolve_user_custom_instructions(login: str | None) -> str | None:
+    """Load user-level custom agent instructions for the triggering user."""
+    if not login:
+        return None
+    try:
+        from .dashboard.user_instructions import get_user_custom_instructions
+
+        return await get_user_custom_instructions(login)
+    except Exception:
+        logger.debug("Failed to load user custom agent instructions", exc_info=True)
         return None
 
 
@@ -804,7 +818,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             raise
         del github_token
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
-        repo_custom_instructions = await _resolve_repo_custom_instructions(prompt_default_repo)
+        repo_custom_instructions, user_custom_instructions = await asyncio.gather(
+            _resolve_repo_custom_instructions(prompt_default_repo),
+            _resolve_user_custom_instructions(self._profile_login),
+        )
 
         try:
             await client.threads.update(
@@ -842,6 +859,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 plan_mode=self._plan_mode,
                 plan_url=dashboard_plan_url(self._thread_id),
                 repo_custom_instructions=repo_custom_instructions,
+                user_custom_instructions=user_custom_instructions,
                 thread_url=dashboard_thread_url(self._thread_id),
                 corridor_enabled=self._corridor_enabled,
             ),
@@ -1027,6 +1045,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             approve_plan,
             enter_plan_mode,
             save_plan,
+            save_user_instructions,
             linear_comment,
             linear_create_issue,
             linear_delete_issue,

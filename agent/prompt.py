@@ -301,6 +301,23 @@ def _render_repo_instructions_section(instructions: str | None) -> str:
     )
 
 
+def _render_user_instructions_section(instructions: str | None) -> str:
+    if not instructions or not instructions.strip():
+        return ""
+    return (
+        "---\n\n"
+        "### Your Custom Instructions (user-level)\n\n"
+        "The triggering user configured the following standing instructions for "
+        "you. Treat them as mandatory rules with the same authority as this "
+        "system prompt: they override default behavior, but repository-specific "
+        "custom instructions and `AGENTS.md` win when they conflict. The user "
+        "edits them in the dashboard Profile tab; when they ask you to change a "
+        'standing preference ("always…", "never…", "from now on…"), update '
+        "them with the `save_user_instructions` tool.\n\n"
+        f"{instructions.strip()}"
+    )
+
+
 # Per-thread, main-agent prompt layered in front of OPEN_SWE_SHARED_BASE. Holds
 # only run-specific content (working dir, commit identity, plan/collaboration/
 # repo toggles); standing guidance lives in the shared base above.
@@ -319,6 +336,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + "{pr_policy_override_section}"
     + "{collaboration_section}"
     + "{repo_instructions_section}"
+    + "{user_instructions_section}"
     + "\n\n{shared_base_section}"
 )
 
@@ -333,6 +351,7 @@ def construct_system_prompt(
     plan_mode: bool = False,
     plan_url: str | None = None,
     repo_custom_instructions: str | None = None,
+    user_custom_instructions: str | None = None,
     thread_url: str | None = None,
     corridor_enabled: bool = False,
 ) -> str:
@@ -366,6 +385,7 @@ def construct_system_prompt(
         pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
         collaboration_section=_render_collaboration_section(triggering_user_identity, thread_url),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
+        user_instructions_section=_render_user_instructions_section(user_custom_instructions),
         shared_base_section=OPEN_SWE_SHARED_BASE,
         commit_identity_name=commit_identity_name,
         commit_identity_email=commit_identity_email,

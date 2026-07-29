@@ -192,6 +192,12 @@ from .user_credentials import (
     get_currents_status,
     get_notion_status,
 )
+from .user_instructions import (
+    UserInstructionsUpdate,
+    delete_user_instructions,
+    get_user_instructions,
+    set_user_instructions,
+)
 from .user_mappings import (
     delete_mapping,
     get_mapping,
@@ -435,6 +441,32 @@ async def me(session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
         "is_admin": _session_is_admin(session),
         "slack_oauth_enabled": slack_oauth_configured(),
     }
+
+
+@router.get("/me/instructions")
+async def api_get_my_instructions(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    login = session["sub"]
+    record = await get_user_instructions(login)
+    return record or {"login": login, "instructions": ""}
+
+
+@router.put("/me/instructions")
+async def api_put_my_instructions(
+    body: UserInstructionsUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    login = session["sub"]
+    return await set_user_instructions(login, body.instructions, updated_by=login)
+
+
+@router.delete("/me/instructions")
+async def api_delete_my_instructions(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> Response:
+    await delete_user_instructions(session["sub"])
+    return Response(status_code=204)
 
 
 @router.get("/options")
