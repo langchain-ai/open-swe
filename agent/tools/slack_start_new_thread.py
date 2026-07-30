@@ -121,11 +121,7 @@ def _run_prompt(
         f"- Thread TS: {thread_ts}\n\n"
         f"{_run_links_section(thread_id)}\n\n"
         "## Breakout Instructions\n"
-        f"{instructions}\n\n"
-        "Use `slack_thread_reply` to communicate in this new Slack thread for clarifications, "
-        "status updates, and final summaries. For Slack requests that require non-trivial work, "
-        "post a very short acknowledgement like `On it!` as soon as possible before "
-        "cloning/checking out repositories, then continue."
+        f"{instructions}"
     )
 
 

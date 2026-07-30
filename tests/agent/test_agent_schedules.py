@@ -469,7 +469,7 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
     assert slack_thread["triggering_user_id"] == "UALICE"
     run = fake_client.runs.created[0]
     assert run["config"]["configurable"]["slack_thread"] == slack_thread
-    assert "slack_thread_reply" in run["input"]["messages"][0]["content"]
+    assert run["input"]["messages"][0]["content"] == record["prompt"]
     mapping = fake_client.store.items[
         (("slack_run_map", "C0123456789"), "thread:1784302353.900029")
     ]

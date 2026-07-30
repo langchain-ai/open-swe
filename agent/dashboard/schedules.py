@@ -402,15 +402,8 @@ def _slack_root_message(record: dict[str, Any]) -> str:
     )
 
 
-def _scheduled_prompt(record: dict[str, Any], slack_thread: dict[str, Any] | None) -> str:
-    prompt = str(record["prompt"])
-    if not slack_thread:
-        return prompt
-    return (
-        f"{prompt}\n\n"
-        "Use `slack_thread_reply` for clarifying questions, essential progress updates, "
-        "the pull request link, and the final outcome in the connected Slack thread."
-    )
+def _scheduled_prompt(record: dict[str, Any]) -> str:
+    return str(record["prompt"])
 
 
 def _agent_run_metadata(
@@ -536,7 +529,7 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
     run = await create_durable_run(
         thread_id,
         _AGENT_ASSISTANT_ID,
-        input={"messages": [{"role": "user", "content": _scheduled_prompt(record, slack_thread)}]},
+        input={"messages": [{"role": "user", "content": _scheduled_prompt(record)}]},
         source="schedule",
         config=await _agent_run_config(record, thread_id, slack_thread),
         client=client,
