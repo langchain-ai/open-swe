@@ -53,6 +53,8 @@ DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
 SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10
+SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH = 4
+SLACK_FORWARDED_ATTACHMENT_MAX_NODES = 50
 SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
 
 
@@ -234,42 +236,61 @@ def select_slack_context_messages(
 
 
 def _format_forwarded_slack_attachments(attachments: Any) -> str:
-    if not isinstance(attachments, list):
-        return ""
-
     forwarded: list[str] = []
-    for attachment in attachments:
-        if len(forwarded) >= SLACK_FORWARDED_ATTACHMENT_MAX_COUNT:
-            break
-        if not isinstance(attachment, dict) or not any(
-            attachment.get(flag) is True
-            for flag in ("is_share", "is_msg_unfurl", "is_reply_unfurl")
-        ):
-            continue
+    rendered_count = 0
+    visited_count = 0
 
-        author = attachment.get("author_name")
-        author = author.strip() if isinstance(author, str) else ""
-        content = attachment.get("text")
-        if not isinstance(content, str) or not content.strip():
-            content = attachment.get("fallback")
-        content = content.strip() if isinstance(content, str) else ""
-        if len(content) > SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS:
-            content = content[:SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS].rstrip() + "… [truncated]"
-        source = attachment.get("from_url")
-        source = source.strip() if isinstance(source, str) else ""
+    def visit(values: Any, depth: int) -> None:
+        nonlocal rendered_count, visited_count
+        if depth > SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH or not isinstance(values, list):
+            return
 
-        label = "[Forwarded Slack message"
-        if author:
-            label += f" from {author}"
-        label += "]"
-        parts = [label]
-        if content:
-            parts.append(content)
-        if source:
-            parts.append(f"Source: {source}")
-        if len(parts) > 1:
-            forwarded.append("\n".join(parts))
+        for attachment in values:
+            if (
+                rendered_count >= SLACK_FORWARDED_ATTACHMENT_MAX_COUNT
+                or visited_count >= SLACK_FORWARDED_ATTACHMENT_MAX_NODES
+            ):
+                return
+            visited_count += 1
+            if not isinstance(attachment, dict):
+                continue
 
+            is_forwarded = any(
+                attachment.get(flag) is True
+                for flag in ("is_share", "is_msg_unfurl", "is_reply_unfurl")
+            )
+            if is_forwarded:
+                author = attachment.get("author_name")
+                author = author.strip() if isinstance(author, str) else ""
+                content = attachment.get("text")
+                if not isinstance(content, str) or not content.strip():
+                    content = attachment.get("fallback")
+                content = content.strip() if isinstance(content, str) else ""
+                if len(content) > SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS:
+                    content = (
+                        content[:SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS].rstrip()
+                        + "… [truncated]"
+                    )
+                source = attachment.get("from_url")
+                source = source.strip() if isinstance(source, str) else ""
+
+                label = "[Forwarded Slack message"
+                if author:
+                    label += f" from {author}"
+                label += "]"
+                parts = [label]
+                if content:
+                    parts.append(content)
+                if source:
+                    parts.append(f"Source: {source}")
+                if len(parts) > 1:
+                    indentation = "  " * depth
+                    forwarded.append("\n".join(f"{indentation}{part}" for part in parts))
+                    rendered_count += 1
+
+            visit(attachment.get("attachments"), depth + 1)
+
+    visit(attachments, 0)
     return "\n".join(forwarded)
 
 

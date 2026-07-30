@@ -306,6 +306,73 @@ def test_format_slack_messages_for_prompt_uses_forwarded_fallback() -> None:
     )
 
 
+def test_format_slack_messages_for_prompt_includes_nested_forwarded_attachments() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "nested context",
+                "user": "U123",
+                "attachments": [
+                    {
+                        "is_share": True,
+                        "author_name": "Bob",
+                        "text": "First level",
+                        "attachments": [
+                            {
+                                "is_share": True,
+                                "author_name": "Carol",
+                                "text": "Second level",
+                                "attachments": [
+                                    {
+                                        "is_reply_unfurl": True,
+                                        "author_name": "Dave",
+                                        "text": "Third level",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == (
+        "@alice(U123): nested context\n"
+        "[Forwarded Slack message from Bob]\n"
+        "First level\n"
+        "  [Forwarded Slack message from Carol]\n"
+        "  Second level\n"
+        "    [Forwarded Slack message from Dave]\n"
+        "    Third level"
+    )
+
+
+def test_format_slack_messages_for_prompt_caps_forwarded_attachment_depth() -> None:
+    root: dict[str, object] = {
+        "is_share": True,
+        "text": "level 0",
+    }
+    current = root
+    for depth in range(1, slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH + 2):
+        nested: dict[str, object] = {
+            "is_share": True,
+            "text": f"level {depth}",
+        }
+        current["attachments"] = [nested]
+        current = nested
+
+    formatted = format_slack_messages_for_prompt(
+        [{"ts": "1.0", "text": "context", "user": "U123", "attachments": [root]}],
+        {"U123": "alice"},
+    )
+
+    assert f"level {slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH}" in formatted
+    assert f"level {slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH + 1}" not in formatted
+
+
 def test_format_slack_messages_for_prompt_ignores_regular_unfurl_attachment() -> None:
     formatted = format_slack_messages_for_prompt(
         [
