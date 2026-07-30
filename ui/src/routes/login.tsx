@@ -55,7 +55,7 @@ function Login() {
     <main className="flex min-h-svh items-center justify-center p-6">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Sign in to open-swe</CardTitle>
+          <CardTitle>Sign in to Jarvis</CardTitle>
           <CardDescription>
             Use your GitHub account. We'll configure your default model, reasoning effort, and
             default repo for Slack/Linear/GitHub triggered runs.
