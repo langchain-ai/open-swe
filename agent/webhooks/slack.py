@@ -13,6 +13,7 @@ import httpx
 from langchain_core.messages.content import create_text_block
 
 from agent.utils.json_types import as_json_object
+from agent.utils.langsmith import get_langsmith_trace_url
 
 from ..utils.user_messages import warning
 from . import common
@@ -164,7 +165,12 @@ async def _slack_user_can_reply_to_ready_plan(
     from agent.dashboard.plan_api import _thread_metadata
 
     thread_id = common.generate_thread_id_from_slack_thread(channel_id, thread_ts)
-    metadata = await _thread_metadata(thread_id)
+    try:
+        metadata = await _thread_metadata(thread_id)
+    except Exception:  # noqa: BLE001
+        # A brand-new thread has no metadata (_thread_metadata raises 404); an
+        # untagged message there simply isn't a plan reply — don't abort the gate.
+        return False
     return (
         metadata.get("plan_mode") is True
         and metadata.get("plan_status") == "ready"
@@ -198,6 +204,20 @@ def _format_slack_thread_section(
         for description_line in channel_description.splitlines():
             if description_line.strip():
                 lines.append(f"  {description_line.strip()}")
+    return "\n".join(lines)
+
+
+def _format_slack_run_links_section(thread_id: str) -> str:
+    dashboard_url = common.dashboard_thread_url(thread_id)
+    trace_url = get_langsmith_trace_url(thread_id)
+    lines = ["## Open SWE Links"]
+    if dashboard_url:
+        lines.append(f"- Web: {dashboard_url}")
+    if trace_url:
+        lines.append(f"- Trace: {trace_url}")
+    lines.append(
+        "- A compact Web footer is added automatically to Slack replies; do not duplicate it manually. Share the Web or trace URL above only if asked."
+    )
     return "\n".join(lines)
 
 
@@ -411,6 +431,7 @@ async def _process_slack_mention_impl(
         "Use this only if the Slack conversation does not identify a different repository.\n\n"
         f"## Triggered by\n{trigger_user}\n\n"
         f"{slack_thread_section}\n\n"
+        f"{_format_slack_run_links_section(thread_id)}\n\n"
         f"## Conversation Context\n{context_text}\n\n"
         f"## Latest Mention Request\n{clean_text}\n\n"
         + (f"{resolved_links_section}\n\n" if resolved_links_section else "")
@@ -557,14 +578,24 @@ async def _process_slack_mention_impl(
         source_context={"slack_thread": configurable["slack_thread"]},
     )
 
-    run = await common.dispatch_agent_run(
+    # A DM (treat_all_messages_as_mentions) is inherently directed at the bot, so
+    # it interrupts immediately like an explicit @-mention rather than debouncing.
+    explicitly_tagged = bool(
+        treat_all_messages_as_mentions
+        or (bot_user_id and f"<@{bot_user_id}>" in text)
+        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+    )
+    run = await _dispatch_or_queue_slack_run(
+        langgraph_client,
         thread_id,
         content_blocks,
         configurable,
-        source="slack",
-        metadata=common._AGENT_VERSION_METADATA,
-        client=langgraph_client,
+        is_first_mention=is_first_mention,
+        explicitly_tagged=explicitly_tagged,
     )
+    if run is None:
+        common.logger.info("Coalesced Slack follow-up onto the queue for busy thread %s", thread_id)
+        return
     common.logger.info(
         "Slack LangGraph run %s dispatched for thread %s",
         common._run_id_for_logging(run),
@@ -572,7 +603,6 @@ async def _process_slack_mention_impl(
     )
     run_id = run.get("run_id")
     if is_first_mention:
-        trace_message_ts = await common.post_slack_trace_reply(channel_id, thread_ts, thread_id)
         await common.set_slack_assistant_status(channel_id, thread_ts)
         if isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(
@@ -580,9 +610,7 @@ async def _process_slack_mention_impl(
                 channel_id,
                 thread_ts,
                 run_id,
-                message_ts=trace_message_ts,
                 triggering_user_id=user_id,
-                trace_message_ts=trace_message_ts,
             )
     else:
         common.logger.info(

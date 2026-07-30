@@ -262,7 +262,7 @@ def test_profile_unknown_provider_defers_to_team_default() -> None:
 
 def test_global_default_is_gpt_5_6_sol() -> None:
     model, _ = default_model_pair()
-    assert model == DEFAULT_MODEL_ID == "anthropic:claude-opus-4-8"
+    assert model == DEFAULT_MODEL_ID == SUPPORTED_ANTHROPIC
 
 
 def test_gate_fable_passthrough_when_enabled() -> None:
