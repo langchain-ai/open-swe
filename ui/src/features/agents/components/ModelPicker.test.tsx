@@ -33,7 +33,7 @@ const MODELS: Array<ModelOption> = [
   {
     id: "fireworks:accounts/fireworks/models/kimi-k3",
     label: "Kimi K3",
-    efforts: ["low", "medium", "high"],
+    efforts: ["low", "high", "max"],
     default_effort: "high",
     supports_images: false,
   },

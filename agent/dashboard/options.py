@@ -70,7 +70,8 @@ SUPPORTED_MODELS: list[ModelOption] = [
     {
         "id": "fireworks:accounts/fireworks/models/kimi-k3",
         "label": "Kimi K3",
-        "efforts": ["low", "medium", "high"],
+        # K3 always reasons and only accepts low/high/max — "medium" is rejected.
+        "efforts": ["low", "high", "max"],
         "default_effort": "high",
         "supports_images": False,
     },
