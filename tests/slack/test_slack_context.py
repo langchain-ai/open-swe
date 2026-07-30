@@ -877,14 +877,10 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt_block["text"]
     assert "- Trace: https://smith/x" in prompt_block["text"]
     assert "do not duplicate it manually" in prompt_block["text"]
-    assert "post a very short acknowledgement like `On it!`" in prompt_block["text"]
-    assert "before cloning/checking out repositories" in prompt_block["text"]
-    assert "from common emoji based on context" in prompt_block["text"]
-    assert ":saluting_face: for taking ownership" in prompt_block["text"]
-    assert "Do not reflexively repeat one emoji" in prompt_block["text"]
-    assert ":dead:" not in prompt_block["text"]
-    assert ":ai-slop:" not in prompt_block["text"]
-    assert "## Latest Mention Request\ncontinue on the branch" in prompt_block["text"]
+    assert "slack_thread_reply" not in prompt_block["text"]
+    assert "slack_add_reaction" not in prompt_block["text"]
+    assert "slack_read_thread_messages" not in prompt_block["text"]
+    assert prompt_block["text"].endswith("## Latest Mention Request\ncontinue on the branch")
 
 
 def test_process_slack_mention_treats_direct_message_as_implicit_mention(

@@ -447,19 +447,8 @@ async def _process_slack_mention_impl(
         f"{slack_thread_section}\n\n"
         f"{_format_slack_run_links_section(thread_id)}\n\n"
         f"## Conversation Context\n{context_text}\n\n"
-        f"## Latest Mention Request\n{clean_text}\n\n"
-        + (f"{resolved_links_section}\n\n" if resolved_links_section else "")
-        + "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
-        "substantive updates, and final summaries. For Slack requests that require non-trivial "
-        "work, post a very short acknowledgement like `On it!` as soon as possible before "
-        "cloning/checking out repositories, then continue. Use `slack_add_reaction` instead of "
-        "posting perfunctory confirmation replies to user follow-up requests. Choose reactions "
-        "from common emoji based on context: :saluting_face: for taking ownership, :eyes: for "
-        "active review, :thinking_face: for investigation, :white_check_mark: for handled work, "
-        "and :tada: for genuine wins. Do not reflexively repeat one emoji or use playful "
-        "reactions for serious, sensitive, or ambiguous messages. "
-        "Use `slack_read_thread_messages` to read any Slack messages by providing channel_id "
-        "and message_ts."
+        f"## Latest Mention Request\n{clean_text}"
+        + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
     )
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
 
