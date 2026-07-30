@@ -334,6 +334,7 @@ async def _process_slack_mention_impl(
     event_ts = event_data.get("event_ts", "")
     user_id = event_data.get("user_id", "")
     text = event_data.get("text", "")
+    attachments = event_data.get("attachments", [])
     bot_user_id = event_data.get("bot_user_id", "")
     channel_context_raw = event_data.get("channel_context")
     channel_context = (
@@ -378,8 +379,21 @@ async def _process_slack_mention_impl(
                 )
 
     thread_messages = await common.fetch_slack_thread_messages(channel_id, thread_ts)
-    if not any(str(message.get("ts")) == str(event_ts) for message in thread_messages):
-        thread_messages.append({"ts": event_ts, "text": text, "user": user_id})
+    current_message = next(
+        (message for message in thread_messages if str(message.get("ts")) == str(event_ts)),
+        None,
+    )
+    if current_message is None:
+        thread_messages.append(
+            {
+                "ts": event_ts,
+                "text": text,
+                "user": user_id,
+                "attachments": attachments,
+            }
+        )
+    elif attachments and not current_message.get("attachments"):
+        current_message["attachments"] = attachments
 
     treat_all_messages_as_mentions = bool(event_data.get("treat_all_messages_as_mentions"))
     context_messages, context_mode = common.select_slack_context_messages(
