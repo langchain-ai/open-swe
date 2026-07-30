@@ -120,6 +120,9 @@ _PROFILE_LOADER_MODULES: dict[str, str] = {
     "google_genai": "langchain_google_genai.chat_models",
     "openai": "langchain_openai.chat_models.base",
 }
+_PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
+    "fireworks:accounts/fireworks/models/kimi-k3-code": 1_040_000,
+}
 
 
 @cache
@@ -143,13 +146,12 @@ def model_profile_context_window(model_id: str) -> int | None:
     if not provider or not model_name:
         return None
     loader = _profile_loader(provider)
-    if loader is None:
-        return None
-    profile = loader(model_name)
-    context_window = profile.get("max_input_tokens")
-    if isinstance(context_window, int) and context_window > 0:
-        return context_window
-    return None
+    if loader is not None:
+        profile = loader(model_name)
+        context_window = profile.get("max_input_tokens")
+        if isinstance(context_window, int) and context_window > 0:
+            return context_window
+    return _PROFILE_CONTEXT_WINDOW_FALLBACKS.get(model_id)
 
 
 def models_with_profile_context_windows(models: Sequence[ModelOption]) -> list[ModelOption]:
