@@ -68,9 +68,10 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "fireworks:accounts/fireworks/models/kimi-k3-code",
+        "id": "fireworks:accounts/fireworks/models/kimi-k3",
         "label": "Kimi K3",
-        "efforts": ["low", "medium", "high"],
+        # K3 always reasons and only accepts low/high/max — "medium" is rejected.
+        "efforts": ["low", "high", "max"],
         "default_effort": "high",
         "supports_images": False,
     },
@@ -105,7 +106,12 @@ DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = {
     "openai:gpt-5.5": "openai:gpt-5.6-sol",
     "google_genai:gemini-3.5-flash": "google_genai:gemini-3.6-flash",
     "fireworks:accounts/fireworks/models/kimi-k2p7-code": (
-        "fireworks:accounts/fireworks/models/kimi-k3-code"
+        "fireworks:accounts/fireworks/models/kimi-k3"
+    ),
+    # Never a real Fireworks deployment: the K2.7 rename kept the `-code` suffix,
+    # which K3 does not use, so selections stored under it 404 at request time.
+    "fireworks:accounts/fireworks/models/kimi-k3-code": (
+        "fireworks:accounts/fireworks/models/kimi-k3"
     ),
 }
 
