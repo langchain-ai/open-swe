@@ -31,7 +31,7 @@ const MODELS: Array<ModelOption> = [
     supports_images: true,
   },
   {
-    id: "fireworks:accounts/fireworks/models/kimi-k3-code",
+    id: "fireworks:accounts/fireworks/models/kimi-k3",
     label: "Kimi K3",
     efforts: ["low", "medium", "high"],
     default_effort: "high",
@@ -152,7 +152,7 @@ describe("ModelPicker", () => {
     fireEvent.click(screen.getByRole("option", { name: "Kimi K3 High" }))
 
     expect(onSelectionChange).toHaveBeenCalledWith({
-      modelId: "fireworks:accounts/fireworks/models/kimi-k3-code",
+      modelId: "fireworks:accounts/fireworks/models/kimi-k3",
       effort: "high",
     })
   })

@@ -7,7 +7,7 @@ from agent.utils.model import (
     provider_model_kwargs,
 )
 
-KIMI_K3_ID = "fireworks:accounts/fireworks/models/kimi-k3-code"
+KIMI_K3_ID = "fireworks:accounts/fireworks/models/kimi-k3"
 
 
 def test_fireworks_reasoning_effort_maps_effort() -> None:
@@ -43,6 +43,15 @@ def test_renamed_kimi_k2p7_migrates_to_kimi_k3() -> None:
     assert provider_fallback_pair(
         "fireworks:accounts/fireworks/models/kimi-k2p7-code", "medium"
     ) == (KIMI_K3_ID, "medium")
+
+
+def test_kimi_k3_code_is_not_offered_and_migrates_to_the_deployed_id() -> None:
+    """`kimi-k3-code` was never deployed on Fireworks and 404s at request time."""
+    assert all(not m["id"].endswith("kimi-k3-code") for m in SUPPORTED_MODELS)
+    assert provider_fallback_pair("fireworks:accounts/fireworks/models/kimi-k3-code", "medium") == (
+        KIMI_K3_ID,
+        "medium",
+    )
 
 
 def test_provider_model_kwargs_for_fireworks_none_disables_reasoning() -> None:
