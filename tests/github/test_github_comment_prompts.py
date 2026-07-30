@@ -127,10 +127,10 @@ def test_construct_system_prompt_identifies_own_repo() -> None:
     prompt = construct_system_prompt(working_dir="/workspace")
 
     # The per-thread prompt points self-referential tasks at the repo; the
-    # "Open SWE" identity lives in the harness-profile base prompt that
-    # deepagents prepends at runtime (OPEN_SWE_SHARED_BASE).
+    # shared base carries the Open SWE identity.
     assert "langchain-ai/open-swe" in prompt
     assert "Open SWE" in OPEN_SWE_SHARED_BASE
+    assert "Open SWE" in prompt
 
 
 def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
@@ -141,42 +141,26 @@ def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
     assert "Default to one sentence" in OPEN_SWE_SHARED_BASE
     assert "applies only to Slack tool messages" in OPEN_SWE_SHARED_BASE
     assert "not normal assistant messages shown in the web UI" in OPEN_SWE_SHARED_BASE
+    assert "post a very short acknowledgement" in OPEN_SWE_SHARED_BASE
+    assert "before cloning/checking out repositories" in OPEN_SWE_SHARED_BASE
+    assert "Choose a common reaction" in OPEN_SWE_SHARED_BASE
+    assert "`saluting_face` for taking ownership" in OPEN_SWE_SHARED_BASE
+    assert "Do not reflexively repeat one emoji" in OPEN_SWE_SHARED_BASE
+    assert "`dead`" not in OPEN_SWE_SHARED_BASE
+    assert "`ai-slop`" not in OPEN_SWE_SHARED_BASE
     assert "Never paste long output" in OPEN_SWE_SHARED_BASE
     assert "`save_plan`" in OPEN_SWE_SHARED_BASE
     assert "plan-review link" in OPEN_SWE_SHARED_BASE
     assert "does not enter plan mode" in OPEN_SWE_SHARED_BASE
 
 
-def test_harness_profile_replaces_deepagents_base_for_supported_providers() -> None:
-    """The Open SWE base prompt is registered per provider and replaces the SDK base."""
-    import deepagents.profiles.harness.harness_profiles as hp
+def test_construct_system_prompt_includes_shared_base_explicitly() -> None:
+    from agent.prompt import OPEN_SWE_SHARED_BASE
 
-    import agent.prompt  # noqa: F401  (registers the profile on import)
-    from agent.prompt import (
-        HARNESS_EXCLUDED_TOOLS,
-        HARNESS_PROFILE_KEYS,
-        OPEN_SWE_SHARED_BASE,
-    )
+    prompt = construct_system_prompt(working_dir="/workspace")
 
-    hp._ensure_harness_profiles_loaded()
-    assert set(HARNESS_PROFILE_KEYS) >= {"anthropic", "openai", "google_genai", "fireworks"}
-    assert "write_todos" in HARNESS_EXCLUDED_TOOLS
-    for key in HARNESS_PROFILE_KEYS:
-        profile = hp._HARNESS_PROFILES.get(key)
-        assert profile is not None, f"no harness profile registered for {key!r}"
-        assert profile.base_system_prompt == OPEN_SWE_SHARED_BASE
-        assert HARNESS_EXCLUDED_TOOLS <= profile.excluded_tools
-    resolved_profile = hp._get_harness_profile("openai:gpt-5.6-sol")
-    assert resolved_profile is not None
-    assert "write_todos" in resolved_profile.excluded_tools
-
-
-def test_enable_todos_env_clears_harness_tool_exclusion(monkeypatch) -> None:
-    from agent import prompt as prompt_module
-
-    monkeypatch.setenv(prompt_module.ENABLE_TODOS_ENV_VAR, "true")
-
-    assert prompt_module._harness_excluded_tools() == frozenset()
+    assert prompt.endswith(OPEN_SWE_SHARED_BASE)
+    assert "base prompt replaces deepagents" not in prompt
 
 
 def test_todo_tool_and_prompt_are_hidden_from_model_request_by_default() -> None:
@@ -193,8 +177,8 @@ def test_todo_tool_and_prompt_are_hidden_from_model_request_by_default() -> None
     assert "You have access to the `write_todos` tool" not in system_text
 
 
-def test_shared_base_is_neutral_for_read_only_agents() -> None:
-    """Shared base carries no PR/commit/mutation guidance (it also underlies the reviewer)."""
+def test_shared_base_keeps_pr_workflow_out_of_standing_guidance() -> None:
+    """Shared base carries no PR/commit/mutation guidance."""
     from agent.prompt import OPEN_SWE_SHARED_BASE
 
     lowered = OPEN_SWE_SHARED_BASE.lower()

@@ -23,6 +23,7 @@ from .github_token import (
 from .http import DEFAULT_HTTP_TIMEOUT
 from .linear import comment_on_linear_issue
 from .slack import post_slack_thread_reply
+from .user_messages import WARNING_ICON, warning
 
 logger = logging.getLogger(__name__)
 
@@ -280,8 +281,11 @@ async def leave_failure_comment(
             await post_slack_thread_reply(
                 channel_id,
                 thread_ts,
-                "⚠️ I couldn't resolve your GitHub account for this run. Sign in with GitHub and "
-                f"connect your Slack account in {link}, then tag me again.",
+                warning(
+                    "Open SWE couldn't resolve your GitHub account for this run. Sign in "
+                    f"with GitHub and connect your Slack account in {link}, then mention "
+                    "it again."
+                ),
             )
         return
     if source in ("github", "github_push"):
@@ -322,8 +326,8 @@ async def resolve_token_from_email(
         raise ValueError("GitHub auth failed: missing thread_id")
     if not email:
         message = (
-            "❌ **GitHub Auth Error**\n\n"
-            "Failed to authenticate with GitHub: missing_user_email\n\n"
+            f"{WARNING_ICON} **GitHub Auth Error**\n\n"
+            "Open SWE failed to authenticate with GitHub: missing_user_email\n\n"
             "Please try again or contact support."
         )
         await leave_failure_comment(source, message)
@@ -365,8 +369,8 @@ async def resolve_token_from_email(
     if not token:
         error = auth_result.get("error", "unknown")
         message = (
-            "❌ **GitHub Auth Error**\n\n"
-            f"Failed to authenticate with GitHub: {error}\n\n"
+            f"{WARNING_ICON} **GitHub Auth Error**\n\n"
+            f"Open SWE failed to authenticate with GitHub: {error}\n\n"
             "Please try again or contact support."
         )
         await leave_failure_comment(source, message)

@@ -47,8 +47,15 @@ def test_sonnet_46_fallback_uses_sonnet_5() -> None:
     )
 
 
-def test_opus_fallback_stays_on_opus_family() -> None:
+def test_deprecated_opus_48_migrates_to_opus_5() -> None:
     assert provider_fallback_pair("anthropic:claude-opus-4-8", "xhigh") == (
+        OPUS_5_ID,
+        "xhigh",
+    )
+
+
+def test_opus_fallback_stays_on_opus_family() -> None:
+    assert provider_fallback_pair("anthropic:claude-opus-4-9", "xhigh") == (
         OPUS_5_ID,
         "xhigh",
     )

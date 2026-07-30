@@ -36,6 +36,7 @@ from ..utils.thread_ops import (
 from .agent_overrides import normalize_profile_overrides
 from .options import (
     SUPPORTED_MODEL_IDS,
+    canonical_model_pair,
     default_vision_model_pair,
     gate_fable_model,
     model_supports_effort,
@@ -148,8 +149,11 @@ class ThreadResolveBody(BaseModel):
 def _normalize_model_choice(
     model_id: str | None, effort: str | None
 ) -> tuple[str | None, str | None]:
-    if not isinstance(model_id, str) or model_id not in SUPPORTED_MODEL_IDS:
+    if not isinstance(model_id, str):
         return None, None
+    if model_id not in SUPPORTED_MODEL_IDS:
+        canonical = canonical_model_pair(model_id, effort)
+        return canonical if canonical is not None else (None, None)
     if not isinstance(effort, str) or not model_supports_effort(model_id, effort):
         return None, None
     return model_id, effort
@@ -273,6 +277,9 @@ def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
         model = metadata.get(key)
         if isinstance(model, str) and model in SUPPORTED_MODEL_IDS:
             return model
+        canonical = canonical_model_pair(model)
+        if canonical is not None:
+            return canonical[0]
     return None
 
 
@@ -334,9 +341,16 @@ def _metadata_repo(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
 
 
 def _run_status_to_agent_status(thread_status: str | None, run_status: str | None) -> str:
+    # "interrupted" wins over a still-``busy`` thread: cancellation is async, so a
+    # just-cancelled thread reports busy for a moment and would otherwise look
+    # like it is still running. Callers refresh the newest run's real status
+    # first, so a follow-up run that superseded an interrupted one reads as
+    # pending/running here.
+    if run_status == "interrupted":
+        return "interrupted"
     if thread_status == "busy" or run_status in {"pending", "running"}:
         return "running"
-    if run_status in {"error", "failed", "timeout", "interrupted"}:
+    if run_status in {"error", "failed", "timeout"}:
         return "error"
     if run_status == "success":
         return "finished"
@@ -1482,6 +1496,14 @@ async def send_dashboard_message(
 async def cancel_dashboard_thread(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
+    """Interrupt every live run on a thread on behalf of its owner.
+
+    Cancels by thread rather than by ``latest_run_id`` so the stop button works
+    for runs this browser never started (Slack/Linear/GitHub triggers, CI
+    auto-fix): the client-side ``stream.stop()`` can only cancel a run it
+    dispatched itself, and cached ``latest_run_id`` metadata can lag the run the
+    platform is actually executing.
+    """
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -1491,12 +1513,11 @@ async def cancel_dashboard_thread(
     metadata = thread_metadata(thread)
     _assert_thread_owner(metadata, login, email)
 
-    run_id = metadata.get("latest_run_id")
-    if isinstance(run_id, str) and run_id:
-        try:
-            await client.runs.cancel(thread_id, run_id, wait=False)
-        except Exception:
-            logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
+    try:
+        await client.runs.cancel_many(thread_id=thread_id, status="all", action="interrupt")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to cancel active runs for thread %s", thread_id)
+        raise HTTPException(502, "failed to request thread cancellation") from exc
 
     await client.threads.update(
         thread_id=thread_id,

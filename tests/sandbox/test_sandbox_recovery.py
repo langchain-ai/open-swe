@@ -10,8 +10,8 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langsmith.sandbox import SandboxClientError
 
 from agent.middleware.sandbox_circuit_breaker import (
-    SANDBOX_UNRECOVERABLE_MESSAGE,
     SandboxCircuitBreakerMiddleware,
+    sandbox_unreachable_message,
 )
 from agent.middleware.tool_error_handler import ToolErrorMiddleware
 from agent.utils.sandbox_state import SANDBOX_BACKENDS, clear_sandbox_backend, set_sandbox_backend
@@ -54,44 +54,42 @@ def _sandbox_error_message(tool_call_id: str, sandbox_id: str = "sb-dead") -> To
 
 
 @pytest.mark.asyncio
-async def test_sandbox_client_error_recreates_sandbox() -> None:
+async def test_sandbox_client_error_notifies_and_never_recreates() -> None:
+    """A dead sandbox surfaces an error to the user; it is never swapped out.
+
+    Replacing it mid-run gives the agent an empty filesystem while it still
+    believes its working tree is intact, silently destroying uncommitted work.
+    """
     middleware = ToolErrorMiddleware()
     request = _tool_request()
-    old_backend = FakeSandboxBackend("sb-old")
-    backend = FakeSandboxBackend("sb-new")
-    proxy = set_sandbox_backend("thread-1", old_backend)
+    set_sandbox_backend("thread-1", FakeSandboxBackend("sb-old"))
 
     async def handler(_request: ToolCallRequest) -> ToolMessage:
         raise SandboxClientError("Sandbox request timed out: sb-dead")
 
     try:
         with (
-            patch("agent.server._recreate_sandbox", new_callable=AsyncMock) as mock_recreate,
-            patch("agent.server.client") as mock_client,
+            patch(
+                "agent.middleware.tool_error_handler.post_sandbox_unreachable_notification",
+                new_callable=AsyncMock,
+            ) as mock_notify,
+            patch("agent.server._create_sandbox_with_proxy", new_callable=AsyncMock) as mock_create,
         ):
-            mock_recreate.return_value = backend
-            mock_client.threads.update = AsyncMock()
-
             result = await middleware.awrap_tool_call(request, handler)
 
-        assert isinstance(result, ToolMessage)
-        mock_recreate.assert_awaited_once_with("thread-1")
-        mock_client.threads.update.assert_awaited_once_with(
-            thread_id="thread-1",
-            metadata={"sandbox_id": "sb-new"},
-        )
-        assert SANDBOX_BACKENDS["thread-1"] is proxy
-        assert proxy.current is backend
-        assert proxy.id == "sb-new"
-        assert proxy.execute("echo ok").output == "sb-new: echo ok: None"
+        mock_create.assert_not_awaited()
+        mock_notify.assert_awaited_once()
+        # The dead backend must not linger for the next tool call.
+        assert "thread-1" not in SANDBOX_BACKENDS
 
+        assert isinstance(result, ToolMessage)
         assert isinstance(result.content, str)
         payload = json.loads(result.content)
         assert payload["status"] == "error"
         assert payload["error_type"] == "SandboxClientError"
-        assert payload["recovery"] == "sandbox_recreated_after_client_error"
+        assert payload["recovery"] == "sandbox_unreachable"
         assert payload["previous_error"] == "Sandbox request timed out: sb-dead"
-        assert "sb-new" in payload["error"]
+        assert "will not be replaced" in payload["error"]
     finally:
         clear_sandbox_backend("thread-1")
 
@@ -122,59 +120,26 @@ def test_repeated_sandbox_errors_trigger_circuit_breaker_once() -> None:
     assert repeated is None
 
 
-def test_repeated_sandbox_recreations_trigger_circuit_breaker() -> None:
+def test_circuit_breaker_message_names_the_sandbox() -> None:
+    """The user gets told which sandbox went quiet, not just that one did."""
     middleware = SandboxCircuitBreakerMiddleware(threshold=2)
     messages = [
         HumanMessage(content="please fix this"),
         AIMessage(content="", tool_calls=[{"name": "ls", "args": {}, "id": "tc1"}]),
-        ToolMessage(
-            content=json.dumps(
-                {
-                    "error_type": "SandboxClientError",
-                    "previous_error": "Sandbox request timed out: sb-old-1",
-                    "recovery": "sandbox_recreated_after_client_error",
-                    "sandbox_id": "sb-new-1",
-                    "status": "error",
-                }
-            ),
-            tool_call_id="tc1",
-            status="error",
-        ),
+        _sandbox_error_message("tc1"),
         AIMessage(content="", tool_calls=[{"name": "grep", "args": {}, "id": "tc2"}]),
-        ToolMessage(
-            content=json.dumps(
-                {
-                    "error_type": "SandboxClientError",
-                    "previous_error": "Sandbox request timed out: sb-new-1",
-                    "recovery": "sandbox_recreated_after_client_error",
-                    "sandbox_id": "sb-new-2",
-                    "status": "error",
-                }
-            ),
-            tool_call_id="tc2",
-            status="error",
-        ),
+        _sandbox_error_message("tc2"),
         AIMessage(content="", tool_calls=[{"name": "execute", "args": {}, "id": "tc3"}]),
-        ToolMessage(
-            content=json.dumps(
-                {
-                    "error_type": "SandboxClientError",
-                    "previous_error": "Sandbox request timed out: sb-new-2",
-                    "recovery": "sandbox_recreated_after_client_error",
-                    "sandbox_id": "sb-new-3",
-                    "status": "error",
-                }
-            ),
-            tool_call_id="tc3",
-            status="error",
-        ),
+        _sandbox_error_message("tc3"),
     ]
 
     result = middleware.before_model({"messages": messages}, MagicMock())
 
     assert result is not None
-    assert result["jump_to"] == "end"
-    assert "consecutive sandbox recreations" in result["messages"][0].content
+    content = result["messages"][0].content
+    assert "id sb-dead" in content
+    # We only observed silence, so the copy must not assert permanence.
+    assert "can't tell whether it will come back" in content
 
 
 @pytest.mark.asyncio
@@ -217,6 +182,8 @@ async def test_circuit_breaker_posts_one_user_notification() -> None:
         result = await middleware.aafter_agent(cast(AgentState[Any], state), MagicMock())
 
     assert result is None
-    mock_slack.assert_awaited_once_with("C123", "171.123", SANDBOX_UNRECOVERABLE_MESSAGE)
+    mock_slack.assert_awaited_once_with(
+        "C123", "171.123", sandbox_unreachable_message(sandbox_id="sb-dead")
+    )
     mock_linear.assert_not_called()
     mock_github.assert_not_called()

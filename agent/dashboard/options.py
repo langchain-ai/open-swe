@@ -26,13 +26,6 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "anthropic:claude-opus-4-8",
-        "label": "Opus 4.8",
-        "efforts": ["low", "medium", "high", "xhigh", "max"],
-        "default_effort": "high",
-        "supports_images": True,
-    },
-    {
         "id": "anthropic:claude-sonnet-5",
         "label": "Sonnet 5",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
@@ -44,13 +37,6 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "label": "Fable 5",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
-        "supports_images": True,
-    },
-    {
-        "id": "openai:gpt-5.5",
-        "label": "GPT-5.5",
-        "efforts": ["none", "low", "medium", "high", "xhigh"],
-        "default_effort": "xhigh",
         "supports_images": True,
     },
     {
@@ -75,15 +61,15 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "google_genai:gemini-3.5-flash",
-        "label": "Gemini 3.5 Flash",
+        "id": "google_genai:gemini-3.6-flash",
+        "label": "Gemini 3.6 Flash",
         "efforts": ["minimal", "low", "medium", "high"],
         "default_effort": "medium",
         "supports_images": True,
     },
     {
-        "id": "fireworks:accounts/fireworks/models/kimi-k2p7-code",
-        "label": "Kimi K2.7",
+        "id": "fireworks:accounts/fireworks/models/kimi-k3-code",
+        "label": "Kimi K3",
         "efforts": ["low", "medium", "high"],
         "default_effort": "high",
         "supports_images": False,
@@ -109,6 +95,19 @@ SUPPORTED_MODEL_IDS: frozenset[str] = frozenset(m["id"] for m in SUPPORTED_MODEL
 FABLE_MODEL_IDS: frozenset[str] = frozenset(
     m["id"] for m in SUPPORTED_MODELS if m["id"].startswith("anthropic:claude-fable")
 )
+
+# Retired ids mapped to the model that replaces them. Stored selections (profiles,
+# team defaults, per-thread config, schedules) are migrated onto the replacement
+# instead of being discarded, so a user who never revisits their settings keeps an
+# equivalent model rather than silently inheriting the team default.
+DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = {
+    "anthropic:claude-opus-4-8": "anthropic:claude-opus-5",
+    "openai:gpt-5.5": "openai:gpt-5.6-sol",
+    "google_genai:gemini-3.5-flash": "google_genai:gemini-3.6-flash",
+    "fireworks:accounts/fireworks/models/kimi-k2p7-code": (
+        "fireworks:accounts/fireworks/models/kimi-k3-code"
+    ),
+}
 
 ProfileLoader = Callable[[str], Mapping[str, object]]
 
@@ -192,7 +191,7 @@ def gate_fable_model(
     return model_id, effort
 
 
-DEFAULT_MODEL_ID: str = "anthropic:claude-opus-4-8"
+DEFAULT_MODEL_ID: str = "anthropic:claude-opus-5"
 DEFAULT_MODEL_EFFORT: str = "medium"
 
 
@@ -239,6 +238,23 @@ def _fallback_effort_for(model: ModelOption, effort: object) -> str | None:
     return None
 
 
+def canonical_model_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
+    """Supported ``(model_id, effort)`` replacing a deprecated/renamed model id.
+
+    Preserves ``effort`` when the replacement supports it, otherwise uses the
+    replacement's default effort. Returns ``None`` for ids that aren't deprecated.
+    """
+    if not isinstance(model_id, str):
+        return None
+    replacement = DEPRECATED_MODEL_REPLACEMENTS.get(model_id)
+    if replacement is None:
+        return None
+    for m in SUPPORTED_MODELS:
+        if m["id"] == replacement:
+            return replacement, _fallback_effort_for(m, effort) or m["default_effort"]
+    return None
+
+
 def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
     """Newest supported ``(model_id, effort)`` for the same provider/family.
 
@@ -248,9 +264,14 @@ def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str
     cross-provider global default. Preserves ``effort`` when the fallback model
     supports it, otherwise uses that model's default effort. Returns ``None`` when
     no supported model shares the provider.
+
+    Explicitly deprecated ids resolve to their mapped replacement first.
     """
     if not isinstance(model_id, str):
         return None
+    canonical = canonical_model_pair(model_id, effort)
+    if canonical is not None:
+        return canonical
     provider = _provider_of(model_id)
     if provider is None:
         return None

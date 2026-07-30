@@ -12,7 +12,7 @@ from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
-_VISION_MODEL = "anthropic:claude-opus-4-8"
+_VISION_MODEL = "anthropic:claude-opus-5"
 _FABLE = "anthropic:claude-fable-5"
 _PAIR = ("openai:gpt-5.6-sol", "medium")
 
@@ -79,11 +79,26 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
 
     model_id, effort = await thread_api._resolve_agent_model_choice(
         {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
-        "anthropic:claude-opus-4-8",
+        "anthropic:claude-opus-5",
         "high",
     )
 
-    assert (model_id, effort) == ("anthropic:claude-opus-4-8", "high")
+    assert (model_id, effort) == ("anthropic:claude-opus-5", "high")
+
+
+async def test_resolve_agent_model_choice_migrates_deprecated_request_model(monkeypatch) -> None:
+    async def fake_team_default(role: str) -> tuple[str, str]:
+        return _VISION_MODEL, "medium"
+
+    monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
+
+    model_id, effort = await thread_api._resolve_agent_model_choice(
+        {},
+        "openai:gpt-5.5",
+        "high",
+    )
+
+    assert (model_id, effort) == ("openai:gpt-5.6-sol", "high")
 
 
 async def test_resolve_agent_model_id_defaults_to_team_default(monkeypatch) -> None:
@@ -119,8 +134,19 @@ async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
     monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
 
-    model_id = await resolve_agent_model_id(None, per_thread_model_id="anthropic:claude-opus-4-8")
-    assert model_id == "anthropic:claude-opus-4-8"
+    model_id = await resolve_agent_model_id(None, per_thread_model_id="anthropic:claude-opus-5")
+    assert model_id == "anthropic:claude-opus-5"
+
+
+async def test_resolve_agent_model_id_migrates_deprecated_per_thread_override(monkeypatch) -> None:
+    async def fake_team_default(role: str) -> tuple[str, str]:
+        return _TEXT_ONLY_MODEL, "high"
+
+    monkeypatch.setattr("agent.dashboard.agent_overrides.get_team_default_model", fake_team_default)
+    monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
+
+    model_id = await resolve_agent_model_id(None, per_thread_model_id="openai:gpt-5.5")
+    assert model_id == "openai:gpt-5.6-sol"
 
 
 def _new_thread_client(created: dict[str, object]) -> object:
@@ -1618,22 +1644,22 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_get_my_profile_preserves_gpt_5_5_models() -> None:
+async def test_get_my_profile_migrates_deprecated_models() -> None:
     with patch(
         "agent.dashboard.routes.get_profile",
         new_callable=AsyncMock,
         return_value={
             "default_model": "openai:gpt-5.5",
             "reasoning_effort": "medium",
-            "default_subagent_model": "openai:gpt-5.5",
+            "default_subagent_model": "anthropic:claude-opus-4-8",
             "subagent_reasoning_effort": "low",
         },
     ):
         payload = await routes.get_my_profile({"sub": "octocat"})
 
-    assert payload["default_model"] == "openai:gpt-5.5"
+    assert payload["default_model"] == "openai:gpt-5.6-sol"
     assert payload["reasoning_effort"] == "medium"
-    assert payload["default_subagent_model"] == "openai:gpt-5.5"
+    assert payload["default_subagent_model"] == "anthropic:claude-opus-5"
     assert payload["subagent_reasoning_effort"] == "low"
 
 
@@ -1715,6 +1741,81 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     assert payload["default_agent_subagent_model"] != _FABLE
     assert payload["default_agent_model"] in model_ids
     assert payload["default_agent_subagent_model"] in model_ids
+
+
+async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypatch) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    thread = {
+        "thread_id": "thread-1",
+        "status": "busy",
+        "metadata": {
+            "title": "Slack-triggered thread",
+            "github_login": "owner",
+            "latest_run_status": "running",
+            "updated_at_ms": 1,
+        },
+    }
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            assert thread_id == "thread-1"
+            return thread
+
+        async def update(self, **kwargs: object) -> None:
+            calls.append(("update", kwargs))
+            metadata = kwargs["metadata"]
+            assert isinstance(metadata, dict)
+            thread["metadata"].update(metadata)
+
+    class FakeRuns:
+        async def cancel_many(self, **kwargs: object) -> None:
+            calls.append(("cancel_many", kwargs))
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.cancel_dashboard_thread("thread-1", "owner")
+
+    assert calls[0] == (
+        "cancel_many",
+        {"thread_id": "thread-1", "status": "all", "action": "interrupt"},
+    )
+    # Reported as interrupted even though the platform still says busy.
+    assert result["status"] == "interrupted"
+
+
+async def test_cancel_dashboard_thread_rejects_non_owner(monkeypatch) -> None:
+    cancelled = False
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "status": "busy",
+                "metadata": {"github_login": "owner"},
+            }
+
+        async def update(self, **kwargs: object) -> None:
+            raise AssertionError("must not update")
+
+    class FakeRuns:
+        async def cancel_many(self, **kwargs: object) -> None:
+            nonlocal cancelled
+            cancelled = True
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    with pytest.raises(HTTPException):
+        await thread_api.cancel_dashboard_thread("thread-1", "someone-else")
+
+    assert cancelled is False
 
 
 async def test_admin_cancel_dashboard_thread_interrupts_all_active_runs(monkeypatch) -> None:

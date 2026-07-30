@@ -2,13 +2,13 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
-import type { ReposPayload } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
 import { RequireLogin } from "@/lib/auth-redirect";
+import { useRepos } from "@/lib/profile";
 import { useSession } from "@/lib/session";
 
 const PAGE_SIZE = 20;
@@ -22,19 +22,7 @@ function RepositoriesOwnerPage() {
   const { owner } = Route.useParams();
   const qc = useQueryClient();
 
-  const repos = useQuery<ReposPayload>({
-    queryKey: ["repos"],
-    queryFn: async () => {
-      try {
-        return await api.repos();
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 401)
-          return { installations: [], repositories: [] };
-        throw e;
-      }
-    },
-    enabled: !!session.data,
-  });
+  const repos = useRepos();
 
   const autoReview = useQuery({
     queryKey: ["autoReviewRepos"],

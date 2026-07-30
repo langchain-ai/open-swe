@@ -13,6 +13,7 @@ import type { SessionUser } from "@/lib/api";
 import type { Theme } from "@/lib/theme";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { api } from "@/lib/api";
+import { clearCachedRepos } from "@/lib/repoCache";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +54,7 @@ export function SidebarUserMenu({ user, showSettingsLink = false }: SidebarUserM
   const onLogout = async () => {
     setOpen(false);
     await api.logout();
+    clearCachedRepos();
     qc.setQueryData(["session"], null);
     navigate({ to: "/login" });
   };

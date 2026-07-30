@@ -2,6 +2,7 @@
 
 import base64
 import uuid
+from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, patch
 
@@ -20,7 +21,6 @@ from agent.integrations.langsmith import (
     _get_sandbox_create_extra_fields,
     _get_sandbox_snapshot_config,
     _install_create_extra_fields,
-    _release_sandbox_name,
     _sandbox_name_for_thread,
     _wait_for_reconnected_sandbox,
 )
@@ -57,22 +57,24 @@ def test_sandbox_name_for_thread_none_or_invalid() -> None:
     assert _sandbox_name_for_thread("not-a-uuid") is None
 
 
-@pytest.mark.asyncio
-async def test_release_sandbox_name_deletes_stale_box() -> None:
-    client = AsyncMock()
-    await _release_sandbox_name(client, "openswe-abc")
-    client.delete_sandbox.assert_awaited_once_with("openswe-abc")
+def test_nothing_deletes_sandboxes() -> None:
+    """No code path may delete a sandbox.
 
-
-@pytest.mark.asyncio
-async def test_release_sandbox_name_swallows_missing_and_skips_none() -> None:
-    client = AsyncMock()
-    client.delete_sandbox.side_effect = RuntimeError("not found")
-    await _release_sandbox_name(client, "openswe-abc")  # must not raise
-
-    client.delete_sandbox.reset_mock(side_effect=True)
-    await _release_sandbox_name(client, None)
-    client.delete_sandbox.assert_not_awaited()
+    A sandbox holds the agent's only copy of its working tree, and callers can't
+    tell a free name from one held by a live box: both the metadata read
+    (``get_sandbox_id_from_metadata``) and write (``_update_thread_sandbox_metadata``)
+    fail open to "this thread has no sandbox". A delete keyed off that guess
+    destroys a running box. Reclamation belongs to the platform's idle TTL and
+    delete-after-stop.
+    """
+    agent_root = Path(__file__).resolve().parents[2] / "agent"
+    offenders = [
+        f"{path.relative_to(agent_root)}:{lineno}"
+        for path in agent_root.rglob("*.py")
+        for lineno, line in enumerate(path.read_text().splitlines(), start=1)
+        if "delete_sandbox" in line
+    ]
+    assert offenders == []
 
 
 def test_defaults_when_env_unset() -> None:
@@ -87,6 +89,7 @@ def test_defaults_when_env_unset() -> None:
     assert vcpus == DEFAULT_SANDBOX_VCPUS
     assert mem == DEFAULT_SANDBOX_MEM_BYTES
     assert idle == DEFAULT_SANDBOX_IDLE_TTL_SECONDS
+    assert DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS == 30 * 24 * 60 * 60
     assert delete_after == DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS
 
 

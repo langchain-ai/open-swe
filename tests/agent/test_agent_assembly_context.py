@@ -120,6 +120,16 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_includes_recreate_sandbox_tool() -> None:
+    from agent.tools import recreate_sandbox
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert recreate_sandbox in tools
+
+
+@pytest.mark.asyncio
 async def test_task_retry_wraps_inside_tool_error_middleware() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     middleware = captured["middleware"]
@@ -127,3 +137,17 @@ async def test_task_retry_wraps_inside_tool_error_middleware() -> None:
     names = [type(m).__name__ for m in middleware]
 
     assert names.index("ToolErrorMiddleware") < names.index("ToolRetryMiddleware")
+
+
+@pytest.mark.asyncio
+async def test_general_purpose_subagent_carries_open_swe_shared_base() -> None:
+    from agent.prompt import OPEN_SWE_SHARED_BASE
+
+    captured = await _capture_create_deep_agent_kwargs()
+    subagents = captured["subagents"]
+    assert isinstance(subagents, list)
+    gp = next(s for s in subagents if s["name"] == "general-purpose")
+    prompt = gp["system_prompt"]
+    assert prompt.startswith(OPEN_SWE_SHARED_BASE)
+    # GP task-mechanics guidance still trails the shared base.
+    assert "calling agent only sees your final" in prompt

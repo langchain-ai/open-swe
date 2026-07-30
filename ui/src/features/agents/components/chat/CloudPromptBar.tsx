@@ -1,6 +1,5 @@
 import {
   ArrowUp,
-  ChevronDown,
   ImagePlus,
   LoaderCircle,
   Map as MapIcon,
@@ -12,7 +11,6 @@ import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import {
   memo,
   useCallback,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -28,18 +26,25 @@ import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsIn
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
+  useCancelAgentThread,
 } from "@/features/agents/lib/queries"
-import { formatModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import { formatTokenCount } from "@/features/agents/lib/contextUsage"
+import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 const PROMPT_TEXTAREA_MAX_HEIGHT = 200
 
+export interface ActiveRun {
+  threadId: string
+  /** Server-reported run state, independent of this client's event stream. */
+  running: boolean
+}
+
 interface SubmitButtonProps {
   canSubmit: boolean
   submitting: boolean
   onSubmit: () => void
+  activeRun?: ActiveRun
 }
 
 function PlainSubmitButton({
@@ -76,13 +81,27 @@ function StreamSubmitButton(props: SubmitButtonProps) {
   const stream = useAgentThreadStream()
   const queryClient = useQueryClient()
   const [stopping, setStopping] = useState(false)
+  const threadId = props.activeRun?.threadId ?? stream.threadId ?? ""
+  const cancelThread = useCancelAgentThread(threadId)
 
   const handleStop = async () => {
     if (stopping) return
     setStopping(true)
     try {
-      await stream.stop()
-      const threadId = stream.threadId
+      // `stream.stop()` only cancels server-side when this client dispatched the
+      // run, so cancel by thread first: a run started from Slack/Linear/GitHub
+      // (or joined after a reload) has no client-side run id to cancel.
+      if (threadId) {
+        try {
+          await cancelThread.mutateAsync()
+        } catch {
+          // Cancellation failed (transient 5xx, or a non-owner viewer). Leave
+          // the stream and the thread's status polling untouched: presenting a
+          // stopped state here would strand the UI on a still-running run.
+          return
+        }
+      }
+      await stream.disconnect()
       if (threadId) {
         queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
           prev ? { ...prev, status: "interrupted" as const } : prev
@@ -94,7 +113,12 @@ function StreamSubmitButton(props: SubmitButtonProps) {
     }
   }
 
-  if (!stream.isLoading) return <PlainSubmitButton {...props} />
+  // Server truth (`activeRun.running`) matters as much as the client stream:
+  // this browser only sees `isLoading` once it observes a lifecycle event, so a
+  // run it never joined would otherwise render an unusable send button.
+  if (!stream.isLoading && !props.activeRun?.running) {
+    return <PlainSubmitButton {...props} />
+  }
 
   return (
     <IconButton
@@ -127,6 +151,8 @@ export interface CloudPromptBarProps {
   compact?: boolean
   disabled?: boolean
   busy?: boolean
+  /** Enables the stop button for the thread's live run. */
+  activeRun?: ActiveRun
   onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>
   models?: Array<ModelOption>
   selection?: ModelSelection | null
@@ -177,6 +203,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   compact = false,
   disabled = false,
   busy = false,
+  activeRun,
   onSubmit,
   models = [],
   selection = null,
@@ -191,28 +218,14 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   const [value, setValue] = useState("")
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
   const [isDragOver, setIsDragOver] = useState(false)
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
-  const modelDropdownRef = useRef<HTMLDivElement>(null)
   // Synchronous double-submit guard: blocks a same-tick second send (Enter +
   // click, or two rapid Enters) before React re-renders. Scoped to the send
   // request only — never the run lifecycle.
   const submittingRef = useRef(false)
-
-  const combos = useMemo<Array<ModelSelection>>(() => {
-    const list: Array<ModelSelection> = []
-    for (const model of models) {
-      for (const effort of model.efforts) {
-        list.push({ modelId: model.id, effort })
-      }
-    }
-    return list
-  }, [models])
-
-  const selectionLabel = formatModelSelection(models, selection)
 
   const selectedModelSupportsImages = useMemo(() => {
     if (!selection || pendingImages.length === 0) return true
@@ -255,20 +268,6 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
     el.style.overflowY =
       el.scrollHeight > PROMPT_TEXTAREA_MAX_HEIGHT ? "auto" : "hidden"
   }, [value])
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      const target = e.target as Node
-      if (
-        modelDropdownRef.current &&
-        !modelDropdownRef.current.contains(target)
-      ) {
-        setModelDropdownOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
 
   const addFiles = useCallback(async (files: FileList | Array<File>) => {
     const nextImages = await Promise.all(
@@ -350,8 +349,6 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
       onPlanModeChange(!planMode)
     }
   }
-
-  const pickerDisabled = combos.length === 0 || !onSelectionChange
 
   return (
     <div
@@ -451,59 +448,12 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
         />
 
         <div className="mt-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pt-2 text-xs text-[color:var(--ui-text-dim)]">
-          <div ref={modelDropdownRef} className="relative min-w-0 shrink">
-            <button
-              type="button"
-              disabled={pickerDisabled}
-              onClick={() => setModelDropdownOpen((open) => !open)}
-              className="flex max-w-[220px] cursor-pointer items-center gap-0.5 text-[13px] text-[color:var(--ui-text-muted)] transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
-            >
-              <span className="truncate">{selectionLabel}</span>
-              {!pickerDisabled && (
-                <ChevronDown className="size-3.5 shrink-0 opacity-60" />
-              )}
-            </button>
-            {modelDropdownOpen && combos.length > 0 && (
-              <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 overflow-hidden overflow-y-auto rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
-                {combos.map((combo) => {
-                  const selected =
-                    !!selection &&
-                    selection.modelId === combo.modelId &&
-                    selection.effort === combo.effort
-                  const model = models.find((m) => m.id === combo.modelId)
-                  const contextWindow = model?.context_window
-                  return (
-                    <button
-                      key={`${combo.modelId}::${combo.effort}`}
-                      type="button"
-                      onClick={() => {
-                        onSelectionChange?.(combo)
-                        setModelDropdownOpen(false)
-                      }}
-                      className={cn(
-                        "flex w-full items-center gap-2 px-3 py-1.5 text-left whitespace-nowrap transition-colors hover:bg-[var(--ui-panel-2)]",
-                        selected
-                          ? "text-[color:var(--ui-text)]"
-                          : "text-[color:var(--ui-text-muted)]"
-                      )}
-                    >
-                      <span>{formatModelSelection(models, combo)}</span>
-                      {typeof contextWindow === "number" && (
-                        <span className="pl-1 text-[color:var(--ui-text-dim)]">
-                          {formatTokenCount(contextWindow)} context
-                        </span>
-                      )}
-                      {selected && (
-                        <span className="ml-auto pl-3 text-[color:var(--ui-text-dim)]">
-                          ✓
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+          <ModelPicker
+            models={models}
+            selection={selection}
+            onSelectionChange={onSelectionChange}
+            requireImageSupport={pendingImages.length > 0}
+          />
 
           {onPlanModeChange && (
             <button
@@ -545,6 +495,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             canSubmit={canSubmit}
             submitting={isSubmitting}
             onSubmit={() => void handleSubmit()}
+            activeRun={activeRun}
           />
         </div>
       </div>

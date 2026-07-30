@@ -338,6 +338,14 @@ export interface AgentInstructions {
   updated_at?: string
 }
 
+export interface UserInstructions {
+  login?: string
+  instructions: string
+  created_at?: string
+  updated_at?: string
+  updated_by?: string
+}
+
 export type RepoSnapshotStatus = "none" | "building" | "ready" | "failed"
 
 export interface RepoSnapshot {
@@ -611,7 +619,8 @@ export const api = {
   profile: () => request<Profile>("/profile"),
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
-  repos: () => request<ReposPayload>("/repos"),
+  repos: (options?: { refresh?: boolean }) =>
+    request<ReposPayload>(options?.refresh ? "/repos?refresh=true" : "/repos"),
   listReviewStyles: () => request<Array<ReviewStyle>>("/review-styles"),
   createReviewStyle: (full_name: string) =>
     request<ReviewStyle>("/review-styles", {
@@ -643,6 +652,14 @@ export const api = {
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
+  getMyInstructions: () => request<UserInstructions>("/me/instructions"),
+  saveMyInstructions: (instructions: string) =>
+    request<UserInstructions>("/me/instructions", {
+      method: "PUT",
+      body: JSON.stringify({ instructions }),
+    }),
+  deleteMyInstructions: () =>
+    request<void>("/me/instructions", { method: "DELETE" }),
   listAgentInstructions: () =>
     request<Array<AgentInstructions>>("/agent-instructions"),
   createAgentInstructions: (full_name: string) =>

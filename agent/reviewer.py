@@ -49,6 +49,7 @@ from .dashboard.team_settings import (
 )
 from .middleware import (
     BasePrepareRunMiddleware,
+    ModelCallTimeoutMiddleware,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -61,6 +62,7 @@ from .middleware import (
     settle_review_check_on_exit,
 )
 from .middleware.prepare_run import PrepareRunState
+from .middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from .review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -113,6 +115,7 @@ from .utils.github_token import cache_github_token_for_thread
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.repo_prep import materialize_trusted_skills, prepare_review_repo
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
+from .utils.sandbox_state import SandboxUnreachableError
 from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 HISTORICAL_REVIEW_GUIDANCE = """- **Anything that overlaps an existing PR review thread.** A
@@ -355,6 +358,9 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
         ),
         "system_prompt": REVIEWER_SUBAGENT_SYSTEM_PROMPT,
         "model": model,
+        # Subagents compile into their own graphs, so the reviewer's own
+        # middleware never wraps their model calls.
+        "middleware": cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()]),
     }
 
 
@@ -951,6 +957,11 @@ async def _ensure_reviewer_sandbox_for_thread(
             github_proxy_token=github_token,
             github_proxy_repositories=[repo_name_for_scope] if repo_name_for_scope else None,
             repo=repo_for_snapshot,
+            # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
+            # re-derives every run, and reviewer threads outlive their sandbox: one
+            # thread per PR, re-triggered on every push. Refusing to replace an
+            # unreachable one would brick reviews on that PR for good.
+            allow_replacement=True,
         ),
         github_token,
     )
@@ -1000,9 +1011,17 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:
         configurable = self._config.get("configurable") or {}
         repo_config = configurable.get("repo") or {}
-        sandbox_backend, github_token = await _ensure_reviewer_sandbox_for_thread(
-            self._thread_id, configurable
-        )
+        try:
+            sandbox_backend, github_token = await _ensure_reviewer_sandbox_for_thread(
+                self._thread_id, configurable
+            )
+        except SandboxUnreachableError as exc:
+            # Replacement was allowed and still failed, so this run dies without a
+            # sandbox. Say so on the PR instead of leaving it looking unreviewed.
+            await post_sandbox_unreachable_notification(
+                self._config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
+            )
+            raise
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
 
         repo_owner = str(repo_config.get("owner", ""))
@@ -1415,6 +1434,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
+                ModelCallTimeoutMiddleware(),
                 settle_review_check_on_exit,
             ],
         ),

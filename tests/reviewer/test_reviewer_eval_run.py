@@ -22,7 +22,7 @@ def test_reviewer_eval_config_coerces_known_values() -> None:
             "max_concurrency": 2,
             "langgraph_url": "https://example.test",
             "assistant_id": "reviewer",
-            "model_id": "anthropic:claude-opus-4-8",
+            "model_id": "anthropic:claude-opus-5",
             "reasoning_effort": "high",
             "score_mode": "surfaced_findings",
             "severity_threshold": "medium",
@@ -37,7 +37,7 @@ def test_reviewer_eval_config_coerces_known_values() -> None:
         "max_concurrency": 2,
         "langgraph_url": "https://example.test",
         "assistant_id": "reviewer",
-        "model_id": "anthropic:claude-opus-4-8",
+        "model_id": "anthropic:claude-opus-5",
         "reasoning_effort": "high",
         "score_mode": "surfaced_findings",
         "severity_threshold": "medium",
@@ -55,7 +55,7 @@ def test_reviewer_eval_config_sets_target_env() -> None:
                 "langgraph_url": "https://example.test",
                 "langsmith_project": "project",
                 "assistant_id": "reviewer",
-                "model_id": "anthropic:claude-opus-4-8",
+                "model_id": "anthropic:claude-opus-5",
                 "reasoning_effort": "high",
                 "score_mode": "surfaced_findings",
                 "severity_threshold": "high",
@@ -70,7 +70,7 @@ def test_reviewer_eval_config_sets_target_env() -> None:
         assert os.environ["LANGSMITH_PROJECT"] == "project"
         assert os.environ["LANGCHAIN_PROJECT"] == "project"
         assert os.environ["REVIEWER_ASSISTANT_ID"] == "reviewer"
-        assert os.environ["REVIEWER_EVAL_MODEL_ID"] == "anthropic:claude-opus-4-8"
+        assert os.environ["REVIEWER_EVAL_MODEL_ID"] == "anthropic:claude-opus-5"
         assert os.environ["REVIEWER_EVAL_REASONING_EFFORT"] == "high"
         assert os.environ["REVIEWER_EVAL_SCORE_MODE"] == "surfaced_findings"
         assert os.environ["REVIEWER_EVAL_SEVERITY_THRESHOLD"] == "high"
@@ -141,7 +141,7 @@ def test_resolve_config_prefers_cli_then_env_then_toml() -> None:
             return_value={
                 "dataset_name": "dataset-config",
                 "experiment_prefix": "experiment-config",
-                "model_id": "anthropic:claude-opus-4-8",
+                "model_id": "anthropic:claude-opus-5",
                 "reasoning_effort": "high",
                 "langsmith_project": "project-config",
             },
@@ -149,7 +149,7 @@ def test_resolve_config_prefers_cli_then_env_then_toml() -> None:
         patch.dict(
             os.environ,
             {
-                "REVIEWER_EVAL_MODEL_ID": "google_genai:gemini-3.5-flash",
+                "REVIEWER_EVAL_MODEL_ID": "google_genai:gemini-3.6-flash",
                 "REVIEWER_EVAL_REASONING_EFFORT": "medium",
                 "LANGSMITH_PROJECT": "project-env",
             },

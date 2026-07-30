@@ -15,7 +15,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
-import { ApiError, api, isGithubReauthError, loginUrl } from "@/lib/api"
+import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
 
 function formatMutationError(e: Error): string {
@@ -50,18 +51,7 @@ export function RepoSnapshotsPanel() {
     queryFn: api.listRepoSnapshots,
   })
 
-  const repos = useQuery({
-    queryKey: ["repos"],
-    queryFn: async () => {
-      try {
-        return await api.repos()
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 401)
-          return { installations: [], repositories: [] }
-        throw e
-      }
-    },
-  })
+  const repos = useRepos()
 
   const detail = useQuery({
     queryKey: ["repoSnapshot", selected],

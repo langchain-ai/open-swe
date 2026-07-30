@@ -6,6 +6,7 @@ _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
     "ensure_no_empty_msg": ".ensure_no_empty_msg",
     "ExcludeToolsMiddleware": ".exclude_tools",
+    "ModelCallTimeoutMiddleware": ".model_call_timeout",
     "ModelFallbackMiddleware": ".model_fallback",
     "notify_step_limit_reached": ".notify_step_limit",
     "PlanModeMiddleware": ".plan_mode",
@@ -31,6 +32,7 @@ _MIDDLEWARE_MODULES = {
 
 __all__ = [
     "ExcludeToolsMiddleware",
+    "ModelCallTimeoutMiddleware",
     "ModelFallbackMiddleware",
     "BasePrepareRunMiddleware",
     "PlanModeMiddleware",
@@ -60,6 +62,7 @@ if TYPE_CHECKING:
     from .check_message_queue import check_message_queue_before_model
     from .ensure_no_empty_msg import ensure_no_empty_msg
     from .exclude_tools import ExcludeToolsMiddleware
+    from .model_call_timeout import ModelCallTimeoutMiddleware
     from .model_fallback import ModelFallbackMiddleware
     from .notify_step_limit import notify_step_limit_reached
     from .plan_mode import PlanModeMiddleware

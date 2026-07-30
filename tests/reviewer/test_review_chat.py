@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import sys
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from deepagents.middleware.filesystem import FilesystemMiddleware
 from fastapi import HTTPException
 
 from agent.dashboard import review_chat_api
@@ -15,6 +17,7 @@ from agent.dashboard import review_chat_api
 list_review_findings = importlib.import_module("agent.tools.list_review_findings")
 read_repo_file = importlib.import_module("agent.tools.read_repo_file")
 search_repo_code = importlib.import_module("agent.tools.search_repo_code")
+web_search = importlib.import_module("agent.tools.web_search")
 
 
 def _fake_async_client(handler):
@@ -639,6 +642,49 @@ async def test_proxy_state_rejects_foreign_thread(monkeypatch) -> None:
 
 
 # --- graph factory guard -----------------------------------------------------
+
+
+def test_chat_excludes_mutating_filesystem_tools() -> None:
+    from agent.chat import _EXCLUDED_TOOLS
+
+    assert {"write_file", "edit_file", "delete", "execute"} <= _EXCLUDED_TOOLS
+
+
+def test_chat_general_purpose_subagent_is_read_only() -> None:
+    from agent.chat import _chat_general_purpose_subagent
+
+    spec = _chat_general_purpose_subagent()
+
+    assert spec["name"] == "general-purpose"
+    fs_middleware = [m for m in spec.get("middleware", []) if isinstance(m, FilesystemMiddleware)]
+    assert len(fs_middleware) == 1
+    enabled = fs_middleware[0]._enabled_tools
+    assert enabled is not None
+    assert {"write_file", "edit_file", "delete", "execute"}.isdisjoint(enabled)
+    assert {"read_file", "ls", "glob", "grep"} <= enabled
+
+
+@pytest.mark.asyncio
+async def test_chat_web_search_returns_inline_results_without_sandbox(monkeypatch) -> None:
+    class FakeExa:
+        def __init__(self, api_key: str) -> None:
+            self.api_key = api_key
+
+        def search_and_contents(self, *args: Any, **kwargs: Any) -> str:
+            return "chat search result"
+
+    async def no_sandbox(tool_name: str, content: str, extension: str) -> str:
+        raise ValueError("Missing sandbox_id in thread metadata for chat-thread")
+
+    monkeypatch.setitem(sys.modules, "exa_py", SimpleNamespace(Exa=FakeExa))
+    monkeypatch.setenv("EXA_API_KEY", "test-key")
+    monkeypatch.setattr(web_search, "write_sandbox_output", no_sandbox)
+
+    result = await web_search.web_search("external standard")
+
+    assert result["success"] is True
+    assert result["results_path"] is None
+    assert result["results"] == "chat search result"
 
 
 def test_get_chat_agent_returns_trivial_when_not_for_execution() -> None:
