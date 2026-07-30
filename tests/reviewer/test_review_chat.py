@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import sys
 from types import SimpleNamespace
 from typing import Any
 
@@ -16,6 +17,7 @@ from agent.dashboard import review_chat_api
 list_review_findings = importlib.import_module("agent.tools.list_review_findings")
 read_repo_file = importlib.import_module("agent.tools.read_repo_file")
 search_repo_code = importlib.import_module("agent.tools.search_repo_code")
+web_search = importlib.import_module("agent.tools.web_search")
 
 
 def _fake_async_client(handler):
