@@ -227,7 +227,7 @@ function MyInstructionsSection() {
   return (
     <SettingsSection
       title="My instructions"
-      description="Personal standing instructions appended to the coding agent's system prompt for every run you trigger, on any surface. Repository instructions and AGENTS.md win when they conflict. Open SWE can also update these for you when you ask it to always or never do something."
+      description="Personal standing instructions appended to the coding agent's system prompt for every run you trigger, on any surface. Repository instructions and AGENTS.md win when they conflict. Jarvis can also update these for you when you ask it to always or never do something."
     >
       <div className="flex flex-col gap-3 p-4">
         {instructions.isLoading ? (

@@ -79,13 +79,13 @@ def _truncate_for_slack(text: str) -> str:
     if len(text) <= _VISIBLE_INSTRUCTIONS_MAX_CHARS:
         return text
     omitted = len(text) - _VISIBLE_INSTRUCTIONS_MAX_CHARS
-    return f"{text[:_VISIBLE_INSTRUCTIONS_MAX_CHARS].rstrip()}\n\n…truncated {omitted} chars; the new Open SWE thread received the full instructions."
+    return f"{text[:_VISIBLE_INSTRUCTIONS_MAX_CHARS].rstrip()}\n\n…truncated {omitted} chars; the new Jarvis thread received the full instructions."
 
 
 def _visible_message(title: str, instructions: str, repo: dict[str, str] | None) -> str:
     repo_line = f"\n*Repository:* `{repo['owner']}/{repo['name']}`" if repo else ""
     return (
-        f"*Open SWE breakout thread:* {title}{repo_line}\n\n"
+        f"*Jarvis breakout thread:* {title}{repo_line}\n\n"
         f"*Instructions for the new thread:*\n{_truncate_for_slack(instructions)}"
     )
 
@@ -100,7 +100,7 @@ def _run_prompt(
     channel_id = original_slack_thread.get("channel_id", "")
     thread_ts = original_slack_thread.get("thread_ts", "")
     return (
-        "You were started from another Open SWE Slack thread as a breakout task.\n\n"
+        "You were started from another Jarvis Slack thread as a breakout task.\n\n"
         f"## Breakout Title\n{title}\n\n"
         f"## Default Repository Hint\n{repo_text}\n"
         "Use this repository unless the instructions below clearly identify a different repository.\n\n"

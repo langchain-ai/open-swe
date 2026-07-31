@@ -208,13 +208,13 @@ def _access_failure_payload(
         http_status=http_status,
         reason=reason,
         likely_cause=(
-            "the Open SWE GitHub App or PR author token is not installed on, granted access "
+            "the Jarvis GitHub App or PR author token is not installed on, granted access "
             "to, or able to see this repository or one of the PR branches"
         ),
         suggested_action=(
-            "install or grant the Open SWE GitHub App and the triggering user's GitHub "
+            "install or grant the Jarvis GitHub App and the triggering user's GitHub "
             "authorization access to this repository, verify the base/head branches exist, "
-            "then ask Open SWE to retry opening the PR"
+            "then ask Jarvis to retry opening the PR"
         ),
         branch_pushed=branch_pushed,
         failed_step=failed_step,
@@ -250,8 +250,8 @@ def _branch_failure_payload(
             "to the PR author token"
         ),
         suggested_action=(
-            f"push or restore the {branch_role} branch `{branch}`, ensure the Open SWE "
-            "GitHub App/token can see it, then ask Open SWE to retry opening the PR"
+            f"push or restore the {branch_role} branch `{branch}`, ensure the Jarvis "
+            "GitHub App/token can see it, then ask Jarvis to retry opening the PR"
         ),
         branch_pushed=branch_pushed,
         failed_step=f"preflight_{branch_role}_branch",
@@ -642,7 +642,7 @@ async def _open_pull_request(
             http_status=None,
             reason="No GitHub token was available to open the pull request",
             likely_cause="the triggering user is not authorized and no GitHub App token is available",
-            suggested_action="connect GitHub authorization or install/grant the Open SWE GitHub App, then retry",
+            suggested_action="connect GitHub authorization or install/grant the Jarvis GitHub App, then retry",
             branch_pushed=None,
             failed_step="resolve_pr_author_token",
         )

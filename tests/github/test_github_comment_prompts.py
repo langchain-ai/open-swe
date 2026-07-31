@@ -129,8 +129,8 @@ def test_construct_system_prompt_identifies_own_repo() -> None:
     # The per-thread prompt points self-referential tasks at the repo; the
     # shared base carries the Open SWE identity.
     assert "langchain-ai/open-swe" in prompt
-    assert "Open SWE" in OPEN_SWE_SHARED_BASE
-    assert "Open SWE" in prompt
+    assert "Jarvis" in OPEN_SWE_SHARED_BASE
+    assert "Jarvis" in prompt
 
 
 def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
@@ -286,7 +286,7 @@ def test_construct_system_prompt_includes_coauthor_trailer_when_identity_present
     assert "git config user.name octocat" in prompt
     assert "git config user.email 1234+octocat@users.noreply.github.com" in prompt
     assert _BOT_TRAILER in prompt
-    assert "Made by [Open SWE](https://openswe.vercel.app)" in prompt
+    assert "Made by [Jarvis](https://openswe.vercel.app)" in prompt
 
 
 def test_construct_system_prompt_includes_github_login_in_pr_footer() -> None:
@@ -306,7 +306,7 @@ def test_construct_system_prompt_includes_github_login_in_pr_footer() -> None:
     assert "git config user.name 'Mona Lisa'" in prompt
     assert "git config user.email 1234+octocat@users.noreply.github.com" in prompt
     assert _BOT_TRAILER in prompt
-    assert "Made by [Open SWE](https://openswe.vercel.app)" in prompt
+    assert "Made by [Jarvis](https://openswe.vercel.app)" in prompt
     assert "replace that existing footer with this line" in prompt
     assert "`_Opened collaboratively by Mona Lisa and jarvis-aeteq._`" in prompt
 
@@ -324,8 +324,8 @@ def test_construct_system_prompt_footer_links_thread_when_provided() -> None:
         thread_url="https://openswe.vercel.app/agents/abc-123",
     )
 
-    assert "Made by [Open SWE](https://openswe.vercel.app/agents/abc-123)" in prompt
-    assert "Made by [Open SWE](https://openswe.vercel.app)" not in prompt
+    assert "Made by [Jarvis](https://openswe.vercel.app/agents/abc-123)" in prompt
+    assert "Made by [Jarvis](https://openswe.vercel.app)" not in prompt
 
 
 def test_construct_system_prompt_shell_escapes_user_name() -> None:
@@ -360,7 +360,7 @@ def test_add_pr_collaboration_note_replaces_legacy_footer() -> None:
     body = "## Description\nDone.\n\n_Opened collaboratively by Mona Lisa and jarvis-aeteq._"
 
     assert add_pr_collaboration_note(body, identity) == (
-        "## Description\nDone.\n\nMade by [Open SWE](https://openswe.vercel.app)"
+        "## Description\nDone.\n\nMade by [Jarvis](https://openswe.vercel.app)"
     )
 
 
@@ -369,11 +369,11 @@ def test_add_pr_collaboration_note_links_thread() -> None:
 
     assert add_pr_collaboration_note(
         body, thread_url="https://openswe.vercel.app/agents/abc-123"
-    ) == ("## Description\nDone.\n\nMade by [Open SWE](https://openswe.vercel.app/agents/abc-123)")
+    ) == ("## Description\nDone.\n\nMade by [Jarvis](https://openswe.vercel.app/agents/abc-123)")
 
 
 def test_add_pr_collaboration_note_skips_when_footer_present_with_other_link() -> None:
-    body = "## Description\nDone.\n\nMade by [Open SWE](https://openswe.vercel.app)"
+    body = "## Description\nDone.\n\nMade by [Jarvis](https://openswe.vercel.app)"
 
     assert (
         add_pr_collaboration_note(body, thread_url="https://openswe.vercel.app/agents/abc-123")

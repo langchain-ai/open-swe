@@ -683,7 +683,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     )
     assert prompt_block["text"].count("## Slack Thread") == 1
     assert f"Thread TS: {thread_ts}" in prompt_block["text"]
-    assert "## Open SWE Links" in prompt_block["text"]
+    assert "## Jarvis Links" in prompt_block["text"]
     assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt_block["text"]
     assert "- Trace: https://smith/x" in prompt_block["text"]
     assert "do not duplicate it manually" in prompt_block["text"]

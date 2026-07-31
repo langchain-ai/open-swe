@@ -254,7 +254,7 @@ export function AutomationEditor({
           />
           <p className="mt-2 text-xs text-[var(--ui-text-dim)]">
             Optional Slack channel ID. Each run starts a new thread there; the
-            Open SWE bot must be a member of the channel.
+            Jarvis bot must be a member of the channel.
           </p>
         </div>
 

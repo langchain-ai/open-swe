@@ -50,7 +50,7 @@ def _load_default_prompt() -> str:
 # Static, run-invariant guidance for the main agent. The per-thread,
 # main-agent-specific prompt (working dir, repo setup, PR workflow,
 # source-channel reply) is layered in front of this via `construct_system_prompt`.
-OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on LangGraph and Deep Agents, operating in a remote, git-backed Linux sandbox invoked from Slack, Linear, or GitHub.
+OPEN_SWE_SHARED_BASE = """You are **Jarvis**, an open-source agent built on LangGraph and Deep Agents, operating in a remote, git-backed Linux sandbox invoked from Slack, Linear, or GitHub.
 
 ### Core Behavior
 
@@ -258,7 +258,7 @@ This run was triggered by **{display_name}**. You author the work **as them** â€
   {bot_coauthor_trailer}
   ```
 
-- **PR body**: append this line at the bottom of the PR description (blank line before it) when you open/update the draft PR; don't duplicate it if present. If the body already has a `Made by [Open SWE]` footer pointing at a different link, or a legacy footer like `_Opened collaboratively by {display_name} and jarvis-aeteq._`, replace that existing footer with this line instead of appending a second footer:
+- **PR body**: append this line at the bottom of the PR description (blank line before it) when you open/update the draft PR; don't duplicate it if present. If the body already has a `Made by [Jarvis]` footer pointing at a different link, or a legacy footer like `_Opened collaboratively by {display_name} and jarvis-aeteq._`, replace that existing footer with this line instead of appending a second footer:
 
   ```
   {pr_attribution_footer}

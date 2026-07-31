@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 OPEN_SWE_BOT_NAME = "jarvis-aeteq[bot]"
 OPEN_SWE_BOT_EMAIL = "jarvis-aeteq@users.noreply.github.com"
 
-PR_ATTRIBUTION_TEXT = "Made by [Open SWE]"
+PR_ATTRIBUTION_TEXT = "Made by [Jarvis]"
 PR_ATTRIBUTION_DEFAULT_URL = "https://openswe.vercel.app"
 PR_ATTRIBUTION_FOOTER = f"{PR_ATTRIBUTION_TEXT}({PR_ATTRIBUTION_DEFAULT_URL})"
 

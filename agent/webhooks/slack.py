@@ -210,7 +210,7 @@ def _format_slack_thread_section(
 def _format_slack_run_links_section(thread_id: str) -> str:
     dashboard_url = common.dashboard_thread_url(thread_id)
     trace_url = get_langsmith_trace_url(thread_id)
-    lines = ["## Open SWE Links"]
+    lines = ["## Jarvis Links"]
     if dashboard_url:
         lines.append(f"- Web: {dashboard_url}")
     if trace_url:
@@ -313,11 +313,11 @@ async def _notify_slack_processing_error(
 
     dashboard_url = common.dashboard_thread_url(thread_id)
     message = warning(
-        "Open SWE hit an unexpected error while handling this Slack thread. "
+        "Jarvis hit an unexpected error while handling this Slack thread. "
         "Send another message and it will try again."
     )
     if dashboard_url:
-        message += f" You can view the error in <{dashboard_url}|Open SWE Web>."
+        message += f" You can view the error in <{dashboard_url}|Jarvis Web>."
     try:
         await common.post_slack_thread_reply(channel_id, thread_ts, message)
     except Exception:  # noqa: BLE001
