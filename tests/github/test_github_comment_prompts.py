@@ -128,7 +128,7 @@ def test_construct_system_prompt_identifies_own_repo() -> None:
 
     # The per-thread prompt points self-referential tasks at the repo; the
     # shared base carries the Open SWE identity.
-    assert "langchain-ai/open-swe" in prompt
+    assert "aeteq/open-swe" in prompt
     assert "Jarvis" in OPEN_SWE_SHARED_BASE
     assert "Jarvis" in prompt
 
