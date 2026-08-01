@@ -649,10 +649,21 @@ docker run \
   -e LANGGRAPH_AUTH_TYPE="noop" \
   -e LANGGRAPH_URL="https://<your-backend-url>" \
   -e DASHBOARD_API_BASE_URL="https://<your-dashboard-or-backend-url>" \
+  -e POSTGRES_POOL_MAX_LIFETIME="60" \
+  -e POSTGRES_POOL_CHECK="1" \
+  -e POSTGRES_POOL_RECONNECT_FAILED="1" \
   open-swe
 ```
 
 The example above assumes Postgres and Redis run on the Docker host. `host.docker.internal` only resolves automatically on Docker Desktop, so `--add-host=host.docker.internal:host-gateway` is what makes it work on a plain Linux Docker Engine. If Postgres and Redis run as their own containers, drop the flag and point `DATABASE_URI` / `REDIS_URI` at their service names on a shared Docker network instead.
+
+**Harden the checkpointer connection pool.** Long-running reviewer runs die with `AdminShutdown('terminating connection due to administrator command')` when Postgres forcibly closes a pooled connection (failover, restart, idle-connection reaping) and the checkpointer writes a checkpoint through the dead connection — losing all in-progress review work. Set these on every reviewer deployment (Docker `-e` flags above, or the LangGraph Cloud deployment config) so the pool refreshes and validates connections before they are used for a checkpoint write:
+
+- `POSTGRES_POOL_MAX_LIFETIME="60"` — recycle pooled connections every ~60s so long-lived connections are refreshed before Postgres reaps them.
+- `POSTGRES_POOL_CHECK="1"` — pre-ping / health-check a connection on checkout so an already-dead connection is discarded and replaced rather than used for a checkpoint write.
+- `POSTGRES_POOL_RECONNECT_FAILED="1"` — reconnect a failed pool connection so a single dropped connection is retried transparently instead of terminating the run.
+
+These are scoped to the checkpointer transaction layer only; they do not add retries around GitHub side effects.
 
 Set all environment variables from step 6, plus the standalone Agent Server requirements: `DATABASE_URI`, `REDIS_URI`, `LANGSMITH_API_KEY` (unless tracing is disabled for your deployment), and `LANGGRAPH_CLOUD_LICENSE_KEY` for the production LangGraph server. Expose the container's port `8000` through your ingress. Do not use scale-to-zero hosting; background runs rely on Redis/Postgres-backed workers staying available. If the built-in LangGraph API routes are reachable from the public internet, put the service behind a private network, API gateway, or custom LangGraph auth before using `LANGGRAPH_AUTH_TYPE=noop`.
 
