@@ -114,6 +114,7 @@ The easiest approach is to extend `BaseSandbox` from `deepagents.backends.sandbo
 from deepagents.backends.sandbox import BaseSandbox
 from deepagents.backends.protocol import ExecuteResponse
 
+
 class MySandbox(BaseSandbox):
     def __init__(self, connection):
         self._conn = connection
@@ -154,13 +155,13 @@ Use the `provider:model` format:
 
 ```python
 # Anthropic
-model=make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
+model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
-model=make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
+model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
 
 # Google
-model=make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
+model = make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
 ```
 
 The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
@@ -236,6 +237,7 @@ Create a new file in `agent/tools/`, define a function, and add it to the tools 
 # agent/tools/datadog_search.py
 import requests
 from typing import Any
+
 
 def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
     """Search Datadog logs for debugging context.
@@ -406,16 +408,18 @@ async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks
 async def process_my_trigger(task_description: str, repo_config: dict):
     thread_id = generate_deterministic_id(task_description)
     langgraph_client = get_client(url=LANGGRAPH_URL)
-    
+
     await langgraph_client.runs.create(
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": task_description}]},
-        config={"configurable": {
-            "repo": repo_config,
-            "source": "my-trigger",
-            "user_email": "user@example.com",
-        }},
+        config={
+            "configurable": {
+                "repo": repo_config,
+                "source": "my-trigger",
+                "user_email": "user@example.com",
+            }
+        },
         if_not_exists="create",
     )
 ```
@@ -516,6 +520,7 @@ Add custom middleware by appending to the middleware list in `get_agent()`. See 
 from langchain.agents.middleware import AgentState, after_agent
 from langgraph.runtime import Runtime
 
+
 @after_agent
 async def run_ci_check(state: AgentState, runtime: Runtime):
     """Run CI checks after the agent finishes."""
@@ -526,11 +531,13 @@ async def run_ci_check(state: AgentState, runtime: Runtime):
 Then add it to the middleware list:
 
 ```python
-middleware=[
-    ToolErrorMiddleware(),
-    check_message_queue_before_model,
-    ensure_no_empty_msg,
-    notify_step_limit_reached,
-    run_ci_check,  # new middleware
-],
+middleware = (
+    [
+        ToolErrorMiddleware(),
+        check_message_queue_before_model,
+        ensure_no_empty_msg,
+        notify_step_limit_reached,
+        run_ci_check,  # new middleware
+    ],
+)
 ```
