@@ -127,7 +127,7 @@ _PROFILE_LOADER_MODULES: dict[str, str] = {
     "openai": "langchain_openai.chat_models.base",
 }
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
-    "fireworks:accounts/fireworks/models/kimi-k3": 1_040_000,
+    "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
 }
 
 
