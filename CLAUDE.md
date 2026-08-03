@@ -75,14 +75,14 @@ The system prompt instructs the agent to call a tool every turn, and `ensure_no_
 
 Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`, `SlackAssistantStatusMiddleware`.
 
-There is intentionally no after-agent safety net that opens a PR for the agent. The agent itself is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel — all via `GH_TOKEN=dummy gh` and `slack_thread_reply` / `linear_comment`.
+There is intentionally no after-agent safety net that opens a PR for the agent. The agent commits and pushes itself, opens NEW pull requests only with the `open_pull_request` tool so the PR is attributed to the triggering user, updates existing PRs with `GH_TOKEN=dummy gh pr edit`, and replies in the source channel via `slack_thread_reply` / `linear_comment`. `PullRequestCreationGuardMiddleware` (`agent/middleware/pr_creation_guard.py`, wired at `agent/server.py:1106`) enforces this: never fall back to `gh pr create`, `gh api repos/.../pulls`, a direct REST `POST /repos/.../pulls`, or any other substitute PR-creation mechanism — if `open_pull_request` fails, report the failure and stop.
 
 ### Tools
 
 All tools live in `agent/tools/` and are flat-imported via `agent/tools/__init__.py`. The set is intentionally small and curated — see README "Tools — Curated, Not Accumulated".
 
 Wired into `get_agent`:
-`http_request`, `fetch_url`, `web_search`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `request_pr_review`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_thread_reply`.
+`http_request`, `fetch_url`, `web_search`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_thread_reply`.
 
 Reviewer-only tools (in `agent/reviewer.py`): `add_finding`, `update_finding`, `list_findings`, `publish_review`. The review-style analyzer uses `save_review_style` (exported as `save_review_style_prompt`).
 
