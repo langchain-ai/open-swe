@@ -115,10 +115,11 @@ def test_models_with_profile_context_windows_enriches_copies() -> None:
             "supports_images": False,
         }
     )
-    with patch("agent.dashboard.options._profile_loader", return_value=None):
-        model_profile_context_window.cache_clear()
+    with patch(
+        "agent.dashboard.options.model_profile_context_window",
+        side_effect=lambda model_id: 1_040_000 if model_id == SUPPORTED_KIMI else 1_050_000,
+    ):
         enriched = models_with_profile_context_windows(models)
-    model_profile_context_window.cache_clear()
     assert all("context_window" not in model for model in models)
     assert {model["id"]: model.get("context_window") for model in enriched} == {
         "openai:gpt-5.6-sol": 1_050_000,
