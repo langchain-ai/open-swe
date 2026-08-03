@@ -9,11 +9,8 @@ from langgraph_sdk import get_client
 from ..dashboard.repo_access import require_repo_access_for_user
 from ..dispatch import dispatch_agent_run
 from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.slack import (
-    post_slack_top_level_message_with_ts,
-    post_slack_trace_reply,
-    store_slack_run_mapping,
-)
+from ..utils.langsmith import get_langsmith_trace_url
+from ..utils.slack import post_slack_top_level_message_with_ts, store_slack_run_mapping
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
 from ..webhooks.common import _is_repo_allowed
 
@@ -79,7 +76,7 @@ def _truncate_for_slack(text: str) -> str:
     if len(text) <= _VISIBLE_INSTRUCTIONS_MAX_CHARS:
         return text
     omitted = len(text) - _VISIBLE_INSTRUCTIONS_MAX_CHARS
-    return f"{text[:_VISIBLE_INSTRUCTIONS_MAX_CHARS].rstrip()}\n\n…truncated {omitted} chars; the new Jarvis thread received the full instructions."
+    return f"{text[:_VISIBLE_INSTRUCTIONS_MAX_CHARS].rstrip()}\n\n…truncated {omitted} chars; the new Open SWE thread received the full instructions."
 
 
 def _visible_message(title: str, instructions: str, repo: dict[str, str] | None) -> str:
@@ -90,23 +87,39 @@ def _visible_message(title: str, instructions: str, repo: dict[str, str] | None)
     )
 
 
+def _run_links_section(thread_id: str) -> str:
+    dashboard_url = dashboard_thread_url(thread_id)
+    trace_url = get_langsmith_trace_url(thread_id)
+    lines = ["## Jarvis Links"]
+    if dashboard_url:
+        lines.append(f"- Web: {dashboard_url}")
+    if trace_url:
+        lines.append(f"- Trace: {trace_url}")
+    lines.append(
+        "- A compact Web footer is added automatically to Slack replies; do not duplicate it manually. Share the Web or trace URL above only if asked."
+    )
+    return "\n".join(lines)
+
+
 def _run_prompt(
     title: str,
     instructions: str,
     repo: dict[str, str] | None,
     original_slack_thread: dict[str, Any],
+    thread_id: str,
 ) -> str:
     repo_text = f"{repo['owner']}/{repo['name']}" if repo else "(no repository specified)"
     channel_id = original_slack_thread.get("channel_id", "")
     thread_ts = original_slack_thread.get("thread_ts", "")
     return (
-        "You were started from another Jarvis Slack thread as a breakout task.\n\n"
+        "You were started from another Open SWE Slack thread as a breakout task.\n\n"
         f"## Breakout Title\n{title}\n\n"
         f"## Default Repository Hint\n{repo_text}\n"
         "Use this repository unless the instructions below clearly identify a different repository.\n\n"
         "## Source Slack Thread\n"
         f"- Channel: {channel_id}\n"
         f"- Thread TS: {thread_ts}\n\n"
+        f"{_run_links_section(thread_id)}\n\n"
         "## Breakout Instructions\n"
         f"{instructions}"
     )
@@ -263,13 +276,12 @@ async def slack_start_new_thread(
 
     run = await dispatch_agent_run(
         thread_id,
-        _run_prompt(clean_title, clean_instructions, repo, current_slack_thread),
+        _run_prompt(clean_title, clean_instructions, repo, current_slack_thread, thread_id),
         new_configurable,
         source="slack",
         client=client,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else None
-    trace_message_ts = await post_slack_trace_reply(channel_id.strip(), message_ts, thread_id)
     if isinstance(run_id, str) and run_id:
         await store_slack_run_mapping(
             client,
@@ -279,15 +291,6 @@ async def slack_start_new_thread(
             message_ts=message_ts,
             triggering_user_id=new_slack_thread.get("triggering_user_id") or None,
         )
-        if trace_message_ts:
-            await store_slack_run_mapping(
-                client,
-                channel_id.strip(),
-                message_ts,
-                run_id,
-                message_ts=trace_message_ts,
-                triggering_user_id=new_slack_thread.get("triggering_user_id") or None,
-            )
 
     return {
         "success": True,
