@@ -102,11 +102,16 @@ def test_model_profile_context_window_falls_back_for_kimi_k3() -> None:
 
 
 def test_models_with_profile_context_windows_enriches_copies() -> None:
-    models = [
-        model
-        for model in SUPPORTED_MODELS
-        if model["id"].startswith("openai:") or model["id"] == SUPPORTED_KIMI
-    ]
+    models = [model for model in SUPPORTED_MODELS if model["id"].startswith("openai:")]
+    models.append(
+        {
+            "id": SUPPORTED_KIMI,
+            "label": "Kimi K3 Code",
+            "efforts": ["low", "high", "max"],
+            "default_effort": "high",
+            "supports_images": False,
+        }
+    )
     enriched = models_with_profile_context_windows(models)
     assert all("context_window" not in model for model in models)
     assert {model["id"]: model.get("context_window") for model in enriched} == {
