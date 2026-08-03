@@ -98,7 +98,10 @@ def test_model_profile_context_window_uses_langchain_profile() -> None:
 
 
 def test_model_profile_context_window_falls_back_for_kimi_k3() -> None:
-    assert model_profile_context_window(SUPPORTED_KIMI) == 1_040_000
+    with patch("agent.dashboard.options._profile_loader", return_value=None):
+        model_profile_context_window.cache_clear()
+        assert model_profile_context_window(SUPPORTED_KIMI) == 1_040_000
+    model_profile_context_window.cache_clear()
 
 
 def test_models_with_profile_context_windows_enriches_copies() -> None:
@@ -112,7 +115,10 @@ def test_models_with_profile_context_windows_enriches_copies() -> None:
             "supports_images": False,
         }
     )
-    enriched = models_with_profile_context_windows(models)
+    with patch("agent.dashboard.options._profile_loader", return_value=None):
+        model_profile_context_window.cache_clear()
+        enriched = models_with_profile_context_windows(models)
+    model_profile_context_window.cache_clear()
     assert all("context_window" not in model for model in models)
     assert {model["id"]: model.get("context_window") for model in enriched} == {
         "openai:gpt-5.6-sol": 1_050_000,
