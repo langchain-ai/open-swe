@@ -84,7 +84,7 @@ The system prompt instructs the agent to call a tool every turn, and `ensure_no_
 
 Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`, `SlackAssistantStatusMiddleware`, `SanitizeThinkingBlocksMiddleware`.
 
-There is intentionally no after-agent safety net that opens a PR for the agent. The agent itself is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel — all via `GH_TOKEN=dummy gh` and `slack_thread_reply` / `linear_comment`.
+There is intentionally no after-agent safety net that opens a PR for the agent. The agent itself is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. New pull requests must be opened with the `open_pull_request` tool only: `PullRequestCreationGuardMiddleware` (`agent/middleware/pr_creation_guard.py`, wired at `agent/server.py:1106`) non-recoverably blocks `gh pr create`, `gh api …/pulls`, and curl fallbacks so the PR stays attributed to the triggering user. `GH_TOKEN=dummy gh` remains the mechanism for PR edits and other GitHub read/update work, and `slack_thread_reply` / `linear_comment` for channel replies.
 
 ### Tools
 
