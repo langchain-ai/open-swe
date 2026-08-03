@@ -46,12 +46,15 @@ The FastAPI app is `agent.webapp:app`.
 
 ### Sandbox lifecycle (the tricky part)
 
-`SANDBOX_BACKENDS` (in `agent/utils/sandbox_state.py`) is an in-process dict keyed by `thread_id`. Thread metadata persists `sandbox_id` across processes. `ensure_sandbox_for_thread` handles four cases:
+`SANDBOX_BACKENDS` (in `agent/utils/sandbox_state.py`) is an in-process dict keyed by `thread_id`. Thread metadata persists `sandbox_id` across processes. `ensure_sandbox_for_thread` handles three cases (dispatch uses `multitask_strategy="interrupt"`, so a thread never provisions two sandboxes concurrently — no cross-process sentinel is needed):
 
-1. Sandbox cached in memory → ping it (`echo ok`); recreate on `SandboxClientError`. Healthy reused sandboxes also get a GitHub-proxy refresh (recreate on failure).
-2. Metadata says `__creating__` and no cache → poll until ready (`_wait_for_sandbox_id`).
-3. No sandbox at all → set `__creating__` sentinel, create one, persist the real id.
-4. Metadata has an id but no cache → reconnect; fall back to recreate on failure.
+1. Sandbox cached in memory → ping it (`echo ok`), then refresh the GitHub proxy.
+2. Metadata has an id but no cache → reconnect, then refresh the GitHub proxy.
+3. No sandbox at all → create one and persist the id.
+
+Only case 3 creates. An existing sandbox that can't be reached raises `SandboxUnreachableError` (`agent/utils/sandbox_state.py`) rather than being replaced: a replacement is empty, so swapping one in would destroy uncommitted work while looking like a recovery. The main agent catches that in `PrepareAgentRunMiddleware` and notifies the user via `post_sandbox_unreachable_notification`.
+
+`allow_replacement=True` opts out of that protection and is passed **only** by the reviewer (`agent/reviewer.py:_ensure_reviewer_sandbox_for_thread`), whose sandbox holds nothing but a checkout `prepare_review_repo` re-derives every run. Reviewer threads are one-per-PR and outlive their sandbox, so without this a deleted sandbox bricks reviews on that PR permanently.
 
 For `SANDBOX_TYPE=langsmith` (default), every sandbox creation/refresh also calls `_configure_github_proxy` with a fresh GitHub App installation token (`get_github_app_installation_token`). The proxy injects Basic auth for `github.com` git traffic and Bearer auth for `api.github.com` so sandbox commands can use `GH_TOKEN=dummy gh ...` without storing real tokens in the sandbox. Other providers (modal, daytona, runloop, e2b, local) skip the proxy step. Provider is selected via `SANDBOX_TYPE`; factory is `agent/utils/sandbox.py:create_sandbox` (`SANDBOX_FACTORIES` maps each provider name to a creator in `agent/integrations/`).
 
