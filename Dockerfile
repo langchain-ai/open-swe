@@ -1,4 +1,4 @@
-FROM langchain/langgraph-api:0.13.0.dev9-py3.12
+FROM langchain/langgraph-api:0.11.2-py3.12
 
 ADD . /deps/open-swe
 RUN cd /deps/open-swe \
@@ -6,7 +6,7 @@ RUN cd /deps/open-swe \
 
 ENV LANGGRAPH_HTTP='{"app":"agent.webapp:app"}'
 ENV LANGGRAPH_CHECKPOINTER='{"ttl":{"strategy":"delete","sweep_interval_minutes":60,"default_ttl":43200}}'
-ENV LANGSERVE_GRAPHS='{"agent":"agent.graphs.agent:traced_agent","reviewer":"agent.graphs.reviewer:traced_reviewer_agent","analyzer":"agent.graphs.analyzer:traced_analyzer","chat":"agent.graphs.chat:traced_chat_agent","scheduler":"agent.graphs.scheduler:get_scheduler"}'
+ENV LANGSERVE_GRAPHS='{"agent":"agent.graphs.agent:traced_agent","reviewer":"agent.graphs.reviewer:traced_reviewer_agent","analyzer":"agent.graphs.analyzer:traced_analyzer_agent","chat":"agent.graphs.chat:traced_chat_agent","scheduler":"agent.graphs.scheduler:get_scheduler"}'
 
 RUN mkdir -p /api/langgraph_api /api/langgraph_runtime /api/langgraph_license \
     && touch /api/langgraph_api/__init__.py /api/langgraph_runtime/__init__.py /api/langgraph_license/__init__.py
