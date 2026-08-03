@@ -27,7 +27,7 @@ from agent.dashboard.team_settings import (
 STALE_ANTHROPIC = "anthropic:claude-opus-4-7"
 SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5"
 SUPPORTED_OPENAI = "openai:gpt-5.6-sol"
-SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3-code"
+SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
 DEPRECATED_ANTHROPIC = "anthropic:claude-opus-4-8"
 DEPRECATED_OPENAI = "openai:gpt-5.5"
 
