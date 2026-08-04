@@ -52,6 +52,10 @@ DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
 )
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
+SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10
+SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH = 4
+SLACK_FORWARDED_ATTACHMENT_MAX_NODES = 50
+SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
 
 
 @dataclass(frozen=True)
@@ -231,26 +235,83 @@ def select_slack_context_messages(
     return up_to_current, "thread_start"
 
 
+def _format_forwarded_slack_attachments(attachments: Any) -> str:
+    forwarded: list[str] = []
+    rendered_count = 0
+    visited_count = 0
+
+    def visit(values: Any, depth: int) -> None:
+        nonlocal rendered_count, visited_count
+        if depth > SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH or not isinstance(values, list):
+            return
+
+        for attachment in values:
+            if (
+                rendered_count >= SLACK_FORWARDED_ATTACHMENT_MAX_COUNT
+                or visited_count >= SLACK_FORWARDED_ATTACHMENT_MAX_NODES
+            ):
+                return
+            visited_count += 1
+            if not isinstance(attachment, dict):
+                continue
+
+            is_forwarded = any(
+                attachment.get(flag) is True
+                for flag in ("is_share", "is_msg_unfurl", "is_reply_unfurl")
+            )
+            if is_forwarded:
+                author = attachment.get("author_name")
+                author = author.strip() if isinstance(author, str) else ""
+                content = attachment.get("text")
+                if not isinstance(content, str) or not content.strip():
+                    content = attachment.get("fallback")
+                content = content.strip() if isinstance(content, str) else ""
+                if len(content) > SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS:
+                    content = (
+                        content[:SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS].rstrip()
+                        + "… [truncated]"
+                    )
+                source = attachment.get("from_url")
+                source = source.strip() if isinstance(source, str) else ""
+
+                label = "[Forwarded Slack message"
+                if author:
+                    label += f" from {author}"
+                label += "]"
+                parts = [label]
+                if content:
+                    parts.append(content)
+                if source:
+                    parts.append(f"Source: {source}")
+                if len(parts) > 1:
+                    indentation = "  " * depth
+                    forwarded.append("\n".join(f"{indentation}{part}" for part in parts))
+                    rendered_count += 1
+
+            visit(attachment.get("attachments"), depth + 1)
+
+    visit(attachments, 0)
+    return "\n".join(forwarded)
+
+
 def format_slack_messages_for_prompt(
     messages: list[dict[str, Any]],
     user_names_by_id: dict[str, str] | None = None,
     bot_user_id: str = "",
     bot_username: str = "",
 ) -> str:
-    """Format Slack messages into readable prompt text."""
+    """Format Slack messages, including forwarded context, as readable prompt text."""
     if not messages:
         return "(no thread messages available)"
 
     lines: list[str] = []
     for message in messages:
-        text = (
-            replace_bot_mention_with_username(
-                str(message.get("text", "")),
-                bot_user_id=bot_user_id,
-                bot_username=bot_username,
-            ).strip()
-            or "[non-text message]"
-        )
+        forwarded = _format_forwarded_slack_attachments(message.get("attachments"))
+        text = replace_bot_mention_with_username(
+            str(message.get("text", "")),
+            bot_user_id=bot_user_id,
+            bot_username=bot_username,
+        ).strip() or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
         if isinstance(user_id, str) and user_id:
             author_name = (user_names_by_id or {}).get(user_id) or user_id
@@ -262,7 +323,10 @@ def format_slack_messages_for_prompt(
             else:
                 bot_name = message.get("username") or "Bot"
             author = f"@{bot_name}(bot)"
-        lines.append(f"{author}: {text}")
+        line = f"{author}: {text}"
+        if forwarded:
+            line += f"\n{forwarded}"
+        lines.append(line)
     return "\n".join(lines)
 
 

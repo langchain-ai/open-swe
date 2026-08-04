@@ -252,6 +252,143 @@ def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> N
     assert formatted == "@alice(U123): @jarvis-aeteq status update?"
 
 
+def test_format_slack_messages_for_prompt_includes_forwarded_attachment() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "please handle this",
+                "user": "U123",
+                "attachments": [
+                    {
+                        "is_share": True,
+                        "author_name": "Bob",
+                        "text": "The forwarded request",
+                        "from_url": "https://example.slack.com/archives/C123/p123",
+                    }
+                ],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == (
+        "@alice(U123): please handle this\n"
+        "[Forwarded Slack message from Bob]\n"
+        "The forwarded request\n"
+        "Source: https://example.slack.com/archives/C123/p123"
+    )
+
+
+def test_format_slack_messages_for_prompt_uses_forwarded_fallback() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "",
+                "user": "U123",
+                "attachments": [
+                    {
+                        "is_reply_unfurl": True,
+                        "author_name": "Bob",
+                        "fallback": "Fallback forwarded text",
+                    }
+                ],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == (
+        "@alice(U123): [forwarded message]\n"
+        "[Forwarded Slack message from Bob]\n"
+        "Fallback forwarded text"
+    )
+
+
+def test_format_slack_messages_for_prompt_includes_nested_forwarded_attachments() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "nested context",
+                "user": "U123",
+                "attachments": [
+                    {
+                        "is_share": True,
+                        "author_name": "Bob",
+                        "text": "First level",
+                        "attachments": [
+                            {
+                                "is_share": True,
+                                "author_name": "Carol",
+                                "text": "Second level",
+                                "attachments": [
+                                    {
+                                        "is_reply_unfurl": True,
+                                        "author_name": "Dave",
+                                        "text": "Third level",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == (
+        "@alice(U123): nested context\n"
+        "[Forwarded Slack message from Bob]\n"
+        "First level\n"
+        "  [Forwarded Slack message from Carol]\n"
+        "  Second level\n"
+        "    [Forwarded Slack message from Dave]\n"
+        "    Third level"
+    )
+
+
+def test_format_slack_messages_for_prompt_caps_forwarded_attachment_depth() -> None:
+    root: dict[str, object] = {
+        "is_share": True,
+        "text": "level 0",
+    }
+    current = root
+    for depth in range(1, slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH + 2):
+        nested: dict[str, object] = {
+            "is_share": True,
+            "text": f"level {depth}",
+        }
+        current["attachments"] = [nested]
+        current = nested
+
+    formatted = format_slack_messages_for_prompt(
+        [{"ts": "1.0", "text": "context", "user": "U123", "attachments": [root]}],
+        {"U123": "alice"},
+    )
+
+    assert f"level {slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH}" in formatted
+    assert f"level {slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH + 1}" not in formatted
+
+
+def test_format_slack_messages_for_prompt_ignores_regular_unfurl_attachment() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "look at this link",
+                "user": "U123",
+                "attachments": [{"title": "Example", "text": "Unfurl preview"}],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == "@alice(U123): look at this link"
+
+
 def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
@@ -628,6 +765,59 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(webhook_common, "_post_account_link_prompt", fake_post_prompt)
 
 
+def test_process_slack_mention_preserves_forwarded_attachment_from_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict]:
+        return [
+            {"ts": thread_ts, "text": "thread root", "user": "U123"},
+            {
+                "ts": "1700000000.000200",
+                "text": "<@UBOT> handle this",
+                "user": "U123",
+            },
+        ]
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        webhook_common, "fetch_slack_thread_messages", fake_fetch_slack_thread_messages
+    )
+    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
+
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000200",
+                "user_id": "U123",
+                "text": "<@UBOT> handle this",
+                "attachments": [
+                    {
+                        "is_share": True,
+                        "author_name": "Teammate",
+                        "text": "Forwarded requirements",
+                    }
+                ],
+                "bot_user_id": "UBOT",
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    run_create = captured["run_create"]
+    assert isinstance(run_create, dict)
+    kwargs = run_create["kwargs"]
+    prompt_block = kwargs["input"]["messages"][0]["content"][0]
+    assert "[Forwarded Slack message from Teammate]" in prompt_block["text"]
+    assert "Forwarded requirements" in prompt_block["text"]
+
+
 def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -687,14 +877,10 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt_block["text"]
     assert "- Trace: https://smith/x" in prompt_block["text"]
     assert "do not duplicate it manually" in prompt_block["text"]
-    assert "post a very short acknowledgement like `On it!`" in prompt_block["text"]
-    assert "before cloning/checking out repositories" in prompt_block["text"]
-    assert "from common emoji based on context" in prompt_block["text"]
-    assert ":saluting_face: for taking ownership" in prompt_block["text"]
-    assert "Do not reflexively repeat one emoji" in prompt_block["text"]
-    assert ":dead:" not in prompt_block["text"]
-    assert ":ai-slop:" not in prompt_block["text"]
-    assert "## Latest Mention Request\ncontinue on the branch" in prompt_block["text"]
+    assert "slack_thread_reply" not in prompt_block["text"]
+    assert "slack_add_reaction" not in prompt_block["text"]
+    assert "slack_read_thread_messages" not in prompt_block["text"]
+    assert prompt_block["text"].endswith("## Latest Mention Request\ncontinue on the branch")
 
 
 def test_process_slack_mention_treats_direct_message_as_implicit_mention(

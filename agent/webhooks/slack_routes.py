@@ -154,6 +154,7 @@ async def slack_webhook(
         "event_ts": event_ts,
         "user_id": user_id,
         "text": text,
+        "attachments": event.get("attachments", []),
         "bot_user_id": bot_user_id,
         "treat_all_messages_as_mentions": is_direct_message,
     }

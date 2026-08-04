@@ -68,9 +68,10 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "fireworks:accounts/fireworks/models/kimi-k3-code",
+        "id": "fireworks:accounts/fireworks/models/kimi-k3",
         "label": "Kimi K3",
-        "efforts": ["low", "medium", "high"],
+        # K3 always reasons and only accepts low/high/max — "medium" is rejected.
+        "efforts": ["low", "high", "max"],
         "default_effort": "high",
         "supports_images": False,
     },
@@ -105,7 +106,12 @@ DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = {
     "openai:gpt-5.5": "openai:gpt-5.6-sol",
     "google_genai:gemini-3.5-flash": "google_genai:gemini-3.6-flash",
     "fireworks:accounts/fireworks/models/kimi-k2p7-code": (
-        "fireworks:accounts/fireworks/models/kimi-k3-code"
+        "fireworks:accounts/fireworks/models/kimi-k3"
+    ),
+    # Never a real Fireworks deployment: the K2.7 rename kept the `-code` suffix,
+    # which K3 does not use, so selections stored under it 404 at request time.
+    "fireworks:accounts/fireworks/models/kimi-k3-code": (
+        "fireworks:accounts/fireworks/models/kimi-k3"
     ),
 }
 
@@ -119,6 +125,9 @@ _PROFILE_LOADER_MODULES: dict[str, str] = {
     "fireworks": "langchain_fireworks.chat_models",
     "google_genai": "langchain_google_genai.chat_models",
     "openai": "langchain_openai.chat_models.base",
+}
+_PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
+    "fireworks:accounts/fireworks/models/kimi-k3": 1_040_000,
 }
 
 
@@ -143,13 +152,12 @@ def model_profile_context_window(model_id: str) -> int | None:
     if not provider or not model_name:
         return None
     loader = _profile_loader(provider)
-    if loader is None:
-        return None
-    profile = loader(model_name)
-    context_window = profile.get("max_input_tokens")
-    if isinstance(context_window, int) and context_window > 0:
-        return context_window
-    return None
+    if loader is not None:
+        profile = loader(model_name)
+        context_window = profile.get("max_input_tokens")
+        if isinstance(context_window, int) and context_window > 0:
+            return context_window
+    return _PROFILE_CONTEXT_WINDOW_FALLBACKS.get(model_id)
 
 
 def models_with_profile_context_windows(models: Sequence[ModelOption]) -> list[ModelOption]:
