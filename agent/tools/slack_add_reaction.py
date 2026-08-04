@@ -13,7 +13,8 @@ async def slack_add_reaction(
 
     Prefer `saluting_face` for taking ownership, `eyes` for active review,
     `thinking_face` for investigation, `white_check_mark` for handled work, and
-    `tada` for genuine wins. Use common emoji that fit the message. If `message_ts`
+    `tada` for genuine wins. Never use `white_check_mark` on a root-level Slack post
+    containing a pull request link; use a neutral reaction instead. If `message_ts`
     is omitted, this reacts to the latest message that triggered the run. Pass
     emoji names without surrounding colons.
     """
