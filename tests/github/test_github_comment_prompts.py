@@ -146,6 +146,11 @@ def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
     assert "Choose a common reaction" in OPEN_SWE_SHARED_BASE
     assert "`saluting_face` for taking ownership" in OPEN_SWE_SHARED_BASE
     assert "Do not reflexively repeat one emoji" in OPEN_SWE_SHARED_BASE
+    assert "Never react to a root-level Slack post containing a pull request link" in (
+        OPEN_SWE_SHARED_BASE
+    )
+    assert "PR has been approved" in OPEN_SWE_SHARED_BASE
+    assert "neutral context-appropriate reaction" in OPEN_SWE_SHARED_BASE
     assert "`dead`" not in OPEN_SWE_SHARED_BASE
     assert "`ai-slop`" not in OPEN_SWE_SHARED_BASE
     assert "Never paste long output" in OPEN_SWE_SHARED_BASE
