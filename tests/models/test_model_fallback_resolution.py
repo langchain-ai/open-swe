@@ -97,8 +97,8 @@ def test_model_profile_context_window_uses_langchain_profile() -> None:
     assert model_profile_context_window(SUPPORTED_OPENAI) == 1_050_000
 
 
-def test_model_profile_context_window_falls_back_for_kimi_k3() -> None:
-    assert model_profile_context_window(SUPPORTED_KIMI) == 1_040_000
+def test_model_profile_context_window_uses_fireworks_profile_for_kimi_k3() -> None:
+    assert model_profile_context_window(SUPPORTED_KIMI) == 1_048_576
 
 
 def test_models_with_profile_context_windows_enriches_copies() -> None:
@@ -113,7 +113,7 @@ def test_models_with_profile_context_windows_enriches_copies() -> None:
         "openai:gpt-5.6-sol": 1_050_000,
         "openai:gpt-5.6-terra": 1_050_000,
         "openai:gpt-5.6-luna": 1_050_000,
-        SUPPORTED_KIMI: 1_040_000,
+        SUPPORTED_KIMI: 1_048_576,
     }
 
 
