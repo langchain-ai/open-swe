@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import ValidationError
 
-from agent.dashboard.skills import SkillCreate, create_skill
+from agent.dashboard.skills import SkillCreate, create_skill, list_skills
 
 
 async def test_skill_validation_and_persistence() -> None:
@@ -38,4 +38,22 @@ async def test_skill_validation_and_persistence() -> None:
         ["user_skills", "octocat"],
         "/review-feedback/SKILL.md",
         record,
+    )
+
+
+async def test_skill_listing_returns_next_offset() -> None:
+    client = AsyncMock()
+    client.store.search_items.return_value = {
+        "items": [
+            {"value": {"name": "first"}},
+            {"value": {"name": "second"}},
+        ]
+    }
+
+    with patch("agent.dashboard.skills._client", return_value=client):
+        page = await list_skills("octocat", limit=1, offset=3)
+
+    assert page == {"items": [{"name": "first"}], "next_offset": 4}
+    client.store.search_items.assert_awaited_once_with(
+        ["user_skills", "octocat"], limit=2, offset=3
     )

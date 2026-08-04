@@ -359,6 +359,11 @@ export interface SkillInput {
   instructions: string
 }
 
+export interface SkillsPage {
+  items: Array<Skill>
+  next_offset: number | null
+}
+
 export type RepoSnapshotStatus = "none" | "building" | "ready" | "failed"
 
 export interface RepoSnapshot {
@@ -673,7 +678,8 @@ export const api = {
     }),
   deleteMyInstructions: () =>
     request<void>("/me/instructions", { method: "DELETE" }),
-  listSkills: () => request<Array<Skill>>("/skills"),
+  listSkills: (offset = 0) =>
+    request<SkillsPage>(`/skills?limit=100&offset=${offset}`),
   createSkill: (name: string, body: SkillInput) =>
     request<Skill>("/skills", {
       method: "POST",

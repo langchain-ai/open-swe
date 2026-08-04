@@ -15,6 +15,8 @@ SKILLS_NAMESPACE = "user_skills"
 MAX_SKILL_NAME_CHARS = 64
 MAX_SKILL_DESCRIPTION_CHARS = 1024
 MAX_SKILL_INSTRUCTIONS_CHARS = 20_000
+DEFAULT_SKILLS_PAGE_SIZE = 100
+MAX_SKILLS_PAGE_SIZE = 100
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
@@ -104,12 +106,15 @@ async def get_skill(login: str, name: str) -> dict[str, Any] | None:
     return _value(item) if item else None
 
 
-async def list_skills(login: str) -> list[dict[str, Any]]:
-    result = await _client().store.search_items(_namespace(login), limit=1000)
+async def list_skills(login: str, *, limit: int, offset: int) -> dict[str, Any]:
+    result = await _client().store.search_items(_namespace(login), limit=limit + 1, offset=offset)
     items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-    skills = [value for item in items or [] if (value := _value(item)) is not None]
+    skills = [value for item in (items or [])[:limit] if (value := _value(item)) is not None]
     skills.sort(key=lambda skill: skill.get("name", ""))
-    return skills
+    return {
+        "items": skills,
+        "next_offset": offset + limit if len(items or []) > limit else None,
+    }
 
 
 async def create_skill(login: str, body: SkillCreate) -> dict[str, Any]:

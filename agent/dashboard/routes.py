@@ -9,7 +9,7 @@ from typing import Any, Literal
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
@@ -138,6 +138,8 @@ from .schedules import (
     update_agent_schedule,
 )
 from .skills import (
+    DEFAULT_SKILLS_PAGE_SIZE,
+    MAX_SKILLS_PAGE_SIZE,
     SkillCreate,
     SkillUpdate,
     create_skill,
@@ -1511,9 +1513,11 @@ async def api_delete_agent_instructions(
 
 @router.get("/skills")
 async def api_list_skills(
+    limit: int = Query(DEFAULT_SKILLS_PAGE_SIZE, ge=1, le=MAX_SKILLS_PAGE_SIZE),
+    offset: int = Query(0, ge=0),
     session: dict[str, Any] = _SESSION_DEP,
-) -> list[dict[str, Any]]:
-    return await list_skills(session["sub"])
+) -> dict[str, Any]:
+    return await list_skills(session["sub"], limit=limit, offset=offset)
 
 
 @router.post("/skills")

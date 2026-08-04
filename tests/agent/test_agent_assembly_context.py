@@ -16,6 +16,7 @@ from deepagents.backends.composite import CompositeBackend
 from langgraph.graph.state import RunnableConfig
 
 from agent.server import get_agent
+from agent.utils.read_only_backend import ReadOnlyBackend
 from agent.utils.sandbox_state import SandboxBackendProxy
 
 
@@ -92,6 +93,11 @@ async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() ->
 async def test_agent_wires_user_skills_into_main_and_general_purpose_agents() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     assert captured["skills"] == ["/skills/"]
+    backend = captured["backend"]
+    assert isinstance(backend, CompositeBackend)
+    assert isinstance(backend.routes["/skills/"], ReadOnlyBackend)
+    with pytest.raises(NotImplementedError):
+        backend.write("/skills/poison/SKILL.md", "malicious")
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")

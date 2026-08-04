@@ -65,7 +65,19 @@ export const agentSkillKeys = {
 }
 
 export function useAgentSkills() {
-  return useQuery({ queryKey: agentSkillKeys.all, queryFn: api.listSkills })
+  return useQuery({
+    queryKey: agentSkillKeys.all,
+    queryFn: async () => {
+      const items = []
+      let offset = 0
+      do {
+        const page = await api.listSkills(offset)
+        items.push(...page.items)
+        offset = page.next_offset ?? 0
+      } while (offset)
+      return items
+    },
+  })
 }
 
 export function useCreateAgentSkill() {

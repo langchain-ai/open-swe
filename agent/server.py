@@ -147,6 +147,7 @@ from .utils.model import (
     make_model,
     provider_model_kwargs,
 )
+from .utils.read_only_backend import ReadOnlyBackend
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .utils.sandbox_state import (
@@ -1042,8 +1043,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         agent_backend = CompositeBackend(
             default=backend,
             routes={
-                USER_SKILLS_ROUTE: StoreBackend(
-                    namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login)
+                USER_SKILLS_ROUTE: ReadOnlyBackend(
+                    StoreBackend(
+                        namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login)
+                    )
                 )
             },
         )
