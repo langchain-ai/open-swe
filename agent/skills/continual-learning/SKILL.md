@@ -24,6 +24,31 @@ Call `read_finding_outcomes` once. It returns this repo's past findings split in
 Look for repetition, not one-offs. A single dismissed finding is noise; the same class
 dismissed several times is a rule.
 
+### How to retrieve outcomes without burning the run
+
+The tool returns **at most `limit` rows total** across `confirmed` + `dismissed`, default
+60. The cap is applied in arbitrary dataset order, so once it is hit the remaining
+outcomes are dropped silently — there is no "more results" signal beyond the `counts`.
+
+Every row embeds the finding's full `description` and `diff_hunk`, so a full 60-row
+result commonly exceeds 190,000 characters. When that happens the sandbox offloads the
+result to a file and the tool message gives you a path like
+`/large_tool_results/call_<hash>` instead of the rows.
+
+If the result is offloaded:
+
+- Read the artifact with `read_file`, using explicit `offset`/`limit` paging, and work
+  from the `counts` summary plus the pages you actually need.
+- Do **not** shell out to inline `python -c` / `jq` to extract the JSON, do **not** write
+  `/tmp` scratch files, and do **not** dispatch a `task` subagent to parse it. Those
+  workarounds cost several times what paged reads cost and are not needed here.
+- You are looking for recurring pattern classes, not an exhaustive index. A few pages of
+  rows per bucket is normally enough to decide what to promote and what to demote.
+
+If `counts.confirmed + counts.dismissed` equals the `limit` you passed (60 by default),
+the cap was reached and you are seeing a truncated, arbitrarily ordered slice. Say so in
+`analysis_summary` in step 3 so the truncation is disclosed rather than hidden.
+
 ## 2. Reconcile against the current prompt
 
 The current `custom_prompt` is the starting point — you are editing it, not rewriting
