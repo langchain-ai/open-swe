@@ -56,7 +56,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
     {
         "id": "openai:gpt-5.6-luna",
         "label": "GPT-5.6 Luna",
-        "efforts": ["none", "low", "medium", "high", "xhigh"],
+        "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
         "default_effort": "xhigh",
         "supports_images": True,
     },

@@ -54,7 +54,7 @@ async def close_cached_models() -> None:
                 await result
 
 
-OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
+OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 # OpenAI's Responses API only returns human-readable reasoning text when a
 # summary is requested; without it, reasoning happens silently (billed in
 # output tokens) and the reasoning content block arrives empty.
@@ -207,6 +207,8 @@ def openai_reasoning_for(
         return {"effort": "high", "summary": "auto"}
     if effort == "xhigh":
         return {"effort": "xhigh", "summary": "auto"}
+    if effort == "max":
+        return {"effort": "max", "summary": "auto"}
     return None
 
 
