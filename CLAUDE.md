@@ -64,19 +64,28 @@ Every run re-applies `git config --global user.name/email` for the bot identity,
 
 Configured in `agent/server.py:get_agent`, runs around every model call (in this order):
 
-1. `SanitizeToolInputsMiddleware` — strips/normalizes tool inputs before they reach tools.
-2. `ModelCallLimitMiddleware` (from `langchain.agents.middleware`) — caps model calls at `MODEL_CALL_RECURSION_LIMIT` (~half of `DEFAULT_RECURSION_LIMIT`); `exit_behavior="end"`.
-3. `ToolErrorMiddleware` — catches tool exceptions and surfaces them as tool messages.
-4. `check_message_queue_before_model` — pulls Linear comments / Slack messages that arrived mid-run from the thread queue and injects them as user messages before the next LLM call. This is what makes "message the agent while it's working" work.
-5. `SlackAssistantStatusMiddleware` — keeps the Slack "assistant is typing"-style status up to date around model calls.
-6. `ensure_no_empty_msg` — after-model hook; when the model emits a message with no tool call (and hasn't already messaged the user or confirmed completion) it re-injects a synthetic `no_op` / `confirming_completion` tool call so the run continues instead of ending prematurely.
-7. `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
-8. `SandboxCircuitBreakerMiddleware` — trips the agent out of repeated sandbox failures instead of looping.
-9. `ModelFallbackMiddleware` (optional, last) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
+1. `PrepareAgentRunMiddleware` — outermost. Per-run setup (sandbox prep, work dir, rendered system prompt); catches `SandboxUnreachableError` and notifies the user instead of replacing the sandbox.
+2. `SanitizeToolInputsMiddleware` — strips/normalizes tool inputs before they reach tools.
+3. `ModelCallLimitMiddleware` (from `langchain.agents.middleware`) — caps model calls at `MODEL_CALL_RECURSION_LIMIT` (~half of `DEFAULT_RECURSION_LIMIT`); `exit_behavior="end"`.
+4. `ToolErrorMiddleware` — catches tool exceptions and surfaces them as tool messages.
+5. `SubdirAgentsReadMiddleware` — appends applicable ancestor `AGENTS.md` instructions to `read_file` results once per run, so scoped rules are visible before edits.
+6. `ToolRetryMiddleware(tools=["task"])` — retries a failed subagent `task` call (max 2, transient errors only); this is the escalation path for a wedged subagent model call, which has no fallback middleware of its own.
+7. `ToolArtifactMiddleware` — stamps `edit_file` / `write_file` results with a presentation diff in `ToolMessage.artifact` so the dashboard renders the same diff live and on reload.
+8. `PullRequestCreationGuardMiddleware` — blocks shell fallbacks (`gh pr create`, `gh api …/pulls`, curl) that would open a PR outside `open_pull_request`.
+9. `refresh_github_proxy_before_model` — re-configures the sandbox GitHub proxy with a fresh installation token before the one-hour token expires mid-run.
+10. `check_message_queue_before_model` — pulls Linear comments / Slack messages that arrived mid-run from the thread queue and injects them as user messages before the next LLM call. This is what makes "message the agent while it's working" work.
+11. `SlackAssistantStatusMiddleware` — keeps the Slack "assistant is typing"-style status up to date around model calls.
+12. `TimeoutWrapupMiddleware` — past `OPEN_SWE_WRAPUP_TIMEOUT_SECONDS` (default 45 min) injects a wrap-up instruction so a long run lands its best available result instead of starting new investigations.
+13. `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
+14. `ModelFallbackMiddleware` (optional) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
+15. `PlanModeMiddleware` — installed unconditionally and state-aware: hides mutating tools whenever plan mode is active, whether carried in `configurable` or entered mid-run via `enter_plan_mode`.
+16. `SanitizeFireworksMessagesMiddleware` — drops the legacy `function_call` field from assistant messages, which the gateway's Fireworks schema rejects.
+17. `SanitizeThinkingBlocksMiddleware` — strips malformed empty Anthropic thinking blocks immediately before provider calls.
+18. `ModelCallTimeoutMiddleware` — innermost. Caps a single model call at `OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS` (default 15 min) so a stalled provider connection raises instead of parking the run; the timeout escalates outward to `ModelFallbackMiddleware`. Complements the per-request `timeout` `agent/utils/model.py` sets on every provider. Subagents compile into their own graphs, so each `SubAgent` spec carries its own instance (`_subagent_model_timeout_middleware`) — parent middleware never wraps a delegated `task`'s model calls, and a wedged one escalates via `ToolRetryMiddleware`'s `task` retry.
 
-The system prompt instructs the agent to call a tool every turn, and `ensure_no_empty_msg` re-injects a tool call when it doesn't — together these keep runs from stopping partway through a task.
+Run continuity is enforced only by the system prompt's tool-every-turn instruction (`agent/prompt.py`) — there is no wired after-model or after-agent net that resumes a stalled run or breaks a sandbox-failure loop. Do not weaken that prompt clause without adding a real middleware backstop.
 
-Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`, `SlackAssistantStatusMiddleware`.
+Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`, `ensure_no_empty_msg`, `SandboxCircuitBreakerMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`, `SlackAssistantStatusMiddleware`, `SanitizeThinkingBlocksMiddleware`.
 
 There is intentionally no after-agent safety net that opens a PR for the agent. The agent itself is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel — all via `GH_TOKEN=dummy gh` and `slack_thread_reply` / `linear_comment`.
 
