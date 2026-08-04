@@ -346,6 +346,19 @@ export interface UserInstructions {
   updated_by?: string
 }
 
+export interface Skill {
+  name: string
+  description: string
+  instructions: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface SkillInput {
+  description: string
+  instructions: string
+}
+
 export type RepoSnapshotStatus = "none" | "building" | "ready" | "failed"
 
 export interface RepoSnapshot {
@@ -660,6 +673,21 @@ export const api = {
     }),
   deleteMyInstructions: () =>
     request<void>("/me/instructions", { method: "DELETE" }),
+  listSkills: () => request<Array<Skill>>("/skills"),
+  createSkill: (name: string, body: SkillInput) =>
+    request<Skill>("/skills", {
+      method: "POST",
+      body: JSON.stringify({ name, ...body }),
+    }),
+  saveSkill: (name: string, body: SkillInput) =>
+    request<Skill>(`/skills/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteSkill: (name: string) =>
+    request<void>(`/skills/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
   listAgentInstructions: () =>
     request<Array<AgentInstructions>>("/agent-instructions"),
   createAgentInstructions: (full_name: string) =>

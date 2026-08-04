@@ -12,6 +12,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from deepagents.backends.composite import CompositeBackend
 from langgraph.graph.state import RunnableConfig
 
 from agent.server import get_agent
@@ -82,8 +83,19 @@ async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() ->
     # eviction + SummarizationMiddleware offloading. deepagents 0.7 requires an
     # initialized backend instance, not a factory callable.
     backend = captured["backend"]
-    assert isinstance(backend, SandboxBackendProxy)
-    assert not callable(backend)
+    assert isinstance(backend, CompositeBackend)
+    assert isinstance(backend.default, SandboxBackendProxy)
+    assert not callable(backend.default)
+
+
+@pytest.mark.asyncio
+async def test_agent_wires_user_skills_into_main_and_general_purpose_agents() -> None:
+    captured = await _capture_create_deep_agent_kwargs()
+    assert captured["skills"] == ["/skills/"]
+    subagents = captured["subagents"]
+    assert isinstance(subagents, list)
+    gp = next(s for s in subagents if s["name"] == "general-purpose")
+    assert gp["skills"] == ["/skills/"]
 
 
 @pytest.mark.asyncio
