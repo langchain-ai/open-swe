@@ -5,10 +5,10 @@ description: Nightly refinement of an existing per-repo review-style prompt usin
 
 # Continual learning
 
-You are **refining** the existing review-style prompt for the repository named in the
-system prompt, using outcomes the reviewer has accrued since the last run. The goal is
-to raise recall (catch more real bugs) without hurting precision (stop repeating
-dismissed ones).
+You are writing the review-style prompt for the repository named in the system prompt,
+using outcomes the reviewer has accrued since the last run. The goal is to raise recall
+(catch more real bugs) without hurting precision (stop repeating dismissed ones). You
+cannot read the prompt currently stored for the repo — see step 2.
 
 ## 1. Read outcomes first
 
@@ -24,21 +24,33 @@ Call `read_finding_outcomes` once. It returns this repo's past findings split in
 Look for repetition, not one-offs. A single dismissed finding is noise; the same class
 dismissed several times is a rule.
 
-## 2. Reconcile against the current prompt
+## 2. Write a complete standalone prompt
 
-The current `custom_prompt` is the starting point — you are editing it, not rewriting
-from scratch. Read it (it is summarized for you / available via the dashboard record).
-Keep what still holds, strengthen rules the outcomes confirm, and remove or soften rules
-the outcomes contradict. Optionally do a **light** `gh` top-up
-(`GH_TOKEN=dummy gh ...`) to confirm a pattern, but outcomes are the primary signal — do
-not re-run a full PR crawl.
+The repository's previous `custom_prompt` is **not available to you**. Your only tools are
+`read_finding_outcomes` and `save_review_style_prompt`, and `read_finding_outcomes`
+returns only `{ok, repo, counts, confirmed, dismissed}` — no prompt text. Do not claim or
+assume you have seen the stored prompt.
+
+`save_review_style_prompt` is a **full replacement**: whatever you save becomes the entire
+stored prompt. So synthesize a complete, self-contained prompt from the outcomes above
+plus the reviewer-agent themes already given in your system prompt — never a patch, a
+delta, or a fragment that only makes sense next to an earlier version.
+
+Optionally do a **light** `gh` top-up (`GH_TOKEN=dummy gh ...`) to confirm a pattern, but
+outcomes are the primary signal — do not re-run a full PR crawl.
 
 Stay aligned with the reviewer-agent themes in the system prompt.
 
 ## 3. Save
 
-Call `save_review_style_prompt` once with the refined `custom_prompt` (400–1200 words),
-an `analysis_summary` that names what changed this cycle (e.g. "promoted N-pattern after
-3 confirmed fixes; dropped M-pattern after repeated dismissals"), and the
-`top_reviewers` / counts you have. If outcomes were empty and nothing changed, say so in
-`analysis_summary` and re-save the existing prompt unchanged rather than degrading it.
+Call `save_review_style_prompt` once with the full `custom_prompt` (400–1200 words), an
+`analysis_summary` grounded **only** in what the current outcomes support (e.g. "promoted
+N-pattern after 3 confirmed fixes; added M-pattern to do-not-flag after repeated
+dismissals"), and the `top_reviewers` / counts you have. Never describe the save as
+reconciled against, merged with, or preserving a previous prompt — you never read one, so
+any such claim is false.
+
+If `read_finding_outcomes` came back empty (or failed), do **not** call
+`save_review_style_prompt` at all — a save would overwrite the accumulated prompt with a
+weaker one built from no evidence. Instead end the run with a final message saying
+outcomes were empty and the stored prompt was left untouched.
