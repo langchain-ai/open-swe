@@ -82,7 +82,7 @@ def _truncate_for_slack(text: str) -> str:
 def _visible_message(title: str, instructions: str, repo: dict[str, str] | None) -> str:
     repo_line = f"\n*Repository:* `{repo['owner']}/{repo['name']}`" if repo else ""
     return (
-        f"*Open SWE breakout thread:* {title}{repo_line}\n\n"
+        f"*Jarvis breakout thread:* {title}{repo_line}\n\n"
         f"*Instructions for the new thread:*\n{_truncate_for_slack(instructions)}"
     )
 
@@ -90,7 +90,7 @@ def _visible_message(title: str, instructions: str, repo: dict[str, str] | None)
 def _run_links_section(thread_id: str) -> str:
     dashboard_url = dashboard_thread_url(thread_id)
     trace_url = get_langsmith_trace_url(thread_id)
-    lines = ["## Open SWE Links"]
+    lines = ["## Jarvis Links"]
     if dashboard_url:
         lines.append(f"- Web: {dashboard_url}")
     if trace_url:

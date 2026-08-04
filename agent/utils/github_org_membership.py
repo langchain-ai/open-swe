@@ -10,7 +10,7 @@ from .github_app import get_github_app_installation_token
 
 logger = logging.getLogger(__name__)
 
-INTERNAL_BOT_LOGINS: frozenset[str] = frozenset({"open-swe[bot]", "openswe-dev[bot]"})
+INTERNAL_BOT_LOGINS: frozenset[str] = frozenset({"jarvis-aeteq[bot]"})
 
 
 async def is_user_active_org_member(username: str, org: str) -> bool:

@@ -179,15 +179,15 @@ def test_strip_bot_mention_removes_bot_tag() -> None:
 
 def test_strip_bot_mention_removes_bot_username_tag() -> None:
     assert (
-        strip_bot_mention("@open-swe please check", "UBOT", bot_username="open-swe")
+        strip_bot_mention("@jarvis-aeteq please check", "UBOT", bot_username="jarvis-aeteq")
         == "please check"
     )
 
 
 def test_replace_bot_mention_with_username() -> None:
     assert (
-        replace_bot_mention_with_username("<@UBOT> can you help?", "UBOT", "open-swe")
-        == "@open-swe can you help?"
+        replace_bot_mention_with_username("<@UBOT> can you help?", "UBOT", "jarvis-aeteq")
+        == "@jarvis-aeteq can you help?"
     )
 
 
@@ -214,20 +214,20 @@ def test_convert_mentions_to_slack_format_preserves_existing_slack_mentions() ->
 
 
 def test_parse_github_pr_url_raw_url() -> None:
-    pr_ref = parse_github_pr_url("https://github.com/langchain-ai/open-swe/pull/1244")
+    pr_ref = parse_github_pr_url("https://github.com/aeteq/open-swe/pull/1244")
 
     assert pr_ref is not None
-    assert pr_ref.owner == "langchain-ai"
+    assert pr_ref.owner == "aeteq"
     assert pr_ref.repo == "open-swe"
     assert pr_ref.number == 1244
-    assert pr_ref.url == "https://github.com/langchain-ai/open-swe/pull/1244"
+    assert pr_ref.url == "https://github.com/aeteq/open-swe/pull/1244"
 
 
 def test_parse_github_pr_url_slack_formatted_link() -> None:
-    pr_ref = parse_github_pr_url("<https://github.com/langchain-ai/open-swe/pull/1244|PR>")
+    pr_ref = parse_github_pr_url("<https://github.com/aeteq/open-swe/pull/1244|PR>")
 
     assert pr_ref is not None
-    assert pr_ref.owner == "langchain-ai"
+    assert pr_ref.owner == "aeteq"
     assert pr_ref.repo == "open-swe"
     assert pr_ref.number == 1244
 
@@ -246,10 +246,10 @@ def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> N
         [{"ts": "1.0", "text": "<@UBOT> status update?", "user": "U123"}],
         {"U123": "alice"},
         bot_user_id="UBOT",
-        bot_username="open-swe",
+        bot_username="jarvis-aeteq",
     )
 
-    assert formatted == "@alice(U123): @open-swe status update?"
+    assert formatted == "@alice(U123): @jarvis-aeteq status update?"
 
 
 def test_format_slack_messages_for_prompt_includes_forwarded_attachment() -> None:
@@ -532,13 +532,13 @@ def test_post_slack_trace_reply_has_no_tip(monkeypatch: pytest.MonkeyPatch) -> N
 def test_select_slack_context_messages_detects_username_mention() -> None:
     selected, mode = select_slack_context_messages(
         [
-            {"ts": "1.0", "text": "@open-swe first request", "user": "U1"},
+            {"ts": "1.0", "text": "@jarvis-aeteq first request", "user": "U1"},
             {"ts": "2.0", "text": "follow up", "user": "U2"},
-            {"ts": "3.0", "text": "@open-swe second request", "user": "U3"},
+            {"ts": "3.0", "text": "@jarvis-aeteq second request", "user": "U3"},
         ],
         "3.0",
         bot_user_id="UBOT",
-        bot_username="open-swe",
+        bot_username="jarvis-aeteq",
     )
 
     assert mode == "last_mention"
@@ -731,7 +731,7 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(
         slack_webhooks, "get_langsmith_trace_url", lambda thread_id: "https://smith/x"
     )
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "jarvis-aeteq")
     monkeypatch.setattr(webhook_common, "get_slack_user_info", fake_get_slack_user_info)
     monkeypatch.setattr(
         webhook_common, "fetch_slack_thread_messages", fake_fetch_slack_thread_messages
@@ -844,7 +844,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
                 "text": "<@UBOT> continue on the branch",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            {"owner": "aeteq", "name": "jarvis"},
         )
     )
 
@@ -852,7 +852,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert captured["fetch_thread"] == {"channel_id": "C123", "thread_ts": thread_ts}
     assert captured["metadata_update"] == {
         "thread_id": expected_thread_id,
-        "metadata": {"repo": {"owner": "langchain-ai", "name": "open-swe"}},
+        "metadata": {"repo": {"owner": "aeteq", "name": "jarvis"}},
     }
     assert "trace_reply" not in captured
 
@@ -866,14 +866,14 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert kwargs["durability"] == "sync"
     assert kwargs["config"]["configurable"]["slack_thread"]["thread_ts"] == thread_ts
     prompt_block = kwargs["input"]["messages"][0]["content"][0]
-    assert "## Default Repository Hint\nlangchain-ai/open-swe" in prompt_block["text"]
+    assert "## Default Repository Hint\naeteq/jarvis" in prompt_block["text"]
     assert (
         "Use this only if the Slack conversation does not identify a different repository."
         in (prompt_block["text"])
     )
     assert prompt_block["text"].count("## Slack Thread") == 1
     assert f"Thread TS: {thread_ts}" in prompt_block["text"]
-    assert "## Open SWE Links" in prompt_block["text"]
+    assert "## Jarvis Links" in prompt_block["text"]
     assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt_block["text"]
     assert "- Trace: https://smith/x" in prompt_block["text"]
     assert "do not duplicate it manually" in prompt_block["text"]
@@ -921,7 +921,7 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
                 "bot_user_id": "UBOT",
                 "treat_all_messages_as_mentions": True,
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            {"owner": "aeteq", "name": "jarvis"},
         )
     )
 
@@ -966,7 +966,7 @@ def test_process_slack_mention_skips_trace_reply_on_followup_mention(
                 "text": "<@UBOT> follow up question",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            {"owner": "aeteq", "name": "jarvis"},
         )
     )
 
@@ -1015,7 +1015,7 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
                 "text": "<@UBOT> do the thing",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            {"owner": "aeteq", "name": "jarvis"},
         )
     )
 
@@ -1066,7 +1066,7 @@ def test_process_slack_mention_mapped_user_no_token_record_prompts_setup(
                 "text": "<@UBOT> do the thing",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            {"owner": "aeteq", "name": "jarvis"},
         )
     )
 
@@ -1113,7 +1113,7 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
                 "text": "<@UBOT> do the thing",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            {"owner": "aeteq", "name": "jarvis"},
         )
     )
 
@@ -1153,7 +1153,7 @@ def test_process_slack_mention_mapped_user_with_token_runs_as_user(
                 "text": "<@UBOT> do the thing",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            {"owner": "aeteq", "name": "jarvis"},
         )
     )
 
@@ -1202,7 +1202,7 @@ def test_process_slack_mention_bot_only_mode_runs_without_user_token(
                 "text": "<@UBOT> do the thing",
                 "bot_user_id": "UBOT",
             },
-            {"owner": "langchain-ai", "name": "open-swe"},
+            {"owner": "aeteq", "name": "jarvis"},
         )
     )
 

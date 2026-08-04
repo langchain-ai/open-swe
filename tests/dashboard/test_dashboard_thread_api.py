@@ -12,7 +12,7 @@ from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
-_VISION_MODEL = "openai:gpt-5.6-sol"
+_VISION_MODEL = "anthropic:claude-opus-5"
 _FABLE = "anthropic:claude-fable-5"
 _PAIR = ("openai:gpt-5.6-sol", "medium")
 
@@ -1707,8 +1707,8 @@ async def test_options_includes_fable_when_enabled() -> None:
     ):
         payload = await routes.options()
     assert _FABLE in [m["id"] for m in payload["models"]]
-    gpt_5_5 = next(m for m in payload["models"] if m["id"] == _VISION_MODEL)
-    assert gpt_5_5["context_window"] == 1_050_000
+    vision_model = next(m for m in payload["models"] if m["id"] == _VISION_MODEL)
+    assert vision_model["context_window"] == 1_000_000
 
 
 @pytest.mark.asyncio

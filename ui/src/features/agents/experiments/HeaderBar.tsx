@@ -9,7 +9,7 @@ export function HeaderBar({ compact }: HeaderBarProps) {
         <pre className="text-[#e07a5f] leading-none text-[10px] m-0">{`╭─╮
 │◠│
 ╰─╯`}</pre>
-        <span className="text-gray-300 font-medium">Open SWE Desktop App</span>
+        <span className="text-gray-300 font-medium">Jarvis Desktop App</span>
       </div>
     );
   }
@@ -21,7 +21,7 @@ export function HeaderBar({ compact }: HeaderBarProps) {
  │ ◠ │
  ╰───╯`}
       </pre>
-      <span className="text-gray-200 font-semibold">Open SWE Desktop App v0.1.0</span>
+      <span className="text-gray-200 font-semibold">Jarvis Desktop App v0.1.0</span>
     </div>
   );
 }

@@ -30,16 +30,28 @@ async def list_enabled_review_repos() -> list[str]:
         item = await _client().store.get_item(
             ENABLED_REVIEW_REPOS_NAMESPACE, ENABLED_REVIEW_REPOS_KEY
         )
-    except Exception as e:
-        logger.debug("enabled review repos lookup failed: %s", e)
+    except Exception:
+        logger.exception(
+            "enabled review repos lookup failed (namespace=%s, key=%s)",
+            ENABLED_REVIEW_REPOS_NAMESPACE,
+            ENABLED_REVIEW_REPOS_KEY,
+        )
         return []
     if item is None:
+        logger.info(
+            "No enabled-review-repos store item found (namespace=%s, key=%s); "
+            "treating as empty list",
+            ENABLED_REVIEW_REPOS_NAMESPACE,
+            ENABLED_REVIEW_REPOS_KEY,
+        )
         return []
     value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
     if not isinstance(value, dict):
+        logger.warning("enabled-review-repos store item has unexpected shape: %r", item)
         return []
     repos = value.get("repos")
     if not isinstance(repos, list):
+        logger.warning("enabled-review-repos value missing 'repos' list: %r", value)
         return []
     return [r for r in repos if isinstance(r, str)]
 
@@ -62,7 +74,19 @@ async def set_review_repo_enabled(full_name: str, enabled: bool) -> list[str]:
 
 async def is_review_repo_enabled(owner: str, name: str) -> bool:
     if not owner or not name:
+        logger.warning(
+            "is_review_repo_enabled called with missing owner/name (owner=%r, name=%r)",
+            owner,
+            name,
+        )
         return False
     full_name = f"{owner.lower()}/{name.lower()}"
     enabled = await list_enabled_review_repos()
-    return any(r.lower() == full_name for r in enabled)
+    result = any(r.lower() == full_name for r in enabled)
+    logger.info(
+        "Auto-review enabled check for %s: %s (enabled_repos=%s)",
+        full_name,
+        result,
+        enabled,
+    )
+    return result

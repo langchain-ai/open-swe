@@ -72,7 +72,7 @@ async def test_slack_processing_error_posts_dashboard_link(
     await_args = post_reply.await_args
     assert await_args is not None
     assert await_args.args[:2] == ("C1", "123.45")
-    assert "<https://ui/t1|Open SWE Web>" in await_args.args[2]
+    assert "<https://ui/t1|Jarvis Web>" in await_args.args[2]
 
 
 async def test_natural_language_plan_approval_uses_shared_approval_flow(
