@@ -1,5 +1,4 @@
 import asyncio
-from decimal import Decimal
 from typing import cast
 
 import pytest
@@ -365,16 +364,12 @@ def test_post_slack_thread_reply_appends_web_context_block_to_blocks(
 
 
 def test_format_slack_web_link_footer_includes_run_usage() -> None:
-    usage = RunUsageSummary(
-        models=("model-a", "model-b"),
-        total_tokens=12_345,
-        total_cost=Decimal("0.42"),
-    )
+    usage = RunUsageSummary(models=("model-a", "model-b"), main_agent_tokens=12_345)
 
     footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
 
     assert footer == (
-        "<https://app.example/agents/t1|Open in Web> • model-a + model-b • 12.3K tokens • $0.42"
+        "<https://app.example/agents/t1|Open in Web> • model-a + model-b • 12.3K main-agent tokens"
     )
 
 

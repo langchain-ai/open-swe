@@ -14,8 +14,8 @@ test.describe("Slack run usage footer", () => {
     const reply = page.locator(".msg.bot").filter({ hasText: "Add greet() helper" });
     await expect(reply).toBeVisible();
     await expect(reply).toContainText("fake-scripted-model");
-    await expect(reply).toContainText("12.3K tokens");
-    await expect(reply).toContainText("$0.42");
+    await expect(reply).toContainText("12.3K main-agent tokens");
+    await expect(reply).not.toContainText("$");
     await expect(reply.getByRole("link", { name: "Open in Web" })).toHaveCount(1);
   });
 });

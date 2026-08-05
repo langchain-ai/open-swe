@@ -242,5 +242,4 @@ async def test_slack_thread_reply_passes_model_reported_usage(
     assert result == {"success": True}
     usage = captured["usage"]
     assert usage.models == ("model-a",)
-    assert usage.total_tokens == 110
-    assert usage.total_cost is None
+    assert usage.main_agent_tokens == 110

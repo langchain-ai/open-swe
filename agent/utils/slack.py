@@ -12,7 +12,6 @@ import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import Any
 from urllib.parse import urlparse
 
@@ -402,14 +401,6 @@ def _format_token_count(count: int) -> str:
     return str(count)
 
 
-def _format_cost(cost: Decimal) -> str:
-    if cost >= 1:
-        return f"${cost:.2f}"
-    if cost >= Decimal("0.01"):
-        return f"${cost:.3f}".rstrip("0").rstrip(".")
-    return f"${cost:.4f}".rstrip("0").rstrip(".")
-
-
 def _safe_model_label(model: str) -> str:
     return re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)[:48].strip("-")
 
@@ -422,10 +413,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     if len(labels) > 3:
         model_text = f"{model_text} +{len(labels) - 3}"
     parts = [model_text] if model_text else []
-    if usage.total_tokens is not None:
-        parts.append(f"{_format_token_count(usage.total_tokens)} tokens")
-    if usage.total_cost is not None:
-        parts.append(_format_cost(usage.total_cost))
+    if usage.main_agent_tokens is not None:
+        parts.append(f"{_format_token_count(usage.main_agent_tokens)} main-agent tokens")
     return " • ".join(parts)
 
 
