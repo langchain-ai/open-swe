@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ImagePlus, Map as MapIcon, X } from "lucide-react";
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu";
@@ -45,6 +45,7 @@ const SLASH_COMMANDS: Array<SlashCommandSpec> = [
 
 export interface ChatComposerProps {
   placeholder?: string;
+  autoFocus?: boolean;
   compact?: boolean;
   disabled?: boolean;
   busy?: boolean;
@@ -136,6 +137,7 @@ export function buildCommandItems(
  */
 export const ChatComposer = memo(function ChatComposer({
   placeholder = "Ask Open SWE to build, fix bugs, explore",
+  autoFocus = false,
   compact = false,
   disabled = false,
   busy = false,
@@ -165,6 +167,11 @@ export const ChatComposer = memo(function ChatComposer({
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
+
+  useEffect(() => {
+    if (autoFocus) editorRef.current?.focus();
+  }, [autoFocus]);
+
   // Synchronous double-submit guard: blocks a same-tick second send (Enter +
   // click, or two rapid Enters) before React re-renders. Scoped to the send
   // request only — never the run lifecycle.
