@@ -242,7 +242,6 @@ export function AgentTurn({
             entry={describeWorkEntry(item.chunk, projectPath)}
             timestamp={item.chunk.timestamp}
             body={<ShellEntryBody chunk={item.chunk} />}
-            defaultExpanded={item.chunk.status === "in_progress"}
           />
         );
 
