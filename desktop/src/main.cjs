@@ -123,6 +123,7 @@ async function proxyBackendRequest(request) {
     return new Response("Forbidden", { status: 403 })
   }
   headers.delete("host")
+  headers.set("accept-encoding", "identity")
   headers.set("origin", new URL(backendUrl).origin)
   const targetUrl = backendRequestUrl(backendUrl, request.url)
   const cookies = await session.defaultSession.cookies.get({ url: targetUrl })
