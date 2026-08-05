@@ -1,7 +1,6 @@
 const path = require("node:path")
 
 const APP_URL = "open-swe://app/"
-const APP_ORIGIN = "open-swe://app"
 const DEFAULT_DEVELOPMENT_BACKEND_URL = "http://localhost:2024"
 const ALLOWED_PERMISSIONS = new Set(["clipboard-sanitized-write", "notifications"])
 
@@ -47,9 +46,14 @@ function isTrustedPermissionRequest(permission, requestingUrl) {
   return ALLOWED_PERMISSIONS.has(permission) && isAppUrl(requestingUrl)
 }
 
-function isTrustedProxyRequest(method, origin) {
-  if (origin === APP_ORIGIN) return true
-  return ["GET", "HEAD"].includes(method) && origin === null
+function isTrustedProxyRequest(method, pageUrl, requestUrl) {
+  if (isAppUrl(pageUrl)) return true
+  if (method !== "GET" || !isGithubOAuthUrl(pageUrl)) return false
+  try {
+    return new URL(requestUrl).pathname === "/dashboard/api/auth/callback"
+  } catch {
+    return false
+  }
 }
 
 function isGithubOAuthUrl(value) {
@@ -108,7 +112,6 @@ function staticFilePath(root, appRequestUrl) {
 }
 
 module.exports = {
-  APP_ORIGIN,
   APP_URL,
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,

@@ -118,10 +118,12 @@ function escapeHtml(value) {
 async function proxyBackendRequest(request) {
   const source = new URL(request.url)
   const headers = new Headers(request.headers)
-  if (!isTrustedProxyRequest(request.method, headers.get("origin"))) {
+  const pageUrl = mainWindow?.webContents.getURL() || ""
+  if (!isTrustedProxyRequest(request.method, pageUrl, request.url)) {
     return new Response("Forbidden", { status: 403 })
   }
   headers.delete("host")
+  headers.set("origin", new URL(backendUrl).origin)
   const targetUrl = backendRequestUrl(backendUrl, request.url)
   const cookies = await session.defaultSession.cookies.get({ url: targetUrl })
   if (cookies.length) {

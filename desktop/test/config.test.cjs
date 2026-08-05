@@ -2,7 +2,6 @@ const test = require("node:test")
 const assert = require("node:assert/strict")
 const path = require("node:path")
 const {
-  APP_ORIGIN,
   APP_URL,
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,
@@ -84,12 +83,29 @@ test("only grants expected permissions to the bundled app", () => {
   )
 })
 
-test("only proxies mutations from the bundled app origin", () => {
-  assert.equal(isTrustedProxyRequest("POST", APP_ORIGIN), true)
-  assert.equal(isTrustedProxyRequest("POST", "https://evil.example"), false)
-  assert.equal(isTrustedProxyRequest("POST", null), false)
-  assert.equal(isTrustedProxyRequest("GET", null), true)
-  assert.equal(isTrustedProxyRequest("GET", "https://evil.example"), false)
+test("only proxies requests from the bundled app window", () => {
+  const requestUrl = `${APP_URL}dashboard/api/threads/thread-id/commands`
+  assert.equal(isTrustedProxyRequest("POST", APP_URL, requestUrl), true)
+  assert.equal(
+    isTrustedProxyRequest("POST", "https://evil.example", requestUrl),
+    false
+  )
+  assert.equal(
+    isTrustedProxyRequest(
+      "GET",
+      "https://github.com/login/oauth/authorize",
+      `${APP_URL}dashboard/api/auth/callback?code=123`
+    ),
+    true
+  )
+  assert.equal(
+    isTrustedProxyRequest(
+      "GET",
+      "https://github.com/login/oauth/authorize",
+      `${APP_URL}dashboard/api/me`
+    ),
+    false
+  )
 })
 
 test("only keeps GitHub login pages in the app window", () => {
