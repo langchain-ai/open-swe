@@ -31,6 +31,11 @@ window.addEventListener("DOMContentLoaded", () => {
     aside > div:first-child :is(a, button, input, textarea, select, [role="button"]) {
       -webkit-app-region: no-drag;
     }
+
+    [data-sidebar-expand] {
+      -webkit-app-region: no-drag;
+      left: 90px !important;
+    }
   `
   document.head.append(style)
 
