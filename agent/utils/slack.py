@@ -20,6 +20,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.run_usage import RunUsageSummary
 from agent.utils.thread_ids import generate_thread_id_from_slack_thread
 
 from .http import DEFAULT_HTTP_TIMEOUT
@@ -456,16 +457,47 @@ def _slack_thread_dashboard_url(channel_id: str, thread_ts: str) -> str | None:
     return dashboard_thread_url(thread_id)
 
 
-def format_slack_web_link_footer(dashboard_url: str | None) -> str:
+def _format_token_count(count: int) -> str:
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}K"
+    return str(count)
+
+
+def _safe_model_label(model: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)[:48].strip("-")
+
+
+def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
+    if usage is None:
+        return ""
+    labels = sorted({label for model in usage.models if (label := _safe_model_label(model))})
+    model_text = " + ".join(labels[:3])
+    if len(labels) > 3:
+        model_text = f"{model_text} +{len(labels) - 3}"
+    parts = [model_text] if model_text else []
+    if usage.main_agent_tokens is not None:
+        parts.append(f"{_format_token_count(usage.main_agent_tokens)} main-agent tokens")
+    return " • ".join(parts)
+
+
+def format_slack_web_link_footer(
+    dashboard_url: str | None, usage: RunUsageSummary | None = None
+) -> str:
     """Format the compact Slack Web footer link."""
     if not dashboard_url:
         return ""
-    return f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"
+    footer = f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"
+    usage_text = format_slack_run_usage(usage)
+    return f"{footer} • {usage_text}" if usage_text else footer
 
 
-def append_slack_web_link_footer(text: str, dashboard_url: str | None) -> str:
+def append_slack_web_link_footer(
+    text: str, dashboard_url: str | None, usage: RunUsageSummary | None = None
+) -> str:
     """Append the compact Slack Web footer link to fallback text."""
-    footer = format_slack_web_link_footer(dashboard_url)
+    footer = format_slack_web_link_footer(dashboard_url, usage)
     if not footer or footer in text:
         return text
     stripped = text.rstrip()
@@ -474,8 +506,10 @@ def append_slack_web_link_footer(text: str, dashboard_url: str | None) -> str:
     return f"{stripped} {footer}"
 
 
-def _slack_web_link_context_block(dashboard_url: str | None) -> dict[str, Any] | None:
-    footer = format_slack_web_link_footer(dashboard_url)
+def _slack_web_link_context_block(
+    dashboard_url: str | None, usage: RunUsageSummary | None = None
+) -> dict[str, Any] | None:
+    footer = format_slack_web_link_footer(dashboard_url, usage)
     if not footer:
         return None
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}
@@ -494,9 +528,12 @@ def _block_contains_text(block: dict[str, Any], needle: str) -> bool:
 
 
 def _with_slack_web_link_context_block(
-    text: str, blocks: list[dict[str, Any]] | None, dashboard_url: str | None
+    text: str,
+    blocks: list[dict[str, Any]] | None,
+    dashboard_url: str | None,
+    usage: RunUsageSummary | None = None,
 ) -> list[dict[str, Any]] | None:
-    context_block = _slack_web_link_context_block(dashboard_url)
+    context_block = _slack_web_link_context_block(dashboard_url, usage)
     if context_block is None:
         return blocks
     if not blocks:
@@ -510,7 +547,12 @@ def _with_slack_web_link_context_block(
     if dashboard_url and any(
         _block_contains_text(block, dashboard_url) for block in updated_blocks
     ):
-        return updated_blocks
+        usage_text = format_slack_run_usage(usage)
+        if not usage_text or any(
+            _block_contains_text(block, usage_text) for block in updated_blocks
+        ):
+            return updated_blocks
+        context_block["elements"][0]["text"] = usage_text
     updated_blocks.append(context_block)
     return updated_blocks
 
@@ -523,11 +565,12 @@ async def post_slack_thread_reply_with_ts(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
+    usage: RunUsageSummary | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
     dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts)
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url)
-    text = append_slack_web_link_footer(text, dashboard_url)
+    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    text = append_slack_web_link_footer(text, dashboard_url, usage)
     return await _post_slack_message_with_ts(
         channel_id,
         text,

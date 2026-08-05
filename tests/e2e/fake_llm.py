@@ -162,6 +162,12 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(
         content="Replying in the Slack thread with the PR link.",
         tool_calls=[{"name": "slack_thread_reply", "args": {"message": text}, "id": "call-reply"}],
+        response_metadata={"model_name": "fake-scripted-model"},
+        usage_metadata={
+            "input_tokens": 12_000,
+            "output_tokens": 345,
+            "total_tokens": 12_345,
+        },
     )
 
 
