@@ -96,8 +96,11 @@ export function buildCommandItems(
   const query = trigger.query.toLowerCase();
 
   if (trigger.kind === "slash-command") {
+    const skillNames = new Set(skills.map((skill) => skill.name));
     return [
-      ...SLASH_COMMANDS.filter((spec) => spec.command.startsWith(query)).map((spec) => ({
+      ...SLASH_COMMANDS.filter(
+        (spec) => spec.command.startsWith(query) && !skillNames.has(spec.command),
+      ).map((spec) => ({
         id: `slash:${spec.command}`,
         type: "slash-command" as const,
         command: spec.command,

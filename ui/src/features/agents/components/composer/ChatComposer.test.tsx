@@ -98,24 +98,26 @@ describe("ChatComposer stop button", () => {
 })
 
 describe("ChatComposer skill autocomplete", () => {
-  it("offers a matching skill and preserves surrounding prompt text", () => {
+  it("prefers a colliding skill and preserves surrounding prompt text", () => {
     const trigger = {
       kind: "slash-command" as const,
-      query: "review",
+      query: "plan",
       rangeStart: 7,
-      rangeEnd: 14,
+      rangeEnd: 12,
     }
-    const [skill] = buildCommandItems(trigger, [], [
+    const items = buildCommandItems(trigger, [], [
       {
-        name: "review-pr",
-        description: "Review a pull request",
+        name: "plan",
+        description: "Create an implementation plan",
         instructions: "",
       },
     ])
 
-    expect(skill).toMatchObject({ type: "skill", name: "review-pr" })
-    expect(replaceTextRange("Please /review handle this", 7, 14, "/review-pr ").text).toBe(
-      "Please /review-pr  handle this"
+    expect(items).toEqual([
+      expect.objectContaining({ type: "skill", name: "plan" }),
+    ])
+    expect(replaceTextRange("Please /plan this", 7, 12, "/plan ").text).toBe(
+      "Please /plan  this"
     )
   })
 })
