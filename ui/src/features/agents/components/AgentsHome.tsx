@@ -14,6 +14,7 @@ import {
   invalidateAgentThreadLists,
   optimisticThread,
   seedAgentThreadLists,
+  useAgentSkills,
 } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useProfile, useRepos } from "@/lib/profile"
@@ -52,6 +53,7 @@ export function AgentsHome() {
 
   const reposQuery = useRepos()
   const profileQuery = useProfile()
+  const skills = useAgentSkills()
   // undefined = untouched (fall back to the profile default); null = explicitly "no repo".
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
     undefined
@@ -132,6 +134,7 @@ export function AgentsHome() {
             onRepoChange={setRepoOverride}
             planMode={planMode}
             onPlanModeChange={setPlanMode}
+            skills={skills.data}
             contextUsage={{
               contextWindow: activeModel?.context_window ?? null,
             }}

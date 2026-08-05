@@ -29,6 +29,7 @@ import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
+import { useAgentSkills } from "@/features/agents/lib/queries"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -80,6 +81,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadStream()
   const isMobile = useIsMobile()
+  const skills = useAgentSkills()
 
   const { models, defaultSelection } = useModelOptions()
   const threadSelection = useMemo<ModelSelection | null>(() => {
@@ -263,6 +265,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   planMode={activePlanMode}
                   onPlanModeChange={setPlanMode}
                   mentionPaths={mentionPaths}
+                  skills={skills.data}
                   contextUsage={{
                     usedTokens,
                     contextWindow: activeModel?.context_window ?? null,
@@ -300,6 +303,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 models={models}
                 selection={activeSelection}
                 onSelectionChange={setSelection}
+                skills={skills.data}
                 contextUsage={{
                   usedTokens,
                   contextWindow: activeModel?.context_window ?? null,
