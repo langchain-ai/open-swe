@@ -483,7 +483,12 @@ def _with_slack_web_link_context_block(
     if dashboard_url and any(
         _block_contains_text(block, dashboard_url) for block in updated_blocks
     ):
-        return updated_blocks
+        usage_text = format_slack_run_usage(usage)
+        if not usage_text or any(
+            _block_contains_text(block, usage_text) for block in updated_blocks
+        ):
+            return updated_blocks
+        context_block["elements"][0]["text"] = usage_text
     updated_blocks.append(context_block)
     return updated_blocks
 
