@@ -19,10 +19,20 @@ import {
 const OWNER = { login: "alice", email: "alice@example.com" };
 const COLLABORATOR = { login: "bob", email: "bob@example.com" };
 
-async function botMessages(request: APIRequestContext): Promise<Array<string>> {
+// Scope to one thread via the "Open in Web" link every bot post carries. A run
+// started by an earlier spec can still be in flight and post here after this
+// test's `/control/reset`, and an unscoped read lets that stale message satisfy
+// a poll — which then stops waiting for the message this test actually wants.
+async function botMessages(
+  request: APIRequestContext,
+  threadId?: string,
+): Promise<Array<string>> {
   const res = await request.get("/mock/slack/messages");
   const msgs = (await res.json()) as Array<{ text: string; is_bot: boolean }>;
-  return msgs.filter((m) => m.is_bot).map((m) => m.text);
+  return msgs
+    .filter((m) => m.is_bot)
+    .map((m) => m.text)
+    .filter((text) => threadId === undefined || text.includes(threadId));
 }
 
 async function addComment(
@@ -87,12 +97,12 @@ test.describe("Plan review (HTTP comments)", () => {
 
     // 2. The agent shares the plan-review link, then announces the plan is ready.
     await expect
-      .poll(async () => (await botMessages(request)).join("\n"), {
+      .poll(async () => (await botMessages(request, threadId)).join("\n"), {
         timeout: 60_000,
       })
       .toMatch(/\/agents\/[^/]+\/plan\b/);
     await expect
-      .poll(async () => (await botMessages(request)).join("\n"), {
+      .poll(async () => (await botMessages(request, threadId)).join("\n"), {
         timeout: 60_000,
       })
       .toMatch(/ready for review/i);
@@ -200,11 +210,13 @@ test.describe("Plan review (HTTP comments)", () => {
     //    echoing the reviewers' feedback — which proves the comments were stored
     //    and harvested server-side on approve.
     await expect
-      .poll(async () => (await botMessages(request)).join("\n"), {
+      .poll(async () => (await botMessages(request, threadId)).join("\n"), {
         timeout: 90_000,
       })
       .toMatch(/\/pull\//);
-    expect((await botMessages(request)).join("\n")).toMatch(/docstring/);
+    expect((await botMessages(request, threadId)).join("\n")).toMatch(
+      /docstring/,
+    );
 
     const prs = (await (
       await request.get("/mock/github/data")
