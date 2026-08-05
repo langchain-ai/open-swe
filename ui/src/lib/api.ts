@@ -5,12 +5,15 @@
  * cookie set by the OAuth callback rides along on cross-origin calls.
  */
 
-const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
-  /\/$/,
-  ""
-)
+import { dashboardApiBase } from "./api-base"
 
-if (!API_BASE && typeof window !== "undefined") {
+const API_BASE = dashboardApiBase()
+
+if (
+  !API_BASE &&
+  typeof window !== "undefined" &&
+  window.location.protocol !== "open-swe:"
+) {
   console.warn("VITE_DASHBOARD_API_BASE_URL is not set")
 }
 

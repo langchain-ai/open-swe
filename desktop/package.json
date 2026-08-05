@@ -1,0 +1,69 @@
+{
+  "name": "open-swe-desktop",
+  "version": "0.2.3",
+  "private": true,
+  "description": "Experimental Open SWE desktop client",
+  "main": "src/main.cjs",
+  "scripts": {
+    "build:ui": "cd ../ui && pnpm run build",
+    "dev": "pnpm run build:ui && electron . --dev",
+    "start": "pnpm run build:ui && electron .",
+    "test": "node --test test/*.test.cjs",
+    "check": "node --check src/config.cjs && node --check src/main.cjs && node --check src/preload.cjs && pnpm run test && pnpm run build:ui",
+    "pack": "pnpm run build:ui && electron-builder --dir",
+    "dist": "pnpm run build:ui && electron-builder"
+  },
+  "build": {
+    "appId": "com.langchain.openswe",
+    "productName": "Open SWE",
+    "asar": true,
+    "icon": "resources/icon.png",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "../ui/.output/public",
+        "to": "ui",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "resources/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "category": "Development",
+      "target": [
+        "AppImage"
+      ]
+    }
+  },
+  "author": "LangChain",
+  "license": "MIT",
+  "homepage": "https://github.com/langchain-ai/open-swe",
+  "packageManager": "pnpm@11.13.1",
+  "devDependencies": {
+    "electron": "41.9.1",
+    "electron-builder": "26.15.3"
+  }
+}

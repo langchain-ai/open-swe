@@ -59,6 +59,25 @@ def test_sanitize_redirect_to_rejects_unsafe_targets(monkeypatch) -> None:
         assert sanitize_redirect_to(target) == "https://dashboard.example"
 
 
+def test_desktop_login_uses_the_requested_backend_callback(monkeypatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("GITHUB_APP_CLIENT_ID", "client-id")
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://backend.example") as client:
+        response = client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop": "true"},
+            follow_redirects=False,
+        )
+
+    query = parse_qs(urlparse(response.headers["location"]).query)
+    assert query["redirect_uri"] == ["https://backend.example/dashboard/api/auth/callback"]
+
+
 def test_auth_callback_preserves_relative_plan_redirect(monkeypatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://testserver")
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "http://testserver")

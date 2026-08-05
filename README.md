@@ -141,6 +141,7 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 - **Opens PRs automatically** — commits changes and opens a draft PR when done, linked back to your ticket
 - **Subagent support** — the agent can spawn child agents for parallel subtasks
 - **Web dashboard** — a companion app (in `ui/`) for GitHub login, per-user model/profile settings, team defaults, enabled-repo and review-style management, user mappings, and an Agents chat UI
+- **Desktop app (experimental)** — an Electron wrapper (in `desktop/`) around the same dashboard; the web UI remains the recommended way to use Open SWE
 
 ---
 

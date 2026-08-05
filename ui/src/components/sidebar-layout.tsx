@@ -114,6 +114,7 @@ export function SidebarFrame({
       <button
         type="button"
         aria-label="Expand sidebar"
+        data-sidebar-expand=""
         onClick={toggle}
         className="fixed top-3 left-3 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
       >

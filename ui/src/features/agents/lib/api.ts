@@ -5,6 +5,7 @@ import type {
   Message,
   WorkflowPushApprovalsResponse,
 } from "./types"
+import { dashboardApiBase } from "@/lib/api-base"
 
 export type { AgentSchedule, AgentThread, Message }
 
@@ -101,10 +102,7 @@ export interface SidebarThreads {
   resolved: SidebarThreadsGroup
 }
 
-const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
-  /\/$/,
-  ""
-)
+const API_BASE = dashboardApiBase()
 
 export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
 
