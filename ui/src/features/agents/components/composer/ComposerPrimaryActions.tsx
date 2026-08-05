@@ -23,6 +23,8 @@ export interface ComposerPrimaryActionsProps {
   onSubmit: () => void;
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun;
+  /** Direct stop handler for non-LangGraph runtimes such as desktop ACP. */
+  onStop?: () => void | Promise<void>;
 }
 
 function SendIcon() {
@@ -126,9 +128,23 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
   return <StopButton disabled={stopping} onStop={() => void handleStop()} />;
 }
 
+function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
+  const [stopping, setStopping] = useState(false);
+  if (!props.activeRun?.running || !props.onStop) return <SendButton {...props} />;
+  const stop = async () => {
+    setStopping(true);
+    try {
+      await props.onStop?.();
+    } finally {
+      setStopping(false);
+    }
+  };
+  return <StopButton disabled={stopping} onStop={() => void stop()} />;
+}
+
 /** The composer's send button, which becomes a stop button while a run is live. */
 export function ComposerPrimaryActions(props: ComposerPrimaryActionsProps) {
   const inAgentThreadStream = useIsInAgentThreadStream();
   if (inAgentThreadStream) return <StreamPrimaryActions {...props} />;
-  return <SendButton {...props} />;
+  return <DirectPrimaryActions {...props} />;
 }

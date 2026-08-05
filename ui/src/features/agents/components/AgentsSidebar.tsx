@@ -12,6 +12,7 @@ import {
   CircleNotchIcon,
   CopyIcon,
   DotsThreeVerticalIcon,
+  FolderOpenIcon,
   GitMergeIcon,
   GitPullRequestIcon,
   LightningIcon,
@@ -26,6 +27,7 @@ import { useState } from "react"
 import type { ComponentType, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
+import type { DesktopAcpSessionSummary } from "@/desktop"
 import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
@@ -51,6 +53,7 @@ import {
   useSidebarThreads,
 } from "@/features/agents/lib/queries"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
+import { useDesktopAcpSessions } from "@/features/agents/lib/desktopAcp"
 import { cn } from "@/lib/utils"
 
 const RESOLVED_SIDEBAR_LIMIT = 20
@@ -96,6 +99,7 @@ const PR_STATE_META: Record<
 interface AgentsSidebarProps {
   user: SessionUser
   activeThreadId?: string
+  activeLocalSessionId?: string
   layout: SidebarLayout
 }
 
@@ -109,11 +113,14 @@ const NAV = [
 export function AgentsSidebar({
   user,
   activeThreadId,
+  activeLocalSessionId,
   layout,
 }: AgentsSidebarProps) {
   const { prefs, setGroup, setCompact, setFilters, resetFilters } =
     useSidebarPrefs()
   const sidebar = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT, activeThreadId)
+  const localSessions = useDesktopAcpSessions()
+  const localGroups = groupLocalSessions(localSessions)
   const activeThreads = sidebar.data?.active.items ?? []
   const resolvedThreads = sidebar.data?.resolved.items ?? []
   const resolvedHasMore = sidebar.data?.resolved.hasMore ?? false
@@ -127,6 +134,7 @@ export function AgentsSidebar({
   const sections = groupThreadsByMode(filteredActive, prefs.group)
   const showResolved = prefs.filters.includeResolved
   const isEmpty =
+    localGroups.length === 0 &&
     sections.length === 0 &&
     (!showResolved || filteredResolved.length === 0) &&
     hasActiveFilters(prefs.filters)
@@ -180,6 +188,16 @@ export function AgentsSidebar({
       </nav>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        {localGroups.map((group) => (
+          <LocalThreadGroup
+            key={group.cwd}
+            label={group.label}
+            sessions={group.sessions}
+            activeSessionId={activeLocalSessionId}
+            onNavigate={layout.closeOnMobile}
+            compact={prefs.compact}
+          />
+        ))}
         {prefs.group === "none"
           ? sections[0]?.threads.map((thread) => (
               <ThreadRow
@@ -231,6 +249,105 @@ export function AgentsSidebar({
         />
       </div>
     </SidebarFrame>
+  )
+}
+
+function groupLocalSessions(sessions: Array<DesktopAcpSessionSummary>) {
+  const groups = new Map<string, Array<DesktopAcpSessionSummary>>()
+  for (const session of sessions) {
+    const group = groups.get(session.cwd) ?? []
+    group.push(session)
+    groups.set(session.cwd, group)
+  }
+  return [...groups.entries()]
+    .map(([cwd, items]) => ({
+      cwd,
+      label: cwd.split(/[\\/]/).filter(Boolean).at(-1) || cwd,
+      sessions: items.sort((left, right) => right.updatedAt - left.updatedAt),
+      updatedAt: Math.max(...items.map((session) => session.updatedAt)),
+    }))
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+}
+
+function LocalThreadGroup({
+  label,
+  sessions,
+  activeSessionId,
+  onNavigate,
+  compact = false,
+}: {
+  label: string
+  sessions: Array<DesktopAcpSessionSummary>
+  activeSessionId?: string
+  onNavigate?: () => void
+  compact?: boolean
+}) {
+  const [collapsed, setCollapsed] = useState(false)
+  const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
+
+  return (
+    <div className={compact ? "mb-2" : "mb-3"}>
+      <button
+        type="button"
+        onClick={() => setCollapsed((value) => !value)}
+        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
+        aria-expanded={!collapsed}
+        title={sessions[0]?.cwd}
+      >
+        <ToggleIcon className="size-3" />
+        <FolderOpenIcon className="size-3.5" />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <span>{sessions.length}</span>
+      </button>
+      {!collapsed &&
+        sessions.map((session) => (
+          <LocalThreadRow
+            key={session.id}
+            session={session}
+            isActive={session.id === activeSessionId}
+            onNavigate={onNavigate}
+            compact={compact}
+          />
+        ))}
+    </div>
+  )
+}
+
+function LocalThreadRow({
+  session,
+  isActive,
+  onNavigate,
+  compact = false,
+}: {
+  session: DesktopAcpSessionSummary
+  isActive: boolean
+  onNavigate?: () => void
+  compact?: boolean
+}) {
+  const running = session.status === "running" || session.status === "starting"
+  return (
+    <Link
+      to="/agents/local/$sessionId"
+      params={{ sessionId: session.id }}
+      onClick={onNavigate}
+      className={cn(
+        "mb-0.5 flex items-center gap-2 rounded-lg px-2.5 transition-colors",
+        compact ? "h-7 gap-1.5" : "h-8",
+        isActive
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-sidebar-row-hover"
+      )}
+    >
+      {running ? (
+        <CircleNotchIcon
+          className="size-3 shrink-0 animate-spin text-primary"
+          aria-label="Local thread running"
+        />
+      ) : (
+        <span className="size-2 shrink-0 rounded-full bg-border" />
+      )}
+      <span className="min-w-0 flex-1 truncate text-xs">{session.title}</span>
+    </Link>
   )
 }
 
@@ -587,10 +704,12 @@ function ThreadRow({
 export function AgentsShell({
   user,
   activeThreadId,
+  activeLocalSessionId,
   children,
 }: {
   user: SessionUser
   activeThreadId?: string
+  activeLocalSessionId?: string
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
@@ -600,6 +719,7 @@ export function AgentsShell({
         <AgentsSidebar
           user={user}
           activeThreadId={activeThreadId}
+          activeLocalSessionId={activeLocalSessionId}
           layout={layout}
         />
         <main className="surface-grain relative flex min-w-0 flex-1 overflow-hidden bg-background">

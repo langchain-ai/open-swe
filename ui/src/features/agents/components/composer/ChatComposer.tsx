@@ -6,6 +6,7 @@ import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPromptEditor, mentionReplacementText } from "./ComposerPromptEditor";
 import { ContextWindowMeter } from "./ContextWindowMeter";
+import { LocalProjectSelector, RunTargetSelector } from "./RunTargetSelector";
 import {
   COMPOSER_PATH_DRAG_MIME,
   detectComposerTrigger,
@@ -15,6 +16,7 @@ import type { ComposerCommandItem } from "./ComposerCommandMenu";
 import type { ActiveRun } from "./ComposerPrimaryActions";
 import type { ComposerCommandKey, ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger";
+import type { RunTarget } from "./RunTargetSelector";
 import type { ModelOption, Skill } from "@/lib/api";
 import type { ImageChunk } from "@/features/agents/lib/types";
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions";
@@ -50,6 +52,7 @@ export interface ChatComposerProps {
   busy?: boolean;
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun;
+  onStop?: () => void | Promise<void>;
   onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>;
   models?: Array<ModelOption>;
   selection?: ModelSelection | null;
@@ -58,6 +61,11 @@ export interface ChatComposerProps {
   repos?: Array<{ full_name: string }>;
   selectedRepo?: string | null;
   onRepoChange?: (repo: string | null) => void;
+  /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
+  runTarget?: RunTarget;
+  onRunTargetChange?: (next: RunTarget) => void;
+  localProjectPath?: string | null;
+  onPickLocalProject?: () => void;
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean;
   onPlanModeChange?: (next: boolean) => void;
@@ -140,6 +148,7 @@ export const ChatComposer = memo(function ChatComposer({
   disabled = false,
   busy = false,
   activeRun,
+  onStop,
   onSubmit,
   models = [],
   selection = null,
@@ -147,6 +156,10 @@ export const ChatComposer = memo(function ChatComposer({
   repos,
   selectedRepo = null,
   onRepoChange,
+  runTarget,
+  onRunTargetChange,
+  localProjectPath = null,
+  onPickLocalProject,
   planMode = false,
   onPlanModeChange,
   mentionPaths = [],
@@ -389,9 +402,26 @@ export const ChatComposer = memo(function ChatComposer({
     <div
       className={cn("relative w-full font-sans text-[13px]", compact ? "max-w-none" : "max-w-2xl")}
     >
-      {onRepoChange && (
+      {(onRepoChange || onRunTargetChange) && (
         <div className="mb-2 flex items-center gap-2 px-1 text-xs">
-          <RepoSelector repos={repos} selectedRepo={selectedRepo} onRepoChange={onRepoChange} />
+          {runTarget === "local" && onPickLocalProject ? (
+            <LocalProjectSelector path={localProjectPath} onPick={onPickLocalProject} />
+          ) : (
+            onRepoChange && (
+              <RepoSelector
+                repos={repos}
+                selectedRepo={selectedRepo}
+                onRepoChange={onRepoChange}
+              />
+            )
+          )}
+          {runTarget && onRunTargetChange && (
+            <RunTargetSelector
+              localEnabled={Boolean(window.openSweDesktop)}
+              onChange={onRunTargetChange}
+              value={runTarget}
+            />
+          )}
         </div>
       )}
 
@@ -541,6 +571,7 @@ export const ChatComposer = memo(function ChatComposer({
             activeRun={activeRun}
             canSubmit={canSubmit}
             onSubmit={() => void handleSubmit()}
+            onStop={onStop}
             submitting={isSubmitting}
           />
         </div>
