@@ -47,6 +47,27 @@ jobs:
       - name: Run unit tests
         run: make test
 
+  desktop:
+    name: Desktop checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+      - run: corepack enable
+      - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
+        with:
+          mode: firewall-free
+      - name: Install desktop dependencies
+        working-directory: desktop
+        env:
+          ELECTRON_GET_USE_PROXY: "true"
+        run: pnpm install --frozen-lockfile
+      - name: Run desktop checks
+        working-directory: desktop
+        run: pnpm run check
+
   e2e:
     name: Playwright E2E
     runs-on: ubuntu-latest

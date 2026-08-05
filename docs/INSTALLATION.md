@@ -599,6 +599,26 @@ For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CL
 
 Other UI scripts: `pnpm run build`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`.
 
+### Run the desktop app (optional)
+
+> **Experimental:** The desktop wrapper is an early-access convenience surface. The web UI is
+> the recommended way to use Open SWE.
+
+The Electron app in `desktop/` is a native wrapper around this same dashboard. With the backend
+and dashboard still running, start it in another terminal:
+
+```bash
+cd desktop
+pnpm install
+pnpm run dev
+```
+
+Development loads `http://localhost:3000`. To use a hosted or self-hosted dashboard instead, run
+`pnpm run start -- --url=https://your-dashboard.example.com` or set
+`OPEN_SWE_DESKTOP_URL`. Create an unpacked application with `pnpm run pack`, or an installer for
+the current platform with `pnpm run dist`. Packaged builds default to
+`https://openswe.vercel.app`.
+
 ## 9. Verify it works
 
 ### GitHub

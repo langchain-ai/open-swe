@@ -1,0 +1,61 @@
+{
+  "name": "open-swe-desktop",
+  "version": "0.1.2",
+  "private": true,
+  "description": "Electron wrapper for the Open SWE dashboard",
+  "main": "src/main.cjs",
+  "scripts": {
+    "dev": "electron . --dev",
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "check": "node --check src/config.cjs && node --check src/main.cjs && node --check src/preload.cjs && pnpm run test",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.langchain.openswe",
+    "productName": "Open SWE",
+    "asar": true,
+    "icon": "resources/icon.png",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "resources/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "category": "Development",
+      "target": [
+        "AppImage"
+      ]
+    }
+  },
+  "author": "LangChain",
+  "license": "MIT",
+  "homepage": "https://github.com/langchain-ai/open-swe",
+  "packageManager": "pnpm@11.13.1",
+  "devDependencies": {
+    "electron": "41.9.1",
+    "electron-builder": "26.15.3"
+  }
+}
