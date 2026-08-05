@@ -118,16 +118,23 @@ async function proxyBackendRequest(request) {
   const headers = new Headers(request.headers)
   headers.delete("host")
   headers.set("origin", new URL(backendUrl).origin)
+  const targetUrl = backendRequestUrl(backendUrl, request.url)
+  const cookies = await session.defaultSession.cookies.get({ url: targetUrl })
+  if (cookies.length) {
+    headers.set("cookie", cookies.map(({ name, value }) => `${name}=${value}`).join("; "))
+  } else {
+    headers.delete("cookie")
+  }
 
-  const upstream = await session.defaultSession.fetch(
-    backendRequestUrl(backendUrl, request.url),
-    {
-      method: request.method,
-      headers,
-      body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
-      redirect: "manual",
-    }
-  )
+  const body = ["GET", "HEAD"].includes(request.method) ? undefined : request.body
+  const upstream = await fetch(targetUrl, {
+    method: request.method,
+    headers,
+    body,
+    redirect: "manual",
+    ...(body ? { duplex: "half" } : {}),
+  })
+  await storeResponseCookies(targetUrl, upstream)
 
   const location = upstream.headers.get("location")
   if (location && source.pathname.endsWith("/callback")) {
@@ -140,6 +147,50 @@ async function proxyBackendRequest(request) {
     })
   }
   return upstream
+}
+
+async function storeResponseCookies(targetUrl, response) {
+  const values = response.headers.getSetCookie?.() ?? []
+  for (const value of values) {
+    const [pair, ...attributes] = value.split(";")
+    const separator = pair.indexOf("=")
+    if (separator <= 0) continue
+    const name = pair.slice(0, separator).trim()
+    const cookieValue = pair.slice(separator + 1).trim()
+    const details = {
+      url: targetUrl,
+      name,
+      value: cookieValue,
+      path: "/",
+    }
+    let remove = false
+    for (const rawAttribute of attributes) {
+      const [rawName, ...rawValue] = rawAttribute.trim().split("=")
+      const attributeName = rawName.toLowerCase()
+      const attributeValue = rawValue.join("=")
+      if (attributeName === "path" && attributeValue) details.path = attributeValue
+      else if (attributeName === "domain" && attributeValue) details.domain = attributeValue
+      else if (attributeName === "secure") details.secure = true
+      else if (attributeName === "httponly") details.httpOnly = true
+      else if (attributeName === "max-age") {
+        const seconds = Number(attributeValue)
+        if (Number.isFinite(seconds) && seconds > 0) {
+          details.expirationDate = Date.now() / 1000 + seconds
+        } else if (seconds === 0) {
+          remove = true
+        }
+      }
+    }
+    const cookieUrl = new URL(details.path, targetUrl).toString()
+    if (remove) await session.defaultSession.cookies.remove(cookieUrl, name)
+    else await session.defaultSession.cookies.set(details)
+  }
+}
+
+async function clearBackendCookies(url) {
+  for (const cookie of await session.defaultSession.cookies.get({ url })) {
+    await session.defaultSession.cookies.remove(new URL(cookie.path, url).toString(), cookie.name)
+  }
 }
 
 async function serveBundledUi(request) {
@@ -253,7 +304,7 @@ function createMenu() {
 }
 
 function handleNavigation(window, event, url) {
-  const callback = backendUrl ? localCallbackUrl(backendUrl, url) : null
+  const callback = backendUrl ? localCallbackUrl(url) : null
   if (callback) {
     event.preventDefault()
     void window.loadURL(callback)
@@ -351,6 +402,7 @@ function createSetupWindow() {
       const previousUrl = backendUrl
       backendUrl = storeBackendUrl(value)
       if (previousUrl && previousUrl !== backendUrl) {
+        await clearBackendCookies(previousUrl)
         await session.defaultSession.clearStorageData({ origin: APP_URL })
       }
       if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow)

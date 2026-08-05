@@ -98,18 +98,16 @@ test("maps desktop API requests to the selected backend", () => {
 test("localizes backend OAuth callbacks and post-login redirects", () => {
   assert.equal(
     localCallbackUrl(
-      "https://backend.example",
       "https://backend.example/dashboard/api/auth/callback?code=123&state=456"
     ),
     `${APP_URL}dashboard/api/auth/callback?code=123&state=456`
   )
   assert.equal(
-    localCallbackUrl(
-      "https://backend.example",
-      "https://evil.example/dashboard/api/auth/callback"
-    ),
-    null
+    localCallbackUrl("https://evil.example/dashboard/api/auth/callback"),
+    `${APP_URL}dashboard/api/auth/callback`
   )
+  assert.equal(localCallbackUrl("javascript:alert(1)"), null)
+  assert.equal(localCallbackUrl("https://backend.example/dashboard/api/me"), null)
   assert.equal(
     appRedirectUrl("https://dashboard.example/agents/thread-1?from=oauth#latest"),
     `${APP_URL}agents/thread-1?from=oauth#latest`

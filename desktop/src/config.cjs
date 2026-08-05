@@ -56,12 +56,11 @@ function backendRequestUrl(backendUrl, appRequestUrl) {
   return target.toString()
 }
 
-function localCallbackUrl(backendUrl, navigationUrl) {
+function localCallbackUrl(navigationUrl) {
   try {
-    const backend = new URL(backendUrl)
     const target = new URL(navigationUrl)
     if (
-      target.origin !== backend.origin ||
+      !["http:", "https:"].includes(target.protocol) ||
       !/^\/dashboard\/api\/(?:auth|slack|notion)\/callback$/.test(target.pathname)
     ) {
       return null

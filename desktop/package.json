@@ -1,6 +1,6 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.2.0",
+  "version": "0.2.3",
   "private": true,
   "description": "Experimental Open SWE desktop client",
   "main": "src/main.cjs",
