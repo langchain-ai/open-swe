@@ -616,8 +616,8 @@ pnpm run dev
 Development loads `http://localhost:3000`. To use a hosted or self-hosted dashboard instead, run
 `pnpm run start -- --url=https://your-dashboard.example.com` or set
 `OPEN_SWE_DESKTOP_URL`. Create an unpacked application with `pnpm run pack`, or an installer for
-the current platform with `pnpm run dist`. Packaged builds default to
-`https://openswe.vercel.app`.
+the current platform with `pnpm run dist`. Packaged builds ask for the organization's dashboard
+URL on first launch and store it locally; they never default to the maintainers' deployment.
 
 ## 9. Verify it works
 

@@ -13,9 +13,10 @@ The dashboard's build and deployment configuration determine which dashboard API
 deployment receive requests. Signing in creates a session for that configured backend but does
 not change the backend selection.
 
-The packaged app loads `https://openswe.vercel.app`, so it uses the same API and LangGraph
-deployment as that web UI. Local development loads `http://localhost:3000`, where the UI's
-`VITE_DASHBOARD_API_BASE_URL` configuration determines the dashboard API.
+Packaged builds ask for the organization's dashboard URL on first launch and store it in the
+app's local user data. They do not default to the Open SWE maintainers' deployment. Local
+development loads `http://localhost:3000`, where the UI's `VITE_DASHBOARD_API_BASE_URL`
+configuration determines the dashboard API.
 
 ## Local development
 
@@ -33,8 +34,9 @@ Development loads `http://localhost:3000`. Use `--url` to open another dashboard
 pnpm run start -- --url=https://your-dashboard.example.com
 ```
 
-`OPEN_SWE_DESKTOP_URL` provides the same override when launching from a shell. Command-line
-configuration takes precedence over the environment variable.
+`OPEN_SWE_DESKTOP_URL` provides the same override when launching from a shell. Resolution order
+is command-line argument, environment variable, saved first-launch configuration, then the local
+development default. Use **Open SWE → Dashboard URL…** to change the saved URL.
 
 ## Packaging
 
@@ -43,5 +45,5 @@ pnpm run pack # unpacked application for the current platform
 pnpm run dist # installer for the current platform
 ```
 
-Packaged builds open `https://openswe.vercel.app` by default. Build outputs are written to
-`desktop/dist/`.
+On first launch, packaged builds ask for the organization's dashboard URL. Build outputs are
+written to `desktop/dist/`.

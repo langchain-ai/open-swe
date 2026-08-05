@@ -2,7 +2,6 @@ const test = require("node:test")
 const assert = require("node:assert/strict")
 const {
   DEFAULT_DEVELOPMENT_URL,
-  DEFAULT_PRODUCTION_URL,
   isTrustedPermissionRequest,
   resolveDashboardUrl,
   validateDashboardUrl,
@@ -15,10 +14,22 @@ test("uses the local dashboard for development", () => {
   )
 })
 
-test("uses the hosted dashboard in packaged builds", () => {
+test("requires dashboard configuration in packaged builds", () => {
   assert.equal(
     resolveDashboardUrl({ argv: [], env: {}, isPackaged: true }),
-    `${DEFAULT_PRODUCTION_URL}/`
+    null
+  )
+})
+
+test("uses the stored dashboard in packaged builds", () => {
+  assert.equal(
+    resolveDashboardUrl({
+      argv: [],
+      env: {},
+      isPackaged: true,
+      storedUrl: "https://open-swe.example.com",
+    }),
+    "https://open-swe.example.com/"
   )
 })
 
@@ -38,6 +49,18 @@ test("allows environment and command-line URL overrides", () => {
       isPackaged: true,
     }),
     "http://localhost:4000/"
+  )
+})
+
+test("command-line and environment configuration override the stored dashboard", () => {
+  assert.equal(
+    resolveDashboardUrl({
+      argv: ["--url=https://cli.example"],
+      env: { OPEN_SWE_DESKTOP_URL: "https://env.example" },
+      isPackaged: true,
+      storedUrl: "https://stored.example",
+    }),
+    "https://cli.example/"
   )
 })
 

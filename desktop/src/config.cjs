@@ -1,5 +1,4 @@
 const DEFAULT_DEVELOPMENT_URL = "http://localhost:3000"
-const DEFAULT_PRODUCTION_URL = "https://openswe.vercel.app"
 const ALLOWED_PERMISSIONS = new Set(["clipboard-sanitized-write", "notifications"])
 
 function cliUrl(argv) {
@@ -18,12 +17,13 @@ function validateDashboardUrl(value) {
   return url.toString()
 }
 
-function resolveDashboardUrl({ argv, env, isPackaged }) {
+function resolveDashboardUrl({ argv, env, isPackaged, storedUrl }) {
   const value =
     cliUrl(argv) ||
     env.OPEN_SWE_DESKTOP_URL ||
-    (isPackaged ? DEFAULT_PRODUCTION_URL : DEFAULT_DEVELOPMENT_URL)
-  return validateDashboardUrl(value.trim())
+    storedUrl ||
+    (isPackaged ? undefined : DEFAULT_DEVELOPMENT_URL)
+  return value ? validateDashboardUrl(value.trim()) : null
 }
 
 function isTrustedPermissionRequest(dashboardUrl, permission, requestingUrl) {
@@ -37,7 +37,6 @@ function isTrustedPermissionRequest(dashboardUrl, permission, requestingUrl) {
 
 module.exports = {
   DEFAULT_DEVELOPMENT_URL,
-  DEFAULT_PRODUCTION_URL,
   isTrustedPermissionRequest,
   resolveDashboardUrl,
   validateDashboardUrl,
