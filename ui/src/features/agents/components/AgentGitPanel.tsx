@@ -491,6 +491,7 @@ export function AgentGitPanel({
           <button
             key={id}
             type="button"
+            aria-current={topTab === id ? "page" : undefined}
             onClick={() => onTabChange(id)}
             className={cn(
               "rounded-md px-2.5 py-1 text-xs transition-colors",
