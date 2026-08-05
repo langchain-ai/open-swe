@@ -1,6 +1,7 @@
 const path = require("node:path")
 
 const APP_URL = "open-swe://app/"
+const APP_ORIGIN = "open-swe://app"
 const DEFAULT_DEVELOPMENT_BACKEND_URL = "http://localhost:2024"
 const ALLOWED_PERMISSIONS = new Set(["clipboard-sanitized-write", "notifications"])
 
@@ -46,6 +47,24 @@ function isTrustedPermissionRequest(permission, requestingUrl) {
   return ALLOWED_PERMISSIONS.has(permission) && isAppUrl(requestingUrl)
 }
 
+function isTrustedProxyRequest(method, origin) {
+  if (origin === APP_ORIGIN) return true
+  return ["GET", "HEAD"].includes(method) && origin === null
+}
+
+function isGithubOAuthUrl(value) {
+  try {
+    const url = new URL(value)
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "github.com" &&
+      url.pathname.startsWith("/login/")
+    )
+  } catch {
+    return false
+  }
+}
+
 function backendRequestUrl(backendUrl, appRequestUrl) {
   if (!isAppUrl(appRequestUrl)) throw new Error("Invalid desktop request URL")
   const source = new URL(appRequestUrl)
@@ -56,11 +75,13 @@ function backendRequestUrl(backendUrl, appRequestUrl) {
   return target.toString()
 }
 
-function localCallbackUrl(navigationUrl) {
+function localCallbackUrl(navigationUrl, backendUrl) {
   try {
     const target = new URL(navigationUrl)
+    const backend = new URL(backendUrl)
     if (
       !["http:", "https:"].includes(target.protocol) ||
+      target.origin !== backend.origin ||
       !/^\/dashboard\/api\/(?:auth|slack|notion)\/callback$/.test(target.pathname)
     ) {
       return null
@@ -87,12 +108,15 @@ function staticFilePath(root, appRequestUrl) {
 }
 
 module.exports = {
+  APP_ORIGIN,
   APP_URL,
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,
   backendRequestUrl,
   isAppUrl,
+  isGithubOAuthUrl,
   isTrustedPermissionRequest,
+  isTrustedProxyRequest,
   localCallbackUrl,
   resolveBackendUrl,
   staticFilePath,

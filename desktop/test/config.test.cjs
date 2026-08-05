@@ -2,11 +2,14 @@ const test = require("node:test")
 const assert = require("node:assert/strict")
 const path = require("node:path")
 const {
+  APP_ORIGIN,
   APP_URL,
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,
   backendRequestUrl,
+  isGithubOAuthUrl,
   isTrustedPermissionRequest,
+  isTrustedProxyRequest,
   localCallbackUrl,
   resolveBackendUrl,
   staticFilePath,
@@ -81,6 +84,21 @@ test("only grants expected permissions to the bundled app", () => {
   )
 })
 
+test("only proxies mutations from the bundled app origin", () => {
+  assert.equal(isTrustedProxyRequest("POST", APP_ORIGIN), true)
+  assert.equal(isTrustedProxyRequest("POST", "https://evil.example"), false)
+  assert.equal(isTrustedProxyRequest("POST", null), false)
+  assert.equal(isTrustedProxyRequest("GET", null), true)
+  assert.equal(isTrustedProxyRequest("GET", "https://evil.example"), false)
+})
+
+test("only keeps GitHub login pages in the app window", () => {
+  assert.equal(isGithubOAuthUrl("https://github.com/login/oauth/authorize?client_id=1"), true)
+  assert.equal(isGithubOAuthUrl("https://github.com/login"), false)
+  assert.equal(isGithubOAuthUrl("https://github.com/langchain-ai/open-swe"), false)
+  assert.equal(isGithubOAuthUrl("https://evil.example/login/oauth/authorize"), false)
+})
+
 test("maps desktop API requests to the selected backend", () => {
   assert.equal(
     backendRequestUrl(
@@ -98,16 +116,23 @@ test("maps desktop API requests to the selected backend", () => {
 test("localizes backend OAuth callbacks and post-login redirects", () => {
   assert.equal(
     localCallbackUrl(
-      "https://backend.example/dashboard/api/auth/callback?code=123&state=456"
+      "https://backend.example/dashboard/api/auth/callback?code=123&state=456",
+      "https://backend.example"
     ),
     `${APP_URL}dashboard/api/auth/callback?code=123&state=456`
   )
   assert.equal(
-    localCallbackUrl("https://evil.example/dashboard/api/auth/callback"),
-    `${APP_URL}dashboard/api/auth/callback`
+    localCallbackUrl(
+      "https://evil.example/dashboard/api/auth/callback",
+      "https://backend.example"
+    ),
+    null
   )
-  assert.equal(localCallbackUrl("javascript:alert(1)"), null)
-  assert.equal(localCallbackUrl("https://backend.example/dashboard/api/me"), null)
+  assert.equal(localCallbackUrl("javascript:alert(1)", "https://backend.example"), null)
+  assert.equal(
+    localCallbackUrl("https://backend.example/dashboard/api/me", "https://backend.example"),
+    null
+  )
   assert.equal(
     appRedirectUrl("https://dashboard.example/agents/thread-1?from=oauth#latest"),
     `${APP_URL}agents/thread-1?from=oauth#latest`

@@ -16,7 +16,9 @@ const {
   appRedirectUrl,
   backendRequestUrl,
   isAppUrl,
+  isGithubOAuthUrl,
   isTrustedPermissionRequest,
+  isTrustedProxyRequest,
   localCallbackUrl,
   resolveBackendUrl,
   staticFilePath,
@@ -116,8 +118,10 @@ function escapeHtml(value) {
 async function proxyBackendRequest(request) {
   const source = new URL(request.url)
   const headers = new Headers(request.headers)
+  if (!isTrustedProxyRequest(request.method, headers.get("origin"))) {
+    return new Response("Forbidden", { status: 403 })
+  }
   headers.delete("host")
-  headers.set("origin", new URL(backendUrl).origin)
   const targetUrl = backendRequestUrl(backendUrl, request.url)
   const cookies = await session.defaultSession.cookies.get({ url: targetUrl })
   if (cookies.length) {
@@ -304,15 +308,17 @@ function createMenu() {
 }
 
 function handleNavigation(window, event, url) {
-  const callback = backendUrl ? localCallbackUrl(url) : null
+  const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null
   if (callback) {
     event.preventDefault()
     void window.loadURL(callback)
     return
   }
+  if (isAppUrl(url) || isGithubOAuthUrl(url)) return
+  event.preventDefault()
   const target = new URL(url)
-  if (!isAppUrl(url) && !["http:", "https:"].includes(target.protocol)) {
-    event.preventDefault()
+  if (["http:", "https:", "mailto:"].includes(target.protocol)) {
+    void shell.openExternal(url)
   }
 }
 

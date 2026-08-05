@@ -66,6 +66,13 @@ async def test_require_same_origin_allows_backend_origin(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_require_same_origin_allows_desktop_app_origin(monkeypatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+
+    oauth.require_same_origin(_request(origin="open-swe://app"))
+
+
+@pytest.mark.asyncio
 async def test_require_same_origin_normalizes_case_and_trailing_slash(monkeypatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "HTTPS://Dashboard.Example/")
     monkeypatch.setenv("DASHBOARD_ALLOWED_ORIGINS", "https://Preview.Example/")

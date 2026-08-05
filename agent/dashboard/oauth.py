@@ -27,6 +27,7 @@ STATE_COOKIE_NAME = "osw_oauth_state"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 STATE_TTL_SECONDS = 600
 JWT_ALG = "HS256"
+DESKTOP_APP_ORIGIN = "open-swe://app"
 
 GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "")
 GITHUB_APP_CLIENT_SECRET = os.environ.get("GITHUB_APP_CLIENT_SECRET", "")
@@ -246,6 +247,7 @@ def require_same_origin(request: Request) -> None:
     allowed = allowed_dashboard_origins()
     if not allowed:
         return
+    allowed.add(DESKTOP_APP_ORIGIN)
     request_base_origin = _origin_of(str(request.base_url))
     if request_base_origin:
         allowed.add(request_base_origin)
