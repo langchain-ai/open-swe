@@ -67,7 +67,7 @@ help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server'
 	@echo 'run                          - run webhook server'
-	@echo 'desktop                      - run the Electron desktop app (dashboard must be running)'
+	@echo 'desktop                      - run the Electron desktop app (backend must be running)'
 	@echo 'install                      - install dependencies (incl. dev extras)'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'

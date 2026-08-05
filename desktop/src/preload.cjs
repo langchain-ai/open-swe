@@ -3,8 +3,8 @@ const DRAG_REGION_ID = "open-swe-desktop-drag-region"
 window.addEventListener("DOMContentLoaded", () => {
   if (process.platform !== "darwin") return
 
-  // The hosted UI cannot detect its Electron host. Mirror T3 Code's 52px title bar and 90px
-  // traffic-light inset here while keeping the header's interactive descendants clickable.
+  // Mirror T3 Code's 52px title bar and 90px traffic-light inset while keeping the header's
+  // interactive descendants clickable.
   const style = document.createElement("style")
   style.textContent = `
     #${DRAG_REGION_ID} {

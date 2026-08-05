@@ -1,16 +1,17 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "private": true,
-  "description": "Electron wrapper for the Open SWE dashboard",
+  "description": "Experimental Open SWE desktop client",
   "main": "src/main.cjs",
   "scripts": {
-    "dev": "electron . --dev",
-    "start": "electron .",
+    "build:ui": "cd ../ui && pnpm run build",
+    "dev": "pnpm run build:ui && electron . --dev",
+    "start": "pnpm run build:ui && electron .",
     "test": "node --test test/*.test.cjs",
-    "check": "node --check src/config.cjs && node --check src/main.cjs && node --check src/preload.cjs && pnpm run test",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "check": "node --check src/config.cjs && node --check src/main.cjs && node --check src/preload.cjs && pnpm run test && pnpm run build:ui",
+    "pack": "pnpm run build:ui && electron-builder --dir",
+    "dist": "pnpm run build:ui && electron-builder"
   },
   "build": {
     "appId": "com.langchain.openswe",
@@ -28,6 +29,13 @@
       {
         "from": "resources/icon.png",
         "to": "icon.png"
+      },
+      {
+        "from": "../ui/.output/public",
+        "to": "ui",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {

@@ -1,43 +1,101 @@
-const DEFAULT_DEVELOPMENT_URL = "http://localhost:3000"
+const path = require("node:path")
+
+const APP_URL = "open-swe://app/"
+const DEFAULT_DEVELOPMENT_BACKEND_URL = "http://localhost:2024"
 const ALLOWED_PERMISSIONS = new Set(["clipboard-sanitized-write", "notifications"])
 
-function cliUrl(argv) {
-  const inline = argv.find((argument) => argument.startsWith("--url="))
-  if (inline) return inline.slice("--url=".length)
+function cliBackendUrl(argv) {
+  for (const name of ["--backend-url", "--url"]) {
+    const inline = argv.find((argument) => argument.startsWith(`${name}=`))
+    if (inline) return inline.slice(name.length + 1)
 
-  const index = argv.indexOf("--url")
-  return index === -1 ? undefined : argv[index + 1]
+    const index = argv.indexOf(name)
+    if (index !== -1) return argv[index + 1]
+  }
+  return undefined
 }
 
-function validateDashboardUrl(value) {
+function validateBackendUrl(value) {
   const url = new URL(value)
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Dashboard URL must use http or https")
+    throw new Error("Backend URL must use http or https")
   }
   return url.toString()
 }
 
-function resolveDashboardUrl({ argv, env, isPackaged, storedUrl }) {
+function resolveBackendUrl({ argv, env, isPackaged, storedUrl }) {
   const value =
-    cliUrl(argv) ||
+    cliBackendUrl(argv) ||
+    env.OPEN_SWE_BACKEND_URL ||
     env.OPEN_SWE_DESKTOP_URL ||
     storedUrl ||
-    (isPackaged ? undefined : DEFAULT_DEVELOPMENT_URL)
-  return value ? validateDashboardUrl(value.trim()) : null
+    (isPackaged ? undefined : DEFAULT_DEVELOPMENT_BACKEND_URL)
+  return value ? validateBackendUrl(value.trim()) : null
 }
 
-function isTrustedPermissionRequest(dashboardUrl, permission, requestingUrl) {
-  if (!ALLOWED_PERMISSIONS.has(permission)) return false
+function isAppUrl(value) {
   try {
-    return new URL(dashboardUrl).origin === new URL(requestingUrl).origin
+    const url = new URL(value)
+    return url.protocol === "open-swe:" && url.hostname === "app"
   } catch {
     return false
   }
 }
 
+function isTrustedPermissionRequest(permission, requestingUrl) {
+  return ALLOWED_PERMISSIONS.has(permission) && isAppUrl(requestingUrl)
+}
+
+function backendRequestUrl(backendUrl, appRequestUrl) {
+  if (!isAppUrl(appRequestUrl)) throw new Error("Invalid desktop request URL")
+  const source = new URL(appRequestUrl)
+  const target = new URL(`${source.pathname}${source.search}`, backendUrl)
+  if (source.pathname === "/dashboard/api/auth/login") {
+    target.searchParams.set("desktop", "true")
+  }
+  return target.toString()
+}
+
+function localCallbackUrl(backendUrl, navigationUrl) {
+  try {
+    const backend = new URL(backendUrl)
+    const target = new URL(navigationUrl)
+    if (
+      target.origin !== backend.origin ||
+      !/^\/dashboard\/api\/(?:auth|slack|notion)\/callback$/.test(target.pathname)
+    ) {
+      return null
+    }
+    return `${APP_URL}${target.pathname.slice(1)}${target.search}${target.hash}`
+  } catch {
+    return null
+  }
+}
+
+function appRedirectUrl(location) {
+  const target = new URL(location, APP_URL)
+  return `${APP_URL}${target.pathname.replace(/^\//, "")}${target.search}${target.hash}`
+}
+
+function staticFilePath(root, appRequestUrl) {
+  if (!isAppUrl(appRequestUrl)) return null
+  const pathname = decodeURIComponent(new URL(appRequestUrl).pathname)
+  const relative = pathname.replace(/^\/+/, "")
+  const rootPath = path.resolve(root)
+  const candidate = path.resolve(rootPath, relative)
+  if (candidate !== rootPath && !candidate.startsWith(`${rootPath}${path.sep}`)) return null
+  return candidate
+}
+
 module.exports = {
-  DEFAULT_DEVELOPMENT_URL,
+  APP_URL,
+  DEFAULT_DEVELOPMENT_BACKEND_URL,
+  appRedirectUrl,
+  backendRequestUrl,
+  isAppUrl,
   isTrustedPermissionRequest,
-  resolveDashboardUrl,
-  validateDashboardUrl,
+  localCallbackUrl,
+  resolveBackendUrl,
+  staticFilePath,
+  validateBackendUrl,
 }

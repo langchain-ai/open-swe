@@ -64,6 +64,9 @@ jobs:
         env:
           ELECTRON_GET_USE_PROXY: "true"
         run: pnpm install --frozen-lockfile
+      - name: Install UI dependencies
+        working-directory: ui
+        run: pnpm install --frozen-lockfile
       - name: Run desktop checks
         working-directory: desktop
         run: pnpm run check

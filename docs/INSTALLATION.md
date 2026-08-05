@@ -64,7 +64,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
    - **Homepage URL**: This can be any valid URL — it's only shown on the GitHub Marketplace page (which you won't be using). Use something like `https://github.com/langchain-ai/open-swe`
    - **Callback URL**: GitHub Apps allow multiple callback URLs (one per line). Add **both**:
      1. `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/your-org-github-oauth`). This is the **agent-runtime** OAuth callback, brokered by LangSmith (step 4b).
-     2. `http://localhost:2024/dashboard/api/auth/callback` — the **dashboard-login** OAuth callback (step 8). For production, also add `https://<your-dashboard-api-url>/dashboard/api/auth/callback`. This is a separate, direct GitHub OAuth flow (not via LangSmith), so it needs its own callback URL.
+     2. `http://localhost:2024/dashboard/api/auth/callback` — the **dashboard-login** OAuth callback (step 8). For production, also add `https://<your-dashboard-api-url>/dashboard/api/auth/callback`. If you distribute the desktop app, add `https://<your-backend-url>/dashboard/api/auth/callback` as well. This is a separate, direct GitHub OAuth flow (not via LangSmith), so it needs its own callback URL.
    - **Request user authorization (OAuth) during installation**: ✅ Enable this
    - **Webhook URL**: `https://<your-ngrok-url>/webhooks/github` — use the ngrok URL from step 2
    - **Webhook secret**: generate one and save it — you'll need it later as `GITHUB_WEBHOOK_SECRET`:
@@ -604,20 +604,21 @@ Other UI scripts: `pnpm run build`, `pnpm run typecheck`, `pnpm run lint`, `pnpm
 > **Experimental:** The desktop wrapper is an early-access convenience surface. The web UI is
 > the recommended way to use Open SWE.
 
-The Electron app in `desktop/` is a native wrapper around this same dashboard. With the backend
-and dashboard still running, start it in another terminal:
+The Electron app in `desktop/` includes the compiled dashboard UI. It only needs the Open SWE
+backend to be running:
 
 ```bash
-cd desktop
-pnpm install
-pnpm run dev
+pnpm --dir ui install
+pnpm --dir desktop install
+pnpm --dir desktop run dev
 ```
 
-Development loads `http://localhost:3000`. To use a hosted or self-hosted dashboard instead, run
-`pnpm run start -- --url=https://your-dashboard.example.com` or set
-`OPEN_SWE_DESKTOP_URL`. Create an unpacked application with `pnpm run pack`, or an installer for
-the current platform with `pnpm run dist`. Packaged builds ask for the organization's dashboard
-URL on first launch and store it locally; they never default to the maintainers' deployment.
+Development connects to `http://localhost:2024`. To use a hosted backend instead, run
+`pnpm --dir desktop run start -- --backend-url=https://your-backend.example.com` or set
+`OPEN_SWE_BACKEND_URL`. Create an unpacked application with `pnpm --dir desktop run pack`, or an
+installer with `pnpm --dir desktop run dist`. Packaged builds ask for the organization's backend
+URL on first launch and store it locally; they never default to the maintainers' deployment. The
+GitHub App must allow `<backend-url>/dashboard/api/auth/callback` for desktop login.
 
 ## 9. Verify it works
 

@@ -373,6 +373,7 @@ def _clear_notion_state_cookie(response: Response) -> None:
 async def auth_login(
     request: Request,
     redirect_to: str | None = None,
+    desktop: bool = False,
 ) -> RedirectResponse:
     client_id = os.environ.get("GITHUB_APP_CLIENT_ID", "")
     if not client_id:
@@ -384,7 +385,8 @@ async def auth_login(
         redirect_to=safe_redirect,
         nonce_hash=hash_state_nonce(nonce),
     )
-    redirect_uri = f"{_api_base_url()}/dashboard/api/auth/callback"
+    api_base_url = str(request.base_url).rstrip("/") if desktop else _api_base_url()
+    redirect_uri = f"{api_base_url}/dashboard/api/auth/callback"
     query = urlencode(
         {
             "client_id": client_id,

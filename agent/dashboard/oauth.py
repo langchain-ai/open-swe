@@ -246,6 +246,9 @@ def require_same_origin(request: Request) -> None:
     allowed = allowed_dashboard_origins()
     if not allowed:
         return
+    request_base_origin = _origin_of(str(request.base_url))
+    if request_base_origin:
+        allowed.add(request_base_origin)
     origin = request_origin(request)
     if not origin or origin not in allowed:
         logger.warning(

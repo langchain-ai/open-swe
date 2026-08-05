@@ -1,14 +1,44 @@
 const fs = require("node:fs")
 const path = require("node:path")
-const { app, BrowserWindow, Menu, dialog, session, shell } = require("electron")
+const { pathToFileURL } = require("node:url")
 const {
+  app,
+  BrowserWindow,
+  Menu,
+  dialog,
+  net,
+  protocol,
+  session,
+  shell,
+} = require("electron")
+const {
+  APP_URL,
+  appRedirectUrl,
+  backendRequestUrl,
+  isAppUrl,
   isTrustedPermissionRequest,
-  resolveDashboardUrl,
-  validateDashboardUrl,
+  localCallbackUrl,
+  resolveBackendUrl,
+  staticFilePath,
+  validateBackendUrl,
 } = require("./config.cjs")
 
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "open-swe",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+      codeCache: true,
+    },
+  },
+])
+
 const isDevelopment = !app.isPackaged || process.argv.includes("--dev")
-let dashboardUrl = null
+let backendUrl = null
 let mainWindow = null
 let setupWindow = null
 
@@ -16,21 +46,21 @@ function configPath() {
   return path.join(app.getPath("userData"), "desktop-config.json")
 }
 
-function readStoredDashboardUrl() {
+function readStoredBackendUrl() {
   try {
     const config = JSON.parse(fs.readFileSync(configPath(), "utf8"))
-    return typeof config.dashboardUrl === "string"
-      ? validateDashboardUrl(config.dashboardUrl)
+    return typeof config.backendUrl === "string"
+      ? validateBackendUrl(config.backendUrl)
       : undefined
   } catch {
     return undefined
   }
 }
 
-function storeDashboardUrl(value) {
-  const url = validateDashboardUrl(value.trim())
+function storeBackendUrl(value) {
+  const url = validateBackendUrl(value.trim())
   fs.mkdirSync(path.dirname(configPath()), { recursive: true })
-  fs.writeFileSync(configPath(), `${JSON.stringify({ dashboardUrl: url }, null, 2)}\n`, {
+  fs.writeFileSync(configPath(), `${JSON.stringify({ backendUrl: url }, null, 2)}\n`, {
     mode: 0o600,
   })
   return url
@@ -40,6 +70,12 @@ function iconPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, "icon.png")
     : path.resolve(__dirname, "../resources/icon.png")
+}
+
+function bundledUiPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "ui")
+    : path.resolve(__dirname, "../../ui/.output/public")
 }
 
 function errorPage(error) {
@@ -60,8 +96,7 @@ function errorPage(error) {
   </head>
   <body>
     <main>
-      <h1>Open SWE could not be reached</h1>
-      <p>${escapeHtml(dashboardUrl ?? "")}</p>
+      <h1>Open SWE could not start</h1>
       <p>${escapeHtml(message)}</p>
       <p>Use View → Reload to try again.</p>
     </main>
@@ -78,18 +113,67 @@ function escapeHtml(value) {
   })
 }
 
-async function loadDashboard(window) {
-  if (!dashboardUrl) return
+async function proxyBackendRequest(request) {
+  const source = new URL(request.url)
+  const headers = new Headers(request.headers)
+  headers.delete("host")
+  headers.set("origin", new URL(backendUrl).origin)
+
+  const upstream = await session.defaultSession.fetch(
+    backendRequestUrl(backendUrl, request.url),
+    {
+      method: request.method,
+      headers,
+      body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
+      redirect: "manual",
+    }
+  )
+
+  const location = upstream.headers.get("location")
+  if (location && source.pathname.endsWith("/callback")) {
+    const responseHeaders = new Headers(upstream.headers)
+    responseHeaders.set("location", appRedirectUrl(location))
+    return new Response(upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: responseHeaders,
+    })
+  }
+  return upstream
+}
+
+async function serveBundledUi(request) {
+  if (!backendUrl) return new Response("Backend is not configured", { status: 503 })
+  const url = new URL(request.url)
+  if (url.pathname.startsWith("/dashboard/api")) return proxyBackendRequest(request)
+  if (!["GET", "HEAD"].includes(request.method)) {
+    return new Response("Method not allowed", { status: 405 })
+  }
+
+  const root = bundledUiPath()
+  let filePath = staticFilePath(root, request.url)
+  if (!filePath || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    if (path.extname(url.pathname)) return new Response("Not found", { status: 404 })
+    filePath = path.join(root, "_shell.html")
+  }
+  if (!fs.existsSync(filePath)) {
+    return new Response("Bundled UI is missing. Run pnpm run build:ui.", { status: 500 })
+  }
+  return net.fetch(pathToFileURL(filePath).toString())
+}
+
+async function loadApp(window) {
+  if (!backendUrl) return
   try {
-    await window.loadURL(dashboardUrl)
+    await window.loadURL(APP_URL)
   } catch (error) {
     if (!window.isDestroyed()) await window.loadURL(errorPage(error))
   }
 }
 
 function createMenu() {
-  const dashboardSettingsItem = {
-    label: "Dashboard URL…",
+  const backendSettingsItem = {
+    label: "Backend URL…",
     click: () => createSetupWindow(),
   }
   const template = [
@@ -99,7 +183,7 @@ function createMenu() {
             label: app.name,
             submenu: [
               { role: "about" },
-              dashboardSettingsItem,
+              backendSettingsItem,
               { type: "separator" },
               { role: "services" },
               { type: "separator" },
@@ -117,7 +201,7 @@ function createMenu() {
       : [
           {
             label: "File",
-            submenu: [dashboardSettingsItem, { type: "separator" }, { role: "quit" }],
+            submenu: [backendSettingsItem, { type: "separator" }, { role: "quit" }],
           },
         ]),
     {
@@ -139,7 +223,7 @@ function createMenu() {
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
           click: () => {
-            if (mainWindow) void loadDashboard(mainWindow)
+            if (mainWindow) void loadApp(mainWindow)
           },
         },
         ...(isDevelopment ? [{ role: "toggleDevTools" }] : []),
@@ -168,8 +252,21 @@ function createMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+function handleNavigation(window, event, url) {
+  const callback = backendUrl ? localCallbackUrl(backendUrl, url) : null
+  if (callback) {
+    event.preventDefault()
+    void window.loadURL(callback)
+    return
+  }
+  const target = new URL(url)
+  if (!isAppUrl(url) && !["http:", "https:"].includes(target.protocol)) {
+    event.preventDefault()
+  }
+}
+
 function createWindow() {
-  if (!dashboardUrl) return createSetupWindow()
+  if (!backendUrl) return createSetupWindow()
   const window = new BrowserWindow({
     title: "Open SWE",
     width: 1440,
@@ -198,21 +295,22 @@ function createWindow() {
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null
   })
-
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (["http:", "https:", "mailto:"].includes(new URL(url).protocol)) {
       void shell.openExternal(url)
     }
     return { action: "deny" }
   })
-  window.webContents.on("will-navigate", (event, url) => {
-    const protocol = new URL(url).protocol
-    if (protocol !== "http:" && protocol !== "https:") event.preventDefault()
-  })
+  window.webContents.on("will-navigate", (event, url) =>
+    handleNavigation(window, event, url)
+  )
+  window.webContents.on("will-redirect", (event, url) =>
+    handleNavigation(window, event, url)
+  )
   window.webContents.on("will-attach-webview", (event) => event.preventDefault())
 
   mainWindow = window
-  void loadDashboard(window)
+  void loadApp(window)
   return window
 }
 
@@ -244,18 +342,22 @@ function createSetupWindow() {
     if (setupWindow === window) setupWindow = null
   })
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
-  window.webContents.on("will-navigate", (event, targetUrl) => {
+  window.webContents.on("will-navigate", async (event, targetUrl) => {
     if (!targetUrl.startsWith("open-swe-setup://configure")) return
     event.preventDefault()
     try {
       const value = new URL(targetUrl).searchParams.get("url")
-      if (!value) throw new Error("Enter a dashboard URL")
-      dashboardUrl = storeDashboardUrl(value)
-      if (mainWindow && !mainWindow.isDestroyed()) void loadDashboard(mainWindow)
+      if (!value) throw new Error("Enter a backend URL")
+      const previousUrl = backendUrl
+      backendUrl = storeBackendUrl(value)
+      if (previousUrl && previousUrl !== backendUrl) {
+        await session.defaultSession.clearStorageData({ origin: APP_URL })
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow)
       else createWindow()
       window.close()
     } catch (error) {
-      dialog.showErrorBox("Invalid Open SWE dashboard URL", error.message)
+      dialog.showErrorBox("Invalid Open SWE backend URL", error.message)
     }
   })
 
@@ -269,7 +371,6 @@ function configurePermissions() {
     (webContents, permission, callback, details) => {
       callback(
         isTrustedPermissionRequest(
-          dashboardUrl,
           permission,
           details.requestingUrl || webContents.getURL()
         )
@@ -278,7 +379,7 @@ function configurePermissions() {
   )
   session.defaultSession.setPermissionCheckHandler(
     (_webContents, permission, requestingOrigin) =>
-      isTrustedPermissionRequest(dashboardUrl, permission, requestingOrigin)
+      isTrustedPermissionRequest(permission, requestingOrigin)
   )
 }
 
@@ -295,20 +396,21 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(() => {
     try {
-      dashboardUrl = resolveDashboardUrl({
+      backendUrl = resolveBackendUrl({
         argv: process.argv.slice(1),
         env: process.env,
         isPackaged: app.isPackaged,
-        storedUrl: readStoredDashboardUrl(),
+        storedUrl: readStoredBackendUrl(),
       })
     } catch (error) {
-      dialog.showErrorBox("Invalid Open SWE dashboard URL", error.message)
+      dialog.showErrorBox("Invalid Open SWE backend URL", error.message)
       app.exit(1)
       return
     }
 
     app.setAppUserModelId("com.langchain.openswe")
     if (process.platform === "darwin") app.dock.setIcon(iconPath())
+    protocol.handle("open-swe", serveBundledUi)
     configurePermissions()
     createMenu()
     createWindow()

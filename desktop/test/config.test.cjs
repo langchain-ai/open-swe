@@ -1,29 +1,32 @@
 const test = require("node:test")
 const assert = require("node:assert/strict")
+const path = require("node:path")
 const {
-  DEFAULT_DEVELOPMENT_URL,
+  APP_URL,
+  DEFAULT_DEVELOPMENT_BACKEND_URL,
+  appRedirectUrl,
+  backendRequestUrl,
   isTrustedPermissionRequest,
-  resolveDashboardUrl,
-  validateDashboardUrl,
+  localCallbackUrl,
+  resolveBackendUrl,
+  staticFilePath,
+  validateBackendUrl,
 } = require("../src/config.cjs")
 
-test("uses the local dashboard for development", () => {
+test("uses the local backend for development", () => {
   assert.equal(
-    resolveDashboardUrl({ argv: [], env: {}, isPackaged: false }),
-    `${DEFAULT_DEVELOPMENT_URL}/`
+    resolveBackendUrl({ argv: [], env: {}, isPackaged: false }),
+    `${DEFAULT_DEVELOPMENT_BACKEND_URL}/`
   )
 })
 
-test("requires dashboard configuration in packaged builds", () => {
-  assert.equal(
-    resolveDashboardUrl({ argv: [], env: {}, isPackaged: true }),
-    null
-  )
+test("requires backend configuration in packaged builds", () => {
+  assert.equal(resolveBackendUrl({ argv: [], env: {}, isPackaged: true }), null)
 })
 
-test("uses the stored dashboard in packaged builds", () => {
+test("uses the stored backend in packaged builds", () => {
   assert.equal(
-    resolveDashboardUrl({
+    resolveBackendUrl({
       argv: [],
       env: {},
       isPackaged: true,
@@ -33,30 +36,11 @@ test("uses the stored dashboard in packaged builds", () => {
   )
 })
 
-test("allows environment and command-line URL overrides", () => {
+test("command-line and environment configuration override the stored backend", () => {
   assert.equal(
-    resolveDashboardUrl({
-      argv: ["--url=https://cli.example/app"],
-      env: { OPEN_SWE_DESKTOP_URL: "https://env.example" },
-      isPackaged: true,
-    }),
-    "https://cli.example/app"
-  )
-  assert.equal(
-    resolveDashboardUrl({
-      argv: [],
-      env: { OPEN_SWE_DESKTOP_URL: "http://localhost:4000" },
-      isPackaged: true,
-    }),
-    "http://localhost:4000/"
-  )
-})
-
-test("command-line and environment configuration override the stored dashboard", () => {
-  assert.equal(
-    resolveDashboardUrl({
-      argv: ["--url=https://cli.example"],
-      env: { OPEN_SWE_DESKTOP_URL: "https://env.example" },
+    resolveBackendUrl({
+      argv: ["--backend-url=https://cli.example"],
+      env: { OPEN_SWE_BACKEND_URL: "https://env.example" },
       isPackaged: true,
       storedUrl: "https://stored.example",
     }),
@@ -64,42 +48,79 @@ test("command-line and environment configuration override the stored dashboard",
   )
 })
 
-test("rejects non-web URLs", () => {
-  assert.throws(() => validateDashboardUrl("file:///tmp/index.html"), /http or https/)
-  assert.throws(() => validateDashboardUrl("javascript:alert(1)"), /http or https/)
+test("supports the original desktop URL overrides", () => {
+  assert.equal(
+    resolveBackendUrl({
+      argv: [],
+      env: { OPEN_SWE_DESKTOP_URL: "http://localhost:4000" },
+      isPackaged: true,
+    }),
+    "http://localhost:4000/"
+  )
+  assert.equal(
+    resolveBackendUrl({
+      argv: ["--url=https://legacy.example/app"],
+      env: {},
+      isPackaged: true,
+    }),
+    "https://legacy.example/app"
+  )
 })
 
-test("only grants expected permissions to the dashboard origin", () => {
+test("rejects non-web backend URLs", () => {
+  assert.throws(() => validateBackendUrl("file:///tmp/index.html"), /http or https/)
+  assert.throws(() => validateBackendUrl("javascript:alert(1)"), /http or https/)
+})
+
+test("only grants expected permissions to the bundled app", () => {
+  assert.equal(isTrustedPermissionRequest("notifications", `${APP_URL}settings`), true)
+  assert.equal(isTrustedPermissionRequest("camera", APP_URL), false)
   assert.equal(
-    isTrustedPermissionRequest(
-      "https://dashboard.example.com/app",
-      "notifications",
-      "https://dashboard.example.com/settings"
-    ),
-    true
-  )
-  assert.equal(
-    isTrustedPermissionRequest(
-      "https://dashboard.example.com",
-      "clipboard-sanitized-write",
-      "https://dashboard.example.com"
-    ),
-    true
-  )
-  assert.equal(
-    isTrustedPermissionRequest(
-      "https://dashboard.example.com",
-      "camera",
-      "https://dashboard.example.com"
-    ),
+    isTrustedPermissionRequest("notifications", "https://dashboard.example"),
     false
   )
+})
+
+test("maps desktop API requests to the selected backend", () => {
   assert.equal(
-    isTrustedPermissionRequest(
-      "https://dashboard.example.com",
-      "notifications",
-      "https://example.com"
+    backendRequestUrl(
+      "https://backend.example/base/",
+      `${APP_URL}dashboard/api/threads?limit=20`
     ),
-    false
+    "https://backend.example/dashboard/api/threads?limit=20"
   )
+  assert.equal(
+    backendRequestUrl("https://backend.example", `${APP_URL}dashboard/api/auth/login`),
+    "https://backend.example/dashboard/api/auth/login?desktop=true"
+  )
+})
+
+test("localizes backend OAuth callbacks and post-login redirects", () => {
+  assert.equal(
+    localCallbackUrl(
+      "https://backend.example",
+      "https://backend.example/dashboard/api/auth/callback?code=123&state=456"
+    ),
+    `${APP_URL}dashboard/api/auth/callback?code=123&state=456`
+  )
+  assert.equal(
+    localCallbackUrl(
+      "https://backend.example",
+      "https://evil.example/dashboard/api/auth/callback"
+    ),
+    null
+  )
+  assert.equal(
+    appRedirectUrl("https://dashboard.example/agents/thread-1?from=oauth#latest"),
+    `${APP_URL}agents/thread-1?from=oauth#latest`
+  )
+})
+
+test("keeps static file resolution inside the bundled UI root", () => {
+  const root = path.resolve("/tmp/open-swe-ui")
+  assert.equal(
+    staticFilePath(root, `${APP_URL}assets/app.js`),
+    path.join(root, "assets/app.js")
+  )
+  assert.equal(staticFilePath(root, `${APP_URL}%2e%2e%2fsecret`), null)
 })

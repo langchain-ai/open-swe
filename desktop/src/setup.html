@@ -24,16 +24,16 @@
   </head>
   <body>
     <main>
-      <h1>Connect to your Open SWE dashboard</h1>
-      <p>Enter the dashboard URL deployed by your organization.</p>
+      <h1>Connect to your Open SWE backend</h1>
+      <p>The web interface is included in this app. Enter your organization's backend URL.</p>
       <form action="open-swe-setup://configure" method="get">
-        <label for="url">Dashboard URL</label>
-        <input id="url" name="url" type="url" placeholder="https://open-swe.example.com" required autofocus />
+        <label for="url">Backend URL</label>
+        <input id="url" name="url" type="url" placeholder="https://open-swe-api.example.com" required autofocus />
         <button type="submit">Continue</button>
       </form>
       <aside>
         The desktop wrapper is experimental. The web UI remains the recommended way to use
-        Open SWE. Signing in will authenticate against the dashboard configured above.
+        Open SWE. Signing in will authenticate against the backend configured above.
       </aside>
     </main>
   </body>
