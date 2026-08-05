@@ -17,9 +17,13 @@ logger = logging.getLogger(__name__)
 async def save_user_instructions(instructions: str) -> dict[str, Any]:
     """Save the triggering user's standing, user-level custom instructions.
 
-    Call this only when the user states a standing behavioural preference
-    ("always …", "never …", "from now on …", "stop doing …") that should apply
-    to all their future runs — not for one-off task details.
+    Call this only when the user clearly states a standing behavioural preference
+    ("always …", "never …", "from now on …", "stop doing …") that pertains to
+    that single user and should apply to all their future runs.
+
+    This is not general-purpose memory. Do not use it for one-off task details,
+    conversation context, shared team/repository/project facts, or preferences
+    concerning other users.
 
     This is a full replacement: pass the COMPLETE new instruction text. Your
     current user-level instructions are shown in your system prompt under "Your

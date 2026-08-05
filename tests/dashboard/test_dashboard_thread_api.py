@@ -1768,6 +1768,10 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
             thread["metadata"].update(metadata)
 
     class FakeRuns:
+        async def list(self, thread_id: str, **kwargs: object) -> list[dict[str, str]]:
+            calls.append(("list", {"thread_id": thread_id, **kwargs}))
+            return [{"run_id": f"{kwargs['status']}-run"}]
+
         async def cancel_many(self, **kwargs: object) -> None:
             calls.append(("cancel_many", kwargs))
 
@@ -1779,9 +1783,13 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
 
     result = await thread_api.cancel_dashboard_thread("thread-1", "owner")
 
-    assert calls[0] == (
+    assert calls[2] == (
         "cancel_many",
-        {"thread_id": "thread-1", "status": "all", "action": "interrupt"},
+        {
+            "thread_id": "thread-1",
+            "run_ids": ["pending-run", "running-run"],
+            "action": "interrupt",
+        },
     )
     # Reported as interrupted even though the platform still says busy.
     assert result["status"] == "interrupted"
@@ -1842,6 +1850,10 @@ async def test_admin_cancel_dashboard_thread_interrupts_all_active_runs(monkeypa
             thread["metadata"].update(metadata)
 
     class FakeRuns:
+        async def list(self, thread_id: str, **kwargs: object) -> list[dict[str, str]]:
+            calls.append(("list", {"thread_id": thread_id, **kwargs}))
+            return [{"run_id": f"{kwargs['status']}-run"}]
+
         async def cancel_many(self, **kwargs: object) -> None:
             calls.append(("cancel_many", kwargs))
 
@@ -1853,11 +1865,15 @@ async def test_admin_cancel_dashboard_thread_interrupts_all_active_runs(monkeypa
 
     result = await thread_api.admin_cancel_dashboard_thread("thread-1")
 
-    assert calls[0] == (
+    assert calls[2] == (
         "cancel_many",
-        {"thread_id": "thread-1", "status": "all", "action": "interrupt"},
+        {
+            "thread_id": "thread-1",
+            "run_ids": ["pending-run", "running-run"],
+            "action": "interrupt",
+        },
     )
-    assert calls[1][0] == "update"
+    assert calls[3][0] == "update"
     assert thread["metadata"]["latest_run_status"] == "interrupted"
     assert result["id"] == "thread-1"
 
@@ -1874,6 +1890,9 @@ async def test_admin_cancel_dashboard_thread_does_not_update_on_cancel_failure(m
             updated = True
 
     class FakeRuns:
+        async def list(self, thread_id: str, **kwargs: object) -> list[dict[str, str]]:
+            return [{"run_id": f"{kwargs['status']}-run"}]
+
         async def cancel_many(self, **kwargs: object) -> None:
             raise RuntimeError("runtime unavailable")
 

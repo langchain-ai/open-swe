@@ -23,6 +23,7 @@ import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as AgentsSnapshotsRouteImport } from './routes/agents_.snapshots'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
 import { Route as AgentsThreadsRouteImport } from './routes/agents/threads'
+import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
 import { Route as AdminEvalsRouteImport } from './routes/admin_.evals'
 import { Route as AgentsReviewsIndexRouteImport } from './routes/agents/reviews/index'
@@ -104,6 +105,11 @@ const AgentsThreadsRoute = AgentsThreadsRouteImport.update({
   path: '/threads',
   getParentRoute: () => AgentsRoute,
 } as any)
+const AgentsSkillsRoute = AgentsSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
+  getParentRoute: () => AgentsRoute,
+} as any)
 const AgentsThreadIdRoute = AgentsThreadIdRouteImport.update({
   id: '/$threadId',
   path: '/$threadId',
@@ -169,6 +175,7 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/admin/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/agents/skills': typeof AgentsSkillsRoute
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/snapshots': typeof AgentsSnapshotsRoute
@@ -194,6 +201,7 @@ export interface FileRoutesByTo {
   '/usage': typeof UsageRoute
   '/admin/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/agents/skills': typeof AgentsSkillsRoute
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/snapshots': typeof AgentsSnapshotsRoute
@@ -221,6 +229,7 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/admin_/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/agents/skills': typeof AgentsSkillsRoute
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/snapshots': typeof AgentsSnapshotsRoute
@@ -249,6 +258,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/admin/evals'
     | '/agents/$threadId'
+    | '/agents/skills'
     | '/agents/threads'
     | '/agents/instructions'
     | '/agents/snapshots'
@@ -274,6 +284,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/admin/evals'
     | '/agents/$threadId'
+    | '/agents/skills'
     | '/agents/threads'
     | '/agents/instructions'
     | '/agents/snapshots'
@@ -300,6 +311,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/admin_/evals'
     | '/agents/$threadId'
+    | '/agents/skills'
     | '/agents/threads'
     | '/agents_/instructions'
     | '/agents_/snapshots'
@@ -433,6 +445,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsThreadsRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/agents/skills': {
+      id: '/agents/skills'
+      path: '/skills'
+      fullPath: '/agents/skills'
+      preLoaderRoute: typeof AgentsSkillsRouteImport
+      parentRoute: typeof AgentsRoute
+    }
     '/agents/$threadId': {
       id: '/agents/$threadId'
       path: '/$threadId'
@@ -508,6 +527,7 @@ declare module '@tanstack/react-router' {
 
 interface AgentsRouteChildren {
   AgentsThreadIdRoute: typeof AgentsThreadIdRoute
+  AgentsSkillsRoute: typeof AgentsSkillsRoute
   AgentsThreadsRoute: typeof AgentsThreadsRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   AgentsThreadIdPlanRoute: typeof AgentsThreadIdPlanRoute
@@ -520,6 +540,7 @@ interface AgentsRouteChildren {
 
 const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsThreadIdRoute: AgentsThreadIdRoute,
+  AgentsSkillsRoute: AgentsSkillsRoute,
   AgentsThreadsRoute: AgentsThreadsRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   AgentsThreadIdPlanRoute: AgentsThreadIdPlanRoute,

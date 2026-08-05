@@ -16,6 +16,7 @@ import {
   GitPullRequestIcon,
   LightningIcon,
   PlusIcon,
+  SparkleIcon,
   TrashIcon,
   TreeStructureIcon,
 } from "@phosphor-icons/react"
@@ -99,6 +100,7 @@ interface AgentsSidebarProps {
 }
 
 const NAV = [
+  { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/my-settings", label: "Dashboard", icon: ChartLineUpIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },

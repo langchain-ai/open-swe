@@ -10,6 +10,8 @@ import type {
   ThreadsPageParams,
 } from "./api"
 import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
+import type { SkillInput } from "@/lib/api"
+import { api } from "@/lib/api"
 
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
@@ -56,6 +58,55 @@ export function seedAgentThreadLists(
 
 export const agentScheduleKeys = {
   all: ["agent-schedules"] as const,
+}
+
+export const agentSkillKeys = {
+  all: ["agent-skills"] as const,
+}
+
+export function useAgentSkills() {
+  return useQuery({
+    queryKey: agentSkillKeys.all,
+    queryFn: async () => {
+      const items = []
+      let offset = 0
+      do {
+        const page = await api.listSkills(offset)
+        items.push(...page.items)
+        offset = page.next_offset ?? 0
+      } while (offset)
+      return items
+    },
+  })
+}
+
+export function useCreateAgentSkill() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, ...body }: SkillInput & { name: string }) =>
+      api.createSkill(name, body),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: agentSkillKeys.all }),
+  })
+}
+
+export function useUpdateAgentSkill() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, ...body }: SkillInput & { name: string }) =>
+      api.saveSkill(name, body),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: agentSkillKeys.all }),
+  })
+}
+
+export function useDeleteAgentSkill() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.deleteSkill,
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: agentSkillKeys.all }),
+  })
 }
 
 // Sidebar lists and detail reads return the same per-thread summary, so warming
