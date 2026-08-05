@@ -85,8 +85,8 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
           onClick={toggle}
           className="inline-flex items-center gap-1.5 text-left hover:brightness-125 transition-colors"
         >
-          <span className={isError ? "text-red-400" : "text-[color:var(--ui-text-muted)]"}>
-            Edited <span className="text-[color:var(--ui-accent)]">{fileName}</span>
+          <span className={isError ? "text-red-400" : "text-muted-foreground"}>
+            Edited <span className="text-primary">{fileName}</span>
           </span>
         </button>
       </div>
@@ -101,16 +101,16 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
           onClick={toggle}
           className="inline-flex items-center gap-1.5 text-left hover:brightness-125 transition-colors"
         >
-          <span className={isError ? "text-red-400" : "text-[color:var(--ui-text-muted)]"}>
+          <span className={isError ? "text-red-400" : "text-muted-foreground"}>
             Edited file
           </span>
-          <span className="text-[color:var(--ui-text-dim)] text-[10px]">▾</span>
+          <span className="text-muted-foreground/70 text-[10px]">▾</span>
         </button>
       </div>
 
-      <div className="rounded-lg bg-[var(--ui-code-bubble)] overflow-hidden border border-[var(--ui-border-subtle)]">
+      <div className="rounded-lg bg-muted overflow-hidden border border-border/60">
         <div className="px-3 py-2 flex items-center gap-2">
-          <span className={`text-[13px] truncate flex-1 min-w-0 ${isError ? "text-red-400" : "text-[color:var(--ui-accent)]"}`}>
+          <span className={`text-[13px] truncate flex-1 min-w-0 ${isError ? "text-red-400" : "text-primary"}`}>
             {filePath}
           </span>
           <span className="shrink-0 text-xs flex items-center gap-2">
@@ -122,7 +122,7 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
         <div
           ref={scrollRef}
           onScroll={updateScrollIndicators}
-          className="border-t border-[var(--ui-border)] max-h-[250px] overflow-auto"
+          className="border-t border-border max-h-[250px] overflow-auto"
           style={{ boxShadow: edgeShadows || "none" }}
         >
           <MultiFileDiff
@@ -169,7 +169,7 @@ export const ToolExecution = memo(function ToolExecution({
     return (
       <div className="my-1 text-[12px] leading-5">
         <DiffView diffData={diffData} />
-        <span className="text-[color:var(--ui-text-dim)]">Waiting for approval...</span>
+        <span className="text-muted-foreground/70">Waiting for approval...</span>
       </div>
     );
   }
@@ -194,7 +194,7 @@ export const ToolExecution = memo(function ToolExecution({
       ? "text-red-400"
       : status === "in_progress" || status === "pending"
         ? "text-yellow-400"
-        : "text-[color:var(--ui-text-muted)]";
+        : "text-muted-foreground";
 
   return (
     <div className="my-0.5 text-[12px] leading-5">

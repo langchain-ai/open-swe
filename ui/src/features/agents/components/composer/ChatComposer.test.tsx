@@ -10,7 +10,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { CloudPromptBar } from "./CloudPromptBar"
+import { ChatComposer } from "./ChatComposer"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 
 const stream = {
@@ -43,22 +43,22 @@ beforeEach(() => {
   cancelThread.mockClear()
 })
 
-function renderPromptBar(running: boolean) {
+function renderComposer(running: boolean) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   })
   render(
     <QueryClientProvider client={client}>
       <AgentThreadStreamBoundary>
-        <CloudPromptBar activeRun={{ threadId: "thread-1", running }} />
+        <ChatComposer activeRun={{ threadId: "thread-1", running }} />
       </AgentThreadStreamBoundary>
     </QueryClientProvider>
   )
 }
 
-describe("CloudPromptBar stop button", () => {
+describe("ChatComposer stop button", () => {
   it("offers to stop a run this client never joined", async () => {
-    renderPromptBar(true)
+    renderComposer(true)
 
     fireEvent.click(screen.getByRole("button", { name: "Stop run" }))
 
@@ -68,7 +68,7 @@ describe("CloudPromptBar stop button", () => {
 
   it("cancels server-side even while streaming, since stop() may know no run id", async () => {
     stream.isLoading = true
-    renderPromptBar(false)
+    renderComposer(false)
 
     fireEvent.click(screen.getByRole("button", { name: "Stop run" }))
 
@@ -77,7 +77,7 @@ describe("CloudPromptBar stop button", () => {
 
   it("keeps the run live when cancellation fails", async () => {
     cancelThread.mockRejectedValueOnce(new Error("502"))
-    renderPromptBar(true)
+    renderComposer(true)
 
     fireEvent.click(screen.getByRole("button", { name: "Stop run" }))
 
@@ -89,7 +89,7 @@ describe("CloudPromptBar stop button", () => {
   })
 
   it("shows the send button when no run is live", () => {
-    renderPromptBar(false)
+    renderComposer(false)
 
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()

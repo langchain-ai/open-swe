@@ -57,7 +57,7 @@ export function WorkflowApprovalCard({
   }
 
   return (
-    <div className="border-b border-[var(--ui-border)] bg-[var(--ui-panel)] px-4 py-3">
+    <div className="border-b border-border bg-card px-4 py-3">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
         {approvals.map((approval) => {
           const busy = decision.isPending
@@ -65,20 +65,20 @@ export function WorkflowApprovalCard({
             <section
               key={approval.fingerprint}
               data-testid="workflow-approval-card"
-              className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-bg)] p-3 shadow-sm"
+              className="rounded-lg border border-border bg-background p-3 shadow-sm"
             >
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="min-w-0 space-y-1">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-[var(--ui-text)]">
-                    <ShieldCheck className="size-4 text-[var(--ui-accent)]" />
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <ShieldCheck className="size-4 text-primary" />
                     Workflow file approval required
                   </div>
-                  <p className="text-xs text-[var(--ui-text-dim)]">
+                  <p className="text-xs text-muted-foreground/70">
                     {approval.repo || "Repository"} on{" "}
                     {approval.branch || "Current branch"} ·{" "}
                     {shortSha(approval.baseSha)} → {shortSha(approval.headSha)}
                   </p>
-                  <p className="font-mono text-[0.68rem] break-all text-[var(--ui-text-dim)]">
+                  <p className="font-mono text-[0.68rem] break-all text-muted-foreground/70">
                     Fingerprint: {approval.fingerprint}
                   </p>
                 </div>
@@ -110,23 +110,23 @@ export function WorkflowApprovalCard({
               </div>
 
               {!isOwner && (
-                <p className="mt-3 text-xs text-[var(--ui-text-dim)]">
+                <p className="mt-3 text-xs text-muted-foreground/70">
                   Only the thread owner can approve or reject this workflow
                   push.
                 </p>
               )}
               {error && (
-                <p className="mt-3 text-xs text-[color:var(--ui-danger)]">
+                <p className="mt-3 text-xs text-destructive">
                   {error}
                 </p>
               )}
 
               <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                 <div className="min-w-0">
-                  <p className="text-xs font-medium text-[var(--ui-text)]">
+                  <p className="text-xs font-medium text-foreground">
                     {fileLabel(approval.files.length)} changed
                   </p>
-                  <ul className="mt-1 space-y-1 text-xs text-[var(--ui-text-dim)]">
+                  <ul className="mt-1 space-y-1 text-xs text-muted-foreground/70">
                     {approval.files.slice(0, 8).map((file) => (
                       <li
                         key={file}
@@ -141,12 +141,12 @@ export function WorkflowApprovalCard({
                     )}
                   </ul>
                 </div>
-                <div className="rounded-md border border-[var(--ui-border)] px-3 py-2 text-xs text-[var(--ui-text-dim)]">
+                <div className="rounded-md border border-border px-3 py-2 text-xs text-muted-foreground/70">
                   <span>{approval.diffStats.files} files</span>
-                  <span className="mx-2 text-[var(--ui-success)]">
+                  <span className="mx-2 text-success-foreground">
                     +{approval.diffStats.additions}
                   </span>
-                  <span className="text-[var(--ui-danger)]">
+                  <span className="text-destructive">
                     -{approval.diffStats.deletions}
                   </span>
                 </div>
@@ -154,14 +154,14 @@ export function WorkflowApprovalCard({
 
               {approval.diffPreview && (
                 <details className="mt-3" open>
-                  <summary className="cursor-pointer text-xs font-medium text-[var(--ui-text)]">
+                  <summary className="cursor-pointer text-xs font-medium text-foreground">
                     Diff preview
                     {approval.diffPreviewTruncated ? " (truncated)" : ""}
                   </summary>
                   <pre
                     className={cn(
-                      "mt-2 max-h-72 overflow-auto rounded-md border border-[var(--ui-border)]",
-                      "bg-[var(--ui-panel)] p-3 text-[0.68rem] leading-relaxed text-[var(--ui-text)]"
+                      "mt-2 max-h-72 overflow-auto rounded-md border border-border",
+                      "bg-card p-3 text-[0.68rem] leading-relaxed text-foreground"
                     )}
                   >
                     {approval.diffPreview}

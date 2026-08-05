@@ -39,7 +39,7 @@ export function DiffView({ diffData }: DiffViewProps) {
         <span className="text-green-400">+{stats.additions}</span>
         <span className="text-red-400">-{stats.deletions}</span>
       </div>
-      <div className="max-h-60 overflow-auto rounded-lg border border-[var(--ui-border-subtle)] bg-[var(--ui-panel)]">
+      <div className="max-h-60 overflow-auto rounded-lg border border-border/60 bg-card">
         <MultiFileDiff
           oldFile={{ name: displayPath, contents: originalContent ?? "" }}
           newFile={{ name: displayPath, contents: newContent }}

@@ -10,6 +10,27 @@ async function loginAs(page: Page, user: { login: string; email: string }) {
   expect(res.ok()).toBeTruthy();
 }
 
+// The composer is a rich-text editor, not a <textarea>: it carries the prompt
+// as `aria-placeholder` plus a visible overlay, so `getByPlaceholder` (which
+// only matches the `placeholder` attribute) can't see it. Assert on both hooks
+// so the visible prompt text stays covered.
+function composerFor(page: Page, placeholder: RegExp) {
+  return {
+    editor: page.getByTestId("composer-editor"),
+    prompt: page.getByText(placeholder),
+  };
+}
+
+// Typing goes through real key events rather than `fill()`: the editor builds
+// its state from beforeinput/keydown, and `fill()`'s single bulk insert leaves
+// it out of sync with the DOM.
+async function typeIntoComposer(page: Page, text: string) {
+  const editor = page.getByTestId("composer-editor");
+  await editor.click();
+  await editor.pressSequentially(text);
+  await editor.press("Enter");
+}
+
 async function setRepoPrivate(page: Page, value: boolean) {
   const res = await page.request.post("/control/repo-private", {
     data: { private: value },
@@ -98,13 +119,19 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
     // The owner sees the composer (either the follow-up bar once the transcript
     // hydrates, or the empty-state bar before it — both mean they can type).
-    const composer = page.getByPlaceholder(
+    const composer = composerFor(
+      page,
       /Add a follow up|Send the first message/,
     );
-    await expect(composer).toBeVisible();
+    await expect(composer.editor).toBeVisible();
+    await expect(composer.prompt).toBeVisible();
+    // The context meter is an icon-only ring, so the numbers live in its
+    // accessible name and in the popover it opens on hover — not in its text.
     const contextIndicator = page.getByTestId("context-window-indicator");
     await expect(contextIndicator).toBeVisible();
-    await expect(contextIndicator).toContainText(/context|%|tokens/);
+    await expect(contextIndicator).toHaveAccessibleName(/context|%|tokens/i);
+    await contextIndicator.hover();
+    await expect(page.getByText("Context window").first()).toBeVisible();
     const screenshotPath = testInfo.outputPath(
       "context-window-indicator-dashboard.png",
     );
@@ -115,8 +142,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     });
 
     // Continue from the web — a new agent reply streams into the same thread.
-    await composer.fill("Looks good — can you also add a docstring?");
-    await composer.press("Enter");
+    await typeIntoComposer(page, "Looks good — can you also add a docstring?");
     await expect(
       page.getByText(/anything else you'd like changed/),
     ).toBeVisible();
@@ -161,15 +187,12 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await openRunningThreadViaSlackLink(page);
 
     const queuedText = "Please queue this follow-up while you finish the PR.";
-    const busyComposer = page.getByPlaceholder(
-      "Send a message to queue next...",
-    );
+    const busyComposer = composerFor(page, /Send a message to queue next/);
     await expect(async () => {
       await page.reload();
-      await expect(busyComposer).toBeVisible({ timeout: 8000 });
+      await expect(busyComposer.prompt).toBeVisible({ timeout: 8000 });
     }).toPass({ timeout: 60000 });
-    await busyComposer.fill(queuedText);
-    await busyComposer.press("Enter");
+    await typeIntoComposer(page, queuedText);
 
     const queuedMessage = page
       .getByTestId("queued-message")
@@ -233,14 +256,15 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expectTranscriptVisible(page);
 
     // …and a non-owner now gets a composer too (owner-only restriction removed).
-    const composer = page.getByPlaceholder(
+    const composer = composerFor(
+      page,
       /Add a follow up|Send the first message/,
     );
-    await expect(composer).toBeVisible();
+    await expect(composer.editor).toBeVisible();
+    await expect(composer.prompt).toBeVisible();
 
     // Posting starts a new run — the agent's follow-up reply streams in.
-    await composer.fill("Can you also add a docstring?");
-    await composer.press("Enter");
+    await typeIntoComposer(page, "Can you also add a docstring?");
     await expect(
       page.getByText(/anything else you'd like changed/),
     ).toBeVisible();

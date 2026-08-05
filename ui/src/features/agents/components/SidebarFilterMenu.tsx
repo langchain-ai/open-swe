@@ -124,11 +124,11 @@ export function SidebarFilterMenu({
           <button
             type="button"
             aria-label="Group and filter threads"
-            className="relative flex size-7 shrink-0 items-center justify-center rounded-md text-[var(--ui-text-muted)] transition-colors outline-none hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text)] data-popup-open:bg-[var(--ui-sidebar-hover)] data-popup-open:text-[var(--ui-text)]"
+            className="relative flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:bg-sidebar-row-hover hover:text-foreground data-popup-open:bg-sidebar-row-hover data-popup-open:text-foreground"
           >
             <FunnelIcon className="size-4" />
             {active && (
-              <span className="absolute top-1 right-1 size-1.5 rounded-full bg-[var(--ui-accent)]" />
+              <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" />
             )}
           </button>
         }

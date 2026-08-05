@@ -1,10 +1,11 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
-import { AgentMessage } from "./AgentMessage";
+import { AgentTurn } from "./timeline/AgentTurn";
 import { ThinkingSpinner } from "./ThinkingSpinner";
 import { UserMessage } from "./UserMessage";
 import type { MessagesProps } from "./types";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId";
 
 const BOTTOM_LOCK_THRESHOLD_PX = 24;
@@ -23,18 +24,18 @@ function QueuedMessages({
         return (
           <div
             key={message.id}
-            className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-panel)] px-3 py-2 text-[13px] text-[color:var(--ui-text)] shadow-sm"
+            className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-border bg-accent/40 px-3 py-2 text-[13px] text-foreground shadow-sm"
             data-testid="queued-message"
           >
-            <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-[color:var(--ui-text-dim)]">
+            <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               <span>
                 {queuedMessages.length > 1 ? `Queued next #${index + 1}` : "Queued next"}
               </span>
-              <span className="h-1.5 w-1.5 rounded-full bg-[var(--ui-accent)]" />
+              <span className="size-1.5 animate-status-pulse rounded-full bg-foreground/60" />
             </div>
             {message.content && <div className="whitespace-pre-wrap break-words">{message.content}</div>}
             {imageCount > 0 && (
-              <div className="mt-1 text-xs text-[color:var(--ui-text-muted)]">
+              <div className="mt-1 text-xs text-muted-foreground">
                 {imageCount} image{imageCount === 1 ? "" : "s"} attached
               </div>
             )}
@@ -216,10 +217,11 @@ export const Messages = memo(function MessagesComponent({
   const projectPath = project?.path;
 
   return (
+    <TooltipProvider delay={250} closeDelay={0}>
     <div className="relative flex-1 min-h-0 min-w-0">
       <div
         ref={scrollRef}
-        className="h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden py-5 text-[13px] leading-6 font-sans antialiased"
+        className="h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden py-5 text-[13px] leading-6 antialiased"
       >
         <div
           ref={contentRef}
@@ -236,7 +238,7 @@ export const Messages = memo(function MessagesComponent({
             }
 
             return (
-              <AgentMessage
+              <AgentTurn
                 key={message.id}
                 message={message}
                 isStreaming={messageIsStreaming}
@@ -262,12 +264,13 @@ export const Messages = memo(function MessagesComponent({
           type="button"
           onClick={handleScrollToBottom}
           aria-label="Scroll to bottom"
-          className="absolute left-1/2 z-30 inline-flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full bg-[var(--ui-panel-2)] text-[color:var(--ui-text-muted)] shadow-md transition-colors hover:bg-[var(--ui-panel)] hover:text-[color:var(--ui-text)]"
+          className="dropdown-glass absolute left-1/2 z-30 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
           style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
         >
-          <ChevronDown className="h-3.5 w-3.5" />
+          <ChevronDown className="size-3.5" />
         </button>
       )}
     </div>
+    </TooltipProvider>
   );
 });

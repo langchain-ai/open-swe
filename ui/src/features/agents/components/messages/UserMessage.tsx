@@ -35,33 +35,39 @@ export function UserMessage({ message }: { message: Message }) {
       : undefined;
 
   return (
-    <div className="flex justify-end my-4">
-      <div className="max-w-[78%]">
-        {images.length > 0 && (
-          <div className="flex gap-2 mb-2 flex-wrap justify-end">
-            {images.map((img, i) => (
-              <img
-                key={i}
-                src={`data:${img.mimeType};base64,${img.base64}`}
-                alt={img.fileName || "image"}
-                className="max-w-48 max-h-48 rounded border border-gray-600"
-              />
-            ))}
-          </div>
-        )}
-        {text && (
-          <div className="inline-block max-w-full rounded-2xl bg-[var(--ui-accent-bubble)] overflow-hidden">
-            <div
-              ref={textRef}
-              onScroll={updateScrollIndicators}
-              className="max-h-[250px] overflow-auto px-3 py-1.5 text-[color:var(--ui-text)] text-[13px] whitespace-pre-wrap break-words"
-              style={{
-                maskImage: textEdgeMask,
-                WebkitMaskImage: textEdgeMask,
-              }}
-            >
-              {text}
-            </div>
+    <div className="group/turn my-4 flex flex-col items-end gap-1">
+      <div className="max-w-[80%]">
+        {(text || images.length > 0) && (
+          <div className="relative overflow-hidden rounded-2xl bg-accent p-3">
+            {images.length > 0 && (
+              <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
+                {images.map((img, i) => (
+                  <div
+                    key={i}
+                    className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                  >
+                    <img
+                      src={`data:${img.mimeType};base64,${img.base64}`}
+                      alt={img.fileName || "image"}
+                      className="block h-auto max-h-[220px] w-full object-cover"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+            {text && (
+              <div
+                ref={textRef}
+                onScroll={updateScrollIndicators}
+                className="max-h-[250px] overflow-auto whitespace-pre-wrap break-words text-[13px] leading-6 text-accent-foreground"
+                style={{
+                  maskImage: textEdgeMask,
+                  WebkitMaskImage: textEdgeMask,
+                }}
+              >
+                {text}
+              </div>
+            )}
           </div>
         )}
         {!message.timestampIsFallback && (
