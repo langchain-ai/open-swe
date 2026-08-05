@@ -62,7 +62,7 @@ export function PlanView({
 }: {
   threadId: string
   standalone?: boolean
-  onApprove?: () => void
+  onApprove?: (runId: string) => void
 }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])

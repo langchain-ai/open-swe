@@ -57,7 +57,7 @@ export function PlanReview({
 }: {
   plan: PlanData
   compact?: boolean
-  onApprove?: () => void
+  onApprove?: (runId: string) => void
 }) {
   const navigate = useNavigate()
   const resolvedTheme = useResolvedTheme()
@@ -181,8 +181,8 @@ export function PlanReview({
       setError(null)
       try {
         if (kind === "approve") {
-          await approvePlan(plan.threadId)
-          if (onApprove) onApprove()
+          const { run_id: runId } = await approvePlan(plan.threadId)
+          if (onApprove) onApprove(runId)
           else
             await navigate({
               to: "/agents/$threadId",

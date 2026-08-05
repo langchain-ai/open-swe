@@ -706,8 +706,9 @@ async def test_approve_plan_dispatches_published_markdown(
 
     async def fake_dispatch(
         thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
-    ) -> None:
+    ) -> dict[str, Any]:
         dispatched.update(text=text, plan_mode=plan_mode)
+        return {"run_id": "run-1"}
 
     monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "_user_owns_thread", lambda *a, **k: True)
@@ -717,7 +718,7 @@ async def test_approve_plan_dispatches_published_markdown(
     monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
 
     result = await plan_api.approve_plan("t1", session={"sub": "a", "email": None})
-    assert result["status"] == "approved"
+    assert result == {"status": "approved", "run_id": "run-1"}
     # The (possibly edited) published plan is the source of truth, plus feedback.
     assert "# Edited plan" in dispatched["text"]
     assert "use snake_case" in dispatched["text"]
@@ -756,8 +757,9 @@ async def test_approve_plan_posts_slack_approval_notice(
 
     async def fake_dispatch(
         thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
-    ) -> None:
+    ) -> dict[str, Any]:
         dispatched.update(text=text, plan_mode=plan_mode)
+        return {"run_id": "run-1"}
 
     monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "_user_owns_thread", lambda *a, **k: True)

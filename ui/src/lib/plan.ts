@@ -119,7 +119,9 @@ export function updatePlan(
   })
 }
 
-export function approvePlan(threadId: string): Promise<{ status: string }> {
+export function approvePlan(
+  threadId: string
+): Promise<{ status: string; run_id: string }> {
   return req(`/plan/${encodeURIComponent(threadId)}/approve`, {
     method: "POST",
   })
