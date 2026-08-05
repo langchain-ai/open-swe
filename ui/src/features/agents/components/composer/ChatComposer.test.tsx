@@ -10,7 +10,8 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { ChatComposer } from "./ChatComposer"
+import { buildCommandItems, ChatComposer } from "./ChatComposer"
+import { replaceTextRange } from "./composerTrigger"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 
 const stream = {
@@ -93,5 +94,30 @@ describe("ChatComposer stop button", () => {
 
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
+  })
+})
+
+describe("ChatComposer skill autocomplete", () => {
+  it("prefers a colliding skill and preserves surrounding prompt text", () => {
+    const trigger = {
+      kind: "slash-command" as const,
+      query: "plan",
+      rangeStart: 7,
+      rangeEnd: 12,
+    }
+    const items = buildCommandItems(trigger, [], [
+      {
+        name: "plan",
+        description: "Create an implementation plan",
+        instructions: "",
+      },
+    ])
+
+    expect(items).toEqual([
+      expect.objectContaining({ type: "skill", name: "plan" }),
+    ])
+    expect(replaceTextRange("Please /plan this", 7, 12, "/plan ").text).toBe(
+      "Please /plan  this"
+    )
   })
 })

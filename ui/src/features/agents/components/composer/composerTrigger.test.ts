@@ -25,20 +25,20 @@ describe("detectComposerTrigger", () => {
     expect(detectComposerTrigger("mail me@example.com", 19)).toBeNull();
   });
 
-  it("only treats a slash as a command at the start of a line", () => {
+  it("treats a whitespace-delimited slash token as a command anywhere", () => {
     expect(detectComposerTrigger("/pl", 3)).toEqual({
       kind: "slash-command",
       query: "pl",
       rangeStart: 0,
       rangeEnd: 3,
     });
-    expect(detectComposerTrigger("fix\n/mo", 7)).toMatchObject({
+    expect(detectComposerTrigger("fix with /review-pr please", 19)).toEqual({
       kind: "slash-command",
-      query: "mo",
-      rangeStart: 4,
+      query: "review-pr",
+      rangeStart: 9,
+      rangeEnd: 19,
     });
-    // A path or a date mid-sentence must not raise the menu.
-    expect(detectComposerTrigger("see src/a /b", 12)).toBeNull();
+    expect(detectComposerTrigger("see src/a/b", 11)).toBeNull();
   });
 
   it("closes the trigger once the cursor moves off the token", () => {

@@ -67,29 +67,14 @@ function isWhitespace(char: string): boolean {
 
 export function detectComposerTrigger(text: string, cursorInput: number): ComposerTrigger | null {
   const cursor = clampCursor(text, cursorInput);
-  const lineStart = text.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
-  const linePrefix = text.slice(lineStart, cursor);
-
-  // A slash command only counts at the start of a line, so a URL path or a
-  // date mid-sentence never opens the menu.
-  const commandMatch = /^\/(\S*)$/.exec(linePrefix);
-  if (commandMatch) {
-    return {
-      kind: "slash-command",
-      query: commandMatch[1] ?? "",
-      rangeStart: lineStart,
-      rangeEnd: cursor,
-    };
-  }
-
   let tokenIdx = cursor - 1;
   while (tokenIdx >= 0 && !isWhitespace(text[tokenIdx] ?? "")) tokenIdx -= 1;
   const tokenStart = tokenIdx + 1;
   const token = text.slice(tokenStart, cursor);
-  if (!token.startsWith("@")) return null;
+  if (!token.startsWith("@") && !token.startsWith("/")) return null;
 
   return {
-    kind: "path",
+    kind: token.startsWith("/") ? "slash-command" : "path",
     query: token.slice(1),
     rangeStart: tokenStart,
     rangeEnd: cursor,

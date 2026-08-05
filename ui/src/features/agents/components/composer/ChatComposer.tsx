@@ -15,7 +15,7 @@ import type { ComposerCommandItem } from "./ComposerCommandMenu";
 import type { ActiveRun } from "./ComposerPrimaryActions";
 import type { ComposerCommandKey, ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger";
-import type { ModelOption } from "@/lib/api";
+import type { ModelOption, Skill } from "@/lib/api";
 import type { ImageChunk } from "@/features/agents/lib/types";
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions";
 import { ModelPicker } from "@/features/agents/components/ModelPicker";
@@ -63,6 +63,7 @@ export interface ChatComposerProps {
   onPlanModeChange?: (next: boolean) => void;
   /** Paths offered by `@` autocomplete — in a thread, the files the agent has touched. */
   mentionPaths?: Array<string>;
+  skills?: Array<Skill>;
   contextUsage?: {
     usedTokens?: number | null;
     contextWindow?: number | null;
@@ -87,20 +88,33 @@ function fileToImageChunk(file: File): Promise<ImageChunk | null> {
   });
 }
 
-function buildCommandItems(
+export function buildCommandItems(
   trigger: ComposerTrigger,
   mentionPaths: Array<string>,
+  skills: Array<Skill>,
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase();
 
   if (trigger.kind === "slash-command") {
-    return SLASH_COMMANDS.filter((spec) => spec.command.startsWith(query)).map((spec) => ({
-      id: `slash:${spec.command}`,
-      type: "slash-command" as const,
-      command: spec.command,
-      label: spec.label,
-      description: spec.description,
-    }));
+    const skillNames = new Set(skills.map((skill) => skill.name));
+    return [
+      ...SLASH_COMMANDS.filter(
+        (spec) => spec.command.startsWith(query) && !skillNames.has(spec.command),
+      ).map((spec) => ({
+        id: `slash:${spec.command}`,
+        type: "slash-command" as const,
+        command: spec.command,
+        label: spec.label,
+        description: spec.description,
+      })),
+      ...skills.filter((skill) => skill.name.startsWith(query)).map((skill) => ({
+        id: `skill:${skill.name}`,
+        type: "skill" as const,
+        name: skill.name,
+        label: `/${skill.name}`,
+        description: skill.description,
+      })),
+    ];
   }
 
   return mentionPaths
@@ -136,6 +150,7 @@ export const ChatComposer = memo(function ChatComposer({
   planMode = false,
   onPlanModeChange,
   mentionPaths = [],
+  skills = [],
   contextUsage,
 }: ChatComposerProps) {
   const [value, setValue] = useState("");
@@ -158,8 +173,8 @@ export const ChatComposer = memo(function ChatComposer({
   const trigger = useMemo(() => detectComposerTrigger(value, cursor), [cursor, value]);
   const triggerKey = trigger ? `${trigger.kind}:${trigger.rangeStart}` : null;
   const commandItems = useMemo(
-    () => (trigger ? buildCommandItems(trigger, mentionPaths) : []),
-    [mentionPaths, trigger],
+    () => (trigger ? buildCommandItems(trigger, mentionPaths, skills) : []),
+    [mentionPaths, skills, trigger],
   );
   const menuOpen =
     trigger !== null && commandItems.length > 0 && dismissedTriggerKey !== triggerKey;
@@ -211,12 +226,12 @@ export const ChatComposer = memo(function ChatComposer({
     (item: ComposerCommandItem) => {
       if (!trigger) return;
 
-      if (item.type === "path") {
+      if (item.type === "path" || item.type === "skill") {
         const next = replaceTextRange(
           value,
           trigger.rangeStart,
           trigger.rangeEnd,
-          mentionReplacementText(item.path),
+          item.type === "path" ? mentionReplacementText(item.path) : `/${item.name} `,
         );
         applyPrompt(next.text, next.cursor);
         return;

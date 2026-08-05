@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 
 export type ComposerCommandItem =
   | { id: string; type: "path"; path: string; label: string; description: string }
-  | { id: string; type: "slash-command"; command: string; label: string; description: string };
+  | { id: string; type: "slash-command"; command: string; label: string; description: string }
+  | { id: string; type: "skill"; name: string; label: string; description: string };
 
 interface ComposerCommandMenuProps {
   items: Array<ComposerCommandItem>;
