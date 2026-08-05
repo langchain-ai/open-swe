@@ -183,6 +183,46 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     });
   });
 
+  test("stops a Slack-started run from the web app", async ({ page }) => {
+    await loginAs(page, SAME_USER);
+    await page.goto("/mock/slack");
+    await page.locator("#reset").click();
+
+    const send = await page.request.post("/mock/slack/send", {
+      data: {
+        text: "<@U0BOT> E2E_BUSY_HOLD please add a greet() helper and open a PR",
+      },
+    });
+    expect(send.ok()).toBeTruthy();
+    const { thread_id: threadId } = (await send.json()) as {
+      thread_id: string;
+    };
+
+    await page.goto(`/agents/${threadId}`);
+    const stopButton = page.getByRole("button", { name: "Stop run" });
+    await expect(stopButton).toBeVisible();
+
+    const cancelResponsePromise = page.waitForResponse((response) => {
+      const path = new URL(response.url()).pathname;
+      return (
+        response.request().method() === "POST" &&
+        path === `/dashboard/api/threads/${threadId}/cancel`
+      );
+    });
+    await stopButton.click();
+
+    const cancelResponse = await cancelResponsePromise;
+    expect(cancelResponse.ok()).toBeTruthy();
+    await expect(cancelResponse.json()).resolves.toMatchObject({
+      id: threadId,
+      status: "interrupted",
+    });
+    await expect(
+      page.getByRole("button", { name: "Send message" }),
+    ).toBeVisible();
+    await expect(stopButton).toHaveCount(0);
+  });
+
   test("a DIFFERENT user can post, and their message is attributed", async ({
     page,
   }) => {

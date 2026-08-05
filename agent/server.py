@@ -30,7 +30,9 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 from deepagents import create_deep_agent
 from deepagents.backends import LangSmithSandbox
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.composite import CompositeBackend
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
+from deepagents.backends.store import StoreBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
@@ -53,6 +55,7 @@ from .dashboard.options import (
     model_supports_effort,
 )
 from .dashboard.repo_snapshots import resolve_repo_snapshot_id
+from .dashboard.skills import SKILLS_NAMESPACE
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model_pair,
@@ -143,6 +146,7 @@ from .utils.model import (
     make_model,
     provider_model_kwargs,
 )
+from .utils.read_only_backend import ReadOnlyBackend
 from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .utils.sandbox_state import (
@@ -159,6 +163,7 @@ from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 client = get_client()
 
 DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
+USER_SKILLS_ROUTE = "/skills/"
 
 
 def _tool_loader_timeout_seconds() -> float:
@@ -574,8 +579,8 @@ def _subagent_model_timeout_middleware() -> list[AgentMiddleware[Any, Any, Any]]
     return cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()])
 
 
-def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
-    return {
+def _general_purpose_subagent(model: BaseChatModel, skills: list[str] | None = None) -> SubAgent:
+    subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": GENERAL_PURPOSE_SUBAGENT["description"],
         # Deep Agents' default GP prompt covers only task mechanics; the shared
@@ -585,6 +590,9 @@ def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
         "model": model,
         "middleware": _subagent_model_timeout_middleware(),
     }
+    if skills:
+        subagent["skills"] = skills
+    return subagent
 
 
 BROWSER_SUBAGENT_DESCRIPTION = (
@@ -1028,6 +1036,20 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
+    agent_backend: BackendProtocol = backend
+    skill_sources: list[str] | None = None
+    if profile_login:
+        agent_backend = CompositeBackend(
+            default=backend,
+            routes={
+                USER_SKILLS_ROUTE: ReadOnlyBackend(
+                    StoreBackend(
+                        namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login)
+                    )
+                )
+            },
+        )
+        skill_sources = [USER_SKILLS_ROUTE]
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     subagent_model = _make_model_or_defer(
         subagent_model_id,
@@ -1067,10 +1089,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             *notion_tools,
         ],
         subagents=[
-            _general_purpose_subagent(subagent_model),
+            _general_purpose_subagent(subagent_model, skill_sources),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
-        backend=backend,
+        skills=skill_sources,
+        backend=agent_backend,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
