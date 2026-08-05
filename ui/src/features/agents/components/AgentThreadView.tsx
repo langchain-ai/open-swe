@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useState } from "react"
-import { Link } from "@tanstack/react-router"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { CircleAlert as CircleAlertIcon, Map as MapIcon } from "lucide-react"
 
@@ -9,6 +8,7 @@ import type {
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
+import type { AgentPanelTab } from "@/features/agents/components/AgentGitPanel"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import {
   AgentGitPanel,
@@ -107,6 +107,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed()
   )
+  const [panelTab, setPanelTab] = useState<AgentPanelTab>("git")
   const handlePanelCollapsedChange = useCallback((next: boolean) => {
     setPanelCollapsed(next)
     writeStoredPanelCollapsed(next)
@@ -200,11 +201,14 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 panelCollapsed && "pr-14"
               )}
             >
-              <Link
-                to="/agents/$threadId/plan"
-                params={{ threadId: thread.id }}
+              <button
+                type="button"
                 data-testid="review-plan-link"
-                className="block transition-colors hover:bg-info/8 rounded-xl"
+                className="block w-full rounded-xl text-left transition-colors hover:bg-info/8"
+                onClick={() => {
+                  setPanelTab("plan")
+                  handlePanelCollapsedChange(false)
+                }}
               >
                 <Alert variant="info">
                   <MapIcon />
@@ -227,7 +231,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                     </span>
                   </AlertAction>
                 </Alert>
-              </Link>
+              </button>
             </div>
           )}
         {hasConversation ? (
@@ -314,7 +318,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         thread={thread}
         messages={baseMessages}
         collapsed={panelCollapsed}
+        requestedTab={panelTab}
         onCollapsedChange={handlePanelCollapsedChange}
+        onTabChange={setPanelTab}
       />
     </div>
   )

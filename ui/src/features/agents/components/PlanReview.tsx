@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { useResolvedTheme } from "@/lib/theme"
+import { cn } from "@/lib/utils"
 
 const POLL_MS = 4000
 
@@ -49,7 +50,15 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-export function PlanReview({ plan }: { plan: PlanData }) {
+export function PlanReview({
+  plan,
+  compact = false,
+  onApprove,
+}: {
+  plan: PlanData
+  compact?: boolean
+  onApprove?: () => void
+}) {
   const navigate = useNavigate()
   const resolvedTheme = useResolvedTheme()
   const [comments, setComments] = useState<Array<PlanComment>>([])
@@ -173,10 +182,12 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       try {
         if (kind === "approve") {
           await approvePlan(plan.threadId)
-          await navigate({
-            to: "/agents/$threadId",
-            params: { threadId: plan.threadId },
-          })
+          if (onApprove) onApprove()
+          else
+            await navigate({
+              to: "/agents/$threadId",
+              params: { threadId: plan.threadId },
+            })
           return
         }
         await rejectPlan(plan.threadId)
@@ -187,7 +198,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
         setBusy(null)
       }
     },
-    [navigate, plan.threadId]
+    [navigate, onApprove, plan.threadId]
   )
 
   const copyPlan = useCallback(async () => {
@@ -205,7 +216,12 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       data-testid="plan-review"
       className="flex min-h-0 flex-1 flex-col bg-background text-foreground"
     >
-      <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between md:gap-4 md:px-6">
+      <div
+        className={cn(
+          "flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between md:gap-4",
+          !compact && "md:px-6"
+        )}
+      >
         <div className="min-w-0">
           <h1 className="text-base font-semibold text-foreground">
             {isShared ? "Shared response" : "Implementation plan"}
@@ -296,17 +312,23 @@ export function PlanReview({ plan }: { plan: PlanData }) {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col overflow-y-auto",
+          !compact && "md:flex-row md:overflow-hidden"
+        )}
+      >
         <div
-          className="min-w-0 px-4 py-4 md:min-h-0 md:flex-1 md:overflow-auto md:px-6"
+          className={cn(
+            "min-w-0 px-4 py-4 md:min-h-0 md:flex-1 md:overflow-auto",
+            !compact && "md:px-6"
+          )}
           data-testid="plan-document"
           data-color-scheme={resolvedTheme}
         >
           {editing ? (
             <div className="flex h-full flex-col gap-2">
-              {error && (
-                <p className="text-xs text-destructive">{error}</p>
-              )}
+              {error && <p className="text-xs text-destructive">{error}</p>}
               <textarea
                 data-testid="plan-editor"
                 value={editDraft}
@@ -325,7 +347,12 @@ export function PlanReview({ plan }: { plan: PlanData }) {
         </div>
 
         {!isShared && (
-          <aside className="flex shrink-0 flex-col border-t border-border md:w-80 md:border-t-0 md:border-l">
+          <aside
+            className={cn(
+              "flex shrink-0 flex-col border-t border-border",
+              !compact && "md:w-80 md:border-t-0 md:border-l"
+            )}
+          >
             <div className="border-b border-border px-4 py-3">
               <h2 className="text-sm font-semibold text-foreground">
                 Comments
@@ -368,9 +395,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
             </div>
             <div className="border-t border-border p-3">
               {error && (
-                <p className="mb-2 text-xs text-destructive">
-                  {error}
-                </p>
+                <p className="mb-2 text-xs text-destructive">{error}</p>
               )}
               <textarea
                 data-testid="comment-input"
