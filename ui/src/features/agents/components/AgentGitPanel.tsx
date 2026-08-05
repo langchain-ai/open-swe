@@ -1,4 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useStreamContext as useAgentThreadStream } from "@langchain/react"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   MultiFileDiff,
   Virtualizer,
@@ -22,11 +24,16 @@ import type { AgentThread, Message } from "@/features/agents/lib/types"
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import type { ChangedFileSummaryItem } from "@/features/agents/components/messages"
 import { agentsApi } from "@/features/agents/lib/api"
-import { useAgentThreadPrDiff } from "@/features/agents/lib/queries"
+import {
+  agentThreadKeys,
+  invalidateAgentThreadLists,
+  useAgentThreadPrDiff,
+} from "@/features/agents/lib/queries"
 import { ReviewTab } from "@/features/reviews/components/ReviewTab"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
 import { buttonVariants } from "@/components/ui/button"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
+import { PlanView } from "@/features/agents/components/PlanView"
 import {
   DIFF_VIRTUALIZER_CONFIG,
   DIFF_VIRTUAL_METRICS,
@@ -40,11 +47,15 @@ import { Z } from "@/features/agents/components/z-index"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
+export type AgentPanelTab = "git" | "desktop" | "terminal" | "plan"
+
 interface AgentGitPanelProps {
   thread: AgentThread
   messages: Array<Message>
   collapsed: boolean
+  requestedTab: AgentPanelTab
   onCollapsedChange: (next: boolean) => void
+  onTabChange: (tab: AgentPanelTab) => void
 }
 
 interface PanelFile {
@@ -262,9 +273,12 @@ export function AgentGitPanel({
   thread,
   messages,
   collapsed,
+  requestedTab,
   onCollapsedChange,
+  onTabChange,
 }: AgentGitPanelProps) {
-  const [topTab, setTopTab] = useState<"git" | "desktop" | "terminal">("git")
+  const queryClient = useQueryClient()
+  const stream = useAgentThreadStream()
   const [tab, setTab] = useState<"diff" | "review" | "commits">("diff")
   const [width, setWidthState] = useState(() => readStoredPanelWidth())
   const [fullScreen, setFullScreen] = useState(false)
@@ -273,6 +287,33 @@ export function AgentGitPanel({
   // overlay that the user navigates to (and back from), like the sidebar.
   const overlay = fullScreen || isMobile
   const panelRef = useRef<HTMLDivElement>(null)
+  const hasPlan = Boolean(
+    thread.planStatus &&
+    thread.planStatus !== "approved" &&
+    thread.planStatus !== "cancelled"
+  )
+
+  const topTab = hasPlan || requestedTab !== "plan" ? requestedTab : "git"
+  const onPlanApproved = useCallback(
+    (runId: string) => {
+      queryClient.setQueryData<AgentThread>(
+        agentThreadKeys.detail(thread.id),
+        (current) =>
+          current
+            ? { ...current, planStatus: "approved", status: "running" }
+            : current
+      )
+      void queryClient.invalidateQueries({ queryKey: ["plan", thread.id] })
+      invalidateAgentThreadLists(queryClient)
+      onTabChange("git")
+      void stream.client.runs.join(thread.id, runId).finally(() => {
+        void queryClient.invalidateQueries({
+          queryKey: agentThreadKeys.detail(thread.id),
+        })
+      })
+    },
+    [onTabChange, queryClient, stream, thread.id]
+  )
 
   // Collapsed state is owned by the parent (so the plan banner can reserve space
   // for the floating expand button); persistence to localStorage lives there too.
@@ -444,12 +485,14 @@ export function AgentGitPanel({
             ["git", "Git"],
             ["desktop", "Desktop"],
             ["terminal", "Terminal"],
-          ] as const
+            ...(hasPlan ? ([["plan", "Plan"]] as const) : []),
+          ] satisfies Array<readonly [AgentPanelTab, string]>
         ).map(([id, label]) => (
           <button
             key={id}
             type="button"
-            onClick={() => setTopTab(id)}
+            aria-current={topTab === id ? "page" : undefined}
+            onClick={() => onTabChange(id)}
             className={cn(
               "rounded-md px-2.5 py-1 text-xs transition-colors",
               topTab === id
@@ -494,7 +537,9 @@ export function AgentGitPanel({
           overlay ? "mx-3 mb-3" : "mr-4 mb-4 ml-1"
         )}
       >
-        {topTab !== "git" ? (
+        {topTab === "plan" ? (
+          <PlanView threadId={thread.id} onApprove={onPlanApproved} />
+        ) : topTab !== "git" ? (
           <div className="flex flex-1 items-center justify-center p-6 text-xs text-muted-foreground/70">
             Coming Soon
           </div>

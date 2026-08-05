@@ -146,11 +146,14 @@ test.describe("Plan review (HTTP comments)", () => {
     const reviewLink = owner.getByTestId("review-plan-link");
     await expect(reviewLink).toBeVisible({ timeout: 30_000 });
     await reviewLink.click();
-    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}/plan$`));
+    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
+    await expect(
+      owner.locator('button[aria-current="page"]', { hasText: "Plan" }),
+    ).toBeVisible();
     await expect(owner.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(owner.getByText("Back to conversation")).toBeVisible();
+    await expect(owner.getByText("Back to conversation")).toHaveCount(0);
     await expect(owner.getByTestId("plan-document")).toContainText("greet", {
       timeout: 30_000,
     });
@@ -195,7 +198,11 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(collab.getByTestId("reject-plan")).toBeVisible();
 
     // Collaborator leaves feedback with Ctrl+Enter.
-    await addComment(collab, "Reviewer: please also add a docstring.", "control");
+    await addComment(
+      collab,
+      "Reviewer: please also add a docstring.",
+      "control",
+    );
     await expect(collab.getByTestId("plan-comment")).toHaveCount(2);
 
     // 6. The owner sees the collaborator's comment (polled), then approves and
