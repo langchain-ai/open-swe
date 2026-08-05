@@ -31,22 +31,22 @@ const STREAMDOWN_ANIMATED = {
 
 const STREAMDOWN_COMPONENTS = {
   h1: ({ children }: { children?: ReactNode }) => (
-    <div className="text-[color:var(--ui-text)] text-[15px] font-medium mt-4 mb-1.5 tracking-tight">
+    <div className="text-foreground text-[15px] font-medium mt-4 mb-1.5 tracking-tight">
       {children}
     </div>
   ),
   h2: ({ children }: { children?: ReactNode }) => (
-    <div className="text-[color:var(--ui-text)] text-[14px] font-medium mt-3 mb-1.5 tracking-tight">
+    <div className="text-foreground text-[14px] font-medium mt-3 mb-1.5 tracking-tight">
       {children}
     </div>
   ),
   h3: ({ children }: { children?: ReactNode }) => (
-    <div className="text-[color:var(--ui-text)] text-[13px] font-medium mt-3 mb-1">
+    <div className="text-foreground text-[13px] font-medium mt-3 mb-1">
       {children}
     </div>
   ),
   p: ({ children }: { children?: ReactNode }) => (
-    <p className="my-1.5 text-[color:var(--ui-text)] break-words [overflow-wrap:anywhere]">
+    <p className="my-1.5 text-foreground break-words [overflow-wrap:anywhere]">
       {children}
     </p>
   ),
@@ -57,22 +57,22 @@ const STREAMDOWN_COMPONENTS = {
     <div className="my-1.5 ml-4 min-w-0">{children}</div>
   ),
   li: ({ children }: { children?: ReactNode }) => (
-    <div className="text-[color:var(--ui-text)] break-words [overflow-wrap:anywhere] [&>p]:inline [&>p]:my-0">
+    <div className="text-foreground break-words [overflow-wrap:anywhere] [&>p]:inline [&>p]:my-0">
       - {children}
     </div>
   ),
   blockquote: ({ children }: { children?: ReactNode }) => (
-    <div className="my-2 border-l-2 border-[var(--ui-border)] pl-3 text-[color:var(--ui-text-muted)] break-words [overflow-wrap:anywhere]">
+    <div className="my-2 border-l-2 border-border pl-3 text-muted-foreground break-words [overflow-wrap:anywhere]">
       {children}
     </div>
   ),
-  hr: () => <hr className="border-[var(--ui-border-subtle)] my-3" />,
+  hr: () => <hr className="border-border/60 my-3" />,
   img: ({ src, alt }: ComponentProps<"img">) => (
     <img
       src={typeof src === "string" ? src : undefined}
       alt={alt ?? ""}
       loading="lazy"
-      className="my-2 h-auto max-w-full rounded-md border border-[var(--ui-border-subtle)]"
+      className="my-2 h-auto max-w-full rounded-md border border-border/60"
     />
   ),
   code: ({ className, children }: { className?: string; children?: ReactNode }) => {
@@ -81,7 +81,7 @@ const STREAMDOWN_COMPONENTS = {
     const isBlock = match || text.includes("\n");
     if (isBlock) return <code className={className}>{children}</code>;
     return (
-      <code className="rounded-md bg-[var(--ui-panel-2)] px-1.5 py-0.5 font-mono text-[0.85em] text-[color:var(--ui-accent)] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+      <code className="rounded-md bg-accent px-1.5 py-0.5 font-mono text-[0.85em] text-primary whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
         {text}
       </code>
     );
@@ -121,7 +121,7 @@ class MarkdownErrorBoundary extends Component<BoundaryProps, BoundaryState> {
   render(): ReactNode {
     if (this.state.failed) {
       return (
-        <pre className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] font-sans text-[color:var(--ui-text)]">
+        <pre className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] font-sans text-foreground">
           {this.props.content}
         </pre>
       );
@@ -140,7 +140,7 @@ export const Markdown = memo(function Markdown({
       ...STREAMDOWN_COMPONENTS,
       a: ({ href, children }: { href?: string; children?: ReactNode }) => (
         <a
-          className="text-[color:var(--ui-accent)] underline decoration-[color:var(--ui-accent)]/50 break-words [overflow-wrap:anywhere]"
+          className="text-primary underline decoration-primary/50 break-words [overflow-wrap:anywhere]"
           href={href}
           target="_blank"
           rel="noreferrer"
@@ -163,7 +163,7 @@ export const Markdown = memo(function Markdown({
   }, [transformImageUrl]);
 
   return (
-    <div className="min-w-0 max-w-full text-[13px] leading-6 break-words [overflow-wrap:anywhere] [&_.streamdown]:text-[color:var(--ui-text)]">
+    <div className="min-w-0 max-w-full text-[13px] leading-6 break-words [overflow-wrap:anywhere] [&_.streamdown]:text-foreground">
       <MarkdownErrorBoundary content={content}>
         <Streamdown
           mode={isLive ? "streaming" : "static"}

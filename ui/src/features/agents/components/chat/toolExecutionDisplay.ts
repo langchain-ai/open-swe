@@ -1,5 +1,5 @@
-import { humanizeToolName } from "@/features/agents/lib/toolNames";
 import type { AcpToolKind } from "@/features/agents/lib/types";
+import { humanizeToolName } from "@/features/agents/lib/toolNames";
 
 function stripProjectPath(path: string, projectPath?: string): string {
   if (!projectPath || !path.startsWith(projectPath)) return path;
@@ -39,53 +39,77 @@ function humanizeToolTitle(title: string): string {
   return humanizeToolName(trimmed);
 }
 
-export function formatToolDisplay(
+/**
+ * A tool call split into the verb ("Read", "Shell") and its argument
+ * ("src/app.ts", "pnpm test"). The timeline styles the two differently — the
+ * heading carries weight, the preview dims out — so they have to stay separable
+ * rather than being pre-joined into one string.
+ */
+export interface ToolDisplayParts {
+  heading: string;
+  preview: string | null;
+}
+
+export function formatToolDisplayParts(
   title: string,
   toolKind: AcpToolKind,
   input: Record<string, unknown> | undefined,
   projectPath?: string,
-): string {
+): ToolDisplayParts {
   const toolName = normalizedToolName(title);
   const path = firstStringArg(input, ["path", "file_path", "target_file"]);
   const pattern = firstStringArg(input, ["pattern"]);
   const query = firstStringArg(input, ["query"]);
   const url = firstStringArg(input, ["url"]);
   const command = firstStringArg(input, ["command"]);
+  const plain = (heading: string): ToolDisplayParts => ({ heading, preview: null });
 
   switch (toolKind) {
     case "read": {
       if (path) {
         const displayPath = stripProjectPath(path, projectPath);
-        return toolName === "ls" ? `List ${displayPath}` : `Read ${displayPath}`;
+        return { heading: toolName === "ls" ? "List" : "Read", preview: displayPath };
       }
-      return humanizeToolTitle(title);
+      return plain(humanizeToolTitle(title));
     }
     case "search": {
-      if (pattern) return `Search "${truncateMiddle(pattern, 40)}"`;
-      if (query) return `Search "${truncateMiddle(query, 40)}"`;
-      if (path) return `Search ${stripProjectPath(path, projectPath)}`;
-      return humanizeToolTitle(title);
+      if (pattern) return { heading: "Search", preview: `"${truncateMiddle(pattern, 40)}"` };
+      if (query) return { heading: "Search", preview: `"${truncateMiddle(query, 40)}"` };
+      if (path) return { heading: "Search", preview: stripProjectPath(path, projectPath) };
+      return plain(humanizeToolTitle(title));
     }
     case "fetch": {
-      if (url) return `Fetch ${truncateMiddle(url, 50)}`;
-      return humanizeToolTitle(title);
+      if (url) return { heading: "Fetch", preview: truncateMiddle(url, 50) };
+      return plain(humanizeToolTitle(title));
     }
     case "execute": {
-      if (command) return `Shell ${truncateMiddle(command, 60)}`;
-      return humanizeToolTitle(title);
+      if (command) return { heading: "Shell", preview: truncateMiddle(command, 60) };
+      return plain(humanizeToolTitle(title));
     }
     case "edit":
     case "delete":
     case "move":
-      return humanizeToolTitle(title);
+      return plain(humanizeToolTitle(title));
     case "think":
-      return "Thinking...";
+      return plain("Thinking...");
     default: {
       if (toolName === "write_todos" || title.toLowerCase().startsWith("write todos")) {
-        return "Update todos";
+        return plain("Update todos");
       }
-      if (toolName === "ls" && path) return `List ${stripProjectPath(path, projectPath)}`;
-      return humanizeToolTitle(title);
+      if (toolName === "ls" && path) {
+        return { heading: "List", preview: stripProjectPath(path, projectPath) };
+      }
+      return plain(humanizeToolTitle(title));
     }
   }
+}
+
+export function formatToolDisplay(
+  title: string,
+  toolKind: AcpToolKind,
+  input: Record<string, unknown> | undefined,
+  projectPath?: string,
+): string {
+  const { heading, preview } = formatToolDisplayParts(title, toolKind, input, projectPath);
+  return preview ? `${heading} ${preview}` : heading;
 }

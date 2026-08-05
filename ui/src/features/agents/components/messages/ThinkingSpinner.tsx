@@ -80,7 +80,7 @@ export function ThinkingSpinner({
   if (done && !showActive) {
     return (
       <div className="my-2 flex items-center gap-2">
-        <span className="text-xs text-[color:var(--ui-text-dim)]">{done.past} for {done.elapsed}</span>
+        <span className="text-xs text-muted-foreground/70">{done.past} for {done.elapsed}</span>
       </div>
     );
   }

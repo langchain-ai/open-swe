@@ -204,8 +204,8 @@ function PanelResizeHandle({
       className={cn(
         "absolute top-0 left-0 z-20 h-full w-1 cursor-col-resize touch-none select-none",
         "after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-transparent after:transition-colors",
-        "hover:after:bg-[var(--ui-border)]",
-        dragging && "after:bg-[var(--ui-border)]"
+        "hover:after:bg-border",
+        dragging && "after:bg-border"
       )}
     />
   )
@@ -234,27 +234,27 @@ export const TREE_UNSAFE_CSS = `
 
 export function treeThemeStyle(): React.CSSProperties {
   return {
-    "--trees-theme-sidebar-bg": "var(--ui-surface)",
-    "--trees-theme-sidebar-fg": "var(--ui-text)",
-    "--trees-theme-sidebar-border": "var(--ui-border)",
-    "--trees-theme-sidebar-header-fg": "var(--ui-text-dim)",
+    "--trees-theme-sidebar-bg": "var(--card)",
+    "--trees-theme-sidebar-fg": "var(--foreground)",
+    "--trees-theme-sidebar-border": "var(--border)",
+    "--trees-theme-sidebar-header-fg": "var(--muted-foreground)",
     "--trees-theme-list-hover-bg":
-      "color-mix(in oklab, var(--ui-accent) 10%, transparent)",
+      "color-mix(in oklab, var(--primary) 10%, transparent)",
     "--trees-theme-list-active-selection-bg":
-      "color-mix(in oklab, var(--ui-accent) 22%, transparent)",
-    "--trees-theme-list-active-selection-fg": "var(--ui-text)",
+      "color-mix(in oklab, var(--primary) 22%, transparent)",
+    "--trees-theme-list-active-selection-fg": "var(--foreground)",
     "--trees-selected-focused-border-color-override": "transparent",
-    "--trees-theme-input-bg": "var(--ui-panel)",
-    "--trees-theme-input-fg": "var(--ui-text)",
-    "--trees-theme-input-border": "var(--ui-border)",
-    "--trees-theme-focus-ring": "var(--ui-accent)",
-    "--trees-theme-scrollbar-thumb": "var(--ui-border)",
+    "--trees-theme-input-bg": "var(--card)",
+    "--trees-theme-input-fg": "var(--foreground)",
+    "--trees-theme-input-border": "var(--border)",
+    "--trees-theme-focus-ring": "var(--primary)",
+    "--trees-theme-scrollbar-thumb": "var(--border)",
     "--trees-theme-git-added-fg": TREE_FILE_FG,
     "--trees-theme-git-modified-fg": TREE_FILE_FG,
     "--trees-theme-git-deleted-fg": TREE_FILE_FG,
     "--trees-theme-git-renamed-fg": TREE_FILE_FG,
     "--trees-theme-git-untracked-fg": TREE_FILE_FG,
-    "--trees-theme-git-ignored-fg": "var(--ui-text-dim)",
+    "--trees-theme-git-ignored-fg": "var(--muted-foreground)",
   } as React.CSSProperties
 }
 
@@ -430,8 +430,11 @@ export function AgentGitPanel({
     <aside
       ref={panelRef}
       className={cn(
-        "relative flex shrink-0 flex-col bg-[var(--ui-bg)]",
-        overlay ? "fixed inset-0 !w-full" : "h-full"
+        // No background or rule of its own: the panel shares the main surface
+        // (and its grain) with the conversation. The seam is the gap between
+        // the two cards; the resize handle only paints on hover.
+        "relative flex shrink-0 flex-col",
+        overlay ? "fixed inset-0 !w-full bg-background" : "h-full"
       )}
       style={overlay ? { zIndex: Z.MODAL } : { width }}
     >
@@ -450,8 +453,8 @@ export function AgentGitPanel({
             className={cn(
               "rounded-md px-2.5 py-1 text-xs transition-colors",
               topTab === id
-                ? "bg-[var(--ui-accent-bubble)] font-medium text-[var(--ui-text)]"
-                : "text-[var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)]"
+                ? "bg-accent font-medium text-foreground"
+                : "text-muted-foreground/70 hover:bg-accent"
             )}
           >
             {label}
@@ -465,7 +468,7 @@ export function AgentGitPanel({
           }}
           aria-label="Collapse git panel"
           title="Collapse git panel"
-          className="ml-auto rounded-md p-1.5 text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+          className="ml-auto rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
         >
           <SidebarSimpleIcon className="size-4" />
         </button>
@@ -474,7 +477,7 @@ export function AgentGitPanel({
             type="button"
             onClick={() => setFullScreen((v) => !v)}
             aria-label={fullScreen ? "Exit full screen" : "Enter full screen"}
-            className="rounded-md p-1.5 text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+            className="rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
           >
             {fullScreen ? (
               <ArrowsInIcon className="size-4" />
@@ -487,19 +490,19 @@ export function AgentGitPanel({
 
       <div
         className={cn(
-          "flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-sm",
+          "flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card",
           overlay ? "mx-3 mb-3" : "mr-4 mb-4 ml-1"
         )}
       >
         {topTab !== "git" ? (
-          <div className="flex flex-1 items-center justify-center p-6 text-xs text-[var(--ui-text-dim)]">
+          <div className="flex flex-1 items-center justify-center p-6 text-xs text-muted-foreground/70">
             Coming Soon
           </div>
         ) : (
           <>
             {pr && (
               <PrHeader
-                className="border-b border-[var(--ui-border)] px-4 py-3"
+                className="border-b border-border px-4 py-3"
                 url={pr.url}
                 title={pr.title}
                 number={pr.number}
@@ -510,7 +513,7 @@ export function AgentGitPanel({
               />
             )}
 
-            <div className="flex items-center gap-1 border-b border-[var(--ui-border)] px-3 py-2">
+            <div className="flex items-center gap-1 border-b border-border px-3 py-2">
               {(
                 [
                   ["diff", "Diff"],
@@ -525,8 +528,8 @@ export function AgentGitPanel({
                   className={cn(
                     "rounded-md px-2.5 py-1 text-xs transition-colors",
                     tab === id
-                      ? "bg-[var(--ui-accent-bubble)] font-medium text-[var(--ui-text)]"
-                      : "text-[var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)]"
+                      ? "bg-accent font-medium text-foreground"
+                      : "text-muted-foreground/70 hover:bg-accent"
                   )}
                 >
                   {label}
@@ -537,7 +540,7 @@ export function AgentGitPanel({
                 {recoveryError && (
                   <span
                     title={recoveryError}
-                    className="max-w-40 truncate text-[11px] text-[var(--ui-danger)]"
+                    className="max-w-40 truncate text-[11px] text-destructive"
                   >
                     {recoveryError}
                   </span>
@@ -556,14 +559,14 @@ export function AgentGitPanel({
                   </button>
                 )}
                 {files.length > 0 && (
-                  <span className="flex items-center gap-2 text-[11px] text-[var(--ui-text-dim)]">
+                  <span className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
                     <span>
                       {files.length} file{files.length === 1 ? "" : "s"}
                     </span>
-                    <span className="text-[var(--ui-success)]">
+                    <span className="text-success-foreground">
                       +{totals.additions}
                     </span>
-                    <span className="text-[var(--ui-danger)]">
+                    <span className="text-destructive">
                       -{totals.deletions}
                     </span>
                   </span>
@@ -596,7 +599,7 @@ export function AgentGitPanel({
                   </Virtualizer>
                 </WorkerPoolContextProvider>
               ) : (
-                <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-[var(--ui-text-dim)]">
+                <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
                   {tab !== "diff"
                     ? "Coming Soon"
                     : prDiff.isLoading
@@ -609,7 +612,7 @@ export function AgentGitPanel({
                 fullScreen &&
                 !isMobile &&
                 files.length > 0 && (
-                  <div className="w-72 shrink-0 border-l border-[var(--ui-border)] bg-[var(--ui-surface)]">
+                  <div className="w-72 shrink-0 border-l border-border bg-card">
                     <FileTreeExplorer
                       files={files}
                       selectedTreePath={selectedTreePath}
@@ -670,31 +673,31 @@ const FileDiffSection = memo(
     return (
       <div
         ref={sectionRef}
-        className="mb-2 scroll-mt-2 overflow-hidden rounded-lg border border-[var(--ui-border)]"
+        className="mb-2 scroll-mt-2 overflow-hidden rounded-lg border border-border"
       >
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-2 bg-[var(--ui-panel-2)] px-3 py-2 text-left text-xs"
+          className="flex w-full items-center gap-2 bg-accent px-3 py-2 text-left text-xs"
         >
           <CaretDownIcon
             className={cn("size-3 transition-transform", !open && "-rotate-90")}
           />
-          <span className="truncate font-medium text-[var(--ui-text)]">
+          <span className="truncate font-medium text-foreground">
             {file.treePath}
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-2">
-            <span className="text-[var(--ui-success)]">+{file.additions}</span>
-            <span className="text-[var(--ui-danger)]">-{file.deletions}</span>
+            <span className="text-success-foreground">+{file.additions}</span>
+            <span className="text-destructive">-{file.deletions}</span>
           </span>
         </button>
         {open &&
           (file.unrenderable ? (
-            <div className="bg-[var(--ui-panel)] p-4 text-center text-xs text-[var(--ui-text-dim)]">
+            <div className="bg-card p-4 text-center text-xs text-muted-foreground/70">
               Binary or large file — diff not shown.
             </div>
           ) : (
-            <div className="overflow-hidden bg-[var(--ui-panel)] p-2">
+            <div className="overflow-hidden bg-card p-2">
               <MultiFileDiff
                 oldFile={oldFile}
                 newFile={newFile}

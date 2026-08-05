@@ -73,22 +73,22 @@ const PR_STATE_META: Record<
   draft: {
     icon: GitPullRequestIcon,
     label: "Draft pull request",
-    className: "text-[var(--ui-text-dim)]",
+    className: "text-muted-foreground/70",
   },
   open: {
     icon: GitPullRequestIcon,
     label: "Open pull request",
-    className: "text-[var(--ui-success)]",
+    className: "text-success-foreground",
   },
   merged: {
     icon: GitMergeIcon,
     label: "Merged pull request",
-    className: "text-[var(--ui-accent)]",
+    className: "text-primary",
   },
   closed: {
     icon: GitPullRequestIcon,
     label: "Closed pull request",
-    className: "text-[var(--ui-danger)]",
+    className: "text-destructive",
   },
 }
 
@@ -132,12 +132,12 @@ export function AgentsSidebar({
   return (
     <SidebarFrame
       {...layout}
-      className="border-r border-[var(--ui-border)] bg-[var(--ui-sidebar)]"
+      className="border-r border-border bg-sidebar"
     >
       <div className="flex items-center justify-between px-4 pt-5 pb-4">
         <Link
           to="/my-settings"
-          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-[var(--ui-text)]"
+          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
           <img src="/logo-mark.png" alt="" className="size-5" />
           open-swe
@@ -149,7 +149,7 @@ export function AgentsSidebar({
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-sidebar-hover)]"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
         >
           <PlusIcon className="size-4" />
           New Agent
@@ -164,10 +164,10 @@ export function AgentsSidebar({
               key={item.to}
               to={item.to}
               onClick={layout.closeOnMobile}
-              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text)]"
+              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
               activeProps={{
                 className:
-                  "bg-[var(--ui-sidebar-hover)] !text-[var(--ui-text)] font-medium",
+                  "bg-sidebar-row-hover !text-foreground font-medium",
               }}
             >
               <Icon className="size-4" />
@@ -209,7 +209,7 @@ export function AgentsSidebar({
           />
         )}
         {isEmpty && (
-          <p className="px-2.5 py-6 text-center text-xs text-[var(--ui-text-dim)]">
+          <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
             No threads match these filters.
           </p>
         )}
@@ -257,7 +257,7 @@ function ThreadGroup({
       <button
         type="button"
         onClick={() => setCollapsed((value) => !value)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-[var(--ui-text-dim)] uppercase transition-colors hover:text-[var(--ui-text-muted)]"
+        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
         aria-expanded={!collapsed}
       >
         <ToggleIcon className="size-3" />
@@ -302,7 +302,7 @@ function ResolvedThreadGroup({
       <button
         type="button"
         onClick={() => setCollapsed((value) => !value)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-[var(--ui-text-dim)] uppercase transition-colors hover:text-[var(--ui-text-muted)]"
+        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
         aria-expanded={!collapsed}
       >
         <ToggleIcon className="size-3" />
@@ -328,7 +328,7 @@ function ResolvedThreadGroup({
               to="/agents/threads"
               search={{ resolved: true, page: 1 }}
               onClick={onNavigate}
-              className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text)]"
+              className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
             >
               Show all
             </Link>
@@ -418,13 +418,13 @@ function ThreadRow({
             "flex items-center gap-2 rounded-lg px-2.5 transition-colors group-hover:pr-8 [@media(hover:none)]:pr-8",
             compact ? "h-7 gap-1.5" : "h-8",
             isActive
-              ? "bg-[var(--ui-accent-bubble)] text-[var(--ui-text)]"
-              : "text-[var(--ui-text-muted)] group-hover:bg-[var(--ui-sidebar-hover)]"
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground group-hover:bg-sidebar-row-hover"
           )}
         >
           {thread.status === "running" ? (
             <CircleNotchIcon
-              className="size-3 shrink-0 animate-spin text-[var(--ui-accent)]"
+              className="size-3 shrink-0 animate-spin text-primary"
               aria-label="Thread running"
             />
           ) : (
@@ -432,8 +432,8 @@ function ThreadRow({
               className={cn(
                 "size-2 shrink-0 rounded-full",
                 showFinishedIndicator
-                  ? "bg-[var(--ui-accent)]"
-                  : "bg-[var(--ui-border)]"
+                  ? "bg-primary"
+                  : "bg-border"
               )}
               aria-label={
                 showFinishedIndicator ? "Thread finished" : "Thread viewed"
@@ -442,7 +442,7 @@ function ThreadRow({
           )}
           {source && SourceIcon && (
             <SourceIcon
-              className="size-3.5 shrink-0 text-[var(--ui-text-dim)]"
+              className="size-3.5 shrink-0 text-muted-foreground/70"
               aria-label={source.label}
             >
               <title>{source.label}</title>
@@ -463,7 +463,7 @@ function ThreadRow({
             </PrIcon>
           )}
           {!compact && badge && (
-            <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-success)] group-hover:hidden">
+            <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-success-foreground group-hover:hidden">
               {badge}
             </span>
           )}
@@ -477,7 +477,7 @@ function ThreadRow({
               <button
                 type="button"
                 aria-label="Thread actions"
-                className="absolute top-1/2 right-1 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)] data-popup-open:flex [@media(hover:none)]:flex"
+                className="absolute top-1/2 right-1 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 group-hover:flex hover:bg-accent hover:text-foreground data-popup-open:flex [@media(hover:none)]:flex"
               >
                 <DotsThreeVerticalIcon className="size-4" weight="bold" />
               </button>
@@ -594,13 +594,15 @@ export function AgentsShell({
   const layout = useSidebarLayout()
   return (
     <SidebarLayoutProvider value={layout}>
-      <div className="agents-ui flex h-svh overflow-hidden bg-[var(--ui-bg)]">
+      <div className="agents-ui flex h-svh overflow-hidden bg-background">
         <AgentsSidebar
           user={user}
           activeThreadId={activeThreadId}
           layout={layout}
         />
-        <div className="flex min-w-0 flex-1">{children}</div>
+        <main className="surface-grain relative flex min-w-0 flex-1 overflow-hidden bg-background">
+          {children}
+        </main>
       </div>
     </SidebarLayoutProvider>
   )

@@ -54,15 +54,15 @@ export function ReasoningBlock({ text, isLive }: { text: string; isLive: boolean
         ) : (
           <>
             <ChevronRight
-              className={`h-3 w-3 text-[color:var(--ui-text-dim)] shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
+              className={`size-3 shrink-0 text-muted-foreground/65 transition-transform ${expanded ? "rotate-90" : ""}`}
               aria-hidden
             />
-            <span className="text-xs text-[color:var(--ui-text-dim)]">{reasoningLabel(elapsedMs)}</span>
+            <span className="text-xs text-muted-foreground">{reasoningLabel(elapsedMs)}</span>
           </>
         )}
       </button>
       {expanded && trimmed && (
-        <div className="mt-1 ml-1 border-l-2 border-[var(--ui-border)] pl-3 text-[12px] leading-5 whitespace-pre-wrap break-words text-[color:var(--ui-text-dim)]">
+        <div className="ms-1 mt-1 whitespace-pre-wrap break-words border-s border-border/45 ps-3 text-[12px] leading-5 text-muted-foreground">
           {trimmed}
         </div>
       )}

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
-import { Map as MapIcon } from "lucide-react"
+import { CircleAlert as CircleAlertIcon, Map as MapIcon } from "lucide-react"
 
 import type {
   AgentThread,
@@ -9,6 +9,7 @@ import type {
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
+import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import {
   AgentGitPanel,
   PANEL_MIN_CHAT_WIDTH,
@@ -19,7 +20,10 @@ import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
-import { Messages } from "@/features/agents/components/messages"
+import {
+  Messages,
+  summarizeChangedFiles,
+} from "@/features/agents/components/messages"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
@@ -135,6 +139,15 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   )
   const hasMessages = baseMessages.length > 0
   const hasConversation = hasMessages || queuedMessages.length > 0
+  // The only file list the UI has: whatever the agent has already touched in
+  // this thread. Those are also the paths a follow-up is most likely about.
+  const mentionPaths = useMemo(
+    () =>
+      summarizeChangedFiles(baseMessages.flatMap((message) => message.chunks)).map(
+        (file) => file.filePath
+      ),
+    [baseMessages]
+  )
   const isThinking = stream.isLoading
   const settingUpSandbox = isThinking && baseMessages.length === 0
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
@@ -148,22 +161,28 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
       >
         {thread.status === "error" && (
-          <div className="border-b border-[var(--ui-border)] bg-[var(--ui-danger)]/10 px-4 py-2 text-xs text-[var(--ui-danger)]">
-            The last run hit an error before it could finish. Send another
-            message to retry.
-            {thread.traceUrl && (
-              <>
-                {" "}
-                <a
-                  href={thread.traceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium underline underline-offset-2"
-                >
-                  Open trace
-                </a>
-              </>
-            )}
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+            <Alert variant="error" controlAlignment="first-line">
+              <CircleAlertIcon />
+              <AlertDescription>
+                <span>
+                  The last run hit an error before it could finish. Send another
+                  message to retry.
+                </span>
+              </AlertDescription>
+              {thread.traceUrl && (
+                <AlertAction>
+                  <a
+                    href={thread.traceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-md px-2 py-1 text-xs font-medium text-destructive-foreground underline underline-offset-2 hover:bg-destructive/8"
+                  >
+                    Open trace
+                  </a>
+                </AlertAction>
+              )}
+            </Alert>
           </div>
         )}
         <WorkflowApprovalCard
@@ -173,33 +192,43 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         {thread.planStatus &&
           thread.planStatus !== "approved" &&
           thread.planStatus !== "cancelled" && (
-            <Link
-              to="/agents/$threadId/plan"
-              params={{ threadId: thread.id }}
-              data-testid="review-plan-link"
+            <div
               className={cn(
-                "flex items-center justify-between gap-2 border-b border-[var(--ui-border)] bg-[var(--ui-panel)] px-4 py-2 text-xs text-[var(--ui-text)] hover:bg-[var(--ui-panel-2)]",
+                "mx-auto w-full max-w-3xl shrink-0 px-4 pt-3",
                 // The collapsed panel floats a fixed expand button in the
                 // top-right corner; clear it so it never covers "Review plan →".
                 panelCollapsed && "pr-14"
               )}
             >
-              <span className="flex items-center gap-2">
-                <MapIcon className="size-3.5 text-[var(--ui-accent)]" />
-                {thread.planStatus === "ready"
-                  ? "A plan is ready for your review."
-                  : thread.planStatus === "shared"
-                    ? "The agent shared a longer response."
-                    : thread.planStatus === "revising"
-                      ? "The agent is revising the plan."
-                      : "The agent is writing a plan."}
-              </span>
-              <span className="font-medium text-[var(--ui-accent)]">
-                {thread.planStatus === "shared"
-                  ? "Open response →"
-                  : "Review plan →"}
-              </span>
-            </Link>
+              <Link
+                to="/agents/$threadId/plan"
+                params={{ threadId: thread.id }}
+                data-testid="review-plan-link"
+                className="block transition-colors hover:bg-info/8 rounded-xl"
+              >
+                <Alert variant="info">
+                  <MapIcon />
+                  <AlertDescription>
+                    <span className="text-foreground">
+                      {thread.planStatus === "ready"
+                        ? "A plan is ready for your review."
+                        : thread.planStatus === "shared"
+                          ? "The agent shared a longer response."
+                          : thread.planStatus === "revising"
+                            ? "The agent is revising the plan."
+                            : "The agent is writing a plan."}
+                    </span>
+                  </AlertDescription>
+                  <AlertAction>
+                    <span className="text-xs font-medium text-info-foreground">
+                      {thread.planStatus === "shared"
+                        ? "Open response →"
+                        : "Review plan →"}
+                    </span>
+                  </AlertAction>
+                </Alert>
+              </Link>
+            </div>
           )}
         {hasConversation ? (
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -233,6 +262,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   onSelectionChange={setSelection}
                   planMode={activePlanMode}
                   onPlanModeChange={setPlanMode}
+                  mentionPaths={mentionPaths}
                   contextUsage={{
                     usedTokens,
                     contextWindow: activeModel?.context_window ?? null,
@@ -244,13 +274,13 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           </div>
         ) : isHydrating ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            <p className="text-xs text-[var(--ui-text-dim)]">
+            <p className="text-xs text-muted-foreground/70">
               Loading conversation…
             </p>
           </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            <p className="text-xs text-[var(--ui-text-dim)]">
+            <p className="text-xs text-muted-foreground/70">
               This thread has no messages yet.
             </p>
             <div className="w-full max-w-3xl">

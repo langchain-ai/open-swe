@@ -28,22 +28,22 @@ export const SubagentCard = memo(function SubagentCard({ chunk }: { chunk: ToolE
     ) : null;
 
   return (
-    <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-accent-bubble)] p-2.5">
+    <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-accent p-2.5">
       <div className="flex items-center gap-1.5 min-w-0">
         {isRunning ? (
-          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[color:var(--ui-accent)]" aria-hidden />
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-hidden />
         ) : (
           <Bot
-            className={`h-3 w-3 shrink-0 ${isError ? "text-red-400" : "text-[color:var(--ui-accent)]"}`}
+            className={`h-3 w-3 shrink-0 ${isError ? "text-red-400" : "text-primary"}`}
             aria-hidden
           />
         )}
-        <span className="truncate text-[11px] font-medium text-[color:var(--ui-text-muted)]">
+        <span className="truncate text-[11px] font-medium text-muted-foreground">
           {subagentType}
         </span>
       </div>
       {description && (
-        <p className="line-clamp-5 whitespace-pre-wrap break-words text-[11px] leading-4 text-[color:var(--ui-text-dim)]">
+        <p className="line-clamp-5 whitespace-pre-wrap break-words text-[11px] leading-4 text-muted-foreground/70">
           {description}
         </p>
       )}

@@ -103,13 +103,13 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
   };
 
   return (
-    <div className="my-2 max-w-full overflow-hidden rounded-xl border border-[var(--ui-border-subtle)] bg-[var(--ui-code-bubble)]">
+    <div className="my-2 max-w-full overflow-hidden rounded-xl border border-border/60 bg-muted">
       <div className="flex items-center justify-between px-3 py-2 text-xs">
-        <span className="font-mono text-[color:var(--ui-accent-2)]">{displayLanguage}</span>
+        <span className="font-mono text-muted-foreground">{displayLanguage}</span>
         <button
           type="button"
           onClick={handleCopy}
-          className="text-[color:var(--ui-text-muted)] hover:text-[color:var(--ui-text)] transition-colors"
+          className="text-muted-foreground hover:text-foreground transition-colors"
           title="Copy code"
         >
           {copied ? "Copied" : "Copy"}
@@ -129,7 +129,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
             ))}
           </code>
         ) : (
-          <code className="block max-w-full text-[color:var(--ui-text)] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{text}</code>
+          <code className="block max-w-full text-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{text}</code>
         )}
       </pre>
     </div>
