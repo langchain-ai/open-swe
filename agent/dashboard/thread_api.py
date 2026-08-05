@@ -1493,6 +1493,26 @@ async def send_dashboard_message(
     return _thread_summary(thread)
 
 
+async def _cancel_active_thread_runs(client: Any, thread_id: str) -> None:
+    run_ids: set[str] = set()
+    for status in ("pending", "running"):
+        offset = 0
+        while True:
+            runs = await client.runs.list(thread_id, status=status, limit=100, offset=offset)
+            run_ids.update(
+                run_id for run in runs if isinstance((run_id := run.get("run_id")), str) and run_id
+            )
+            if len(runs) < 100:
+                break
+            offset += len(runs)
+    if run_ids:
+        await client.runs.cancel_many(
+            thread_id=thread_id,
+            run_ids=sorted(run_ids),
+            action="interrupt",
+        )
+
+
 async def cancel_dashboard_thread(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
@@ -1514,7 +1534,7 @@ async def cancel_dashboard_thread(
     _assert_thread_owner(metadata, login, email)
 
     try:
-        await client.runs.cancel_many(thread_id=thread_id, status="all", action="interrupt")
+        await _cancel_active_thread_runs(client, thread_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
@@ -1535,7 +1555,7 @@ async def admin_cancel_dashboard_thread(thread_id: str) -> dict[str, Any]:
         raise HTTPException(404, "thread not found") from exc
 
     try:
-        await client.runs.cancel_many(thread_id=thread_id, status="all", action="interrupt")
+        await _cancel_active_thread_runs(client, thread_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
