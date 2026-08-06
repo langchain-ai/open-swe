@@ -1654,9 +1654,16 @@ async def _readable_thread_metadata(
 async def get_dashboard_thread_state(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
-    thread = await _readable_thread(thread_id, login=login, email=email)
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    state = await langgraph_client().threads.get_state(thread_id)
+    _assert_thread_readable(metadata)
+    thread, latest_run_status, _ = await _refresh_latest_run_metadata(client, thread)
+    metadata = thread_metadata(thread)
+    state = await client.threads.get_state(thread_id)
     result = as_json_object(state)
     # The SDK's `useStream` opens its live event subscription only when the
     # hydrated `getState()` looks active (`next` non-empty / absent). When a
@@ -1665,7 +1672,11 @@ async def get_dashboard_thread_state(
     # which the SDK reads as idle and never opens the stream. Drop `next`
     # while a run is pending/running so the SDK treats the thread as active.
     metadata_run_status = metadata.get("latest_run_status")
-    if _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}:
+    if (
+        _thread_is_busy(thread)
+        or latest_run_status in {"pending", "running"}
+        or metadata_run_status in {"pending", "running"}
+    ):
         result.pop("next", None)
     return result
 
