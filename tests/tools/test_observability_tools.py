@@ -241,6 +241,17 @@ async def test_observability_authorized_allowlist(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.asyncio
+async def test_allowed_org_member(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "langchain-ai")
+    membership = AsyncMock(return_value=True)
+    monkeypatch.setattr(server, "is_user_active_org_member", membership)
+
+    config = cast(RunnableConfig, {"configurable": {"github_login": "dev"}})
+    assert await server._allowed_org_member(config, "dev") is True
+    membership.assert_awaited_once_with("dev", "langchain-ai")
+
+
+@pytest.mark.asyncio
 async def test_observability_authorized_resolves_login_email(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
