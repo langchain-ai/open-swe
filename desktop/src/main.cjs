@@ -19,13 +19,6 @@ const {
   removeProject,
 } = require("./project-store.cjs")
 const {
-  appendThreadEvent,
-  readThread,
-  readThreads,
-  removeThread,
-  writeThread,
-} = require("./local-thread-store.cjs")
-const {
   APP_URL,
   appRedirectUrl,
   backendRequestUrl,
@@ -58,30 +51,18 @@ let backendUrl = null
 let mainWindow = null
 let setupWindow = null
 const acpSessions = new Map()
-const acpSessionRestarts = new Map()
 
 function requireTrustedDesktopIpc(event) {
   const senderUrl = event.senderFrame?.url || event.sender.getURL()
   if (!isAppUrl(senderUrl)) throw new Error("Forbidden")
 }
 
-function localThreadsPath() {
-  return path.join(app.getPath("userData"), "local-threads")
-}
-
 function sendAcpEvent(sessionId, event) {
-  const localSession = acpSessions.get(sessionId)
-  if (!localSession) return
-  try {
-    appendThreadEvent(localThreadsPath(), localSession.summary(), event)
-  } catch (error) {
-    console.error("Could not persist local thread event", error)
-  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("desktop:acp-event", {
       sessionId,
       event,
-      session: localSession.summary(),
+      session: acpSessions.get(sessionId)?.summary(),
     })
   }
 }
@@ -121,66 +102,6 @@ async function requestAcpPermission(params) {
     ? await dialog.showMessageBox(mainWindow, options)
     : await dialog.showMessageBox(options)
   return result.response === 0
-}
-
-function createAcpSession(cwd, restoredSession) {
-  return new AcpSession({
-    cwd,
-    target: dcodeTarget(),
-    env: process.env,
-    onEvent: sendAcpEvent,
-    onSessionReady: (session) => writeThread(localThreadsPath(), session),
-    requestPermission: requestAcpPermission,
-    restoredSession,
-  })
-}
-
-async function restartAcpSession(sessionId) {
-  const restoredSession = readThread(localThreadsPath(), sessionId)
-  if (!restoredSession) throw new Error("Local Deep Agents Code session not found")
-  if (!restoredSession.canResume) {
-    throw new Error(
-      "The installed Deep Agents Code version cannot resume saved ACP sessions"
-    )
-  }
-  if (
-    !path.isAbsolute(restoredSession.cwd) ||
-    !fs.existsSync(restoredSession.cwd) ||
-    !fs.statSync(restoredSession.cwd).isDirectory()
-  ) {
-    throw new Error("The local project directory is no longer available")
-  }
-  if (!listProjects().some((project) => project.cwd === restoredSession.cwd)) {
-    throw new Error("Add this project to Open SWE before resuming its local agent")
-  }
-
-  const localSession = createAcpSession(restoredSession.cwd, restoredSession)
-  acpSessions.set(localSession.id, localSession)
-  try {
-    await localSession.initialize({ resume: true })
-    return localSession
-  } catch (error) {
-    acpSessions.delete(localSession.id)
-    localSession.close()
-    writeThread(localThreadsPath(), localSession.summary())
-    throw error
-  }
-}
-
-async function getRunningAcpSession(sessionId) {
-  const active = acpSessions.get(sessionId)
-  if (active) return active
-  const restarting = acpSessionRestarts.get(sessionId)
-  if (restarting) return restarting
-  const next = restartAcpSession(sessionId)
-  acpSessionRestarts.set(sessionId, next)
-  try {
-    return await next
-  } finally {
-    if (acpSessionRestarts.get(sessionId) === next) {
-      acpSessionRestarts.delete(sessionId)
-    }
-  }
 }
 
 function configureDesktopIpc() {
@@ -241,15 +162,19 @@ function configureDesktopIpc() {
     if (!listProjects().some((project) => project.cwd === cwd)) {
       throw new Error("Add this project to Open SWE before starting a local agent")
     }
-    const localSession = createAcpSession(cwd)
+    const localSession = new AcpSession({
+      cwd,
+      target: dcodeTarget(),
+      env: process.env,
+      onEvent: sendAcpEvent,
+      requestPermission: requestAcpPermission,
+    })
     acpSessions.set(localSession.id, localSession)
     try {
-      writeThread(localThreadsPath(), localSession.summary())
       await localSession.initialize()
     } catch (error) {
       acpSessions.delete(localSession.id)
       localSession.close()
-      removeThread(localThreadsPath(), localSession.id)
       throw error
     }
     void localSession.prompt(input.prompt || "", input.images || []).catch(() => {})
@@ -258,7 +183,8 @@ function configureDesktopIpc() {
 
   ipcMain.handle("desktop:acp-prompt", async (event, input) => {
     requireTrustedDesktopIpc(event)
-    const localSession = await getRunningAcpSession(input?.sessionId)
+    const localSession = acpSessions.get(input?.sessionId)
+    if (!localSession) throw new Error("Local Deep Agents Code session not found")
     await localSession.prompt(input.prompt || "", input.images || [])
     return localSession.snapshot()
   })
@@ -270,25 +196,13 @@ function configureDesktopIpc() {
 
   ipcMain.handle("desktop:acp-session", (event, sessionId) => {
     requireTrustedDesktopIpc(event)
-    return (
-      acpSessions.get(sessionId)?.snapshot() ||
-      readThread(localThreadsPath(), sessionId)
-    )
+    return acpSessions.get(sessionId)?.snapshot() || null
   })
 
   ipcMain.handle("desktop:acp-sessions", (event) => {
     requireTrustedDesktopIpc(event)
-    const sessions = new Map(
-      readThreads(localThreadsPath()).map((localSession) => [
-        localSession.id,
-        localSession,
-      ])
-    )
-    for (const localSession of acpSessions.values()) {
-      sessions.set(localSession.id, localSession.summary())
-    }
-    return [...sessions.values()].sort(
-      (left, right) => right.updatedAt - left.updatedAt
+    return [...acpSessions.values()].map((localSession) =>
+      localSession.summary()
     )
   })
 }
@@ -736,10 +650,7 @@ if (!hasSingleInstanceLock) {
   })
 
   app.on("before-quit", () => {
-    for (const localSession of acpSessions.values()) {
-      localSession.close()
-      writeThread(localThreadsPath(), localSession.summary())
-    }
+    for (const localSession of acpSessions.values()) localSession.close()
     acpSessions.clear()
   })
 }

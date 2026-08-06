@@ -17,11 +17,9 @@ export interface DesktopAcpSessionSummary {
   id: string
   cwd: string
   title: string
-  status: "starting" | "idle" | "running" | "stopped" | "error"
+  status: "starting" | "idle" | "running" | "error"
   createdAt: number
   updatedAt: number
-  providerSessionId?: string
-  canResume: boolean
 }
 
 export interface DesktopAcpSession extends DesktopAcpSessionSummary {
