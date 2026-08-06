@@ -164,7 +164,10 @@ function configureDesktopIpc() {
     }
     const localSession = new AcpSession({
       cwd,
-      target: dcodeTarget(),
+      target: dcodeTarget({
+        modelId: typeof input.modelId === "string" ? input.modelId : undefined,
+        effort: typeof input.effort === "string" ? input.effort : undefined,
+      }),
       env: process.env,
       onEvent: sendAcpEvent,
       requestPermission: requestAcpPermission,

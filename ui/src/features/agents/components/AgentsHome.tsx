@@ -135,6 +135,8 @@ export function AgentsHome() {
           cwd: localProjectPath,
           prompt,
           images,
+          modelId: activeSelection?.modelId,
+          effort: activeSelection?.effort,
         })
         await navigate({
           to: "/agents/local/$sessionId",
@@ -200,11 +202,9 @@ export function AgentsHome() {
           <AgentPromptBar
             onSubmit={handleSubmit}
             disabled={submitting}
-            models={runTarget === "local" ? [] : models}
-            selection={runTarget === "local" ? null : activeSelection}
-            onSelectionChange={
-              runTarget === "cloud" ? setSelection : undefined
-            }
+            models={models}
+            selection={activeSelection}
+            onSelectionChange={setSelection}
             repos={reposQuery.data?.repositories}
             selectedRepo={repo}
             onRepoChange={setRepoOverride}

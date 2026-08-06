@@ -10,9 +10,19 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function dcodeTarget({ env = process.env, platform = process.platform } = {}) {
+function dcodeTarget({
+  env = process.env,
+  platform = process.platform,
+  modelId,
+  effort,
+} = {}) {
+  const args = ["--acp"]
+  if (modelId) args.push("--model", modelId)
+  if (effort) {
+    args.push("--model-params", JSON.stringify({ reasoning_effort: effort }))
+  }
   if (env.OPEN_SWE_DCODE_COMMAND) {
-    return { command: env.OPEN_SWE_DCODE_COMMAND, args: ["--acp"] }
+    return { command: env.OPEN_SWE_DCODE_COMMAND, args }
   }
   const home = env.HOME || env.USERPROFILE
   const installedCommand = home
@@ -24,9 +34,9 @@ function dcodeTarget({ env = process.env, platform = process.platform } = {}) {
       )
     : null
   if (installedCommand && fs.existsSync(installedCommand)) {
-    return { command: installedCommand, args: ["--acp"] }
+    return { command: installedCommand, args }
   }
-  return { command: "dcode", args: ["--acp"] }
+  return { command: "dcode", args }
 }
 
 function sessionTitle(text) {

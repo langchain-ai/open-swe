@@ -44,6 +44,8 @@ declare global {
       startAcpSession: (
         input: DesktopAcpPromptInput & {
           cwd: string
+          modelId?: string
+          effort?: string
         }
       ) => Promise<DesktopAcpSession>
       promptAcpSession: (

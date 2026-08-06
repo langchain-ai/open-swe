@@ -37,6 +37,26 @@ test("falls back to dcode on PATH", () => {
   })
 })
 
+test("passes the selected model and effort to dcode", () => {
+  assert.deepEqual(
+    dcodeTarget({
+      env: { OPEN_SWE_DCODE_COMMAND: "/opt/bin/dcode" },
+      modelId: "anthropic:claude-sonnet-5",
+      effort: "high",
+    }),
+    {
+      command: "/opt/bin/dcode",
+      args: [
+        "--acp",
+        "--model",
+        "anthropic:claude-sonnet-5",
+        "--model-params",
+        '{"reasoning_effort":"high"}',
+      ],
+    }
+  )
+})
+
 test("uses the first prompt as the local session title", () => {
   assert.equal(
     sessionTitle("  explain\nthis   project  "),
