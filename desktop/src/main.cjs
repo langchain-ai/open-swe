@@ -14,6 +14,11 @@ const {
 } = require("electron")
 const { AcpSession, dcodeTarget } = require("./acp-client.cjs")
 const {
+  addProject,
+  readProjects,
+  removeProject,
+} = require("./project-store.cjs")
+const {
   APP_URL,
   appRedirectUrl,
   backendRequestUrl,
@@ -62,6 +67,20 @@ function sendAcpEvent(sessionId, event) {
   }
 }
 
+function projectsPath() {
+  return path.join(app.getPath("userData"), "desktop-projects.json")
+}
+
+function listProjects() {
+  return readProjects(projectsPath())
+}
+
+function sendProjectsChanged() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("desktop:projects-changed", listProjects())
+  }
+}
+
 async function requestAcpPermission(params) {
   const toolCall =
     params && typeof params.toolCall === "object" ? params.toolCall : null
@@ -86,16 +105,46 @@ async function requestAcpPermission(params) {
 }
 
 function configureDesktopIpc() {
-  ipcMain.handle("desktop:pick-directory", async (event) => {
+  ipcMain.handle("desktop:projects", (event) => {
+    requireTrustedDesktopIpc(event)
+    return listProjects()
+  })
+
+  ipcMain.handle("desktop:add-project", async (event) => {
     requireTrustedDesktopIpc(event)
     const options = {
-      title: "Choose a project to run on My Mac",
+      title: "Add a project from This Mac",
       properties: ["openDirectory", "createDirectory"],
     }
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, options)
       : await dialog.showOpenDialog(options)
-    return result.canceled ? null : result.filePaths[0] || null
+    if (result.canceled || !result.filePaths[0]) return null
+    const project = addProject(projectsPath(), result.filePaths[0])
+    sendProjectsChanged()
+    return project
+  })
+
+  ipcMain.handle("desktop:remove-project", async (event, cwd) => {
+    requireTrustedDesktopIpc(event)
+    const project = listProjects().find((item) => item.cwd === cwd)
+    if (!project) return false
+    const options = {
+      type: "warning",
+      title: "Remove project",
+      message: `Remove “${project.name}” from Open SWE?`,
+      detail: `${project.cwd}\n\nThis does not delete files from your Mac.`,
+      buttons: ["Cancel", "Remove"],
+      defaultId: 0,
+      cancelId: 0,
+    }
+    const result = mainWindow
+      ? await dialog.showMessageBox(mainWindow, options)
+      : await dialog.showMessageBox(options)
+    if (result.response !== 1) return false
+    const removed = removeProject(projectsPath(), project.cwd)
+    if (removed) sendProjectsChanged()
+    return removed
   })
 
   ipcMain.handle("desktop:acp-start", async (event, input) => {
@@ -109,8 +158,12 @@ function configureDesktopIpc() {
     ) {
       throw new Error("Choose a valid local project directory")
     }
+    const cwd = fs.realpathSync(input.cwd)
+    if (!listProjects().some((project) => project.cwd === cwd)) {
+      throw new Error("Add this project to Open SWE before starting a local agent")
+    }
     const localSession = new AcpSession({
-      cwd: input.cwd,
+      cwd,
       model: typeof input.model === "string" ? input.model : null,
       effort: typeof input.effort === "string" ? input.effort : null,
       target: dcodeTarget(),

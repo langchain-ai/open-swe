@@ -1,5 +1,11 @@
 import type { ImageChunk } from "@/features/agents/lib/types"
 
+export interface DesktopProject {
+  cwd: string
+  name: string
+  addedAt: number
+}
+
 export interface DesktopAcpEvent {
   sequence: number
   timestamp: string
@@ -31,7 +37,12 @@ declare global {
   interface Window {
     openSweDesktop?: {
       isDesktop: true
-      pickDirectory: () => Promise<string | null>
+      listProjects: () => Promise<Array<DesktopProject>>
+      addProject: () => Promise<DesktopProject | null>
+      removeProject: (cwd: string) => Promise<boolean>
+      onProjectsChanged: (
+        callback: (projects: Array<DesktopProject>) => void
+      ) => () => void
       startAcpSession: (
         input: DesktopAcpPromptInput & {
           cwd: string

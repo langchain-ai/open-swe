@@ -6,7 +6,7 @@ import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPromptEditor, mentionReplacementText } from "./ComposerPromptEditor";
 import { ContextWindowMeter } from "./ContextWindowMeter";
-import { LocalProjectSelector, RunTargetSelector } from "./RunTargetSelector";
+import { RunTargetSelector } from "./RunTargetSelector";
 import {
   COMPOSER_PATH_DRAG_MIME,
   detectComposerTrigger,
@@ -17,6 +17,7 @@ import type { ActiveRun } from "./ComposerPrimaryActions";
 import type { ComposerCommandKey, ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger";
 import type { RunTarget } from "./RunTargetSelector";
+import type { DesktopProject } from "@/desktop";
 import type { ModelOption, Skill } from "@/lib/api";
 import type { ImageChunk } from "@/features/agents/lib/types";
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions";
@@ -64,8 +65,11 @@ export interface ChatComposerProps {
   /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
   runTarget?: RunTarget;
   onRunTargetChange?: (next: RunTarget) => void;
-  localProjectPath?: string | null;
-  onPickLocalProject?: () => void;
+  localProjects?: Array<DesktopProject>;
+  selectedLocalProjectPath?: string | null;
+  onSelectLocalProject?: (cwd: string) => void;
+  onAddLocalProject?: () => void;
+  onRemoveLocalProject?: (cwd: string) => void;
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean;
   onPlanModeChange?: (next: boolean) => void;
@@ -158,8 +162,11 @@ export const ChatComposer = memo(function ChatComposer({
   onRepoChange,
   runTarget,
   onRunTargetChange,
-  localProjectPath = null,
-  onPickLocalProject,
+  localProjects = [],
+  selectedLocalProjectPath = null,
+  onSelectLocalProject,
+  onAddLocalProject,
+  onRemoveLocalProject,
   planMode = false,
   onPlanModeChange,
   mentionPaths = [],
@@ -404,24 +411,29 @@ export const ChatComposer = memo(function ChatComposer({
     >
       {(onRepoChange || onRunTargetChange) && (
         <div className="mb-2 flex items-center gap-2 px-1 text-xs">
-          {runTarget === "local" && onPickLocalProject ? (
-            <LocalProjectSelector path={localProjectPath} onPick={onPickLocalProject} />
-          ) : (
-            onRepoChange && (
-              <RepoSelector
-                repos={repos}
-                selectedRepo={selectedRepo}
-                onRepoChange={onRepoChange}
-              />
-            )
-          )}
-          {runTarget && onRunTargetChange && (
-            <RunTargetSelector
-              localEnabled={Boolean(window.openSweDesktop)}
-              onChange={onRunTargetChange}
-              value={runTarget}
+          {runTarget !== "local" && onRepoChange && (
+            <RepoSelector
+              repos={repos}
+              selectedRepo={selectedRepo}
+              onRepoChange={onRepoChange}
             />
           )}
+          {runTarget &&
+            onRunTargetChange &&
+            onSelectLocalProject &&
+            onAddLocalProject &&
+            onRemoveLocalProject && (
+              <RunTargetSelector
+                localEnabled={Boolean(window.openSweDesktop)}
+                onChange={onRunTargetChange}
+                onAddProject={onAddLocalProject}
+                onRemoveProject={onRemoveLocalProject}
+                onSelectProject={onSelectLocalProject}
+                projects={localProjects}
+                selectedProjectPath={selectedLocalProjectPath}
+                value={runTarget}
+              />
+            )}
         </div>
       )}
 

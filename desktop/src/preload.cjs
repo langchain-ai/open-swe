@@ -2,7 +2,14 @@ const { contextBridge, ipcRenderer } = require("electron")
 
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
-  pickDirectory: () => ipcRenderer.invoke("desktop:pick-directory"),
+  listProjects: () => ipcRenderer.invoke("desktop:projects"),
+  addProject: () => ipcRenderer.invoke("desktop:add-project"),
+  removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
+  onProjectsChanged: (callback) => {
+    const listener = (_event, projects) => callback(projects)
+    ipcRenderer.on("desktop:projects-changed", listener)
+    return () => ipcRenderer.removeListener("desktop:projects-changed", listener)
+  },
   startAcpSession: (input) => ipcRenderer.invoke("desktop:acp-start", input),
   promptAcpSession: (input) => ipcRenderer.invoke("desktop:acp-prompt", input),
   cancelAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-cancel", sessionId),

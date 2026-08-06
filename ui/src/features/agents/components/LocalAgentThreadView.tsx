@@ -47,7 +47,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         <span className="truncate" title={session.cwd}>
           {session.cwd}
         </span>
-        <span className="ml-auto shrink-0">My Mac</span>
+        <span className="ml-auto shrink-0">This Mac</span>
       </div>
       {session.status === "error" && (
         <div className="mx-auto w-full max-w-3xl px-4 pt-3">

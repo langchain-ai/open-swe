@@ -18,6 +18,7 @@ import {
   useAgentSkills,
 } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
+import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { useProfile, useRepos } from "@/lib/profile"
 import {
   requestNotificationPermission,
@@ -56,6 +57,8 @@ export function AgentsHome() {
   const [runTarget, setRunTarget] = useState<RunTarget>("cloud")
   const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
+  const { projects: localProjects, addProject, removeProject } =
+    useDesktopProjects()
 
   const reposQuery = useRepos()
   const profileQuery = useProfile()
@@ -85,16 +88,34 @@ export function AgentsHome() {
     void navigate({ to: "/agents/$threadId", params: { threadId: id } })
   }, [stream.threadId, queryClient, navigate])
 
-  const pickLocalProject = async () => {
-    const path = await window.openSweDesktop?.pickDirectory()
-    if (path) setLocalProjectPath(path)
-    return path ?? null
-  }
+  useEffect(() => {
+    if (
+      localProjectPath &&
+      !localProjects.some((project) => project.cwd === localProjectPath)
+    ) {
+      setLocalProjectPath(null)
+    }
+  }, [localProjectPath, localProjects])
 
   const handleRunTargetChange = (next: RunTarget) => {
     setRunTarget(next)
     setLocalError(null)
-    if (next === "local" && !localProjectPath) void pickLocalProject()
+  }
+
+  const handleSelectLocalProject = (cwd: string) => {
+    setLocalProjectPath(cwd)
+    setRunTarget("local")
+    setLocalError(null)
+  }
+
+  const handleAddLocalProject = async () => {
+    const project = await addProject()
+    if (project) handleSelectLocalProject(project.cwd)
+  }
+
+  const handleRemoveLocalProject = async (cwd: string) => {
+    if (!(await removeProject(cwd))) return
+    if (localProjectPath === cwd) setLocalProjectPath(null)
   }
 
   const handleSubmit = async (prompt: string, images: Array<ImageChunk>) => {
@@ -103,13 +124,15 @@ export function AgentsHome() {
     })
     if (runTarget === "local") {
       const desktop = window.openSweDesktop
-      const cwd = localProjectPath ?? (await pickLocalProject())
-      if (!desktop || !cwd) return
+      if (!desktop || !localProjectPath) {
+        setLocalError("Choose or add a project from This Mac before sending.")
+        return
+      }
       setSubmitting(true)
       setLocalError(null)
       try {
         const session = await desktop.startAcpSession({
-          cwd,
+          cwd: localProjectPath,
           prompt,
           images,
           model: activeSelection?.modelId ?? null,
@@ -187,10 +210,11 @@ export function AgentsHome() {
             onRepoChange={setRepoOverride}
             runTarget={isDesktop ? runTarget : undefined}
             onRunTargetChange={isDesktop ? handleRunTargetChange : undefined}
-            localProjectPath={localProjectPath}
-            onPickLocalProject={
-              isDesktop ? () => void pickLocalProject() : undefined
-            }
+            localProjects={localProjects}
+            selectedLocalProjectPath={localProjectPath}
+            onSelectLocalProject={handleSelectLocalProject}
+            onAddLocalProject={() => void handleAddLocalProject()}
+            onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
             planMode={planMode}
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
             skills={skills.data}
