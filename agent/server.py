@@ -679,11 +679,11 @@ async def _allowed_org_member(config: RunnableConfig, profile_login: str | None)
     login = profile_login or (config_login if isinstance(config_login, str) else None)
     if not login:
         return False
-    orgs = {
+    orgs = dict.fromkeys(
         org.strip().lower()
         for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
         if org.strip()
-    }
+    )
     for org in orgs:
         if await is_user_active_org_member(login, org):
             return True
