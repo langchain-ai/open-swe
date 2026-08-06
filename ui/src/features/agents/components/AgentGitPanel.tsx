@@ -443,15 +443,17 @@ export function AgentGitPanel({
     [files]
   )
 
-  useEffect(() => {
-    if (!selectedTreePath) return
-    const target = files.find((file) => file.treePath === selectedTreePath)
+  const filesRef = useRef(files)
+  filesRef.current = files
+  const selectTreePath = useCallback((path: string) => {
+    setSelectedTreePath(path)
+    const target = filesRef.current.find((file) => file.treePath === path)
     if (!target) return
     sectionRefs.current[target.filePath]?.scrollIntoView({
       block: "start",
       behavior: "smooth",
     })
-  }, [selectedTreePath, files])
+  }, [])
 
   if (collapsed) {
     return (
@@ -661,7 +663,7 @@ export function AgentGitPanel({
                     <FileTreeExplorer
                       files={files}
                       selectedTreePath={selectedTreePath}
-                      onSelect={setSelectedTreePath}
+                      onSelect={selectTreePath}
                     />
                   </div>
                 )}
