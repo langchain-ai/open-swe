@@ -106,6 +106,7 @@ from .runtime.constants import (
 from .runtime.execution import graph_loaded_for_execution
 from .tools import (
     approve_plan,
+    delete_user_skill,
     enter_plan_mode,
     fetch_url,
     http_request,
@@ -123,6 +124,7 @@ from .tools import (
     request_pr_review,
     save_plan,
     save_user_instructions,
+    save_user_skill,
     schedule_thread_wakeup,
     slack_add_reaction,
     slack_read_thread_messages,
@@ -576,6 +578,8 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "open_pull_request",
         "recreate_sandbox",
         "request_pr_review",
+        "save_user_skill",
+        "delete_user_skill",
         "slack_start_new_thread",
         "linear_create_issue",
         "linear_update_issue",
@@ -1120,6 +1124,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         enter_plan_mode,
         save_plan,
         save_user_instructions,
+        save_user_skill,
+        delete_user_skill,
         linear_comment,
         linear_create_issue,
         linear_delete_issue,

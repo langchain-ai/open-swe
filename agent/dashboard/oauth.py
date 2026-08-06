@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "osw_session"
 STATE_COOKIE_NAME = "osw_oauth_state"
+_DESKTOP_APP_ORIGIN = "open-swe://app"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 STATE_TTL_SECONDS = 600
 JWT_ALG = "HS256"
@@ -246,6 +247,7 @@ def require_same_origin(request: Request) -> None:
     allowed = allowed_dashboard_origins()
     if not allowed:
         return
+    allowed.add(_DESKTOP_APP_ORIGIN)
     request_base_origin = _origin_of(str(request.base_url))
     if request_base_origin:
         allowed.add(request_base_origin)
