@@ -13,7 +13,7 @@ import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows";
 import { DiffEntryBody, DiffStatChip, ShellEntryBody } from "./entryBodies";
 import type { ReactNode } from "react";
 import type { RenderItem } from "../renderItems";
-import type { ApprovalCallbacks, ChangedFileSummaryItem } from "../types";
+import type { ApprovalCallbacks } from "../types";
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types";
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard";
 import { SubagentGroup } from "@/features/agents/components/subagents";
@@ -46,14 +46,16 @@ function splitWorkAndReply(items: Array<RenderItem>): {
   return { workItems: items.slice(0, splitIndex), replyItems: items.slice(splitIndex) };
 }
 
+/**
+ * Renders one edit call from its own before/after content — never the turn's
+ * per-file aggregate, which makes repeated edits of a file look duplicated.
+ */
 function EditWorkEntry({
   chunk,
   projectPath,
-  resolved,
 }: {
   chunk: ToolExecutionChunk;
   projectPath?: string;
-  resolved?: ChangedFileSummaryItem;
 }) {
   const entry = describeWorkEntry(chunk, projectPath);
   const diff = latestDiff(chunk);
@@ -61,8 +63,8 @@ function EditWorkEntry({
   const { body, trailing } = useMemo(() => {
     if (!diff) return { body: undefined, trailing: undefined };
 
-    const originalContent = resolved?.originalContent ?? diff.originalContent ?? "";
-    const newContent = resolved?.modifiedContent ?? diff.newContent;
+    const originalContent = diff.originalContent ?? "";
+    const newContent = diff.newContent;
     const stats = countLineChanges(originalContent, newContent, diff.filePath);
 
     return {
@@ -75,7 +77,7 @@ function EditWorkEntry({
       ),
       trailing: <DiffStatChip additions={stats.additions} deletions={stats.deletions} />,
     };
-  }, [diff, resolved]);
+  }, [diff]);
 
   return (
     <WorkEntryRow entry={entry} timestamp={chunk.timestamp} body={body} trailing={trailing} />
@@ -141,11 +143,6 @@ export function AgentTurn({
       deletions += item.deletions;
     }
     return { additions, deletions };
-  }, [changedFiles]);
-  const changedFilesByPath = useMemo(() => {
-    const byPath = new Map<string, ChangedFileSummaryItem>();
-    for (const file of changedFiles) byPath.set(file.filePath, file);
-    return byPath;
   }, [changedFiles]);
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -223,17 +220,8 @@ export function AgentTurn({
       case "subagent-group":
         return <SubagentGroup key={item.key} chunks={item.chunks} />;
 
-      case "edit-item": {
-        const diff = latestDiff(item.chunk);
-        return (
-          <EditWorkEntry
-            key={item.key}
-            chunk={item.chunk}
-            projectPath={projectPath}
-            resolved={diff ? changedFilesByPath.get(diff.filePath) : undefined}
-          />
-        );
-      }
+      case "edit-item":
+        return <EditWorkEntry key={item.key} chunk={item.chunk} projectPath={projectPath} />;
 
       case "shell-item":
         return (
