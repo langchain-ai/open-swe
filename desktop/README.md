@@ -12,9 +12,9 @@ this option. The desktop app launches the user's installed `dcode --acp`, inheri
 authentication and configuration. It finds the standard `~/.local/bin/dcode` installation even
 when a packaged app does not inherit the terminal's `PATH`; `OPEN_SWE_DCODE_COMMAND` overrides the
 executable path. Added projects are persisted in the desktop app's local data and can be selected
-from the **This Mac** submenu or managed from the sidebar. Local threads remain available for the
-lifetime of the app; dcode ACP does not currently support resuming those sessions after the desktop
-process exits.
+from the **This Mac** submenu or managed from the sidebar. Local dcode runs are ephemeral: their
+sessions remain available only for the lifetime of the desktop process and cannot be resumed after
+it exits.
 
 ## How it connects
 
