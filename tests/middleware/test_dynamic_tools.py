@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
@@ -85,3 +86,12 @@ async def test_dynamic_tools_load_only_selected_schemas_and_route_calls() -> Non
 
     with pytest.raises(ValueError, match="Duplicate integration tool name"):
         DynamicToolMiddleware({"Notion": [_tool("static")]}, reserved_names={"static"})
+
+
+def test_general_purpose_subagent_includes_dynamic_tools() -> None:
+    from agent.server import _general_purpose_subagent
+
+    middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
+    subagent = _general_purpose_subagent(MagicMock(), dynamic_tools=middleware)
+
+    assert middleware in subagent.get("middleware", [])

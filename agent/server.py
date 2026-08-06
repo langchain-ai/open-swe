@@ -592,7 +592,11 @@ def _subagent_model_timeout_middleware() -> list[AgentMiddleware[Any, Any, Any]]
     return cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()])
 
 
-def _general_purpose_subagent(model: BaseChatModel, skills: list[str] | None = None) -> SubAgent:
+def _general_purpose_subagent(
+    model: BaseChatModel,
+    skills: list[str] | None = None,
+    dynamic_tools: DynamicToolMiddleware | None = None,
+) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": GENERAL_PURPOSE_SUBAGENT["description"],
@@ -601,7 +605,10 @@ def _general_purpose_subagent(model: BaseChatModel, skills: list[str] | None = N
         # tool-call cadence) that delegated work also needs.
         "system_prompt": OPEN_SWE_SHARED_BASE + "\n\n" + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
-        "middleware": _subagent_model_timeout_middleware(),
+        "middleware": [
+            *([dynamic_tools] if dynamic_tools else []),
+            *_subagent_model_timeout_middleware(),
+        ],
     }
     if skills:
         subagent["skills"] = skills
@@ -1074,7 +1081,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_start_new_thread,
         slack_thread_reply,
     ]
-    dynamic_tool_middleware: list[Any] = []
+    dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups = {
         "Corridor": corridor_tools,
         "Observability": observability_tools,
@@ -1082,11 +1089,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "Notion": notion_tools,
     }
     if any(integration_tool_groups.values()):
-        dynamic_tool_middleware.append(
-            DynamicToolMiddleware(
-                integration_tool_groups,
-                reserved_names={*DEEP_AGENT_TOOL_NAMES, *(tool.__name__ for tool in static_tools)},
-            )
+        dynamic_tool_middleware = DynamicToolMiddleware(
+            integration_tool_groups,
+            reserved_names={*DEEP_AGENT_TOOL_NAMES, *(tool.__name__ for tool in static_tools)},
         )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
@@ -1115,7 +1120,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         system_prompt="",
         tools=static_tools,
         subagents=[
-            _general_purpose_subagent(subagent_model, skill_sources),
+            _general_purpose_subagent(subagent_model, skill_sources, dynamic_tool_middleware),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
         skills=skill_sources,
@@ -1137,7 +1142,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     plan_mode=plan_mode,
                     corridor_enabled=bool(corridor_tools),
                 ),
-                *dynamic_tool_middleware,
+                *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
