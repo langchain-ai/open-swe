@@ -37,20 +37,6 @@ DEFAULT_ASSISTANT_STATUS = "is thinking…"
 SlackChannelContext = dict[str, str]
 _SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
-# Curated rotating loading strings shown by Slack while the indicator is active.
-# Capped at 10 by Slack's API.
-DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
-    "Pondering…",
-    "Cogitating…",
-    "Ruminating…",
-    "Noodling…",
-    "Percolating…",
-    "Marinating…",
-    "Simmering…",
-    "Conjuring…",
-    "Tinkering…",
-    "Schlepping…",
-)
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
 SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10

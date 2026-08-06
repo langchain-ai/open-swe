@@ -28,7 +28,6 @@ from langgraph.types import Command
 
 from ..utils.slack import (
     DEFAULT_ASSISTANT_STATUS,
-    DEFAULT_LOADING_MESSAGES,
     set_slack_assistant_status,
 )
 
@@ -114,12 +113,7 @@ def _status_from_recent_tool_calls(messages: list[Any]) -> str:
 
 async def _set_status(channel_id: str, thread_ts: str, status: str) -> None:
     try:
-        await set_slack_assistant_status(
-            channel_id,
-            thread_ts,
-            status=status,
-            loading_messages=list(DEFAULT_LOADING_MESSAGES) if status else None,
-        )
+        await set_slack_assistant_status(channel_id, thread_ts, status=status)
     except Exception:
         logger.exception("Failed to update Slack assistant status")
 

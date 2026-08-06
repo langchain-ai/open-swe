@@ -10,7 +10,7 @@ from agent.middleware.refresh_slack_status import (
     SlackAssistantStatusMiddleware,
     _status_from_recent_tool_calls,
 )
-from agent.utils.slack import DEFAULT_ASSISTANT_STATUS, DEFAULT_LOADING_MESSAGES
+from agent.utils.slack import DEFAULT_ASSISTANT_STATUS
 
 
 class TestSlackAssistantStatusMiddleware:
@@ -40,7 +40,7 @@ class TestSlackAssistantStatusMiddleware:
         kwargs = await_args.kwargs
         assert args == ("C1", "1.0")
         assert kwargs["status"] == DEFAULT_ASSISTANT_STATUS
-        assert kwargs["loading_messages"] == list(DEFAULT_LOADING_MESSAGES)
+        assert "loading_messages" not in kwargs
 
     @pytest.mark.asyncio
     async def test_after_agent_clears_status_when_slack_thread_present(self) -> None:
@@ -58,7 +58,7 @@ class TestSlackAssistantStatusMiddleware:
         await_args = mock_set.await_args
         assert await_args is not None
         assert await_args.kwargs["status"] == ""
-        assert await_args.kwargs["loading_messages"] is None
+        assert "loading_messages" not in await_args.kwargs
 
     @pytest.mark.asyncio
     async def test_model_call_uses_contextual_status_from_last_tool_call(self) -> None:
