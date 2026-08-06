@@ -5,7 +5,6 @@ const os = require("node:os")
 const path = require("node:path")
 
 const {
-  dcodeArgs,
   dcodeTarget,
   promptBlocks,
   sessionTitle,
@@ -36,16 +35,6 @@ test("falls back to dcode on PATH", () => {
     command: "dcode",
     args: ["--acp"],
   })
-})
-
-test("uses dcode ACP model arguments", () => {
-  assert.deepEqual(dcodeArgs(["--acp"], "openai:gpt-5.6-sol", "medium"), [
-    "--acp",
-    "-M",
-    "openai:gpt-5.6-sol",
-    "--model-params",
-    '{"reasoning_effort":"medium"}',
-  ])
 })
 
 test("uses the first prompt as the local session title", () => {

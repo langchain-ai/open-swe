@@ -1,16 +1,13 @@
 import { CircleAlert, FolderOpen } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
-import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { Messages } from "@/features/agents/components/messages"
 import { useDesktopAcpSession } from "@/features/agents/lib/desktopAcp"
-import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const { session, messages, loaded } = useDesktopAcpSession(sessionId)
-  const { models } = useModelOptions()
 
   if (!session) {
     return (
@@ -30,13 +27,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     )
   }
 
-  const selection: ModelSelection | null =
-    session.model && session.effort
-      ? { modelId: session.model, effort: session.effort }
-      : null
-  const selectedModels = session.model
-    ? models.filter((model) => model.id === session.model)
-    : models
   const isRunning =
     session.status === "running" || session.status === "starting"
 
@@ -74,7 +64,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               busy={isRunning}
               compact
               disabled={session.status === "error"}
-              models={selectedModels}
               onStop={() => window.openSweDesktop?.cancelAcpSession(session.id)}
               onSubmit={async (prompt, images) => {
                 await window.openSweDesktop?.promptAcpSession({
@@ -84,7 +73,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 })
               }}
               placeholder="Add a follow up"
-              selection={selection}
             />
           </div>
         </div>

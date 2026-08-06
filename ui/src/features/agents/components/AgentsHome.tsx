@@ -135,8 +135,6 @@ export function AgentsHome() {
           cwd: localProjectPath,
           prompt,
           images,
-          model: activeSelection?.modelId ?? null,
-          effort: activeSelection?.effort ?? null,
         })
         await navigate({
           to: "/agents/local/$sessionId",

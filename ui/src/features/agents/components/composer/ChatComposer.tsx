@@ -520,15 +520,17 @@ export const ChatComposer = memo(function ChatComposer({
         />
 
         <div className="mt-auto flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 pt-2 text-xs text-muted-foreground">
-          <ModelPicker
-            models={models}
-            onOpenChange={setModelPickerOpen}
-            onSelectionChange={onSelectionChange}
-            open={modelPickerOpen}
-            requireImageSupport={pendingImages.length > 0}
-            selection={selection}
-            triggerClassName="h-7 rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
-          />
+          {models.length > 0 && (
+            <ModelPicker
+              models={models}
+              onOpenChange={setModelPickerOpen}
+              onSelectionChange={onSelectionChange}
+              open={modelPickerOpen}
+              requireImageSupport={pendingImages.length > 0}
+              selection={selection}
+              triggerClassName="h-7 rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
+            />
+          )}
 
           {onPlanModeChange && (
             <Tooltip>

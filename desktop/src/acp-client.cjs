@@ -29,15 +29,6 @@ function dcodeTarget({ env = process.env, platform = process.platform } = {}) {
   return { command: "dcode", args: ["--acp"] }
 }
 
-function dcodeArgs(targetArgs, model, effort) {
-  const args = [...targetArgs]
-  if (model) args.push("-M", model)
-  if (effort) {
-    args.push("--model-params", JSON.stringify({ reasoning_effort: effort }))
-  }
-  return args
-}
-
 function sessionTitle(text) {
   const value = text.trim().replace(/\s+/g, " ")
   return value.slice(0, 80) || "New local agent"
@@ -232,11 +223,9 @@ class NdJsonRpcClient {
 }
 
 class AcpSession {
-  constructor({ cwd, model, effort, target, env, onEvent, requestPermission }) {
+  constructor({ cwd, target, env, onEvent, requestPermission }) {
     this.id = randomUUID()
     this.cwd = cwd
-    this.model = model
-    this.effort = effort
     this.title = "New local agent"
     this.createdAt = Date.now()
     this.updatedAt = this.createdAt
@@ -245,8 +234,7 @@ class AcpSession {
     this.onEvent = onEvent
     this.requestPermission = requestPermission
     this.tools = new Map()
-    const args = dcodeArgs(target.args, model, effort)
-    this.rpc = new NdJsonRpcClient(target.command, args, cwd, env)
+    this.rpc = new NdJsonRpcClient(target.command, target.args, cwd, env)
     this.rpc.onNotification = (method, params) =>
       this.handleNotification(method, params)
     this.rpc.onRequest = (method, params) => this.handleRequest(method, params)
@@ -392,8 +380,6 @@ class AcpSession {
       id: this.id,
       cwd: this.cwd,
       title: this.title,
-      model: this.model,
-      effort: this.effort,
       status: this.status,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
@@ -407,7 +393,6 @@ class AcpSession {
 
 module.exports = {
   AcpSession,
-  dcodeArgs,
   dcodeTarget,
   promptBlocks,
   sessionTitle,

@@ -22,48 +22,70 @@ function mergeSession(
   }
 }
 
+function mergeEvent(
+  session: DesktopAcpSession,
+  event: DesktopAcpEvent
+): DesktopAcpSession {
+  const status =
+    event.type === "run-start"
+      ? "running"
+      : event.type === "run-end"
+        ? "idle"
+        : event.type === "error"
+          ? "error"
+          : session.status
+  return mergeSession(session, { ...session, status, events: [event] })
+}
+
 export function useDesktopAcpSession(sessionId: string) {
   const [session, setSession] = useState<DesktopAcpSession | null>(null)
-  const [loaded, setLoaded] = useState(false)
+  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
 
   useEffect(() => {
+    setSession(null)
+    setLoadedSessionId(null)
     const desktop = window.openSweDesktop
-    if (!desktop) return
+    if (!desktop) {
+      setLoadedSessionId(sessionId)
+      return
+    }
+    let active = true
     const pendingEvents: Array<DesktopAcpEvent> = []
     const unsubscribe = desktop.onAcpEvent((payload) => {
       if (payload.sessionId !== sessionId) return
       pendingEvents.push(payload.event)
       setSession((current) => {
-        if (!current) return current
-        return mergeSession(current, {
-          ...current,
-          status:
-            payload.event.type === "run-start"
-              ? "running"
-              : payload.event.type === "run-end"
-                ? "idle"
-                : payload.event.type === "error"
-                  ? "error"
-                  : current.status,
-          events: [payload.event],
-        })
+        if (!current || current.id !== sessionId) return current
+        return mergeEvent(current, payload.event)
       })
     })
     void desktop.getAcpSession(sessionId).then((next) => {
+      if (!active) return
       if (next) {
-        const hydrated = mergeSession(next, { ...next, events: pendingEvents })
-        setSession((current) => mergeSession(current, hydrated))
+        const hydrated = pendingEvents.reduce(mergeEvent, next)
+        setSession((current) =>
+          current?.id === sessionId ? mergeSession(hydrated, current) : hydrated
+        )
       }
-      setLoaded(true)
+      setLoadedSessionId(sessionId)
     })
-    return unsubscribe
+    return () => {
+      active = false
+      unsubscribe()
+    }
   }, [sessionId])
 
+  const currentSession = session?.id === sessionId ? session : null
+
   const messages = useMemo(
-    () => desktopAcpMessages(session?.events ?? []),
-    [session?.events]
+    () => desktopAcpMessages(currentSession?.events ?? []),
+    [currentSession?.events]
   )
-  return { session, messages, loaded }
+  return {
+    session: currentSession,
+    messages,
+    loaded: loadedSessionId === sessionId,
+  }
 }
 
 function mergeSummaries(

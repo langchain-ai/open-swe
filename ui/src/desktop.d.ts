@@ -17,8 +17,6 @@ export interface DesktopAcpSessionSummary {
   id: string
   cwd: string
   title: string
-  model: string | null
-  effort: string | null
   status: "starting" | "idle" | "running" | "error"
   createdAt: number
   updatedAt: number
@@ -46,8 +44,6 @@ declare global {
       startAcpSession: (
         input: DesktopAcpPromptInput & {
           cwd: string
-          model: string | null
-          effort: string | null
         }
       ) => Promise<DesktopAcpSession>
       promptAcpSession: (
