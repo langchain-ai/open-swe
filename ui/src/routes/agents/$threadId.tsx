@@ -27,7 +27,7 @@ function AgentThreadPage() {
 
   return (
     <AgentThreadStreamBoundary>
-      <AgentThreadView thread={threadQuery.data} />
+      <AgentThreadView key={threadId} thread={threadQuery.data} />
     </AgentThreadStreamBoundary>
   )
 }

@@ -107,13 +107,16 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   // Own the git panel's collapsed state so the plan banner can reserve space for
   // the floating expand button the panel renders while collapsed.
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
-    readStoredPanelCollapsed()
+    readStoredPanelCollapsed(thread.id)
   )
   const [panelTab, setPanelTab] = useState<AgentPanelTab>("git")
-  const handlePanelCollapsedChange = useCallback((next: boolean) => {
-    setPanelCollapsed(next)
-    writeStoredPanelCollapsed(next)
-  }, [])
+  const handlePanelCollapsedChange = useCallback(
+    (next: boolean) => {
+      setPanelCollapsed(next)
+      writeStoredPanelCollapsed(thread.id, next)
+    },
+    [thread.id]
+  )
 
   const baseMessages = useMemo<Array<Message>>(() => {
     const live = streamMessagesToUi(
