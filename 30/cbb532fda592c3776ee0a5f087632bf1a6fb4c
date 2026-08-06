@@ -1,0 +1,26 @@
+agent/tools/__init__.py
+  s_ed98d06d50921b::t_c3d495b6904d22 24,62,100
+tests/reviewer/test_reviewer_tools.py
+  s_ed98d06d50921b::t_c3d495b6904d22 13,76-136
+  s_ed98d06d50921b::t_3943589f7709ba 137-138
+agent/reviewer.py
+  s_ed98d06d50921b::t_c3d495b6904d22 104,144-145,148-152,1418
+agent/tools/record_auto_approval_decision.py
+  s_ed98d06d50921b::t_c3d495b6904d22 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "30cbb532fda592c3776ee0a5f087632bf1a6fb4c",
+  "prompts": {},
+  "sessions": {
+    "s_ed98d06d50921b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8f56-f254-7711-ad77-c6cd346604ce",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "eric-langchain <168655640+eric-langchain@users.noreply.github.com>"
+    }
+  }
+}
