@@ -4,6 +4,7 @@ const { pathToFileURL } = require("node:url")
 const {
   app,
   BrowserWindow,
+  ipcMain,
   Menu,
   dialog,
   net,
@@ -11,6 +12,12 @@ const {
   session,
   shell,
 } = require("electron")
+const { AcpSession, dcodeTarget } = require("./acp-client.cjs")
+const {
+  addProject,
+  readProjects,
+  removeProject,
+} = require("./project-store.cjs")
 const {
   APP_URL,
   appRedirectUrl,
@@ -43,6 +50,165 @@ const isDevelopment = !app.isPackaged || process.argv.includes("--dev")
 let backendUrl = null
 let mainWindow = null
 let setupWindow = null
+const acpSessions = new Map()
+
+function requireTrustedDesktopIpc(event) {
+  const senderUrl = event.senderFrame?.url || event.sender.getURL()
+  if (!isAppUrl(senderUrl)) throw new Error("Forbidden")
+}
+
+function sendAcpEvent(sessionId, event) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("desktop:acp-event", {
+      sessionId,
+      event,
+      session: acpSessions.get(sessionId)?.summary(),
+    })
+  }
+}
+
+function projectsPath() {
+  return path.join(app.getPath("userData"), "desktop-projects.json")
+}
+
+function listProjects() {
+  return readProjects(projectsPath())
+}
+
+function sendProjectsChanged() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("desktop:projects-changed", listProjects())
+  }
+}
+
+async function requestAcpPermission(params) {
+  const toolCall =
+    params && typeof params.toolCall === "object" ? params.toolCall : null
+  const title =
+    typeof toolCall?.title === "string" ? toolCall.title : "Run local tool"
+  const detail = toolCall?.rawInput
+    ? JSON.stringify(toolCall.rawInput, null, 2).slice(0, 2_000)
+    : ""
+  const options = {
+    type: "question",
+    title: "Deep Agents Code permission",
+    message: title,
+    detail,
+    buttons: ["Allow once", "Deny"],
+    defaultId: 0,
+    cancelId: 1,
+  }
+  const result = mainWindow
+    ? await dialog.showMessageBox(mainWindow, options)
+    : await dialog.showMessageBox(options)
+  return result.response === 0
+}
+
+function configureDesktopIpc() {
+  ipcMain.handle("desktop:projects", (event) => {
+    requireTrustedDesktopIpc(event)
+    return listProjects()
+  })
+
+  ipcMain.handle("desktop:add-project", async (event) => {
+    requireTrustedDesktopIpc(event)
+    const options = {
+      title: "Add a project from This Mac",
+      properties: ["openDirectory", "createDirectory"],
+    }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return null
+    const project = addProject(projectsPath(), result.filePaths[0])
+    sendProjectsChanged()
+    return project
+  })
+
+  ipcMain.handle("desktop:remove-project", async (event, cwd) => {
+    requireTrustedDesktopIpc(event)
+    const project = listProjects().find((item) => item.cwd === cwd)
+    if (!project) return false
+    const options = {
+      type: "warning",
+      title: "Remove project",
+      message: `Remove “${project.name}” from Open SWE?`,
+      detail: `${project.cwd}\n\nThis does not delete files from your Mac.`,
+      buttons: ["Cancel", "Remove"],
+      defaultId: 0,
+      cancelId: 0,
+    }
+    const result = mainWindow
+      ? await dialog.showMessageBox(mainWindow, options)
+      : await dialog.showMessageBox(options)
+    if (result.response !== 1) return false
+    const removed = removeProject(projectsPath(), project.cwd)
+    if (removed) sendProjectsChanged()
+    return removed
+  })
+
+  ipcMain.handle("desktop:acp-start", async (event, input) => {
+    requireTrustedDesktopIpc(event)
+    if (
+      !input ||
+      typeof input.cwd !== "string" ||
+      !path.isAbsolute(input.cwd) ||
+      !fs.existsSync(input.cwd) ||
+      !fs.statSync(input.cwd).isDirectory()
+    ) {
+      throw new Error("Choose a valid local project directory")
+    }
+    const cwd = fs.realpathSync(input.cwd)
+    if (!listProjects().some((project) => project.cwd === cwd)) {
+      throw new Error("Add this project to Open SWE before starting a local agent")
+    }
+    const localSession = new AcpSession({
+      cwd,
+      target: dcodeTarget({
+        modelId: typeof input.modelId === "string" ? input.modelId : undefined,
+        effort: typeof input.effort === "string" ? input.effort : undefined,
+      }),
+      env: process.env,
+      onEvent: sendAcpEvent,
+      requestPermission: requestAcpPermission,
+    })
+    acpSessions.set(localSession.id, localSession)
+    try {
+      await localSession.initialize()
+    } catch (error) {
+      acpSessions.delete(localSession.id)
+      localSession.close()
+      throw error
+    }
+    void localSession.prompt(input.prompt || "", input.images || []).catch(() => {})
+    return localSession.snapshot()
+  })
+
+  ipcMain.handle("desktop:acp-prompt", async (event, input) => {
+    requireTrustedDesktopIpc(event)
+    const localSession = acpSessions.get(input?.sessionId)
+    if (!localSession) throw new Error("Local Deep Agents Code session not found")
+    await localSession.prompt(input.prompt || "", input.images || [])
+    return localSession.snapshot()
+  })
+
+  ipcMain.handle("desktop:acp-cancel", (event, sessionId) => {
+    requireTrustedDesktopIpc(event)
+    acpSessions.get(sessionId)?.cancel()
+  })
+
+  ipcMain.handle("desktop:acp-session", (event, sessionId) => {
+    requireTrustedDesktopIpc(event)
+    return acpSessions.get(sessionId)?.snapshot() || null
+  })
+
+  ipcMain.handle("desktop:acp-sessions", (event) => {
+    requireTrustedDesktopIpc(event)
+    return [...acpSessions.values()].map((localSession) =>
+      localSession.summary()
+    )
+  })
+}
 
 function configPath() {
   return path.join(app.getPath("userData"), "desktop-config.json")
@@ -473,6 +639,7 @@ if (!hasSingleInstanceLock) {
     if (process.platform === "darwin") app.dock.setIcon(iconPath())
     protocol.handle("open-swe", serveBundledUi)
     configurePermissions()
+    configureDesktopIpc()
     createMenu()
     createWindow()
 
@@ -483,5 +650,10 @@ if (!hasSingleInstanceLock) {
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit()
+  })
+
+  app.on("before-quit", () => {
+    for (const localSession of acpSessions.values()) localSession.close()
+    acpSessions.clear()
   })
 }

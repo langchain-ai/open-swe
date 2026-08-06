@@ -6,6 +6,17 @@
 The Electron package ships the compiled Open SWE web UI. Users configure only the URL of a
 compatible Open SWE backend; they do not need a separately hosted dashboard.
 
+Desktop users can choose **This Mac** in the new-task composer to run the Python
+`deepagents-code` agent over ACP in a selected local project. The web dashboard does not expose
+this option. The desktop app passes the selected model and reasoning effort to the user's installed
+`dcode --acp`, inheriting its authentication and configuration. Missing local provider credentials
+or packages fail during startup and surface in the composer. The app finds the standard
+`~/.local/bin/dcode` installation even when a packaged app does not inherit the terminal's `PATH`;
+`OPEN_SWE_DCODE_COMMAND` overrides the executable path. Added projects are persisted in the desktop
+app's local data and can be selected from the **This Mac** submenu or managed from the sidebar. Local
+dcode runs are ephemeral: their sessions remain available only for the lifetime of the desktop
+process and cannot be resumed after it exits.
+
 ## How it connects
 
 The bundled UI runs at an internal `open-swe://app` origin. Electron proxies its
@@ -30,6 +41,9 @@ pnpm --dir ui install
 pnpm --dir desktop install
 pnpm --dir desktop run dev
 ```
+
+The Python dcode CLI must also be installed and configured. Confirm it is available with
+`dcode --version` before starting the desktop app.
 
 Development defaults to `http://localhost:2024`. Point to another backend with:
 

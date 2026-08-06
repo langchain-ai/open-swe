@@ -6,6 +6,7 @@ import { useNavigate } from "@tanstack/react-router"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
+import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { OnboardingDialog } from "@/features/agents/components/OnboardingDialog"
 import { Logo } from "@/features/agents/components/chat/Logo"
@@ -17,6 +18,7 @@ import {
   useAgentSkills,
 } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
+import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { useProfile, useRepos } from "@/lib/profile"
 import {
   requestNotificationPermission,
@@ -50,6 +52,13 @@ export function AgentsHome() {
   )
   const [planMode, setPlanMode] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const [runTarget, setRunTarget] = useState<RunTarget>("cloud")
+  const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
+  const [localError, setLocalError] = useState<string | null>(null)
+  const { projects: localProjects, addProject, removeProject } =
+    useDesktopProjects()
 
   const reposQuery = useRepos()
   const profileQuery = useProfile()
@@ -79,10 +88,71 @@ export function AgentsHome() {
     void navigate({ to: "/agents/$threadId", params: { threadId: id } })
   }, [stream.threadId, queryClient, navigate])
 
-  const handleSubmit = (prompt: string, images: Array<ImageChunk>) => {
+  useEffect(() => {
+    if (
+      localProjectPath &&
+      !localProjects.some((project) => project.cwd === localProjectPath)
+    ) {
+      setLocalProjectPath(null)
+    }
+  }, [localProjectPath, localProjects])
+
+  const handleRunTargetChange = (next: RunTarget) => {
+    setRunTarget(next)
+    setLocalError(null)
+  }
+
+  const handleSelectLocalProject = (cwd: string) => {
+    setLocalProjectPath(cwd)
+    setRunTarget("local")
+    setLocalError(null)
+  }
+
+  const handleAddLocalProject = async () => {
+    const project = await addProject()
+    if (project) handleSelectLocalProject(project.cwd)
+  }
+
+  const handleRemoveLocalProject = async (cwd: string) => {
+    if (!(await removeProject(cwd))) return
+    if (localProjectPath === cwd) setLocalProjectPath(null)
+  }
+
+  const handleSubmit = async (prompt: string, images: Array<ImageChunk>) => {
     void requestNotificationPermission().then((perm) => {
       if (perm === "granted") setNotificationsPref(true)
     })
+    if (runTarget === "local") {
+      const desktop = window.openSweDesktop
+      if (!desktop || !localProjectPath) {
+        setLocalError("Choose or add a project from This Mac before sending.")
+        return
+      }
+      setSubmitting(true)
+      setLocalError(null)
+      try {
+        const session = await desktop.startAcpSession({
+          cwd: localProjectPath,
+          prompt,
+          images,
+          modelId: activeSelection?.modelId,
+          effort: activeSelection?.effort,
+        })
+        await navigate({
+          to: "/agents/local/$sessionId",
+          params: { sessionId: session.id },
+        })
+      } catch (error) {
+        setSubmitting(false)
+        setLocalError(
+          error instanceof Error
+            ? error.message
+            : "Could not start Deep Agents Code"
+        )
+        throw error
+      }
+      return
+    }
     draftRef.current = {
       prompt,
       images,
@@ -102,18 +172,19 @@ export function AgentsHome() {
     if (repoOverride === null) configurable.repo_explicitly_none = true
     if (planMode) configurable.plan_mode = true
 
-    stream
+    await stream
       .submit(
         {
           messages: [{ type: "human", content: promptContent(prompt, images) }],
         },
         { config: { configurable } }
       )
-      .catch(() => {
+      .catch((error) => {
         // Submit failed before the SDK minted a thread id — re-enable the
         // prompt instead of leaving it disabled until a reload.
         draftRef.current = null
         setSubmitting(false)
+        throw error
       })
   }
 
@@ -123,6 +194,11 @@ export function AgentsHome() {
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center">
         <div className="flex w-full flex-col items-center gap-6">
           <Logo />
+          {localError && (
+            <div className="w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              {localError}
+            </div>
+          )}
           <AgentPromptBar
             autoFocus
             onSubmit={handleSubmit}
@@ -133,11 +209,21 @@ export function AgentsHome() {
             repos={reposQuery.data?.repositories}
             selectedRepo={repo}
             onRepoChange={setRepoOverride}
+            runTarget={isDesktop ? runTarget : undefined}
+            onRunTargetChange={isDesktop ? handleRunTargetChange : undefined}
+            localProjects={localProjects}
+            selectedLocalProjectPath={localProjectPath}
+            onSelectLocalProject={handleSelectLocalProject}
+            onAddLocalProject={() => void handleAddLocalProject()}
+            onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
             planMode={planMode}
-            onPlanModeChange={setPlanMode}
+            onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
             skills={skills.data}
             contextUsage={{
-              contextWindow: activeModel?.context_window ?? null,
+              contextWindow:
+                runTarget === "cloud"
+                  ? (activeModel?.context_window ?? null)
+                  : null,
             }}
           />
         </div>
