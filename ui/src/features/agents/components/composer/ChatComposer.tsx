@@ -6,6 +6,7 @@ import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPromptEditor, mentionReplacementText } from "./ComposerPromptEditor";
 import { ContextWindowMeter } from "./ContextWindowMeter";
+import { RunTargetSelector } from "./RunTargetSelector";
 import {
   COMPOSER_PATH_DRAG_MIME,
   detectComposerTrigger,
@@ -15,6 +16,8 @@ import type { ComposerCommandItem } from "./ComposerCommandMenu";
 import type { ActiveRun } from "./ComposerPrimaryActions";
 import type { ComposerCommandKey, ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger";
+import type { RunTarget } from "./RunTargetSelector";
+import type { DesktopProject } from "@/desktop";
 import type { ModelOption, Skill } from "@/lib/api";
 import type { ImageChunk } from "@/features/agents/lib/types";
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions";
@@ -51,6 +54,7 @@ export interface ChatComposerProps {
   busy?: boolean;
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun;
+  onStop?: () => void | Promise<void>;
   onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>;
   models?: Array<ModelOption>;
   selection?: ModelSelection | null;
@@ -59,6 +63,14 @@ export interface ChatComposerProps {
   repos?: Array<{ full_name: string }>;
   selectedRepo?: string | null;
   onRepoChange?: (repo: string | null) => void;
+  /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
+  runTarget?: RunTarget;
+  onRunTargetChange?: (next: RunTarget) => void;
+  localProjects?: Array<DesktopProject>;
+  selectedLocalProjectPath?: string | null;
+  onSelectLocalProject?: (cwd: string) => void;
+  onAddLocalProject?: () => void;
+  onRemoveLocalProject?: (cwd: string) => void;
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean;
   onPlanModeChange?: (next: boolean) => void;
@@ -93,6 +105,7 @@ export function buildCommandItems(
   trigger: ComposerTrigger,
   mentionPaths: Array<string>,
   skills: Array<Skill>,
+  includeModelCommand = true,
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase();
 
@@ -100,7 +113,10 @@ export function buildCommandItems(
     const skillNames = new Set(skills.map((skill) => skill.name));
     return [
       ...SLASH_COMMANDS.filter(
-        (spec) => spec.command.startsWith(query) && !skillNames.has(spec.command),
+        (spec) =>
+          spec.command.startsWith(query) &&
+          !skillNames.has(spec.command) &&
+          (includeModelCommand || spec.command !== "model"),
       ).map((spec) => ({
         id: `slash:${spec.command}`,
         type: "slash-command" as const,
@@ -142,6 +158,7 @@ export const ChatComposer = memo(function ChatComposer({
   disabled = false,
   busy = false,
   activeRun,
+  onStop,
   onSubmit,
   models = [],
   selection = null,
@@ -149,6 +166,13 @@ export const ChatComposer = memo(function ChatComposer({
   repos,
   selectedRepo = null,
   onRepoChange,
+  runTarget,
+  onRunTargetChange,
+  localProjects = [],
+  selectedLocalProjectPath = null,
+  onSelectLocalProject,
+  onAddLocalProject,
+  onRemoveLocalProject,
   planMode = false,
   onPlanModeChange,
   mentionPaths = [],
@@ -180,8 +204,11 @@ export const ChatComposer = memo(function ChatComposer({
   const trigger = useMemo(() => detectComposerTrigger(value, cursor), [cursor, value]);
   const triggerKey = trigger ? `${trigger.kind}:${trigger.rangeStart}` : null;
   const commandItems = useMemo(
-    () => (trigger ? buildCommandItems(trigger, mentionPaths, skills) : []),
-    [mentionPaths, skills, trigger],
+    () =>
+      trigger
+        ? buildCommandItems(trigger, mentionPaths, skills, models.length > 0)
+        : [],
+    [mentionPaths, models.length, skills, trigger],
   );
   const menuOpen =
     trigger !== null && commandItems.length > 0 && dismissedTriggerKey !== triggerKey;
@@ -396,9 +423,31 @@ export const ChatComposer = memo(function ChatComposer({
     <div
       className={cn("relative w-full font-sans text-[13px]", compact ? "max-w-none" : "max-w-2xl")}
     >
-      {onRepoChange && (
+      {(onRepoChange || onRunTargetChange) && (
         <div className="mb-2 flex items-center gap-2 px-1 text-xs">
-          <RepoSelector repos={repos} selectedRepo={selectedRepo} onRepoChange={onRepoChange} />
+          {runTarget !== "local" && onRepoChange && (
+            <RepoSelector
+              repos={repos}
+              selectedRepo={selectedRepo}
+              onRepoChange={onRepoChange}
+            />
+          )}
+          {runTarget &&
+            onRunTargetChange &&
+            onSelectLocalProject &&
+            onAddLocalProject &&
+            onRemoveLocalProject && (
+              <RunTargetSelector
+                localEnabled={Boolean(window.openSweDesktop)}
+                onChange={onRunTargetChange}
+                onAddProject={onAddLocalProject}
+                onRemoveProject={onRemoveLocalProject}
+                onSelectProject={onSelectLocalProject}
+                projects={localProjects}
+                selectedProjectPath={selectedLocalProjectPath}
+                value={runTarget}
+              />
+            )}
         </div>
       )}
 
@@ -485,15 +534,17 @@ export const ChatComposer = memo(function ChatComposer({
         />
 
         <div className="mt-auto flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 pt-2 text-xs text-muted-foreground">
-          <ModelPicker
-            models={models}
-            onOpenChange={setModelPickerOpen}
-            onSelectionChange={onSelectionChange}
-            open={modelPickerOpen}
-            requireImageSupport={pendingImages.length > 0}
-            selection={selection}
-            triggerClassName="h-7 rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
-          />
+          {models.length > 0 && (
+            <ModelPicker
+              models={models}
+              onOpenChange={setModelPickerOpen}
+              onSelectionChange={onSelectionChange}
+              open={modelPickerOpen}
+              requireImageSupport={pendingImages.length > 0}
+              selection={selection}
+              triggerClassName="h-7 rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
+            />
+          )}
 
           {onPlanModeChange && (
             <Tooltip>
@@ -548,6 +599,7 @@ export const ChatComposer = memo(function ChatComposer({
             activeRun={activeRun}
             canSubmit={canSubmit}
             onSubmit={() => void handleSubmit()}
+            onStop={onStop}
             submitting={isSubmitting}
           />
         </div>

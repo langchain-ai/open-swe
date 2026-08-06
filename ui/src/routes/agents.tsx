@@ -31,16 +31,19 @@ function AgentsLayout() {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
-  const [, section, threadId] = pathname.split("/")
+  const [, section, threadId, localSessionId] = pathname.split("/")
   const activeThreadId =
     section === "agents" &&
     threadId &&
     threadId !== "automations" &&
     threadId !== "skills" &&
     threadId !== "threads" &&
-    threadId !== "reviews"
+    threadId !== "reviews" &&
+    threadId !== "local"
       ? threadId
       : undefined
+  const activeLocalSessionId =
+    section === "agents" && threadId === "local" ? localSessionId : undefined
 
   if (session.isLoading) {
     return (
@@ -53,7 +56,11 @@ function AgentsLayout() {
   if (!session.data) return <RequireLogin />
 
   return (
-    <AgentsShell user={session.data} activeThreadId={activeThreadId}>
+    <AgentsShell
+      user={session.data}
+      activeThreadId={activeThreadId}
+      activeLocalSessionId={activeLocalSessionId}
+    >
       <AgentThreadStreamProvider threadId={activeThreadId ?? null}>
         <Outlet />
       </AgentThreadStreamProvider>

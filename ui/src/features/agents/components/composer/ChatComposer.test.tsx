@@ -10,7 +10,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { buildCommandItems, ChatComposer } from "./ChatComposer"
+import { ChatComposer, buildCommandItems } from "./ChatComposer"
 import { replaceTextRange } from "./composerTrigger"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 
@@ -98,6 +98,22 @@ describe("ChatComposer stop button", () => {
 })
 
 describe("ChatComposer skill autocomplete", () => {
+  it("omits the model command when no model picker is available", () => {
+    const items = buildCommandItems(
+      {
+        kind: "slash-command",
+        query: "model",
+        rangeStart: 0,
+        rangeEnd: 6,
+      },
+      [],
+      [],
+      false
+    )
+
+    expect(items).toEqual([])
+  })
+
   it("prefers a colliding skill and preserves surrounding prompt text", () => {
     const trigger = {
       kind: "slash-command" as const,
