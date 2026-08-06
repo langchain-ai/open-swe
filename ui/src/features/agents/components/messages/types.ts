@@ -1,18 +1,11 @@
 import type { Message, Project, QueuedThreadMessage } from "@/features/agents/lib/types";
 
-export interface ChangedFileSummaryItem {
-  filePath: string;
-  additions: number;
-  deletions: number;
-  originalContent: string;
-  modifiedContent: string;
-}
-
 export interface ApprovalCallbacks {
   onApprove?: (approvalRequestId: string) => void;
   onReject?: (approvalRequestId: string) => void;
   onAutoApprove?: (approvalRequestId: string) => void;
-  onOpenDiff?: (diffData: { filePath: string; originalContent: string; modifiedContent: string }) => void;
+  /** Reveal a path in the side panel's diff view. */
+  onOpenFile?: (filePath: string) => void;
 }
 
 export type MessagesScrollControl = {
@@ -21,6 +14,8 @@ export type MessagesScrollControl = {
 
 export interface MessagesProps extends ApprovalCallbacks {
   messages: Array<Message>;
+  /** Cloud threads only; enables the git-sourced changed-files card per turn. */
+  threadId?: string;
   queuedMessages?: Array<QueuedThreadMessage>;
   isStreaming: boolean;
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */

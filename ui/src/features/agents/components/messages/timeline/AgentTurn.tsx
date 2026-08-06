@@ -4,20 +4,18 @@ import { ChunkRenderer } from "../ChunkRenderer";
 import { MessageTimestamp } from "../MessageTimestamp";
 import { ReasoningBlock } from "../ReasoningBlock";
 import { buildRenderItems } from "../renderItems";
-import { summarizeChangedFiles } from "../summarizeChangedFiles";
 import { TurnChangedFilesCard } from "../TurnChangedFilesCard";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { WorkEntryRow } from "./WorkEntryRow";
 import { describeWorkEntry, latestDiff } from "./workEntry";
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows";
-import { DiffEntryBody, DiffStatChip, ShellEntryBody } from "./entryBodies";
+import { ShellEntryBody } from "./entryBodies";
 import type { ReactNode } from "react";
 import type { RenderItem } from "../renderItems";
-import type { ApprovalCallbacks, ChangedFileSummaryItem } from "../types";
+import type { ApprovalCallbacks } from "../types";
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types";
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard";
 import { SubagentGroup } from "@/features/agents/components/subagents";
-import { countLineChanges } from "@/features/agents/utils/diffStats";
 import { formatElapsed } from "@/lib/utils";
 
 /**
@@ -46,39 +44,27 @@ function splitWorkAndReply(items: Array<RenderItem>): {
   return { workItems: items.slice(0, splitIndex), replyItems: items.slice(splitIndex) };
 }
 
+/**
+ * One row per edit call, showing only what the call targeted. The diff lives in
+ * the turn's changed-files card and the side panel, both of which read git —
+ * rendering a per-call diff here made repeated edits of one file look duplicated.
+ */
 function EditWorkEntry({
   chunk,
   projectPath,
-  resolved,
+  onOpenFile,
 }: {
   chunk: ToolExecutionChunk;
   projectPath?: string;
-  resolved?: ChangedFileSummaryItem;
+  onOpenFile?: (filePath: string) => void;
 }) {
-  const entry = describeWorkEntry(chunk, projectPath);
-  const diff = latestDiff(chunk);
-
-  const { body, trailing } = useMemo(() => {
-    if (!diff) return { body: undefined, trailing: undefined };
-
-    const originalContent = resolved?.originalContent ?? diff.originalContent ?? "";
-    const newContent = resolved?.modifiedContent ?? diff.newContent;
-    const stats = countLineChanges(originalContent, newContent, diff.filePath);
-
-    return {
-      body: (
-        <DiffEntryBody
-          diffData={diff}
-          originalContent={originalContent}
-          newContent={newContent}
-        />
-      ),
-      trailing: <DiffStatChip additions={stats.additions} deletions={stats.deletions} />,
-    };
-  }, [diff, resolved]);
-
+  const filePath = latestDiff(chunk)?.filePath;
   return (
-    <WorkEntryRow entry={entry} timestamp={chunk.timestamp} body={body} trailing={trailing} />
+    <WorkEntryRow
+      entry={describeWorkEntry(chunk, projectPath)}
+      timestamp={chunk.timestamp}
+      onActivate={filePath && onOpenFile ? () => onOpenFile(filePath) : undefined}
+    />
   );
 }
 
@@ -121,32 +107,22 @@ export function AgentTurn({
   isStreaming,
   isMarkdownLive,
   projectPath,
+  threadId,
+  isLatestTurn,
   ...callbacks
 }: {
   message: Message;
   isStreaming?: boolean;
   isMarkdownLive?: boolean;
   projectPath?: string;
+  /** Cloud threads only; enables the git-sourced changed-files card. */
+  threadId?: string;
+  isLatestTurn?: boolean;
 } & ApprovalCallbacks) {
   const renderItems = useMemo(
     () => buildRenderItems(message.chunks, message.id),
     [message.chunks, message.id],
   );
-  const changedFiles = useMemo(() => summarizeChangedFiles(message.chunks), [message.chunks]);
-  const changedFilesTotals = useMemo(() => {
-    let additions = 0;
-    let deletions = 0;
-    for (const item of changedFiles) {
-      additions += item.additions;
-      deletions += item.deletions;
-    }
-    return { additions, deletions };
-  }, [changedFiles]);
-  const changedFilesByPath = useMemo(() => {
-    const byPath = new Map<string, ChangedFileSummaryItem>();
-    for (const file of changedFiles) byPath.set(file.filePath, file);
-    return byPath;
-  }, [changedFiles]);
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const toggleGroup = useCallback((id: string) => {
@@ -223,17 +199,15 @@ export function AgentTurn({
       case "subagent-group":
         return <SubagentGroup key={item.key} chunks={item.chunks} />;
 
-      case "edit-item": {
-        const diff = latestDiff(item.chunk);
+      case "edit-item":
         return (
           <EditWorkEntry
             key={item.key}
             chunk={item.chunk}
             projectPath={projectPath}
-            resolved={diff ? changedFilesByPath.get(diff.filePath) : undefined}
+            onOpenFile={callbacks.onOpenFile}
           />
         );
-      }
 
       case "shell-item":
         return (
@@ -300,11 +274,12 @@ export function AgentTurn({
         renderItems.map((item, index) => renderItem(item, index, renderItems.length))
       )}
 
-      {changedFiles.length > 0 && !isStreaming && (
+      {threadId && message.turnKey && !isStreaming && (
         <TurnChangedFilesCard
-          files={changedFiles}
-          totals={changedFilesTotals}
-          projectPath={projectPath}
+          threadId={threadId}
+          turnKey={message.turnKey}
+          isLatestTurn={!!isLatestTurn}
+          onOpenFile={callbacks.onOpenFile}
         />
       )}
 

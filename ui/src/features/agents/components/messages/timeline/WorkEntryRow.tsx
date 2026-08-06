@@ -92,18 +92,22 @@ export function WorkEntryRow({
   timestamp,
   body,
   trailing,
+  onActivate,
   defaultExpanded = false,
 }: {
   entry: WorkEntryView;
   timestamp?: string;
   body?: ReactNode;
   trailing?: ReactNode;
+  /** Clicking the row runs this instead of expanding it (e.g. reveal a file). */
+  onActivate?: () => void;
   defaultExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const toggle = useCallback(() => setExpanded((value) => !value), []);
 
-  const canExpand = body != null || entry.expandedText != null;
+  const canExpand = onActivate == null && (body != null || entry.expandedText != null);
+  const activate = onActivate ?? (canExpand ? toggle : null);
   const isError = entry.tone === "error";
   const hoverTimestamp = formatHoverTimestamp(timestamp);
 
@@ -111,18 +115,18 @@ export function WorkEntryRow({
     (event: KeyboardEvent<HTMLDivElement>) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
-      toggle();
+      activate?.();
     },
-    [toggle],
+    [activate],
   );
 
-  const rowToggleProps = canExpand
+  const rowToggleProps = activate
     ? {
         role: "button" as const,
         tabIndex: 0,
-        "aria-expanded": expanded,
+        ...(canExpand ? { "aria-expanded": expanded } : {}),
         "aria-label": entry.preview ? `${entry.heading} ${entry.preview}` : entry.heading,
-        onClick: toggle,
+        onClick: activate,
         onKeyDown: handleKeyDown,
       }
     : {};
@@ -131,7 +135,7 @@ export function WorkEntryRow({
     <div
       className={cn(
         "group/entry flex flex-col rounded-md px-0.5 py-0.5 transition-colors",
-        canExpand &&
+        activate &&
           "cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
       )}
       {...rowToggleProps}

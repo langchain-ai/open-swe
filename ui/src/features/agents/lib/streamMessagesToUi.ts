@@ -87,6 +87,7 @@ type AgentTurn = {
   id: string;
   author: Message["author"];
   timestamp: string;
+  turnKey?: string;
   startedAt: string;
   timestampIsFallback?: boolean;
   chunks: Array<Chunk>;
@@ -240,41 +241,6 @@ function toolOutputText(
 }
 
 /**
- * Read a server-computed diff off a tool result's persisted `artifact`.
- *
- * `ToolMessage.artifact` survives the checkpoint + `/state` hydration (it is
- * a standard serialized field), so `ToolArtifactMiddleware`
- * (`agent/middleware/tool_artifact.py`) attaches a real, sandbox-computed
- * {@link DiffData} here and the client renders it both live and on reload —
- * without re-deriving it from tool args. Falls back to the args heuristic
- * ({@link maybeDiffFromArgs}) when no artifact is present.
- */
-function diffFromArtifact(artifact: unknown): DiffData | null {
-  if (!artifact || typeof artifact !== "object") return null;
-  const record = artifact as Record<string, unknown>;
-  const candidate: unknown = record.diff ?? record.diffData ?? artifact;
-  if (candidate === null || typeof candidate !== "object") return null;
-  const diff = candidate as Record<string, unknown>;
-  const { filePath, newContent } = diff;
-  if (typeof filePath !== "string" || typeof newContent !== "string") return null;
-  // The server may send a minimal `{ filePath, originalContent, newContent }`,
-  // so fill the remaining presentation fields with sensible defaults.
-  const originalContent = typeof diff.originalContent === "string" ? diff.originalContent : null;
-  return {
-    originalContent,
-    newContent,
-    filePath: filePath.trim(),
-    isNewFile: typeof diff.isNewFile === "boolean" ? diff.isNewFile : originalContent === null,
-    isBinary: typeof diff.isBinary === "boolean" ? diff.isBinary : false,
-    isTruncated: typeof diff.isTruncated === "boolean" ? diff.isTruncated : false,
-    totalLines:
-      typeof diff.totalLines === "number"
-        ? diff.totalLines
-        : Math.max(newContent.split("\n").length, 1),
-  };
-}
-
-/**
  * Convert the SDK's live projections into the dashboard chunk model so the
  * transcript streams (and hydrates) directly from the SDK instead of a
  * hand-rolled, server-mirrored adapter.
@@ -284,8 +250,9 @@ function diffFromArtifact(artifact: unknown): DiffData | null {
  *   each tool call's status and output — no `pendingTools` bookkeeping.
  * - `toolKind` / `title` stay a pure mapping of name+args (known at call time,
  *   already persisted) so the in-progress card renders instantly.
- * - `diffData` prefers the persisted `ToolMessage.artifact`, falling back to
- *   the args heuristic.
+ * - `diffData` is derived from the call's own args, which is all that is
+ *   available before an edit is applied (what a pending approval renders). What
+ *   a turn actually changed comes from git, via the turn-diff endpoint.
  * - `subagents` ({@link SubagentDiscoverySnapshot}[], i.e. `stream.subagents`)
  *   authoritatively identifies `task` calls that spawned a subagent (matched by
  *   `snapshot.id === toolCallId`) and supplies their lifecycle status + the
@@ -320,6 +287,7 @@ export function streamMessagesToUi(
 
   const uiMessages: Array<Message> = [];
   let agentTurn: AgentTurn | null = null;
+  let turnKey: string | undefined;
 
   const flushAgentTurn = () => {
     if (!agentTurn) return;
@@ -338,6 +306,7 @@ export function streamMessagesToUi(
         id: msgId,
         author: "agent",
         timestamp,
+        turnKey,
         startedAt: timestamp,
         timestampIsFallback,
         chunks: [...chunks],
@@ -357,6 +326,7 @@ export function streamMessagesToUi(
 
     if (HumanMessage.isInstance(raw)) {
       flushAgentTurn();
+      turnKey = typeof raw.id === "string" ? raw.id : undefined;
       const content = (raw as unknown as { content?: unknown }).content;
       const chunks = imageChunks(content);
       const text = raw.text.trim();
@@ -397,7 +367,7 @@ export function streamMessagesToUi(
         };
         const output = toolOutputText(assembled, toolMessage);
         if (output) chunk.output = output;
-        const diffData = diffFromArtifact(toolMessage?.artifact) ?? maybeDiffFromArgs(args);
+        const diffData = maybeDiffFromArgs(args);
         if (diffData) chunk.diffData = diffData;
         // When the SDK has discovered the subagent this `task` call spawned, take
         // its namespace (for scoped nested activity) and authoritative status.

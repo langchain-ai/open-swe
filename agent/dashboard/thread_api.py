@@ -1931,6 +1931,43 @@ async def _github_token_for_login(login: str) -> str:
     return token
 
 
+async def get_dashboard_thread_turn_diff(
+    thread_id: str, login: str, *, turn_key: str | None = None, email: str | None = None
+) -> dict[str, Any]:
+    """What one turn (or the whole thread) changed, straight from git.
+
+    ``turn_key`` is the id of the user message that opened the turn. Omit it for
+    the cumulative thread diff. The head is the next turn's checkpoint, or the
+    live worktree for the most recent turn.
+    """
+    from ..utils.turn_checkpoint import read_turn_diff
+
+    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    checkpoints = metadata.get("turn_checkpoints")
+    checkpoints = [
+        entry
+        for entry in (checkpoints if isinstance(checkpoints, list) else [])
+        if isinstance(entry, Mapping) and isinstance(entry.get("ref"), str)
+    ]
+    index = (
+        next((i for i, entry in enumerate(checkpoints) if entry.get("key") == turn_key), -1)
+        if turn_key is not None
+        else 0
+    )
+    sandbox_id = metadata.get("sandbox_id")
+    if index < 0 or not checkpoints or not isinstance(sandbox_id, str) or not sandbox_id:
+        return {"status": "missing", "files": [], "truncated": False}
+
+    try:
+        sandbox = await create_sandbox(sandbox_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not connect to sandbox %s for turn diff", sandbox_id, exc_info=True)
+        return {"status": "missing", "files": [], "truncated": False}
+
+    head = checkpoints[index + 1]["ref"] if turn_key and index + 1 < len(checkpoints) else None
+    return await read_turn_diff(sandbox, None, str(checkpoints[index]["ref"]), head)
+
+
 async def get_dashboard_thread_pr_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
