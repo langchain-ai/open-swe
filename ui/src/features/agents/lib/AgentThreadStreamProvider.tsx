@@ -54,12 +54,26 @@ const agentStreamApiUrl = toAbsoluteApiUrl(agentsApi.langGraphApiUrl)
 function ActiveThreadRecovery({ threadId }: { threadId: string | null }) {
   const stream = useStreamContext()
   const controller = stream[STREAM_CONTROLLER]
+  const threadIdRef = useRef(threadId)
+  const recoveringRef = useRef(false)
+  threadIdRef.current = threadId
 
   useEffect(() => {
     if (!threadId) return
-    const recover = () => {
-      if (document.visibilityState === "visible") {
-        void controller.hydrate(threadId)
+    const recover = async () => {
+      if (
+        document.visibilityState !== "visible" ||
+        recoveringRef.current ||
+        threadIdRef.current !== threadId
+      ) {
+        return
+      }
+      recoveringRef.current = true
+      try {
+        await controller.hydrate(null)
+        if (threadIdRef.current === threadId) await controller.hydrate(threadId)
+      } finally {
+        recoveringRef.current = false
       }
     }
     document.addEventListener("visibilitychange", recover)
