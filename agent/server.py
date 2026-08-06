@@ -72,6 +72,7 @@ from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
+    DynamicToolMiddleware,
     ModelCallTimeoutMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
@@ -165,6 +166,17 @@ client = get_client()
 
 DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
+DEEP_AGENT_TOOL_NAMES = {
+    "delete",
+    "edit_file",
+    "execute",
+    "glob",
+    "grep",
+    "ls",
+    "read_file",
+    "task",
+    "write_file",
+}
 
 
 def _tool_loader_timeout_seconds() -> float:
@@ -1036,6 +1048,47 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ),
         )
 
+    static_tools = [
+        http_request,
+        fetch_url,
+        web_search,
+        approve_plan,
+        enter_plan_mode,
+        save_plan,
+        save_user_instructions,
+        linear_comment,
+        linear_create_issue,
+        linear_delete_issue,
+        linear_get_issue,
+        linear_get_issue_comments,
+        linear_list_teams,
+        linear_search_issues,
+        linear_update_issue,
+        open_pull_request,
+        request_pr_review,
+        recreate_sandbox,
+        report_platform_issue,
+        schedule_thread_wakeup,
+        slack_add_reaction,
+        slack_read_thread_messages,
+        slack_start_new_thread,
+        slack_thread_reply,
+    ]
+    dynamic_tool_middleware: list[Any] = []
+    integration_tool_groups = {
+        "Corridor": corridor_tools,
+        "Observability": observability_tools,
+        "Currents": currents_tools,
+        "Notion": notion_tools,
+    }
+    if any(integration_tool_groups.values()):
+        dynamic_tool_middleware.append(
+            DynamicToolMiddleware(
+                integration_tool_groups,
+                reserved_names={*DEEP_AGENT_TOOL_NAMES, *(tool.__name__ for tool in static_tools)},
+            )
+        )
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
     skill_sources: list[str] | None = None
@@ -1060,36 +1113,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=main_model,
         system_prompt="",
-        tools=[
-            http_request,
-            fetch_url,
-            web_search,
-            approve_plan,
-            enter_plan_mode,
-            save_plan,
-            save_user_instructions,
-            linear_comment,
-            linear_create_issue,
-            linear_delete_issue,
-            linear_get_issue,
-            linear_get_issue_comments,
-            linear_list_teams,
-            linear_search_issues,
-            linear_update_issue,
-            open_pull_request,
-            request_pr_review,
-            recreate_sandbox,
-            report_platform_issue,
-            schedule_thread_wakeup,
-            slack_add_reaction,
-            slack_read_thread_messages,
-            slack_start_new_thread,
-            slack_thread_reply,
-            *corridor_tools,
-            *observability_tools,
-            *currents_tools,
-            *notion_tools,
-        ],
+        tools=static_tools,
         subagents=[
             _general_purpose_subagent(subagent_model, skill_sources),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
@@ -1113,6 +1137,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     plan_mode=plan_mode,
                     corridor_enabled=bool(corridor_tools),
                 ),
+                *dynamic_tool_middleware,
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
