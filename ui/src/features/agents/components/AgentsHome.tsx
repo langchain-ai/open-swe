@@ -200,9 +200,11 @@ export function AgentsHome() {
           <AgentPromptBar
             onSubmit={handleSubmit}
             disabled={submitting}
-            models={models}
-            selection={activeSelection}
-            onSelectionChange={setSelection}
+            models={runTarget === "local" ? [] : models}
+            selection={runTarget === "local" ? null : activeSelection}
+            onSelectionChange={
+              runTarget === "cloud" ? setSelection : undefined
+            }
             repos={reposQuery.data?.repositories}
             selectedRepo={repo}
             onRepoChange={setRepoOverride}
@@ -217,7 +219,10 @@ export function AgentsHome() {
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
             skills={skills.data}
             contextUsage={{
-              contextWindow: activeModel?.context_window ?? null,
+              contextWindow:
+                runTarget === "cloud"
+                  ? (activeModel?.context_window ?? null)
+                  : null,
             }}
           />
         </div>

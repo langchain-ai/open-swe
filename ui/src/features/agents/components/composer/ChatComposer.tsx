@@ -104,6 +104,7 @@ export function buildCommandItems(
   trigger: ComposerTrigger,
   mentionPaths: Array<string>,
   skills: Array<Skill>,
+  includeModelCommand = true,
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase();
 
@@ -111,7 +112,10 @@ export function buildCommandItems(
     const skillNames = new Set(skills.map((skill) => skill.name));
     return [
       ...SLASH_COMMANDS.filter(
-        (spec) => spec.command.startsWith(query) && !skillNames.has(spec.command),
+        (spec) =>
+          spec.command.startsWith(query) &&
+          !skillNames.has(spec.command) &&
+          (includeModelCommand || spec.command !== "model"),
       ).map((spec) => ({
         id: `slash:${spec.command}`,
         type: "slash-command" as const,
@@ -193,8 +197,11 @@ export const ChatComposer = memo(function ChatComposer({
   const trigger = useMemo(() => detectComposerTrigger(value, cursor), [cursor, value]);
   const triggerKey = trigger ? `${trigger.kind}:${trigger.rangeStart}` : null;
   const commandItems = useMemo(
-    () => (trigger ? buildCommandItems(trigger, mentionPaths, skills) : []),
-    [mentionPaths, skills, trigger],
+    () =>
+      trigger
+        ? buildCommandItems(trigger, mentionPaths, skills, models.length > 0)
+        : [],
+    [mentionPaths, models.length, skills, trigger],
   );
   const menuOpen =
     trigger !== null && commandItems.length > 0 && dismissedTriggerKey !== triggerKey;
