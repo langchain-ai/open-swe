@@ -19,6 +19,7 @@ const {
   removeProject,
 } = require("./project-store.cjs")
 const {
+  APP_ORIGIN,
   APP_URL,
   appRedirectUrl,
   backendRequestUrl,
@@ -290,7 +291,7 @@ async function proxyBackendRequest(request) {
   }
   headers.delete("host")
   headers.set("accept-encoding", "identity")
-  headers.set("origin", new URL(backendUrl).origin)
+  headers.set("origin", APP_ORIGIN)
   const targetUrl = backendRequestUrl(backendUrl, request.url)
   const cookies = await session.defaultSession.cookies.get({ url: targetUrl })
   if (cookies.length) {

@@ -1,6 +1,7 @@
 const path = require("node:path")
 
-const APP_URL = "open-swe://app/"
+const APP_ORIGIN = "open-swe://app"
+const APP_URL = `${APP_ORIGIN}/`
 const DEFAULT_DEVELOPMENT_BACKEND_URL = "http://localhost:2024"
 const ALLOWED_PERMISSIONS = new Set(["clipboard-sanitized-write", "notifications"])
 
@@ -112,6 +113,7 @@ function staticFilePath(root, appRequestUrl) {
 }
 
 module.exports = {
+  APP_ORIGIN,
   APP_URL,
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,
