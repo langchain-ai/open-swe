@@ -36,6 +36,7 @@ function session(
     status,
     createdAt: 1,
     updatedAt: 1,
+    canResume: false,
     events,
   }
 }

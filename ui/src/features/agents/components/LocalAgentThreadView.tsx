@@ -1,5 +1,6 @@
 import { CircleAlert, FolderOpen } from "lucide-react"
 import { Link } from "@tanstack/react-router"
+import { useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
@@ -8,6 +9,7 @@ import { useDesktopAcpSession } from "@/features/agents/lib/desktopAcp"
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const { session, messages, loaded } = useDesktopAcpSession(sessionId)
+  const [sendError, setSendError] = useState<string | null>(null)
 
   if (!session) {
     return (
@@ -29,6 +31,16 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
 
   const isRunning =
     session.status === "running" || session.status === "starting"
+  const cannotResume = session.status === "stopped" && !session.canResume
+  const statusMessage = sendError
+    ? sendError
+    : session.status === "error"
+      ? "Deep Agents Code stopped unexpectedly. This conversation is saved."
+      : session.status === "stopped"
+        ? session.canResume
+          ? "Deep Agents Code is stopped. Send a follow-up to resume this saved conversation."
+          : "This conversation is saved, but the installed Deep Agents Code version cannot resume ACP sessions."
+        : null
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -39,13 +51,15 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         </span>
         <span className="ml-auto shrink-0">This Mac</span>
       </div>
-      {session.status === "error" && (
+      {statusMessage && (
         <div className="mx-auto w-full max-w-3xl px-4 pt-3">
-          <Alert variant="error">
+          <Alert
+            variant={
+              sendError || session.status === "error" ? "error" : "default"
+            }
+          >
             <CircleAlert />
-            <AlertDescription>
-              Deep Agents Code stopped. Start a new local session to continue.
-            </AlertDescription>
+            <AlertDescription>{statusMessage}</AlertDescription>
           </Alert>
         </div>
       )}
@@ -63,14 +77,24 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               activeRun={{ threadId: session.id, running: isRunning }}
               busy={isRunning}
               compact
-              disabled={session.status === "error"}
+              disabled={session.status === "error" || cannotResume}
               onStop={() => window.openSweDesktop?.cancelAcpSession(session.id)}
               onSubmit={async (prompt, images) => {
-                await window.openSweDesktop?.promptAcpSession({
-                  sessionId: session.id,
-                  prompt,
-                  images,
-                })
+                setSendError(null)
+                try {
+                  await window.openSweDesktop?.promptAcpSession({
+                    sessionId: session.id,
+                    prompt,
+                    images,
+                  })
+                } catch (error) {
+                  setSendError(
+                    error instanceof Error
+                      ? error.message
+                      : "Could not resume Deep Agents Code"
+                  )
+                  throw error
+                }
               }}
               placeholder="Add a follow up"
             />

@@ -11,10 +11,11 @@ Desktop users can choose **This Mac** in the new-task composer to run the Python
 this option. The desktop app launches the user's installed `dcode --acp`, inheriting its
 authentication and configuration. It finds the standard `~/.local/bin/dcode` installation even
 when a packaged app does not inherit the terminal's `PATH`; `OPEN_SWE_DCODE_COMMAND` overrides the
-executable path. Added projects are persisted in the desktop app's local data and can be selected
-from the **This Mac** submenu or managed from the sidebar. Local threads remain available for the
-lifetime of the app; dcode ACP does not currently support resuming those sessions after the desktop
-process exits.
+executable path. Added projects and local conversation history are persisted in the desktop app's
+local data and can be selected from the **This Mac** submenu or managed from the sidebar. Saved
+conversations remain visible after a restart. Follow-up prompts resume through ACP `session/load`
+when the installed dcode advertises that capability; versions without it leave restarted
+conversations read-only.
 
 ## How it connects
 

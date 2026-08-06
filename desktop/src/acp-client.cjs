@@ -223,15 +223,29 @@ class NdJsonRpcClient {
 }
 
 class AcpSession {
-  constructor({ cwd, target, env, onEvent, requestPermission }) {
-    this.id = randomUUID()
+  constructor({
+    cwd,
+    target,
+    env,
+    onEvent,
+    onSessionReady,
+    requestPermission,
+    restoredSession,
+  }) {
+    this.id = restoredSession?.id || randomUUID()
     this.cwd = cwd
-    this.title = "New local agent"
-    this.createdAt = Date.now()
-    this.updatedAt = this.createdAt
+    this.title = restoredSession?.title || "New local agent"
+    this.createdAt = restoredSession?.createdAt || Date.now()
+    this.updatedAt = restoredSession?.updatedAt || this.createdAt
     this.status = "starting"
-    this.events = []
+    this.events = Array.isArray(restoredSession?.events)
+      ? [...restoredSession.events]
+      : []
+    this.acpSessionId = restoredSession?.providerSessionId
+    this.canResume = restoredSession?.canResume === true
+    this.loadingSession = false
     this.onEvent = onEvent
+    this.onSessionReady = onSessionReady
     this.requestPermission = requestPermission
     this.tools = new Map()
     this.rpc = new NdJsonRpcClient(target.command, target.args, cwd, env)
@@ -259,8 +273,8 @@ class AcpSession {
     this.onEvent(this.id, stamped)
   }
 
-  async initialize() {
-    await this.rpc.request("initialize", {
+  async initialize({ resume = false } = {}) {
+    const initialized = await this.rpc.request("initialize", {
       protocolVersion: ACP_PROTOCOL_VERSION,
       clientCapabilities: {
         fs: { readTextFile: false, writeTextFile: false },
@@ -272,15 +286,38 @@ class AcpSession {
         version: "0.1.0",
       },
     })
-    const result = await this.rpc.request("session/new", {
-      cwd: this.cwd,
-      mcpServers: [],
-    })
-    if (!isRecord(result) || typeof result.sessionId !== "string") {
-      throw new Error("Deep Agents Code did not create an ACP session")
+    const capabilities = isRecord(initialized?.agentCapabilities)
+      ? initialized.agentCapabilities
+      : {}
+    this.canResume = capabilities.loadSession === true
+    if (resume) {
+      if (!this.acpSessionId || !this.canResume) {
+        throw new Error(
+          "The installed Deep Agents Code version cannot resume saved ACP sessions"
+        )
+      }
+      this.loadingSession = true
+      try {
+        await this.rpc.request("session/load", {
+          sessionId: this.acpSessionId,
+          cwd: this.cwd,
+          mcpServers: [],
+        })
+      } finally {
+        this.loadingSession = false
+      }
+    } else {
+      const result = await this.rpc.request("session/new", {
+        cwd: this.cwd,
+        mcpServers: [],
+      })
+      if (!isRecord(result) || typeof result.sessionId !== "string") {
+        throw new Error("Deep Agents Code did not create an ACP session")
+      }
+      this.acpSessionId = result.sessionId
     }
-    this.acpSessionId = result.sessionId
     this.status = "idle"
+    this.onSessionReady?.(this.summary())
   }
 
   async prompt(text, images) {
@@ -312,7 +349,9 @@ class AcpSession {
   }
 
   handleNotification(method, params) {
+    // session/load replays history already present in the desktop event journal.
     if (
+      this.loadingSession ||
       method !== "session/update" ||
       !isRecord(params) ||
       !isRecord(params.update)
@@ -383,10 +422,16 @@ class AcpSession {
       status: this.status,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
+      ...(this.acpSessionId
+        ? { providerSessionId: this.acpSessionId }
+        : {}),
+      canResume: this.canResume,
     }
   }
 
   close() {
+    if (this.status !== "error") this.status = "stopped"
+    this.updatedAt = Date.now()
     this.rpc.close()
   }
 }
