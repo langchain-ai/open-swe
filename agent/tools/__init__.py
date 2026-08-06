@@ -29,6 +29,8 @@ _TOOL_MODULES = {
     "resolve_finding_thread": ".resolve_finding_thread",
     "save_plan": ".save_plan",
     "save_user_instructions": ".save_user_instructions",
+    "save_user_skill": ".user_skills",
+    "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": ".search_repo_code",
     "slack_add_reaction": ".slack_add_reaction",
@@ -66,6 +68,8 @@ __all__ = [
     "resolve_finding_thread",
     "save_plan",
     "save_user_instructions",
+    "save_user_skill",
+    "delete_user_skill",
     "schedule_thread_wakeup",
     "search_repo_code",
     "slack_add_reaction",
@@ -110,6 +114,7 @@ if TYPE_CHECKING:
     from .slack_start_new_thread import slack_start_new_thread
     from .slack_thread_reply import slack_thread_reply
     from .update_finding import update_finding
+    from .user_skills import delete_user_skill, save_user_skill
     from .web_search import web_search
 
 

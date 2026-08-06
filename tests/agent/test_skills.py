@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 from pydantic import ValidationError
 
 from agent.dashboard.skills import SkillCreate, create_skill, list_skills
+from agent.tools.user_skills import save_user_skill
 
 
 async def test_skill_validation_and_persistence() -> None:
@@ -39,6 +40,22 @@ async def test_skill_validation_and_persistence() -> None:
         "/review-feedback/SKILL.md",
         record,
     )
+
+
+async def test_save_user_skill_uses_triggering_user_namespace() -> None:
+    create = AsyncMock(return_value={"name": "deslop"})
+    with (
+        patch(
+            "agent.tools.user_skills.get_config",
+            return_value={"configurable": {"github_login": "octocat"}},
+        ),
+        patch("agent.tools.user_skills.get_skill", new_callable=AsyncMock, return_value=None),
+        patch("agent.tools.user_skills.create_skill", create),
+    ):
+        result = await save_user_skill("deslop", "Minimize diffs", "Remove bloat.")
+
+    assert result == {"ok": True, "skill": {"name": "deslop"}}
+    create.assert_awaited_once_with("octocat", ANY)
 
 
 async def test_skill_listing_returns_next_offset() -> None:
