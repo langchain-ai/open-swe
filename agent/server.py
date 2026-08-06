@@ -138,6 +138,7 @@ from .utils.authorship import (
 from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import get_github_app_installation_token_with_expiry
+from .utils.github_org_membership import is_user_active_org_member
 from .utils.github_proxy import record_proxy_token_expiry
 from .utils.json_types import as_json_object
 from .utils.model import (
@@ -672,6 +673,23 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
     )
 
 
+async def _allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
+    configurable = (config or {}).get("configurable") or {}
+    config_login = configurable.get("github_login")
+    login = profile_login or (config_login if isinstance(config_login, str) else None)
+    if not login:
+        return False
+    orgs = dict.fromkeys(
+        org.strip().lower()
+        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
+        if org.strip()
+    )
+    for org in orgs:
+        if await is_user_active_org_member(login, org):
+            return True
+    return False
+
+
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
     async def load_with_timeout() -> list[Any]:
         return await asyncio.wait_for(loader(), timeout=_tool_loader_timeout_seconds())
@@ -1014,9 +1032,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
     ]
 
-    observability_tools = await _load_observability_tools(
-        await _observability_authorized(config, profile_login)
-    )
+    observability_authorized = await _observability_authorized(config, profile_login)
+    if observability_authorized:
+        observability_tools = await _load_observability_tools(True)
+    elif await _allowed_org_member(config, profile_login):
+        observability_tools = await _cached_tool_loader(
+            f"tools:langsmith:{id(load_langsmith_tools)}", 600, load_langsmith_tools
+        )
+    else:
+        observability_tools = []
     corridor_tools = await _load_corridor_mcp_tools()
     browser_tools = load_browser_tools()
 

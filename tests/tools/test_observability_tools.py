@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal, cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 import pytest
 from langchain_core.runnables import RunnableConfig
@@ -238,6 +238,17 @@ async def test_observability_authorized_allowlist(monkeypatch: pytest.MonkeyPatc
 
     config = cast(RunnableConfig, {"configurable": {"user_email": "trusted@example.com"}})
     assert await server._observability_authorized(config, None) is True
+
+
+@pytest.mark.asyncio
+async def test_allowed_org_member(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary,secondary")
+    membership = AsyncMock(side_effect=[False, True])
+    monkeypatch.setattr(server, "is_user_active_org_member", membership)
+
+    config = cast(RunnableConfig, {"configurable": {"github_login": "dev"}})
+    assert await server._allowed_org_member(config, "dev") is True
+    assert membership.await_args_list == [call("dev", "primary"), call("dev", "secondary")]
 
 
 @pytest.mark.asyncio
