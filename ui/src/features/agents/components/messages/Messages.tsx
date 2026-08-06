@@ -48,6 +48,7 @@ function QueuedMessages({
 
 export const Messages = memo(function MessagesComponent({
   messages,
+  threadId,
   queuedMessages = [],
   isStreaming,
   streamIsLoading,
@@ -63,7 +64,7 @@ export const Messages = memo(function MessagesComponent({
   onApprove,
   onReject,
   onAutoApprove,
-  onOpenDiff,
+  onOpenFile,
 }: MessagesProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -215,6 +216,9 @@ export const Messages = memo(function MessagesComponent({
   }, [onShowScrollToBottomChange, showScrollToBottom]);
 
   const projectPath = project?.path;
+  const lastAgentIndex = visibleMessages.findLastIndex(
+    (message) => message.author === "agent",
+  );
 
   return (
     <TooltipProvider delay={250} closeDelay={0}>
@@ -244,10 +248,12 @@ export const Messages = memo(function MessagesComponent({
                 isStreaming={messageIsStreaming}
                 isMarkdownLive={messageIsMarkdownLive}
                 projectPath={projectPath}
+                threadId={threadId}
+                isLatestTurn={index === lastAgentIndex}
                 onApprove={onApprove}
                 onReject={onReject}
                 onAutoApprove={onAutoApprove}
-                onOpenDiff={onOpenDiff}
+                onOpenFile={onOpenFile}
               />
             );
           })}

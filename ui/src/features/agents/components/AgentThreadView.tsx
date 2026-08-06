@@ -20,10 +20,7 @@ import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
-import {
-  Messages,
-  summarizeChangedFiles,
-} from "@/features/agents/components/messages"
+import { Messages } from "@/features/agents/components/messages"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
@@ -42,6 +39,19 @@ function messageText(message: Message): string {
     .map((chunk) => (chunk.kind === "text" ? chunk.text : ""))
     .join("\n")
     .trim()
+}
+
+/** Paths the agent has edited this thread, newest last, for `@file` mentions. */
+function editedPaths(messages: Array<Message>): Array<string> {
+  const paths = new Set<string>()
+  for (const message of messages) {
+    for (const chunk of message.chunks) {
+      if (chunk.kind !== "tool-execution" || chunk.toolKind !== "edit") continue
+      const path = chunk.input?.file_path ?? chunk.input?.path
+      if (typeof path === "string" && path) paths.add(path)
+    }
+  }
+  return [...paths]
 }
 
 function visibleQueuedMessages(
@@ -114,6 +124,15 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     setPanelCollapsed(next)
     writeStoredPanelCollapsed(next)
   }, [])
+  const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
+  const handleOpenFile = useCallback(
+    (filePath: string) => {
+      setRevealFilePath(filePath)
+      setPanelTab("git")
+      handlePanelCollapsedChange(false)
+    },
+    [handlePanelCollapsedChange]
+  )
 
   const baseMessages = useMemo<Array<Message>>(() => {
     const live = streamMessagesToUi(
@@ -144,13 +163,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const hasConversation = hasMessages || queuedMessages.length > 0
   // The only file list the UI has: whatever the agent has already touched in
   // this thread. Those are also the paths a follow-up is most likely about.
-  const mentionPaths = useMemo(
-    () =>
-      summarizeChangedFiles(baseMessages.flatMap((message) => message.chunks)).map(
-        (file) => file.filePath
-      ),
-    [baseMessages]
-  )
+  const mentionPaths = useMemo(() => editedPaths(baseMessages), [baseMessages])
   const isThinking = stream.isLoading
   const settingUpSandbox = isThinking && baseMessages.length === 0
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
@@ -240,6 +253,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <Messages
               messages={baseMessages}
+              threadId={thread.id}
+              onOpenFile={handleOpenFile}
               queuedMessages={queuedMessages}
               isStreaming={isStreaming}
               streamIsLoading={stream.isLoading}
@@ -320,7 +335,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       </div>
       <AgentGitPanel
         thread={thread}
-        messages={baseMessages}
+        revealFilePath={revealFilePath}
         collapsed={panelCollapsed}
         requestedTab={panelTab}
         onCollapsedChange={handlePanelCollapsedChange}

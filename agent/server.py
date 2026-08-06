@@ -12,6 +12,7 @@ import logging
 import os
 import warnings
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 from langsmith.sandbox import SandboxClientError
 
 from .dashboard.admin import is_observability_authorized
@@ -83,7 +85,6 @@ from .middleware import (
     SlackAssistantStatusMiddleware,
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
-    ToolArtifactMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
@@ -162,6 +163,7 @@ from .utils.sandbox_state import (
     unwrap_sandbox_backend,
 )
 from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
+from .utils.turn_checkpoint import merge_checkpoint, record_turn_checkpoint
 
 client = get_client()
 
@@ -836,6 +838,35 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "effort": self._effort,
         }
 
+    async def _record_turn_checkpoint(
+        self, state: PrepareRunState, sandbox_backend: Any, work_dir: str
+    ) -> list[dict[str, str]] | None:
+        """Snapshot the worktree so the dashboard can diff this turn from git.
+
+        Keyed by the user message that opened the turn, which is the same id the
+        client groups an assistant turn under.
+        """
+        turn_key = next(
+            (
+                message.id
+                for message in reversed(state.get("messages") or [])
+                if isinstance(message, HumanMessage) and message.id
+            ),
+            None,
+        )
+        if not turn_key:
+            return None
+        ref = await record_turn_checkpoint(sandbox_backend, work_dir, turn_key)
+        if ref is None:
+            return None
+        try:
+            thread = await client.threads.get(thread_id=self._thread_id)
+            existing = (thread.get("metadata") or {}).get("turn_checkpoints")
+        except Exception:
+            logger.debug("Could not read turn checkpoints for %s", self._thread_id, exc_info=True)
+            existing = None
+        return merge_checkpoint(existing, turn_key, ref, datetime.now(UTC).isoformat())
+
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         configurable = (self._config or {}).get("configurable") or {}
@@ -867,6 +898,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             _resolve_repo_custom_instructions(prompt_default_repo),
             _resolve_user_custom_instructions(self._profile_login),
         )
+        turn_checkpoints = await self._record_turn_checkpoint(state, sandbox_backend, work_dir)
 
         try:
             await client.threads.update(
@@ -877,6 +909,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     "effort": self._effort,
                     "source": self._source,
                     "plan_mode": self._plan_mode,
+                    **({"turn_checkpoints": turn_checkpoints} if turn_checkpoints else {}),
                 },
             )
             await record_agent_thread_usage(
@@ -1179,7 +1212,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     initial_delay=1.0,
                     max_delay=10.0,
                 ),
-                ToolArtifactMiddleware(),
                 PullRequestCreationGuardMiddleware(),
                 refresh_github_proxy_before_model,
                 check_message_queue_before_model,
