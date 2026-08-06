@@ -20,14 +20,14 @@ import {
 import type { FileContents } from "@pierre/diffs/react"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
-import type { AgentThread, Message } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/features/agents/lib/types"
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
-import type { ChangedFileSummaryItem } from "@/features/agents/components/messages"
 import { agentsApi } from "@/features/agents/lib/api"
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
   useAgentThreadPrDiff,
+  useAgentThreadTurnDiff,
 } from "@/features/agents/lib/queries"
 import { ReviewTab } from "@/features/reviews/components/ReviewTab"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
@@ -42,7 +42,6 @@ import {
   fileContentsCacheKey,
   useDiffOptions,
 } from "@/features/agents/utils/diffUtils"
-import { summarizeChangedFiles } from "@/features/agents/components/messages"
 import { Z } from "@/features/agents/components/z-index"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
@@ -51,7 +50,8 @@ export type AgentPanelTab = "git" | "desktop" | "terminal" | "plan"
 
 interface AgentGitPanelProps {
   thread: AgentThread
-  messages: Array<Message>
+  /** Path to select and scroll to, set when a transcript row is clicked. */
+  revealFilePath?: string | null
   collapsed: boolean
   requestedTab: AgentPanelTab
   onCollapsedChange: (next: boolean) => void
@@ -72,16 +72,6 @@ interface PanelFile {
 function prFileStatus(file: ThreadPrDiffFile): GitStatus {
   if (file.status === "added") return "added"
   if (file.status === "removed") return "deleted"
-  return "modified"
-}
-
-function deriveStatus(file: ChangedFileSummaryItem): GitStatus {
-  if (file.originalContent.length === 0 && file.modifiedContent.length > 0) {
-    return "added"
-  }
-  if (file.modifiedContent.length === 0 && file.originalContent.length > 0) {
-    return "deleted"
-  }
   return "modified"
 }
 
@@ -271,7 +261,7 @@ export function treeThemeStyle(): React.CSSProperties {
 
 export function AgentGitPanel({
   thread,
-  messages,
+  revealFilePath,
   collapsed,
   requestedTab,
   onCollapsedChange,
@@ -368,6 +358,9 @@ export function AgentGitPanel({
   }
 
   const prDiff = useAgentThreadPrDiff(thread.id, Boolean(pr))
+  // Without a PR the sandbox's git checkpoints are the only source of truth for
+  // what this thread changed.
+  const turnDiff = useAgentThreadTurnDiff(thread.id, null, !pr && !collapsed)
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const canDownloadRecovery =
@@ -397,39 +390,23 @@ export function AgentGitPanel({
     }
   }, [thread.id])
 
-  const chunks = useMemo(
-    () => messages.flatMap((message) => message.chunks),
-    [messages]
-  )
-
   const files = useMemo<Array<PanelFile>>(() => {
-    if (prDiff.data) {
-      return prDiff.data.files.map((file) => ({
-        filePath: file.path,
-        treePath: file.path,
-        additions: file.additions,
-        deletions: file.deletions,
-        originalContent: file.originalContent ?? "",
-        modifiedContent: file.modifiedContent ?? "",
-        status: prFileStatus(file),
-        unrenderable: file.unrenderable,
-      }))
-    }
-    const summary = summarizeChangedFiles(chunks)
-    const prefix = commonDirPrefix(summary.map((file) => file.filePath))
-    return summary.map((file) => ({
-      filePath: file.filePath,
+    const diffFiles = prDiff.data?.files ?? turnDiff.data?.files ?? []
+    const prefix = commonDirPrefix(diffFiles.map((file) => file.path))
+    return diffFiles.map((file) => ({
+      filePath: file.path,
       treePath:
-        prefix && file.filePath.startsWith(prefix)
-          ? file.filePath.slice(prefix.length)
-          : file.filePath,
+        prefix && file.path.startsWith(prefix)
+          ? file.path.slice(prefix.length)
+          : file.path,
       additions: file.additions,
       deletions: file.deletions,
-      originalContent: file.originalContent,
-      modifiedContent: file.modifiedContent,
-      status: deriveStatus(file),
+      originalContent: file.originalContent ?? "",
+      modifiedContent: file.modifiedContent ?? "",
+      status: prFileStatus(file),
+      unrenderable: file.unrenderable,
     }))
-  }, [chunks, prDiff.data])
+  }, [prDiff.data, turnDiff.data])
 
   const totals = useMemo(
     () =>
@@ -454,6 +431,16 @@ export function AgentGitPanel({
       behavior: "smooth",
     })
   }, [])
+
+  useEffect(() => {
+    if (!revealFilePath) return
+    // Transcript rows carry sandbox-absolute paths; diff files are repo-relative.
+    const target = filesRef.current.find(
+      (file) =>
+        file.filePath === revealFilePath || revealFilePath.endsWith(`/${file.filePath}`)
+    )
+    if (target) selectTreePath(target.treePath)
+  }, [revealFilePath, files, selectTreePath])
 
   if (collapsed) {
     return (

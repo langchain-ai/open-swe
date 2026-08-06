@@ -26,7 +26,6 @@ _MIDDLEWARE_MODULES = {
     "task_on_failure": ".task_retry",
     "task_retry_on": ".task_retry",
     "TimeoutWrapupMiddleware": ".timeout_wrapup",
-    "ToolArtifactMiddleware": ".tool_artifact",
     "ToolErrorMiddleware": ".tool_error_handler",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
 }
@@ -45,7 +44,6 @@ __all__ = [
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
     "SubdirAgentsReadMiddleware",
-    "ToolArtifactMiddleware",
     "ToolErrorMiddleware",
     "TimeoutWrapupMiddleware",
     "WorkflowPushGuardMiddleware",
@@ -82,7 +80,6 @@ if TYPE_CHECKING:
     from .subdir_agents import SubdirAgentsReadMiddleware
     from .task_retry import task_on_failure, task_retry_on
     from .timeout_wrapup import TimeoutWrapupMiddleware
-    from .tool_artifact import ToolArtifactMiddleware
     from .tool_error_handler import ToolErrorMiddleware
     from .workflow_push_guard import WorkflowPushGuardMiddleware
 

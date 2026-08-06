@@ -22,6 +22,8 @@ export const agentThreadKeys = {
   }) => ["agent-threads", "lists", "sidebar", params] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
+  turnDiff: (threadId: string, turnKey: string | null) =>
+    ["agent-threads", threadId, "turn-diff", turnKey] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
   page: (params: ThreadsPageParams) =>
@@ -186,6 +188,20 @@ export function useAgentThreadPrDiff(threadId: string, enabled: boolean) {
     queryKey: agentThreadKeys.prDiff(threadId),
     queryFn: () => agentsApi.getThreadPrDiff(threadId),
     enabled,
+    staleTime: 30_000,
+    retry: false,
+  })
+}
+
+export function useAgentThreadTurnDiff(
+  threadId: string,
+  turnKey: string | null,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.turnDiff(threadId, turnKey),
+    queryFn: () => agentsApi.getThreadTurnDiff(threadId, turnKey),
+    enabled: enabled && Boolean(threadId),
     staleTime: 30_000,
     retry: false,
   })

@@ -37,7 +37,6 @@ export function ChunkRenderer({
           onApprove={callbacks.onApprove}
           onReject={callbacks.onReject}
           onAutoApprove={callbacks.onAutoApprove}
-          onOpenDiff={callbacks.onOpenDiff}
         />
       );
     case "image":

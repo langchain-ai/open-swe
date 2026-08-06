@@ -12,8 +12,6 @@ interface ToolExecutionProps {
   onApprove?: (approvalRequestId: string) => void;
   onReject?: (approvalRequestId: string) => void;
   onAutoApprove?: (approvalRequestId: string) => void;
-  onOpenDiff?: (diffData: { filePath: string; originalContent: string; modifiedContent: string }) => void;
-  resolvedDiffData?: { originalContent: string; modifiedContent: string };
 }
 
 function stripProjectPath(path: string, projectPath?: string): string {
@@ -139,7 +137,6 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
 export const ToolExecution = memo(function ToolExecution({
   chunk,
   projectPath,
-  resolvedDiffData,
 }: ToolExecutionProps) {
   const { title, toolKind, input, status, output } = chunk;
   const diffs = chunk.diffs?.length ? chunk.diffs : (chunk.diffData ? [chunk.diffData] : []);
@@ -156,8 +153,8 @@ export const ToolExecution = memo(function ToolExecution({
       <InlineDiffCollapsible
         filePath={editedFilePath || diffData.filePath}
         fileName={editedFileName || editedFilePath || diffData.filePath}
-        originalContent={resolvedDiffData?.originalContent ?? diffData.originalContent ?? ""}
-        newContent={resolvedDiffData?.modifiedContent ?? diffData.newContent}
+        originalContent={diffData.originalContent ?? ""}
+        newContent={diffData.newContent}
         additions={diffStats.additions}
         deletions={diffStats.deletions}
         isError={status === "error"}
