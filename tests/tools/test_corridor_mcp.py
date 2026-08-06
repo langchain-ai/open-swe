@@ -182,11 +182,15 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
             patch.object(server, "create_deep_agent", side_effect=fake_create_deep_agent),
         ):
             await server.get_agent(cast(RunnableConfig, config))
-            prepare = cast(AgentMiddleware, cast(list[object], captured["middleware"])[0])
+            middleware = cast(list[object], captured["middleware"])
+            prepare = cast(AgentMiddleware, middleware[0])
             await prepare.abefore_agent(
                 cast(AgentState[object], {"messages": []}),
                 cast(Runtime[None], MagicMock()),
             )
+            if corridor_tools:
+                assert corridor_tools[0] not in cast(list[object], captured["tools"])
+                assert "DynamicToolMiddleware" in {type(item).__name__ for item in middleware}
         return bool(prompt.call_args.kwargs["corridor_enabled"])
 
     assert await run_with_corridor_tools([]) is False
