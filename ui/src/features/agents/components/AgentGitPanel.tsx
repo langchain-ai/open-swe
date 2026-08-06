@@ -443,18 +443,17 @@ export function AgentGitPanel({
     [files]
   )
 
-  const selectTreePath = useCallback(
-    (path: string) => {
-      setSelectedTreePath(path)
-      const target = files.find((file) => file.treePath === path)
-      if (!target) return
-      sectionRefs.current[target.filePath]?.scrollIntoView({
-        block: "start",
-        behavior: "smooth",
-      })
-    },
-    [files]
-  )
+  const filesRef = useRef(files)
+  filesRef.current = files
+  const selectTreePath = useCallback((path: string) => {
+    setSelectedTreePath(path)
+    const target = filesRef.current.find((file) => file.treePath === path)
+    if (!target) return
+    sectionRefs.current[target.filePath]?.scrollIntoView({
+      block: "start",
+      behavior: "smooth",
+    })
+  }, [])
 
   if (collapsed) {
     return (
