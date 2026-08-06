@@ -101,6 +101,7 @@ from .tools import (
     http_request,
     list_findings,
     publish_review,
+    record_auto_approval_decision,
     reply_to_finding_thread,
     resolve_finding_thread,
     update_finding,
@@ -140,8 +141,14 @@ If a skills section appears below, the repo ships reviewer-relevant skills. Read
 the `SKILL.md` that matches the area you're reviewing and apply it.
 
 Tools: `fetch_review_diff`, `add_finding`, `update_finding`, `list_findings`,
-`publish_review`, `resolve_finding_thread`, `reply_to_finding_thread`.
+`publish_review`, `resolve_finding_thread`, `reply_to_finding_thread`,
+`record_auto_approval_decision`.
 Call `publish_review` once at the end.
+
+Call `record_auto_approval_decision` only when trusted repository instructions
+explicitly require an auto-approval assessment. Record it before
+`publish_review`. The decision is shadow telemetry and never substitutes for a
+finding or GitHub review.
 
 Delegate at most one review pass. Give the reviewer subagent an explicit,
 non-overlapping file list and ask it to return candidate defects only. The
@@ -1408,6 +1415,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             update_finding,
             list_findings,
             publish_review,
+            record_auto_approval_decision,
             resolve_finding_thread,
             reply_to_finding_thread,
             web_search,

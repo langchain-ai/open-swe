@@ -10,6 +10,7 @@ import pytest
 
 from agent.tools.add_finding import add_finding
 from agent.tools.list_findings import list_findings
+from agent.tools.record_auto_approval_decision import record_auto_approval_decision
 from agent.tools.resolve_finding_thread import resolve_finding_thread
 from agent.tools.update_finding import update_finding
 
@@ -70,6 +71,69 @@ async def test_add_finding_rejects_invalid_severity() -> None:
         )
     assert result["success"] is False
     assert "severity" in result["error"].lower()
+
+
+async def test_record_auto_approval_decision_persists_sha_bound_metadata() -> None:
+    set_metadata = AsyncMock()
+    with (
+        patch("agent.tools.record_auto_approval_decision.get_config", return_value=_config()),
+        patch(
+            "agent.tools.record_auto_approval_decision.get_thread_id_from_runtime",
+            return_value="tid-1",
+        ),
+        patch(
+            "agent.tools.record_auto_approval_decision.resolve_review_head_sha",
+            AsyncMock(return_value="sha-head"),
+        ),
+        patch(
+            "agent.tools.record_auto_approval_decision.set_reviewer_thread_metadata",
+            set_metadata,
+        ),
+    ):
+        result = await record_auto_approval_decision(
+            outcome="AUTO_APPROVE_CANDIDATE",
+            evidence=["frontend-only change"],
+            failed_requirements=[],
+            rubric_version="frontend-auto-approval-v1",
+        )
+
+    assert result["success"] is True
+    assert result["decision"]["head_sha"] == "sha-head"
+    set_metadata.assert_awaited_once()
+    persisted = set_metadata.await_args.kwargs["extra"]["auto_approval_decision"]
+    assert persisted == result["decision"]
+
+
+@pytest.mark.parametrize(
+    ("outcome", "evidence", "failed_requirements", "rubric_version", "error"),
+    [
+        ("APPROVE", ["fact"], [], "v1", "outcome"),
+        ("ABSTAIN", [], ["missing context"], "v1", "evidence"),
+        ("ABSTAIN", ["fact"], ["missing context"], "", "rubric_version"),
+        (
+            "AUTO_APPROVE_CANDIDATE",
+            ["fact"],
+            ["tests missing"],
+            "v1",
+            "failed_requirements",
+        ),
+    ],
+)
+async def test_record_auto_approval_decision_rejects_invalid_contract(
+    outcome: str,
+    evidence: list[str],
+    failed_requirements: list[str],
+    rubric_version: str,
+    error: str,
+) -> None:
+    result = await record_auto_approval_decision(
+        outcome=outcome,
+        evidence=evidence,
+        failed_requirements=failed_requirements,
+        rubric_version=rubric_version,
+    )
+    assert result["success"] is False
+    assert error in result["error"]
 
 
 async def test_add_finding_rejects_empty_title() -> None:

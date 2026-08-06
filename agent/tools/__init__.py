@@ -21,6 +21,7 @@ _TOOL_MODULES = {
     "list_review_findings": ".list_review_findings",
     "open_pull_request": ".open_pull_request",
     "publish_review": ".publish_review",
+    "record_auto_approval_decision": ".record_auto_approval_decision",
     "read_repo_file": ".read_repo_file",
     "recreate_sandbox": ".recreate_sandbox",
     "report_platform_issue": ".report_platform_issue",
@@ -58,6 +59,7 @@ __all__ = [
     "list_review_findings",
     "open_pull_request",
     "publish_review",
+    "record_auto_approval_decision",
     "read_repo_file",
     "recreate_sandbox",
     "report_platform_issue",
@@ -95,6 +97,7 @@ if TYPE_CHECKING:
     from .list_review_findings import list_review_findings
     from .open_pull_request import open_pull_request
     from .publish_review import publish_review
+    from .record_auto_approval_decision import record_auto_approval_decision
     from .read_repo_file import read_repo_file
     from .recreate_sandbox import recreate_sandbox
     from .reply_to_finding_thread import reply_to_finding_thread
