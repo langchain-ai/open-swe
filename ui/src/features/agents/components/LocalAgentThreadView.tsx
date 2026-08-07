@@ -124,11 +124,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         onCollapsedChange={handlePanelCollapsedChange}
       >
         {() => (
-          <TerminalPanel
-            transport="local"
-            id={`local-session:${session.id}`}
-            cwd={session.cwd}
-          />
+          <TerminalPanel id={`local-session:${session.id}`} cwd={session.cwd} />
         )}
       </AgentPanelShell>
     </div>

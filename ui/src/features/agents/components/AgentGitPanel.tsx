@@ -30,7 +30,6 @@ import { buttonVariants } from "@/components/ui/button"
 import { AgentPanelShell } from "@/features/agents/components/AgentPanelShell"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { PlanView } from "@/features/agents/components/PlanView"
-import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
 import {
   DIFF_VIRTUALIZER_CONFIG,
   DIFF_VIRTUAL_METRICS,
@@ -42,7 +41,7 @@ import {
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
-export type AgentPanelTab = "git" | "desktop" | "terminal" | "plan"
+export type AgentPanelTab = "git" | "plan"
 
 interface AgentGitPanelProps {
   thread: AgentThread
@@ -280,13 +279,7 @@ export function AgentGitPanel({
 
   return (
     <AgentPanelShell
-      // The cloud terminal is hidden until the sandbox proxy stops rejecting the
-      // session token; the local desktop terminal is unaffected.
-      tabs={[
-        ["git", "Git"],
-        ["desktop", "Desktop"],
-        ...(hasPlan ? ([["plan", "Plan"]] as const) : []),
-      ]}
+      tabs={[["git", "Git"], ...(hasPlan ? ([["plan", "Plan"]] as const) : [])]}
       activeTab={topTab}
       onTabChange={onTabChange}
       collapsed={collapsed}
@@ -296,8 +289,6 @@ export function AgentGitPanel({
         <>
           {topTab === "plan" ? (
             <PlanView threadId={thread.id} onApprove={onPlanApproved} />
-          ) : topTab === "terminal" ? (
-            <TerminalPanel transport="cloud" threadId={thread.id} />
           ) : topTab !== "git" ? (
             <div className="flex flex-1 items-center justify-center p-6 text-xs text-muted-foreground/70">
               Coming Soon

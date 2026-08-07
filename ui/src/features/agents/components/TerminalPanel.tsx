@@ -2,12 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react"
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 
-import type { ThreadTerminalEvent } from "@/features/agents/lib/api"
-import { agentsApi } from "@/features/agents/lib/api"
-
-type TerminalPanelProps =
-  | { transport: "local"; id: string; cwd: string }
-  | { transport: "cloud"; threadId: string }
+type TerminalPanelProps = { id: string; cwd: string }
 
 export function TerminalPanel(props: TerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -15,9 +10,8 @@ export function TerminalPanel(props: TerminalPanelProps) {
   // Depend on the individual fields, never the props object: it is a fresh
   // literal on every parent render, which would tear down and respawn the shell
   // each time the transcript streams a token.
-  const localId = props.transport === "local" ? props.id : null
-  const localCwd = props.transport === "local" ? props.cwd : null
-  const cloudThreadId = props.transport === "cloud" ? props.threadId : null
+  const localId = props.id
+  const localCwd = props.cwd
 
   useLayoutEffect(() => {
     setError(null)
@@ -96,62 +90,6 @@ export function TerminalPanel(props: TerminalPanelProps) {
           bridge.destroy(localId)
         }
       }
-    } else if (cloudThreadId) {
-      let remoteId: string | null = null
-      const abort = new AbortController()
-      const input = terminal.onData((data) => {
-        if (remoteId)
-          void agentsApi.writeTerminal(cloudThreadId, remoteId, data)
-      })
-      void (async () => {
-        try {
-          const remote = await agentsApi.createTerminal(cloudThreadId)
-          remoteId = remote.id
-          const response = await fetch(
-            agentsApi.terminalStreamUrl(cloudThreadId, remote.id),
-            {
-              credentials: "include",
-              signal: abort.signal,
-            }
-          )
-          if (!response.ok || !response.body)
-            throw new Error("Terminal stream unavailable")
-          const reader = response.body.getReader()
-          const decoder = new TextDecoder()
-          let buffer = ""
-          for (
-            let result = await reader.read();
-            !result.done;
-            result = await reader.read()
-          ) {
-            buffer += decoder.decode(result.value, { stream: true })
-            const events = buffer.split("\n\n")
-            buffer = events.pop() ?? ""
-            for (const raw of events) {
-              const line = raw
-                .split("\n")
-                .find((entry) => entry.startsWith("data: "))
-              if (!line) continue
-              const event = JSON.parse(line.slice(6)) as ThreadTerminalEvent
-              if (event.type === "output" && event.data)
-                terminal.write(event.data)
-              else if (event.type === "error")
-                setError(event.detail ?? "Terminal connection lost")
-            }
-          }
-        } catch (caught) {
-          if (!abort.signal.aborted) {
-            setError(
-              caught instanceof Error ? caught.message : "Terminal unavailable"
-            )
-          }
-        }
-      })()
-      cleanupTransport = () => {
-        input.dispose()
-        abort.abort()
-        if (remoteId) void agentsApi.closeTerminal(cloudThreadId, remoteId)
-      }
     }
 
     scheduleResize()
@@ -165,7 +103,7 @@ export function TerminalPanel(props: TerminalPanelProps) {
       cleanupTransport()
       terminal.dispose()
     }
-  }, [cloudThreadId, localCwd, localId])
+  }, [localCwd, localId])
 
   return (
     <div className="relative h-full min-h-0 bg-[#111111] p-2">

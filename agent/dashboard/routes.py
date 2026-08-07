@@ -172,7 +172,6 @@ from .team_settings import (
     get_team_settings,
     upsert_team_settings,
 )
-from .terminal_api import TerminalInputBody, terminal_manager
 from .thread_api import (
     ThreadMessageBody,
     ThreadResolveBody,
@@ -1719,53 +1718,6 @@ async def api_get_thread_pr_diff(
         session["sub"],
         email=session.get("email"),
     )
-
-
-@router.post("/threads/{thread_id}/terminal")
-async def api_create_thread_terminal(
-    thread_id: str,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    return await terminal_manager.create(thread_id, session["sub"], email=session.get("email"))
-
-
-@router.get("/threads/{thread_id}/terminal/{terminal_id}/stream")
-async def api_stream_thread_terminal(
-    thread_id: str,
-    terminal_id: str,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> StreamingResponse:
-    stream = terminal_manager.stream(
-        thread_id, terminal_id, session["sub"], email=session.get("email")
-    )
-    return StreamingResponse(
-        stream,
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
-
-
-@router.post("/threads/{thread_id}/terminal/{terminal_id}/input")
-async def api_input_thread_terminal(
-    thread_id: str,
-    terminal_id: str,
-    body: TerminalInputBody,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> Response:
-    await terminal_manager.input(
-        thread_id, terminal_id, session["sub"], body.data, email=session.get("email")
-    )
-    return Response(status_code=204)
-
-
-@router.delete("/threads/{thread_id}/terminal/{terminal_id}")
-async def api_close_thread_terminal(
-    thread_id: str,
-    terminal_id: str,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> Response:
-    await terminal_manager.close(thread_id, terminal_id, session["sub"], email=session.get("email"))
-    return Response(status_code=204)
 
 
 @router.post("/threads/{thread_id}/messages")

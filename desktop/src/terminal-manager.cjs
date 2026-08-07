@@ -97,7 +97,9 @@ function configureTerminalIpc({ ipcMain, requireTrusted, getWindow, listProjects
           term.onData((data) => {
             if (!event.sender.isDestroyed()) event.sender.send("desktop:terminal-data", id, data)
           })
-          term.onExit(() => terminals.delete(id))
+          term.onExit(() => {
+            if (terminals.get(id)?.term === term) terminals.delete(id)
+          })
           return
         } catch (error) {
           lastError = error

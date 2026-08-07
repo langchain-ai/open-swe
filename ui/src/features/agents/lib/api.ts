@@ -79,19 +79,6 @@ export interface ThreadRecoveryPatch {
   filename: string
 }
 
-export interface ThreadTerminal {
-  id: string
-  cwd: string
-}
-
-export interface ThreadTerminalEvent {
-  type: "output" | "error" | "exit"
-  stream?: "stdout" | "stderr"
-  data?: string
-  detail?: string
-  exitCode?: number | null
-}
-
 export interface ThreadsPageParams {
   limit?: number
   offset?: number
@@ -321,23 +308,6 @@ export const agentsApi = {
     agentsBlobRequest(
       `/threads/${encodeURIComponent(threadId)}/recovery.patch`
     ),
-  createTerminal: (threadId: string) =>
-    agentsRequest<ThreadTerminal>(
-      `/threads/${encodeURIComponent(threadId)}/terminal`,
-      { method: "POST" }
-    ),
-  writeTerminal: (threadId: string, terminalId: string, data: string) =>
-    agentsRequest<void>(
-      `/threads/${encodeURIComponent(threadId)}/terminal/${encodeURIComponent(terminalId)}/input`,
-      { method: "POST", body: JSON.stringify({ data }) }
-    ),
-  closeTerminal: (threadId: string, terminalId: string) =>
-    agentsRequest<void>(
-      `/threads/${encodeURIComponent(threadId)}/terminal/${encodeURIComponent(terminalId)}`,
-      { method: "DELETE" }
-    ),
-  terminalStreamUrl: (threadId: string, terminalId: string) =>
-    `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/terminal/${encodeURIComponent(terminalId)}/stream`,
   streamUrl: (threadId: string) =>
     `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
 }

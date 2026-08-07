@@ -26,9 +26,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        from ..dashboard.terminal_api import terminal_manager
-
-        await terminal_manager.aclose()
         await close_cached_models()
 
 
