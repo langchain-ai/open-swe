@@ -974,6 +974,40 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
     await thread_api.proxy_dashboard_thread_history("tid", "teammate", b"{}")
 
 
+async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "status": "idle",
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "owner",
+                    "latest_run_status": "success",
+                },
+            }
+
+        async def update(self, **kwargs: object) -> None:
+            pass
+
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            return {"values": {"messages": []}, "next": []}
+
+    class FakeRuns:
+        async def list(self, thread_id: str, *, limit: int) -> list[dict[str, str]]:
+            return [{"run_id": "run-1", "status": "running"}]
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    state = await thread_api.get_dashboard_thread_state("tid", "owner")
+
+    assert "next" not in state
+
+
 async def test_read_endpoints_reject_non_surfaced_source(monkeypatch) -> None:
     """Threads with an unknown source are not readable by anyone."""
 
