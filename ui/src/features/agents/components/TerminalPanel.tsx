@@ -24,7 +24,7 @@ export function TerminalPanel(props: TerminalPanelProps) {
         "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       fontSize: 13,
       theme: {
-        background: "#111111",
+        background: "#1c1c1c",
         foreground: "#e5e7eb",
         cursor: "#e5e7eb",
       },
