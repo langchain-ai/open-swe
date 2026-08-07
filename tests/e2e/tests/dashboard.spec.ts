@@ -191,6 +191,44 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toHaveCount(0);
   });
 
+  test("streams after thread navigation and foreground recovery", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+    await waitForThreadIdle(page, threadId);
+
+    await page.getByRole("link", { name: "New Agent" }).click();
+    await expect(page).toHaveURL(/\/agents\/?$/);
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`/agents/${threadId}$`));
+    await expect(
+      page.getByRole("link", { name: "Add greet() helper" }).first(),
+    ).toBeVisible();
+
+    const hydrated = page.waitForResponse((response) => {
+      const path = new URL(response.url()).pathname;
+      return (
+        response.request().method() === "GET" &&
+        path === `/dashboard/api/threads/${threadId}/state`
+      );
+    });
+    await page.evaluate(() =>
+      document.dispatchEvent(new Event("visibilitychange")),
+    );
+    expect((await hydrated).ok()).toBeTruthy();
+
+    await typeIntoComposer(page, "Can you also add a docstring?");
+    await expect(
+      page.getByText(/anything else you'd like changed/),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Add greet() helper" }).first(),
+    ).toBeVisible();
+  });
+
   test("does not expose the originating Slack thread for public repos", async ({
     page,
   }) => {
