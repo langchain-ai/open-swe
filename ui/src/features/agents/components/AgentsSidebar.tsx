@@ -251,7 +251,10 @@ export function AgentsSidebar({
         {isDesktop && (
           <SectionHeader
             label="Cloud"
-count={filteredActive.length + (showResolved ? filteredResolved.length : 0)}
+            count={
+              filteredActive.length +
+              (showResolved ? filteredResolved.length : 0)
+            }
             collapsed={prefs.collapsed.cloud}
             onToggle={() => toggleSection("cloud")}
           />
@@ -327,18 +330,18 @@ function SectionHeader({
   onToggle: () => void
   children?: ReactNode
 }) {
-  const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
   return (
     <div className="flex items-center">
       <button
         type="button"
         onClick={onToggle}
-        className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
+        className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left font-heading text-xs font-semibold tracking-wide text-foreground uppercase transition-colors hover:text-foreground/80"
         aria-expanded={!collapsed}
       >
-        <ToggleIcon className="size-3" />
         <span className="min-w-0 flex-1 truncate">{label}</span>
-        <span>{count}</span>
+        <span className="text-[10px] font-medium text-muted-foreground/70">
+          {count}
+        </span>
       </button>
       {children}
     </div>
