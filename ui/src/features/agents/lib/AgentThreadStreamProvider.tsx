@@ -4,35 +4,24 @@ import {
   StreamProvider,
   useStreamContext,
 } from "@langchain/react"
-import {
-  ProtocolSseTransportAdapter,
-  overrideFetchImplementation,
-} from "@langchain/langgraph-sdk"
+import { Client, overrideFetchImplementation } from "@langchain/langgraph-sdk"
 import { useQueryClient } from "@tanstack/react-query"
 
 import { agentsApi } from "./api"
 import { agentThreadKeys, invalidateAgentThreadLists } from "./queries"
 import type { ReactNode } from "react"
 
+const AGENT_ASSISTANT_ID = "agent"
+
 const dashboardFetch: typeof fetch = (input, init) =>
   fetch(input, { ...init, credentials: "include" })
 
-/**
- * Commands, the event stream, and `getState` hydration flow through a
- * {@link ProtocolSseTransportAdapter} backed by {@link dashboardFetch}. But subagent/subgraph
- * discovery on hydrate (`POST /threads/:id/history`) and `getState` itself
- * are issued by the SDK's internal `Client` rather than the transport's
- * `fetch`. Without this, the `Client` falls back to a bare `fetch` that
- * omits the dashboard session cookie cross-origin, so the proxy rejects the
- * read with `401 "not authenticated"`. Override the SDK's global fetch so
- * every `Client` read carries the same credentials as the transport.
- *
- * The transport receives the same fetch through `fetchFactory`, which preserves
- * the SDK's reconnect and idle-heartbeat defaults (passing `fetch` directly
- * disables both). `useAgentThread` still polls run metadata as a fallback for
- * controls such as the stop button.
- */
 overrideFetchImplementation(dashboardFetch)
+
+const dashboardRequest = (_url: URL, init: RequestInit): RequestInit => ({
+  ...init,
+  credentials: "include",
+})
 
 /**
  * The SDK transport builds request URLs as `new URL(apiUrl + path)`, so
@@ -84,12 +73,9 @@ function ActiveThreadRecovery({ threadId }: { threadId: string | null }) {
 }
 
 /**
- * One persistent stream for the whole `/agents` subtree, mounted by the
- * layout so it survives the home → thread navigation. The SSE transport is
- * reused across thread switches —
- * changing `threadId` re-hydrates the same controller instead of tearing
- * down a per-thread transport — which is what lets a home-page
- * `stream.submit` keep streaming after we navigate to the minted thread.
+ * One persistent stream controller for the whole `/agents` subtree. The SDK
+ * owns each thread's transport so switching threads or recovering a suspended
+ * tab closes the old transport and creates a fresh one.
  */
 export function AgentThreadStreamProvider({
   threadId,
@@ -106,21 +92,15 @@ export function AgentThreadStreamProvider({
   children: ReactNode
 }) {
   const queryClient = useQueryClient()
-  const transport = useMemo(
+  const client = useMemo(
     () =>
-      new ProtocolSseTransportAdapter({
+      new Client({
         apiUrl: agentStreamApiUrl,
-        fetchFactory: () => dashboardFetch,
+        apiKey: null,
+        onRequest: dashboardRequest,
       }),
     []
   )
-
-  // `StreamController` never binds the thread id on a transport it did not
-  // build — only `client.threads.stream(threadId, { transport })` does, which
-  // runs on submit. Hydration reads `transport.getState()` first, so an unbound
-  // transport throws there and leaves the transcript empty. Bind in render: the
-  // SDK's hydrate effect fires before any effect of ours could.
-  transport.setThreadId(threadId ?? "")
 
   // The SDK captures the lifecycle callbacks once at controller creation, so
   // they must be stable. Read the live thread id from a ref instead of
@@ -144,7 +124,9 @@ export function AgentThreadStreamProvider({
 
   return (
     <StreamProvider
-      transport={transport}
+      apiUrl={agentStreamApiUrl}
+      assistantId={AGENT_ASSISTANT_ID}
+      client={client}
       threadId={threadId ?? undefined}
       onCreated={onCreated}
       onCompleted={onCompleted}
