@@ -42,6 +42,7 @@ const appRuntime = resolveAppRuntime({
 })
 const isDevelopment = appRuntime.isDevelopment
 if (appRuntime.userDataPath) {
+  fs.mkdirSync(appRuntime.userDataPath, { recursive: true })
   app.setName(appRuntime.name)
   app.setPath("userData", appRuntime.userDataPath)
 }
