@@ -90,10 +90,16 @@ There is intentionally no after-agent safety net that opens a PR for the agent. 
 
 ### Tools
 
-All tools live in `agent/tools/` and are flat-imported via `agent/tools/__init__.py`. The set is intentionally small and curated — see README "Tools — Curated, Not Accumulated".
+All tools live in `agent/tools/` and are flat-imported via `agent/tools/__init__.py`. The always-on set is intentionally small and curated — see README "Tools — Curated, Not Accumulated". Optional integration tools stay off the default surface and are pulled in on demand via `load_integration_tools` (below).
 
-Wired into `get_agent`:
-`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
+Wired into `get_agent` (the `static_tools` list in `agent/server.py`):
+`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `save_user_skill`, `delete_user_skill`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `recreate_sandbox`, `report_platform_issue`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
+
+#### Dynamic integration tools
+
+`DynamicToolMiddleware` (`agent/middleware/dynamic_tools.py`, wired in `agent/server.py`) keeps the connected **Corridor / Observability / Currents / Notion** tool groups off the model's tool surface until they're explicitly loaded. It exposes a single `load_integration_tools` tool: call it with the tools you need, then call those tools normally **on the next turn** — the schemas only appear after the loading turn completes.
+
+`tool_names` takes **bare** tool names, e.g. `["analyzePlan"]`. The catalog in the tool's description renders entries as `Group: name` (`Corridor: analyzePlan`), but that prefix is a display label only — validation compares against the bare registered names, so passing `"Corridor: analyzePlan"` is rejected with `Unknown integration tools`.
 
 Reviewer-only tools (in `agent/reviewer.py`): `add_finding`, `update_finding`, `list_findings`, `publish_review`. The review-style analyzer uses `save_review_style` (exported as `save_review_style_prompt`).
 
