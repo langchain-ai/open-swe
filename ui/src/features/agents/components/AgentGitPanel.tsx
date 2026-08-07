@@ -34,6 +34,7 @@ import { PrHeader } from "@/features/reviews/components/PrHeader"
 import { buttonVariants } from "@/components/ui/button"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { PlanView } from "@/features/agents/components/PlanView"
+import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
 import {
   DIFF_VIRTUALIZER_CONFIG,
   DIFF_VIRTUAL_METRICS,
@@ -528,6 +529,8 @@ export function AgentGitPanel({
       >
         {topTab === "plan" ? (
           <PlanView threadId={thread.id} onApprove={onPlanApproved} />
+        ) : topTab === "terminal" ? (
+          <TerminalPanel transport="cloud" threadId={thread.id} />
         ) : topTab !== "git" ? (
           <div className="flex flex-1 items-center justify-center p-6 text-xs text-muted-foreground/70">
             Coming Soon

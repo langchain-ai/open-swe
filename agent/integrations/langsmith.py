@@ -478,6 +478,10 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     its own request deadline.
     """
 
+    @property
+    def sandbox(self) -> Any:
+        return self._sandbox
+
     _WS_FALLBACK_ERRORS = (
         SandboxConnectionError,
         SandboxServerReloadError,

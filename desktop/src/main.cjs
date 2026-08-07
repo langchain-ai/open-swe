@@ -13,6 +13,7 @@ const {
   shell,
 } = require("electron")
 const { AcpSession, dcodeTarget } = require("./acp-client.cjs")
+const { closeAllTerminals, configureTerminalIpc } = require("./terminal-manager.cjs")
 const {
   addProject,
   readProjects,
@@ -643,6 +644,12 @@ if (!hasSingleInstanceLock) {
     configureDesktopIpc()
     createMenu()
     createWindow()
+    configureTerminalIpc({
+      ipcMain,
+      requireTrusted: requireTrustedDesktopIpc,
+      getWindow: () => mainWindow,
+      listProjects,
+    })
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -654,6 +661,7 @@ if (!hasSingleInstanceLock) {
   })
 
   app.on("before-quit", () => {
+    closeAllTerminals()
     for (const localSession of acpSessions.values()) localSession.close()
     acpSessions.clear()
   })

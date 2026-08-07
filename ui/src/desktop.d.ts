@@ -61,6 +61,14 @@ declare global {
           session: DesktopAcpSessionSummary
         }) => void
       ) => () => void
+      terminal: {
+        create: (id: string, cwd: string) => void
+        write: (id: string, data: string) => void
+        resize: (id: string, cols: number, rows: number) => void
+        destroy: (id: string) => void
+        onData: (callback: (id: string, data: string) => void) => () => void
+        onError: (callback: (id: string, message: string) => void) => () => void
+      }
     }
   }
 }
