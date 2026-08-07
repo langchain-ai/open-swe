@@ -97,6 +97,10 @@ def _dynamic_step(factory: StepFactory) -> StepSpec:
     return StepSpec(factory=factory)
 
 
+def _parallel_tool_step(content: str, calls: tuple[ToolCallSpec, ...]) -> StepSpec:
+    return StepSpec(content=content, tool_calls=calls)
+
+
 def _render_step(step: StepSpec, messages: list[BaseMessage]) -> AIMessage:
     if step.factory is not None:
         return step.factory(messages)
@@ -281,7 +285,95 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
 
 
+# --- Subagents -------------------------------------------------------------
+#
+# The `task` tool runs a nested deepagents loop against this same fake model,
+# so a subagent's own turns land back in `_generate`. Its message list starts
+# fresh at the task description, which is what routes it to its own script.
+
+SUBAGENT_TASKS: dict[str, str] = {
+    "scout": "Scout the repository layout and report which files define the greet helper.",
+    "auditor": "Audit the repository for missing tests and report what is uncovered.",
+}
+
+SCOUT_RESULT = "Scout done: greet() lives in the feature module; no other definitions found."
+AUDITOR_RESULT = "Audit done: the greet() helper has no test coverage."
+
+# Each nested `execute` sleeps so the parent's card is observably `running`
+# before it settles — the transition is what the E2E asserts on.
+_SCOUT_SCRIPT = """
+set -e
+sleep 15
+echo SCOUTED
+""".strip()
+
+_AUDIT_SCRIPT = """
+set -e
+sleep 25
+echo AUDITED
+""".strip()
+
+
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    "subagents": (
+        _tool_step(
+            "Acknowledging before fanning out.",
+            "slack_thread_reply",
+            {"message": "On it — fanning out to a couple of subagents."},
+            "call-subagents-ack",
+        ),
+        _parallel_tool_step(
+            "Delegating the scouting and the audit in parallel.",
+            (
+                _tool_call(
+                    "task",
+                    {
+                        "subagent_type": "general-purpose",
+                        "description": SUBAGENT_TASKS["scout"],
+                    },
+                    "call-task-scout",
+                ),
+                _tool_call(
+                    "task",
+                    {
+                        "subagent_type": "general-purpose",
+                        "description": SUBAGENT_TASKS["auditor"],
+                    },
+                    "call-task-auditor",
+                ),
+            ),
+        ),
+        _tool_step(
+            "Reporting what the subagents found.",
+            "slack_thread_reply",
+            {"message": "Both subagents finished — the greet() helper is untested."},
+            "call-subagents-reply",
+        ),
+    ),
+    "subagent:scout": (
+        _tool_step(
+            "Listing the repository.",
+            "execute",
+            {"command": _SCOUT_SCRIPT},
+            "call-scout-ls",
+        ),
+        _tool_step(
+            "Grepping for the helper.",
+            "execute",
+            {"command": "grep -r greet . || true"},
+            "call-scout-grep",
+        ),
+        StepSpec(content=SCOUT_RESULT),
+    ),
+    "subagent:auditor": (
+        _tool_step(
+            "Looking for tests.",
+            "execute",
+            {"command": _AUDIT_SCRIPT},
+            "call-audit-find",
+        ),
+        StepSpec(content=AUDITOR_RESULT),
+    ),
     "implement": (
         _tool_step(
             "Acknowledging the Slack request before starting work.",
@@ -346,6 +438,19 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
 }
 
 
+def _subagent_script_name(first_text: str) -> str | None:
+    """Route a nested loop to its script by the task description it was handed."""
+    for name, description in SUBAGENT_TASKS.items():
+        if description in first_text:
+            return f"subagent:{name}"
+    return None
+
+
+def _is_subagent_request(text: str) -> bool:
+    t = text.lower()
+    return "fan out" in t or "subagent" in t
+
+
 def _is_plan_request(text: str) -> bool:
     return "plan" in text.lower()
 
@@ -367,6 +472,9 @@ def _is_revision(text: str) -> bool:
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
+    ScriptRule(
+        "subagents", lambda ctx: ctx.human_count <= 1 and _is_subagent_request(ctx.first_text)
+    ),
     ScriptRule("plan", lambda ctx: _is_revision(ctx.last_text)),
     ScriptRule("plan", lambda ctx: ctx.human_count <= 1 and _is_plan_request(ctx.first_text)),
     ScriptRule(
@@ -378,6 +486,11 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
 
 
 def _script_for(context: ScriptContext) -> tuple[StepSpec, ...]:
+    # A nested loop is identified by its task description, never by the parent
+    # rules — its first human message is the description, not the user's ask.
+    nested = _subagent_script_name(context.first_text)
+    if nested is not None:
+        return SCRIPT_LIBRARY[nested]
     for rule in SCRIPT_RULES:
         if rule.predicate(context):
             return SCRIPT_LIBRARY[rule.name]
