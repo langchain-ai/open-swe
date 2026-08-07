@@ -184,9 +184,19 @@ class NdJsonRpcClient {
       if (!pending) return
       this.pending.delete(message.id)
       if ("error" in message) {
-        const detail = isRecord(message.error) && message.error.message
+        const rpcError = isRecord(message.error) ? message.error : {}
+        const detail =
+          isRecord(rpcError.data) && typeof rpcError.data.details === "string"
+            ? rpcError.data.details
+            : ""
+        const errorMessage =
+          typeof rpcError.message === "string"
+            ? rpcError.message
+            : "Request failed"
         pending.reject(
-          new Error(`[acp:${pending.method}] ${detail || "Request failed"}`)
+          new Error(
+            `[acp:${pending.method}] ${errorMessage}${detail ? `: ${detail}` : ""}`
+          )
         )
       } else {
         pending.resolve(message.result)
@@ -308,8 +318,9 @@ class AcpSession {
       this.emit({ type: "run-end" })
     } catch (error) {
       if (this.status !== "error") {
-        this.status = "error"
+        this.status = "idle"
         this.emit({ type: "error", message: String(error?.message || error) })
+        this.emit({ type: "run-end" })
       }
       throw error
     }
