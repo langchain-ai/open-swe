@@ -10,10 +10,8 @@ import type {
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { AgentPanelTab } from "@/features/agents/components/AgentGitPanel"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
-import {
-  AgentGitPanel,
-  PANEL_MIN_CHAT_WIDTH,
-} from "@/features/agents/components/AgentGitPanel"
+import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
+import { PANEL_MIN_CHAT_WIDTH } from "@/features/agents/components/AgentPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import {

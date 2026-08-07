@@ -9,7 +9,7 @@
     "dev": "pnpm run build:ui && electron . --dev",
     "start": "pnpm run build:ui && electron .",
     "test": "node --test test/*.test.cjs",
-    "check": "node --check src/config.cjs && node --check src/acp-client.cjs && node --check src/project-store.cjs && node --check src/main.cjs && node --check src/preload.cjs && pnpm run test && pnpm run build:ui",
+    "check": "node --check src/config.cjs && node --check src/acp-client.cjs && node --check src/project-store.cjs && node --check src/terminal-manager.cjs && node --check src/main.cjs && node --check src/preload.cjs && pnpm run test && pnpm run build:ui",
     "pack": "pnpm run build:ui && electron-builder --dir",
     "dist": "pnpm run build:ui && electron-builder"
   },
@@ -65,5 +65,8 @@
   "devDependencies": {
     "electron": "41.9.1",
     "electron-builder": "26.15.3"
+  },
+  "dependencies": {
+    "node-pty": "1.1.0"
   }
 }

@@ -20,6 +20,23 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.on("desktop:acp-event", listener)
     return () => ipcRenderer.removeListener("desktop:acp-event", listener)
   },
+  terminal: {
+    create: (id, cwd) => ipcRenderer.send("desktop:terminal-create", id, cwd),
+    write: (id, data) => ipcRenderer.send("desktop:terminal-write", id, data),
+    resize: (id, cols, rows) =>
+      ipcRenderer.send("desktop:terminal-resize", id, cols, rows),
+    destroy: (id) => ipcRenderer.send("desktop:terminal-destroy", id),
+    onData: (callback) => {
+      const listener = (_event, id, data) => callback(id, data)
+      ipcRenderer.on("desktop:terminal-data", listener)
+      return () => ipcRenderer.removeListener("desktop:terminal-data", listener)
+    },
+    onError: (callback) => {
+      const listener = (_event, id, message) => callback(id, message)
+      ipcRenderer.on("desktop:terminal-error", listener)
+      return () => ipcRenderer.removeListener("desktop:terminal-error", listener)
+    },
+  },
 })
 
 const DRAG_REGION_ID = "open-swe-desktop-drag-region"
