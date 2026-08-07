@@ -90,6 +90,21 @@ async function expectTranscriptVisible(page: Page) {
   }).toPass({ timeout: 60000 });
 }
 
+async function waitForThreadIdle(page: Page, threadId: string) {
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get(
+          `/dashboard/api/threads/${threadId}?mark_viewed=false`,
+        );
+        if (!res.ok()) return "unknown";
+        return ((await res.json()) as { status?: string }).status ?? "unknown";
+      },
+      { timeout: 30_000, intervals: [500] },
+    )
+    .not.toBe("running");
+}
+
 async function latestPrBody(page: Page): Promise<string> {
   const res = await page.request.get("/mock/github/data");
   expect(res.ok()).toBeTruthy();
@@ -151,6 +166,29 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(
       page.getByRole("link", { name: "Add greet() helper" }).first(),
     ).toBeVisible();
+  });
+
+  // A cold load of a finished thread must hydrate from `getState()` alone. The
+  // event stream is blocked so run replay can't stand in for that read: a
+  // long-finished run has no replay left, which is what makes a broken hydrate
+  // surface as a permanently empty transcript.
+  test("a cold load renders a finished thread's transcript without run replay", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+    await waitForThreadIdle(page, threadId);
+
+    await page.route("**/stream/events", (route) => route.abort());
+    await page.goto(`/agents/${threadId}`);
+    await expect(
+      page.getByRole("link", { name: "Add greet() helper" }).first(),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.getByText("This thread has no messages yet."),
+    ).toHaveCount(0);
   });
 
   test("does not expose the originating Slack thread for public repos", async ({
