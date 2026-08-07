@@ -10,6 +10,7 @@ from langgraph.graph.state import RunnableConfig
 
 from .dashboard.schedules import launch_scheduled_agent_run
 from .reconcile import reconcile_stale_runs
+from .utils.tracing import strip_server_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -37,4 +38,4 @@ def get_scheduler(config: RunnableConfig | None = None):
     builder.add_node("launch", _launch)
     builder.add_edge(START, "launch")
     builder.add_edge("launch", END)
-    return builder.compile().with_config(config or {})
+    return builder.compile().with_config(strip_server_runtime_config(config or {}))
