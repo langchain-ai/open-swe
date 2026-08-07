@@ -238,16 +238,16 @@ async def upsert_run_outcome(
             "label": label,
             "label_source": label_source,
         }
-        async with AsyncLangSmithClient(api_key=credentials[0], api_url=credentials[1]) as client:
-            await _create_or_update_example(
-                client,
-                credentials,
-                dataset_id=await _ensure_dataset(client),
-                example_id=uuid.uuid5(uuid.NAMESPACE_URL, f"run-outcome:{run_id}:{label_source}"),
-                inputs=inputs,
-                outputs=outputs,
-                metadata=metadata,
-            )
+        client = async_langsmith_client(*credentials)
+        await _create_or_update_example(
+            client,
+            credentials,
+            dataset_id=await _ensure_dataset(client),
+            example_id=uuid.uuid5(uuid.NAMESPACE_URL, f"run-outcome:{run_id}:{label_source}"),
+            inputs=inputs,
+            outputs=outputs,
+            metadata=metadata,
+        )
         return True
     except Exception:  # noqa: BLE001
         logger.exception("Failed to upsert run outcome for run %s", run_id)
@@ -306,33 +306,33 @@ async def read_outcomes_for_repo(repo: str, *, limit: int = 100) -> dict[str, li
     if credentials is None or not repo:
         return {"confirmed": confirmed, "dismissed": dismissed}
     try:
-        async with AsyncLangSmithClient(api_key=credentials[0], api_url=credentials[1]) as client:
-            existing = await _find_dataset(client)
-            if existing is None:
-                return {"confirmed": confirmed, "dismissed": dismissed}
-            async for example in client.list_examples(dataset_id=existing.id):
-                metadata = getattr(example, "metadata", None) or {}
-                if metadata.get("granularity") != "finding" or metadata.get("repo") != repo:
-                    continue
-                outputs = getattr(example, "outputs", None) or {}
-                inputs = getattr(example, "inputs", None) or {}
-                finding = outputs.get("finding") or {}
-                row = {
-                    "file": inputs.get("file"),
-                    "title": finding.get("title"),
-                    "description": finding.get("description"),
-                    "severity": finding.get("severity"),
-                    "category": finding.get("category"),
-                    "label_source": outputs.get("label_source"),
-                    "diff_hunk": inputs.get("diff_hunk"),
-                    "resolution_note": outputs.get("resolution_note"),
-                }
-                if outputs.get("label") == TRUE_POSITIVE:
-                    confirmed.append(row)
-                elif outputs.get("label") == FALSE_POSITIVE:
-                    dismissed.append(row)
-                if len(confirmed) + len(dismissed) >= limit:
-                    break
+        client = async_langsmith_client(*credentials)
+        existing = await _find_dataset(client)
+        if existing is None:
+            return {"confirmed": confirmed, "dismissed": dismissed}
+        async for example in client.list_examples(dataset_id=existing.id):
+            metadata = getattr(example, "metadata", None) or {}
+            if metadata.get("granularity") != "finding" or metadata.get("repo") != repo:
+                continue
+            outputs = getattr(example, "outputs", None) or {}
+            inputs = getattr(example, "inputs", None) or {}
+            finding = outputs.get("finding") or {}
+            row = {
+                "file": inputs.get("file"),
+                "title": finding.get("title"),
+                "description": finding.get("description"),
+                "severity": finding.get("severity"),
+                "category": finding.get("category"),
+                "label_source": outputs.get("label_source"),
+                "diff_hunk": inputs.get("diff_hunk"),
+                "resolution_note": outputs.get("resolution_note"),
+            }
+            if outputs.get("label") == TRUE_POSITIVE:
+                confirmed.append(row)
+            elif outputs.get("label") == FALSE_POSITIVE:
+                dismissed.append(row)
+            if len(confirmed) + len(dismissed) >= limit:
+                break
     except Exception:  # noqa: BLE001
         logger.exception("Failed to read outcomes for repo %s", repo)
     return {"confirmed": confirmed, "dismissed": dismissed}
