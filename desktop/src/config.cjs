@@ -99,6 +99,17 @@ function backendRequestUrl(backendUrl, appRequestUrl) {
   return target.toString()
 }
 
+function backendLoginUrl(navigationUrl, backendUrl) {
+  try {
+    const target = new URL(navigationUrl)
+    return isAppUrl(navigationUrl) && target.pathname === "/dashboard/api/auth/login"
+      ? backendRequestUrl(backendUrl, navigationUrl)
+      : null
+  } catch {
+    return null
+  }
+}
+
 function localCallbackUrl(navigationUrl, backendUrl) {
   try {
     const target = new URL(navigationUrl)
@@ -137,6 +148,7 @@ module.exports = {
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,
   resolveAppRuntime,
+  backendLoginUrl,
   backendRequestUrl,
   isAppUrl,
   isGithubOAuthUrl,
