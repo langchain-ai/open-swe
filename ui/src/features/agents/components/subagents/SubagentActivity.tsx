@@ -1,51 +1,56 @@
-import { useStreamContext as useAgentThreadStream, useToolCalls } from "@langchain/react"
 import { Check, Loader2, X } from "lucide-react"
 
-import { humanizeToolName } from "@/features/agents/lib/toolNames"
+import type { SubagentStep } from "@/features/agents/lib/subagentModel"
+
+/** Nested steps kept visible when the card is collapsed. */
+const COLLAPSED_STEPS = 1
 
 /**
- * Live status for a single subagent, read straight from the SDK's scoped
- * `tools` projection (`useToolCalls(stream, { namespace })`). The namespace
- * comes from `stream.subagents` (attached to the `task` chunk by
- * `streamMessagesToUi`), so this subscribes to exactly the subagent that the
- * parent card represents.
- *
- * Hotfix: rather than listing every nested tool call (which balloons the card),
- * this shows a single line with the subagent's current activity plus a running
- * step count. A richer activity UI will replace this later.
- *
- * Mounting opens a ref-counted subscription scoped to `namespace`; unmounting
- * closes it. Only mounted from {@link SubagentCard} when
- * `useIsInAgentThreadStream()` is true, so the `useStreamContext` read is
- * always inside a `StreamProvider`.
+ * A subagent's nested tool calls. Steps come from the subagent's own messages
+ * (see `subagentSteps`) because the server emits no `tools` events for a
+ * subagent namespace, leaving the SDK's scoped tool projection empty.
  */
-export function SubagentActivity({ namespace }: { namespace: Array<string> }) {
-  const stream = useAgentThreadStream()
-  const toolCalls = useToolCalls(stream, { namespace })
+export function SubagentActivity({
+  steps,
+  expanded,
+}: {
+  steps: Array<SubagentStep>
+  expanded: boolean
+}) {
+  if (steps.length === 0) return null
 
-  const current = toolCalls[toolCalls.length - 1]
-  if (!current) return null
-
-  const stepCount = toolCalls.length
+  const visible = expanded ? steps : steps.slice(-COLLAPSED_STEPS)
+  const hidden = steps.length - visible.length
 
   return (
-    <div className="mt-1 flex min-w-0 items-center gap-1.5 border-t border-border pt-1.5">
-      {current.status === "finished" ? (
-        <Check className="h-3 w-3 shrink-0 text-primary" aria-hidden />
-      ) : current.status === "error" ? (
-        <X className="h-3 w-3 shrink-0 text-red-400" aria-hidden />
-      ) : (
-        <Loader2
-          className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/70"
-          aria-hidden
-        />
+    <div
+      className="mt-1 flex min-w-0 flex-col gap-1 border-t border-border pt-1.5"
+      data-testid="subagent-activity"
+      data-step-count={steps.length}
+    >
+      {hidden > 0 && (
+        <span className="text-[10px] text-muted-foreground/50">
+          +{hidden} earlier {hidden === 1 ? "step" : "steps"}
+        </span>
       )}
-      <span className="truncate text-[10px] text-muted-foreground/70">
-        {humanizeToolName(current.name)}
-      </span>
-      <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
-        {stepCount} {stepCount === 1 ? "step" : "steps"}
-      </span>
+      {visible.map((step) => (
+        <div
+          key={step.id}
+          className="flex min-w-0 items-center gap-1.5"
+          data-testid="subagent-activity-step"
+        >
+          <StepIcon status={step.status} />
+          <span className="truncate font-mono text-[10px] text-muted-foreground/70">
+            {step.label}
+          </span>
+        </div>
+      ))}
     </div>
   )
+}
+
+function StepIcon({ status }: { status: SubagentStep["status"] }) {
+  if (status === "completed") return <Check className="h-3 w-3 shrink-0 text-primary" aria-hidden />
+  if (status === "error") return <X className="h-3 w-3 shrink-0 text-red-400" aria-hidden />
+  return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/70" aria-hidden />
 }
