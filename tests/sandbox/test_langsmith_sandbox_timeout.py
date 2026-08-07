@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from types import SimpleNamespace
 from typing import Any, cast
@@ -20,14 +21,14 @@ class _FakeHandle:
         self.killed = False
 
     @property
-    def result(self) -> Any:
+    async def result(self) -> Any:
         if self._sleep:
-            time.sleep(self._sleep)
+            await asyncio.sleep(self._sleep)
         if self._raises is not None:
             raise self._raises
         return self._result
 
-    def kill(self) -> None:
+    async def kill(self) -> None:
         self.killed = True
 
 
@@ -37,7 +38,7 @@ class _FakeSandbox:
         self._run_raises = run_raises
         self.run_calls: list[dict[str, Any]] = []
 
-    def run(self, command: str, *, timeout: int, wait: bool) -> _FakeHandle:
+    async def run(self, command: str, *, timeout: int, wait: bool) -> _FakeHandle:
         self.run_calls.append({"command": command, "timeout": timeout, "wait": wait})
         if self._run_raises is not None:
             raise self._run_raises
@@ -48,7 +49,8 @@ def _backend(
     handle: _FakeHandle, *, run_raises: Exception | None = None
 ) -> TimeoutLangSmithSandbox:
     sb = TimeoutLangSmithSandbox.__new__(TimeoutLangSmithSandbox)
-    object.__setattr__(sb, "_sandbox", _FakeSandbox(handle, run_raises=run_raises))
+    object.__setattr__(sb, "_async_sandbox", _FakeSandbox(handle, run_raises=run_raises))
+    object.__setattr__(sb, "_async_client", None)
     sb._default_timeout = 30 * 60
     return sb
 
@@ -67,7 +69,7 @@ async def test_aexecute_kills_on_client_timeout() -> None:
     assert resp.exit_code == 124
     assert "killed" in resp.output
     assert handle.killed
-    sandbox = cast(_FakeSandbox, sb._sandbox)
+    sandbox = cast(_FakeSandbox, sb._async_sandbox)
     assert sandbox.run_calls[0]["wait"] is False
 
 
@@ -89,23 +91,13 @@ async def test_aexecute_server_timeout_not_killed() -> None:
     assert not handle.killed
 
 
-def test_execute_kills_on_client_timeout() -> None:
-    handle = _FakeHandle(sleep=5.0)
-    sb = _backend(handle)
-    start = time.monotonic()
-    resp = sb.execute("sleep 999", timeout=1)
-    assert time.monotonic() - start < 3.0
-    assert resp.exit_code == 124
-    assert handle.killed
-
-
 def _patch_base_execute(monkeypatch: pytest.MonkeyPatch, sink: dict[str, Any]) -> None:
-    def fake_base_execute(self: Any, command: str, *, timeout: int | None = None) -> Any:
+    async def fake_base_execute(self: Any, command: str, *, timeout: int | None = None) -> Any:
         sink["command"] = command
         sink["timeout"] = timeout
         return SimpleNamespace(output="via-http", exit_code=0, truncated=False)
 
-    monkeypatch.setattr("agent.integrations.langsmith.LangSmithSandbox.execute", fake_base_execute)
+    monkeypatch.setattr("agent.integrations.langsmith.LangSmithSandbox.aexecute", fake_base_execute)
 
 
 async def test_aexecute_ws_connect_failure_falls_back_to_base(
@@ -131,15 +123,6 @@ async def test_aexecute_ws_connect_timeout_falls_back_to_base(
     assert resp.output == "via-http"
 
 
-def test_execute_ws_connect_failure_falls_back_to_base(monkeypatch: pytest.MonkeyPatch) -> None:
-    sb = _backend(_FakeHandle(), run_raises=SandboxConnectionError("no ws"))
-    called: dict[str, Any] = {}
-    _patch_base_execute(monkeypatch, called)
-    resp = sb.execute("git status", timeout=5)
-    assert called == {"command": "git status", "timeout": 5}
-    assert resp.output == "via-http"
-
-
 async def test_aexecute_midstream_ws_drop_falls_back_to_base(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -150,3 +133,8 @@ async def test_aexecute_midstream_ws_drop_falls_back_to_base(
     resp = await sb.aexecute("git status", timeout=5)
     assert called["command"] == "git status"
     assert resp.output == "via-http"
+
+
+def test_execute_is_async_only() -> None:
+    with pytest.raises(NotImplementedError):
+        _backend(_FakeHandle()).execute("echo hi", timeout=5)

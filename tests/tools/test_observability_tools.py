@@ -167,7 +167,13 @@ async def test_langsmith_get_trace_serializes() -> None:
         outputs = {"b": 2}
 
     class _FakeClient:
-        def read_run(self, run_id: str, load_child_runs: bool = False):
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def read_run(self, run_id: str):
             assert run_id == "run-1"
             return _Run()
 
@@ -186,10 +192,17 @@ async def test_langsmith_list_runs_caps_limit() -> None:
     captured: dict[str, object] = {}
 
     class _FakeClient:
-        def list_runs(self, *, project_name: str, filter, limit: int):
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def list_runs(self, *, project_name: str, filter, limit: int):
             captured["limit"] = limit
             captured["project_name"] = project_name
-            return []
+            return
+            yield
 
     tools = langsmith_tools._make_tools(creds)
     list_runs = next(t for t in tools if t.name == "langsmith_list_runs")

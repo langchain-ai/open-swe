@@ -20,6 +20,10 @@ from agent.webhooks import common as webhook_common
 from agent.webhooks import slack as slack_webhooks
 
 
+async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
+    return "https://smith/x"
+
+
 class _FakeNotFoundError(Exception):
     status_code = 404
 
@@ -561,7 +565,7 @@ def test_post_slack_trace_reply_has_no_tip(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         slack_utils, "post_slack_thread_reply_with_ts", fake_post_slack_thread_reply_with_ts
     )
-    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", lambda thread_id: "https://smith/x")
+    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", _fake_trace_url)
 
     asyncio.run(post_slack_trace_reply("C123", "1.0", "thread-id"))
 
@@ -772,9 +776,7 @@ def _setup_slack_mention_fakes(
         threads = _FakeThreadsClientForProcess()
 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
-    monkeypatch.setattr(
-        slack_webhooks, "get_langsmith_trace_url", lambda thread_id: "https://smith/x"
-    )
+    monkeypatch.setattr(slack_webhooks, "get_langsmith_trace_url", _fake_trace_url)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(webhook_common, "get_slack_user_info", fake_get_slack_user_info)
     monkeypatch.setattr(

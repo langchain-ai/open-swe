@@ -22,9 +22,9 @@ _MAX_LIST_RUNS = 50
 
 
 def _client(creds: LangSmithCredentials):
-    from langsmith import Client
+    from langsmith import AsyncClient
 
-    return Client(api_key=creds.api_key, api_url=creds.endpoint)
+    return AsyncClient(api_key=creds.api_key, api_url=creds.endpoint)
 
 
 def _serialize_run(run: Any) -> dict[str, Any]:
@@ -58,9 +58,18 @@ def _make_tools(creds: LangSmithCredentials) -> list[BaseTool]:
             Dictionary with the run details, or an error message.
         """
         try:
-            run = await asyncio.to_thread(
-                _client(creds).read_run, run_id, load_child_runs=load_child_runs
-            )
+            if load_child_runs:
+                # AsyncClient.read_run has no load_child_runs; the sync one runs off-loop.
+                from langsmith import Client
+
+                run = await asyncio.to_thread(
+                    Client(api_key=creds.api_key, api_url=creds.endpoint).read_run,
+                    run_id,
+                    load_child_runs=True,
+                )
+            else:
+                async with _client(creds) as client:
+                    run = await client.read_run(run_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("langsmith_get_trace failed", exc_info=True)
             return {"success": False, "error": f"{type(e).__name__}: {e}"}
@@ -83,17 +92,16 @@ def _make_tools(creds: LangSmithCredentials) -> list[BaseTool]:
         """
         capped = max(1, min(limit, _MAX_LIST_RUNS))
 
-        def _list() -> list[Any]:
-            return list(
-                _client(creds).list_runs(
-                    project_name=project_name,
-                    filter=filter,
-                    limit=capped,
-                )
-            )
-
         try:
-            runs = await asyncio.to_thread(_list)
+            async with _client(creds) as client:
+                runs = [
+                    run
+                    async for run in client.list_runs(
+                        project_name=project_name,
+                        filter=filter,
+                        limit=capped,
+                    )
+                ]
         except Exception as e:  # noqa: BLE001
             logger.warning("langsmith_list_runs failed", exc_info=True)
             return {"success": False, "error": f"{type(e).__name__}: {e}"}

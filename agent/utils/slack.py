@@ -1177,7 +1177,7 @@ async def post_slack_trace_reply(
     channel_id: str, thread_ts: str, thread_id: str, *, include_dashboard_link: bool = True
 ) -> str | None:
     """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
-    trace_url = get_langsmith_trace_url(thread_id)
+    trace_url = await get_langsmith_trace_url(thread_id)
     dashboard_url = dashboard_thread_url(thread_id) if include_dashboard_link else None
     message_ts, _ = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -1193,7 +1193,7 @@ async def update_slack_trace_reply_for_web_handoff(
     channel_id: str, message_ts: str, thread_id: str
 ) -> bool:
     """Update the initial Slack trace reply after a dashboard handoff."""
-    trace_url = get_langsmith_trace_url(thread_id)
+    trace_url = await get_langsmith_trace_url(thread_id)
     dashboard_url = dashboard_thread_url(thread_id)
     ok, error = await update_slack_message(
         channel_id,

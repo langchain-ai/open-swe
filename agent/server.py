@@ -381,8 +381,7 @@ async def _refresh_github_proxy_or_fail(
 
 
 async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
-    await asyncio.to_thread(
-        sandbox_backend.execute,
+    await sandbox_backend.aexecute(
         f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
         f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'",
     )
@@ -394,7 +393,7 @@ async def check_sandbox_reachable(
 ) -> SandboxBackendProtocol:
     """Ping a cached sandbox; an unreachable one fails the run, never gets replaced."""
     try:
-        await asyncio.to_thread(sandbox_backend.execute, "echo ok")
+        await sandbox_backend.aexecute("echo ok")
     except SandboxClientError as exc:
         logger.warning("Cached sandbox is no longer reachable for thread %s", thread_id)
         raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc

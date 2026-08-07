@@ -60,24 +60,23 @@ class _FakeLangSmithClient:
             }
         )
 
-    def list_runs(self, **kwargs: Any) -> list[dict[str, Any]]:
+    async def list_runs(self, **kwargs: Any):
         filter_expr = kwargs["filter"]
         self.filters.append(filter_expr)
         for needle, runs in self.search_results.items():
             if needle in filter_expr:
-                return runs
+                for run in runs:
+                    yield run
+                return
         thread_id = _thread_id_from_filter(filter_expr)
         if thread_id:
-            return [
-                _run(
-                    f"turn-{thread_id}",
-                    thread_id,
-                    metadata={"repository_name": "langchain-ai/open-swe"},
-                    inputs={"message": "Need to update reviewer.py"},
-                    outputs={"message": "Edited reviewer.py after checking edge cases."},
-                )
-            ]
-        return []
+            yield _run(
+                f"turn-{thread_id}",
+                thread_id,
+                metadata={"repository_name": "langchain-ai/open-swe"},
+                inputs={"message": "Need to update reviewer.py"},
+                outputs={"message": "Edited reviewer.py after checking edge cases."},
+            )
 
 
 class _CapturingSandbox:

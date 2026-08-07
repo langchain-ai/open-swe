@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import os
 from collections.abc import Callable
 from importlib import import_module
@@ -41,8 +42,11 @@ async def create_sandbox(
     The provider is selected via the SANDBOX_TYPE environment variable.
     Supported values: langsmith (default), daytona, modal, runloop, e2b, local.
 
-    The langsmith provider provisions natively async; the other providers wrap
-    sync SDKs and are bridged onto the event loop with ``asyncio.to_thread``.
+    langsmith, modal and local provision natively async. daytona, e2b and
+    runloop stay on ``asyncio.to_thread``: their ``langchain_*`` backend
+    wrappers bind a *sync* SDK handle (``E2BSandbox(sandbox=e2b.Sandbox)``,
+    ``RunloopSandbox`` calling ``devbox.cmd.exec``), so the async SDK client
+    cannot be handed to them.
 
     Args:
         sandbox_id: Optional existing sandbox ID to reconnect to.
@@ -55,9 +59,9 @@ async def create_sandbox(
     """
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     factory = _load_sandbox_factory(sandbox_type)
-    if sandbox_type == "langsmith":
-        if snapshot_id is not None:
-            return await factory(sandbox_id, snapshot_id=snapshot_id)
+    if sandbox_type == "langsmith" and snapshot_id is not None:
+        return await factory(sandbox_id, snapshot_id=snapshot_id)
+    if inspect.iscoroutinefunction(factory):
         return await factory(sandbox_id)
     return await asyncio.to_thread(factory, sandbox_id)
 

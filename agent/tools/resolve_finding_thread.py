@@ -82,7 +82,7 @@ async def resolve_finding_thread(
         return thread_missing_tool_result(exc)
     if result.get("success") and isinstance(result.get("finding"), dict):
         thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
-        emit_finding_status_outcome(
+        await emit_finding_status_outcome(
             result["finding"],
             status,
             configurable=configurable,

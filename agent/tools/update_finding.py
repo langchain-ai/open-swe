@@ -212,7 +212,9 @@ async def update_finding(
     if updated is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
     if status in {"resolved", "dismissed"} and not delegated_resolution:
-        emit_finding_status_outcome(updated, status, configurable=configurable, thread_id=thread_id)
+        await emit_finding_status_outcome(
+            updated, status, configurable=configurable, thread_id=thread_id
+        )
     result = {"success": True, "finding": updated}
     if suggestion_dropped:
         result["suggestion_dropped"] = True

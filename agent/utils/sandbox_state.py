@@ -47,6 +47,9 @@ class SandboxUnreachableError(RuntimeError):
         )
 
 
+_SYNC_UNSUPPORTED = "SandboxBackendProxy is async-only; use the a-prefixed method instead."
+
+
 class SandboxBackendProxy(BaseSandbox):
     """Stable per-thread backend handle whose target can be replaced.
 
@@ -127,13 +130,13 @@ class SandboxBackendProxy(BaseSandbox):
             return self._backend
 
     def ls(self, path: str) -> LsResult:
-        return self._get_backend().ls(path)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def als(self, path: str) -> LsResult:
         return await (await self._aget_backend()).als(path)
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        return self._get_backend().read(file_path, offset, limit)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
         return await (await self._aget_backend()).aread(file_path, offset, limit)
@@ -146,7 +149,7 @@ class SandboxBackendProxy(BaseSandbox):
         *,
         max_count: int | None = None,
     ) -> GrepResult:
-        return self._get_backend().grep(pattern, path, glob, max_count=max_count)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def agrep(
         self,
@@ -159,13 +162,13 @@ class SandboxBackendProxy(BaseSandbox):
         return await (await self._aget_backend()).agrep(pattern, path, glob, max_count=max_count)
 
     def glob(self, pattern: str, path: str | None = None) -> GlobResult:
-        return self._get_backend().glob(pattern, path)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
         return await (await self._aget_backend()).aglob(pattern, path)
 
     def write(self, file_path: str, content: str) -> WriteResult:
-        return self._get_backend().write(file_path, content)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
         return await (await self._aget_backend()).awrite(file_path, content)
@@ -177,7 +180,7 @@ class SandboxBackendProxy(BaseSandbox):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        return self._get_backend().edit(file_path, old_string, new_string, replace_all)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aedit(
         self,
@@ -191,19 +194,19 @@ class SandboxBackendProxy(BaseSandbox):
         )
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        return self._get_backend().upload_files(files)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         return await (await self._aget_backend()).aupload_files(files)
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        return self._get_backend().download_files(paths)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         return await (await self._aget_backend()).adownload_files(paths)
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        return self._get_backend().execute(command, timeout=timeout)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         return await (await self._aget_backend()).aexecute(command, timeout=timeout)
@@ -217,21 +220,7 @@ class SandboxBackendProxy(BaseSandbox):
         max_capture_bytes: int | None = None,
         timeout: int | None = None,
     ) -> ExecuteOffloadResult:
-        # Delegate to the live backend so each provider's own capture-offload
-        # behavior (enable_capture_offload, shell wrapper) is honored.
-        backend = self._get_backend()
-        offload = getattr(backend, "execute_with_offload", None)
-        if offload is None:
-            return ExecuteOffloadResult(
-                offloaded=False, response=self._plain(backend, command, timeout)
-            )
-        return offload(
-            command,
-            capture_path,
-            max_inline_bytes=max_inline_bytes,
-            max_capture_bytes=max_capture_bytes,
-            timeout=timeout,
-        )
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aexecute_with_offload(
         self,
@@ -255,14 +244,6 @@ class SandboxBackendProxy(BaseSandbox):
             max_capture_bytes=max_capture_bytes,
             timeout=timeout,
         )
-
-    @staticmethod
-    def _plain(
-        backend: SandboxBackendProtocol, command: str, timeout: int | None
-    ) -> ExecuteResponse:
-        if timeout is not None and execute_accepts_timeout(type(backend)):
-            return backend.execute(command, timeout=timeout)
-        return backend.execute(command)
 
     @staticmethod
     async def _aplain(
