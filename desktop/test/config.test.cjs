@@ -5,6 +5,7 @@ const {
   APP_URL,
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,
+  backendLoginUrl,
   backendRequestUrl,
   isGithubOAuthUrl,
   isTrustedPermissionRequest,
@@ -154,6 +155,13 @@ test("maps desktop API requests to the selected backend", () => {
   assert.equal(
     backendRequestUrl("https://backend.example", `${APP_URL}dashboard/api/auth/login`),
     "https://backend.example/dashboard/api/auth/login?desktop=true"
+  )
+  assert.equal(
+    backendLoginUrl(
+      `${APP_URL}dashboard/api/auth/login?redirect_to=%2Fagents`,
+      "http://localhost:2024"
+    ),
+    "http://localhost:2024/dashboard/api/auth/login?redirect_to=%2Fagents&desktop=true"
   )
 })
 
