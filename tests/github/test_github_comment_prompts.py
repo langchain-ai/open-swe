@@ -8,7 +8,7 @@ from langchain_core.language_models.base import LangSmithParams
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from agent.dashboard.agent_overrides import profile_create_prs
+from agent.dashboard.agent_overrides import profile_create_prs, profile_draft_prs
 from agent.prompt import construct_system_prompt
 from agent.utils import github_comments
 from agent.utils.authorship import (
@@ -257,13 +257,27 @@ def test_construct_system_prompt_includes_always_create_prs_override() -> None:
     prompt = construct_system_prompt(working_dir="/workspace", create_prs=True)
 
     assert "Always Create PRs Policy Override" in prompt
+    assert "New PRs are created as drafts by default" in prompt
     assert "This does not apply to questions" in prompt
+
+
+def test_construct_system_prompt_includes_ready_pr_preference() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace", draft_prs=False)
+
+    assert "New PRs are created ready for review by default" in prompt
 
 
 def test_profile_create_prs_defaults_to_normal_pr_policy() -> None:
     assert profile_create_prs(None) is False
     assert profile_create_prs({}) is False
     assert profile_create_prs({"create_prs": True}) is True
+
+
+def test_profile_draft_prs_defaults_to_draft_policy() -> None:
+    assert profile_draft_prs(None) is True
+    assert profile_draft_prs({}) is True
+    assert profile_draft_prs({"draft_prs": False}) is False
+    assert profile_draft_prs({"draft_prs": True}) is True
 
 
 def test_construct_system_prompt_forbids_force_push() -> None:

@@ -47,6 +47,7 @@ from .dashboard.agent_overrides import (
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
     profile_create_prs,
+    profile_draft_prs,
     resolve_github_login,
 )
 from .dashboard.agent_usage import record_agent_thread_usage
@@ -813,6 +814,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_project_id: str,
         linear_issue_number: str,
         create_prs: bool,
+        draft_prs: bool,
         plan_mode: bool,
         corridor_enabled: bool,
     ) -> None:
@@ -826,6 +828,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
         self._create_prs = create_prs
+        self._draft_prs = draft_prs
         self._plan_mode = plan_mode
         self._corridor_enabled = corridor_enabled
 
@@ -837,6 +840,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "source": self._source,
             "repo": configurable.get("repo"),
             "plan_mode": self._plan_mode,
+            "draft_prs": self._draft_prs,
             "model": self._model_id,
             "effort": self._effort,
         }
@@ -873,6 +877,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         configurable = (self._config or {}).get("configurable") or {}
+        configurable["draft_prs"] = self._draft_prs
         prompt_default_repo = await _resolve_prompt_default_repo(configurable)
         triggering_user_identity_task = asyncio.create_task(
             asyncio.to_thread(
@@ -936,6 +941,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 linear_issue_number=self._linear_issue_number,
                 triggering_user_identity=triggering_user_identity,
                 create_prs=self._create_prs,
+                draft_prs=self._draft_prs,
                 default_repo=prompt_default_repo,
                 plan_mode=self._plan_mode,
                 plan_url=dashboard_plan_url(self._thread_id),
@@ -1035,6 +1041,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagent_effort = per_thread_effort
 
     always_create_prs = profile_create_prs(profile)
+    draft_prs = profile_draft_prs(profile)
     if always_create_prs:
         logger.info("Always Create PRs enabled by profile for %s", profile_login)
 
@@ -1201,6 +1208,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     linear_project_id=linear_project_id,
                     linear_issue_number=linear_issue_number,
                     create_prs=always_create_prs,
+                    draft_prs=draft_prs,
                     plan_mode=plan_mode,
                     corridor_enabled=bool(corridor_tools),
                 ),
