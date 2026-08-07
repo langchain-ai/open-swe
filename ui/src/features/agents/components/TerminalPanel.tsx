@@ -24,7 +24,7 @@ export function TerminalPanel(props: TerminalPanelProps) {
         "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       fontSize: 13,
       theme: {
-        background: "#111111",
+        background: "#1c1c1c",
         foreground: "#e5e7eb",
         cursor: "#e5e7eb",
       },
@@ -106,7 +106,7 @@ export function TerminalPanel(props: TerminalPanelProps) {
   }, [localCwd, localId])
 
   return (
-    <div className="relative h-full min-h-0 bg-[#111111] p-2">
+    <div className="relative h-full min-h-0 bg-[#1c1c1c] p-2">
       <div ref={containerRef} className="h-full w-full" />
       {error && (
         <div className="absolute inset-x-3 top-3 rounded-md border border-destructive/40 bg-background/95 px-3 py-2 text-xs text-destructive shadow-sm">

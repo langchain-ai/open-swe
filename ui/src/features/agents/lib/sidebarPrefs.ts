@@ -12,15 +12,19 @@ const GROUP_MODES: ReadonlyArray<SidebarGroupMode> = [
   "repo",
 ]
 
+export type SidebarSection = "local" | "cloud"
+
 export interface SidebarPrefs {
   group: SidebarGroupMode
   compact: boolean
+  collapsed: Record<SidebarSection, boolean>
   filters: SidebarFilters
 }
 
 export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   group: "date",
   compact: false,
+  collapsed: { local: false, cloud: false },
   filters: DEFAULT_SIDEBAR_FILTERS,
 }
 
@@ -51,6 +55,12 @@ function sanitizeFilters(value: unknown): SidebarFilters {
   }
 }
 
+function sanitizeCollapsed(value: unknown): Record<SidebarSection, boolean> {
+  const raw =
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+  return { local: raw.local === true, cloud: raw.cloud === true }
+}
+
 function sanitizePrefs(value: unknown): SidebarPrefs {
   const raw =
     value && typeof value === "object" ? (value as Record<string, unknown>) : {}
@@ -63,6 +73,7 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
       typeof raw.compact === "boolean"
         ? raw.compact
         : DEFAULT_SIDEBAR_PREFS.compact,
+    collapsed: sanitizeCollapsed(raw.collapsed),
     filters: sanitizeFilters(raw.filters),
   }
 }
@@ -97,6 +108,14 @@ export function useSidebarPrefs() {
     (compact: boolean) => setPrefs((prev) => ({ ...prev, compact })),
     []
   )
+  const toggleSection = useCallback(
+    (section: SidebarSection) =>
+      setPrefs((prev) => ({
+        ...prev,
+        collapsed: { ...prev.collapsed, [section]: !prev.collapsed[section] },
+      })),
+    []
+  )
   const setFilters = useCallback(
     (filters: SidebarFilters) => setPrefs((prev) => ({ ...prev, filters })),
     []
@@ -110,7 +129,14 @@ export function useSidebarPrefs() {
     []
   )
 
-  return { prefs, setGroup, setCompact, setFilters, resetFilters }
+  return {
+    prefs,
+    setGroup,
+    setCompact,
+    toggleSection,
+    setFilters,
+    resetFilters,
+  }
 }
 
 export type UseSidebarPrefs = ReturnType<typeof useSidebarPrefs>
