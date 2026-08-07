@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { CircleAlert as CircleAlertIcon, Map as MapIcon } from "lucide-react"
 
@@ -173,8 +173,20 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   // Show a loading state during that one-time fetch instead of the empty state.
   const isHydrating = stream.isThreadLoading && !hasMessages
   // A failed hydrate is indistinguishable from an empty thread in the snapshot,
-  // so say so rather than claiming the thread has no messages.
-  const hydrationFailed = !isHydrating && !hasMessages && stream.error != null
+  // so say so rather than claiming the thread has no messages. `stream.error`
+  // also carries run failures, hence the dedicated hydration signal.
+  const [hydrateRejected, setHydrateRejected] = useState(false)
+  useEffect(() => {
+    let active = true
+    setHydrateRejected(false)
+    stream.hydrationPromise.catch(() => {
+      if (active) setHydrateRejected(true)
+    })
+    return () => {
+      active = false
+    }
+  }, [stream.hydrationPromise])
+  const hydrationFailed = !isHydrating && !hasMessages && hydrateRejected
 
   return (
     <div className="flex min-w-0 flex-1">
