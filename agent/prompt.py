@@ -213,7 +213,7 @@ COMMIT_PR_SECTION = """---
 
 ### Committing Changes and Opening Pull Requests
 
-This applies only after you've made code changes. By default, open or update a draft PR when the user asks for one or when a PR is necessary to deliver or review the changes; if a code-change task doesn't need a PR, still commit and push the branch so the work is preserved, then notify the source channel with the branch URL. (If the Always Create PRs setting is on, always open/update a draft PR for code-change tasks.)
+This applies only after you've made code changes. By default, open or update a draft PR when the user asks for one or when a PR is necessary to deliver or review the changes; the user's profile setting controls whether a new PR is a draft. If a code-change task doesn't need a PR, still commit and push the branch so the work is preserved, then notify the source channel with the branch URL. (If the Always Create PRs setting is on, always open/update a PR for code-change tasks.)
 
 Steps, in order:
 
@@ -285,7 +285,7 @@ ALWAYS_CREATE_PR_SECTION = """---
 
 ### Always Create PRs Policy Override
 
-The user's dashboard setting **Always Create PRs** is enabled. For code-change tasks, always open or update a draft pull request after committing and pushing the branch. This does not apply to questions, explanations, status checks, or other information-only requests where no files are changed."""
+The user's dashboard setting **Always Create PRs** is enabled. For code-change tasks, always open or update a pull request after committing and pushing the branch. New pull requests follow the user's **Create PRs as draft** preference; existing pull requests are updated separately. This does not apply to questions, explanations, status checks, or other information-only requests where no files are changed."""
 
 
 def _render_repo_instructions_section(instructions: str | None) -> str:
@@ -348,6 +348,7 @@ def construct_system_prompt(
     linear_issue_number: str = "",
     triggering_user_identity: CollaboratorIdentity | None = None,
     create_prs: bool = False,
+    draft_prs: bool = True,
     default_repo: dict[str, str] | None = None,
     plan_mode: bool = False,
     plan_url: str | None = None,
@@ -383,7 +384,10 @@ def construct_system_prompt(
         ),
         default_prompt_section=default_prompt_section,
         corridor_prompt_section=CORRIDOR_PROMPT if corridor_enabled else "",
-        pr_policy_override_section=ALWAYS_CREATE_PR_SECTION if create_prs else "",
+        pr_policy_override_section=(
+            (ALWAYS_CREATE_PR_SECTION if create_prs else "")
+            + f"\n\nNew PRs are created {'as drafts' if draft_prs else 'ready for review'} by default."
+        ),
         collaboration_section=_render_collaboration_section(triggering_user_identity, thread_url),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         user_instructions_section=_render_user_instructions_section(user_custom_instructions),

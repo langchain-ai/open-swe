@@ -97,6 +97,12 @@ def profile_create_prs(profile: dict[str, Any] | None) -> bool:
     return False
 
 
+def profile_draft_prs(profile: dict[str, Any] | None) -> bool:
+    """Return whether new PRs should be drafts. Defaults to True."""
+    value = profile.get("draft_prs") if isinstance(profile, dict) else None
+    return value if isinstance(value, bool) else True
+
+
 def _normalize_profile_model_pair(
     profile: dict[str, Any],
     *,
