@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from agent.dashboard import terminal_api
 from agent.integrations.langsmith import TimeoutLangSmithSandbox
+from agent.utils import sandbox_paths, sandbox_state
 
 
 class FakeHandle:
@@ -46,11 +47,13 @@ async def test_terminal_create_is_owner_only_and_resolves_repo_cwd(monkeypatch) 
     proxy = SimpleNamespace(
         aexecute=AsyncMock(return_value=SimpleNamespace(exit_code=0)),
     )
+    # `TerminalManager.create` imports the sandbox helpers lazily to keep them out
+    # of `agent.webapp`'s import closure, so patch them at their source modules.
     monkeypatch.setattr(terminal_api, "_authorized_thread", authorize)
-    monkeypatch.setattr(terminal_api, "get_sandbox_backend", AsyncMock(return_value=proxy))
-    monkeypatch.setattr(terminal_api, "unwrap_sandbox_backend", lambda value: backend)
+    monkeypatch.setattr(sandbox_state, "get_sandbox_backend", AsyncMock(return_value=proxy))
+    monkeypatch.setattr(sandbox_state, "unwrap_sandbox_backend", lambda value: backend)
     monkeypatch.setattr(
-        terminal_api, "aresolve_repo_dir", AsyncMock(return_value="/workspace/repo")
+        sandbox_paths, "aresolve_repo_dir", AsyncMock(return_value="/workspace/repo")
     )
 
     manager = terminal_api.TerminalManager()

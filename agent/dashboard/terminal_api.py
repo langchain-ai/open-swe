@@ -11,10 +11,7 @@ from typing import Any
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
-from ..integrations.langsmith import TimeoutLangSmithSandbox
 from ..utils.json_types import thread_metadata
-from ..utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
-from ..utils.sandbox_state import get_sandbox_backend, unwrap_sandbox_backend
 from .thread_api import _authorized_thread, _metadata_repo
 
 _TERMINAL_INPUT_LIMIT = 64_000
@@ -50,6 +47,12 @@ class TerminalManager:
     async def create(
         self, thread_id: str, login: str, *, email: str | None = None
     ) -> dict[str, Any]:
+        # The sandbox stack pulls in deepagents/anthropic, and this module sits in
+        # `agent.webapp`'s import closure, where those imports cost pod readiness.
+        from ..integrations.langsmith import TimeoutLangSmithSandbox
+        from ..utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
+        from ..utils.sandbox_state import get_sandbox_backend, unwrap_sandbox_backend
+
         thread = await _authorized_thread(thread_id, login, email=email)
         metadata = thread_metadata(thread)
         sandbox_id = metadata.get("sandbox_id")
