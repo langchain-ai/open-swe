@@ -251,7 +251,7 @@ export function AgentsSidebar({
         {isDesktop && (
           <SectionHeader
             label="Cloud"
-            count={filteredActive.length}
+count={filteredActive.length + (showResolved ? filteredResolved.length : 0)}
             collapsed={prefs.collapsed.cloud}
             onToggle={() => toggleSection("cloud")}
           />
