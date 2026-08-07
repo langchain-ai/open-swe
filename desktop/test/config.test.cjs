@@ -11,6 +11,7 @@ const {
   isTrustedProxyRequest,
   localCallbackUrl,
   resolveBackendUrl,
+  resolveAppRuntime,
   staticFilePath,
   validateBackendUrl,
 } = require("../src/config.cjs")
@@ -19,6 +20,33 @@ test("uses the local backend for development", () => {
   assert.equal(
     resolveBackendUrl({ argv: [], env: {}, isPackaged: false }),
     `${DEFAULT_DEVELOPMENT_BACKEND_URL}/`
+  )
+})
+
+test("uses an isolated app profile for development runs", () => {
+  const appDataPath = path.join("/tmp", "open-swe-app-data")
+  const expected = {
+    isDevelopment: true,
+    name: "Open SWE Development",
+    appUserModelId: "com.langchain.openswe.dev",
+    userDataPath: path.join(appDataPath, "Open SWE Development"),
+  }
+  assert.deepEqual(
+    resolveAppRuntime({ argv: [], isPackaged: false, appDataPath }),
+    expected
+  )
+  assert.deepEqual(
+    resolveAppRuntime({ argv: ["--dev"], isPackaged: true, appDataPath }),
+    expected
+  )
+  assert.deepEqual(
+    resolveAppRuntime({ argv: [], isPackaged: true, appDataPath }),
+    {
+      isDevelopment: false,
+      name: "Open SWE",
+      appUserModelId: "com.langchain.openswe",
+      userDataPath: null,
+    }
   )
 })
 

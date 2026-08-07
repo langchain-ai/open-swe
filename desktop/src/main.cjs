@@ -30,9 +30,22 @@ const {
   isTrustedProxyRequest,
   localCallbackUrl,
   resolveBackendUrl,
+  resolveAppRuntime,
   staticFilePath,
   validateBackendUrl,
 } = require("./config.cjs")
+
+const appRuntime = resolveAppRuntime({
+  argv: process.argv,
+  isPackaged: app.isPackaged,
+  appDataPath: app.getPath("appData"),
+})
+const isDevelopment = appRuntime.isDevelopment
+if (appRuntime.userDataPath) {
+  app.setName(appRuntime.name)
+  app.setPath("userData", appRuntime.userDataPath)
+}
+app.setAppUserModelId(appRuntime.appUserModelId)
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -48,7 +61,6 @@ protocol.registerSchemesAsPrivileged([
   },
 ])
 
-const isDevelopment = !app.isPackaged || process.argv.includes("--dev")
 let backendUrl = null
 let mainWindow = null
 let setupWindow = null
@@ -496,7 +508,7 @@ function handleNavigation(window, event, url) {
 function createWindow() {
   if (!backendUrl) return createSetupWindow()
   const window = new BrowserWindow({
-    title: "Open SWE",
+    title: appRuntime.name,
     width: 1440,
     height: 900,
     minWidth: 900,
@@ -550,7 +562,7 @@ function createSetupWindow() {
   }
 
   const window = new BrowserWindow({
-    title: "Configure Open SWE",
+    title: `Configure ${appRuntime.name}`,
     width: 560,
     height: 460,
     minWidth: 480,
@@ -586,7 +598,7 @@ function createSetupWindow() {
       else createWindow()
       window.close()
     } catch (error) {
-      dialog.showErrorBox("Invalid Open SWE backend URL", error.message)
+      dialog.showErrorBox(`Invalid ${appRuntime.name} backend URL`, error.message)
     }
   })
 
@@ -632,12 +644,11 @@ if (!hasSingleInstanceLock) {
         storedUrl: readStoredBackendUrl(),
       })
     } catch (error) {
-      dialog.showErrorBox("Invalid Open SWE backend URL", error.message)
+      dialog.showErrorBox(`Invalid ${appRuntime.name} backend URL`, error.message)
       app.exit(1)
       return
     }
 
-    app.setAppUserModelId("com.langchain.openswe")
     if (process.platform === "darwin") app.dock.setIcon(iconPath())
     protocol.handle("open-swe", serveBundledUi)
     configurePermissions()

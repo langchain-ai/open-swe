@@ -2,8 +2,27 @@ const path = require("node:path")
 
 const APP_ORIGIN = "open-swe://app"
 const APP_URL = `${APP_ORIGIN}/`
+const APP_NAME = "Open SWE"
+const DEVELOPMENT_APP_NAME = "Open SWE Development"
+const APP_USER_MODEL_ID = "com.langchain.openswe"
+const DEVELOPMENT_APP_USER_MODEL_ID = "com.langchain.openswe.dev"
+const DEVELOPMENT_USER_DATA_DIRECTORY = "Open SWE Development"
 const DEFAULT_DEVELOPMENT_BACKEND_URL = "http://localhost:2024"
 const ALLOWED_PERMISSIONS = new Set(["clipboard-sanitized-write", "notifications"])
+
+function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
+  const isDevelopment = !isPackaged || argv.includes("--dev")
+  return {
+    isDevelopment,
+    name: isDevelopment ? DEVELOPMENT_APP_NAME : APP_NAME,
+    appUserModelId: isDevelopment
+      ? DEVELOPMENT_APP_USER_MODEL_ID
+      : APP_USER_MODEL_ID,
+    userDataPath: isDevelopment
+      ? path.join(appDataPath, DEVELOPMENT_USER_DATA_DIRECTORY)
+      : null,
+  }
+}
 
 function cliBackendUrl(argv) {
   for (const name of ["--backend-url", "--url"]) {
@@ -117,6 +136,7 @@ module.exports = {
   APP_URL,
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,
+  resolveAppRuntime,
   backendRequestUrl,
   isAppUrl,
   isGithubOAuthUrl,

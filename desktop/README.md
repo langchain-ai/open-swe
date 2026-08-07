@@ -42,6 +42,11 @@ pnpm --dir desktop install
 pnpm --dir desktop run dev
 ```
 
+Source launches use an isolated `Open SWE Development` Electron profile, so the dev app can run
+beside an installed `Open SWE` app without sharing its login session, backend configuration,
+projects, or single-instance lock. The dev window is labeled **Open SWE Development**; its first
+launch may require signing in and adding projects again.
+
 The Python dcode CLI must also be installed and configured. Confirm it is available with
 `dcode --version` before starting the desktop app.
 
