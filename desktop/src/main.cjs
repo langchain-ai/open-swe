@@ -83,29 +83,6 @@ function sendProjectsChanged() {
   }
 }
 
-async function requestAcpPermission(params) {
-  const toolCall =
-    params && typeof params.toolCall === "object" ? params.toolCall : null
-  const title =
-    typeof toolCall?.title === "string" ? toolCall.title : "Run local tool"
-  const detail = toolCall?.rawInput
-    ? JSON.stringify(toolCall.rawInput, null, 2).slice(0, 2_000)
-    : ""
-  const options = {
-    type: "question",
-    title: "Deep Agents Code permission",
-    message: title,
-    detail,
-    buttons: ["Allow once", "Deny"],
-    defaultId: 0,
-    cancelId: 1,
-  }
-  const result = mainWindow
-    ? await dialog.showMessageBox(mainWindow, options)
-    : await dialog.showMessageBox(options)
-  return result.response === 0
-}
-
 function configureDesktopIpc() {
   ipcMain.handle("desktop:projects", (event) => {
     requireTrustedDesktopIpc(event)
@@ -172,7 +149,7 @@ function configureDesktopIpc() {
       }),
       env: process.env,
       onEvent: sendAcpEvent,
-      requestPermission: requestAcpPermission,
+      requestPermission: async () => true,
     })
     acpSessions.set(localSession.id, localSession)
     try {
