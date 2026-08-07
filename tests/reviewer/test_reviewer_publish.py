@@ -824,6 +824,112 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
     assert result["skipped_empty_re_review"] is True
 
 
+@pytest.mark.parametrize(
+    ("status", "flag", "expected"),
+    [
+        (
+            "open",
+            "true",
+            (
+                "failure",
+                "Found 1 potential issue",
+                "Open SWE surfaced 1 potential issue on this pull request.",
+            ),
+        ),
+        (
+            "resolved",
+            "true",
+            (
+                "success",
+                "No issues found",
+                "Open SWE reviewed this pull request and found no issues.",
+            ),
+        ),
+        (
+            "open",
+            None,
+            (
+                "success",
+                "No issues found",
+                "Open SWE reviewed this pull request and found no issues.",
+            ),
+        ),
+    ],
+    ids=[
+        "standing-open-surfaced-blocking-fails",
+        "standing-resolved-blocking-succeeds",
+        "standing-open-surfaced-informational-unchanged",
+    ],
+)
+async def test_publish_review_check_counts_standing_findings(
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    flag: str | None,
+    expected: tuple[str, str, str],
+) -> None:
+    from agent.tools.publish_review import _publish_review_async
+
+    if flag is None:
+        monkeypatch.delenv("REVIEW_CHECK_BLOCKING", raising=False)
+    else:
+        monkeypatch.setenv("REVIEW_CHECK_BLOCKING", flag)
+
+    finding = _f(
+        id="f_standing",
+        status=status,
+        github_review_comment_id=100,
+    )
+    surface = finding["surface"]
+    assert surface is not None
+    surface["state"] = "surfaced"
+    settle = AsyncMock()
+    post_review = AsyncMock()
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.list_findings_async",
+            AsyncMock(return_value=[finding]),
+        ),
+        patch(
+            "agent.tools.publish_review._open_swe_already_reviewed",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.tools.publish_review.settle_review_check_run", settle),
+        patch(
+            "agent.tools.publish_review._resolve_review_trace_url",
+            AsyncMock(return_value=None),
+        ),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="newsha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=True,
+        )
+
+    post_review.assert_not_called()
+    settle.assert_awaited_once()
+    call = settle.await_args
+    assert call is not None
+    assert (
+        call.kwargs["conclusion"],
+        call.kwargs["title"],
+        call.kwargs["summary"],
+    ) == expected
+    assert result["surfaced_count"] == 0
+
+
 @pytest.mark.asyncio
 async def test_publish_review_does_not_surface_out_of_diff_finding() -> None:
     """Out-of-diff findings are disabled: a finding anchored outside the diff is
