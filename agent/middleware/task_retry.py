@@ -22,6 +22,12 @@ _TRANSIENT_ERROR_NAMES = frozenset(
 
 
 def _error_body(exc: Exception) -> dict[str, object]:
+    """Return the error payload extracted from an exception.
+
+    If the exception contains a nested ``error`` object, that object is
+    returned. Otherwise, the top-level body is returned. An empty dictionary
+    is returned when no structured error payload is available.
+    """
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
         nested = body.get("error")
@@ -30,6 +36,11 @@ def _error_body(exc: Exception) -> dict[str, object]:
 
 
 def _status_code(exc: Exception) -> int | None:
+    """Extract the HTTP status code associated with an exception.
+
+    The status code is read directly from the exception when available,
+    otherwise from an attached response object.
+    """
     status = getattr(exc, "status_code", None)
     if isinstance(status, int):
         return status
@@ -39,6 +50,12 @@ def _status_code(exc: Exception) -> int | None:
 
 
 def _error_fields(exc: Exception) -> dict[str, object]:
+    """Collect normalized error metadata from an exception.
+
+    The returned dictionary may include the HTTP status code together with
+    common error fields such as ``type``, ``code``, and ``message`` when
+    available.
+    """
     body = _error_body(exc)
     out: dict[str, object] = {}
     status = _status_code(exc)
@@ -54,6 +71,7 @@ def _error_fields(exc: Exception) -> dict[str, object]:
 
 
 def _is_httpx_transport_error(exc: Exception) -> bool:
+    """Return whether the exception is an HTTPX transport error."""
     try:
         import httpx
     except ImportError:  # pragma: no cover - dependency is declared in production
@@ -62,6 +80,11 @@ def _is_httpx_transport_error(exc: Exception) -> bool:
 
 
 def task_retry_on(exc: Exception) -> bool:
+    """Return whether a task should be retried for the given exception.
+
+    Retries are enabled for retryable HTTP status codes, server-side failures,
+    and known transient transport or timeout errors.
+    """
     status = _status_code(exc)
     if isinstance(status, int) and (status in _RETRY_HTTP_STATUS_CODES or status >= 500):
         return True
@@ -69,6 +92,11 @@ def task_retry_on(exc: Exception) -> bool:
 
 
 def task_on_failure(exc: Exception) -> str:
+    """Serialize recoverable failures for the model.
+
+    Recoverable model errors are returned as a JSON payload. All other
+    exceptions are re-raised for normal error handling.
+    """
     error = _error_fields(exc)
     code = error.get("code")
     status = error.get("status_code")
