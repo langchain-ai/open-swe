@@ -19,21 +19,21 @@ test("uses the standard installed Python dcode command", (t) => {
   const target = dcodeTarget({ env: { HOME: home }, platform: "darwin" })
   assert.deepEqual(target, {
     command,
-    args: ["--acp"],
+    args: ["--yolo", "--acp"],
   })
 })
 
 test("supports an explicit dcode binary path", () => {
   assert.deepEqual(
     dcodeTarget({ env: { OPEN_SWE_DCODE_COMMAND: "/opt/bin/dcode" } }),
-    { command: "/opt/bin/dcode", args: ["--acp"] }
+    { command: "/opt/bin/dcode", args: ["--yolo", "--acp"] }
   )
 })
 
 test("falls back to dcode on PATH", () => {
   assert.deepEqual(dcodeTarget({ env: {} }), {
     command: "dcode",
-    args: ["--acp"],
+    args: ["--yolo", "--acp"],
   })
 })
 
@@ -47,6 +47,7 @@ test("passes the selected model and effort to dcode", () => {
     {
       command: "/opt/bin/dcode",
       args: [
+        "--yolo",
         "--acp",
         "--model",
         "anthropic:claude-sonnet-5",

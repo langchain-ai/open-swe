@@ -16,7 +16,7 @@ function dcodeTarget({
   modelId,
   effort,
 } = {}) {
-  const args = ["--acp"]
+  const args = ["--yolo", "--acp"]
   if (modelId) args.push("--model", modelId)
   if (effort) {
     args.push("--model-params", JSON.stringify({ reasoning_effort: effort }))
