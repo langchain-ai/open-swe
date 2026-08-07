@@ -25,7 +25,7 @@ import {
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
 import { useState } from "react"
-import type { ComponentType, SVGProps } from "react"
+import type { ComponentType, ReactNode, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import type { DesktopAcpSessionSummary, DesktopProject } from "@/desktop"
@@ -118,8 +118,14 @@ export function AgentsSidebar({
   activeLocalSessionId,
   layout,
 }: AgentsSidebarProps) {
-  const { prefs, setGroup, setCompact, setFilters, resetFilters } =
-    useSidebarPrefs()
+  const {
+    prefs,
+    setGroup,
+    setCompact,
+    toggleSection,
+    setFilters,
+    resetFilters,
+  } = useSidebarPrefs()
   const sidebar = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT, activeThreadId)
   const localSessions = useDesktopAcpSessions()
   const {
@@ -147,6 +153,11 @@ export function AgentsSidebar({
     sections.length === 0 &&
     (!showResolved || filteredResolved.length === 0) &&
     hasActiveFilters(prefs.filters)
+  const localSessionCount = localGroups.reduce(
+    (total, group) => total + group.sessions.length,
+    0
+  )
+  const cloudCollapsed = isDesktop && prefs.collapsed.cloud
 
   return (
     <SidebarFrame
@@ -199,72 +210,90 @@ export function AgentsSidebar({
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {isDesktop && (
           <div className="mb-3">
-            <div className="mb-1 flex items-center justify-between px-2">
-              <span className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-                Projects
-              </span>
+            <SectionHeader
+              label="Local"
+              count={localSessionCount}
+              collapsed={prefs.collapsed.local}
+              onToggle={() => toggleSection("local")}
+            >
               <button
                 aria-label="Add project"
-                className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+                className="mr-1 flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
                 onClick={() => void addLocalProject()}
                 title="Add project"
                 type="button"
               >
                 <FolderPlusIcon className="size-3.5" />
               </button>
-            </div>
-            {localGroups.map((group) => (
-              <LocalThreadGroup
-                key={group.project.cwd}
-                project={group.project}
-                sessions={group.sessions}
-                activeSessionId={activeLocalSessionId}
-                onNavigate={layout.closeOnMobile}
-                onRemove={() => void removeLocalProject(group.project.cwd)}
-                compact={prefs.compact}
-              />
-            ))}
-            {localGroups.length === 0 && (
-              <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
-                No projects yet
-              </p>
+            </SectionHeader>
+            {!prefs.collapsed.local && (
+              <>
+                {localGroups.map((group) => (
+                  <LocalThreadGroup
+                    key={group.project.cwd}
+                    project={group.project}
+                    sessions={group.sessions}
+                    activeSessionId={activeLocalSessionId}
+                    onNavigate={layout.closeOnMobile}
+                    onRemove={() => void removeLocalProject(group.project.cwd)}
+                    compact={prefs.compact}
+                  />
+                ))}
+                {localGroups.length === 0 && (
+                  <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
+                    No projects yet
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}
-        {prefs.group === "none"
-          ? sections[0]?.threads.map((thread) => (
-              <ThreadRow
-                key={thread.id}
-                thread={thread}
-                isActive={thread.id === activeThreadId}
-                onNavigate={layout.closeOnMobile}
-                compact={prefs.compact}
-              />
-            ))
-          : sections.map((section) => (
-              <ThreadGroup
-                key={`${prefs.group}:${section.key}`}
-                label={section.label}
-                threads={section.threads}
-                activeThreadId={activeThreadId}
-                onNavigate={layout.closeOnMobile}
-                defaultCollapsed={section.defaultCollapsed}
-                compact={prefs.compact}
-              />
-            ))}
-        {showResolved && (
-          <ResolvedThreadGroup
-            threads={filteredResolved}
-            hasMore={resolvedHasMore}
-            activeThreadId={activeThreadId}
-            onNavigate={layout.closeOnMobile}
-            compact={prefs.compact}
+        {isDesktop && (
+          <SectionHeader
+            label="Cloud"
+count={filteredActive.length + (showResolved ? filteredResolved.length : 0)}
+            collapsed={prefs.collapsed.cloud}
+            onToggle={() => toggleSection("cloud")}
           />
         )}
-        {isEmpty && (
-          <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
-            No threads match these filters.
-          </p>
+        {!cloudCollapsed && (
+          <>
+            {prefs.group === "none"
+              ? sections[0]?.threads.map((thread) => (
+                  <ThreadRow
+                    key={thread.id}
+                    thread={thread}
+                    isActive={thread.id === activeThreadId}
+                    onNavigate={layout.closeOnMobile}
+                    compact={prefs.compact}
+                  />
+                ))
+              : sections.map((section) => (
+                  <ThreadGroup
+                    key={`${prefs.group}:${section.key}`}
+                    label={section.label}
+                    threads={section.threads}
+                    activeThreadId={activeThreadId}
+                    onNavigate={layout.closeOnMobile}
+                    defaultCollapsed={section.defaultCollapsed}
+                    compact={prefs.compact}
+                  />
+                ))}
+            {showResolved && (
+              <ResolvedThreadGroup
+                threads={filteredResolved}
+                hasMore={resolvedHasMore}
+                activeThreadId={activeThreadId}
+                onNavigate={layout.closeOnMobile}
+                compact={prefs.compact}
+              />
+            )}
+            {isEmpty && (
+              <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
+                No threads match these filters.
+              </p>
+            )}
+          </>
         )}
       </div>
 
@@ -282,6 +311,37 @@ export function AgentsSidebar({
         />
       </div>
     </SidebarFrame>
+  )
+}
+
+function SectionHeader({
+  label,
+  count,
+  collapsed,
+  onToggle,
+  children,
+}: {
+  label: string
+  count: number
+  collapsed: boolean
+  onToggle: () => void
+  children?: ReactNode
+}) {
+  const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
+  return (
+    <div className="flex items-center">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
+        aria-expanded={!collapsed}
+      >
+        <ToggleIcon className="size-3" />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <span>{count}</span>
+      </button>
+      {children}
+    </div>
   )
 }
 
