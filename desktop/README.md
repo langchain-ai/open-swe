@@ -9,7 +9,7 @@ compatible Open SWE backend; they do not need a separately hosted dashboard.
 Desktop users can choose **This Mac** in the new-task composer to run the Python
 `deepagents-code` agent over ACP in a selected local project. The web dashboard does not expose
 this option. The desktop app passes the selected model and reasoning effort to the user's installed
-`dcode --yolo --acp`, inheriting its authentication and configuration. Missing local provider credentials
+`dcode --acp`, inheriting its authentication and configuration. Missing local provider credentials
 or packages fail during startup and surface in the composer. The app finds the standard
 `~/.local/bin/dcode` installation even when a packaged app does not inherit the terminal's `PATH`;
 `OPEN_SWE_DCODE_COMMAND` overrides the executable path. Added projects are persisted in the desktop
