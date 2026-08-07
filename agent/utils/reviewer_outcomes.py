@@ -20,9 +20,9 @@ import uuid
 from typing import Any
 
 from langsmith import AsyncClient as AsyncLangSmithClient
-from langsmith import Client as LangSmithClient
 
 from ..review.findings import Finding
+from .langsmith import async_langsmith_client, sync_langsmith_client
 
 logger = logging.getLogger(__name__)
 
@@ -128,8 +128,7 @@ async def _create_or_update_example(
         )
     except Exception:  # noqa: BLE001 — example already exists; update in place
         # AsyncClient exposes no update_example; the sync one runs off-loop.
-        api_key, api_url = credentials
-        sync_client = LangSmithClient(api_key=api_key, api_url=api_url)
+        sync_client = sync_langsmith_client(*credentials)
         await asyncio.to_thread(
             sync_client.update_example,
             example_id=example_id,
@@ -195,16 +194,16 @@ async def upsert_finding_outcome(
             "thread_id": thread_id,
             "first_seen_sha": finding.get("first_seen_sha"),
         }
-        async with AsyncLangSmithClient(api_key=credentials[0], api_url=credentials[1]) as client:
-            await _create_or_update_example(
-                client,
-                credentials,
-                dataset_id=await _ensure_dataset(client),
-                example_id=_example_id(repo, finding_id, label_source),
-                inputs=inputs,
-                outputs=outputs,
-                metadata=metadata,
-            )
+        client = async_langsmith_client(*credentials)
+        await _create_or_update_example(
+            client,
+            credentials,
+            dataset_id=await _ensure_dataset(client),
+            example_id=_example_id(repo, finding_id, label_source),
+            inputs=inputs,
+            outputs=outputs,
+            metadata=metadata,
+        )
         return True
     except Exception:  # noqa: BLE001 — dataset writes must never break a review
         logger.exception("Failed to upsert reviewer finding outcome for %s", finding_id)

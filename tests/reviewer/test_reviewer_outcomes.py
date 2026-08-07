@@ -88,8 +88,8 @@ def _patch_client(monkeypatch, fake: _FakeClient | None) -> None:  # noqa: ANN00
         monkeypatch.setattr(reviewer_outcomes, "_outcomes_credentials", lambda: None)
         return
     monkeypatch.setattr(reviewer_outcomes, "_outcomes_credentials", lambda: ("k", "https://api"))
-    monkeypatch.setattr(reviewer_outcomes, "AsyncLangSmithClient", lambda **kwargs: fake)
-    monkeypatch.setattr(reviewer_outcomes, "LangSmithClient", lambda **kwargs: cast(Any, fake))
+    monkeypatch.setattr(reviewer_outcomes, "async_langsmith_client", lambda *a: fake)
+    monkeypatch.setattr(reviewer_outcomes, "sync_langsmith_client", lambda *a: cast(Any, fake))
 
 
 def _finding() -> Finding:

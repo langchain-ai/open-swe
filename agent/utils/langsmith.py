@@ -17,6 +17,31 @@ from .tracing import AGENT_TRACING_PROJECT
 logger = logging.getLogger(__name__)
 
 _PROJECT_ID_CACHE: dict[str, str] = {}
+_ASYNC_CLIENTS: dict[tuple[str, str], AsyncLangSmithClient] = {}
+_SYNC_CLIENTS: dict[tuple[str, str], LangSmithClient] = {}
+
+
+def async_langsmith_client(api_key: str, api_url: str) -> AsyncLangSmithClient:
+    """Return a pooled ``AsyncClient`` for these credentials.
+
+    Each client owns an ``httpx`` connection pool bound to the event loop that
+    built it, so this assumes one loop per process. Keyed on the credentials so
+    a test that repoints the env gets a fresh client instead of a stale pool.
+    """
+    key = (api_key, api_url)
+    client = _ASYNC_CLIENTS.get(key)
+    if client is None:
+        client = _ASYNC_CLIENTS[key] = AsyncLangSmithClient(api_key=api_key, api_url=api_url)
+    return client
+
+
+def sync_langsmith_client(api_key: str, api_url: str) -> LangSmithClient:
+    """Return a pooled sync ``Client``, for the few endpoints AsyncClient lacks."""
+    key = (api_key, api_url)
+    client = _SYNC_CLIENTS.get(key)
+    if client is None:
+        client = _SYNC_CLIENTS[key] = LangSmithClient(api_key=api_key, api_url=api_url)
+    return client
 
 
 def _build_prod_langsmith_client() -> AsyncLangSmithClient | None:
@@ -31,7 +56,7 @@ def _build_prod_langsmith_client() -> AsyncLangSmithClient | None:
     api_url = os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
         "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
     )
-    return AsyncLangSmithClient(api_key=api_key, api_url=api_url)
+    return async_langsmith_client(api_key, api_url)
 
 
 async def _resolve_project_id_by_name(project_name: str) -> str | None:
@@ -43,8 +68,7 @@ async def _resolve_project_id_by_name(project_name: str) -> str | None:
     if client is None:
         return None
     try:
-        async with client:
-            project = await client.read_project(project_name=project_name)
+        project = await client.read_project(project_name=project_name)
     except LangSmithNotFoundError:
         _PROJECT_ID_CACHE[project_name] = ""
         return None
@@ -125,7 +149,7 @@ async def _update_feedback(
     comment: str | None,
 ) -> None:
     # AsyncClient exposes no update_feedback; the sync one runs off-loop.
-    client = LangSmithClient(api_key=api_key, api_url=api_url)
+    client = sync_langsmith_client(api_key, api_url)
     await asyncio.to_thread(client.update_feedback, feedback_id, score=score, comment=comment)
 
 
@@ -146,21 +170,20 @@ async def create_langsmith_feedback(
     feedback_id = _feedback_id(run_id, key)
     any_success = False
     for api_key, api_url in configs:
-        async with AsyncLangSmithClient(api_key=api_key, api_url=api_url) as client:
-            try:
-                await client.create_feedback(
-                    run_id=run_id,
-                    key=key,
-                    score=score,
-                    comment=comment,
-                    source_info=source_info,
-                    feedback_source_type="api",
-                    feedback_id=feedback_id,
-                )
-                any_success = True
-                continue
-            except Exception:  # noqa: BLE001 - feedback already exists; update in place
-                pass
+        try:
+            await async_langsmith_client(api_key, api_url).create_feedback(
+                run_id=run_id,
+                key=key,
+                score=score,
+                comment=comment,
+                source_info=source_info,
+                feedback_source_type="api",
+                feedback_id=feedback_id,
+            )
+            any_success = True
+            continue
+        except Exception:  # noqa: BLE001 - feedback already exists; update in place
+            pass
         try:
             await _update_feedback(api_key, api_url, feedback_id, score=score, comment=comment)
             any_success = True
@@ -179,12 +202,11 @@ async def delete_langsmith_feedback(run_id: str, key: str) -> bool:
     feedback_id = _feedback_id(run_id, key)
     any_success = False
     for api_key, api_url in configs:
-        async with AsyncLangSmithClient(api_key=api_key, api_url=api_url) as client:
-            try:
-                await client.delete_feedback(feedback_id)
-                any_success = True
-            except LangSmithNotFoundError:
-                any_success = True
-            except Exception:
-                logger.exception("Failed to delete LangSmith feedback for run %s", run_id)
+        try:
+            await async_langsmith_client(api_key, api_url).delete_feedback(feedback_id)
+            any_success = True
+        except LangSmithNotFoundError:
+            any_success = True
+        except Exception:
+            logger.exception("Failed to delete LangSmith feedback for run %s", run_id)
     return any_success
