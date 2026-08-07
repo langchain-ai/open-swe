@@ -45,7 +45,7 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     create_prs: bool = False
-    draft_prs: bool = True
+    draft_prs: bool | None = None
     review_draft_prs: bool | None = None
 
     @model_validator(mode="after")
@@ -159,7 +159,9 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "branch_prefix": update.branch_prefix,
         "auto_fix_ci": update.auto_fix_ci,
         "create_prs": update.create_prs,
-        "draft_prs": update.draft_prs,
+        "draft_prs": (
+            update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
+        ),
         "review_draft_prs": update.review_draft_prs,
         "updated_at": datetime.now(UTC).isoformat(),
     }
