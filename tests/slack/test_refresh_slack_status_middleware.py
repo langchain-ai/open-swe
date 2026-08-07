@@ -7,7 +7,9 @@ from langchain_core.messages import AIMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 
 from agent.middleware.refresh_slack_status import (
+    _LOADING_TIPS,
     SlackAssistantStatusMiddleware,
+    _loading_tip_for_run,
     _status_from_recent_tool_calls,
 )
 from agent.utils.slack import DEFAULT_ASSISTANT_STATUS
@@ -17,8 +19,13 @@ class TestSlackAssistantStatusMiddleware:
     def _runtime(self) -> MagicMock:
         return MagicMock()
 
-    def _config(self) -> dict:
-        return {"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}}
+    def _config(self, run_id: str = "run-a") -> dict:
+        return {
+            "configurable": {
+                "prepare_run_id": run_id,
+                "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            }
+        }
 
     @pytest.mark.asyncio
     async def test_before_agent_sets_status_when_slack_thread_present(self) -> None:
@@ -40,7 +47,13 @@ class TestSlackAssistantStatusMiddleware:
         kwargs = await_args.kwargs
         assert args == ("C1", "1.0")
         assert kwargs["status"] == DEFAULT_ASSISTANT_STATUS
-        assert "loading_messages" not in kwargs
+        assert kwargs["loading_messages"] == [_loading_tip_for_run("run-a")]
+
+    def test_loading_tip_is_stable_per_run_and_varies_across_runs(self) -> None:
+        assert _loading_tip_for_run("run-a") == _loading_tip_for_run("run-a")
+        selected_tips = {_loading_tip_for_run(f"run-{index}") for index in range(20)}
+        assert selected_tips <= set(_LOADING_TIPS)
+        assert len(selected_tips) > 1
 
     @pytest.mark.asyncio
     async def test_after_agent_clears_status_when_slack_thread_present(self) -> None:
@@ -58,7 +71,7 @@ class TestSlackAssistantStatusMiddleware:
         await_args = mock_set.await_args
         assert await_args is not None
         assert await_args.kwargs["status"] == ""
-        assert "loading_messages" not in await_args.kwargs
+        assert await_args.kwargs["loading_messages"] is None
 
     @pytest.mark.asyncio
     async def test_model_call_uses_contextual_status_from_last_tool_call(self) -> None:
@@ -121,11 +134,13 @@ class TestSlackAssistantStatusMiddleware:
         )
         refreshed = asyncio.Event()
         set_count = 0
+        loading_messages: list[object] = []
         real_sleep = asyncio.sleep
 
-        async def fake_set_status(*_args: object, **_kwargs: object) -> bool:
+        async def fake_set_status(*_args: object, **kwargs: object) -> bool:
             nonlocal set_count
             set_count += 1
+            loading_messages.append(kwargs["loading_messages"])
             if set_count >= 2:
                 refreshed.set()
             return True
@@ -156,6 +171,7 @@ class TestSlackAssistantStatusMiddleware:
 
         assert response.result[0].content == "done"
         assert set_count >= 2
+        assert loading_messages == [[_loading_tip_for_run("run-a")]] * set_count
 
     @pytest.mark.asyncio
     async def test_skips_when_slack_thread_missing(self) -> None:
