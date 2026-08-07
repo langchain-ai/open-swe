@@ -12,6 +12,12 @@ type TerminalPanelProps =
 export function TerminalPanel(props: TerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string | null>(null)
+  // Depend on the individual fields, never the props object: it is a fresh
+  // literal on every parent render, which would tear down and respawn the shell
+  // each time the transcript streams a token.
+  const localId = props.transport === "local" ? props.id : null
+  const localCwd = props.transport === "local" ? props.cwd : null
+  const cloudThreadId = props.transport === "cloud" ? props.threadId : null
 
   useLayoutEffect(() => {
     setError(null)
@@ -48,13 +54,13 @@ export function TerminalPanel(props: TerminalPanelProps) {
         return
       fit.fit()
       if (
-        props.transport === "local" &&
+        localId &&
         (terminal.cols !== lastCols || terminal.rows !== lastRows)
       ) {
         lastCols = terminal.cols
         lastRows = terminal.rows
         window.openSweDesktop?.terminal.resize(
-          props.id,
+          localId,
           terminal.cols,
           terminal.rows
         )
@@ -70,39 +76,39 @@ export function TerminalPanel(props: TerminalPanelProps) {
     const observer = new ResizeObserver(scheduleResize)
     observer.observe(container)
 
-    if (props.transport === "local") {
+    if (localId && localCwd) {
       const bridge = window.openSweDesktop?.terminal
       if (!bridge) {
         setError("Local terminal is only available in the desktop app.")
       } else {
         const removeData = bridge.onData((id, data) => {
-          if (!disposed && id === props.id) terminal.write(data)
+          if (!disposed && id === localId) terminal.write(data)
         })
         const removeError = bridge.onError((id, message) => {
-          if (id === props.id) setError(message)
+          if (id === localId) setError(message)
         })
-        const input = terminal.onData((data) => bridge.write(props.id, data))
-        bridge.create(props.id, props.cwd)
+        const input = terminal.onData((data) => bridge.write(localId, data))
+        bridge.create(localId, localCwd)
         cleanupTransport = () => {
           input.dispose()
           removeData()
           removeError()
-          bridge.destroy(props.id)
+          bridge.destroy(localId)
         }
       }
-    } else {
+    } else if (cloudThreadId) {
       let remoteId: string | null = null
       const abort = new AbortController()
       const input = terminal.onData((data) => {
         if (remoteId)
-          void agentsApi.writeTerminal(props.threadId, remoteId, data)
+          void agentsApi.writeTerminal(cloudThreadId, remoteId, data)
       })
       void (async () => {
         try {
-          const remote = await agentsApi.createTerminal(props.threadId)
+          const remote = await agentsApi.createTerminal(cloudThreadId)
           remoteId = remote.id
           const response = await fetch(
-            agentsApi.terminalStreamUrl(props.threadId, remote.id),
+            agentsApi.terminalStreamUrl(cloudThreadId, remote.id),
             {
               credentials: "include",
               signal: abort.signal,
@@ -144,7 +150,7 @@ export function TerminalPanel(props: TerminalPanelProps) {
       cleanupTransport = () => {
         input.dispose()
         abort.abort()
-        if (remoteId) void agentsApi.closeTerminal(props.threadId, remoteId)
+        if (remoteId) void agentsApi.closeTerminal(cloudThreadId, remoteId)
       }
     }
 
@@ -159,7 +165,7 @@ export function TerminalPanel(props: TerminalPanelProps) {
       cleanupTransport()
       terminal.dispose()
     }
-  }, [props])
+  }, [cloudThreadId, localCwd, localId])
 
   return (
     <div className="relative h-full min-h-0 bg-[#111111] p-2">
