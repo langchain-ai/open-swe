@@ -10,6 +10,10 @@ from agent.utils.thread_ids import generate_thread_id_from_slack_thread
 slack_breakout_tool = importlib.import_module("agent.tools.slack_start_new_thread")
 
 
+async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
+    return "https://smith/x"
+
+
 def _config() -> dict[str, Any]:
     return {
         "configurable": {
@@ -118,9 +122,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     )
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
     monkeypatch.setattr(slack_breakout_tool, "store_slack_run_mapping", fake_store_mapping)
-    monkeypatch.setattr(
-        slack_breakout_tool, "get_langsmith_trace_url", lambda thread_id: "https://smith/x"
-    )
+    monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
     monkeypatch.setattr(
         slack_breakout_tool,
         "dashboard_thread_url",

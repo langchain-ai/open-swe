@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import re
@@ -213,10 +212,9 @@ async def process_github_reaction(
     }
     score = _score_reactions(active_reactions)
     if score is None:
-        success = await asyncio.to_thread(delete_langsmith_feedback, run_id, key)
+        success = await delete_langsmith_feedback(run_id, key)
     else:
-        success = await asyncio.to_thread(
-            create_langsmith_feedback,
+        success = await create_langsmith_feedback(
             run_id,
             key,
             score=score,
@@ -226,8 +224,7 @@ async def process_github_reaction(
     outcome = outcome_from_score(score, source="github")
     if outcome is not None:
         label, label_source = outcome
-        await asyncio.to_thread(
-            upsert_finding_outcome,
+        await upsert_finding_outcome(
             finding,
             label=label,
             label_source=label_source,

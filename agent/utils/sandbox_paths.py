@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import posixpath
 import shlex
-from collections.abc import Iterable
+from collections.abc import AsyncIterable, Iterable
 from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -17,30 +16,25 @@ _WORK_DIR_CACHE_ATTR = "_open_swe_resolved_work_dir"
 _PROVIDER_ATTR_NAMES = ("sandbox", "_sandbox")
 
 
-def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: str) -> str:
+async def aresolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: str) -> str:
     """Resolve the repository directory for a sandbox backend."""
     if not repo_name:
         raise ValueError("repo_name must be a non-empty string")
 
-    work_dir = resolve_sandbox_work_dir(sandbox_backend)
+    work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
     return posixpath.join(work_dir, repo_name)
 
 
-async def aresolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: str) -> str:
-    """Async wrapper around resolve_repo_dir for use in event-loop code."""
-    return await asyncio.to_thread(resolve_repo_dir, sandbox_backend, repo_name)
-
-
-def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
+async def aresolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
     """Resolve a writable base directory for repository operations."""
     cached_work_dir = getattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, None)
     if isinstance(cached_work_dir, str) and cached_work_dir:
         return cached_work_dir
 
     checked_candidates: list[str] = []
-    for candidate in _iter_work_dir_candidates(sandbox_backend):
+    async for candidate in _iter_work_dir_candidates(sandbox_backend):
         checked_candidates.append(candidate)
-        if _is_writable_directory(sandbox_backend, candidate):
+        if await _is_writable_directory(sandbox_backend, candidate):
             _cache_work_dir(sandbox_backend, candidate)
             return candidate
 
@@ -50,14 +44,9 @@ def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
     raise RuntimeError(msg)
 
 
-async def aresolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
-    """Async wrapper around resolve_sandbox_work_dir for use in event-loop code."""
-    return await asyncio.to_thread(resolve_sandbox_work_dir, sandbox_backend)
-
-
-def _iter_work_dir_candidates(
+async def _iter_work_dir_candidates(
     sandbox_backend: SandboxBackendProtocol,
-) -> Iterable[str]:
+) -> AsyncIterable[str]:
     seen: set[str] = set()
 
     for candidate in _iter_provider_paths(sandbox_backend, "get_work_dir"):
@@ -65,7 +54,7 @@ def _iter_work_dir_candidates(
             seen.add(candidate)
             yield candidate
 
-    shell_work_dir = _resolve_shell_path(sandbox_backend, "pwd")
+    shell_work_dir = await _resolve_shell_path(sandbox_backend, "pwd")
     if shell_work_dir and shell_work_dir not in seen:
         seen.add(shell_work_dir)
         yield shell_work_dir
@@ -79,7 +68,7 @@ def _iter_work_dir_candidates(
             seen.add(candidate)
             yield candidate
 
-    shell_home_dir = _resolve_shell_path(sandbox_backend, "printf '%s' \"$HOME\"")
+    shell_home_dir = await _resolve_shell_path(sandbox_backend, "printf '%s' \"$HOME\"")
     if shell_home_dir and shell_home_dir not in seen:
         seen.add(shell_home_dir)
         yield shell_home_dir
@@ -117,11 +106,11 @@ def _call_path_method(provider: Any, method_name: str) -> str | None:
         return None
 
 
-def _resolve_shell_path(
+async def _resolve_shell_path(
     sandbox_backend: SandboxBackendProtocol,
     command: str,
 ) -> str | None:
-    result = sandbox_backend.execute(command)
+    result = await sandbox_backend.aexecute(command)
     if result.exit_code != 0:
         return None
     return _normalize_path(result.output)
@@ -138,12 +127,12 @@ def _normalize_path(raw_path: str | None) -> str | None:
     return posixpath.normpath(path)
 
 
-def _is_writable_directory(
+async def _is_writable_directory(
     sandbox_backend: SandboxBackendProtocol,
     directory: str,
 ) -> bool:
     safe_directory = shlex.quote(directory)
-    result = sandbox_backend.execute(f"test -d {safe_directory} && test -w {safe_directory}")
+    result = await sandbox_backend.aexecute(f"test -d {safe_directory} && test -w {safe_directory}")
     return result.exit_code == 0
 
 

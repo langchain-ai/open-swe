@@ -293,8 +293,8 @@ def _thread_with_metadata(metadata: dict) -> dict:
     return {"thread_id": "t1", "status": "idle", "metadata": metadata}
 
 
-def test_thread_summary_includes_pr_and_diff_stats() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_includes_pr_and_diff_stats() -> None:
+    summary = await thread_api._thread_summary(
         _thread_with_metadata(
             {
                 "repo_full_name": "langchain-ai/open-swe",
@@ -321,8 +321,8 @@ def test_thread_summary_includes_pr_and_diff_stats() -> None:
     assert summary["diffStats"] == {"files": 3, "additions": 10, "deletions": 2}
 
 
-def test_thread_summary_defaults_unknown_pr_state_to_open() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_defaults_unknown_pr_state_to_open() -> None:
+    summary = await thread_api._thread_summary(
         _thread_with_metadata(
             {
                 "pr_number": 7,
@@ -335,27 +335,29 @@ def test_thread_summary_defaults_unknown_pr_state_to_open() -> None:
     assert summary["pr"]["state"] == "open"
 
 
-def test_thread_summary_omits_pr_when_no_pr_metadata() -> None:
-    summary = thread_api._thread_summary(_thread_with_metadata({"title": "No PR"}))
+async def test_thread_summary_omits_pr_when_no_pr_metadata() -> None:
+    summary = await thread_api._thread_summary(_thread_with_metadata({"title": "No PR"}))
 
     assert "pr" not in summary
     assert "diffStats" not in summary
 
 
-def test_thread_summary_exposes_sandbox_id() -> None:
-    summary = thread_api._thread_summary(_thread_with_metadata({"sandbox_id": "sb-abc123"}))
+async def test_thread_summary_exposes_sandbox_id() -> None:
+    summary = await thread_api._thread_summary(_thread_with_metadata({"sandbox_id": "sb-abc123"}))
 
     assert summary["sandboxId"] == "sb-abc123"
 
 
-def test_thread_summary_hides_creating_sandbox_sentinel() -> None:
-    summary = thread_api._thread_summary(_thread_with_metadata({"sandbox_id": "__creating__"}))
+async def test_thread_summary_hides_creating_sandbox_sentinel() -> None:
+    summary = await thread_api._thread_summary(
+        _thread_with_metadata({"sandbox_id": "__creating__"})
+    )
 
     assert summary["sandboxId"] is None
 
 
-def test_thread_summary_includes_slack_source_url_for_private_repo() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_includes_slack_source_url_for_private_repo() -> None:
+    summary = await thread_api._thread_summary(
         _thread_with_metadata(
             {
                 "source": "slack",
@@ -368,8 +370,8 @@ def test_thread_summary_includes_slack_source_url_for_private_repo() -> None:
     assert summary["sourceUrl"] == "https://slack.example/thread"
 
 
-def test_thread_summary_omits_slack_source_url_for_public_repo() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_omits_slack_source_url_for_public_repo() -> None:
+    summary = await thread_api._thread_summary(
         _thread_with_metadata(
             {
                 "source": "slack",
@@ -429,7 +431,7 @@ async def test_recovery_patch_downloads_generated_patch(monkeypatch) -> None:
         }
 
     class FakeSandbox:
-        def execute(self, command: str, *, timeout: int | None = None):
+        async def aexecute(self, command: str, *, timeout: int | None = None):
             assert "repo" in command
             assert timeout == thread_api._RECOVERY_PATCH_TIMEOUT_SECONDS
             return SimpleNamespace(
@@ -437,7 +439,7 @@ async def test_recovery_patch_downloads_generated_patch(monkeypatch) -> None:
                 exit_code=0,
             )
 
-        def download_files(self, paths: list[str]):
+        async def adownload_files(self, paths: list[str]):
             assert paths == ["/tmp/open-swe-tid.patch"]
             return [SimpleNamespace(content=b"patch bytes")]
 
@@ -455,7 +457,7 @@ async def test_recovery_patch_rejects_empty_patch(monkeypatch) -> None:
         return {"thread_id": thread_id, "metadata": {"sandbox_id": "sbx", "github_login": login}}
 
     class FakeSandbox:
-        def execute(self, command: str, *, timeout: int | None = None):
+        async def aexecute(self, command: str, *, timeout: int | None = None):
             return SimpleNamespace(
                 output=json.dumps({"ok": True, "path": "/tmp/open-swe-tid.patch", "size": 0}),
                 exit_code=0,
@@ -476,7 +478,7 @@ async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
         return {"thread_id": thread_id, "metadata": {"sandbox_id": "sbx", "github_login": login}}
 
     class FakeSandbox:
-        def execute(self, command: str, *, timeout: int | None = None):
+        async def aexecute(self, command: str, *, timeout: int | None = None):
             return SimpleNamespace(
                 output=json.dumps(
                     {
@@ -1134,8 +1136,8 @@ async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> N
     assert payload["text"] == "ship it"
 
 
-def test_thread_summary_exposes_resolved_state() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_exposes_resolved_state() -> None:
+    summary = await thread_api._thread_summary(
         {
             "thread_id": "tid",
             "metadata": {
@@ -1151,8 +1153,8 @@ def test_thread_summary_exposes_resolved_state() -> None:
     assert summary["resolvedAt"] == 1700
 
 
-def test_thread_summary_defaults_to_not_resolved() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_defaults_to_not_resolved() -> None:
+    summary = await thread_api._thread_summary(
         {"thread_id": "tid", "metadata": {"source": "dashboard", "github_login": "octocat"}}
     )
 
@@ -1160,8 +1162,8 @@ def test_thread_summary_defaults_to_not_resolved() -> None:
     assert summary["resolvedAt"] is None
 
 
-def test_thread_summary_is_owner_true_for_matching_login() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_is_owner_true_for_matching_login() -> None:
+    summary = await thread_api._thread_summary(
         {"thread_id": "tid", "metadata": {"source": "slack", "github_login": "octocat"}},
         owner_login="octocat",
     )
@@ -1169,8 +1171,8 @@ def test_thread_summary_is_owner_true_for_matching_login() -> None:
     assert summary["isOwner"] is True
 
 
-def test_thread_summary_is_owner_false_for_non_owner() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_is_owner_false_for_non_owner() -> None:
+    summary = await thread_api._thread_summary(
         {"thread_id": "tid", "metadata": {"source": "slack", "github_login": "octocat"}},
         owner_login="teammate",
     )
@@ -1178,8 +1180,8 @@ def test_thread_summary_is_owner_false_for_non_owner() -> None:
     assert summary["isOwner"] is False
 
 
-def test_thread_summary_is_owner_true_for_matching_email() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_is_owner_true_for_matching_email() -> None:
+    summary = await thread_api._thread_summary(
         {
             "thread_id": "tid",
             "metadata": {
@@ -1195,8 +1197,8 @@ def test_thread_summary_is_owner_true_for_matching_email() -> None:
     assert summary["isOwner"] is True
 
 
-def test_thread_summary_is_owner_defaults_true_without_owner_login() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_is_owner_defaults_true_without_owner_login() -> None:
+    summary = await thread_api._thread_summary(
         {"thread_id": "tid", "metadata": {"source": "slack", "github_login": "octocat"}},
     )
 

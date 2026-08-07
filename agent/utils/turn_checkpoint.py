@@ -12,7 +12,6 @@ gets ``None`` / ``status="error"`` and the UI degrades to "diff unavailable".
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import json
@@ -136,7 +135,7 @@ def _ok(response: Any) -> bool:
 
 
 async def _execute(sandbox: Any, command: str, timeout: int) -> Any:
-    return await asyncio.to_thread(sandbox.execute, command, timeout=timeout)
+    return await sandbox.aexecute(command, timeout=timeout)
 
 
 def parse_numstat(raw: str) -> list[tuple[str, int | None, int | None]]:

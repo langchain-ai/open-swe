@@ -8,6 +8,10 @@ import pytest
 from agent.dashboard import thread_api
 
 
+async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
+    return f"https://smith.example/t/{thread_id}"
+
+
 def test_resolve_repo_config_parses_request_repo() -> None:
     assert thread_api._resolve_repo_config("octo/repo") == {"owner": "octo", "name": "repo"}
 
@@ -18,16 +22,16 @@ def test_resolve_repo_config_returns_empty_when_no_repo_given() -> None:
     assert thread_api._resolve_repo_config("not-a-repo") == {}
 
 
-def test_thread_summary_blanks_repo_when_absent() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_blanks_repo_when_absent() -> None:
+    summary = await thread_api._thread_summary(
         {"thread_id": "t1", "metadata": {"source": "dashboard", "title": "no repo run"}}
     )
     assert summary["repo"] == ""
     assert summary["repoFullName"] == ""
 
 
-def test_thread_summary_keeps_repo_when_present() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_keeps_repo_when_present() -> None:
+    summary = await thread_api._thread_summary(
         {
             "thread_id": "t2",
             "metadata": {
@@ -42,13 +46,13 @@ def test_thread_summary_keeps_repo_when_present() -> None:
     assert summary["repoFullName"] == "octo/repo"
 
 
-def test_thread_summary_includes_trace_url(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_thread_summary_includes_trace_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         thread_api,
         "get_langsmith_trace_url",
-        lambda thread_id: f"https://smith.example/t/{thread_id}",
+        _fake_trace_url,
     )
-    summary = thread_api._thread_summary(
+    summary = await thread_api._thread_summary(
         {"thread_id": "t3", "metadata": {"source": "dashboard", "title": "traced run"}}
     )
     assert summary["traceUrl"] == "https://smith.example/t/t3"

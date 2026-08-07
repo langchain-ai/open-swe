@@ -69,7 +69,7 @@ async def post_linear_trace_comment(
     issue_id: str, thread_id: str, triggering_comment_id: str
 ) -> None:
     """Post a trace URL comment on a Linear issue."""
-    trace_url = get_langsmith_trace_url(thread_id)
+    trace_url = await get_langsmith_trace_url(thread_id)
     if trace_url:
         await comment_on_linear_issue(
             issue_id,

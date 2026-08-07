@@ -390,7 +390,7 @@ def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
     return permalink.strip() if isinstance(permalink, str) and permalink.strip() else None
 
 
-def _thread_summary(
+async def _thread_summary(
     thread: ThreadLike,
     *,
     latest_run_status: str | None = None,
@@ -418,7 +418,7 @@ def _thread_summary(
     pr_state = metadata.get("pr_state")
 
     thread_id = thread.get("thread_id") or thread.get("id")
-    trace_url = get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
+    trace_url = await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
 
     raw_sandbox_id = metadata.get("sandbox_id")
     # "__creating__" is the in-flight sentinel written before the real id lands.
@@ -664,7 +664,7 @@ async def _summarize_thread(
         thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
             client, thread
         )
-    return _thread_summary(
+    return await _thread_summary(
         thread,
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
@@ -1046,7 +1046,7 @@ async def get_dashboard_thread(
         )
         thread = {**as_thread_dict(thread), "metadata": metadata}
 
-    return _thread_summary(
+    return await _thread_summary(
         thread,
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
@@ -1490,7 +1490,7 @@ async def send_dashboard_message(
     except Exception:
         logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
     thread = await client.threads.get(thread_id)
-    return _thread_summary(thread)
+    return await _thread_summary(thread)
 
 
 async def _cancel_active_thread_runs(client: Any, thread_id: str) -> None:
@@ -1544,7 +1544,7 @@ async def cancel_dashboard_thread(
         metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
     )
     thread = await client.threads.get(thread_id)
-    return _thread_summary(thread)
+    return await _thread_summary(thread)
 
 
 async def admin_cancel_dashboard_thread(thread_id: str) -> dict[str, Any]:
@@ -1565,7 +1565,7 @@ async def admin_cancel_dashboard_thread(thread_id: str) -> dict[str, Any]:
         metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
     )
     updated_thread = await client.threads.get(thread_id)
-    return _thread_summary(updated_thread)
+    return await _thread_summary(updated_thread)
 
 
 async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | None = None) -> None:
@@ -1605,7 +1605,7 @@ async def resolve_dashboard_thread(
         logger.debug("Could not update resolved state for thread %s", thread_id, exc_info=True)
         raise HTTPException(502, "failed to update thread") from exc
     thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
-    return _thread_summary(thread)
+    return await _thread_summary(thread)
 
 
 async def _authorized_thread_metadata(
@@ -1876,8 +1876,7 @@ async def get_dashboard_thread_recovery_patch(
         raise HTTPException(502, "could not connect to thread sandbox") from exc
 
     try:
-        result = await asyncio.to_thread(
-            sandbox.execute,
+        result = await sandbox.aexecute(
             _recovery_patch_command(metadata, thread_id),
             timeout=_RECOVERY_PATCH_TIMEOUT_SECONDS,
         )
@@ -1910,7 +1909,7 @@ async def get_dashboard_thread_recovery_patch(
         raise HTTPException(502, "failed to generate recovery patch")
 
     try:
-        downloads = await asyncio.to_thread(sandbox.download_files, [patch_path])
+        downloads = await sandbox.adownload_files([patch_path])
     except Exception as exc:  # noqa: BLE001
         logger.debug("Recovery patch download failed for %s", thread_id, exc_info=True)
         raise HTTPException(502, "failed to download recovery patch") from exc
