@@ -37,18 +37,18 @@ logger = logging.getLogger(__name__)
 _HEARTBEAT_INTERVAL_SECONDS = 60.0
 _MAX_HEARTBEAT_SECONDS = 60 * 60
 _LOADING_TIPS: tuple[str, ...] = (
-    "Tip: I work while you're away",
-    "Tip: Send follow-ups while I work",
-    "Tip: Run tasks in parallel",
-    "Tip: Each task gets an isolated sandbox",
-    "Tip: Mention me from Slack, Linear, or GitHub",
-    "Tip: Use repo:owner/name to choose the repository",
-    "Tip: I can open draft pull requests",
-    "Tip: I can delegate work to subagents",
-    "Tip: Open the web dashboard to follow my progress",
-    "Tip: Choose your model and effort in Profile",
-    "Tip: Add AGENTS.md to teach me repo conventions",
-    "Tip: Ask me to split work into a new Slack thread",
+    "Tip: Use repo:owner/name to override the repository",
+    "Tip: Send follow-ups mid-run; I read them before my next step",
+    "Tip: Ask for plan mode to review my approach before edits",
+    "Tip: Paste a LangSmith trace link for built-in inspection",
+    "Tip: Ask me to check back after CI or a deploy finishes",
+    'Tip: Say "split this out" to start a new Slack thread',
+    "Tip: Ask me to create a reusable skill for future runs",
+    'Tip: Say "always..." to save a standing preference',
+    "Tip: Toggle Always Create PRs in your Profile",
+    "Tip: Add Repository Instructions for repo-specific behavior",
+    "Tip: Use @open-swe autofix off to pause fixes on one PR",
+    "Tip: Customize reviewer style prompts in the dashboard",
 )
 
 _T = TypeVar("_T")
