@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { CircleAlert as CircleAlertIcon, Map as MapIcon } from "lucide-react"
 
@@ -172,6 +172,21 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
   // Show a loading state during that one-time fetch instead of the empty state.
   const isHydrating = stream.isThreadLoading && !hasMessages
+  // A failed hydrate is indistinguishable from an empty thread in the snapshot,
+  // so say so rather than claiming the thread has no messages. `stream.error`
+  // also carries run failures, hence the dedicated hydration signal.
+  const [hydrateRejected, setHydrateRejected] = useState(false)
+  useEffect(() => {
+    let active = true
+    setHydrateRejected(false)
+    stream.hydrationPromise.catch(() => {
+      if (active) setHydrateRejected(true)
+    })
+    return () => {
+      active = false
+    }
+  }, [stream.hydrationPromise])
+  const hydrationFailed = !isHydrating && !hasMessages && hydrateRejected
 
   return (
     <div className="flex min-w-0 flex-1">
@@ -305,9 +320,21 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            <p className="text-xs text-muted-foreground/70">
-              This thread has no messages yet.
-            </p>
+            {hydrationFailed ? (
+              <Alert variant="error" className="max-w-3xl">
+                <CircleAlertIcon />
+                <AlertDescription>
+                  <span>
+                    This thread&apos;s messages could not be loaded. Reload to
+                    try again.
+                  </span>
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <p className="text-xs text-muted-foreground/70">
+                This thread has no messages yet.
+              </p>
+            )}
             <div className="w-full max-w-3xl">
               <AgentPromptBar
                 placeholder="Send the first message"

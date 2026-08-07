@@ -115,6 +115,13 @@ export function AgentThreadStreamProvider({
     []
   )
 
+  // `StreamController` never binds the thread id on a transport it did not
+  // build — only `client.threads.stream(threadId, { transport })` does, which
+  // runs on submit. Hydration reads `transport.getState()` first, so an unbound
+  // transport throws there and leaves the transcript empty. Bind in render: the
+  // SDK's hydrate effect fires before any effect of ours could.
+  transport.setThreadId(threadId ?? "")
+
   // The SDK captures the lifecycle callbacks once at controller creation, so
   // they must be stable. Read the live thread id from a ref instead of
   // closing over the (changing) prop.
