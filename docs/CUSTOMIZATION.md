@@ -47,6 +47,28 @@ This is useful for pre-installing languages, frameworks, or internal tools that 
 
 `REPO_SNAPSHOT_BASE_IMAGE` should point to the published Docker image used to create your default Open SWE sandbox snapshot (typically the image built from this repository's `Dockerfile.sandbox`). The admin **Repository Snapshots** page uses it as the base image when generating per-repo Dockerfile templates. If it is not configured, template generation fails closed instead of suggesting a bare image that would be missing Open SWE's required sandbox tools.
 
+### Scheduled repo cache warming
+
+Open SWE records every repo it preps a sandbox for. On a schedule it can rebuild the shared snapshot with the most-used of those repos already cloned into the sandbox work dir, so runs skip the cold clone.
+
+This is configured entirely from the admin **Snapshots** page (`/agents/snapshots`) — there are no environment variables. It is off until an admin turns it on, and the page controls the schedule, how many repos to bake in, how long a repo may go unused before it drops out, and how many captures to retain. The same page shows the clone ledger, the last build's result, and a **Rebuild now** button.
+
+Repos are cached as ready-to-use checkouts under `<work-dir>/.repo-cache/<owner>/<name>`. A run takes one with a `mv` — a rename within a single filesystem, so it is O(1) whatever the repo's size — then fetches origin. Full checkouts rather than bare mirrors because materializing the working tree is the expensive half, and because installed dependencies can be baked into the tree and ride along with the same rename.
+
+Warms are incremental: the builder boots from the previous capture and each repo is fetched rather than re-cloned, so anything baked in survives. It falls back to the seed image automatically when `DEFAULT_SANDBOX_SNAPSHOT_ID` changes — otherwise a new base image would never reach the chain — and on demand via **Rebuild from scratch** on the admin page. How the cache reaches a run depends on the provider:
+
+| `SANDBOX_TYPE` | Mode | How it works |
+|---|---|---|
+| `langsmith` | `snapshot` | Warms a throwaway builder booted from the previous capture, then captures it as an image. New sandboxes boot from that capture unless the repo has its own snapshot, which still wins. |
+| `local` | `cache` | Warms the shared work dir in place. No image involved — the cache simply persists. |
+| others | — | Fails with a clear message: without a capture API *and* without a persistent filesystem, a warmed cache would be discarded with the sandbox that built it. |
+
+A failed run leaves the last good capture in place, and with no capture at all runs fall back to `DEFAULT_SANDBOX_SNAPSHOT_ID`.
+
+The cache dir is hidden (dot-prefixed) and lives inside the work dir rather than at an absolute path, so the `local` provider writes inside `LOCAL_SANDBOX_ROOT_DIR` instead of your host's filesystem. The visible work dir stays empty. The agent gets a repo by calling the `repo` tool with `action: "clone"`, which takes the baked checkout when one exists (a rename, effectively free) and clones over the network when it doesn't, then fetches origin either way so the checkout carries commits made since the last warm. A `fetched: false` in its result means that fetch failed and the tree may be behind. The ledger is built from those tool calls, so it records what was actually cloned — a thread may clone as many repos as the task needs.
+
+Every repo baked in is readable by every run booting from that snapshot, including runs targeting a different repo. Leave the nightly rebuild off if that is not acceptable for your installation.
+
 For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
 
 - `github.com` / `*.github.com` receive Basic auth for git-over-HTTPS operations.

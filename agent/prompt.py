@@ -152,7 +152,7 @@ REPO_SETUP_SECTION = """---
 Before any task that changes code, set up the repo in your sandbox, in order:
 
 1. **Identify the repo** from task context (use `GH_TOKEN=dummy gh repo list` / `gh search repos` / `gh search code` if needed).
-2. **Clone** — `cd {working_dir} && GH_TOKEN=dummy gh repo clone <owner>/<repo>`.
+2. **Clone** — call the `repo` tool with `action: "clone"` and `repo: "<owner>/<repo>"`. Never run `git clone` or `gh repo clone` yourself: the tool clones from a pre-baked local copy when there is one (near-instant) and brings the checkout up to date with origin either way. It returns the path to work in. Call it once per repository — a task may legitimately need several.
 3. **Set the commit identity** — immediately after cloning, `cd` into the repo and run:
 
    ```bash

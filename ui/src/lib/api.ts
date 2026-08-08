@@ -393,6 +393,51 @@ export interface RepoSnapshot {
   updated_at?: string
 }
 
+export interface BaseSnapshotSettings {
+  enabled: boolean
+  schedule: string
+  preclone_limit: number
+  max_age_days: number
+  keep_snapshots: number
+  pre_script: string
+  post_script: string
+}
+
+export interface BaseSnapshotProgress {
+  phase: "starting" | "cloning" | "capturing"
+  completed: number
+  total: number
+}
+
+export interface BaseSnapshotRecord {
+  settings: BaseSnapshotSettings
+  mode?: "snapshot" | "cache"
+  progress?: BaseSnapshotProgress | null
+  snapshot_id?: string | null
+  snapshot_name?: string | null
+  status?: RepoSnapshotStatus
+  status_message?: string | null
+  repos?: Array<string>
+  skipped_repos?: Array<string>
+  failed_repos?: Array<string>
+  built_at?: string | null
+  last_attempt_at?: string | null
+  cron_id?: string | null
+}
+
+export interface RepoCloneStat {
+  full_name: string
+  clone_count: number
+  first_cloned_at?: string
+  last_cloned_at?: string
+}
+
+export interface BaseSnapshotView {
+  record: BaseSnapshotRecord
+  clone_stats: Array<RepoCloneStat>
+  next_preclone: Array<string>
+}
+
 export interface RepoSnapshotUpdateBody {
   dockerfile: string
   fs_capacity_bytes?: number | null
@@ -722,6 +767,17 @@ export const api = {
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
+  getBaseSnapshot: () => request<BaseSnapshotView>("/base-snapshot"),
+  saveBaseSnapshotSettings: (body: BaseSnapshotSettings) =>
+    request<BaseSnapshotRecord>("/base-snapshot/settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  rebuildBaseSnapshot: (fromScratch = false) =>
+    request<BaseSnapshotRecord>(
+      `/base-snapshot/rebuild?from_scratch=${fromScratch}`,
+      { method: "POST" }
+    ),
   listRepoSnapshots: () => request<Array<RepoSnapshot>>("/repo-snapshots"),
   createRepoSnapshot: (full_name: string) =>
     request<RepoSnapshot>("/repo-snapshots", {

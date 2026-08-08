@@ -23,6 +23,7 @@ _TOOL_MODULES = {
     "publish_review": ".publish_review",
     "read_repo_file": ".read_repo_file",
     "recreate_sandbox": ".recreate_sandbox",
+    "repo": ".repo_tool",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": ".request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
@@ -62,6 +63,7 @@ __all__ = [
     "publish_review",
     "read_repo_file",
     "recreate_sandbox",
+    "repo",
     "report_platform_issue",
     "request_pr_review",
     "reply_to_finding_thread",
@@ -102,6 +104,7 @@ if TYPE_CHECKING:
     from .read_repo_file import read_repo_file
     from .recreate_sandbox import recreate_sandbox
     from .reply_to_finding_thread import reply_to_finding_thread
+    from .repo_tool import repo
     from .report_platform_issue import report_platform_issue
     from .request_pr_review import request_pr_review
     from .resolve_finding_thread import resolve_finding_thread

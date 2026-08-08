@@ -1,0 +1,50 @@
+# Verifies the sandbox repo cache against real LangSmith sandboxes: warm a
+# builder, capture it, boot a fresh sandbox from the capture, and take the repo
+# out of the cache. The unit tests only assert on generated shell strings, so
+# this is the only thing that catches a capture that drops the cache or a work
+# dir that moves between builder and run.
+#
+# Not run on pull requests: it creates real cloud resources and costs money.
+#
+# Required repository config:
+#   secrets: LANGSMITH_API_KEY   (must have sandbox access)
+#   vars:    SNAPSHOT_E2E_ENDPOINT  (optional; defaults to prod)
+name: Snapshot cache E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Public owner/name to cache
+        type: string
+        default: langchain-ai/open-swe
+  schedule:
+    # Weekly, well clear of the nightly base-snapshot rebuild window.
+    - cron: "0 13 * * 1"
+
+permissions:
+  contents: read
+
+# Serialized: concurrent runs would each create sandboxes and snapshots in the
+# same workspace, and a cancelled run cannot clean up after itself.
+concurrency:
+  group: snapshot-cache-e2e
+  cancel-in-progress: false
+
+jobs:
+  snapshot-cache-e2e:
+    name: Snapshot cache E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Run snapshot cache E2E
+        env:
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+        run: |
+          uv run python tests/e2e/snapshot_cache_e2e.py \
+            --repo "${{ inputs.repo || 'langchain-ai/open-swe' }}" \
+            ${{ vars.SNAPSHOT_E2E_ENDPOINT && format('--endpoint {0}', vars.SNAPSHOT_E2E_ENDPOINT) || '' }}
