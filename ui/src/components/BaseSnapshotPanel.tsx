@@ -1,3 +1,4 @@
+import { Dialog } from "@base-ui/react/dialog"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
@@ -65,6 +66,7 @@ export function BaseSnapshotPanel() {
   const qc = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<BaseSnapshotSettings>(DEFAULT_SETTINGS)
+  const [scratchOpen, setScratchOpen] = useState(false)
 
   const view = useQuery({
     queryKey: ["baseSnapshot"],
@@ -298,19 +300,7 @@ export function BaseSnapshotPanel() {
             disabled={
               dirty || !stored?.enabled || building || rebuild.isPending
             }
-            onClick={() => {
-              if (
-                !window.confirm(
-                  "Discard the current snapshot and rebuild from the base image? " +
-                    "Every repo is re-cloned from scratch, so this is much slower " +
-                    "than a normal rebuild. Runs keep using the current snapshot " +
-                    "until the new one is ready."
-                )
-              ) {
-                return
-              }
-              void rebuild.mutateAsync(true).catch(() => undefined)
-            }}
+            onClick={() => setScratchOpen(true)}
           >
             Rebuild from scratch
           </Button>
@@ -320,6 +310,46 @@ export function BaseSnapshotPanel() {
             </span>
           )}
         </div>
+
+        <Dialog.Root open={scratchOpen} onOpenChange={setScratchOpen}>
+          <Dialog.Portal>
+            <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+            <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-6 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+              <div className="flex flex-col gap-4">
+                <Dialog.Title className="text-sm font-medium">
+                  Rebuild from scratch
+                </Dialog.Title>
+                <Dialog.Description className="text-xs text-muted-foreground">
+                  Discards the current snapshot and starts from the base sandbox
+                  image. Every repo is cloned again and both scripts re-run, so
+                  this is much slower than a normal rebuild. Runs keep using the
+                  current snapshot until the new one is ready.
+                </Dialog.Description>
+                <div className="mt-2 flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setScratchOpen(false)}
+                    disabled={rebuild.isPending}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={rebuild.isPending}
+                    onClick={() => {
+                      setScratchOpen(false)
+                      void rebuild.mutateAsync(true).catch(() => undefined)
+                    }}
+                  >
+                    Rebuild from scratch
+                  </Button>
+                </div>
+              </div>
+            </Dialog.Popup>
+          </Dialog.Portal>
+        </Dialog.Root>
 
         <p className="text-xs text-muted-foreground">
           Rebuilds start from the current snapshot and only fetch what changed.
