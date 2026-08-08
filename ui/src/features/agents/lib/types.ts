@@ -13,18 +13,10 @@ export type ChunkKind =
 export type TodoStatus = "pending" | "in_progress" | "completed"
 
 export type AgentStatus =
-  | "idle"
-  | "running"
-  | "finished"
-  | "interrupted"
-  | "error"
+  "idle" | "running" | "finished" | "interrupted" | "error"
 
 export type AgentSource =
-  | "dashboard"
-  | "github"
-  | "slack"
-  | "linear"
-  | "schedule"
+  "dashboard" | "github" | "slack" | "linear" | "schedule"
 
 export interface TodoItem {
   content: string

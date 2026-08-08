@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import type { AgentSource, AgentStatus } from "@/features/agents/lib/types"
-import type { ThreadsPageFilters } from "@/features/agents/components/AgentsThreadsPage";
+import type { ThreadsPageFilters } from "@/features/agents/components/AgentsThreadsPage"
 import { AgentsThreadsPage } from "@/features/agents/components/AgentsThreadsPage"
 
 const SOURCES: ReadonlyArray<AgentSource> = [

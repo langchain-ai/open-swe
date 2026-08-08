@@ -121,13 +121,17 @@ describe("ChatComposer skill autocomplete", () => {
       rangeStart: 7,
       rangeEnd: 12,
     }
-    const items = buildCommandItems(trigger, [], [
-      {
-        name: "plan",
-        description: "Create an implementation plan",
-        instructions: "",
-      },
-    ])
+    const items = buildCommandItems(
+      trigger,
+      [],
+      [
+        {
+          name: "plan",
+          description: "Create an implementation plan",
+          instructions: "",
+        },
+      ]
+    )
 
     expect(items).toEqual([
       expect.objectContaining({ type: "skill", name: "plan" }),

@@ -10,7 +10,10 @@ import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { describeCron, isDescribableCron } from "@/features/automations/lib/cron"
+import {
+  describeCron,
+  isDescribableCron,
+} from "@/features/automations/lib/cron"
 import {
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
@@ -36,9 +39,7 @@ function scheduleToSelection(
     (model) =>
       model.id === schedule.model && model.efforts.includes(schedule.effort!)
   )
-  return supported
-    ? { modelId: schedule.model, effort: schedule.effort }
-    : null
+  return supported ? { modelId: schedule.model, effort: schedule.effort } : null
 }
 
 export function AutomationEditor({

@@ -1,38 +1,38 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react"
 
-import { MessageTimestamp } from "./MessageTimestamp";
-import type { Message } from "@/features/agents/lib/types";
+import { MessageTimestamp } from "./MessageTimestamp"
+import type { Message } from "@/features/agents/lib/types"
 
 export function UserMessage({ message }: { message: Message }) {
   const text = message.chunks
     .filter((c) => c.kind === "text")
     .map((c) => c.text)
-    .join("");
+    .join("")
 
-  const images = message.chunks.filter((c) => c.kind === "image");
-  const textRef = useRef<HTMLDivElement>(null);
-  const [scrolledFromTop, setScrolledFromTop] = useState(false);
-  const [scrolledFromBottom, setScrolledFromBottom] = useState(false);
+  const images = message.chunks.filter((c) => c.kind === "image")
+  const textRef = useRef<HTMLDivElement>(null)
+  const [scrolledFromTop, setScrolledFromTop] = useState(false)
+  const [scrolledFromBottom, setScrolledFromBottom] = useState(false)
 
   const updateScrollIndicators = useCallback(() => {
-    const el = textRef.current;
-    if (!el) return;
-    setScrolledFromTop(el.scrollTop > 0);
-    setScrolledFromBottom(el.scrollTop < el.scrollHeight - el.clientHeight - 1);
-  }, []);
+    const el = textRef.current
+    if (!el) return
+    setScrolledFromTop(el.scrollTop > 0)
+    setScrolledFromBottom(el.scrollTop < el.scrollHeight - el.clientHeight - 1)
+  }, [])
 
   useLayoutEffect(() => {
-    updateScrollIndicators();
-  }, [text, updateScrollIndicators]);
+    updateScrollIndicators()
+  }, [text, updateScrollIndicators])
 
-  const topStop = scrolledFromTop ? "transparent 0, black 24px" : "black 0";
+  const topStop = scrolledFromTop ? "transparent 0, black 24px" : "black 0"
   const bottomStop = scrolledFromBottom
     ? "black calc(100% - 24px), transparent 100%"
-    : "black 100%";
+    : "black 100%"
   const textEdgeMask =
     scrolledFromTop || scrolledFromBottom
       ? `linear-gradient(to bottom, ${topStop}, ${bottomStop})`
-      : undefined;
+      : undefined
 
   return (
     <div className="group/turn my-4 flex flex-col items-end gap-1">
@@ -59,7 +59,7 @@ export function UserMessage({ message }: { message: Message }) {
               <div
                 ref={textRef}
                 onScroll={updateScrollIndicators}
-                className="max-h-[250px] overflow-auto whitespace-pre-wrap break-words text-[13px] leading-6 text-accent-foreground"
+                className="max-h-[250px] overflow-auto text-[13px] leading-6 break-words whitespace-pre-wrap text-accent-foreground"
                 style={{
                   maskImage: textEdgeMask,
                   WebkitMaskImage: textEdgeMask,
@@ -79,5 +79,5 @@ export function UserMessage({ message }: { message: Message }) {
         )}
       </div>
     </div>
-  );
+  )
 }

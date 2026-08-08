@@ -43,9 +43,7 @@ export function AutomationsList() {
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
-        <h1 className="text-base font-medium text-foreground">
-          Automations
-        </h1>
+        <h1 className="text-base font-medium text-foreground">Automations</h1>
         <p className="mt-1 text-xs text-muted-foreground">
           Run Open SWE on a recurring schedule. Each run starts a fresh agent
           thread.
@@ -55,7 +53,11 @@ export function AutomationsList() {
           <StatCard label="Total" value={total} />
           <StatCard label="Active" value={active} />
           <StatCard label="Paused" value={paused} />
-          <StatCard label="Needs attention" value={issues} highlight={issues > 0} />
+          <StatCard
+            label="Needs attention"
+            value={issues}
+            highlight={issues > 0}
+          />
         </div>
 
         <div className="mt-8 flex items-center justify-between">

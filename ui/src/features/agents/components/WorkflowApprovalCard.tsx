@@ -116,9 +116,7 @@ export function WorkflowApprovalCard({
                 </p>
               )}
               {error && (
-                <p className="mt-3 text-xs text-destructive">
-                  {error}
-                </p>
+                <p className="mt-3 text-xs text-destructive">{error}</p>
               )}
 
               <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">

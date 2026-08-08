@@ -1,4 +1,7 @@
-import { useStreamContext as useAgentThreadStream, useToolCalls } from "@langchain/react"
+import {
+  useStreamContext as useAgentThreadStream,
+  useToolCalls,
+} from "@langchain/react"
 import { Check, Loader2, X } from "lucide-react"
 
 import { humanizeToolName } from "@/features/agents/lib/toolNames"
@@ -43,7 +46,7 @@ export function SubagentActivity({ namespace }: { namespace: Array<string> }) {
       <span className="truncate text-[10px] text-muted-foreground/70">
         {humanizeToolName(current.name)}
       </span>
-      <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+      <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
         {stepCount} {stepCount === 1 ? "step" : "steps"}
       </span>
     </div>

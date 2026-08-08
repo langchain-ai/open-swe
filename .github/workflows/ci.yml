@@ -47,6 +47,22 @@ jobs:
       - name: Run unit tests
         run: make test
 
+  ui-format:
+    name: UI format check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: Install UI dependencies
+        working-directory: ui
+        run: pnpm install --frozen-lockfile
+      - name: Run format check
+        working-directory: ui
+        run: pnpm run format:check
+
   desktop:
     name: Desktop checks
     runs-on: ubuntu-latest

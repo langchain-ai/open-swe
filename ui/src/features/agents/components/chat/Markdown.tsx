@@ -1,18 +1,18 @@
-import { Component, memo, useMemo } from "react";
-import { Streamdown, defaultUrlTransform } from "streamdown";
-import type { ComponentProps, ReactNode } from "react";
-import "streamdown/styles.css";
+import { Component, memo, useMemo } from "react"
+import { Streamdown, defaultUrlTransform } from "streamdown"
+import type { ComponentProps, ReactNode } from "react"
+import "streamdown/styles.css"
 
 interface MarkdownProps {
-  content: string;
+  content: string
   /** When true, keep Streamdown in streaming mode for the duration of the run. */
-  isLive?: boolean;
+  isLive?: boolean
   /**
    * Rewrite image `src` URLs before rendering (e.g. route private GitHub
    * attachments through an authenticated proxy). Return the URL unchanged to
    * leave it as-is.
    */
-  transformImageUrl?: (src: string) => string;
+  transformImageUrl?: (src: string) => string
 }
 
 /**
@@ -27,26 +27,26 @@ const STREAMDOWN_ANIMATED = {
   duration: 60,
   stagger: 10,
   easing: "ease-out",
-} as const;
+} as const
 
 const STREAMDOWN_COMPONENTS = {
   h1: ({ children }: { children?: ReactNode }) => (
-    <div className="text-foreground text-[15px] font-medium mt-4 mb-1.5 tracking-tight">
+    <div className="mt-4 mb-1.5 text-[15px] font-medium tracking-tight text-foreground">
       {children}
     </div>
   ),
   h2: ({ children }: { children?: ReactNode }) => (
-    <div className="text-foreground text-[14px] font-medium mt-3 mb-1.5 tracking-tight">
+    <div className="mt-3 mb-1.5 text-[14px] font-medium tracking-tight text-foreground">
       {children}
     </div>
   ),
   h3: ({ children }: { children?: ReactNode }) => (
-    <div className="text-foreground text-[13px] font-medium mt-3 mb-1">
+    <div className="mt-3 mb-1 text-[13px] font-medium text-foreground">
       {children}
     </div>
   ),
   p: ({ children }: { children?: ReactNode }) => (
-    <p className="my-1.5 text-foreground break-words [overflow-wrap:anywhere]">
+    <p className="my-1.5 [overflow-wrap:anywhere] break-words text-foreground">
       {children}
     </p>
   ),
@@ -57,16 +57,16 @@ const STREAMDOWN_COMPONENTS = {
     <div className="my-1.5 ml-4 min-w-0">{children}</div>
   ),
   li: ({ children }: { children?: ReactNode }) => (
-    <div className="text-foreground break-words [overflow-wrap:anywhere] [&>p]:inline [&>p]:my-0">
+    <div className="[overflow-wrap:anywhere] break-words text-foreground [&>p]:my-0 [&>p]:inline">
       - {children}
     </div>
   ),
   blockquote: ({ children }: { children?: ReactNode }) => (
-    <div className="my-2 border-l-2 border-border pl-3 text-muted-foreground break-words [overflow-wrap:anywhere]">
+    <div className="my-2 border-l-2 border-border pl-3 [overflow-wrap:anywhere] break-words text-muted-foreground">
       {children}
     </div>
   ),
-  hr: () => <hr className="border-border/60 my-3" />,
+  hr: () => <hr className="my-3 border-border/60" />,
   img: ({ src, alt }: ComponentProps<"img">) => (
     <img
       src={typeof src === "string" ? src : undefined}
@@ -75,58 +75,68 @@ const STREAMDOWN_COMPONENTS = {
       className="my-2 h-auto max-w-full rounded-md border border-border/60"
     />
   ),
-  code: ({ className, children }: { className?: string; children?: ReactNode }) => {
-    const text = String(children);
-    const match = /language-([^\s]+)/.exec(className || "");
-    const isBlock = match || text.includes("\n");
-    if (isBlock) return <code className={className}>{children}</code>;
+  code: ({
+    className,
+    children,
+  }: {
+    className?: string
+    children?: ReactNode
+  }) => {
+    const text = String(children)
+    const match = /language-([^\s]+)/.exec(className || "")
+    const isBlock = match || text.includes("\n")
+    if (isBlock) return <code className={className}>{children}</code>
     return (
-      <code className="rounded-md bg-accent px-1.5 py-0.5 font-mono text-[0.85em] text-primary whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+      <code className="rounded-md bg-accent px-1.5 py-0.5 font-mono text-[0.85em] [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary">
         {text}
       </code>
-    );
+    )
   },
-};
+}
 
-const SHIKI_THEME: ["github-light", "github-dark"] = ["github-light", "github-dark"];
+const SHIKI_THEME: ["github-light", "github-dark"] = [
+  "github-light",
+  "github-dark",
+]
 
 interface BoundaryProps {
-  content: string;
-  children: ReactNode;
+  content: string
+  children: ReactNode
 }
 
 interface BoundaryState {
-  failed: boolean;
-  key: string;
+  failed: boolean
+  key: string
 }
 
 // Streamdown bundles Mermaid and renders ```mermaid blocks itself; a diagram it
 // can't parse throws during render and, with no boundary, white-screens the
 // whole page. Contain it and fall back to the raw markdown text.
 class MarkdownErrorBoundary extends Component<BoundaryProps, BoundaryState> {
-  state: BoundaryState = { failed: false, key: this.props.content };
+  state: BoundaryState = { failed: false, key: this.props.content }
 
   static getDerivedStateFromError(): Partial<BoundaryState> {
-    return { failed: true };
+    return { failed: true }
   }
 
   static getDerivedStateFromProps(
     props: BoundaryProps,
     state: BoundaryState
   ): Partial<BoundaryState> | null {
-    if (props.content !== state.key) return { failed: false, key: props.content };
-    return null;
+    if (props.content !== state.key)
+      return { failed: false, key: props.content }
+    return null
   }
 
   render(): ReactNode {
     if (this.state.failed) {
       return (
-        <pre className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] font-sans text-foreground">
+        <pre className="font-sans [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-foreground">
           {this.props.content}
         </pre>
-      );
+      )
     }
-    return this.props.children;
+    return this.props.children
   }
 }
 
@@ -140,7 +150,7 @@ export const Markdown = memo(function Markdown({
       ...STREAMDOWN_COMPONENTS,
       a: ({ href, children }: { href?: string; children?: ReactNode }) => (
         <a
-          className="text-primary underline decoration-primary/50 break-words [overflow-wrap:anywhere]"
+          className="[overflow-wrap:anywhere] break-words text-primary underline decoration-primary/50"
           href={href}
           target="_blank"
           rel="noreferrer"
@@ -150,20 +160,22 @@ export const Markdown = memo(function Markdown({
       ),
     }),
     []
-  );
+  )
 
   const urlTransform = useMemo(() => {
-    if (!transformImageUrl) return undefined;
+    if (!transformImageUrl) return undefined
     return (
       url: string,
       key: string,
       node: Parameters<typeof defaultUrlTransform>[2]
     ) =>
-      key === "src" ? transformImageUrl(url) : defaultUrlTransform(url, key, node);
-  }, [transformImageUrl]);
+      key === "src"
+        ? transformImageUrl(url)
+        : defaultUrlTransform(url, key, node)
+  }, [transformImageUrl])
 
   return (
-    <div className="min-w-0 max-w-full text-[13px] leading-6 break-words [overflow-wrap:anywhere] [&_.streamdown]:text-foreground">
+    <div className="max-w-full min-w-0 text-[13px] leading-6 [overflow-wrap:anywhere] break-words [&_.streamdown]:text-foreground">
       <MarkdownErrorBoundary content={content}>
         <Streamdown
           mode={isLive ? "streaming" : "static"}
@@ -171,7 +183,7 @@ export const Markdown = memo(function Markdown({
           isAnimating={isLive}
           animated={isLive ? STREAMDOWN_ANIMATED : false}
           shikiTheme={SHIKI_THEME}
-          className="streamdown-agent min-w-0 max-w-full"
+          className="streamdown-agent max-w-full min-w-0"
           components={components}
           urlTransform={urlTransform}
         >
@@ -179,5 +191,5 @@ export const Markdown = memo(function Markdown({
         </Streamdown>
       </MarkdownErrorBoundary>
     </div>
-  );
-});
+  )
+})

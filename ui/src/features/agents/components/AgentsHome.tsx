@@ -57,8 +57,11 @@ export function AgentsHome() {
   const [runTarget, setRunTarget] = useState<RunTarget>("cloud")
   const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
-  const { projects: localProjects, addProject, removeProject } =
-    useDesktopProjects()
+  const {
+    projects: localProjects,
+    addProject,
+    removeProject,
+  } = useDesktopProjects()
 
   const reposQuery = useRepos()
   const profileQuery = useProfile()
