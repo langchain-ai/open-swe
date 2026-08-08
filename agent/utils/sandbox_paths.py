@@ -10,7 +10,10 @@ from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
+from .repo_clone import PREFERRED_WORK_DIR
+
 logger = logging.getLogger(__name__)
+
 
 _WORK_DIR_CACHE_ATTR = "_open_swe_resolved_work_dir"
 _PROVIDER_ATTR_NAMES = ("sandbox", "_sandbox")
@@ -53,6 +56,16 @@ async def _iter_work_dir_candidates(
         if candidate not in seen:
             seen.add(candidate)
             yield candidate
+
+    # Ahead of `pwd`, because `pwd` is not stable across how a sandbox was
+    # booted: a snapshot captured from a running sandbox carries the filesystem
+    # but not the image's WORKDIR, so shells there start at `/`. Resolving to
+    # `/` would clone repos at the filesystem root and hide anything the
+    # snapshot left under the real work dir. Skipped when it isn't a writable
+    # directory, so providers without it keep their old behavior.
+    if PREFERRED_WORK_DIR not in seen:
+        seen.add(PREFERRED_WORK_DIR)
+        yield PREFERRED_WORK_DIR
 
     shell_work_dir = await _resolve_shell_path(sandbox_backend, "pwd")
     if shell_work_dir and shell_work_dir not in seen:

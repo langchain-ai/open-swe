@@ -19,6 +19,8 @@ from collections.abc import Sequence
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
+from .repo_clone import cache_path_for
+
 logger = logging.getLogger(__name__)
 
 CLONE_TIMEOUT_SECONDS = 240
@@ -43,12 +45,19 @@ def _prep_command(
     q_repo_name = shlex.quote(repo_name)
     q_head = shlex.quote(head_sha) if head_sha else ""
 
+    q_cache = shlex.quote(cache_path_for(work_dir, repo_owner, repo_name))
+
     lines = [
         "set -e",
         f"if [ -d {q_repo_dir}/.git ]; then",
         # Tolerate fetch-all failures: the targeted head/base fetches below
         # are what the checkout actually needs.
         f"  cd {q_repo_dir} && {{ GH_TOKEN=dummy git fetch --all --quiet || true; }}",
+        # Taking a baked checkout is a rename within one filesystem, so the
+        # fetch below only has to carry commits made since the last warm.
+        f"elif [ -d {q_cache} ] && mv {q_cache} {q_repo_dir} 2>/dev/null; then",
+        f"  cd {q_repo_dir}",
+        "  GH_TOKEN=dummy git fetch origin --prune --quiet 2>/dev/null || true",
         "else",
         f"  cd {q_work_dir} && GH_TOKEN=dummy gh repo clone {q_full_name} && cd {q_repo_name}",
         "fi",

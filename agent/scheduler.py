@@ -8,6 +8,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import RunnableConfig
 
+from .dashboard.base_snapshot import rebuild_base_snapshot
 from .dashboard.schedules import launch_scheduled_agent_run
 from .reconcile import reconcile_stale_runs
 
@@ -25,6 +26,8 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
     task = state.get("task") or configurable.get("task")
     if task == "reconcile":
         return {"result": await reconcile_stale_runs()}
+    if task == "rebuild_base_snapshot":
+        return {"result": await rebuild_base_snapshot()}
     schedule_id = state.get("schedule_id") or configurable.get("schedule_id")
     if not isinstance(schedule_id, str) or not schedule_id:
         logger.warning("Scheduled agent tick missing schedule_id")

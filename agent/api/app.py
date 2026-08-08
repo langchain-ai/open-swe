@@ -18,11 +18,13 @@ from .health import router as health_router
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from ..dashboard.base_snapshot import schedule_base_snapshot_cron_sync
     from ..utils.model import close_cached_models, validate_local_dev_llm_config
     from ..utils.sandbox import validate_sandbox_startup_config
 
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
+    schedule_base_snapshot_cron_sync()
     try:
         yield
     finally:

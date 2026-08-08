@@ -1,6 +1,7 @@
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 
 import { AppShell } from "@/components/AppShell"
+import { BaseSnapshotPanel } from "@/components/BaseSnapshotPanel"
 import { RepoSnapshotsPanel } from "@/components/RepoSnapshotsPanel"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -27,11 +28,36 @@ function RepoSnapshotsPage() {
     <AppShell
       user={session.data}
       title="Repository Snapshots"
-      description="Build a per-repo sandbox image from a custom Dockerfile. Repos without a ready snapshot fall back to the default sandbox image."
+      description="Control the sandbox images runs boot from. Anything without its own snapshot falls back to the default sandbox image."
       backTo={{ to: "/cloud-agents", label: "Back to Open SWE Agent" }}
     >
-      <div className="rounded-lg border border-border bg-card">
-        <RepoSnapshotsPanel />
+      <div className="flex flex-col gap-6">
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold text-foreground">
+            Nightly base snapshot
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Rebuild the shared sandbox snapshot on a schedule with the repos
+            Open SWE works on most already cloned. Repos with their own snapshot
+            below still take precedence.
+          </p>
+          <div className="rounded-lg border border-border bg-card">
+            <BaseSnapshotPanel />
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold text-foreground">
+            Per-repository snapshots
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Build a sandbox image for one repo from a custom Dockerfile, for
+            repos needing toolchains the default image doesn't carry.
+          </p>
+          <div className="rounded-lg border border-border bg-card">
+            <RepoSnapshotsPanel />
+          </div>
+        </section>
       </div>
     </AppShell>
   )

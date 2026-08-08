@@ -51,6 +51,7 @@ from .dashboard.agent_overrides import (
     resolve_github_login,
 )
 from .dashboard.agent_usage import record_agent_thread_usage
+from .dashboard.base_snapshot import resolve_base_snapshot_id
 from .dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -132,6 +133,9 @@ from .tools import (
     slack_start_new_thread,
     slack_thread_reply,
     web_search,
+)
+from .tools import (
+    repo as repo_tool,
 )
 from .utils import ttl_cache
 from .utils.auth import resolve_github_token
@@ -282,18 +286,21 @@ async def _resolve_proxy_token(
 
 
 async def _resolve_snapshot_id_for_repo(repo: dict[str, str] | None) -> str | None:
-    """Resolve a repo's ready snapshot id; ``None`` falls back to the default.
+    """Resolve the snapshot a new sandbox should boot from.
 
-    Never raises: any failure resolves to ``None`` so sandbox creation falls
-    back to the configured ``DEFAULT_SANDBOX_SNAPSHOT_ID``.
+    Order: the repo's own ready snapshot, then the nightly base snapshot with
+    common repos pre-cloned, then ``None`` -- which falls back to the
+    configured ``DEFAULT_SANDBOX_SNAPSHOT_ID``. Never raises.
     """
-    if not repo:
-        return None
-    try:
-        return await resolve_repo_snapshot_id(repo.get("owner"), repo.get("name"))
-    except Exception:  # noqa: BLE001
-        logger.debug("Failed to resolve repo-scoped snapshot", exc_info=True)
-        return None
+    if repo:
+        try:
+            repo_snapshot_id = await resolve_repo_snapshot_id(repo.get("owner"), repo.get("name"))
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to resolve repo-scoped snapshot", exc_info=True)
+            repo_snapshot_id = None
+        if repo_snapshot_id:
+            return repo_snapshot_id
+    return await resolve_base_snapshot_id()
 
 
 async def _create_sandbox_with_proxy(
@@ -1143,6 +1150,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         open_pull_request,
         request_pr_review,
         recreate_sandbox,
+        repo_tool,
         report_platform_issue,
         schedule_thread_wakeup,
         slack_add_reaction,

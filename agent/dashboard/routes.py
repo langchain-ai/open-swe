@@ -29,6 +29,14 @@ from .agent_usage import (
     refresh_usage_leaderboard_cache,
 )
 from .analyzer_cron import remove_continual_cron
+from .base_snapshot import (
+    BaseSnapshotSettings,
+    get_base_snapshot_record,
+    is_base_snapshot_build_stale,
+    mark_base_snapshot_building,
+    rebuild_base_snapshot,
+    update_base_snapshot_settings,
+)
 from .enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
@@ -81,6 +89,7 @@ from .repo_cache import (
     schedule_repo_cache_refresh,
     write_cached_repos,
 )
+from .repo_clone_stats import list_repo_clone_stats, repos_to_preclone
 from .repo_snapshots import (
     RepoSnapshotConfigError,
     RepoSnapshotCreate,
@@ -787,6 +796,53 @@ async def api_set_enabled_review_repo(
 ) -> dict[str, list[str]]:
     repos = await set_review_repo_enabled(update.full_name, update.enabled)
     return {"repos": repos}
+
+
+@router.get("/base-snapshot")
+async def api_get_base_snapshot(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    record = await get_base_snapshot_record()
+    settings = BaseSnapshotSettings.model_validate(record["settings"])
+    return {
+        "record": record,
+        # The UI disables the rebuild controls while a build is running, so it
+        # needs to know when a "building" record is really a dead worker --
+        # otherwise a crashed build locks admins out of the recovery the
+        # backend already allows.
+        "build_stale": is_base_snapshot_build_stale(record),
+        "clone_stats": await list_repo_clone_stats(),
+        "next_preclone": await repos_to_preclone(
+            limit=settings.preclone_limit, max_age_days=settings.max_age_days
+        ),
+    }
+
+
+@router.put("/base-snapshot/settings")
+async def api_update_base_snapshot_settings(
+    body: BaseSnapshotSettings,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await update_base_snapshot_settings(body)
+
+
+@router.post("/base-snapshot/rebuild")
+async def api_rebuild_base_snapshot(
+    background_tasks: BackgroundTasks,
+    from_scratch: bool = False,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    record = await get_base_snapshot_record()
+    settings = BaseSnapshotSettings.model_validate(record["settings"])
+    if not settings.enabled:
+        raise HTTPException(400, "nightly base snapshot rebuilds are disabled")
+    if record.get("status") == "building" and not is_base_snapshot_build_stale(record):
+        raise HTTPException(409, "a rebuild is already in progress")
+    # Marked here rather than only inside the background task: the poll can
+    # otherwise land first, read a stale "ready", and stop polling.
+    record = await mark_base_snapshot_building()
+    background_tasks.add_task(rebuild_base_snapshot, from_scratch)
+    return record
 
 
 @router.get("/repo-snapshots")
