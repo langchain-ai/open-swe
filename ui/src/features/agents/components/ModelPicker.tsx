@@ -70,9 +70,7 @@ function OptionRow({
       onMouseEnter={onMouseEnter}
       className={cn(
         "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] whitespace-nowrap transition-colors",
-        selected
-          ? "text-foreground"
-          : "text-muted-foreground",
+        selected ? "text-foreground" : "text-muted-foreground",
         focused && "bg-accent",
         disabled
           ? "cursor-default opacity-40"

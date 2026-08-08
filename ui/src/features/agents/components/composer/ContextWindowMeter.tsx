@@ -1,23 +1,27 @@
-import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover";
-import { formatTokenCount } from "@/features/agents/lib/contextUsage";
-import { cn } from "@/lib/utils";
+import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
+import { formatTokenCount } from "@/features/agents/lib/contextUsage"
+import { cn } from "@/lib/utils"
 
 export interface ContextWindowMeterProps {
-  usedTokens?: number | null;
-  contextWindow?: number | null;
-  hasMessages?: boolean;
+  usedTokens?: number | null
+  contextWindow?: number | null
+  hasMessages?: boolean
 }
 
-const RADIUS = 9.75;
-const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
-const OVERLOADED_PERCENTAGE = 90;
+const RADIUS = 9.75
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS
+const OVERLOADED_PERCENTAGE = 90
 
 function cleanTokenCount(value: number | null | undefined): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null
 }
 
 function formatPercentage(value: number): string {
-  return value < 10 ? `${value.toFixed(1).replace(/\.0$/, "")}%` : `${Math.round(value)}%`;
+  return value < 10
+    ? `${value.toFixed(1).replace(/\.0$/, "")}%`
+    : `${Math.round(value)}%`
 }
 
 /** Ring gauge for context usage; the detail panel opens on hover. */
@@ -26,20 +30,22 @@ export function ContextWindowMeter({
   contextWindow,
   hasMessages = false,
 }: ContextWindowMeterProps) {
-  const used = cleanTokenCount(usedTokens);
-  const limit = cleanTokenCount(contextWindow);
-  if (used == null && limit == null) return null;
+  const used = cleanTokenCount(usedTokens)
+  const limit = cleanTokenCount(contextWindow)
+  if (used == null && limit == null) return null
 
   const percentage =
-    used != null && limit != null ? Math.max(0, Math.min(100, (used / limit) * 100)) : 0;
-  const hasPercentage = used != null && limit != null;
-  const isOverloaded = hasPercentage && percentage >= OVERLOADED_PERCENTAGE;
+    used != null && limit != null
+      ? Math.max(0, Math.min(100, (used / limit) * 100))
+      : 0
+  const hasPercentage = used != null && limit != null
+  const isOverloaded = hasPercentage && percentage >= OVERLOADED_PERCENTAGE
   const usageColor = isOverloaded
     ? "var(--color-destructive)"
-    : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
+    : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)"
   const label = hasPercentage
     ? `Context window ${formatPercentage(percentage)} used`
-    : `Context window ${formatTokenCount(used ?? limit ?? 0)} tokens`;
+    : `Context window ${formatTokenCount(used ?? limit ?? 0)} tokens`
 
   return (
     <Popover>
@@ -51,9 +57,9 @@ export function ContextWindowMeter({
           <button
             aria-label={label}
             className={cn(
-              "inline-flex size-7 cursor-pointer items-center justify-center rounded-full border border-transparent text-muted-foreground outline-none transition-colors",
+              "inline-flex size-7 cursor-pointer items-center justify-center rounded-full border border-transparent text-muted-foreground transition-colors outline-none",
               "hover:bg-accent data-[pressed]:bg-accent",
-              "focus-visible:ring-2 focus-visible:ring-ring",
+              "focus-visible:ring-2 focus-visible:ring-ring"
             )}
             data-testid="context-window-indicator"
             type="button"
@@ -92,11 +98,18 @@ export function ContextWindowMeter({
           </button>
         }
       />
-      <PopoverPopup align="end" className="w-64 max-w-none text-left whitespace-normal" side="top" tooltipStyle>
+      <PopoverPopup
+        align="end"
+        className="w-64 max-w-none text-left whitespace-normal"
+        side="top"
+        tooltipStyle
+      >
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-xs font-medium text-muted-foreground">Context window</div>
-            <div className="text-[11px] tabular-nums text-muted-foreground/70">
+            <div className="text-xs font-medium text-muted-foreground">
+              Context window
+            </div>
+            <div className="text-[11px] text-muted-foreground/70 tabular-nums">
               {hasPercentage ? (
                 <>
                   <span>{formatPercentage(percentage)}</span>
@@ -136,11 +149,12 @@ export function ContextWindowMeter({
           )}
           {isOverloaded && (
             <p className="text-[11px] leading-4 font-medium text-destructive">
-              Approaching the context limit — start a new thread if replies degrade.
+              Approaching the context limit — start a new thread if replies
+              degrade.
             </p>
           )}
         </div>
       </PopoverPopup>
     </Popover>
-  );
+  )
 }

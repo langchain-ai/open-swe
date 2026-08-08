@@ -49,9 +49,7 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
               <span className="text-success-foreground">
                 +{stats.additions}
               </span>
-              <span className="text-destructive">
-                -{stats.deletions}
-              </span>
+              <span className="text-destructive">-{stats.deletions}</span>
             </div>
           </>
         ) : (

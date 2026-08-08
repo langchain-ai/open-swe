@@ -152,12 +152,7 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
           )
         }
         if (block.type === "divider") {
-          return (
-            <div
-              key={index}
-              className="border-t border-border/60"
-            />
-          )
+          return <div key={index} className="border-t border-border/60" />
         }
         return null
       })}

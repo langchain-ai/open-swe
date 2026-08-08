@@ -1,21 +1,39 @@
-import { memo, useLayoutEffect, useRef } from "react";
-import { Bot, File as FileIcon } from "lucide-react";
+import { memo, useLayoutEffect, useRef } from "react"
+import { Bot, File as FileIcon } from "lucide-react"
 
-import type { ComposerTriggerKind } from "./composerTrigger";
-import { cn } from "@/lib/utils";
+import type { ComposerTriggerKind } from "./composerTrigger"
+import { cn } from "@/lib/utils"
 
 export type ComposerCommandItem =
-  | { id: string; type: "path"; path: string; label: string; description: string }
-  | { id: string; type: "slash-command"; command: string; label: string; description: string }
-  | { id: string; type: "skill"; name: string; label: string; description: string };
+  | {
+      id: string
+      type: "path"
+      path: string
+      label: string
+      description: string
+    }
+  | {
+      id: string
+      type: "slash-command"
+      command: string
+      label: string
+      description: string
+    }
+  | {
+      id: string
+      type: "skill"
+      name: string
+      label: string
+      description: string
+    }
 
 interface ComposerCommandMenuProps {
-  items: Array<ComposerCommandItem>;
-  triggerKind: ComposerTriggerKind;
-  activeItemId: string | null;
-  emptyStateText?: string;
-  onHighlight: (itemId: string) => void;
-  onSelect: (item: ComposerCommandItem) => void;
+  items: Array<ComposerCommandItem>
+  triggerKind: ComposerTriggerKind
+  activeItemId: string | null
+  emptyStateText?: string
+  onHighlight: (itemId: string) => void
+  onSelect: (item: ComposerCommandItem) => void
 }
 
 /**
@@ -31,14 +49,16 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
   onHighlight,
   onSelect,
 }: ComposerCommandMenuProps) {
-  const listRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null)
 
   useLayoutEffect(() => {
-    if (!activeItemId || !listRef.current) return;
+    if (!activeItemId || !listRef.current) return
     listRef.current
-      .querySelector<HTMLElement>(`[data-composer-item-id="${CSS.escape(activeItemId)}"]`)
-      ?.scrollIntoView({ block: "nearest" });
-  }, [activeItemId]);
+      .querySelector<HTMLElement>(
+        `[data-composer-item-id="${CSS.escape(activeItemId)}"]`
+      )
+      ?.scrollIntoView({ block: "nearest" })
+  }, [activeItemId])
 
   return (
     <div
@@ -53,7 +73,9 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
               aria-selected={activeItemId === item.id}
               className={cn(
                 "flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-xs/relaxed select-none",
-                activeItemId === item.id ? "bg-accent text-accent-foreground" : "text-foreground",
+                activeItemId === item.id
+                  ? "bg-accent text-accent-foreground"
+                  : "text-foreground"
               )}
               data-composer-item-id={item.id}
               key={item.id}
@@ -61,7 +83,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
               // insertion is anchored to disappears before the click lands.
               onMouseDown={(event) => event.preventDefault()}
               onMouseMove={() => {
-                if (activeItemId !== item.id) onHighlight(item.id);
+                if (activeItemId !== item.id) onHighlight(item.id)
               }}
               onClick={() => onSelect(item)}
               role="option"
@@ -82,9 +104,11 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
       ) : (
         <p className="px-4 py-3 text-xs text-muted-foreground/70">
           {emptyStateText ??
-            (triggerKind === "path" ? "No matching files." : "No matching command.")}
+            (triggerKind === "path"
+              ? "No matching files."
+              : "No matching command.")}
         </p>
       )}
     </div>
-  );
-});
+  )
+})

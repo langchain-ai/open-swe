@@ -7,10 +7,17 @@ import {
 } from "@phosphor-icons/react"
 import { useState } from "react"
 
-import type { AgentSource, AgentStatus, AgentThread } from "@/features/agents/lib/types"
+import type {
+  AgentSource,
+  AgentStatus,
+  AgentThread,
+} from "@/features/agents/lib/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useResolveAgentThread, useThreadsPage } from "@/features/agents/lib/queries"
+import {
+  useResolveAgentThread,
+  useThreadsPage,
+} from "@/features/agents/lib/queries"
 import { cn } from "@/lib/utils"
 
 const PAGE_SIZE = 25
@@ -62,7 +69,9 @@ function triToBool(value: TriState): boolean | undefined {
 }
 
 function displayStatus(status: AgentStatus): string {
-  return STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status
+  return (
+    STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status
+  )
 }
 
 export function AgentsThreadsPage({

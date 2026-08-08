@@ -156,7 +156,9 @@ function RunningAgentsSection() {
                       setMessage(null)
                       cancel.mutate(thread.id, {
                         onSuccess: () =>
-                          setMessage(`Interruption requested for ${thread.title}.`),
+                          setMessage(
+                            `Interruption requested for ${thread.title}.`
+                          ),
                         onError: (error: Error) => setMessage(error.message),
                       })
                     }}
@@ -732,7 +734,9 @@ function LLMGatewaySection() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="inherit">Inherit deployment default</SelectItem>
+                <SelectItem value="inherit">
+                  Inherit deployment default
+                </SelectItem>
                 <SelectItem value="enabled">Enabled</SelectItem>
                 <SelectItem value="disabled">Disabled</SelectItem>
               </SelectContent>
@@ -747,7 +751,10 @@ function LLMGatewaySection() {
 
 function FableSection() {
   const qc = useQueryClient()
-  const settings = useQuery({ queryKey: ["teamSettings"], queryFn: api.getTeamSettings })
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
     mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
@@ -771,7 +778,8 @@ function FableSection() {
             <Switch
               checked={!!settings.data?.fable_enabled}
               onCheckedChange={(next) =>
-                settings.data && save.mutate({ ...settings.data, fable_enabled: next })
+                settings.data &&
+                save.mutate({ ...settings.data, fable_enabled: next })
               }
               disabled={!settings.data || save.isPending}
             />
