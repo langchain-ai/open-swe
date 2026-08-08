@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 USER_MAPPINGS_NAMESPACE: list[str] = ["user_mappings"]
 
-MappingSource = Literal["slack_oauth"]
+MappingSource = Literal["slack_oauth", "github_oauth"]
 MappingStatus = Literal["active", "pending"]
 
 
