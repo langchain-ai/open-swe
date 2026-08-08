@@ -1,9 +1,12 @@
 {
   "$schema": "https://langgra.ph/schema.json",
   "python_version": "3.12",
-  "dependencies": ["."],
+  "dependencies": [
+    "."
+  ],
   "graphs": {
-    "agent": "./tests/e2e/agent_entrypoint.py:traced_agent"
+    "agent": "./tests/e2e/agent_entrypoint.py:traced_agent",
+    "scheduler": "agent.graphs.scheduler:get_scheduler"
   },
   "http": {
     "app": "./tests/e2e/harness.py:app"

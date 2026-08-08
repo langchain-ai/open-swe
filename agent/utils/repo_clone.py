@@ -38,6 +38,29 @@ def _repo_url(owner: str, name: str) -> str:
     return shlex.quote(f"https://github.com/{owner}/{name}.git")
 
 
+def _clone_expr(owner: str, name: str, dest: str, *, proxy_auth: bool, stderr: str = "") -> str:
+    """Shell expression that clones ``owner/name`` into ``dest``.
+
+    With the LangSmith proxy, plain git is the whole story -- it injects the
+    credentials and there is no ``gh`` login in the sandbox.
+
+    Without it, prefer an authenticated ``gh`` when one is present: that is the
+    only way a private repo clones on a developer's machine, and it uses their
+    existing login rather than a token interpolated into a command string. Falls
+    back to git, which still covers every public repo.
+    """
+    url = _repo_url(owner, name)
+    redirect = f" 2>{stderr}" if stderr else ""
+    if proxy_auth:
+        return f"GH_TOKEN=dummy git clone {url} {dest} --quiet{redirect}"
+    gh_clone = f"gh repo clone {shlex.quote(f'{owner}/{name}')} {dest} -- --quiet{redirect}"
+    git_clone = f"git clone {url} {dest} --quiet{redirect}"
+    return (
+        "{ command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1 "
+        f"&& {gh_clone}; }} || {git_clone}"
+    )
+
+
 def cache_root_for(work_dir: str) -> str:
     return posixpath.join(work_dir, REPO_CACHE_DIRNAME)
 
@@ -100,7 +123,7 @@ def build_clone_script(
         "  SOURCE=github",
         f"  mkdir -p {q_work_dir}",
         f"  cd {q_work_dir}",
-        f"  GH_TOKEN=dummy git clone {_repo_url(owner, name)} {q_name} --quiet",
+        f"  {_clone_expr(owner, name, q_name, proxy_auth=True)}",
         f"  cd {q_dest}",
         "fi",
         # A baked checkout is as stale as the last warm, and an existing one as
@@ -170,7 +193,7 @@ def build_mirror_sweep_script(
                 f"  echo ok {q_full}",
                 "else",
                 f"  rm -rf {q_cache}",
-                f"  if {git} clone {_repo_url(owner, name)} {q_cache} --quiet 2>{q_err}; then",
+                f"  if {_clone_expr(owner, name, q_cache, proxy_auth=proxy_auth, stderr=q_err)}; then",
                 f"    echo ok {q_full}",
                 "  else",
                 f"    rm -rf {q_cache}",

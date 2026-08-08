@@ -117,6 +117,13 @@ export function BaseSnapshotPanel() {
     (a, b) => b.clone_count - a.clone_count
   )
   const cronMissing = stored?.enabled === true && !record?.cron_id
+  // The warm reports each failure as "owner/name <git's error>"; split them so
+  // the same message repeated per repo doesn't become a wall of text.
+  const failures = (record?.failed_repos ?? []).map((entry) => {
+    const [repo, ...rest] = entry.split(" ")
+    return { repo, reason: rest.join(" ") }
+  })
+  const partial = status === "ready" && failures.length > 0
   const progress = record?.progress ?? {
     phase: "starting",
     completed: 0,
@@ -408,6 +415,12 @@ export function BaseSnapshotPanel() {
           <span className={`text-xs ${STATUS_CLASS[status]}`}>
             {STATUS_LABEL[status]}
           </span>
+          {partial && (
+            <span className="text-xs text-amber-600 dark:text-amber-400">
+              {failures.length} of{" "}
+              {failures.length + (record?.repos?.length ?? 0)} repos missing
+            </span>
+          )}
           {record?.snapshot_id && (
             <span className="text-[10px] text-muted-foreground">
               snapshot {record.snapshot_id}
@@ -427,10 +440,23 @@ export function BaseSnapshotPanel() {
             Pre-cloned: {record?.repos?.join(", ")}
           </p>
         )}
-        {(record?.failed_repos?.length ?? 0) > 0 && (
-          <p className="text-xs text-destructive">
-            Failed to clone: {record?.failed_repos?.join(", ")}
-          </p>
+        {failures.length > 0 && (
+          <div className="space-y-1 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2">
+            <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+              Could not clone {failures.length}{" "}
+              {failures.length === 1 ? "repository" : "repositories"} — runs
+              still work, they just clone{" "}
+              {failures.length === 1 ? "it" : "them"} over the network.
+            </p>
+            <ul className="space-y-0.5">
+              {failures.map(({ repo, reason }) => (
+                <li key={repo} className="text-xs text-muted-foreground">
+                  <span className="text-foreground">{repo}</span>
+                  {reason && <> — {reason}</>}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         {(view.data?.next_preclone.length ?? 0) > 0 && (
           <p className="text-xs text-muted-foreground">

@@ -508,14 +508,26 @@ def test_mirror_sweep_only_uses_proxy_auth_when_asked() -> None:
     # Elsewhere, no token is interpolated at all.
     plain = build_mirror_sweep_script("/workspace", ["acme/one"], proxy_auth=False)
     assert "GH_TOKEN" not in plain
-    assert "git clone https://github.com/acme/one.git" in plain
 
 
-def test_mirror_sweep_clones_with_git_not_gh() -> None:
-    # gh demands an authenticated login even for a public repo; git over https
-    # works unauthenticated and still picks up the proxy's injected auth.
-    command = build_mirror_sweep_script("/workspace", ["acme/one"], proxy_auth=False)
+def test_proxy_path_clones_with_git_only() -> None:
+    # gh demands an authenticated login, and there is none in the sandbox; git
+    # over https picks up the proxy's injected credentials.
+    command = build_mirror_sweep_script("/workspace", ["acme/one"], proxy_auth=True)
     assert "gh repo clone" not in command
+    assert "GH_TOKEN=dummy git clone" in command
+
+
+def test_local_path_prefers_an_authenticated_gh() -> None:
+    # Without a proxy, an authenticated gh is the only way a private repo
+    # clones -- and it uses the developer's existing login rather than a token
+    # interpolated into a command string.
+    command = build_mirror_sweep_script("/workspace", ["acme/one"], proxy_auth=False)
+    assert "gh auth status" in command
+    assert "gh repo clone acme/one" in command
+    # Still falls back to git, which covers every public repo.
+    assert "|| git clone https://github.com/acme/one.git" in command
+    assert "GH_TOKEN" not in command
 
 
 def test_mirror_sweep_reports_why_a_clone_failed() -> None:
