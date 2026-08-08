@@ -97,34 +97,47 @@ def build_clone_script(
     name: str,
     ref: str = "",
 ) -> str:
-    """Script that puts ``owner/name`` at ``work_dir/name``, from cache if baked.
+    """Script that puts ``owner/name`` under ``work_dir``, from cache if baked.
 
-    Idempotent: it reuses an existing checkout and refreshes it rather than
-    re-cloning over it, so calling it again never clobbers uncommitted work.
+    Idempotent: it reuses an existing checkout of the *same* repo and refreshes
+    it rather than re-cloning over it, so calling it again never clobbers
+    uncommitted work.
+
+    The destination is chosen at run time. It is ``work_dir/name`` normally, but
+    falls back to ``work_dir/owner-name`` when a different repo already occupies
+    that path -- two orgs can both own a repo called ``tools``, and handing back
+    the wrong one would have the agent silently editing the wrong code. The
+    caller reads the real path off the result line rather than assuming it.
     """
-    dest = posixpath.join(work_dir, name)
-    q_dest = shlex.quote(dest)
     q_work_dir = shlex.quote(work_dir)
     q_cache = shlex.quote(cache_path_for(work_dir, owner, name))
-    q_name = shlex.quote(name)
+    q_plain = shlex.quote(posixpath.join(work_dir, name))
+    q_scoped = shlex.quote(posixpath.join(work_dir, f"{owner}-{name}"))
+    q_pattern = shlex.quote(f"[:/]{owner}/{name}(\\.git)?/?$")
 
     lines = [
         "set -e",
-        f"if [ -d {q_dest}/.git ]; then",
+        f"mkdir -p {q_work_dir}",
+        # Belongs to this repo, some other repo, or nobody -- the three cases
+        # that decide both where to put it and whether it can be reused.
+        f"DEST={q_plain}",
+        'if [ -d "$DEST/.git" ] && ! git -C "$DEST" remote get-url origin 2>/dev/null'
+        f" | grep -qiE {q_pattern}; then",
+        f"  DEST={q_scoped}",
+        "fi",
+        'if [ -d "$DEST/.git" ]; then',
         "  SOURCE=existing",
-        f"  cd {q_dest}",
+        '  cd "$DEST"',
         # A rename, not a copy: both paths live under the work dir, so this is
         # O(1) however large the repo. Falls through to a network clone if the
         # move fails for any reason (a cache on another filesystem, say).
-        f"elif [ -d {q_cache} ] && mv {q_cache} {q_dest} 2>/dev/null; then",
+        f'elif [ -d {q_cache} ] && mv {q_cache} "$DEST" 2>/dev/null; then',
         "  SOURCE=cache",
-        f"  cd {q_dest}",
+        '  cd "$DEST"',
         "else",
         "  SOURCE=github",
-        f"  mkdir -p {q_work_dir}",
-        f"  cd {q_work_dir}",
-        f"  {_clone_expr(owner, name, q_name, proxy_auth=True)}",
-        f"  cd {q_dest}",
+        "  " + _clone_expr(owner, name, '"$DEST"', proxy_auth=True),
+        '  cd "$DEST"',
         "fi",
         # A baked checkout is as stale as the last warm, and an existing one as
         # stale as its last use, so always pull in what came after.
@@ -137,7 +150,7 @@ def build_clone_script(
         "fi",
         *_resolve_ref_lines(ref),
         f'echo "{RESULT_MARKER} source=$SOURCE fetched=$FETCHED'
-        f' path={dest} head=$(git rev-parse HEAD)"',
+        ' path=$DEST head=$(git rev-parse HEAD)"',
     ]
     return "\n".join(lines)
 

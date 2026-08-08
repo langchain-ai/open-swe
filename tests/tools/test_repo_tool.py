@@ -33,10 +33,10 @@ def test_cache_root_follows_the_work_dir() -> None:
 def test_clone_script_prefers_cache_but_falls_back_to_github() -> None:
     script = build_clone_script(work_dir="/workspace", owner="acme", name="tools")
     # Taking a baked checkout is a rename, not a copy: O(1) whatever the size.
-    assert "mv /workspace/.repo-cache/acme/tools /workspace/tools" in script
+    assert 'mv /workspace/.repo-cache/acme/tools "$DEST"' in script
     # Falls through to a network clone when the move fails or nothing is baked.
     assert "2>/dev/null; then" in script
-    assert "git clone https://github.com/acme/tools.git tools" in script
+    assert 'git clone https://github.com/acme/tools.git "$DEST"' in script
 
 
 def test_clone_script_always_fetches_after_local_clone() -> None:
@@ -56,10 +56,19 @@ def test_clone_script_records_whether_the_fetch_succeeded() -> None:
 
 def test_clone_script_reuses_an_existing_checkout() -> None:
     script = build_clone_script(work_dir="/workspace", owner="acme", name="tools")
-    assert "if [ -d /workspace/tools/.git ]" in script
+    assert 'if [ -d "$DEST/.git" ]' in script
     assert "SOURCE=existing" in script
     # Never clobber a checkout that may hold uncommitted work.
     assert "rm -rf" not in script
+
+
+def test_clone_script_will_not_reuse_a_different_repo_of_the_same_name() -> None:
+    # org-a/tools then org-b/tools must not hand back the first checkout, or
+    # the agent silently edits the wrong code.
+    script = build_clone_script(work_dir="/workspace", owner="acme", name="tools")
+    assert "remote get-url origin" in script
+    assert "[:/]acme/tools" in script
+    assert "DEST=/workspace/acme-tools" in script
 
 
 def test_clone_script_checks_out_explicit_ref() -> None:
@@ -75,7 +84,7 @@ def test_clone_script_defaults_to_the_default_branch() -> None:
 
 def test_clone_script_quotes_hostile_input() -> None:
     script = build_clone_script(work_dir="/work dir", owner="acme", name="a;rm -rf /")
-    assert "'a;rm -rf /'" in script
+    assert "'/work dir/a;rm -rf /'" in script
     assert "rm -rf /\n" not in script
 
 

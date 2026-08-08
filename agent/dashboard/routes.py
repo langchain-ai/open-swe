@@ -806,6 +806,11 @@ async def api_get_base_snapshot(
     settings = BaseSnapshotSettings.model_validate(record["settings"])
     return {
         "record": record,
+        # The UI disables the rebuild controls while a build is running, so it
+        # needs to know when a "building" record is really a dead worker --
+        # otherwise a crashed build locks admins out of the recovery the
+        # backend already allows.
+        "build_stale": is_base_snapshot_build_stale(record),
         "clone_stats": await list_repo_clone_stats(),
         "next_preclone": await repos_to_preclone(
             limit=settings.preclone_limit, max_age_days=settings.max_age_days

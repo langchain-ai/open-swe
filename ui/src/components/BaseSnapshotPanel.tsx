@@ -111,7 +111,11 @@ export function BaseSnapshotPanel() {
   const record = view.data?.record
   const status = record?.status ?? "none"
   const dirty = stored != null && !sameSettings(draft, stored)
-  const building = status === "building"
+  // A crashed worker leaves the record on "building" forever. The backend
+  // already treats an old one as replaceable, so the UI must not keep the
+  // recovery buttons disabled past that point.
+  const buildStale = view.data?.build_stale === true
+  const building = status === "building" && !buildStale
   const builtAt = formatDate(record?.built_at)
   const cloneStats = [...(view.data?.clone_stats ?? [])].sort(
     (a, b) => b.clone_count - a.clone_count

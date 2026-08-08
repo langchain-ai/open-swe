@@ -197,8 +197,10 @@ async def resolve_base_snapshot_id() -> str | None:
         return None
     if not record or not _coerce_settings(record.get("settings")).enabled:
         return None
-    if record.get("status") != "ready":
-        return None
+    # Deliberately not gated on status: a snapshot_id is only written after a
+    # capture succeeds, so the last good one stays usable when a later rebuild
+    # fails. Gating on ``ready`` would drop the whole warm cache on one
+    # transient hook, clone, or capture failure.
     snapshot_id = record.get("snapshot_id")
     return snapshot_id if isinstance(snapshot_id, str) and snapshot_id else None
 
@@ -463,7 +465,10 @@ async def rebuild_base_snapshot(from_scratch: bool = False) -> dict[str, Any]:
 
     existing = await _read_record()
     settings = _coerce_settings(existing.get("settings"))
-    prior_status = existing.get("status") or "none"
+    # Never derived from the record's current status: the route marks it
+    # ``building`` before this runs, so echoing that back on a terminal path
+    # would leave the UI polling a build that already finished.
+    idle_status = "ready" if existing.get("snapshot_id") else "none"
     previous = await mark_base_snapshot_building()
     started_at = _now_iso()
 
@@ -492,7 +497,7 @@ async def rebuild_base_snapshot(from_scratch: bool = False) -> dict[str, Any]:
     )
     if not repos:
         logger.info("No repos in the clone ledger yet; skipping base snapshot rebuild")
-        return await _store(status=prior_status, status_message="no repos recorded yet")
+        return await _store(status=idle_status, status_message="no repos recorded yet")
 
     if provider != "langsmith":
         # No capture API outside LangSmith. Where the sandbox filesystem

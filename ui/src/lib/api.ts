@@ -434,6 +434,7 @@ export interface RepoCloneStat {
 
 export interface BaseSnapshotView {
   record: BaseSnapshotRecord
+  build_stale: boolean
   clone_stats: Array<RepoCloneStat>
   next_preclone: Array<string>
 }

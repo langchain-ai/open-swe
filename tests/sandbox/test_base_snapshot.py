@@ -107,8 +107,17 @@ async def test_resolve_base_snapshot_id_returns_ready_snapshot() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_base_snapshot_id_ignores_failed_record() -> None:
+async def test_a_failed_rebuild_keeps_serving_the_last_good_snapshot() -> None:
+    # A snapshot_id is only written after a capture succeeds, so one transient
+    # hook/clone/capture failure must not drop the whole warm cache.
     record = {"status": "failed", "snapshot_id": "snap-1", "settings": {"enabled": True}}
+    with patch.object(base_snapshot, "_read_record", AsyncMock(return_value=record)):
+        assert await base_snapshot.resolve_base_snapshot_id() == "snap-1"
+
+
+@pytest.mark.asyncio
+async def test_resolve_returns_none_when_nothing_was_ever_captured() -> None:
+    record = {"status": "failed", "snapshot_id": None, "settings": {"enabled": True}}
     with patch.object(base_snapshot, "_read_record", AsyncMock(return_value=record)):
         assert await base_snapshot.resolve_base_snapshot_id() is None
 
@@ -218,6 +227,52 @@ async def test_rebuild_keeps_previous_snapshot_id_on_failure() -> None:
     assert record["status"] == "failed"
     assert record["snapshot_id"] == "snap-old"
     put.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_empty_ledger_does_not_leave_the_record_building() -> None:
+    # The route marks the record building before the rebuild runs, so echoing
+    # the current status back would strand the UI on a finished build.
+    stored: dict[str, Any] = {}
+    with (
+        patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "seed-1"}),
+        patch.object(
+            base_snapshot,
+            "_read_record",
+            AsyncMock(return_value={"settings": {"enabled": True}, "status": "building"}),
+        ),
+        patch.object(base_snapshot, "mark_base_snapshot_building", AsyncMock(return_value={})),
+        patch.object(base_snapshot, "repos_to_preclone", AsyncMock(return_value=[])),
+        patch.object(base_snapshot, "_put_record", AsyncMock(side_effect=stored.update)),
+    ):
+        record = await base_snapshot.rebuild_base_snapshot()
+
+    assert record["status"] == "none"
+    assert record["build_started_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_empty_ledger_keeps_a_previous_capture_ready() -> None:
+    with (
+        patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "seed-1"}),
+        patch.object(
+            base_snapshot,
+            "_read_record",
+            AsyncMock(
+                return_value={
+                    "settings": {"enabled": True},
+                    "status": "building",
+                    "snapshot_id": "snap-old",
+                }
+            ),
+        ),
+        patch.object(base_snapshot, "mark_base_snapshot_building", AsyncMock(return_value={})),
+        patch.object(base_snapshot, "repos_to_preclone", AsyncMock(return_value=[])),
+        patch.object(base_snapshot, "_put_record", AsyncMock()),
+    ):
+        record = await base_snapshot.rebuild_base_snapshot()
+
+    assert record["status"] == "ready"
 
 
 @pytest.mark.asyncio
@@ -794,3 +849,34 @@ def test_mirror_sweep_keeps_scratch_files_out_of_the_cache() -> None:
     command = build_mirror_sweep_script("/workspace", ["acme/one"], proxy_auth=False)
     assert "/workspace/.repo-cache/acme/one.err" not in command
     assert "/tmp/openswe-warm.err" in command
+
+
+@pytest.mark.asyncio
+async def test_get_endpoint_reports_a_stale_build() -> None:
+    # The UI disables rebuild while "building"; without this flag a crashed
+    # worker locks admins out of the recovery the backend already allows.
+    old = (
+        datetime.now(UTC) - timedelta(seconds=base_snapshot.STALE_BUILD_SECONDS + 60)
+    ).isoformat()
+    record = {"settings": {"enabled": True}, "status": "building", "build_started_at": old}
+    with (
+        patch.object(routes, "get_base_snapshot_record", AsyncMock(return_value=record)),
+        patch.object(routes, "list_repo_clone_stats", AsyncMock(return_value=[])),
+        patch.object(routes, "repos_to_preclone", AsyncMock(return_value=[])),
+    ):
+        result = await routes.api_get_base_snapshot(_admin={"sub": "octo"})
+
+    assert result["build_stale"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_endpoint_does_not_call_a_live_build_stale() -> None:
+    record = {"settings": {"enabled": True}, "status": "building", "build_started_at": _iso(0)}
+    with (
+        patch.object(routes, "get_base_snapshot_record", AsyncMock(return_value=record)),
+        patch.object(routes, "list_repo_clone_stats", AsyncMock(return_value=[])),
+        patch.object(routes, "repos_to_preclone", AsyncMock(return_value=[])),
+    ):
+        result = await routes.api_get_base_snapshot(_admin={"sub": "octo"})
+
+    assert result["build_stale"] is False
