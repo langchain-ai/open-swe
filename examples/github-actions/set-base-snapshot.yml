@@ -1,0 +1,73 @@
+# Example: point Open SWE at a new base sandbox snapshot from CI.
+#
+# This is a reference file, not an active workflow — copy it into
+# .github/workflows/ of the repo that builds your sandbox image.
+#
+# Auth is GitHub Actions OIDC: this job mints a short-lived token that GitHub
+# signs and scopes to this repo, ref, and audience, so nothing long-lived is
+# stored in secrets. On the Open SWE deployment, allowlist it with:
+#
+#   ADMIN_OIDC_SUBJECTS=<owner>/<this-repo>
+#
+# Use a full subject to also pin the ref, e.g.
+#   ADMIN_OIDC_SUBJECTS=repo:<owner>/<this-repo>:ref:refs/heads/main
+#
+# The audience defaults to "open-swe" on both sides; override it by setting
+# ADMIN_OIDC_AUDIENCE on the deployment and AUDIENCE below to match.
+#
+# Variables to configure in this repo:
+#   OPEN_SWE_BASE_URL  e.g. https://open-swe.internal.example.com
+#
+# The alternative to OIDC is a personal access token belonging to a login in
+# CONFIGURED_ADMINS, sent as the same bearer header. secrets.GITHUB_TOKEN does
+# NOT work either way: installation tokens have no user identity, and they are
+# not OIDC tokens.
+
+name: Set Open SWE base snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot_id:
+        description: Snapshot the agent should boot new sandboxes from
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write # required to mint the OIDC token
+
+jobs:
+  set-base-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      # Replace with whatever produces the snapshot (docker build + push, then
+      # a LangSmith snapshot build) and pass its id along as SNAPSHOT_ID.
+      - name: Publish base snapshot
+        id: publish
+        run: echo "snapshot_id=${{ inputs.snapshot_id }}" >> "$GITHUB_OUTPUT"
+
+      - name: Point Open SWE at the new snapshot
+        uses: actions/github-script@v8
+        env:
+          BASE_URL: ${{ vars.OPEN_SWE_BASE_URL }}
+          AUDIENCE: open-swe
+          SNAPSHOT_ID: ${{ steps.publish.outputs.snapshot_id }}
+        with:
+          script: |
+            const { BASE_URL, AUDIENCE, SNAPSHOT_ID } = process.env
+            const idToken = await core.getIDToken(AUDIENCE)
+            core.setSecret(idToken)
+
+            const response = await fetch(`${BASE_URL}/dashboard/api/sandbox-settings`, {
+              method: "PUT",
+              headers: {
+                Authorization: `Bearer ${idToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ base_snapshot_id: SNAPSHOT_ID }),
+            })
+            if (!response.ok) {
+              throw new Error(`${response.status}: ${await response.text()}`)
+            }
+            core.info(`Base snapshot set to ${SNAPSHOT_ID}`)
