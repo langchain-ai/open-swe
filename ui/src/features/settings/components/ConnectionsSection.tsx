@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input"
 import { api, notionConnectUrl, slackConnectUrl } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
+type SetError = (message: string | null) => void
+
 function StatusPill({ connected }: { connected: boolean }) {
   return (
     <span
@@ -77,7 +79,7 @@ function SlackRow({ user }: { user: SessionUser }) {
   )
 }
 
-function NotionRow({ onError }: { onError: (message: string) => void }) {
+function NotionRow({ setError }: { setError: SetError }) {
   const qc = useQueryClient()
   const creds = useQuery({
     queryKey: ["myNotion"],
@@ -87,8 +89,11 @@ function NotionRow({ onError }: { onError: (message: string) => void }) {
 
   const disconnect = useMutation({
     mutationFn: () => api.disconnectNotion(),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["myNotion"] }),
-    onError: (e: Error) => onError(e.message),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["myNotion"] })
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
   })
 
   const connected = !!creds.data?.connected
@@ -130,7 +135,7 @@ function NotionRow({ onError }: { onError: (message: string) => void }) {
   )
 }
 
-function CurrentsRow({ onError }: { onError: (message: string) => void }) {
+function CurrentsRow({ setError }: { setError: SetError }) {
   const qc = useQueryClient()
   const creds = useQuery({
     queryKey: ["myCurrents"],
@@ -138,21 +143,22 @@ function CurrentsRow({ onError }: { onError: (message: string) => void }) {
   })
   const [apiKey, setApiKey] = useState("")
 
-  const onSettled = () => {
+  const onSuccess = () => {
     void qc.invalidateQueries({ queryKey: ["myCurrents"] })
     setApiKey("")
+    setError(null)
   }
-  const handleError = (e: Error) => onError(e.message)
+  const onError = (e: Error) => setError(e.message)
 
   const connect = useMutation({
     mutationFn: () => api.connectCurrents({ api_key: apiKey.trim() }),
-    onSuccess: onSettled,
-    onError: handleError,
+    onSuccess,
+    onError,
   })
   const disconnect = useMutation({
     mutationFn: () => api.disconnectCurrents(),
-    onSuccess: onSettled,
-    onError: handleError,
+    onSuccess,
+    onError,
   })
 
   const connected = !!creds.data?.connected
@@ -211,8 +217,8 @@ export function ConnectionsSection({ user }: { user: SessionUser }) {
       description="Accounts and credentials Open SWE can use on your behalf."
     >
       <SlackRow user={user} />
-      <NotionRow onError={setError} />
-      <CurrentsRow onError={setError} />
+      <NotionRow setError={setError} />
+      <CurrentsRow setError={setError} />
       {error && <p className="px-4 py-2 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   )
