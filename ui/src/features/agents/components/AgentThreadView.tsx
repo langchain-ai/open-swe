@@ -14,6 +14,10 @@ import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { PANEL_MIN_CHAT_WIDTH } from "@/features/agents/components/AgentPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
+import {
+  readStoredPanelCollapsed,
+  writeStoredPanelCollapsed,
+} from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
