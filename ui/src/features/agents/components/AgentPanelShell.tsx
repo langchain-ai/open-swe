@@ -123,8 +123,9 @@ function PanelResizeHandle({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       className={cn(
-        "absolute top-0 left-0 z-20 h-full w-1 cursor-col-resize touch-none select-none",
-        "after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-transparent after:transition-colors",
+        // Straddles the seam so the grab strip never sits on top of panel content.
+        "absolute top-0 -left-1 z-20 h-full w-2 cursor-col-resize touch-none select-none",
+        "after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent after:transition-colors",
         "hover:after:bg-border",
         dragging && "after:bg-border"
       )}
@@ -270,7 +271,9 @@ export function AgentPanelShell<TTab extends string>({
       <div
         className={cn(
           "flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card",
-          overlay ? "mx-3 mb-3" : "mr-4 mb-4 ml-1"
+          // No left margin: the seam is the chat column's own `px-4`, so the gap
+          // to the composer matches the gap on the sidebar side.
+          overlay ? "mx-3 mb-3" : "mr-4 mb-4"
         )}
       >
         {children({ fullScreen })}
