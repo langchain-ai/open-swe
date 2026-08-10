@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { Check, ChevronDown, ChevronRight } from "lucide-react"
 
 import type { ModelOption } from "@/lib/api"
@@ -90,8 +97,8 @@ function OptionRow({
 
 /**
  * Model picker in the Cursor layout: the main pane configures the currently
- * selected model (context, reasoning) and ends in a `Model >` row that swaps the
- * pane for the searchable model list, anchored to the same trigger.
+ * selected model (context, reasoning) and ends in a `Model >` row that opens the
+ * searchable model list as a submenu pinned to that row.
  */
 export function ModelPicker({
   models,
@@ -122,8 +129,11 @@ export function ModelPicker({
   const [focusedModelId, setFocusedModelId] = useState<string | null>(null)
   const [pane, setPane] = useState<Pane>("main")
   const [mainIndex, setMainIndex] = useState(0)
+  const [modelPaneTop, setModelPaneTop] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
   const mainPaneRef = useRef<HTMLDivElement>(null)
+  const modelRowRef = useRef<HTMLDivElement>(null)
+  const modelPaneRef = useRef<HTMLDivElement>(null)
 
   const pickerDisabled = disabled || models.length === 0 || !onSelectionChange
 
@@ -165,6 +175,26 @@ export function ModelPicker({
   useEffect(() => {
     if (open && pane === "main") mainPaneRef.current?.focus()
   }, [open, pane])
+
+  // Hang the model list off the `Model >` row — its selected entry lines up with
+  // that row — instead of letting it tower over the whole main pane.
+  useLayoutEffect(() => {
+    if (pane !== "models") return
+    const row = modelRowRef.current
+    const modelPane = modelPaneRef.current
+    if (!row || !modelPane) return
+    const paneRect = modelPane.getBoundingClientRect()
+    if (paneRect.height === 0) return
+    const selected = modelPane.querySelector('[aria-selected="true"]')
+    const anchor = (selected ?? modelPane).getBoundingClientRect()
+    const desired =
+      row.getBoundingClientRect().bottom - (anchor.bottom - paneRect.top)
+    const clamped = Math.max(
+      8,
+      Math.min(desired, window.innerHeight - paneRect.height - 8)
+    )
+    setModelPaneTop((top) => top + clamped - paneRect.top)
+  }, [pane])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -318,8 +348,7 @@ export function ModelPicker({
           <div
             ref={mainPaneRef}
             tabIndex={-1}
-            hidden={pane !== "main"}
-            className="dropdown-glass flex w-60 flex-col overflow-hidden rounded-xl py-1 outline-none"
+            className="dropdown-glass flex w-56 flex-col overflow-hidden rounded-xl py-1 outline-none"
           >
             {contextWindow != null && (
               <>
@@ -355,22 +384,26 @@ export function ModelPicker({
                 />
               ))}
             </div>
-            <div className="mt-1 border-t border-border pt-1">
+            <div ref={modelRowRef} className="mt-1 border-t border-border pt-1">
               <SectionHeading>Model</SectionHeading>
               <OptionRow
                 label={selectedModel.label}
                 selected={false}
-                focused={mainIndex === modelRowIndex}
+                focused={pane === "models" || mainIndex === modelRowIndex}
                 trailing={
                   <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/60" />
                 }
-                onMouseEnter={() => setMainIndex(modelRowIndex)}
+                onMouseEnter={openModelPane}
                 onClick={openModelPane}
               />
             </div>
           </div>
           {pane === "models" && (
-            <div className="dropdown-glass flex w-60 flex-col overflow-hidden rounded-xl">
+            <div
+              ref={modelPaneRef}
+              style={{ top: modelPaneTop }}
+              className="dropdown-glass absolute left-full ml-1 flex w-60 flex-col overflow-hidden rounded-xl"
+            >
               <input
                 autoFocus
                 value={query}
