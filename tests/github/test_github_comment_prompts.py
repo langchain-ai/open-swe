@@ -133,13 +133,17 @@ def test_construct_system_prompt_identifies_own_repo() -> None:
     assert "Open SWE" in prompt
 
 
-def test_construct_system_prompt_includes_notion_access_setup() -> None:
+def test_construct_system_prompt_includes_dashboard_ui_map() -> None:
     prompt = construct_system_prompt(working_dir="/workspace")
 
-    assert "https://openswe.vercel.app/my-settings" in prompt
+    assert "DASHBOARD_BASE_URL" in prompt
+    assert "Profile Settings" in prompt
+    assert "/my-settings" in prompt
     assert "Connect Notion" in prompt
-    assert "complete the Notion OAuth flow" in prompt
-    assert "answer directly without investigating first" in prompt
+    assert "/cloud-agents" in prompt
+    assert "/agents/instructions" in prompt
+    assert "/review" in prompt
+    assert "https://openswe.vercel.app/my-settings" not in prompt
 
 
 def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
