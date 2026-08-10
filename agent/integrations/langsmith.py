@@ -583,8 +583,12 @@ class LangSmithProvider(SandboxProvider):
     def validate_startup_config(cls) -> None:
         """Validate env-var configuration at server startup. Raises ValueError if invalid."""
         if not os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID"):
-            msg = "DEFAULT_SANDBOX_SNAPSHOT_ID must be set when SANDBOX_TYPE=langsmith"
-            raise ValueError(msg)
+            # Not fatal: an admin can set the base snapshot at runtime from the
+            # dashboard, which is stored outside the environment.
+            logger.warning(
+                "DEFAULT_SANDBOX_SNAPSHOT_ID is not set; sandbox creation will fail until a "
+                "base snapshot is configured in admin settings"
+            )
         for name in (
             "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES",
             "DEFAULT_SANDBOX_VCPUS",
@@ -666,7 +670,10 @@ class LangSmithProvider(SandboxProvider):
                 return TimeoutLangSmithSandbox(sandbox.to_sync())
 
             if not snapshot_id:
-                msg = "DEFAULT_SANDBOX_SNAPSHOT_ID must be set when SANDBOX_TYPE=langsmith"
+                msg = (
+                    "No base snapshot configured: set it in admin settings or via "
+                    "DEFAULT_SANDBOX_SNAPSHOT_ID"
+                )
                 raise ValueError(msg)
 
             _install_create_extra_fields(client, _get_sandbox_create_extra_fields())
