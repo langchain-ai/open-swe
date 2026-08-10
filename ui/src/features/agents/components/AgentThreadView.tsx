@@ -132,7 +132,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   // the panel is a full-screen overlay that would hide the conversation.
   const planStatus = thread.planStatus
   const planReady = planStatus === "ready" || planStatus === "shared"
-  const lastPlanStatus = useRef<string | null | undefined>(undefined)
+  // Seeded from the mount status (the view is keyed by thread id and only
+  // renders once the thread has loaded) so revisiting a thread with an
+  // already-ready plan keeps the user's collapsed preference.
+  const lastPlanStatus = useRef<string | null | undefined>(planStatus)
   useEffect(() => {
     const previous = lastPlanStatus.current
     lastPlanStatus.current = planStatus
