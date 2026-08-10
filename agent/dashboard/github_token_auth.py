@@ -21,6 +21,7 @@ from .admin import is_admin
 logger = logging.getLogger(__name__)
 
 _GITHUB_USER_URL = "https://api.github.com/user"
+_GITHUB_EMAILS_URL = "https://api.github.com/user/emails"
 _GITHUB_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 
 
@@ -34,16 +35,26 @@ def bearer_github_token(request: Request) -> str | None:
 
 
 async def _github_identity(token: str) -> tuple[str, str | None]:
-    """Resolve a GitHub token to ``(login, email)``."""
+    """Resolve a GitHub token to ``(login, email)``.
+
+    ``GET /user`` only carries an email when the account publishes one, so fall
+    back to the primary from ``/user/emails`` — same as the browser OAuth path —
+    otherwise an admin allowlisted by email is unauthenticatable. That endpoint
+    needs the token to be able to read email addresses; failure just leaves the
+    email unresolved, and login matching still works.
+    """
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
+    email: str | None = None
     try:
         async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
-            response = await client.get(
-                _GITHUB_USER_URL,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/vnd.github+json",
-                },
-            )
+            response = await client.get(_GITHUB_USER_URL, headers=headers)
+            if response.status_code == 200:
+                email = _email_of(response) or _primary_email(
+                    await client.get(_GITHUB_EMAILS_URL, headers=headers)
+                )
     except httpx.HTTPError as e:
         raise HTTPException(502, f"could not verify GitHub token: {e}") from e
 
@@ -60,8 +71,28 @@ async def _github_identity(token: str) -> tuple[str, str | None]:
     login = data.get("login") if isinstance(data, dict) else None
     if not isinstance(login, str) or not login.strip():
         raise HTTPException(401, "GitHub token did not resolve to a user")
+    return login.strip(), email
+
+
+def _email_of(response: httpx.Response) -> str | None:
+    data = response.json() if response.content else {}
     email = data.get("email") if isinstance(data, dict) else None
-    return login.strip(), email if isinstance(email, str) and email.strip() else None
+    return email.strip() if isinstance(email, str) and email.strip() else None
+
+
+def _primary_email(response: httpx.Response) -> str | None:
+    if response.status_code != 200 or not response.content:
+        return None
+    entries = response.json()
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if not isinstance(entry, dict) or not entry.get("primary"):
+            continue
+        email = entry.get("email")
+        if isinstance(email, str) and email.strip():
+            return email.strip()
+    return None
 
 
 async def admin_session_for_github_token(token: str) -> dict[str, Any]:

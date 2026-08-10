@@ -18,8 +18,9 @@
 # Variables to configure in this repo:
 #   OPEN_SWE_BASE_URL  e.g. https://open-swe.internal.example.com
 #
-# The alternative to OIDC is a personal access token belonging to a login in
-# CONFIGURED_ADMINS, sent as the same bearer header. secrets.GITHUB_TOKEN does
+# The alternative to OIDC is a personal access token whose owner is listed in
+# CONFIGURED_ADMINS, sent as the same bearer header (allowlisting that owner by
+# login needs no token permissions). secrets.GITHUB_TOKEN does
 # NOT work either way: installation tokens have no user identity, and they are
 # not OIDC tokens.
 
