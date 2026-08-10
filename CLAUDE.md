@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Open SWE is an open-source coding-agent framework built on **LangGraph** + **Deep Agents** (`deepagents.create_deep_agent`). It runs as a LangGraph app: each thread spawns its own isolated cloud sandbox, and the agent is invoked from Slack, Linear, or GitHub (PR comments, plus auto-review on opened / ready-for-review).
 
-A separate **reviewer** graph runs read-only code reviews on PRs, and a **review-style analyzer** graph learns per-repo review style from historical PRs.
+A separate **reviewer** graph runs code reviews on PRs (not read-only by construction — see Entrypoints), and a **review-style analyzer** graph learns per-repo review style from historical PRs.
 
 ## Commands
 
@@ -29,7 +29,7 @@ make typecheck          # basedpyright agent tests
 | Graph | Entrypoint | Purpose |
 |---|---|---|
 | `agent` | `agent.server:traced_agent` (wraps `get_agent`) | Main coding agent (Slack/Linear/GitHub-triggered). |
-| `reviewer` | `agent.reviewer:traced_reviewer_agent` (wraps `get_reviewer_agent`) | Read-only PR reviewer. Findings model + `publish_review`. |
+| `reviewer` | `agent.reviewer:traced_reviewer_agent` (wraps `get_reviewer_agent`) | PR reviewer. Findings model + `publish_review`. |
 | `analyzer` | `agent.analyzer:traced_analyzer` (wraps `get_analyzer`) | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
 
 The FastAPI app is `agent.webapp:app`.
@@ -39,7 +39,7 @@ The FastAPI app is `agent.webapp:app`.
 ### Entrypoints
 
 - **`agent/server.py` → `get_agent(config)`** — main graph factory. Called per-thread. Resolves the GitHub token, gets-or-creates the sandbox for the thread, resolves the team/profile/per-thread model + effort, then constructs a fresh `create_deep_agent(...)` with the curated tool list and middleware stack. The agent itself is stateless — all per-thread state lives in the sandbox + thread metadata.
-- **`agent/reviewer.py` → `get_reviewer_agent(config)`** — reviewer graph factory. Shares `ensure_sandbox_for_thread` with the main agent but wires a reviewer-only toolset (`add_finding`, `update_finding`, `list_findings`, `publish_review`, `web_search`, `fetch_url`, `http_request`) and a different system prompt that pins the single-evolving-findings model and the diff-anchored bar for filing a finding. Read-only: no commit/push/PR-opening tools.
+- **`agent/reviewer.py` → `get_reviewer_agent(config)`** — reviewer graph factory. Shares `ensure_sandbox_for_thread` with the main agent but wires a reviewer-only toolset (`fetch_review_diff`, `add_finding`, `update_finding`, `list_findings`, `publish_review`, `resolve_finding_thread`, `reply_to_finding_thread`, `web_search`, `fetch_url`, `http_request`), a review subagent, and a different system prompt that pins the single-evolving-findings model and the diff-anchored bar for filing a finding. **The reviewer is not read-only by construction:** on top of that toolset `create_deep_agent` injects the mutating builtins `write_file`, `edit_file`, and `delete`, plus an `execute` whose sandbox GitHub proxy carries real GitHub App credentials — so nothing stops a reviewer run from editing the checkout or pushing with those credentials. Before a read-only guarantee may be documented as holding, `get_reviewer_agent` must wire `ExcludeToolsMiddleware` to strip `write_file`, `edit_file`, and `delete` (as `agent/chat.py` does for the chat graph).
 - **`agent/analyzer.py` → `get_analyzer(config)`** — small graph that emits a per-repo style prompt via the `save_review_style_prompt` tool, consumed by the reviewer as a "repository-specific review style" appendix. It runs in one of two modes (`analyzer_mode` in `configurable`): **bootstrap** (cold-start: crawl historical PR reviews) and **continual** (nightly: refine using this reviewer's own finding outcomes via `read_finding_outcomes`). Each mode's procedure lives in a deepagents **skill** (`agent/skills/bootstrap-repo-analysis/`, `agent/skills/continual-learning/`) served as virtual files via a `CompositeBackend` `/skills/` route + `StateBackend` (seeded into the run's `files` channel by the launcher — never written to the sandbox). Launchers and the per-repo nightly cron live in `agent/dashboard/review_style_jobs.py` and `agent/dashboard/analyzer_cron.py`; the cron is registered when bootstrap completes.
 - **`agent/webapp.py`** — custom FastAPI routes mounted alongside the LangGraph server. Webhooks land here (GitHub, Linear, Slack). Each webhook resolves a deterministic `thread_id` (so follow-up messages route to the same agent run) and triggers/streams a run via the `langgraph_sdk` client. Also auto-reviews PRs on `opened` / `ready_for_review` events when the repo+author opt in.
 - **`agent/dashboard/`** — `router` mounted under the FastAPI app at startup (`app.include_router(dashboard_router)`). Owns GitHub OAuth, per-user profiles, admin endpoints, team defaults, enabled-repo lists, review-style management, and the Agents chat thread API used by the UI in `ui/`.
@@ -76,7 +76,7 @@ Configured in `agent/server.py:get_agent`, runs around every model call (in this
 
 The system prompt instructs the agent to call a tool every turn, and `ensure_no_empty_msg` re-injects a tool call when it doesn't — together these keep runs from stopping partway through a task.
 
-Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`, `SlackAssistantStatusMiddleware`.
+`ExcludeToolsMiddleware` (in `agent/middleware/`) is the only tool-exclusion control, and it is wired **only** in the chat factory (`agent/chat.py:255`, excluding `execute`, `write_file`, `edit_file`, `delete`) — not in `server.py:get_agent` and not in `reviewer.py:get_reviewer_agent`, which is why the reviewer is not read-only (see Entrypoints). The reviewer wires its own thirteen-entry stack in `agent/reviewer.py`, from `PrepareReviewerRunMiddleware` through `settle_review_check_on_exit`; none of those entries removes a tool.
 
 There is intentionally no after-agent safety net that opens a PR for the agent. The agent itself is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel — all via `GH_TOKEN=dummy gh` and `slack_thread_reply` / `linear_comment`.
 
@@ -87,7 +87,7 @@ All tools live in `agent/tools/` and are flat-imported via `agent/tools/__init__
 Wired into `get_agent`:
 `http_request`, `fetch_url`, `web_search`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `request_pr_review`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_thread_reply`.
 
-Reviewer-only tools (in `agent/reviewer.py`): `add_finding`, `update_finding`, `list_findings`, `publish_review`. The review-style analyzer uses `save_review_style` (exported as `save_review_style_prompt`).
+Reviewer-only tools (in `agent/reviewer.py`): `fetch_review_diff`, `add_finding`, `update_finding`, `list_findings`, `publish_review`, `resolve_finding_thread`, `reply_to_finding_thread`. The review-style analyzer uses `save_review_style` (exported as `save_review_style_prompt`).
 
 Built-in deepagents tools (`read_file`, `write_file`, `edit_file`, `delete`, `ls`, `glob`, `grep`, `execute`, `task` for subagent spawning, …) are added by `create_deep_agent` itself; don't duplicate them.
 
