@@ -167,9 +167,19 @@ export function useSidebarThreads(
 }
 
 export function useAgentThread(threadId: string) {
+  const queryClient = useQueryClient()
+  const queryKey = agentThreadKeys.detail(threadId)
+
   return useQuery({
-    queryKey: agentThreadKeys.detail(threadId),
-    queryFn: () => agentsApi.getThread(threadId),
+    queryKey,
+    queryFn: async () => {
+      const thread = await agentsApi.getThread(threadId)
+      const queuedMessages =
+        queryClient.getQueryData<AgentThread>(queryKey)?.queuedMessages
+      return thread.status === "running" && queuedMessages?.length
+        ? { ...thread, queuedMessages }
+        : thread
+    },
     // Server truth heartbeat while a run is live. The SDK's SSE transport does
     // not reconnect once a custom `fetch` is supplied (it needs the dashboard
     // session cookie), so a dropped event stream must not leave the view — and
