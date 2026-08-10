@@ -71,7 +71,7 @@ html.dark[data-agents-theme] {
 
   --background: oklch(22.6% 0 0); /* soft charcoal, not black */
   --app-chrome-background: var(--background);
-  --foreground: oklch(97% 0 0); /* neutral-100 */
+  --foreground: #fff;
   --card: color-mix(in srgb, var(--background) 92%, #fff);
   --card-foreground: var(--foreground);
   --surface-raised: var(--secondary);
@@ -82,7 +82,7 @@ html.dark[data-agents-theme] {
   --secondary: color-mix(in srgb, #fff 4%, transparent);
   --secondary-foreground: var(--foreground);
   --muted: color-mix(in srgb, #fff 4%, transparent);
-  --muted-foreground: oklch(72% 0 0);
+  --muted-foreground: oklch(85% 0 0);
   --accent: color-mix(in srgb, #fff 4%, transparent);
   --accent-foreground: var(--foreground);
   --destructive: color-mix(in srgb, oklch(63.7% 0.237 25.331) 90%, #fff);
