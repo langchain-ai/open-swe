@@ -256,11 +256,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect.poll(() => latestPrBody(page)).toContain("Slack thread");
   });
 
-  test("shows follow-ups queued while the agent is still running", async ({
+  test("keeps follow-ups visible while queued during a running agent", async ({
     page,
   }, testInfo) => {
     await loginAs(page, SAME_USER);
     await openRunningThreadViaSlackLink(page);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
 
     const queuedText = "Please queue this follow-up while you finish the PR.";
     const busyComposer = composerFor(page, /Send a message to queue next/);
@@ -280,6 +282,24 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       path: screenshotPath,
       contentType: "image/png",
     });
+
+    const serverRefresh = await page.waitForResponse((response) => {
+      const path = new URL(response.url()).pathname;
+      return (
+        response.request().method() === "GET" &&
+        path === `/dashboard/api/threads/${threadId}`
+      );
+    });
+    expect(serverRefresh.ok()).toBeTruthy();
+    await expect(serverRefresh.json()).resolves.toMatchObject({
+      status: "running",
+    });
+
+    test.fail(
+      true,
+      "Queued follow-ups disappear when the running thread summary refreshes",
+    );
+    await expect(queuedMessage).toBeVisible();
   });
 
   test("stops a Slack-started run from the web app", async ({ page }) => {
