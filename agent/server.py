@@ -141,7 +141,7 @@ from .utils.authorship import (
     OPEN_SWE_BOT_NAME,
     resolve_triggering_user_identity,
 )
-from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_org_membership import is_user_active_org_member
@@ -942,6 +942,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "work_dir": work_dir,
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
+                dashboard_base_url=dashboard_base_url(),
                 linear_project_id=self._linear_project_id,
                 linear_issue_number=self._linear_issue_number,
                 triggering_user_identity=triggering_user_identity,
