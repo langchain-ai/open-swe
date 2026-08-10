@@ -135,11 +135,11 @@ def test_construct_system_prompt_identifies_own_repo() -> None:
 
 def test_construct_system_prompt_includes_dashboard_ui_map() -> None:
     prompt = construct_system_prompt(
-        working_dir="/workspace", dashboard_base_url="https://dashboard.example"
+        working_dir="/workspace", dashboard_base_url="deployment-dashboard-base"
     )
 
     assert "Dashboard Context" in prompt
-    assert "https://dashboard.example" in prompt
+    assert "deployment-dashboard-base" in prompt
     assert "Profile Settings" in prompt
     assert "/my-settings" in prompt
     assert "Connect Notion" in prompt
