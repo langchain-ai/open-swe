@@ -81,6 +81,16 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `new_version=${next}\n`);
           NODE
 
+      - name: Commit desktop version
+        env:
+          VERSION: ${{ steps.bump.outputs.new_version }}
+        run: |
+          git add desktop/package.json
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "chore(desktop): release v${VERSION}"
+          git push origin HEAD:main
+
       - name: Install UI dependencies
         working-directory: ui
         run: pnpm install --frozen-lockfile
@@ -162,16 +172,11 @@ jobs:
           echo "mac_dmg=${mac_dmgs[0]}" >> "$GITHUB_OUTPUT"
           echo "app_zip=$app_zip" >> "$GITHUB_OUTPUT"
 
-      - name: Commit and tag desktop version
+      - name: Tag desktop version
         env:
           VERSION: ${{ steps.bump.outputs.new_version }}
         run: |
-          git add desktop/package.json
-          git -c user.name="github-actions[bot]" \
-            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -m "chore(desktop): release v${VERSION}"
           git tag "desktop-v${VERSION}"
-          git push origin HEAD:main
           git push origin "desktop-v${VERSION}"
 
       - name: Create GitHub release
