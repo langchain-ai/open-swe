@@ -59,7 +59,7 @@ export function UserMessage({ message }: { message: Message }) {
               <div
                 ref={textRef}
                 onScroll={updateScrollIndicators}
-                className="max-h-[250px] overflow-auto text-[13px] leading-6 break-words whitespace-pre-wrap text-accent-foreground"
+                className="max-h-[250px] overflow-auto text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-accent-foreground"
                 style={{
                   maskImage: textEdgeMask,
                   WebkitMaskImage: textEdgeMask,
