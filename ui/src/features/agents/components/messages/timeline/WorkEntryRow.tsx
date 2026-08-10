@@ -175,7 +175,7 @@ export function WorkEntryRow({
 
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <div className="min-w-0 flex-1 overflow-hidden">
-            <p className="flex w-full min-w-0 items-baseline gap-1.5 text-[12px] leading-5">
+            <p className="flex w-full min-w-0 items-baseline gap-1.5 text-[13px] leading-5">
               <span
                 className={cn(
                   "min-w-0 shrink truncate font-medium",
@@ -185,14 +185,14 @@ export function WorkEntryRow({
                 {entry.heading}
               </span>
               {entry.preview && (
-                <span className="min-w-0 flex-1 truncate text-muted-foreground/55">
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">
                   {entry.preview}
                 </span>
               )}
             </p>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1 text-muted-foreground/55">
+          <div className="flex shrink-0 items-center gap-1 text-muted-foreground">
             {trailing}
             {hoverTimestamp && (
               <time className="text-[10px] tabular-nums opacity-0 transition-opacity group-hover/entry:opacity-100">
@@ -227,7 +227,7 @@ export function WorkEntryRow({
           onPointerDown={stopRowToggle}
         >
           {body ?? (
-            <pre className="max-h-64 cursor-text overflow-auto font-mono text-[11px] leading-relaxed break-words whitespace-pre-wrap text-muted-foreground select-text">
+            <pre className="max-h-64 cursor-text overflow-auto font-mono text-[12px] leading-relaxed break-words whitespace-pre-wrap text-muted-foreground select-text">
               {entry.expandedText}
             </pre>
           )}
