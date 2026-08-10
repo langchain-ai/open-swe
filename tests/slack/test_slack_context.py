@@ -4,6 +4,7 @@ from typing import cast
 import pytest
 
 from agent.utils import slack as slack_utils
+from agent.utils.run_usage import RunUsageSummary
 from agent.utils.slack import (
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
@@ -17,6 +18,10 @@ from agent.utils.slack import (
 from agent.utils.thread_ids import generate_thread_id_from_slack_thread
 from agent.webhooks import common as webhook_common
 from agent.webhooks import slack as slack_webhooks
+
+
+async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
+    return "https://smith/x"
 
 
 class _FakeNotFoundError(Exception):
@@ -499,6 +504,49 @@ def test_post_slack_thread_reply_appends_web_context_block_to_blocks(
     assert blocks[0]["text"]["text"] == "Pick one"
 
 
+def test_post_slack_thread_reply_keeps_usage_with_existing_web_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    usage = RunUsageSummary(models=("model-a",), main_agent_tokens=110)
+
+    async def fake_post_message_with_ts(
+        channel_id: str,
+        text: str,
+        **kwargs: object,
+    ) -> tuple[str | None, str | None]:
+        captured.update(kwargs)
+        return "1.1", None
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
+    monkeypatch.setattr(slack_utils, "_post_slack_message_with_ts", fake_post_message_with_ts)
+    dashboard_url = slack_utils._slack_thread_dashboard_url("C123", "1.0")
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": dashboard_url}}]
+
+    asyncio.run(
+        slack_utils.post_slack_thread_reply_with_ts(
+            "C123", "1.0", "Done", blocks=blocks, usage=usage
+        )
+    )
+
+    posted_blocks = cast(list[dict[str, object]], captured["blocks"])
+    assert str(posted_blocks).count(str(dashboard_url)) == 1
+    assert posted_blocks[-1] == {
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": "model-a • 110 main-agent tokens"}],
+    }
+
+
+def test_format_slack_web_link_footer_includes_run_usage() -> None:
+    usage = RunUsageSummary(models=("model-a", "model-b"), main_agent_tokens=12_345)
+
+    footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
+
+    assert footer == (
+        "<https://app.example/agents/t1|Open in Web> • model-a + model-b • 12.3K main-agent tokens"
+    )
+
+
 def test_post_slack_trace_reply_has_no_tip(monkeypatch: pytest.MonkeyPatch) -> None:
     posted: list[dict] = []
 
@@ -517,7 +565,7 @@ def test_post_slack_trace_reply_has_no_tip(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         slack_utils, "post_slack_thread_reply_with_ts", fake_post_slack_thread_reply_with_ts
     )
-    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", lambda thread_id: "https://smith/x")
+    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", _fake_trace_url)
 
     asyncio.run(post_slack_trace_reply("C123", "1.0", "thread-id"))
 

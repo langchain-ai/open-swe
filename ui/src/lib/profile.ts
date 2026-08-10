@@ -112,14 +112,19 @@ export function buildProfileUpdate(
     default_model: current?.default_model ?? fallbackModel,
     reasoning_effort: current?.reasoning_effort ?? fallbackEffort,
     default_subagent_model:
-      current?.default_subagent_model ?? current?.default_model ?? fallbackModel,
+      current?.default_subagent_model ??
+      current?.default_model ??
+      fallbackModel,
     subagent_reasoning_effort:
-      current?.subagent_reasoning_effort ?? current?.reasoning_effort ?? fallbackEffort,
+      current?.subagent_reasoning_effort ??
+      current?.reasoning_effort ??
+      fallbackEffort,
     default_repo: current?.default_repo ?? null,
     base_branch: current?.base_branch ?? null,
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
     create_prs: current?.create_prs ?? false,
+    draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
     ...patch,
   }

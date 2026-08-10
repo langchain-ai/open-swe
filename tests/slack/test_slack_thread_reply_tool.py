@@ -4,6 +4,7 @@ import importlib
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 slack_reply_tool = importlib.import_module("agent.tools.slack_thread_reply")
 
@@ -207,3 +208,38 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
     assert actions["type"] == "actions"
     assert [button["text"]["text"] for button in actions["elements"]] == ["A", "B"]
     assert actions["elements"][0]["action_id"] == "open_swe_option_select"
+
+
+async def test_slack_thread_reply_passes_model_reported_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_post_and_store_mapping(
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        **kwargs: Any,
+    ) -> tuple[str | None, str | None]:
+        captured.update(kwargs)
+        return "2.0", None
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+    state = {
+        "messages": [
+            HumanMessage(content="request"),
+            AIMessage(
+                content="",
+                response_metadata={"model_name": "model-a"},
+                usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+            ),
+        ]
+    }
+
+    result = await slack_reply_tool.slack_thread_reply("Done", state=state)
+
+    assert result == {"success": True}
+    usage = captured["usage"]
+    assert usage.models == ("model-a",)
+    assert usage.main_agent_tokens == 110

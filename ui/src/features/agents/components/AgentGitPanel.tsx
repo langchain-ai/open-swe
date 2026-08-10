@@ -1,4 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useStreamContext as useAgentThreadStream } from "@langchain/react"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   MultiFileDiff,
   Virtualizer,
@@ -9,24 +11,25 @@ import {
   useFileTree,
   useFileTreeSelection,
 } from "@pierre/trees/react"
-import {
-  ArrowsInIcon,
-  ArrowsOutIcon,
-  CaretDownIcon,
-  SidebarSimpleIcon,
-} from "@phosphor-icons/react"
+import { CaretDownIcon } from "@phosphor-icons/react"
 import type { FileContents } from "@pierre/diffs/react"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
-import type { AgentThread, Message } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/features/agents/lib/types"
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
-import type { ChangedFileSummaryItem } from "@/features/agents/components/messages"
 import { agentsApi } from "@/features/agents/lib/api"
-import { useAgentThreadPrDiff } from "@/features/agents/lib/queries"
+import {
+  agentThreadKeys,
+  invalidateAgentThreadLists,
+  useAgentThreadPrDiff,
+  useAgentThreadTurnDiff,
+} from "@/features/agents/lib/queries"
 import { ReviewTab } from "@/features/reviews/components/ReviewTab"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
 import { buttonVariants } from "@/components/ui/button"
+import { AgentPanelShell } from "@/features/agents/components/AgentPanelShell"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
+import { PlanView } from "@/features/agents/components/PlanView"
 import {
   DIFF_VIRTUALIZER_CONFIG,
   DIFF_VIRTUAL_METRICS,
@@ -35,16 +38,19 @@ import {
   fileContentsCacheKey,
   useDiffOptions,
 } from "@/features/agents/utils/diffUtils"
-import { summarizeChangedFiles } from "@/features/agents/components/messages"
-import { Z } from "@/features/agents/components/z-index"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
+export type AgentPanelTab = "git" | "plan"
+
 interface AgentGitPanelProps {
   thread: AgentThread
-  messages: Array<Message>
+  /** Path to select and scroll to, set when a transcript row is clicked. */
+  revealFilePath?: string | null
   collapsed: boolean
+  requestedTab: AgentPanelTab
   onCollapsedChange: (next: boolean) => void
+  onTabChange: (tab: AgentPanelTab) => void
 }
 
 interface PanelFile {
@@ -64,16 +70,6 @@ function prFileStatus(file: ThreadPrDiffFile): GitStatus {
   return "modified"
 }
 
-function deriveStatus(file: ChangedFileSummaryItem): GitStatus {
-  if (file.originalContent.length === 0 && file.modifiedContent.length > 0) {
-    return "added"
-  }
-  if (file.modifiedContent.length === 0 && file.originalContent.length > 0) {
-    return "deleted"
-  }
-  return "modified"
-}
-
 function commonDirPrefix(paths: Array<string>): string {
   const first = paths[0]
   if (paths.length === 0 || first === undefined) return ""
@@ -86,149 +82,6 @@ function commonDirPrefix(paths: Array<string>): string {
     depth = i
   }
   return depth === 0 ? "" : `${base.slice(0, depth).join("/")}/`
-}
-
-const PANEL_STORAGE_WIDTH = "open-swe.gitpanel.width"
-const PANEL_STORAGE_COLLAPSED = "open-swe.gitpanel.collapsed"
-const COLLAPSED_STATE_TRUE = "1"
-const COLLAPSED_STATE_FALSE = "0"
-const PANEL_DEFAULT_WIDTH = 420
-const PANEL_MIN_WIDTH = 320
-// Keep at least this much room for the chat so the panel can grow to nearly the
-// full window (e.g. ~50/50 on ultrawide screens) without squishing the chat.
-// Exported so the chat column can enforce the same floor via min-width.
-export const PANEL_MIN_CHAT_WIDTH = 360
-
-function getPanelMaxWidth(availableWidth?: number): number {
-  if (typeof window === "undefined") return PANEL_DEFAULT_WIDTH
-  const available = availableWidth ?? window.innerWidth
-  return Math.max(PANEL_MIN_WIDTH, available - PANEL_MIN_CHAT_WIDTH)
-}
-
-function clampPanelWidth(width: number, availableWidth?: number): number {
-  return Math.min(
-    getPanelMaxWidth(availableWidth),
-    Math.max(PANEL_MIN_WIDTH, width)
-  )
-}
-
-function readStoredPanelWidth(): number {
-  if (typeof window === "undefined") return PANEL_DEFAULT_WIDTH
-  const raw = window.localStorage.getItem(PANEL_STORAGE_WIDTH)
-  const parsed = raw ? Number(raw) : NaN
-  if (!Number.isFinite(parsed)) return PANEL_DEFAULT_WIDTH
-  return clampPanelWidth(parsed)
-}
-
-export function readStoredPanelCollapsed(): boolean {
-  if (typeof window === "undefined") return true
-  // Default to collapsed until the user opens it once.
-  return (
-    window.localStorage.getItem(PANEL_STORAGE_COLLAPSED) !==
-    COLLAPSED_STATE_FALSE
-  )
-}
-
-export function writeStoredPanelCollapsed(collapsed: boolean): void {
-  if (typeof window === "undefined") return
-  window.localStorage.setItem(
-    PANEL_STORAGE_COLLAPSED,
-    collapsed ? COLLAPSED_STATE_TRUE : COLLAPSED_STATE_FALSE
-  )
-}
-
-function PanelResizeHandle({
-  width,
-  onResize,
-  onResizeEnd,
-}: {
-  width: number
-  onResize: (next: number) => number
-  onResizeEnd: (next: number) => void
-}) {
-  const startRef = useRef<{ x: number; width: number } | null>(null)
-  const pendingWidthRef = useRef<number | null>(null)
-  const latestWidthRef = useRef(width)
-  const frameRef = useRef<number | null>(null)
-  const [dragging, setDragging] = useState(false)
-
-  useEffect(() => {
-    latestWidthRef.current = width
-  }, [width])
-
-  const flushResize = useCallback(() => {
-    frameRef.current = null
-    const next = pendingWidthRef.current
-    pendingWidthRef.current = null
-    if (next == null) return
-    latestWidthRef.current = onResize(next)
-  }, [onResize])
-
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    startRef.current = { x: e.clientX, width: latestWidthRef.current }
-    setDragging(true)
-    e.currentTarget.setPointerCapture(e.pointerId)
-  }
-
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!startRef.current) return
-    pendingWidthRef.current =
-      startRef.current.width - (e.clientX - startRef.current.x)
-    if (frameRef.current == null) {
-      frameRef.current = window.requestAnimationFrame(flushResize)
-    }
-  }
-
-  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (frameRef.current != null) {
-      window.cancelAnimationFrame(frameRef.current)
-      flushResize()
-    }
-    startRef.current = null
-    setDragging(false)
-    onResizeEnd(latestWidthRef.current)
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId)
-    }
-  }
-
-  useEffect(() => {
-    return () => {
-      if (frameRef.current != null) {
-        window.cancelAnimationFrame(frameRef.current)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!dragging) return
-    const prevCursor = document.body.style.cursor
-    const prevUserSelect = document.body.style.userSelect
-    document.body.style.cursor = "col-resize"
-    document.body.style.userSelect = "none"
-    return () => {
-      document.body.style.cursor = prevCursor
-      document.body.style.userSelect = prevUserSelect
-    }
-  }, [dragging])
-
-  return (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      className={cn(
-        "absolute top-0 left-0 z-20 h-full w-1 cursor-col-resize touch-none select-none",
-        "after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-transparent after:transition-colors",
-        "hover:after:bg-[var(--ui-border)]",
-        dragging && "after:bg-[var(--ui-border)]"
-      )}
-    />
-  )
 }
 
 // Neutral filename foreground from the pierre Shiki themes (pierre-light /
@@ -254,82 +107,74 @@ export const TREE_UNSAFE_CSS = `
 
 export function treeThemeStyle(): React.CSSProperties {
   return {
-    "--trees-theme-sidebar-bg": "var(--ui-surface)",
-    "--trees-theme-sidebar-fg": "var(--ui-text)",
-    "--trees-theme-sidebar-border": "var(--ui-border)",
-    "--trees-theme-sidebar-header-fg": "var(--ui-text-dim)",
+    "--trees-theme-sidebar-bg": "var(--card)",
+    "--trees-theme-sidebar-fg": "var(--foreground)",
+    "--trees-theme-sidebar-border": "var(--border)",
+    "--trees-theme-sidebar-header-fg": "var(--muted-foreground)",
     "--trees-theme-list-hover-bg":
-      "color-mix(in oklab, var(--ui-accent) 10%, transparent)",
+      "color-mix(in oklab, var(--primary) 10%, transparent)",
     "--trees-theme-list-active-selection-bg":
-      "color-mix(in oklab, var(--ui-accent) 22%, transparent)",
-    "--trees-theme-list-active-selection-fg": "var(--ui-text)",
+      "color-mix(in oklab, var(--primary) 22%, transparent)",
+    "--trees-theme-list-active-selection-fg": "var(--foreground)",
     "--trees-selected-focused-border-color-override": "transparent",
-    "--trees-theme-input-bg": "var(--ui-panel)",
-    "--trees-theme-input-fg": "var(--ui-text)",
-    "--trees-theme-input-border": "var(--ui-border)",
-    "--trees-theme-focus-ring": "var(--ui-accent)",
-    "--trees-theme-scrollbar-thumb": "var(--ui-border)",
+    "--trees-theme-input-bg": "var(--card)",
+    "--trees-theme-input-fg": "var(--foreground)",
+    "--trees-theme-input-border": "var(--border)",
+    "--trees-theme-focus-ring": "var(--primary)",
+    "--trees-theme-scrollbar-thumb": "var(--border)",
     "--trees-theme-git-added-fg": TREE_FILE_FG,
     "--trees-theme-git-modified-fg": TREE_FILE_FG,
     "--trees-theme-git-deleted-fg": TREE_FILE_FG,
     "--trees-theme-git-renamed-fg": TREE_FILE_FG,
     "--trees-theme-git-untracked-fg": TREE_FILE_FG,
-    "--trees-theme-git-ignored-fg": "var(--ui-text-dim)",
+    "--trees-theme-git-ignored-fg": "var(--muted-foreground)",
   } as React.CSSProperties
 }
 
 export function AgentGitPanel({
   thread,
-  messages,
+  revealFilePath,
   collapsed,
+  requestedTab,
   onCollapsedChange,
+  onTabChange,
 }: AgentGitPanelProps) {
-  const [topTab, setTopTab] = useState<"git" | "desktop" | "terminal">("git")
+  const queryClient = useQueryClient()
+  const stream = useAgentThreadStream()
   const [tab, setTab] = useState<"diff" | "review" | "commits">("diff")
-  const [width, setWidthState] = useState(() => readStoredPanelWidth())
-  const [fullScreen, setFullScreen] = useState(false)
   const isMobile = useIsMobile()
-  // On mobile the panel is never an inline resizable column — it's a full-screen
-  // overlay that the user navigates to (and back from), like the sidebar.
-  const overlay = fullScreen || isMobile
-  const panelRef = useRef<HTMLDivElement>(null)
+  const hasPlan = Boolean(
+    thread.planStatus &&
+    thread.planStatus !== "approved" &&
+    thread.planStatus !== "cancelled"
+  )
+
+  const topTab = hasPlan || requestedTab !== "plan" ? requestedTab : "git"
+  const onPlanApproved = useCallback(
+    (runId: string) => {
+      queryClient.setQueryData<AgentThread>(
+        agentThreadKeys.detail(thread.id),
+        (current) =>
+          current
+            ? { ...current, planStatus: "approved", status: "running" }
+            : current
+      )
+      void queryClient.invalidateQueries({ queryKey: ["plan", thread.id] })
+      invalidateAgentThreadLists(queryClient)
+      onTabChange("git")
+      void stream.client.runs.join(thread.id, runId).finally(() => {
+        void queryClient.invalidateQueries({
+          queryKey: agentThreadKeys.detail(thread.id),
+        })
+      })
+    },
+    [onTabChange, queryClient, stream, thread.id]
+  )
 
   // Collapsed state is owned by the parent (so the plan banner can reserve space
   // for the floating expand button); persistence to localStorage lives there too.
   const setCollapsed = onCollapsedChange
 
-  const applyWidth = useCallback(
-    (next: number) => {
-      const available = panelRef.current?.parentElement?.clientWidth
-      const clamped = clampPanelWidth(next, available)
-      if (!overlay && panelRef.current) {
-        panelRef.current.style.width = `${clamped}px`
-      }
-      return clamped
-    },
-    [overlay]
-  )
-
-  const commitWidth = useCallback(
-    (next: number) => {
-      const clamped = applyWidth(next)
-      setWidthState((current) => (current === clamped ? current : clamped))
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(PANEL_STORAGE_WIDTH, String(clamped))
-      }
-    },
-    [applyWidth]
-  )
-
-  // Re-clamp against the real container width on mount and whenever the window
-  // resizes, so the panel can never squeeze the chat below its minimum width.
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const reclamp = () => commitWidth(width)
-    reclamp()
-    window.addEventListener("resize", reclamp)
-    return () => window.removeEventListener("resize", reclamp)
-  }, [commitWidth, width])
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null)
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const pr = thread.pr
@@ -347,6 +192,9 @@ export function AgentGitPanel({
   }
 
   const prDiff = useAgentThreadPrDiff(thread.id, Boolean(pr))
+  // Without a PR the sandbox's git checkpoints are the only source of truth for
+  // what this thread changed.
+  const turnDiff = useAgentThreadTurnDiff(thread.id, null, !pr && !collapsed)
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const canDownloadRecovery =
@@ -376,39 +224,23 @@ export function AgentGitPanel({
     }
   }, [thread.id])
 
-  const chunks = useMemo(
-    () => messages.flatMap((message) => message.chunks),
-    [messages]
-  )
-
   const files = useMemo<Array<PanelFile>>(() => {
-    if (prDiff.data) {
-      return prDiff.data.files.map((file) => ({
-        filePath: file.path,
-        treePath: file.path,
-        additions: file.additions,
-        deletions: file.deletions,
-        originalContent: file.originalContent ?? "",
-        modifiedContent: file.modifiedContent ?? "",
-        status: prFileStatus(file),
-        unrenderable: file.unrenderable,
-      }))
-    }
-    const summary = summarizeChangedFiles(chunks)
-    const prefix = commonDirPrefix(summary.map((file) => file.filePath))
-    return summary.map((file) => ({
-      filePath: file.filePath,
+    const diffFiles = prDiff.data?.files ?? turnDiff.data?.files ?? []
+    const prefix = commonDirPrefix(diffFiles.map((file) => file.path))
+    return diffFiles.map((file) => ({
+      filePath: file.path,
       treePath:
-        prefix && file.filePath.startsWith(prefix)
-          ? file.filePath.slice(prefix.length)
-          : file.filePath,
+        prefix && file.path.startsWith(prefix)
+          ? file.path.slice(prefix.length)
+          : file.path,
       additions: file.additions,
       deletions: file.deletions,
-      originalContent: file.originalContent,
-      modifiedContent: file.modifiedContent,
-      status: deriveStatus(file),
+      originalContent: file.originalContent ?? "",
+      modifiedContent: file.modifiedContent ?? "",
+      status: prFileStatus(file),
+      unrenderable: file.unrenderable,
     }))
-  }, [chunks, prDiff.data])
+  }, [prDiff.data, turnDiff.data])
 
   const totals = useMemo(
     () =>
@@ -422,233 +254,173 @@ export function AgentGitPanel({
     [files]
   )
 
-  useEffect(() => {
-    if (!selectedTreePath) return
-    const target = files.find((file) => file.treePath === selectedTreePath)
+  const filesRef = useRef(files)
+  filesRef.current = files
+  const selectTreePath = useCallback((path: string) => {
+    setSelectedTreePath(path)
+    const target = filesRef.current.find((file) => file.treePath === path)
     if (!target) return
     sectionRefs.current[target.filePath]?.scrollIntoView({
       block: "start",
       behavior: "smooth",
     })
-  }, [selectedTreePath, files])
+  }, [])
 
-  if (collapsed) {
-    return (
-      <button
-        type="button"
-        onClick={() => setCollapsed(false)}
-        aria-label="Expand git panel"
-        title="Expand git panel"
-        className="fixed top-3 right-3 z-30 flex size-7 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
-      >
-        <SidebarSimpleIcon className="size-4" />
-      </button>
+  useEffect(() => {
+    if (!revealFilePath) return
+    // Transcript rows carry sandbox-absolute paths; diff files are repo-relative.
+    const target = filesRef.current.find(
+      (file) =>
+        file.filePath === revealFilePath ||
+        revealFilePath.endsWith(`/${file.filePath}`)
     )
-  }
+    if (target) selectTreePath(target.treePath)
+  }, [revealFilePath, files, selectTreePath])
 
   return (
-    <aside
-      ref={panelRef}
-      className={cn(
-        "relative flex shrink-0 flex-col bg-[var(--ui-bg)]",
-        overlay ? "fixed inset-0 !w-full" : "h-full"
-      )}
-      style={overlay ? { zIndex: Z.MODAL } : { width }}
+    <AgentPanelShell
+      tabs={[["git", "Git"], ...(hasPlan ? ([["plan", "Plan"]] as const) : [])]}
+      activeTab={topTab}
+      onTabChange={onTabChange}
+      collapsed={collapsed}
+      onCollapsedChange={setCollapsed}
     >
-      <div className="flex h-11 shrink-0 items-center gap-1 px-3">
-        {(
-          [
-            ["git", "Git"],
-            ["desktop", "Desktop"],
-            ["terminal", "Terminal"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTopTab(id)}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-xs transition-colors",
-              topTab === id
-                ? "bg-[var(--ui-accent-bubble)] font-medium text-[var(--ui-text)]"
-                : "text-[var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)]"
-            )}
-          >
-            {label}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => {
-            setFullScreen(false)
-            setCollapsed(true)
-          }}
-          aria-label="Collapse git panel"
-          title="Collapse git panel"
-          className="ml-auto rounded-md p-1.5 text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
-        >
-          <SidebarSimpleIcon className="size-4" />
-        </button>
-        {!isMobile && (
-          <button
-            type="button"
-            onClick={() => setFullScreen((v) => !v)}
-            aria-label={fullScreen ? "Exit full screen" : "Enter full screen"}
-            className="rounded-md p-1.5 text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
-          >
-            {fullScreen ? (
-              <ArrowsInIcon className="size-4" />
-            ) : (
-              <ArrowsOutIcon className="size-4" />
-            )}
-          </button>
-        )}
-      </div>
-
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-sm",
-          overlay ? "mx-3 mb-3" : "mr-4 mb-4 ml-1"
-        )}
-      >
-        {topTab !== "git" ? (
-          <div className="flex flex-1 items-center justify-center p-6 text-xs text-[var(--ui-text-dim)]">
-            Coming Soon
-          </div>
-        ) : (
-          <>
-            {pr && (
-              <PrHeader
-                className="border-b border-[var(--ui-border)] px-4 py-3"
-                url={pr.url}
-                title={pr.title}
-                number={pr.number}
-                state={pr.state}
-                headRef={pr.headRef}
-                baseRef={pr.baseRef}
-                titleClassName="truncate text-sm"
-              />
-            )}
-
-            <div className="flex items-center gap-1 border-b border-[var(--ui-border)] px-3 py-2">
-              {(
-                [
-                  ["diff", "Diff"],
-                  ["review", "Review"],
-                  ["commits", "Commits"],
-                ] as const
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setTab(id)}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 text-xs transition-colors",
-                    tab === id
-                      ? "bg-[var(--ui-accent-bubble)] font-medium text-[var(--ui-text)]"
-                      : "text-[var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)]"
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-              <div className="ml-auto flex min-w-0 items-center gap-2">
-                {tab === "diff" && <DiffWrapToggle />}
-                {recoveryError && (
-                  <span
-                    title={recoveryError}
-                    className="max-w-40 truncate text-[11px] text-[var(--ui-danger)]"
-                  >
-                    {recoveryError}
-                  </span>
-                )}
-                {canDownloadRecovery && (
-                  <button
-                    type="button"
-                    onClick={downloadRecoveryPatch}
-                    disabled={recoveringPatch}
-                    className={cn(
-                      buttonVariants({ variant: "outline", size: "sm" }),
-                      "h-7 px-2 text-[11px]"
-                    )}
-                  >
-                    {recoveringPatch ? "Preparing…" : "Download patch"}
-                  </button>
-                )}
-                {files.length > 0 && (
-                  <span className="flex items-center gap-2 text-[11px] text-[var(--ui-text-dim)]">
-                    <span>
-                      {files.length} file{files.length === 1 ? "" : "s"}
-                    </span>
-                    <span className="text-[var(--ui-success)]">
-                      +{totals.additions}
-                    </span>
-                    <span className="text-[var(--ui-danger)]">
-                      -{totals.deletions}
-                    </span>
-                  </span>
-                )}
-              </div>
+      {({ fullScreen }) => (
+        <>
+          {topTab === "plan" ? (
+            <PlanView threadId={thread.id} onApprove={onPlanApproved} />
+          ) : topTab !== "git" ? (
+            <div className="flex flex-1 items-center justify-center p-6 text-xs text-muted-foreground/70">
+              Coming Soon
             </div>
-
-            <div className="flex min-h-0 flex-1">
-              {tab === "review" ? (
-                <ReviewTab thread={thread} />
-              ) : tab === "diff" && files.length > 0 ? (
-                <WorkerPoolContextProvider
-                  poolOptions={DIFF_WORKER_POOL_OPTIONS}
-                  highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
-                >
-                  <Virtualizer
-                    className="min-h-0 flex-1 overflow-y-auto"
-                    contentClassName="space-y-2 p-2"
-                    config={DIFF_VIRTUALIZER_CONFIG}
-                  >
-                    {files.map((file) => (
-                      <FileDiffSection
-                        key={file.filePath}
-                        file={file}
-                        sectionRef={(node) => {
-                          sectionRefs.current[file.filePath] = node
-                        }}
-                      />
-                    ))}
-                  </Virtualizer>
-                </WorkerPoolContextProvider>
-              ) : (
-                <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-[var(--ui-text-dim)]">
-                  {tab !== "diff"
-                    ? "Coming Soon"
-                    : prDiff.isLoading
-                      ? "Loading PR diff…"
-                      : "No diff available."}
-                </div>
+          ) : (
+            <>
+              {pr && (
+                <PrHeader
+                  className="border-b border-border px-4 py-3"
+                  url={pr.url}
+                  title={pr.title}
+                  number={pr.number}
+                  state={pr.state}
+                  headRef={pr.headRef}
+                  baseRef={pr.baseRef}
+                  titleClassName="truncate text-sm"
+                />
               )}
 
-              {tab === "diff" &&
-                fullScreen &&
-                !isMobile &&
-                files.length > 0 && (
-                  <div className="w-72 shrink-0 border-l border-[var(--ui-border)] bg-[var(--ui-surface)]">
-                    <FileTreeExplorer
-                      files={files}
-                      selectedTreePath={selectedTreePath}
-                      onSelect={setSelectedTreePath}
-                    />
+              <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+                {(
+                  [
+                    ["diff", "Diff"],
+                    ["review", "Review"],
+                    ["commits", "Commits"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setTab(id)}
+                    className={cn(
+                      "rounded-md px-2.5 py-1 text-xs transition-colors",
+                      tab === id
+                        ? "bg-accent font-medium text-foreground"
+                        : "text-muted-foreground/70 hover:bg-accent"
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <div className="ml-auto flex min-w-0 items-center gap-2">
+                  {tab === "diff" && <DiffWrapToggle />}
+                  {recoveryError && (
+                    <span
+                      title={recoveryError}
+                      className="max-w-40 truncate text-[11px] text-destructive"
+                    >
+                      {recoveryError}
+                    </span>
+                  )}
+                  {canDownloadRecovery && (
+                    <button
+                      type="button"
+                      onClick={downloadRecoveryPatch}
+                      disabled={recoveringPatch}
+                      className={cn(
+                        buttonVariants({ variant: "outline", size: "sm" }),
+                        "h-7 px-2 text-[11px]"
+                      )}
+                    >
+                      {recoveringPatch ? "Preparing…" : "Download patch"}
+                    </button>
+                  )}
+                  {files.length > 0 && (
+                    <span className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
+                      <span>
+                        {files.length} file{files.length === 1 ? "" : "s"}
+                      </span>
+                      <span className="text-success-foreground">
+                        +{totals.additions}
+                      </span>
+                      <span className="text-destructive">
+                        -{totals.deletions}
+                      </span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex min-h-0 flex-1">
+                {tab === "review" ? (
+                  <ReviewTab thread={thread} />
+                ) : tab === "diff" && files.length > 0 ? (
+                  <WorkerPoolContextProvider
+                    poolOptions={DIFF_WORKER_POOL_OPTIONS}
+                    highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
+                  >
+                    <Virtualizer
+                      className="min-h-0 flex-1 overflow-y-auto"
+                      contentClassName="space-y-2 p-2"
+                      config={DIFF_VIRTUALIZER_CONFIG}
+                    >
+                      {files.map((file) => (
+                        <FileDiffSection
+                          key={file.filePath}
+                          file={file}
+                          sectionRef={(node) => {
+                            sectionRefs.current[file.filePath] = node
+                          }}
+                        />
+                      ))}
+                    </Virtualizer>
+                  </WorkerPoolContextProvider>
+                ) : (
+                  <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
+                    {tab !== "diff"
+                      ? "Coming Soon"
+                      : prDiff.isLoading
+                        ? "Loading PR diff…"
+                        : "No diff available."}
                   </div>
                 )}
-            </div>
-          </>
-        )}
-      </div>
-      {!overlay && (
-        <PanelResizeHandle
-          width={width}
-          onResize={applyWidth}
-          onResizeEnd={commitWidth}
-        />
+
+                {tab === "diff" &&
+                  fullScreen &&
+                  !isMobile &&
+                  files.length > 0 && (
+                    <div className="w-72 shrink-0 border-l border-border bg-card">
+                      <FileTreeExplorer
+                        files={files}
+                        selectedTreePath={selectedTreePath}
+                        onSelect={selectTreePath}
+                      />
+                    </div>
+                  )}
+              </div>
+            </>
+          )}
+        </>
       )}
-    </aside>
+    </AgentPanelShell>
   )
 }
 
@@ -690,31 +462,31 @@ const FileDiffSection = memo(
     return (
       <div
         ref={sectionRef}
-        className="mb-2 scroll-mt-2 overflow-hidden rounded-lg border border-[var(--ui-border)]"
+        className="mb-2 scroll-mt-2 overflow-hidden rounded-lg border border-border"
       >
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-2 bg-[var(--ui-panel-2)] px-3 py-2 text-left text-xs"
+          className="flex w-full items-center gap-2 bg-accent px-3 py-2 text-left text-xs"
         >
           <CaretDownIcon
             className={cn("size-3 transition-transform", !open && "-rotate-90")}
           />
-          <span className="truncate font-medium text-[var(--ui-text)]">
+          <span className="truncate font-medium text-foreground">
             {file.treePath}
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-2">
-            <span className="text-[var(--ui-success)]">+{file.additions}</span>
-            <span className="text-[var(--ui-danger)]">-{file.deletions}</span>
+            <span className="text-success-foreground">+{file.additions}</span>
+            <span className="text-destructive">-{file.deletions}</span>
           </span>
         </button>
         {open &&
           (file.unrenderable ? (
-            <div className="bg-[var(--ui-panel)] p-4 text-center text-xs text-[var(--ui-text-dim)]">
+            <div className="bg-card p-4 text-center text-xs text-muted-foreground/70">
               Binary or large file — diff not shown.
             </div>
           ) : (
-            <div className="overflow-hidden bg-[var(--ui-panel)] p-2">
+            <div className="overflow-hidden bg-card p-2">
               <MultiFileDiff
                 oldFile={oldFile}
                 newFile={newFile}

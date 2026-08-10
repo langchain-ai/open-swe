@@ -28,6 +28,8 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
         "open_pull_request",
         "recreate_sandbox",
         "request_pr_review",
+        "save_user_skill",
+        "delete_user_skill",
         "slack_start_new_thread",
         "linear_create_issue",
         "linear_update_issue",
@@ -147,13 +149,13 @@ def test_run_start_omits_plan_mode_when_disabled(
     assert "plan_mode" not in configurable
 
 
-def test_thread_summary_reports_plan_mode() -> None:
-    summary = thread_api._thread_summary(
+async def test_thread_summary_reports_plan_mode() -> None:
+    summary = await thread_api._thread_summary(
         {"thread_id": "t1", "metadata": {"source": "dashboard", "plan_mode": True}}
     )
     assert summary["planMode"] is True
 
-    summary_off = thread_api._thread_summary(
+    summary_off = await thread_api._thread_summary(
         {"thread_id": "t2", "metadata": {"source": "dashboard"}}
     )
     assert summary_off["planMode"] is False

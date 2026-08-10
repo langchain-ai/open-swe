@@ -7,10 +7,17 @@ import {
 } from "@phosphor-icons/react"
 import { useState } from "react"
 
-import type { AgentSource, AgentStatus, AgentThread } from "@/features/agents/lib/types"
+import type {
+  AgentSource,
+  AgentStatus,
+  AgentThread,
+} from "@/features/agents/lib/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useResolveAgentThread, useThreadsPage } from "@/features/agents/lib/queries"
+import {
+  useResolveAgentThread,
+  useThreadsPage,
+} from "@/features/agents/lib/queries"
 import { cn } from "@/lib/utils"
 
 const PAGE_SIZE = 25
@@ -62,7 +69,9 @@ function triToBool(value: TriState): boolean | undefined {
 }
 
 function displayStatus(status: AgentStatus): string {
-  return STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status
+  return (
+    STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status
+  )
 }
 
 export function AgentsThreadsPage({
@@ -103,15 +112,15 @@ export function AgentsThreadsPage({
     <main className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-8">
       <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6">
         <div>
-          <h1 className="font-heading text-base font-medium text-[var(--ui-text)]">
+          <h1 className="font-heading text-base font-medium text-foreground">
             Threads
           </h1>
-          <p className="text-xs text-[var(--ui-text-muted)]">
+          <p className="text-xs text-muted-foreground">
             Search and filter every thread, including resolved ones.
           </p>
         </div>
 
-        <div className="flex flex-col gap-3 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] p-3">
+        <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3">
           <form onSubmit={onSearchSubmit} className="flex gap-2">
             <Input
               value={search}
@@ -158,11 +167,11 @@ export function AgentsThreadsPage({
 
         <div className="flex flex-col gap-1">
           {query.isLoading ? (
-            <p className="px-2 py-8 text-center text-xs text-[var(--ui-text-muted)]">
+            <p className="px-2 py-8 text-center text-xs text-muted-foreground">
               Loading...
             </p>
           ) : items.length === 0 ? (
-            <p className="px-2 py-8 text-center text-xs text-[var(--ui-text-muted)]">
+            <p className="px-2 py-8 text-center text-xs text-muted-foreground">
               No threads match these filters.
             </p>
           ) : (
@@ -173,7 +182,7 @@ export function AgentsThreadsPage({
         </div>
 
         {(items.length > 0 || filters.page > 1) && (
-          <div className="mt-auto flex items-center justify-between pt-2 text-xs text-[var(--ui-text-muted)]">
+          <div className="mt-auto flex items-center justify-between pt-2 text-xs text-muted-foreground">
             <span>
               {items.length > 0 ? `${offset + 1}–${end}` : "No results"}
               {exactTotal != null ? ` of ${exactTotal}` : hasMore ? "+" : ""}
@@ -217,8 +226,8 @@ function TriFilter({
 }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[var(--ui-text-dim)]">{label}</span>
-      <div className="flex overflow-hidden rounded-md border border-[var(--ui-border)]">
+      <span className="text-muted-foreground/70">{label}</span>
+      <div className="flex overflow-hidden rounded-md border border-border">
         {TRI_OPTIONS.map((option) => (
           <button
             key={option.value}
@@ -227,8 +236,8 @@ function TriFilter({
             className={cn(
               "px-2 py-0.5 transition-colors",
               value === option.value
-                ? "bg-[var(--ui-accent-bubble)] text-[var(--ui-text)]"
-                : "text-[var(--ui-text-muted)] hover:bg-[var(--ui-sidebar-hover)]"
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:bg-sidebar-row-hover"
             )}
           >
             {option.label}
@@ -252,7 +261,7 @@ function SelectFilter({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="h-7 rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel)] px-2 text-xs text-[var(--ui-text)] outline-none"
+      className="h-7 rounded-md border border-border bg-card px-2 text-xs text-foreground outline-none"
     >
       {options.map((option) => (
         <option key={option.value} value={option.value}>
@@ -278,11 +287,11 @@ function ThreadListItem({ thread }: { thread: AgentThread }) {
     <Link
       to="/agents/$threadId"
       params={{ threadId: thread.id }}
-      className="group flex items-center gap-3 rounded-lg border border-transparent px-3 py-2 transition-colors hover:border-[var(--ui-border)] hover:bg-[var(--ui-sidebar-hover)]"
+      className="group flex items-center gap-3 rounded-lg border border-transparent px-3 py-2 transition-colors hover:border-border hover:bg-sidebar-row-hover"
     >
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-[var(--ui-text)]">{thread.title}</p>
-        <p className="truncate text-[11px] text-[var(--ui-text-dim)]">
+        <p className="truncate text-sm text-foreground">{thread.title}</p>
+        <p className="truncate text-[11px] text-muted-foreground/70">
           {thread.repoFullName || "No repo"} · {displayStatus(thread.status)}
           {isResolved ? " · Resolved" : ""}
         </p>
@@ -293,7 +302,7 @@ function ThreadListItem({ thread }: { thread: AgentThread }) {
         title={isResolved ? "Unresolve thread" : "Resolve thread"}
         onClick={onToggleResolved}
         disabled={resolveThread.isPending}
-        className="flex size-6 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+        className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:bg-accent hover:text-foreground"
       >
         {isResolved ? (
           <ArrowCounterClockwiseIcon className="size-4" />

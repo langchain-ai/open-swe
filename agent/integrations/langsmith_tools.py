@@ -15,6 +15,7 @@ from typing import Any
 from langchain_core.tools import BaseTool, StructuredTool
 
 from ..dashboard.team_credentials import LangSmithCredentials, get_langsmith_credentials
+from ..utils.langsmith import async_langsmith_client, sync_langsmith_client
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,7 @@ _MAX_LIST_RUNS = 50
 
 
 def _client(creds: LangSmithCredentials):
-    from langsmith import Client
-
-    return Client(api_key=creds.api_key, api_url=creds.endpoint)
+    return async_langsmith_client(creds.api_key, creds.endpoint)
 
 
 def _serialize_run(run: Any) -> dict[str, Any]:
@@ -58,9 +57,15 @@ def _make_tools(creds: LangSmithCredentials) -> list[BaseTool]:
             Dictionary with the run details, or an error message.
         """
         try:
-            run = await asyncio.to_thread(
-                _client(creds).read_run, run_id, load_child_runs=load_child_runs
-            )
+            if load_child_runs:
+                # AsyncClient.read_run has no load_child_runs; the sync one runs off-loop.
+                run = await asyncio.to_thread(
+                    sync_langsmith_client(creds.api_key, creds.endpoint).read_run,
+                    run_id,
+                    load_child_runs=True,
+                )
+            else:
+                run = await _client(creds).read_run(run_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("langsmith_get_trace failed", exc_info=True)
             return {"success": False, "error": f"{type(e).__name__}: {e}"}
@@ -83,17 +88,15 @@ def _make_tools(creds: LangSmithCredentials) -> list[BaseTool]:
         """
         capped = max(1, min(limit, _MAX_LIST_RUNS))
 
-        def _list() -> list[Any]:
-            return list(
-                _client(creds).list_runs(
+        try:
+            runs = [
+                run
+                async for run in _client(creds).list_runs(
                     project_name=project_name,
                     filter=filter,
                     limit=capped,
                 )
-            )
-
-        try:
-            runs = await asyncio.to_thread(_list)
+            ]
         except Exception as e:  # noqa: BLE001
             logger.warning("langsmith_list_runs failed", exc_info=True)
             return {"success": False, "error": f"{type(e).__name__}: {e}"}

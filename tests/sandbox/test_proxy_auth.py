@@ -339,6 +339,7 @@ class TestRefreshProxyOnSandboxReuse:
         """Cached sandboxes should get a fresh proxy token before git operations."""
         config = self._execution_config()
         mock_sandbox = MagicMock(id="sandbox-cached")
+        mock_sandbox.aexecute = AsyncMock()
         captured: dict[str, object] = {}
 
         def fake_create_deep_agent(**kwargs):
@@ -398,6 +399,7 @@ class TestRefreshProxyOnSandboxReuse:
         """Reconnected sandboxes should also get a fresh proxy token."""
         config = self._execution_config()
         mock_sandbox = MagicMock(id="sandbox-existing")
+        mock_sandbox.aexecute = AsyncMock()
         captured: dict[str, object] = {}
 
         def fake_create_deep_agent(**kwargs):

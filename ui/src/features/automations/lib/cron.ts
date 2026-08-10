@@ -35,7 +35,13 @@ export function describeCron(expr: string): string {
   const [min, hour, dom, mon, dow] = parts
   if (!min || !hour || !dom || !mon || !dow) return expr
 
-  if (min === "0" && hour === "*" && dom === "*" && mon === "*" && dow === "*") {
+  if (
+    min === "0" &&
+    hour === "*" &&
+    dom === "*" &&
+    mon === "*" &&
+    dow === "*"
+  ) {
     return "Every hour"
   }
 

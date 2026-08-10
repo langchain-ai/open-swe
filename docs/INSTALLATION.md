@@ -64,7 +64,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
    - **Homepage URL**: This can be any valid URL — it's only shown on the GitHub Marketplace page (which you won't be using). Use something like `https://github.com/langchain-ai/open-swe`
    - **Callback URL**: GitHub Apps allow multiple callback URLs (one per line). Add **both**:
      1. `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/your-org-github-oauth`). This is the **agent-runtime** OAuth callback, brokered by LangSmith (step 4b).
-     2. `http://localhost:2024/dashboard/api/auth/callback` — the **dashboard-login** OAuth callback (step 8). For production, also add `https://<your-dashboard-api-url>/dashboard/api/auth/callback`. This is a separate, direct GitHub OAuth flow (not via LangSmith), so it needs its own callback URL.
+     2. `http://localhost:2024/dashboard/api/auth/callback` — the **dashboard-login** OAuth callback (step 8). For production, also add `https://<your-dashboard-api-url>/dashboard/api/auth/callback`. If you distribute the desktop app, add `https://<your-backend-url>/dashboard/api/auth/callback` as well. This is a separate, direct GitHub OAuth flow (not via LangSmith), so it needs its own callback URL.
    - **Request user authorization (OAuth) during installation**: ✅ Enable this
    - **Webhook URL**: `https://<your-ngrok-url>/webhooks/github` — use the ngrok URL from step 2
    - **Webhook secret**: generate one and save it — you'll need it later as `GITHUB_WEBHOOK_SECRET`:
@@ -82,7 +82,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
      - Workflows: Read & write — required to let Open SWE directly push branches containing explicitly requested GitHub Actions workflow changes.
      - Metadata: Read-only
    - **Organization permissions** (required only if you plan to set `ALLOWED_GITHUB_ORGS` — see step 5 / Security):
-     - Members: Read-only — used to verify org membership for the dashboard-login gate via `GET /orgs/{org}/memberships/{username}`. Without this permission that call returns 403, the check fails closed, and **every** dashboard login is rejected.
+     - Members: Read-only — used to verify org membership for dashboard login and LangSmith trace-tool access via `GET /orgs/{org}/memberships/{username}`. Without this permission that call returns 403 and the check fails closed.
 4. Under **Subscribe to events**, enable:
    - `Issue comment`
    - `Pull request review`
@@ -254,7 +254,9 @@ A GitHub or Linear webhook is accepted if the resolved repo's org is in `ALLOWED
 
 `ALLOWED_GITHUB_ORGS` also gates **dashboard login**: when set, only GitHub accounts that are active members of one of the listed organizations can complete the OAuth login and receive a session. Membership is verified server-side with the GitHub App installation token (so private memberships are visible and no extra OAuth scope is required), and the check fails closed on any API error. When `ALLOWED_GITHUB_ORGS` is empty, dashboard login is open to any GitHub account (the prior behavior).
 
-> **Required GitHub App permission**: the membership check calls `GET /orgs/{org}/memberships/{username}`, which requires the GitHub App's **Organization → Members: Read-only** permission (see step 3b). If you set `ALLOWED_GITHUB_ORGS` without granting that permission, the call returns 403, the check fails closed, and **every** dashboard login is rejected. After changing an installed app's permissions, GitHub requires you to **approve the new permission** on each installation before it takes effect.
+> **Observability access**: when team LangSmith credentials are connected, every active member of an organization in `ALLOWED_GITHUB_ORGS` can use the read-only LangSmith trace tools. Only list organizations whose full active membership may access team-level trace data. This does not grant Datadog access.
+
+> **Required GitHub App installation and permission**: install the App in every organization listed in `ALLOWED_GITHUB_ORGS` and grant **Organization → Members: Read-only** (see step 3b). Membership checks resolve each organization's installation and call `GET /orgs/{org}/memberships/{username}`. Missing installations, unapproved permissions, and API errors fail closed. `GITHUB_APP_INSTALLATION_ID` remains the default installation for ordinary GitHub operations.
 
 ### Linear (optional)
 
@@ -598,6 +600,27 @@ The client calls `${VITE_DASHBOARD_API_BASE_URL}/dashboard/api/*` with `credenti
 For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `DASHBOARD_JWT_SECRET`, `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `DASHBOARD_ALLOWED_ORIGINS`. To reach the admin pages (user mappings, etc.), add your GitHub login or email to `CONFIGURED_ADMINS`.
 
 Other UI scripts: `pnpm run build`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`.
+
+### Run the desktop app (optional)
+
+> **Experimental:** The desktop wrapper is an early-access convenience surface. The web UI is
+> the recommended way to use Open SWE.
+
+The Electron app in `desktop/` includes the compiled dashboard UI. It only needs the Open SWE
+backend to be running:
+
+```bash
+pnpm --dir ui install
+pnpm --dir desktop install
+pnpm --dir desktop run dev
+```
+
+Development connects to `http://localhost:2024`. To use a hosted backend instead, run
+`pnpm --dir desktop run start -- --backend-url=https://your-backend.example.com` or set
+`OPEN_SWE_BACKEND_URL`. Create an unpacked application with `pnpm --dir desktop run pack`, or an
+installer with `pnpm --dir desktop run dist`. Packaged builds ask for the organization's backend
+URL on first launch and store it locally; they never default to the maintainers' deployment. The
+GitHub App must allow `<backend-url>/dashboard/api/auth/callback` for desktop login.
 
 ## 9. Verify it works
 

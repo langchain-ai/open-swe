@@ -87,9 +87,9 @@ def _visible_message(title: str, instructions: str, repo: dict[str, str] | None)
     )
 
 
-def _run_links_section(thread_id: str) -> str:
+async def _run_links_section(thread_id: str) -> str:
     dashboard_url = dashboard_thread_url(thread_id)
-    trace_url = get_langsmith_trace_url(thread_id)
+    trace_url = await get_langsmith_trace_url(thread_id)
     lines = ["## Jarvis Links"]
     if dashboard_url:
         lines.append(f"- Web: {dashboard_url}")
@@ -101,7 +101,7 @@ def _run_links_section(thread_id: str) -> str:
     return "\n".join(lines)
 
 
-def _run_prompt(
+async def _run_prompt(
     title: str,
     instructions: str,
     repo: dict[str, str] | None,
@@ -119,7 +119,7 @@ def _run_prompt(
         "## Source Slack Thread\n"
         f"- Channel: {channel_id}\n"
         f"- Thread TS: {thread_ts}\n\n"
-        f"{_run_links_section(thread_id)}\n\n"
+        f"{await _run_links_section(thread_id)}\n\n"
         "## Breakout Instructions\n"
         f"{instructions}"
     )
@@ -276,7 +276,7 @@ async def slack_start_new_thread(
 
     run = await dispatch_agent_run(
         thread_id,
-        _run_prompt(clean_title, clean_instructions, repo, current_slack_thread, thread_id),
+        await _run_prompt(clean_title, clean_instructions, repo, current_slack_thread, thread_id),
         new_configurable,
         source="slack",
         client=client,

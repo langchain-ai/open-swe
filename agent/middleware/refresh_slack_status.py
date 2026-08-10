@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
@@ -28,7 +29,6 @@ from langgraph.types import Command
 
 from ..utils.slack import (
     DEFAULT_ASSISTANT_STATUS,
-    DEFAULT_LOADING_MESSAGES,
     set_slack_assistant_status,
 )
 
@@ -36,6 +36,20 @@ logger = logging.getLogger(__name__)
 
 _HEARTBEAT_INTERVAL_SECONDS = 60.0
 _MAX_HEARTBEAT_SECONDS = 60 * 60
+_LOADING_TIPS: tuple[str, ...] = (
+    "Tip: Use repo:owner/name to override the repository",
+    "Tip: Send follow-ups mid-run; I read them before my next step",
+    "Tip: Ask for plan mode to review my approach before edits",
+    "Tip: Paste a LangSmith trace link for built-in inspection",
+    "Tip: Ask me to check back after CI or a deploy finishes",
+    'Tip: Say "split this out" to start a new Slack thread',
+    "Tip: Ask me to create a reusable skill for future runs",
+    'Tip: Say "always..." to save a standing preference',
+    "Tip: Toggle Always Create PRs in your Profile",
+    "Tip: Add Repository Instructions for repo-specific behavior",
+    "Tip: Use @open-swe autofix off to pause fixes on one PR",
+    "Tip: Customize reviewer style prompts in the dashboard",
+)
 
 _T = TypeVar("_T")
 
@@ -63,6 +77,7 @@ _TOOL_STATUS: dict[str, str] = {
     "linear_get_issue": "checking Linear...",
     "linear_get_issue_comments": "checking Linear...",
     "linear_list_teams": "checking Linear...",
+    "linear_search_issues": "searching Linear...",
     "linear_update_issue": "updating Linear...",
     "linear_delete_issue": "updating Linear...",
     "add_finding": "recording review findings...",
@@ -72,7 +87,12 @@ _TOOL_STATUS: dict[str, str] = {
 }
 
 
-def _slack_thread_from_config() -> tuple[str, str] | None:
+def _loading_tip_for_run(run_id: str) -> str:
+    digest = hashlib.sha256(run_id.encode()).digest()
+    return _LOADING_TIPS[int.from_bytes(digest[:8], "big") % len(_LOADING_TIPS)]
+
+
+def _slack_status_context_from_config() -> tuple[str, str, str] | None:
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     slack_thread = configurable.get("slack_thread") if isinstance(configurable, dict) else None
@@ -85,7 +105,10 @@ def _slack_thread_from_config() -> tuple[str, str] | None:
         return None
     if not channel_id or not thread_ts:
         return None
-    return channel_id, thread_ts
+
+    prepare_run_id = configurable.get("prepare_run_id")
+    tip_key = prepare_run_id if isinstance(prepare_run_id, str) and prepare_run_id else thread_ts
+    return channel_id, thread_ts, _loading_tip_for_run(tip_key)
 
 
 def _tool_call_name(tool_call: object) -> str | None:
@@ -111,13 +134,13 @@ def _status_from_recent_tool_calls(messages: list[Any]) -> str:
     return DEFAULT_ASSISTANT_STATUS
 
 
-async def _set_status(channel_id: str, thread_ts: str, status: str) -> None:
+async def _set_status(channel_id: str, thread_ts: str, status: str, loading_tip: str) -> None:
     try:
         await set_slack_assistant_status(
             channel_id,
             thread_ts,
             status=status,
-            loading_messages=list(DEFAULT_LOADING_MESSAGES) if status else None,
+            loading_messages=[loading_tip] if status else None,
         )
     except Exception:
         logger.exception("Failed to update Slack assistant status")
@@ -175,26 +198,26 @@ class SlackAssistantStatusMiddleware(AgentMiddleware):
 
     async def _try_set(self, status: str) -> None:
         try:
-            slack_thread = _slack_thread_from_config()
-            if slack_thread is None:
+            status_context = _slack_status_context_from_config()
+            if status_context is None:
                 return
-            channel_id, thread_ts = slack_thread
-            await _set_status(channel_id, thread_ts, status)
+            channel_id, thread_ts, loading_tip = status_context
+            await _set_status(channel_id, thread_ts, status, loading_tip)
         except Exception:
             logger.exception("Failed to read Slack thread config")
 
     async def _run_with_heartbeat(self, status: str, awaitable: Awaitable[_T]) -> _T:
         try:
-            slack_thread = _slack_thread_from_config()
+            status_context = _slack_status_context_from_config()
         except Exception:
             logger.exception("Failed to read Slack thread config")
             return await awaitable
-        if slack_thread is None:
+        if status_context is None:
             return await awaitable
 
-        channel_id, thread_ts = slack_thread
-        await _set_status(channel_id, thread_ts, status)
-        heartbeat = asyncio.create_task(self._heartbeat(channel_id, thread_ts, status))
+        channel_id, thread_ts, loading_tip = status_context
+        await _set_status(channel_id, thread_ts, status, loading_tip)
+        heartbeat = asyncio.create_task(self._heartbeat(channel_id, thread_ts, status, loading_tip))
         try:
             return await awaitable
         finally:
@@ -202,7 +225,9 @@ class SlackAssistantStatusMiddleware(AgentMiddleware):
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat
 
-    async def _heartbeat(self, channel_id: str, thread_ts: str, status: str) -> None:
+    async def _heartbeat(
+        self, channel_id: str, thread_ts: str, status: str, loading_tip: str
+    ) -> None:
         loop = asyncio.get_running_loop()
         started_at = loop.time()
         while True:
@@ -213,4 +238,4 @@ class SlackAssistantStatusMiddleware(AgentMiddleware):
                     self._max_heartbeat_seconds,
                 )
                 return
-            await _set_status(channel_id, thread_ts, status)
+            await _set_status(channel_id, thread_ts, status, loading_tip)

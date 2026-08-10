@@ -78,6 +78,12 @@ def _github_message(resp: httpx.Response) -> str:
     return resp.text.strip() or f"HTTP {resp.status_code}"
 
 
+def _effective_draft(draft: bool) -> bool:
+    configurable = _configurable()
+    preference = configurable.get("draft_prs")
+    return preference if isinstance(preference, bool) else draft
+
+
 def _configurable() -> dict[str, Any]:
     try:
         config = get_config()
@@ -660,7 +666,14 @@ async def _open_pull_request(
         if preflight_failure is not None:
             return preflight_failure
         body = await _maybe_append_references(client, token, owner, repo, body)
-        payload = {"title": title, "head": head, "base": base, "body": body, "draft": draft}
+        draft = _effective_draft(draft)
+        payload = {
+            "title": title,
+            "head": head,
+            "base": base,
+            "body": body,
+            "draft": draft,
+        }
         resp = await client.post(
             f"{GITHUB_API}/repos/{owner}/{repo}/pulls",
             headers=_auth_headers(token),
@@ -774,7 +787,8 @@ async def open_pull_request(
         base: The branch you want to merge into (e.g. "main").
         title: PR title.
         body: PR description (Markdown).
-        draft: Open as a draft PR. Defaults to True.
+        draft: Requested draft status. The authenticated user's dashboard preference
+          overrides this value for newly created PRs; existing PRs are returned unchanged.
 
     Returns:
         On success: {"success": True, "created": bool, "url": str, "number": int,

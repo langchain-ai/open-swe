@@ -9,8 +9,6 @@ import logging
 import os
 import uuid
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Any
 
 import httpx
@@ -478,6 +476,10 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     its own request deadline.
     """
 
+    @property
+    def sandbox(self) -> Any:
+        return self._sandbox
+
     _WS_FALLBACK_ERRORS = (
         SandboxConnectionError,
         SandboxServerReloadError,
@@ -506,44 +508,17 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         )
 
     @staticmethod
-    def _safe_kill(handle: Any) -> None:
+    async def _asafe_kill(handle: Any) -> None:
         try:
-            handle.kill()
+            await handle.kill()
         except Exception:  # noqa: BLE001 - best-effort cleanup of a wedged command
             logger.warning("Failed to kill timed-out sandbox command", exc_info=True)
 
-    def _base_execute(self, command: str, timeout: int | None) -> ExecuteResponse:
-        # WS path unavailable; the base wait=True path falls back to HTTP,
-        # which carries its own request deadline.
-        return LangSmithSandbox.execute(self, command, timeout=timeout)
+    async def _abase_execute(self, command: str, timeout: int | None) -> ExecuteResponse:
+        return await LangSmithSandbox.aexecute(self, command, timeout=timeout)
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        effective = timeout if timeout is not None else self._default_timeout
-        if not effective:  # 0 / None: caller opted out of any deadline
-            return super().execute(command, timeout=timeout)
-        # run(wait=False) eagerly opens the WS and reads the "started" frame, so
-        # connect/setup failures raise here — fall back to the base path.
-        try:
-            handle = self._sandbox.run(command, timeout=effective, wait=False)
-        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
-            return self._base_execute(command, timeout)
-        deadline = self._deadline(effective)
-        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sbx-exec")
-        try:
-            future = pool.submit(lambda: handle.result)
-            try:
-                result = future.result(timeout=deadline)
-            except FuturesTimeout:
-                self._safe_kill(handle)
-                return self._timeout_response(deadline, server_side=False)
-            except CommandTimeoutError:
-                return self._timeout_response(effective, server_side=True)
-            except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS):
-                return self._base_execute(command, timeout)
-            return self._result_to_response(result)
-        finally:
-            # Never join: a still-wedged worker must not block the caller.
-            pool.shutdown(wait=False)
+        raise NotImplementedError("TimeoutLangSmithSandbox is async-only; use aexecute.")
 
     async def aexecute(
         self,
@@ -554,27 +529,22 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         effective = timeout if timeout is not None else self._default_timeout
         if not effective:
             return await super().aexecute(command, timeout=timeout)
-        # run(wait=False) eagerly opens the WS and reads the "started" frame
-        # (blocking, bounded by the SDK connect timeout); connect/setup failures
-        # raise here — fall back to the base path.
+        # run(wait=False) opens the WS and reads the "started" frame, so
+        # connect/setup failures raise here — fall back to the base path.
         try:
-            handle = await asyncio.to_thread(
-                self._sandbox.run, command, timeout=effective, wait=False
-            )
+            handle = await self._aget_sandbox().run(command, timeout=effective, wait=False)
         except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
-            return await asyncio.to_thread(self._base_execute, command, timeout)
+            return await self._abase_execute(command, timeout)
         deadline = self._deadline(effective)
         try:
-            result = await asyncio.wait_for(
-                asyncio.to_thread(lambda: handle.result), timeout=deadline
-            )
+            result = await asyncio.wait_for(handle.result, timeout=deadline)
         except TimeoutError:
-            await asyncio.to_thread(self._safe_kill, handle)
+            await self._asafe_kill(handle)
             return self._timeout_response(deadline, server_side=False)
         except CommandTimeoutError:
             return self._timeout_response(effective, server_side=True)
         except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS):
-            return await asyncio.to_thread(self._base_execute, command, timeout)
+            return await self._abase_execute(command, timeout)
         return self._result_to_response(result)
 
 

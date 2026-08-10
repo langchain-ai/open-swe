@@ -143,6 +143,23 @@ def test_uses_user_token_for_slack_with_login(monkeypatch: pytest.MonkeyPatch) -
     }
 
 
+def test_profile_draft_preference_overrides_tool_argument(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117", "draft_prs": False})
+    _stub_token(monkeypatch)
+    client = _FakeClient(
+        post=_FakeResponse(
+            201,
+            {"html_url": "https://x/pull/1", "number": 1, "user": {"login": "johannes117"}},
+        )
+    )
+    _install_client(monkeypatch, client)
+
+    result = _open()
+
+    assert result["success"] is True
+    assert client.post_calls[0]["json"]["draft"] is False
+
+
 def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "linear", "github_login": "johannes117"})
 

@@ -37,27 +37,25 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
     <Link
       to="/agents/$threadId"
       params={{ threadId: thread.id }}
-      className="group flex items-center gap-4 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 transition-colors hover:border-[var(--ui-accent)]/30 hover:bg-[var(--ui-panel)]"
+      className="group flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-primary/30 hover:bg-card"
     >
-      <div className="flex size-[72px] shrink-0 flex-col items-center justify-center rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel-2)] text-center">
+      <div className="flex size-[72px] shrink-0 flex-col items-center justify-center rounded-lg border border-border bg-accent text-center">
         {stats ? (
           <>
-            <div className="text-[11px] font-medium text-[var(--ui-text-muted)]">
+            <div className="text-[11px] font-medium text-muted-foreground">
               {stats.files} {stats.files === 1 ? "file" : "files"}
             </div>
             <div className="mt-0.5 flex items-center gap-1.5 text-xs font-medium">
-              <span className="text-[var(--ui-success)]">
+              <span className="text-success-foreground">
                 +{stats.additions}
               </span>
-              <span className="text-[var(--ui-danger)]">
-                -{stats.deletions}
-              </span>
+              <span className="text-destructive">-{stats.deletions}</span>
             </div>
           </>
         ) : (
-          <GitBranchIcon className="size-5 text-[var(--ui-text-dim)]" />
+          <GitBranchIcon className="size-5 text-muted-foreground/70" />
         )}
-        <div className="mt-1.5 flex items-center gap-1 text-[10px] text-[var(--ui-text-dim)]">
+        <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground/70">
           {hasPr ? (
             <>
               <GitPullRequestIcon className="size-3" />
@@ -73,10 +71,10 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-[var(--ui-text)]">
+        <div className="truncate text-sm font-medium text-foreground">
           {thread.title}
         </div>
-        <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-[var(--ui-text-dim)]">
+        <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground/70">
           {source && SourceIcon && (
             <>
               <span
@@ -111,7 +109,7 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
         className={cn(
           "size-5 shrink-0",
           thread.status === "finished"
-            ? "text-[var(--ui-text-dim)] opacity-100"
+            ? "text-muted-foreground/70 opacity-100"
             : "opacity-0"
         )}
         weight="regular"

@@ -73,7 +73,7 @@ async def test_github_reaction_added_creates_langsmith_feedback(
     client = _FakeClient()
     created: dict[str, Any] = {}
 
-    def fake_create_feedback(
+    async def fake_create_feedback(
         run_id: str,
         key: str,
         *,
@@ -136,7 +136,7 @@ async def test_github_reaction_removed_deletes_langsmith_feedback(
     }
     deleted: dict[str, str] = {}
 
-    def fake_delete_feedback(run_id: str, key: str) -> bool:
+    async def fake_delete_feedback(run_id: str, key: str) -> bool:
         deleted["run_id"] = run_id
         deleted["key"] = key
         return True

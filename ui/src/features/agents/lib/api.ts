@@ -5,6 +5,7 @@ import type {
   Message,
   WorkflowPushApprovalsResponse,
 } from "./types"
+import { dashboardApiBase } from "@/lib/api-base"
 
 export type { AgentSchedule, AgentThread, Message }
 
@@ -66,6 +67,13 @@ export interface ThreadPrDiff {
   files: Array<ThreadPrDiffFile>
 }
 
+/** Files a turn changed, read from the sandbox's git checkpoints. */
+export interface ThreadTurnDiff {
+  status: "ready" | "missing" | "error"
+  truncated: boolean
+  files: Array<ThreadPrDiffFile>
+}
+
 export interface ThreadRecoveryPatch {
   blob: Blob
   filename: string
@@ -101,10 +109,7 @@ export interface SidebarThreads {
   resolved: SidebarThreadsGroup
 }
 
-const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
-  /\/$/,
-  ""
-)
+const API_BASE = dashboardApiBase()
 
 export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
 
@@ -292,6 +297,12 @@ export const agentsApi = {
   getThreadPrDiff: (threadId: string) =>
     agentsRequest<ThreadPrDiff>(
       `/threads/${encodeURIComponent(threadId)}/pr-diff`
+    ),
+  getThreadTurnDiff: (threadId: string, turnKey?: string | null) =>
+    agentsRequest<ThreadTurnDiff>(
+      `/threads/${encodeURIComponent(threadId)}/turn-diff${
+        turnKey ? `?turn_key=${encodeURIComponent(turnKey)}` : ""
+      }`
     ),
   downloadThreadRecoveryPatch: (threadId: string) =>
     agentsBlobRequest(

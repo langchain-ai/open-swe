@@ -43,10 +43,8 @@ export function AutomationsList() {
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
-        <h1 className="text-base font-medium text-[var(--ui-text)]">
-          Automations
-        </h1>
-        <p className="mt-1 text-xs text-[var(--ui-text-muted)]">
+        <h1 className="text-base font-medium text-foreground">Automations</h1>
+        <p className="mt-1 text-xs text-muted-foreground">
           Run Jarvis on a recurring schedule. Each run starts a fresh agent
           thread.
         </p>
@@ -55,11 +53,15 @@ export function AutomationsList() {
           <StatCard label="Total" value={total} />
           <StatCard label="Active" value={active} />
           <StatCard label="Paused" value={paused} />
-          <StatCard label="Needs attention" value={issues} highlight={issues > 0} />
+          <StatCard
+            label="Needs attention"
+            value={issues}
+            highlight={issues > 0}
+          />
         </div>
 
         <div className="mt-8 flex items-center justify-between">
-          <span className="text-xs font-medium text-[var(--ui-text-muted)]">
+          <span className="text-xs font-medium text-muted-foreground">
             {total} {total === 1 ? "automation" : "automations"}
           </span>
           <Link to="/agents/automations/new" className={buttonVariants()}>
@@ -101,12 +103,12 @@ function StatCard({
   highlight?: boolean
 }) {
   return (
-    <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3">
-      <div className="text-xs text-[var(--ui-text-dim)]">{label}</div>
+    <div className="rounded-xl border border-border bg-card px-4 py-3">
+      <div className="text-xs text-muted-foreground/70">{label}</div>
       <div
         className={cn(
           "mt-1 text-lg font-medium",
-          highlight ? "text-[var(--ui-danger)]" : "text-[var(--ui-text)]"
+          highlight ? "text-destructive" : "text-foreground"
         )}
       >
         {value}
@@ -117,14 +119,14 @@ function StatCard({
 
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface)] px-6 py-14 text-center">
-      <div className="rounded-full bg-[var(--ui-panel-2)] p-3 text-[var(--ui-text-muted)]">
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card px-6 py-14 text-center">
+      <div className="rounded-full bg-accent p-3 text-muted-foreground">
         <LightningIcon className="size-5" />
       </div>
-      <h3 className="mt-4 text-sm font-medium text-[var(--ui-text)]">
+      <h3 className="mt-4 text-sm font-medium text-foreground">
         No automations yet
       </h3>
-      <p className="mt-1 max-w-sm text-xs text-[var(--ui-text-muted)]">
+      <p className="mt-1 max-w-sm text-xs text-muted-foreground">
         Schedule Jarvis to run on a recurring cadence — review code, triage
         issues, or keep docs up to date.
       </p>
@@ -158,29 +160,29 @@ function AutomationRow({ schedule }: { schedule: AgentSchedule }) {
     <Link
       to="/agents/automations/$scheduleId"
       params={{ scheduleId: schedule.id }}
-      className="flex items-center gap-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 transition-colors hover:border-[var(--ui-text-dim)]"
+      className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-muted-foreground/70"
     >
       <span
         className={cn(
           "size-2 shrink-0 rounded-full",
-          schedule.enabled ? "bg-[var(--ui-success)]" : "bg-[var(--ui-border)]"
+          schedule.enabled ? "bg-success" : "bg-border"
         )}
       />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium text-[var(--ui-text)]">
+          <span className="truncate text-sm font-medium text-foreground">
             {schedule.name}
           </span>
           {schedule.lastError && (
             <WarningCircleIcon
-              className="size-3.5 shrink-0 text-[var(--ui-danger)]"
+              className="size-3.5 shrink-0 text-destructive"
               aria-label="Last run failed"
             >
               <title>Last run failed</title>
             </WarningCircleIcon>
           )}
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ui-text-dim)]">
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
           <span className="flex items-center gap-1">
             <ClockIcon className="size-3.5" />
             {describeCron(schedule.schedule)}
@@ -195,7 +197,7 @@ function AutomationRow({ schedule }: { schedule: AgentSchedule }) {
         onClick={onToggle}
         disabled={isToggling}
         aria-label={schedule.enabled ? "Pause automation" : "Resume automation"}
-        className="shrink-0 rounded-md p-1.5 text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)] disabled:opacity-40"
+        className="shrink-0 rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
       >
         {schedule.enabled ? (
           <PauseIcon className="size-4" />

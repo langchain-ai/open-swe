@@ -1,0 +1,4 @@
+allowBuilds:
+  electron: true
+  electron-winstaller: false
+  node-pty: true

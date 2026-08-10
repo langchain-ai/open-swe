@@ -1,7 +1,9 @@
 @import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/ibm-plex-sans";
 @import "./styles/agents.css";
 @source "../node_modules/streamdown/dist/*.js";
 
@@ -10,6 +12,23 @@
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Inter Variable', sans-serif;
+    /* Duty-cycled indicator animation: long holds with stepped ramps, so the
+       compositor updates discrete frames instead of every vsync. */
+    --animate-status-pulse: status-pulse 2s infinite;
+    --color-warning-foreground: var(--warning-foreground);
+    --color-warning: var(--warning);
+    --color-info-foreground: var(--info-foreground);
+    --color-info: var(--info);
+    --color-surface-raised: var(--surface-raised);
+    --color-app-chrome-background: var(--app-chrome-background);
+    --color-sidebar-muted-foreground: var(--sidebar-muted-foreground);
+    --color-sidebar-control-surface: var(--sidebar-control-surface);
+    --color-sidebar-row-hover: var(--sidebar-row-hover);
+    --color-sidebar-row-active: var(--sidebar-row-active);
+    --color-sidebar-row-selected: var(--sidebar-row-selected);
+    --color-success-foreground: var(--success-foreground);
+    --color-success: var(--success);
+    --color-destructive-foreground: var(--destructive-foreground);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,75 +67,156 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+    @keyframes status-pulse {
+        0%,
+        40% {
+            opacity: 1;
+            animation-timing-function: steps(6);
+        }
+        50%,
+        90% {
+            opacity: 0.5;
+            animation-timing-function: steps(6);
+        }
+        100% {
+            opacity: 1;
+        }
+    }
 }
 
 :root {
-    --background: oklch(1 0 0);
+    --background: oklch(0.974 0.002 106);
     --foreground: oklch(0.148 0 0);
-    --card: oklch(1 0 0);
+    --card: oklch(0.994 0.001 106);
     --card-foreground: oklch(0.148 0 0);
-    --popover: oklch(1 0 0);
+    --popover: oklch(0.994 0.001 106);
     --popover-foreground: oklch(0.148 0 0);
     --primary: oklch(0.21 0 0);
     --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.967 0 0);
+    --secondary: oklch(0.95 0.002 106);
     --secondary-foreground: oklch(0.21 0 0);
-    --muted: oklch(0.963 0 0);
+    --muted: oklch(0.945 0.002 106);
     --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.963 0 0);
+    --accent: oklch(0.945 0.002 106);
     --accent-foreground: oklch(0.21 0 0);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
+    --destructive-foreground: oklch(0.505 0.213 27.518);
+    --success: oklch(0.696 0.17 162.48);
+    --success-foreground: oklch(0.508 0.118 165.612);
+    --warning: oklch(0.769 0.188 70.08);
+    --warning-foreground: oklch(0.555 0.163 48.998);
+    --info: oklch(0.623 0.214 259.815);
+    --info-foreground: oklch(0.488 0.243 264.376);
+    --border: oklch(0.906 0.003 106);
+    --input: oklch(0.906 0.003 106);
     --ring: oklch(0.708 0 0);
+    --app-chrome-background: var(--background);
+    --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
+    --surface-grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+    /* Compact control geometry — keep semantic so chat controls, menus, and
+       tooltips cannot quietly drift apart. */
+    --control-radius: 0.5rem;
+    --glass-blur: 12px;
+    --glass-opacity: 80%;
     --chart-1: oklch(0.872 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.45 0 0);
     --chart-4: oklch(0.378 0 0);
     --chart-5: oklch(0.275 0 0);
     --radius: 0.625rem;
-    --sidebar: oklch(0.987 0 0);
+    --sidebar: oklch(0.963 0.002 106);
     --sidebar-foreground: oklch(0.148 0 0);
     --sidebar-primary: oklch(0.21 0 0);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.963 0 0);
+    --sidebar-accent: oklch(0.945 0.002 106);
     --sidebar-accent-foreground: oklch(0.21 0 0);
-    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-border: oklch(0.906 0.003 106);
     --sidebar-ring: oklch(0.708 0 0);
+    --sidebar-muted-foreground: var(--muted-foreground);
+    --sidebar-control-surface: var(--accent);
+    --sidebar-row-hover: var(--accent);
+    --sidebar-row-active: var(--accent);
+    --sidebar-row-selected: var(--accent);
 }
 
 .dark {
-    --background: oklch(0.148 0 0);
+    --background: oklch(0.226 0 0);
     --foreground: oklch(0.985 0 0);
-    --card: oklch(0.218 0 0);
+    --card: oklch(0.262 0 0);
     --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.218 0 0);
+    --popover: oklch(0.262 0 0);
     --popover-foreground: oklch(0.985 0 0);
     --primary: oklch(0.92 0 0);
     --primary-foreground: oklch(0.21 0 0);
-    --secondary: oklch(0.274 0 0);
+    --secondary: oklch(0.31 0 0);
     --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.275 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.275 0 0);
+    --muted: oklch(0.31 0 0);
+    --muted-foreground: oklch(0.72 0 0);
+    --accent: oklch(0.31 0 0);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
+    --destructive-foreground: oklch(0.704 0.191 22.216);
+    --success: oklch(0.696 0.17 162.48);
+    --success-foreground: oklch(0.765 0.177 163.223);
+    --warning: oklch(0.769 0.188 70.08);
+    --warning-foreground: oklch(0.828 0.189 84.429);
+    --info: oklch(0.623 0.214 259.815);
+    --info-foreground: oklch(0.707 0.165 254.624);
+    --border: oklch(1 0 0 / 12%);
+    --input: oklch(1 0 0 / 16%);
     --ring: oklch(0.556 0 0);
+    --glass-blur: 16px;
     --chart-1: oklch(0.872 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.45 0 0);
     --chart-4: oklch(0.378 0 0);
     --chart-5: oklch(0.275 0 0);
-    --sidebar: oklch(0.218 0 0);
+    --sidebar: oklch(0.262 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.92 0 0);
     --sidebar-primary-foreground: oklch(0.21 0 0);
-    --sidebar-accent: oklch(0.275 0 0);
+    --sidebar-accent: oklch(0.31 0 0);
     --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-border: oklch(1 0 0 / 12%);
     --sidebar-ring: oklch(0.556 0 0);
+    --sidebar-control-surface: var(--accent);
+    --sidebar-row-hover: var(--accent);
+    --sidebar-row-active: var(--accent);
+    --sidebar-row-selected: var(--accent);
+}
+
+@layer utilities {
+  /*
+   * Elevated glass needs a denser tint than broad ambient surfaces. Nesting the
+   * opacity mix inside an 18% popover tint keeps high-contrast page content
+   * from blooming through menus.
+   */
+  .dropdown-glass {
+    background: color-mix(
+      in srgb,
+      var(--popover) 18%,
+      color-mix(in srgb, var(--popover) var(--glass-opacity), transparent)
+    );
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+    box-shadow: 0 16px 40px -18px rgb(0 0 0 / 55%);
+  }
+
+  .dark .dropdown-glass {
+    box-shadow: 0 18px 44px -18px rgb(0 0 0 / 80%);
+  }
+
+  /*
+   * App-chrome grain, baked into the surface's own background rather than laid
+   * over the page: a fixed full-viewport overlay makes the compositor re-blend
+   * on every frame any animation produces. The 3.5% opacity lives in the SVG.
+   */
+  .surface-grain {
+    background-image: var(--surface-grain);
+    background-repeat: repeat;
+    background-size: 256px 256px;
+  }
 }
 
 @layer base {

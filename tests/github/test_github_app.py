@@ -48,6 +48,27 @@ def _configure(monkeypatch: pytest.MonkeyPatch, client_cls: type) -> None:
     monkeypatch.setattr(github_app.httpx, "AsyncClient", client_cls)
 
 
+@pytest.mark.asyncio
+async def test_resolves_org_installation(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Response:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, int]:
+            return {"id": 3}
+
+    class Client(_FakeAsyncClient):
+        async def get(self, url: str, **kwargs: Any) -> Response:
+            type(self).last_post = {"url": url, **kwargs}
+            return Response()
+
+    _configure(monkeypatch, Client)
+
+    assert await github_app.get_github_app_installation_id_for_org("secondary/org") == 3
+    assert Client.last_post is not None
+    assert Client.last_post["url"].endswith("/orgs/secondary%2Forg/installation")
+
+
 class _CountingResponse:
     def __init__(self, expires_at: str) -> None:
         self._expires_at = expires_at
@@ -112,6 +133,23 @@ async def test_cache_is_scoped_per_repository_set(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.asyncio
+async def test_cache_is_scoped_per_installation(monkeypatch: pytest.MonkeyPatch) -> None:
+    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+
+    class Client(_CountingClient):
+        posts = 0
+        expires_at = future
+
+    _configure(monkeypatch, Client)
+
+    await github_app.get_github_app_installation_token_with_expiry(installation_id=2)
+    await github_app.get_github_app_installation_token_with_expiry(installation_id=3)
+    await github_app.get_github_app_installation_token_with_expiry(installation_id=2)
+
+    assert Client.posts == 2
+
+
+@pytest.mark.asyncio
 async def test_near_expiry_token_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     soon = (datetime.now(UTC) + timedelta(minutes=2)).isoformat()
 
@@ -138,12 +176,13 @@ async def test_installation_token_can_be_scoped_to_repository_ids(
     monkeypatch.setattr(github_app.httpx, "AsyncClient", _FakeAsyncClient)
 
     token, expires_at = await github_app.get_github_app_installation_token_with_expiry(
-        repository_ids=[123]
+        installation_id=3, repository_ids=[123]
     )
 
     assert token == "token"
     assert expires_at == "expires"
     assert _FakeAsyncClient.last_post is not None
+    assert _FakeAsyncClient.last_post["url"].endswith("/app/installations/3/access_tokens")
     assert _FakeAsyncClient.last_post["json"] == {"repository_ids": [123]}
 
 

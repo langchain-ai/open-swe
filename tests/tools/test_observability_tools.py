@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal, cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 import pytest
 from langchain_core.runnables import RunnableConfig
@@ -167,7 +167,13 @@ async def test_langsmith_get_trace_serializes() -> None:
         outputs = {"b": 2}
 
     class _FakeClient:
-        def read_run(self, run_id: str, load_child_runs: bool = False):
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def read_run(self, run_id: str):
             assert run_id == "run-1"
             return _Run()
 
@@ -186,10 +192,17 @@ async def test_langsmith_list_runs_caps_limit() -> None:
     captured: dict[str, object] = {}
 
     class _FakeClient:
-        def list_runs(self, *, project_name: str, filter, limit: int):
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def list_runs(self, *, project_name: str, filter, limit: int):
             captured["limit"] = limit
             captured["project_name"] = project_name
-            return []
+            return
+            yield
 
     tools = langsmith_tools._make_tools(creds)
     list_runs = next(t for t in tools if t.name == "langsmith_list_runs")
@@ -238,6 +251,17 @@ async def test_observability_authorized_allowlist(monkeypatch: pytest.MonkeyPatc
 
     config = cast(RunnableConfig, {"configurable": {"user_email": "trusted@example.com"}})
     assert await server._observability_authorized(config, None) is True
+
+
+@pytest.mark.asyncio
+async def test_allowed_org_member(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary,secondary")
+    membership = AsyncMock(side_effect=[False, True])
+    monkeypatch.setattr(server, "is_user_active_org_member", membership)
+
+    config = cast(RunnableConfig, {"configurable": {"github_login": "dev"}})
+    assert await server._allowed_org_member(config, "dev") is True
+    assert membership.await_args_list == [call("dev", "primary"), call("dev", "secondary")]
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,8 @@ from deepagents.backends.protocol import (
     ReadResult,
 )
 
+_SYNC_UNSUPPORTED = "ReadOnlyBackend is async-only; use the a-prefixed method instead."
+
 
 class ReadOnlyBackend(BackendProtocol):
     """Delegate backend reads while rejecting inherited mutation operations."""
@@ -19,13 +21,13 @@ class ReadOnlyBackend(BackendProtocol):
         self._backend = backend
 
     def ls(self, path: str) -> LsResult:
-        return self._backend.ls(path)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def als(self, path: str) -> LsResult:
         return await self._backend.als(path)
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        return self._backend.read(file_path, offset, limit)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
         return await self._backend.aread(file_path, offset, limit)
@@ -38,7 +40,7 @@ class ReadOnlyBackend(BackendProtocol):
         *,
         max_count: int | None = None,
     ) -> GrepResult:
-        return self._backend.grep(pattern, path, glob, max_count=max_count)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def agrep(
         self,
@@ -51,13 +53,13 @@ class ReadOnlyBackend(BackendProtocol):
         return await self._backend.agrep(pattern, path, glob, max_count=max_count)
 
     def glob(self, pattern: str, path: str | None = None) -> GlobResult:
-        return self._backend.glob(pattern, path)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
         return await self._backend.aglob(pattern, path)
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        return self._backend.download_files(paths)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         return await self._backend.adownload_files(paths)

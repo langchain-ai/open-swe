@@ -493,7 +493,22 @@ function MySettingsPage() {
 
   const draftChoice = toChoice(profile.data?.review_draft_prs)
   const teamDefaultOn = teamSettings.data?.review_draft_prs ?? false
+  const createDraftPrs = profile.data?.draft_prs ?? true
   const teamDefaultLabel = `Use team default (currently: ${teamDefaultOn ? "On" : "Off"})`
+
+  const handleDraftPrsChange = (checked: boolean) => {
+    setError(null)
+    save
+      .mutateAsync(
+        buildProfileUpdate(
+          profile.data,
+          { draft_prs: checked },
+          fallbackModel,
+          fallbackEffort
+        )
+      )
+      .catch((e: Error) => setError(e.message))
+  }
 
   const handleDraftChoiceChange = (next: DraftReviewChoice) => {
     setError(null)
@@ -523,6 +538,20 @@ function MySettingsPage() {
       </SettingsSection>
 
       <UserMappingSection session={session.data} />
+
+      <SettingsSection title="Pull Requests">
+        <SettingsRow
+          label="Create PRs as draft"
+          description="New pull requests are created as drafts by default. Existing pull requests are updated without changing their draft status."
+          control={
+            <Switch
+              checked={createDraftPrs}
+              onCheckedChange={handleDraftPrsChange}
+              disabled={profile.isLoading || save.isPending}
+            />
+          }
+        />
+      </SettingsSection>
 
       <SettingsSection title="Jarvis Review">
         <SettingsRow

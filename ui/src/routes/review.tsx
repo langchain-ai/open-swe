@@ -1,21 +1,21 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CaretRightIcon } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState } from "react";
-import { IoLogoGithub } from "react-icons/io5";
+import { Link, createFileRoute } from "@tanstack/react-router"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { CaretRightIcon } from "@phosphor-icons/react"
+import { useEffect, useMemo, useState } from "react"
+import { IoLogoGithub } from "react-icons/io5"
 
-import type { TeamSettings } from "@/lib/api";
-import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
-import { RequireLogin } from "@/lib/auth-redirect";
-import { useRepos } from "@/lib/profile";
-import { useSession } from "@/lib/session";
+import type { TeamSettings } from "@/lib/api"
+import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
+import { api } from "@/lib/api"
+import { RequireLogin } from "@/lib/auth-redirect"
+import { useRepos } from "@/lib/profile"
+import { useSession } from "@/lib/session"
 
-export const Route = createFileRoute("/review")({ component: ReviewPage });
+export const Route = createFileRoute("/review")({ component: ReviewPage })
 
 const DEFAULT_SETTINGS: TeamSettings = {
   review_draft_prs: false,
@@ -31,62 +31,62 @@ const DEFAULT_SETTINGS: TeamSettings = {
   default_reviewer_reasoning_effort: null,
   default_reviewer_subagent_model: null,
   default_reviewer_subagent_reasoning_effort: null,
-};
+}
 
 function ReviewPage() {
-  const session = useSession();
-  const qc = useQueryClient();
+  const session = useSession()
+  const qc = useQueryClient()
   const settings = useQuery({
     queryKey: ["teamSettings"],
     queryFn: api.getTeamSettings,
     enabled: !!session.data,
-  });
-  const [local, setLocal] = useState<TeamSettings>(DEFAULT_SETTINGS);
-  const [guidelinesDraft, setGuidelinesDraft] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  })
+  const [local, setLocal] = useState<TeamSettings>(DEFAULT_SETTINGS)
+  const [guidelinesDraft, setGuidelinesDraft] = useState("")
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (settings.data) {
-      setLocal(settings.data);
-      setGuidelinesDraft(settings.data.org_guidelines ?? "");
+      setLocal(settings.data)
+      setGuidelinesDraft(settings.data.org_guidelines ?? "")
     }
-  }, [settings.data]);
+  }, [settings.data])
 
   const save = useMutation({
     mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
     onSuccess: (saved) => {
-      qc.setQueryData(["teamSettings"], saved);
-      setError(null);
+      qc.setQueryData(["teamSettings"], saved)
+      setError(null)
     },
     onError: (e: Error) => setError(e.message),
-  });
+  })
 
   if (session.isLoading) {
     return (
       <main className="p-6">
         <Skeleton className="h-64 w-full" />
       </main>
-    );
+    )
   }
-  if (!session.data) return <RequireLogin />;
+  if (!session.data) return <RequireLogin />
 
-  const current: TeamSettings = local;
-  const canEdit = session.data.is_admin;
+  const current: TeamSettings = local
+  const canEdit = session.data.is_admin
 
   const persist = (patch: Partial<TeamSettings>) => {
-    const next: TeamSettings = { ...current, ...patch };
-    setLocal(next);
-    if (canEdit) save.mutate(next);
-  };
+    const next: TeamSettings = { ...current, ...patch }
+    setLocal(next)
+    if (canEdit) save.mutate(next)
+  }
 
-  const trimmedGuidelines = guidelinesDraft.trim();
-  const savedGuidelines = current.org_guidelines ?? "";
-  const guidelinesDirty = trimmedGuidelines !== savedGuidelines.trim();
+  const trimmedGuidelines = guidelinesDraft.trim()
+  const savedGuidelines = current.org_guidelines ?? ""
+  const guidelinesDirty = trimmedGuidelines !== savedGuidelines.trim()
 
   const saveGuidelines = () => {
-    if (!canEdit) return;
-    persist({ org_guidelines: trimmedGuidelines || null });
-  };
+    if (!canEdit) return
+    persist({ org_guidelines: trimmedGuidelines || null })
+  }
 
   return (
     <AppShell
@@ -102,7 +102,9 @@ function ReviewPage() {
           className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
         >
           <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium text-foreground">Review Style Prompts</span>
+            <span className="text-xs font-medium text-foreground">
+              Review Style Prompts
+            </span>
             <span className="text-xs text-muted-foreground">
               Per-repo style guides learned from past PR review feedback.
             </span>
@@ -133,7 +135,9 @@ function ReviewPage() {
                 Save guidelines
               </Button>
               {guidelinesDirty && (
-                <span className="text-xs text-muted-foreground">Unsaved changes</span>
+                <span className="text-xs text-muted-foreground">
+                  Unsaved changes
+                </span>
               )}
             </div>
           )}
@@ -186,35 +190,38 @@ function ReviewPage() {
 
       {error && <p className="text-xs text-destructive">{error}</p>}
     </AppShell>
-  );
+  )
 }
 
 function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
-  const repos = useRepos();
+  const repos = useRepos()
 
   const autoReview = useQuery({
     queryKey: ["autoReviewRepos"],
     queryFn: api.listAutoReviewRepos,
-  });
+  })
 
   const autoReviewSet = useMemo(
     () => new Set(autoReview.data?.repos ?? []),
-    [autoReview.data?.repos],
-  );
+    [autoReview.data?.repos]
+  )
 
   const grouped = useMemo(() => {
-    const byOwner = new Map<string, Array<{ full_name: string; private: boolean }>>();
+    const byOwner = new Map<
+      string,
+      Array<{ full_name: string; private: boolean }>
+    >()
     for (const r of repos.data?.repositories ?? []) {
-      const [owner] = r.full_name.split("/");
-      if (!owner) continue;
-      const arr = byOwner.get(owner) ?? [];
-      arr.push(r);
-      byOwner.set(owner, arr);
+      const [owner] = r.full_name.split("/")
+      if (!owner) continue
+      const arr = byOwner.get(owner) ?? []
+      arr.push(r)
+      byOwner.set(owner, arr)
     }
-    return Array.from(byOwner.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [repos.data?.repositories]);
+    return Array.from(byOwner.entries()).sort(([a], [b]) => a.localeCompare(b))
+  }, [repos.data?.repositories])
 
-  const loading = repos.isLoading || autoReview.isLoading;
+  const loading = repos.isLoading || autoReview.isLoading
 
   return (
     <SettingsSection
@@ -229,12 +236,14 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
         )}
         {!loading && grouped.length === 0 && (
           <p className="px-4 py-3 text-xs text-muted-foreground">
-            No GitHub App installations found. Install the Jarvis GitHub App on an
-            account or org to manage repos here.
+            No GitHub App installations found. Install the Jarvis GitHub App on
+            an account or org to manage repos here.
           </p>
         )}
         {grouped.map(([owner, list]) => {
-          const autoReviewCount = list.filter((r) => autoReviewSet.has(r.full_name)).length;
+          const autoReviewCount = list.filter((r) =>
+            autoReviewSet.has(r.full_name)
+          ).length
           return (
             <Link
               key={owner}
@@ -258,10 +267,9 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
                 <CaretRightIcon className="size-3.5" />
               </div>
             </Link>
-          );
+          )
         })}
       </div>
     </SettingsSection>
-  );
+  )
 }
-

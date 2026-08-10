@@ -68,4 +68,5 @@ __pycache__/
 *.egg-info/
 .eggs/
 
-# 
+#
+logs/

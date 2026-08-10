@@ -10,7 +10,10 @@ import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { describeCron, isDescribableCron } from "@/features/automations/lib/cron"
+import {
+  describeCron,
+  isDescribableCron,
+} from "@/features/automations/lib/cron"
 import {
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
@@ -36,9 +39,7 @@ function scheduleToSelection(
     (model) =>
       model.id === schedule.model && model.efforts.includes(schedule.effort!)
   )
-  return supported
-    ? { modelId: schedule.model, effort: schedule.effort }
-    : null
+  return supported ? { modelId: schedule.model, effort: schedule.effort } : null
 }
 
 export function AutomationEditor({
@@ -146,15 +147,15 @@ export function AutomationEditor({
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <header className="flex items-center justify-between gap-3 px-6 py-4 max-md:pt-14">
-        <div className="flex min-w-0 items-center gap-1.5 text-xs text-[var(--ui-text-dim)]">
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/70">
           <Link
             to="/agents/automations"
-            className="shrink-0 transition-colors hover:text-[var(--ui-text)]"
+            className="shrink-0 transition-colors hover:text-foreground"
           >
             Automations
           </Link>
           <span className="shrink-0">/</span>
-          <span className="truncate text-[var(--ui-text)]">
+          <span className="truncate text-foreground">
             {name.trim() || "New automation"}
           </span>
         </div>
@@ -166,7 +167,7 @@ export function AutomationEditor({
               onClick={handleDelete}
               disabled={deleteSchedule.isPending}
               aria-label="Delete automation"
-              className="text-[var(--ui-text-dim)] hover:text-[var(--ui-danger)]"
+              className="text-muted-foreground/70 hover:text-destructive"
             >
               <TrashIcon className="size-4" />
             </Button>
@@ -186,40 +187,40 @@ export function AutomationEditor({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Untitled automation"
-          className="w-full bg-transparent text-base font-medium text-[var(--ui-text)] outline-none placeholder:text-[var(--ui-text-dim)]"
+          className="w-full bg-transparent text-base font-medium text-foreground outline-none placeholder:text-muted-foreground/70"
         />
 
         <div className="mt-3 flex items-center gap-3 text-xs">
           <div className="flex items-center gap-2">
             <Switch checked={enabled} onCheckedChange={setEnabled} />
-            <span className="text-[var(--ui-text-muted)]">
+            <span className="text-muted-foreground">
               {enabled ? "Active" : "Paused"}
             </span>
           </div>
-          <span className="text-[var(--ui-border)]">|</span>
+          <span className="text-border">|</span>
           <RepoSelector
             repos={reposQuery.data?.repositories}
             selectedRepo={repo}
             onRepoChange={setRepo}
             placeholder="No repository"
-            triggerClassName="text-[var(--ui-text-muted)]"
+            triggerClassName="text-muted-foreground"
           />
         </div>
 
         <SectionLabel>Triggers</SectionLabel>
-        <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1.5">
+        <div className="rounded-xl border border-border bg-card p-1.5">
           {cron && (
             <div className="flex items-center gap-3 rounded-lg px-3 py-2.5">
-              <ClockIcon className="size-4 shrink-0 text-[var(--ui-text-muted)]" />
+              <ClockIcon className="size-4 shrink-0 text-muted-foreground" />
               {customMode ? (
                 <input
                   value={cron}
                   onChange={(e) => setCron(e.target.value)}
                   placeholder="0 9 * * 1-5"
-                  className="flex-1 bg-transparent font-mono text-sm text-[var(--ui-text)] outline-none placeholder:text-[var(--ui-text-dim)]"
+                  className="flex-1 bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
                 />
               ) : (
-                <span className="flex-1 text-sm text-[var(--ui-text)]">
+                <span className="flex-1 text-sm text-foreground">
                   {describeCron(cron)}
                 </span>
               )}
@@ -230,13 +231,13 @@ export function AutomationEditor({
                   setCustomMode(false)
                 }}
                 aria-label="Remove trigger"
-                className="shrink-0 rounded p-1 text-[var(--ui-text-dim)] hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+                className="shrink-0 rounded p-1 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
               >
                 <TrashIcon className="size-3.5" />
               </button>
             </div>
           )}
-          {cron && <div className="mx-3 h-px bg-[var(--ui-border-subtle)]" />}
+          {cron && <div className="mx-3 h-px bg-border/60" />}
           <ScheduleTriggerPicker
             onSelect={onPickTrigger}
             triggerLabel={cron ? "Change trigger" : "Add Trigger"}
@@ -244,28 +245,28 @@ export function AutomationEditor({
         </div>
 
         <SectionLabel>Slack destination</SectionLabel>
-        <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3">
+        <div className="rounded-xl border border-border bg-card p-3">
           <input
             value={slackChannelId}
             onChange={(e) => setSlackChannelId(e.target.value)}
             placeholder="C0123456789"
             spellCheck={false}
-            className="w-full bg-transparent font-mono text-sm text-[var(--ui-text)] outline-none placeholder:text-[var(--ui-text-dim)]"
+            className="w-full bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
           />
-          <p className="mt-2 text-xs text-[var(--ui-text-dim)]">
+          <p className="mt-2 text-xs text-muted-foreground/70">
             Optional Slack channel ID. Each run starts a new thread there; the
             Jarvis bot must be a member of the channel.
           </p>
         </div>
 
         <SectionLabel>Agent Instructions</SectionLabel>
-        <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3">
+        <div className="rounded-xl border border-border bg-card p-3">
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="What should Jarvis do each time this runs?"
             rows={5}
-            className="w-full resize-none bg-transparent text-sm leading-relaxed text-[var(--ui-text)] outline-none placeholder:text-[var(--ui-text-dim)]"
+            className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70"
           />
           <div className="mt-2 flex items-center">
             <ModelPicker
@@ -277,7 +278,7 @@ export function AutomationEditor({
         </div>
 
         {errorMessage && (
-          <p className="mt-4 text-xs text-[var(--ui-danger)]">{errorMessage}</p>
+          <p className="mt-4 text-xs text-destructive">{errorMessage}</p>
         )}
       </div>
     </div>
@@ -286,7 +287,7 @@ export function AutomationEditor({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="mt-8 mb-2 text-xs font-medium text-[var(--ui-text-muted)]">
+    <h2 className="mt-8 mb-2 text-xs font-medium text-muted-foreground">
       {children}
     </h2>
   )

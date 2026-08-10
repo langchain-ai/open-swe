@@ -19,6 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
+from langgraph_sdk.schema import Run
 from pydantic import BaseModel
 
 from ..dispatch import dispatch_agent_run
@@ -209,13 +210,13 @@ async def approve_plan_for_thread(
         text = "The plan has been approved. Implement it now as described in the plan."
     if feedback:
         text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
-    await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
+    run = await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
     await _maybe_post_plan_approved_to_slack(
         metadata,
         comment_count=len(comments),
         actor=actor,
     )
-    return {"status": PLAN_STATUS_APPROVED}
+    return {"status": PLAN_STATUS_APPROVED, "run_id": run["run_id"]}
 
 
 @plan_router.post("/{thread_id}/reject")
@@ -302,7 +303,7 @@ def _format_comments(comments: list[dict[str, Any]]) -> str:
 
 async def _dispatch_followup(
     thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
-) -> None:
+) -> Run:
     """Continue the existing thread with a new instruction run.
 
     Runs on the same LangGraph thread, so the agent resumes from the checkpoint
@@ -332,7 +333,7 @@ async def _dispatch_followup(
     # mode (implement), reject stays in plan mode (revise the plan).
     configurable["plan_mode"] = plan_mode
 
-    await dispatch_agent_run(
+    return await dispatch_agent_run(
         thread_id,
         text,
         configurable,

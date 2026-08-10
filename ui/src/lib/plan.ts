@@ -6,10 +6,9 @@
  * hands them to the agent as the instruction for the follow-up run.
  */
 
-const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
-  /\/$/,
-  ""
-)
+import { dashboardApiBase } from "./api-base"
+
+const API_BASE = dashboardApiBase()
 
 function apiBase(): string {
   if (API_BASE) return API_BASE
@@ -119,7 +118,9 @@ export function updatePlan(
   })
 }
 
-export function approvePlan(threadId: string): Promise<{ status: string }> {
+export function approvePlan(
+  threadId: string
+): Promise<{ status: string; run_id: string }> {
   return req(`/plan/${encodeURIComponent(threadId)}/approve`, {
     method: "POST",
   })

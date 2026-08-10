@@ -182,6 +182,7 @@ from .thread_api import (
     get_dashboard_thread_pr_diff,
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
+    get_dashboard_thread_turn_diff,
     list_dashboard_threads,
     list_dashboard_threads_page,
     list_dashboard_threads_sidebar,
@@ -373,6 +374,7 @@ def _clear_notion_state_cookie(response: Response) -> None:
 async def auth_login(
     request: Request,
     redirect_to: str | None = None,
+    desktop: bool = False,
 ) -> RedirectResponse:
     client_id = os.environ.get("GITHUB_APP_CLIENT_ID", "")
     if not client_id:
@@ -384,7 +386,8 @@ async def auth_login(
         redirect_to=safe_redirect,
         nonce_hash=hash_state_nonce(nonce),
     )
-    redirect_uri = f"{_api_base_url()}/dashboard/api/auth/callback"
+    api_base_url = str(request.base_url).rstrip("/") if desktop else _api_base_url()
+    redirect_uri = f"{api_base_url}/dashboard/api/auth/callback"
     query = urlencode(
         {
             "client_id": client_id,
@@ -1688,6 +1691,20 @@ async def api_get_thread_recovery_patch(
         content=content,
         media_type="text/x-diff",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/threads/{thread_id}/turn-diff")
+async def api_get_thread_turn_diff(
+    thread_id: str,
+    turn_key: str | None = None,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_turn_diff(
+        thread_id,
+        session["sub"],
+        turn_key=turn_key,
+        email=session.get("email"),
     )
 
 

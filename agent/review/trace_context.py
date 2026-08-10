@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -225,7 +224,7 @@ async def _resolve_session(
         thread_id=thread_id,
         evidence=evidence,
         confidence=confidence,
-        trace_url=_trace_url(thread_id, project),
+        trace_url=await _trace_url(thread_id, project),
         runs=runs,
     )
     return session, "Resolved.", project
@@ -347,20 +346,17 @@ async def _list_thread_runs(client: Any, project: str, thread_id: str, *, limit:
 async def _list_runs(client: Any, project: str, filter_expr: str, *, limit: int) -> list[Any]:
     capped = max(1, min(limit, _MAX_SESSION_RUNS))
 
-    def _call() -> list[Any]:
-        kwargs: dict[str, Any] = {"filter": filter_expr, "limit": capped}
-        if _looks_uuid(project):
-            kwargs["project_id"] = project
-        else:
-            kwargs["project_name"] = project
-        try:
-            return list(client.list_runs(**kwargs))
-        except TypeError:
-            kwargs.pop("project_id", None)
-            kwargs["project_name"] = project
-            return list(client.list_runs(**kwargs))
-
-    return await asyncio.to_thread(_call)
+    kwargs: dict[str, Any] = {"filter": filter_expr, "limit": capped}
+    if _looks_uuid(project):
+        kwargs["project_id"] = project
+    else:
+        kwargs["project_name"] = project
+    try:
+        return [run async for run in client.list_runs(**kwargs)]
+    except TypeError:
+        kwargs.pop("project_id", None)
+        kwargs["project_name"] = project
+        return [run async for run in client.list_runs(**kwargs)]
 
 
 def _serialize_run(run: Any) -> dict[str, Any]:
@@ -469,8 +465,8 @@ def _is_specific_branch(branch: str) -> bool:
     return normalized not in _GENERIC_BRANCHES
 
 
-def _trace_url(thread_id: str, project: str) -> str | None:
-    resolved = get_langsmith_trace_url(thread_id, project_name=project)
+async def _trace_url(thread_id: str, project: str) -> str | None:
+    resolved = await get_langsmith_trace_url(thread_id, project_name=project)
     if resolved:
         return resolved
     tenant_id = os.environ.get("LANGSMITH_TENANT_ID_PROD")

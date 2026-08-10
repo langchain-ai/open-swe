@@ -155,6 +155,12 @@ def test_profile_stale_anthropic_upgrades_to_supported() -> None:
     assert normalize_profile_overrides(profile) == (SUPPORTED_ANTHROPIC, "high")
 
 
+def test_profile_update_defaults_draft_prs_to_none_for_legacy_clients() -> None:
+    update = ProfileUpdate(default_model=SUPPORTED_OPENAI, reasoning_effort="medium")
+
+    assert update.draft_prs is None
+
+
 def test_profile_update_migrates_deprecated_gpt_5_5_model() -> None:
     update = ProfileUpdate(default_model=DEPRECATED_OPENAI, reasoning_effort="medium")
     update.validate_pairing()

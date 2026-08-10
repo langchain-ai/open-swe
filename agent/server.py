@@ -12,6 +12,7 @@ import logging
 import os
 import warnings
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 from langsmith.sandbox import SandboxClientError
 
 from .dashboard.admin import is_observability_authorized
@@ -45,6 +47,7 @@ from .dashboard.agent_overrides import (
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
     profile_create_prs,
+    profile_draft_prs,
     resolve_github_login,
 )
 from .dashboard.agent_usage import record_agent_thread_usage
@@ -72,6 +75,7 @@ from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
+    DynamicToolMiddleware,
     ModelCallTimeoutMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
@@ -82,7 +86,6 @@ from .middleware import (
     SlackAssistantStatusMiddleware,
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
-    ToolArtifactMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
@@ -104,6 +107,7 @@ from .runtime.constants import (
 from .runtime.execution import graph_loaded_for_execution
 from .tools import (
     approve_plan,
+    delete_user_skill,
     enter_plan_mode,
     fetch_url,
     http_request,
@@ -113,6 +117,7 @@ from .tools import (
     linear_get_issue,
     linear_get_issue_comments,
     linear_list_teams,
+    linear_search_issues,
     linear_update_issue,
     open_pull_request,
     recreate_sandbox,
@@ -120,6 +125,7 @@ from .tools import (
     request_pr_review,
     save_plan,
     save_user_instructions,
+    save_user_skill,
     schedule_thread_wakeup,
     slack_add_reaction,
     slack_read_thread_messages,
@@ -137,6 +143,7 @@ from .utils.authorship import (
 from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import get_github_app_installation_token_with_expiry
+from .utils.github_org_membership import is_user_active_org_member
 from .utils.github_proxy import record_proxy_token_expiry
 from .utils.json_types import as_json_object
 from .utils.model import (
@@ -159,11 +166,23 @@ from .utils.sandbox_state import (
     unwrap_sandbox_backend,
 )
 from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
+from .utils.turn_checkpoint import merge_checkpoint, record_turn_checkpoint
 
 client = get_client()
 
 DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
+DEEP_AGENT_TOOL_NAMES = {
+    "delete",
+    "edit_file",
+    "execute",
+    "glob",
+    "grep",
+    "ls",
+    "read_file",
+    "task",
+    "write_file",
+}
 
 
 def _tool_loader_timeout_seconds() -> float:
@@ -363,8 +382,7 @@ async def _refresh_github_proxy_or_fail(
 
 
 async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
-    await asyncio.to_thread(
-        sandbox_backend.execute,
+    await sandbox_backend.aexecute(
         f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
         f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'",
     )
@@ -376,7 +394,7 @@ async def check_sandbox_reachable(
 ) -> SandboxBackendProtocol:
     """Ping a cached sandbox; an unreachable one fails the run, never gets replaced."""
     try:
-        await asyncio.to_thread(sandbox_backend.execute, "echo ok")
+        await sandbox_backend.aexecute("echo ok")
     except SandboxClientError as exc:
         logger.warning("Cached sandbox is no longer reachable for thread %s", thread_id)
         raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
@@ -560,6 +578,8 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "open_pull_request",
         "recreate_sandbox",
         "request_pr_review",
+        "save_user_skill",
+        "delete_user_skill",
         "slack_start_new_thread",
         "linear_create_issue",
         "linear_update_issue",
@@ -579,7 +599,11 @@ def _subagent_model_timeout_middleware() -> list[AgentMiddleware[Any, Any, Any]]
     return cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()])
 
 
-def _general_purpose_subagent(model: BaseChatModel, skills: list[str] | None = None) -> SubAgent:
+def _general_purpose_subagent(
+    model: BaseChatModel,
+    skills: list[str] | None = None,
+    dynamic_tools: DynamicToolMiddleware | None = None,
+) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": GENERAL_PURPOSE_SUBAGENT["description"],
@@ -588,7 +612,10 @@ def _general_purpose_subagent(model: BaseChatModel, skills: list[str] | None = N
         # tool-call cadence) that delegated work also needs.
         "system_prompt": OPEN_SWE_SHARED_BASE + "\n\n" + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
-        "middleware": _subagent_model_timeout_middleware(),
+        "middleware": [
+            *([dynamic_tools] if dynamic_tools else []),
+            *_subagent_model_timeout_middleware(),
+        ],
     }
     if skills:
         subagent["skills"] = skills
@@ -669,6 +696,23 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
     return is_observability_authorized(
         await email_for_login(candidate_login), login=candidate_login
     )
+
+
+async def _allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
+    configurable = (config or {}).get("configurable") or {}
+    config_login = configurable.get("github_login")
+    login = profile_login or (config_login if isinstance(config_login, str) else None)
+    if not login:
+        return False
+    orgs = dict.fromkeys(
+        org.strip().lower()
+        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
+        if org.strip()
+    )
+    for org in orgs:
+        if await is_user_active_org_member(login, org):
+            return True
+    return False
 
 
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
@@ -770,6 +814,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_project_id: str,
         linear_issue_number: str,
         create_prs: bool,
+        draft_prs: bool,
         plan_mode: bool,
         corridor_enabled: bool,
     ) -> None:
@@ -783,6 +828,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
         self._create_prs = create_prs
+        self._draft_prs = draft_prs
         self._plan_mode = plan_mode
         self._corridor_enabled = corridor_enabled
 
@@ -794,13 +840,44 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "source": self._source,
             "repo": configurable.get("repo"),
             "plan_mode": self._plan_mode,
+            "draft_prs": self._draft_prs,
             "model": self._model_id,
             "effort": self._effort,
         }
 
+    async def _record_turn_checkpoint(
+        self, state: PrepareRunState, sandbox_backend: Any, work_dir: str
+    ) -> list[dict[str, str]] | None:
+        """Snapshot the worktree so the dashboard can diff this turn from git.
+
+        Keyed by the user message that opened the turn, which is the same id the
+        client groups an assistant turn under.
+        """
+        turn_key = next(
+            (
+                message.id
+                for message in reversed(state.get("messages") or [])
+                if isinstance(message, HumanMessage) and message.id
+            ),
+            None,
+        )
+        if not turn_key:
+            return None
+        ref = await record_turn_checkpoint(sandbox_backend, work_dir, turn_key)
+        if ref is None:
+            return None
+        try:
+            thread = await client.threads.get(thread_id=self._thread_id)
+            existing = (thread.get("metadata") or {}).get("turn_checkpoints")
+        except Exception:
+            logger.debug("Could not read turn checkpoints for %s", self._thread_id, exc_info=True)
+            existing = None
+        return merge_checkpoint(existing, turn_key, ref, datetime.now(UTC).isoformat())
+
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         configurable = (self._config or {}).get("configurable") or {}
+        configurable["draft_prs"] = self._draft_prs
         prompt_default_repo = await _resolve_prompt_default_repo(configurable)
         triggering_user_identity_task = asyncio.create_task(
             asyncio.to_thread(
@@ -829,6 +906,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             _resolve_repo_custom_instructions(prompt_default_repo),
             _resolve_user_custom_instructions(self._profile_login),
         )
+        turn_checkpoints = await self._record_turn_checkpoint(state, sandbox_backend, work_dir)
 
         try:
             await client.threads.update(
@@ -839,6 +917,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     "effort": self._effort,
                     "source": self._source,
                     "plan_mode": self._plan_mode,
+                    **({"turn_checkpoints": turn_checkpoints} if turn_checkpoints else {}),
                 },
             )
             await record_agent_thread_usage(
@@ -862,6 +941,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 linear_issue_number=self._linear_issue_number,
                 triggering_user_identity=triggering_user_identity,
                 create_prs=self._create_prs,
+                draft_prs=self._draft_prs,
                 default_repo=prompt_default_repo,
                 plan_mode=self._plan_mode,
                 plan_url=dashboard_plan_url(self._thread_id),
@@ -961,6 +1041,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagent_effort = per_thread_effort
 
     always_create_prs = profile_create_prs(profile)
+    draft_prs = profile_draft_prs(profile)
     if always_create_prs:
         logger.info("Always Create PRs enabled by profile for %s", profile_login)
 
@@ -1013,9 +1094,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
     ]
 
-    observability_tools = await _load_observability_tools(
-        await _observability_authorized(config, profile_login)
-    )
+    observability_authorized = await _observability_authorized(config, profile_login)
+    if observability_authorized:
+        observability_tools = await _load_observability_tools(True)
+    elif await _allowed_org_member(config, profile_login):
+        observability_tools = await _cached_tool_loader(
+            f"tools:langsmith:{id(load_langsmith_tools)}", 600, load_langsmith_tools
+        )
+    else:
+        observability_tools = []
     corridor_tools = await _load_corridor_mcp_tools()
     browser_tools = load_browser_tools()
 
@@ -1033,6 +1120,47 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 300,
                 lambda: load_notion_tools(profile_login),
             ),
+        )
+
+    static_tools = [
+        http_request,
+        fetch_url,
+        web_search,
+        approve_plan,
+        enter_plan_mode,
+        save_plan,
+        save_user_instructions,
+        save_user_skill,
+        delete_user_skill,
+        linear_comment,
+        linear_create_issue,
+        linear_delete_issue,
+        linear_get_issue,
+        linear_get_issue_comments,
+        linear_list_teams,
+        linear_search_issues,
+        linear_update_issue,
+        open_pull_request,
+        request_pr_review,
+        recreate_sandbox,
+        report_platform_issue,
+        schedule_thread_wakeup,
+        slack_add_reaction,
+        slack_read_thread_messages,
+        slack_start_new_thread,
+        slack_thread_reply,
+    ]
+    dynamic_tool_middleware: DynamicToolMiddleware | None = None
+    integration_tool_groups = {
+        "Corridor": corridor_tools,
+        "Observability": observability_tools,
+        "Currents": currents_tools,
+        "Notion": notion_tools,
+    }
+    if any(integration_tool_groups.values()):
+        dynamic_tool_middleware = DynamicToolMiddleware(
+            integration_tool_groups,
+            reserved_names={*DEEP_AGENT_TOOL_NAMES, *(tool.__name__ for tool in static_tools)},
         )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
@@ -1059,37 +1187,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=main_model,
         system_prompt="",
-        tools=[
-            http_request,
-            fetch_url,
-            web_search,
-            approve_plan,
-            enter_plan_mode,
-            save_plan,
-            save_user_instructions,
-            linear_comment,
-            linear_create_issue,
-            linear_delete_issue,
-            linear_get_issue,
-            linear_get_issue_comments,
-            linear_list_teams,
-            linear_update_issue,
-            open_pull_request,
-            request_pr_review,
-            recreate_sandbox,
-            report_platform_issue,
-            schedule_thread_wakeup,
-            slack_add_reaction,
-            slack_read_thread_messages,
-            slack_start_new_thread,
-            slack_thread_reply,
-            *corridor_tools,
-            *observability_tools,
-            *currents_tools,
-            *notion_tools,
-        ],
+        tools=static_tools,
         subagents=[
-            _general_purpose_subagent(subagent_model, skill_sources),
+            _general_purpose_subagent(subagent_model, skill_sources, dynamic_tool_middleware),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
         skills=skill_sources,
@@ -1108,9 +1208,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     linear_project_id=linear_project_id,
                     linear_issue_number=linear_issue_number,
                     create_prs=always_create_prs,
+                    draft_prs=draft_prs,
                     plan_mode=plan_mode,
                     corridor_enabled=bool(corridor_tools),
                 ),
+                *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
@@ -1123,7 +1225,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     initial_delay=1.0,
                     max_delay=10.0,
                 ),
-                ToolArtifactMiddleware(),
                 PullRequestCreationGuardMiddleware(),
                 refresh_github_proxy_before_model,
                 check_message_queue_before_model,

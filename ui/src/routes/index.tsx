@@ -1,7 +1,7 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router";
+import { Navigate, createFileRoute } from "@tanstack/react-router"
 
-export const Route = createFileRoute("/")({ component: Index });
+export const Route = createFileRoute("/")({ component: Index })
 
 function Index() {
-  return <Navigate to="/agents" />;
+  return <Navigate to="/agents" />
 }

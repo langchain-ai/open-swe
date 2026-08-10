@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
+    "DynamicToolMiddleware": ".dynamic_tools",
     "ensure_no_empty_msg": ".ensure_no_empty_msg",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
@@ -25,12 +26,12 @@ _MIDDLEWARE_MODULES = {
     "task_on_failure": ".task_retry",
     "task_retry_on": ".task_retry",
     "TimeoutWrapupMiddleware": ".timeout_wrapup",
-    "ToolArtifactMiddleware": ".tool_artifact",
     "ToolErrorMiddleware": ".tool_error_handler",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
 }
 
 __all__ = [
+    "DynamicToolMiddleware",
     "ExcludeToolsMiddleware",
     "ModelCallTimeoutMiddleware",
     "ModelFallbackMiddleware",
@@ -43,7 +44,6 @@ __all__ = [
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
     "SubdirAgentsReadMiddleware",
-    "ToolArtifactMiddleware",
     "ToolErrorMiddleware",
     "TimeoutWrapupMiddleware",
     "WorkflowPushGuardMiddleware",
@@ -60,6 +60,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from .check_message_queue import check_message_queue_before_model
+    from .dynamic_tools import DynamicToolMiddleware
     from .ensure_no_empty_msg import ensure_no_empty_msg
     from .exclude_tools import ExcludeToolsMiddleware
     from .model_call_timeout import ModelCallTimeoutMiddleware
@@ -79,7 +80,6 @@ if TYPE_CHECKING:
     from .subdir_agents import SubdirAgentsReadMiddleware
     from .task_retry import task_on_failure, task_retry_on
     from .timeout_wrapup import TimeoutWrapupMiddleware
-    from .tool_artifact import ToolArtifactMiddleware
     from .tool_error_handler import ToolErrorMiddleware
     from .workflow_push_guard import WorkflowPushGuardMiddleware
 

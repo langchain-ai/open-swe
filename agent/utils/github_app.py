@@ -8,6 +8,7 @@ import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import jwt
@@ -28,7 +29,7 @@ GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID", "")
 _TOKEN_CACHE_MARGIN = timedelta(minutes=10)
 PermissionMap = Mapping[str, str]
 PermissionKey = tuple[tuple[str, str], ...]
-ScopeKey = tuple[tuple[int, ...], tuple[str, ...], PermissionKey]
+ScopeKey = tuple[str, tuple[int, ...], tuple[str, ...], PermissionKey]
 
 # scope key -> (token, expires_at, good_until). In-process only; never persisted.
 _TOKEN_CACHE: dict[ScopeKey, tuple[str, str | None, datetime]] = {}
@@ -42,14 +43,15 @@ def normalize_permissions(permissions: PermissionMap | None) -> PermissionKey:
 
 
 def _scope_key(
+    installation_id: str,
     repository_ids: Sequence[int] | None,
     repositories: Sequence[str] | None,
     permissions: PermissionMap | None = None,
 ) -> ScopeKey:
-    """Cache key segregating repo and permission-scoped tokens."""
+    """Cache key segregating installation, repo, and permission-scoped tokens."""
     ids = tuple(sorted(int(i) for i in repository_ids)) if repository_ids else ()
     names = tuple(sorted(str(r) for r in repositories)) if repositories else ()
-    return ids, names, normalize_permissions(permissions)
+    return installation_id, ids, names, normalize_permissions(permissions)
 
 
 def _parse_expiry(expires_at: Any) -> datetime | None:
@@ -96,8 +98,31 @@ def _generate_app_jwt() -> str:
     return jwt.encode(payload, private_key, algorithm="RS256")
 
 
+async def get_github_app_installation_id_for_org(org: str) -> int | None:
+    """Resolve the GitHub App installation for an organization."""
+    if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not org.strip():
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+            response = await client.get(
+                f"https://api.github.com/orgs/{quote(org.strip(), safe='')}/installation",
+                headers={
+                    "Authorization": f"Bearer {_generate_app_jwt()}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+        response.raise_for_status()
+        installation_id = response.json().get("id")
+        return installation_id if isinstance(installation_id, int) and installation_id > 0 else None
+    except Exception:
+        logger.warning("Failed to resolve GitHub App installation for %s", org, exc_info=True)
+        return None
+
+
 async def get_github_app_installation_token(
     *,
+    installation_id: str | int | None = None,
     repository_ids: Sequence[int] | None = None,
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
@@ -105,6 +130,7 @@ async def get_github_app_installation_token(
 ) -> str | None:
     """Exchange the GitHub App JWT for an installation access token."""
     token, _ = await get_github_app_installation_token_with_expiry(
+        installation_id=installation_id,
         repository_ids=repository_ids,
         repositories=repositories,
         permissions=permissions,
@@ -115,17 +141,26 @@ async def get_github_app_installation_token(
 
 async def get_github_app_installation_token_with_expiry(
     *,
+    installation_id: str | int | None = None,
     repository_ids: Sequence[int] | None = None,
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
     log_errors: bool = True,
 ) -> tuple[str | None, str | None]:
     """Exchange the GitHub App JWT for an installation access token and its expiry."""
-    if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not GITHUB_APP_INSTALLATION_ID:
+    resolved_installation_id = str(
+        GITHUB_APP_INSTALLATION_ID if installation_id is None else installation_id
+    ).strip()
+    if (
+        not GITHUB_APP_ID
+        or not GITHUB_APP_PRIVATE_KEY
+        or not resolved_installation_id.isdigit()
+        or int(resolved_installation_id) <= 0
+    ):
         logger.debug("GitHub App env vars not fully configured, skipping app token")
         return None, None
 
-    key = _scope_key(repository_ids, repositories, permissions)
+    key = _scope_key(resolved_installation_id, repository_ids, repositories, permissions)
     now = datetime.now(UTC)
     cached = _cached_token(key, now=now)
     if cached is not None:
@@ -144,7 +179,7 @@ async def get_github_app_installation_token_with_expiry(
         app_jwt = _generate_app_jwt()
         async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
             response = await client.post(
-                f"https://api.github.com/app/installations/{GITHUB_APP_INSTALLATION_ID}/access_tokens",
+                f"https://api.github.com/app/installations/{resolved_installation_id}/access_tokens",
                 headers={
                     "Authorization": f"Bearer {app_jwt}",
                     "Accept": "application/vnd.github+json",

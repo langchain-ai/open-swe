@@ -1217,7 +1217,7 @@ function ReviewBodyInner({
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <main className="relative flex min-h-0 min-w-0 flex-1">
           {!embedded && (
-            <div className="hidden w-72 shrink-0 flex-col border-r border-border bg-[var(--ui-sidebar)] lg:flex">
+            <div className="hidden w-72 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
               <ReviewSidebarPanel data={sidebarData} />
             </div>
           )}
@@ -1266,7 +1266,7 @@ function ReviewBodyInner({
                 <div
                   className={cn(
                     "mt-4 rounded-lg border border-border p-4",
-                    embedded ? "bg-[var(--ui-surface)]" : "bg-card"
+                    embedded ? "bg-card" : "bg-card"
                   )}
                 >
                   {detail.pr.body ? (
@@ -1436,7 +1436,7 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
   return (
     <div className="sticky top-0 z-[5] border-b border-border bg-background py-2">
       <div className="flex items-center gap-2">
-        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-[var(--ui-panel-2)] text-[11px] font-medium text-muted-foreground">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-accent text-[11px] font-medium text-muted-foreground">
           {group.index}
         </span>
         <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h3>
@@ -1693,9 +1693,9 @@ const FileDiffCard = memo(function FileDiffCard({
   return (
     <div
       ref={sectionRef}
-      className="scroll-mt-4 overflow-hidden rounded-lg border border-[var(--ui-border)]"
+      className="scroll-mt-4 overflow-hidden rounded-lg border border-border"
     >
-      <div className="flex items-center gap-2 bg-[var(--ui-panel-2)] px-3 py-2 text-xs">
+      <div className="flex items-center gap-2 bg-accent px-3 py-2 text-xs">
         <button
           type="button"
           onClick={() => onToggleExpanded(file.path)}
@@ -1737,7 +1737,7 @@ const FileDiffCard = memo(function FileDiffCard({
       </div>
       {expanded &&
         (file.unrenderable ? (
-          <div className="bg-[var(--ui-panel)] p-4 text-center text-xs text-[var(--ui-text-dim)]">
+          <div className="bg-card p-4 text-center text-xs text-muted-foreground/70">
             Binary or large file — diff not shown.
           </div>
         ) : (
@@ -1747,7 +1747,7 @@ const FileDiffCard = memo(function FileDiffCard({
               lastPointerRef.current = { x: event.clientX, y: event.clientY }
             }}
             onMouseUp={handleTextSelection}
-            className="overflow-x-auto bg-[var(--ui-panel)] font-mono text-[11px] leading-5"
+            className="overflow-x-auto bg-card font-mono text-[11px] leading-5"
           >
             <MultiFileDiff<ReviewAnnotation>
               oldFile={oldFile}
@@ -1994,13 +1994,13 @@ function CommentComposer({
     cn(
       "rounded px-2 py-0.5 text-[11px]",
       active
-        ? "bg-[var(--ui-panel-2)] font-medium text-foreground"
+        ? "bg-accent font-medium text-foreground"
         : "text-muted-foreground hover:text-foreground"
     )
   return (
     <div className="px-2 py-1 font-sans">
-      <div className="overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)]">
-        <div className="flex items-center gap-1.5 border-b border-[var(--ui-border)] px-2 py-1 text-[11px]">
+      <div className="overflow-hidden rounded-md border border-border bg-card">
+        <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px]">
           <ChatCircleIcon className="size-3 text-muted-foreground" />
           <span className="font-medium">
             Add a comment on line {commentRangeLabel(range)}
@@ -2032,7 +2032,7 @@ function CommentComposer({
           </div>
         ) : (
           <>
-            <div className="flex items-center gap-1 border-b border-[var(--ui-border)] px-1.5 py-1">
+            <div className="flex items-center gap-1 border-b border-border px-1.5 py-1">
               <button
                 type="button"
                 onClick={() => setMode("write")}
@@ -2054,7 +2054,7 @@ function CommentComposer({
                   {MARKDOWN_TOOLBAR.map((group, groupIndex) => (
                     <Fragment key={group[0]?.action ?? groupIndex}>
                       {groupIndex > 0 && (
-                        <span className="mx-0.5 h-4 w-px bg-[var(--ui-border)]" />
+                        <span className="mx-0.5 h-4 w-px bg-border" />
                       )}
                       {group.map(({ action, label, Icon }) => (
                         <IconButton
@@ -2158,8 +2158,8 @@ function InlineComment({
       ref={(node) => registerAnnotation(`comment:${comment.id}`, node)}
       className="px-2 py-1 font-sans"
     >
-      <div className="overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)]">
-        <div className="flex items-center gap-1.5 border-b border-[var(--ui-border)] px-2 py-1 text-[11px]">
+      <div className="overflow-hidden rounded-md border border-border bg-card">
+        <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px]">
           {comment.author_avatar_url ? (
             <img
               src={comment.author_avatar_url}
@@ -2221,7 +2221,7 @@ function InlineFinding({ finding }: { finding: ReviewFinding }) {
       ref={(node) => registerAnnotation(finding.id, node)}
       className="px-2 py-1 font-sans"
     >
-      <div className="overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)]">
+      <div className="overflow-hidden rounded-md border border-border bg-card">
         <button
           type="button"
           onClick={() => toggle(finding)}
@@ -2276,7 +2276,7 @@ function FindingDetails({
   }
 
   return (
-    <div className="border-t border-[var(--ui-border)] px-3 py-2.5 font-sans">
+    <div className="border-t border-border px-3 py-2.5 font-sans">
       <div className="text-xs text-muted-foreground">
         <Markdown content={finding.description} />
       </div>

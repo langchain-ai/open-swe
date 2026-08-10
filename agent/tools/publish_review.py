@@ -187,7 +187,7 @@ async def _resolve_review_trace_url(thread_id: str, config_override: object) -> 
         return None
     if not thread_id:
         return None
-    return get_langsmith_trace_url(thread_id, project_name=REVIEW_TRACING_PROJECT)
+    return await get_langsmith_trace_url(thread_id, project_name=REVIEW_TRACING_PROJECT)
 
 
 def _is_reviewer_eval_mode(configurable: dict[str, Any]) -> bool:

@@ -13,18 +13,10 @@ export type ChunkKind =
 export type TodoStatus = "pending" | "in_progress" | "completed"
 
 export type AgentStatus =
-  | "idle"
-  | "running"
-  | "finished"
-  | "interrupted"
-  | "error"
+  "idle" | "running" | "finished" | "interrupted" | "error"
 
 export type AgentSource =
-  | "dashboard"
-  | "github"
-  | "slack"
-  | "linear"
-  | "schedule"
+  "dashboard" | "github" | "slack" | "linear" | "schedule"
 
 export interface TodoItem {
   content: string
@@ -140,6 +132,12 @@ export interface Message {
   id: string
   author: Author
   timestamp: string
+  /**
+   * Id of the user message that opened this agent turn. Matches the key the
+   * agent stamps on its git checkpoint, so the turn's changed files can be read
+   * back from the sandbox.
+   */
+  turnKey?: string
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
   startedAt?: string
   timestampIsFallback?: boolean

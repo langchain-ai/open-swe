@@ -15,6 +15,7 @@ _TOOL_MODULES = {
     "linear_get_issue": ".linear_get_issue",
     "linear_get_issue_comments": ".linear_get_issue_comments",
     "linear_list_teams": ".linear_list_teams",
+    "linear_search_issues": ".linear_search_issues",
     "linear_update_issue": ".linear_update_issue",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
@@ -28,6 +29,8 @@ _TOOL_MODULES = {
     "resolve_finding_thread": ".resolve_finding_thread",
     "save_plan": ".save_plan",
     "save_user_instructions": ".save_user_instructions",
+    "save_user_skill": ".user_skills",
+    "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": ".search_repo_code",
     "slack_add_reaction": ".slack_add_reaction",
@@ -51,6 +54,7 @@ __all__ = [
     "linear_get_issue",
     "linear_get_issue_comments",
     "linear_list_teams",
+    "linear_search_issues",
     "linear_update_issue",
     "list_findings",
     "list_review_findings",
@@ -64,6 +68,8 @@ __all__ = [
     "resolve_finding_thread",
     "save_plan",
     "save_user_instructions",
+    "save_user_skill",
+    "delete_user_skill",
     "schedule_thread_wakeup",
     "search_repo_code",
     "slack_add_reaction",
@@ -87,6 +93,7 @@ if TYPE_CHECKING:
     from .linear_get_issue import linear_get_issue
     from .linear_get_issue_comments import linear_get_issue_comments
     from .linear_list_teams import linear_list_teams
+    from .linear_search_issues import linear_search_issues
     from .linear_update_issue import linear_update_issue
     from .list_findings import list_findings
     from .list_review_findings import list_review_findings
@@ -107,6 +114,7 @@ if TYPE_CHECKING:
     from .slack_start_new_thread import slack_start_new_thread
     from .slack_thread_reply import slack_thread_reply
     from .update_finding import update_finding
+    from .user_skills import delete_user_skill, save_user_skill
     from .web_search import web_search
 
 

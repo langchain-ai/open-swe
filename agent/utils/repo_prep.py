@@ -12,7 +12,6 @@ the fetched diff) and returns ``False`` so callers can skip skill wiring.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import posixpath
 import shlex
@@ -93,9 +92,7 @@ async def prepare_review_repo(
 
     command = _prep_command(work_dir, repo_owner, repo_name, head_sha, pr_number, base_sha)
     try:
-        result = await asyncio.to_thread(
-            sandbox_backend.execute, command, timeout=CLONE_TIMEOUT_SECONDS
-        )
+        result = await sandbox_backend.aexecute(command, timeout=CLONE_TIMEOUT_SECONDS)
     except Exception:  # noqa: BLE001
         logger.warning("Failed to prep review repo %s/%s", repo_owner, repo_name, exc_info=True)
         return False
@@ -155,7 +152,7 @@ async def materialize_trusted_skills(
             f"echo {q_dest}"
         )
         try:
-            result = await asyncio.to_thread(sandbox_backend.execute, command)
+            result = await sandbox_backend.aexecute(command)
         except Exception:  # noqa: BLE001
             logger.warning("Failed to extract trusted skills %s", skill_dir, exc_info=True)
             continue

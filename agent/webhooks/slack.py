@@ -207,7 +207,7 @@ def _format_slack_thread_section(
     return "\n".join(lines)
 
 
-def _format_slack_run_links_section(thread_id: str) -> str:
+async def _format_slack_run_links_section(thread_id: str) -> str:
     dashboard_url = common.dashboard_thread_url(thread_id)
     trace_url = get_langsmith_trace_url(thread_id)
     lines = ["## Jarvis Links"]
@@ -445,7 +445,7 @@ async def _process_slack_mention_impl(
         "Use this only if the Slack conversation does not identify a different repository.\n\n"
         f"## Triggered by\n{trigger_user}\n\n"
         f"{slack_thread_section}\n\n"
-        f"{_format_slack_run_links_section(thread_id)}\n\n"
+        f"{await _format_slack_run_links_section(thread_id)}\n\n"
         f"## Conversation Context\n{context_text}\n\n"
         f"## Latest Mention Request\n{clean_text}"
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")

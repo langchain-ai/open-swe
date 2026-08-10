@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { useResolvedTheme } from "@/lib/theme"
+import { cn } from "@/lib/utils"
 
 const POLL_MS = 4000
 
@@ -49,7 +50,15 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-export function PlanReview({ plan }: { plan: PlanData }) {
+export function PlanReview({
+  plan,
+  compact = false,
+  onApprove,
+}: {
+  plan: PlanData
+  compact?: boolean
+  onApprove?: (runId: string) => void
+}) {
   const navigate = useNavigate()
   const resolvedTheme = useResolvedTheme()
   const [comments, setComments] = useState<Array<PlanComment>>([])
@@ -172,11 +181,13 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       setError(null)
       try {
         if (kind === "approve") {
-          await approvePlan(plan.threadId)
-          await navigate({
-            to: "/agents/$threadId",
-            params: { threadId: plan.threadId },
-          })
+          const { run_id: runId } = await approvePlan(plan.threadId)
+          if (onApprove) onApprove(runId)
+          else
+            await navigate({
+              to: "/agents/$threadId",
+              params: { threadId: plan.threadId },
+            })
           return
         }
         await rejectPlan(plan.threadId)
@@ -187,7 +198,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
         setBusy(null)
       }
     },
-    [navigate, plan.threadId]
+    [navigate, onApprove, plan.threadId]
   )
 
   const copyPlan = useCallback(async () => {
@@ -203,14 +214,19 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   return (
     <div
       data-testid="plan-review"
-      className="flex min-h-0 flex-1 flex-col bg-[var(--ui-bg)] text-[var(--ui-text)]"
+      className="flex min-h-0 flex-1 flex-col bg-background text-foreground"
     >
-      <div className="flex flex-col gap-3 border-b border-[var(--ui-border)] px-4 py-3 md:flex-row md:items-center md:justify-between md:gap-4 md:px-6">
+      <div
+        className={cn(
+          "flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between md:gap-4",
+          !compact && "md:px-6"
+        )}
+      >
         <div className="min-w-0">
-          <h1 className="text-base font-semibold text-[var(--ui-text)]">
+          <h1 className="text-base font-semibold text-foreground">
             {isShared ? "Shared response" : "Implementation plan"}
           </h1>
-          <p className="text-xs text-[var(--ui-text-dim)]">
+          <p className="text-xs text-muted-foreground/70">
             {isShared ? "Viewing" : "Reviewing"} as {plan.user.name}
             {plan.isOwner ? " (owner)" : ""} · status:{" "}
             <span data-testid="plan-status">{plan.status}</span>
@@ -220,7 +236,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
           {decision && (
             <span
               data-testid="plan-decision"
-              className="w-full text-xs text-[var(--ui-text-dim)] md:w-auto"
+              className="w-full text-xs text-muted-foreground/70 md:w-auto"
             >
               {decision}
             </span>
@@ -296,38 +312,49 @@ export function PlanReview({ plan }: { plan: PlanData }) {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col overflow-y-auto",
+          !compact && "md:flex-row md:overflow-hidden"
+        )}
+      >
         <div
-          className="min-w-0 px-4 py-4 md:min-h-0 md:flex-1 md:overflow-auto md:px-6"
+          className={cn(
+            "min-w-0 px-4 py-4 md:min-h-0 md:flex-1 md:overflow-auto",
+            !compact && "md:px-6"
+          )}
           data-testid="plan-document"
           data-color-scheme={resolvedTheme}
         >
           {editing ? (
             <div className="flex h-full flex-col gap-2">
-              {error && (
-                <p className="text-xs text-[color:var(--ui-danger)]">{error}</p>
-              )}
+              {error && <p className="text-xs text-destructive">{error}</p>}
               <textarea
                 data-testid="plan-editor"
                 value={editDraft}
                 onChange={(e) => setEditDraft(e.target.value)}
                 spellCheck={false}
-                className="min-h-[20rem] w-full flex-1 resize-none rounded-md border border-[var(--ui-border)] bg-[var(--ui-bg)] px-3 py-2 font-mono text-sm text-[var(--ui-text)] outline-none focus:border-[var(--ui-accent)]"
+                className="min-h-[20rem] w-full flex-1 resize-none rounded-md border border-border bg-background px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-primary"
               />
             </div>
           ) : markdown.trim() ? (
             <Markdown content={markdown} />
           ) : (
-            <p className="text-sm text-[var(--ui-text-dim)]">
+            <p className="text-sm text-muted-foreground/70">
               The plan hasn't been written yet.
             </p>
           )}
         </div>
 
         {!isShared && (
-          <aside className="flex shrink-0 flex-col border-t border-[var(--ui-border)] md:w-80 md:border-t-0 md:border-l">
-            <div className="border-b border-[var(--ui-border)] px-4 py-3">
-              <h2 className="text-sm font-semibold text-[var(--ui-text)]">
+          <aside
+            className={cn(
+              "flex shrink-0 flex-col border-t border-border",
+              !compact && "md:w-80 md:border-t-0 md:border-l"
+            )}
+          >
+            <div className="border-b border-border px-4 py-3">
+              <h2 className="text-sm font-semibold text-foreground">
                 Comments
               </h2>
             </div>
@@ -336,7 +363,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
               data-testid="plan-comments"
             >
               {comments.length === 0 ? (
-                <p className="text-xs text-[var(--ui-text-dim)]">
+                <p className="text-xs text-muted-foreground/70">
                   No comments yet.
                 </p>
               ) : (
@@ -344,33 +371,31 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   <div
                     key={c.id}
                     data-testid="plan-comment"
-                    className="rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel)] px-3 py-2"
+                    className="rounded-md border border-border bg-card px-3 py-2"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-medium text-[var(--ui-text)]">
+                      <span className="text-xs font-medium text-foreground">
                         {c.author}
                       </span>
                       <button
                         type="button"
                         data-testid="comment-delete"
-                        className="text-xs text-[var(--ui-text-dim)] hover:text-[var(--ui-text)]"
+                        className="text-xs text-muted-foreground/70 hover:text-foreground"
                         onClick={() => void removeComment(c.id)}
                       >
                         Delete
                       </button>
                     </div>
-                    <p className="mt-1 text-sm whitespace-pre-wrap text-[var(--ui-text)]">
+                    <p className="mt-1 text-sm whitespace-pre-wrap text-foreground">
                       {c.body}
                     </p>
                   </div>
                 ))
               )}
             </div>
-            <div className="border-t border-[var(--ui-border)] p-3">
+            <div className="border-t border-border p-3">
               {error && (
-                <p className="mb-2 text-xs text-[color:var(--ui-danger)]">
-                  {error}
-                </p>
+                <p className="mb-2 text-xs text-destructive">{error}</p>
               )}
               <textarea
                 data-testid="comment-input"
@@ -379,7 +404,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                 onKeyDown={handleCommentKeyDown}
                 placeholder="Leave a comment on the plan"
                 rows={3}
-                className="w-full resize-none rounded-md border border-[var(--ui-border)] bg-[var(--ui-bg)] px-2 py-1.5 text-sm text-[var(--ui-text)] outline-none focus:border-[var(--ui-accent)]"
+                className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-primary"
               />
               <div className="mt-2 flex justify-end">
                 <Button

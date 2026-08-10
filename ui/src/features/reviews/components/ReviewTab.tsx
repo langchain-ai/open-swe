@@ -31,21 +31,21 @@ export function ReviewTab({ thread }: { thread: AgentThread }) {
 
   if (!enabled) {
     return (
-      <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-[var(--ui-text-dim)]">
+      <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
         Open a pull request to see its review here.
       </div>
     )
   }
   if (detail.isLoading) {
     return (
-      <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-[var(--ui-text-dim)]">
+      <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
         Loading review…
       </div>
     )
   }
   if (detail.error || !detail.data) {
     return (
-      <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-[var(--ui-text-dim)]">
+      <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
         No review for this pull request yet.
       </div>
     )

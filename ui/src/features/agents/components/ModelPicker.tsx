@@ -20,6 +20,9 @@ export interface ModelPickerProps {
   requireImageSupport?: boolean
   className?: string
   triggerClassName?: string
+  /** Controlled open state, so `/model` in the composer can raise the picker. */
+  open?: boolean
+  onOpenChange?: (next: boolean) => void
 }
 
 type Pane = "models" | "efforts"
@@ -36,7 +39,7 @@ function effortForModel(
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-3 pt-2 pb-1 text-[11px] text-[color:var(--ui-text-dim)]">
+    <div className="px-3 pt-2 pb-1 text-[11px] text-muted-foreground/60">
       {children}
     </div>
   )
@@ -67,18 +70,16 @@ function OptionRow({
       onMouseEnter={onMouseEnter}
       className={cn(
         "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] whitespace-nowrap transition-colors",
-        selected
-          ? "text-[color:var(--ui-text)]"
-          : "text-[color:var(--ui-text-muted)]",
-        focused && "bg-[var(--ui-panel-2)]",
+        selected ? "text-foreground" : "text-muted-foreground",
+        focused && "bg-accent",
         disabled
           ? "cursor-default opacity-40"
-          : "cursor-pointer hover:bg-[var(--ui-panel-2)]"
+          : "cursor-pointer hover:bg-accent"
       )}
     >
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {selected && (
-        <Check className="size-3.5 shrink-0 text-[color:var(--ui-text-dim)]" />
+        <Check className="size-3.5 shrink-0 text-muted-foreground/60" />
       )}
     </button>
   )
@@ -93,8 +94,23 @@ export function ModelPicker({
   requireImageSupport = false,
   className,
   triggerClassName,
+  open: controlledOpen,
+  onOpenChange,
 }: ModelPickerProps) {
-  const [open, setOpen] = useState(false)
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const open = controlledOpen ?? uncontrolledOpen
+  // Read through a ref so `setOpen` stays referentially stable for the
+  // click-outside listener while still resolving updater functions correctly.
+  const openRef = useRef(open)
+  openRef.current = open
+  const setOpen = useCallback(
+    (next: boolean | ((value: boolean) => boolean)) => {
+      const value = typeof next === "function" ? next(openRef.current) : next
+      setUncontrolledOpen(value)
+      onOpenChange?.(value)
+    },
+    [onOpenChange]
+  )
   const [query, setQuery] = useState("")
   const [focusedModelId, setFocusedModelId] = useState<string | null>(null)
   const [pane, setPane] = useState<Pane>("models")
@@ -128,7 +144,7 @@ export function ModelPicker({
     }
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
+  }, [setOpen])
 
   const apply = useCallback(
     (next: ModelSelection, { close }: { close: boolean }) => {
@@ -138,7 +154,7 @@ export function ModelPicker({
       setQuery("")
       setPane("models")
     },
-    [onSelectionChange]
+    [onSelectionChange, setOpen]
   )
 
   const modelDisabled = useCallback(
@@ -220,7 +236,7 @@ export function ModelPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         className={cn(
-          "flex max-w-[220px] cursor-pointer items-center gap-0.5 text-[13px] text-[color:var(--ui-text-muted)] transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
+          "flex max-w-[220px] cursor-pointer items-center gap-0.5 text-[13px] text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
           triggerClassName
         )}
       >
@@ -236,7 +252,7 @@ export function ModelPicker({
           data-testid="model-picker-panel"
           onKeyDown={handleKeyDown}
           style={{ zIndex: Z.DROPDOWN }}
-          className="absolute bottom-full left-0 mb-1 flex overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg"
+          className="dropdown-glass absolute bottom-full left-0 mb-1 flex overflow-hidden rounded-xl"
         >
           <div className="flex w-60 flex-col">
             <input
@@ -245,7 +261,7 @@ export function ModelPicker({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search models"
               aria-label="Search models"
-              className="w-full border-b border-[var(--ui-border)] bg-transparent px-3 py-2 text-[13px] text-[color:var(--ui-text)] outline-none placeholder:text-[color:var(--ui-text-dim)]"
+              className="w-full border-b border-border bg-transparent px-3 py-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/60"
             />
             <div
               role="listbox"
@@ -253,7 +269,7 @@ export function ModelPicker({
               className="max-h-72 overflow-y-auto py-1"
             >
               {filteredModels.length === 0 ? (
-                <p className="px-3 py-1.5 text-[13px] text-[color:var(--ui-text-dim)]">
+                <p className="px-3 py-1.5 text-[13px] text-muted-foreground/60">
                   No matches
                 </p>
               ) : (
@@ -271,7 +287,7 @@ export function ModelPicker({
                     label={
                       <>
                         {model.label}{" "}
-                        <span className="text-[color:var(--ui-text-dim)]">
+                        <span className="text-muted-foreground/60">
                           {formatEffort(effortForModel(model, selection))}
                         </span>
                       </>
@@ -282,18 +298,18 @@ export function ModelPicker({
             </div>
           </div>
           {focusedModel && (
-            <div className="flex w-52 flex-col border-l border-[var(--ui-border)] py-1">
+            <div className="flex w-52 flex-col border-l border-border py-1">
               {focusedContextWindow != null && (
                 <>
                   <SectionHeading>Context</SectionHeading>
                   <div
-                    className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-[color:var(--ui-text)]"
+                    className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-foreground"
                     title="Context window reported for this model"
                   >
                     <span className="min-w-0 flex-1 truncate">
                       {formatTokenCount(focusedContextWindow)}
                     </span>
-                    <Check className="size-3.5 shrink-0 text-[color:var(--ui-text-dim)]" />
+                    <Check className="size-3.5 shrink-0 text-muted-foreground/60" />
                   </div>
                 </>
               )}
