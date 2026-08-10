@@ -297,13 +297,17 @@ async def test_slack_start_new_thread_returns_slack_failure_without_dispatch(
 async def test_slack_start_new_thread_returns_detail_failure_without_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, bool] = {"dispatched": False}
+    captured: dict[str, Any] = {"dispatched": False, "detail_posts": 0, "sleeps": []}
 
     async def fake_post_top_level(*args: Any, **kwargs: Any) -> tuple[str | None, str | None]:
         return "1700000000.111111", None
 
     async def fake_post_thread_reply(*args: Any, **kwargs: Any) -> tuple[str | None, str | None]:
+        captured["detail_posts"] += 1
         return None, "rate_limited: 30"
+
+    async def fake_sleep(delay: float) -> None:
+        captured["sleeps"].append(delay)
 
     async def fake_dispatch_agent_run(*args: Any, **kwargs: Any) -> dict[str, str]:
         captured["dispatched"] = True
@@ -317,6 +321,7 @@ async def test_slack_start_new_thread_returns_detail_failure_without_dispatch(
         slack_breakout_tool, "post_slack_thread_reply_with_ts", fake_post_thread_reply
     )
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
+    monkeypatch.setattr(slack_breakout_tool.asyncio, "sleep", fake_sleep)
 
     result = await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
 
@@ -324,4 +329,6 @@ async def test_slack_start_new_thread_returns_detail_failure_without_dispatch(
     assert result["error"] == "rate_limited: 30"
     assert result["slack_error"] == "rate_limited: 30"
     assert "30s" in result["hint"]
+    assert captured["detail_posts"] == 2
+    assert captured["sleeps"] == [30]
     assert captured["dispatched"] is False

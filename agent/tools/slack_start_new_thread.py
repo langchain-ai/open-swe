@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 from typing import Any
@@ -43,6 +44,19 @@ def _failure_hint(slack_error: str | None) -> str:
     if slack_error and slack_error.startswith("http_error:"):
         return "Slack posting hit an HTTP error; retry once."
     return "Slack post failed; retry once with concise instructions."
+
+
+def _rate_limit_delay(slack_error: str | None) -> float | None:
+    if slack_error == "rate_limited":
+        return 1
+    prefix = "rate_limited: "
+    if not slack_error or not slack_error.startswith(prefix):
+        return None
+    try:
+        delay = float(slack_error.removeprefix(prefix))
+    except ValueError:
+        return None
+    return delay if 0 <= delay <= 60 else None
 
 
 def _validate_text(value: str, *, field: str, max_chars: int) -> str | dict[str, Any]:
@@ -230,13 +244,20 @@ async def slack_start_new_thread(
             "hint": _failure_hint(slack_error),
         }
 
-    details_ts, details_error = await post_slack_thread_reply_with_ts(
-        clean_channel_id,
-        message_ts,
-        _thread_details(clean_instructions, repo),
-        unfurl_links=False,
-        unfurl_media=False,
-    )
+    for attempt in range(2):
+        details_ts, details_error = await post_slack_thread_reply_with_ts(
+            clean_channel_id,
+            message_ts,
+            _thread_details(clean_instructions, repo),
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+        if details_ts is not None:
+            break
+        delay = _rate_limit_delay(details_error)
+        if attempt or delay is None:
+            break
+        await asyncio.sleep(delay)
     if details_ts is None:
         return {
             "success": False,
