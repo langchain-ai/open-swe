@@ -31,7 +31,9 @@ function Harness({ initialValue = "" }: { initialValue?: string }) {
 describe("ComposerPromptEditor", () => {
   it("renders plain text as text", () => {
     render(<Harness initialValue="rename the handler" />)
-    expect(screen.getByTestId("composer-editor").textContent).toBe("rename the handler")
+    expect(screen.getByTestId("composer-editor").textContent).toBe(
+      "rename the handler"
+    )
   })
 
   it("renders a file link as a chip whose text content is the original source", () => {

@@ -9,7 +9,7 @@ export function Logo() {
     "          ░███                                                                     ",
     "          █████                                                                    ",
     "         ░░░░░                                                                     ",
-  ].join("\n");
+  ].join("\n")
 
   return (
     <div className="w-full" style={{ containerType: "inline-size" }}>
@@ -20,5 +20,5 @@ export function Logo() {
         {ascii}
       </pre>
     </div>
-  );
+  )
 }

@@ -1,6 +1,6 @@
 import { Button as ButtonPrimitive } from "@base-ui/react/button"
-import {  cva } from "class-variance-authority"
-import type {VariantProps} from "class-variance-authority";
+import { cva } from "class-variance-authority"
+import type { VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
@@ -61,12 +61,7 @@ function IconButton({
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
   return (
-    <Button
-      variant={variant}
-      size={size}
-      className={className}
-      {...props}
-    />
+    <Button variant={variant} size={size} className={className} {...props} />
   )
 }
 

@@ -8,9 +8,17 @@ const Menu = MenuPrimitive.Root
 
 const MenuPortal = MenuPrimitive.Portal
 
-function MenuTrigger({ className, children, ...props }: MenuPrimitive.Trigger.Props) {
+function MenuTrigger({
+  className,
+  children,
+  ...props
+}: MenuPrimitive.Trigger.Props) {
   return (
-    <MenuPrimitive.Trigger className={className} data-slot="menu-trigger" {...props}>
+    <MenuPrimitive.Trigger
+      className={className}
+      data-slot="menu-trigger"
+      {...props}
+    >
       {children}
     </MenuPrimitive.Trigger>
   )
@@ -45,7 +53,7 @@ function MenuPopup({
       >
         <MenuPrimitive.Popup
           className={cn(
-            "dropdown-glass relative flex min-w-32 origin-(--transform-origin) rounded-lg outline-none transition-[scale,opacity] data-starting-style:scale-98 data-starting-style:opacity-0",
+            "dropdown-glass relative flex min-w-32 origin-(--transform-origin) rounded-lg transition-[scale,opacity] outline-none data-starting-style:scale-98 data-starting-style:opacity-0",
             className
           )}
           data-slot="menu-popup"
@@ -76,7 +84,7 @@ function MenuItem({
   return (
     <MenuPrimitive.Item
       className={cn(
-        "flex min-h-7 cursor-default select-none items-center gap-2 rounded-md px-2 py-1 text-xs/relaxed text-foreground outline-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground data-inset:ps-8 data-[variant=destructive]:text-destructive [&>svg]:pointer-events-none [&>svg]:shrink-0 [&>svg:not([class*='size-'])]:size-3.5 [&>svg:not([class*='text-'])]:text-muted-foreground data-[variant=destructive]:[&>svg:not([class*='text-'])]:text-current",
+        "flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs/relaxed text-foreground outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-inset:ps-8 data-[variant=destructive]:text-destructive data-disabled:pointer-events-none data-disabled:opacity-50 [&>svg]:pointer-events-none [&>svg]:shrink-0 [&>svg:not([class*='size-'])]:size-3.5 [&>svg:not([class*='text-'])]:text-muted-foreground data-[variant=destructive]:[&>svg:not([class*='text-'])]:text-current",
         className
       )}
       data-inset={inset}
@@ -97,7 +105,7 @@ function MenuCheckboxItem({
     <MenuPrimitive.CheckboxItem
       checked={checked}
       className={cn(
-        "grid min-h-7 cursor-default grid-cols-[1rem_1fr] items-center gap-2 rounded-md py-1 pe-4 ps-2 text-xs/relaxed text-foreground outline-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        "grid min-h-7 cursor-default grid-cols-[1rem_1fr] items-center gap-2 rounded-md py-1 ps-2 pe-4 text-xs/relaxed text-foreground outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
         className
       )}
       data-slot="menu-checkbox-item"
@@ -127,11 +135,15 @@ function MenuRadioGroup(props: MenuPrimitive.RadioGroup.Props) {
   return <MenuPrimitive.RadioGroup data-slot="menu-radio-group" {...props} />
 }
 
-function MenuRadioItem({ className, children, ...props }: MenuPrimitive.RadioItem.Props) {
+function MenuRadioItem({
+  className,
+  children,
+  ...props
+}: MenuPrimitive.RadioItem.Props) {
   return (
     <MenuPrimitive.RadioItem
       className={cn(
-        "flex min-h-7 cursor-default items-center rounded-md px-2 py-1 text-xs/relaxed text-foreground outline-none data-checked:bg-foreground/[0.08] data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        "flex min-h-7 cursor-default items-center rounded-md px-2 py-1 text-xs/relaxed text-foreground outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-checked:bg-foreground/[0.08] data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
         className
       )}
       data-slot="menu-radio-item"
@@ -196,7 +208,7 @@ function MenuSubTrigger({
   return (
     <MenuPrimitive.SubmenuTrigger
       className={cn(
-        "flex min-h-7 items-center gap-2 rounded-md px-2 py-1 text-xs/relaxed text-foreground outline-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground data-inset:ps-8 data-popup-open:bg-accent data-popup-open:text-accent-foreground [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "flex min-h-7 items-center gap-2 rounded-md px-2 py-1 text-xs/relaxed text-foreground outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-inset:ps-8 data-popup-open:bg-accent data-popup-open:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-muted-foreground",
         className
       )}
       data-inset={inset}
@@ -204,7 +216,7 @@ function MenuSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRightIcon className="-me-0.5 ms-auto opacity-80" />
+      <ChevronRightIcon className="ms-auto -me-0.5 opacity-80" />
     </MenuPrimitive.SubmenuTrigger>
   )
 }

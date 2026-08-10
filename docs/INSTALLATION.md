@@ -220,7 +220,37 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"
 REPO_SNAPSHOT_BASE_IMAGE="<your-docker-hub>/<name-of-your-image>"
 ```
 
-`DEFAULT_SANDBOX_SNAPSHOT_ID` is required when `SANDBOX_TYPE=langsmith`. The server validates this at startup and refuses to boot if it's missing. The snapshot should include the GitHub CLI from `Dockerfile.sandbox`; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
+A base snapshot is required when `SANDBOX_TYPE=langsmith` — either `DEFAULT_SANDBOX_SNAPSHOT_ID` or the runtime setting described below. The server logs a warning at startup when neither the env var nor a stored setting is present, and sandbox creation fails until one is. The snapshot should include the GitHub CLI from `Dockerfile.sandbox`; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
+
+### Changing the base snapshot without a redeploy
+
+Admins can override `DEFAULT_SANDBOX_SNAPSHOT_ID` at runtime from the **Repository Snapshots** page (**Base snapshot** field). The stored value wins; clearing it falls back to the env var. Per-repo snapshots still take precedence for runs targeting a repo with a ready snapshot.
+
+The same setting is available over the API, which is how the repo that builds your sandbox image can roll a new snapshot out on its own:
+
+```bash
+curl -X PUT "$OPEN_SWE_BASE_URL/dashboard/api/sandbox-settings" \
+  -H "Authorization: Bearer $ADMIN_GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"base_snapshot_id": "<snapshot-uuid>"}'
+```
+
+Admin-gated sandbox-settings requests accept two CI credentials in place of the browser session cookie, both as `Authorization: Bearer`:
+
+**GitHub Actions OIDC (preferred — no stored secret).** A workflow with `permissions: id-token: write` mints a short-lived token that GitHub signs and scopes to the repo, ref, and audience it requested. Allowlist it on the deployment:
+
+```bash
+ADMIN_OIDC_SUBJECTS="acme/sandbox-images"                       # any workflow/ref in this repo
+# or pin the ref with a full subject:
+# ADMIN_OIDC_SUBJECTS="repo:acme/sandbox-images:ref:refs/heads/main"
+ADMIN_OIDC_AUDIENCE="open-swe"                                  # optional; this is the default
+```
+
+`ADMIN_OIDC_SUBJECTS` is the on/off switch — while it is empty, OIDC auth is unavailable. Entries containing `:` are matched against the token's `sub` claim, and `owner/repo` entries against its `repository` claim. The audience is verified either way, defaulting to `open-swe`; override it only if you set the workflow's requested audience to match. Anyone who can run a workflow on an allowlisted repo/ref gets admin on these endpoints, so keep the list to internal repos.
+
+**Admin personal access token.** The token only needs to identify its owner (`GET /user`), and that login (or email) must appear in `CONFIGURED_ADMINS`. Matching by login needs no token permissions; matching by email needs a token that can read email addresses (classic `user:email`, or the fine-grained "Email addresses" read permission) when the account's email isn't public. Prefer a machine user over a human's token.
+
+`secrets.GITHUB_TOKEN` works for neither: installation tokens have no user identity, and they are not OIDC tokens. `examples/github-actions/set-base-snapshot.yml` is a copy-ready workflow using the OIDC path.
 
 `REPO_SNAPSHOT_BASE_IMAGE` should point at the same published Open SWE sandbox image you used to create the default snapshot (for example, the image built from `./Dockerfile.sandbox`). The admin **Repository Snapshots** page uses it as the `FROM` line when generating per-repo Dockerfile templates. If it is not set, template generation is intentionally disabled so admins do not accidentally build repo-scoped snapshots from a bare image that lacks Open SWE's required tools (`git`, `gh`, `sfw`, language runtimes, and proxy assumptions).
 
@@ -484,6 +514,10 @@ DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"  # prod: your frontend origin(
 # Comma-separated GitHub login or email allowlist for admin dashboard endpoints.
 # Empty => nobody is an admin.
 CONFIGURED_ADMINS=""                   # e.g. "alice,bob@my-org.com"
+# Optional; lets a GitHub Actions workflow act as an admin over the API via OIDC
+# (see step 4c). Empty => off.
+ADMIN_OIDC_SUBJECTS=""                 # e.g. "acme/sandbox-images" or "repo:acme/sandbox-images:ref:refs/heads/main"
+ADMIN_OIDC_AUDIENCE=""                 # audience the workflow must request; defaults to "open-swe"
 # URL of the LangGraph server the FastAPI side calls to trigger/stream runs.
 # Defaults to http://localhost:2024 locally; set to your deployment URL in prod.
 LANGGRAPH_URL="http://localhost:2024"
@@ -519,7 +553,7 @@ PUBLIC_REPO_ORG_GATE=""
 # === Sandbox (optional) ===
 # Provider: langsmith (default), modal, daytona, runloop, e2b, or local. See CUSTOMIZATION.md.
 SANDBOX_TYPE="langsmith"
-DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith (see step 4c)
+DEFAULT_SANDBOX_SNAPSHOT_ID=""         # Required when SANDBOX_TYPE=langsmith unless set at runtime by an admin (see step 4c)
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES=""  # Root FS size in bytes (default: 128 GiB)
 DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
 DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 16 GiB)
@@ -736,7 +770,7 @@ Alternatively, you can run the dashboard as a direct cross-origin client: set `V
 
 - Verify `LANGSMITH_API_KEY_PROD` is set and valid
 - Check LangSmith sandbox quotas in your workspace settings
-- If the server refuses to start with `DEFAULT_SANDBOX_SNAPSHOT_ID must be set`, build a snapshot (see step 4c) and export its UUID
+- If sandbox creation fails with `No base snapshot configured`, build a snapshot (see step 4c) and either export its UUID as `DEFAULT_SANDBOX_SNAPSHOT_ID` or set it as the base snapshot on the admin **Repository Snapshots** page
 - If you see `Failed to create sandbox from snapshot '<id>'`, confirm the snapshot exists in your workspace and has status `ready`
 - If you get a 403 Forbidden error on the sandbox endpoints, your LangSmith workspace may not have sandbox access enabled — contact LangSmith support
 

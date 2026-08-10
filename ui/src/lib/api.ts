@@ -369,6 +369,15 @@ export interface SkillsPage {
   next_offset: number | null
 }
 
+export interface SandboxSettings {
+  base_snapshot_id: string | null
+  env_base_snapshot_id: string | null
+  effective_base_snapshot_id: string | null
+  base_snapshot_source: "admin" | "env" | "unset"
+  updated_at: string | null
+  updated_by: string | null
+}
+
 export type RepoSnapshotStatus = "none" | "building" | "ready" | "failed"
 
 export interface RepoSnapshot {
@@ -721,6 +730,12 @@ export const api = {
   deleteAgentInstructions: (full_name: string) =>
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
+    }),
+  getSandboxSettings: () => request<SandboxSettings>("/sandbox-settings"),
+  saveSandboxSettings: (base_snapshot_id: string | null) =>
+    request<SandboxSettings>("/sandbox-settings", {
+      method: "PUT",
+      body: JSON.stringify({ base_snapshot_id }),
     }),
   listRepoSnapshots: () => request<Array<RepoSnapshot>>("/repo-snapshots"),
   createRepoSnapshot: (full_name: string) =>

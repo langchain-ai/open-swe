@@ -58,6 +58,7 @@ from .dashboard.options import (
     model_supports_effort,
 )
 from .dashboard.repo_snapshots import resolve_repo_snapshot_id
+from .dashboard.sandbox_settings import get_admin_base_snapshot_id
 from .dashboard.skills import SKILLS_NAMESPACE
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
@@ -281,19 +282,22 @@ async def _resolve_proxy_token(
     return token, expires_at, None
 
 
-async def _resolve_snapshot_id_for_repo(repo: dict[str, str] | None) -> str | None:
-    """Resolve a repo's ready snapshot id; ``None`` falls back to the default.
+async def _resolve_snapshot_id(repo: dict[str, str] | None) -> str | None:
+    """Resolve the snapshot a new sandbox boots from.
 
+    A repo's ready snapshot wins, then the admin-configured base snapshot.
     Never raises: any failure resolves to ``None`` so sandbox creation falls
     back to the configured ``DEFAULT_SANDBOX_SNAPSHOT_ID``.
     """
-    if not repo:
-        return None
-    try:
-        return await resolve_repo_snapshot_id(repo.get("owner"), repo.get("name"))
-    except Exception:  # noqa: BLE001
-        logger.debug("Failed to resolve repo-scoped snapshot", exc_info=True)
-        return None
+    if repo:
+        try:
+            repo_snapshot_id = await resolve_repo_snapshot_id(repo.get("owner"), repo.get("name"))
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to resolve repo-scoped snapshot", exc_info=True)
+            repo_snapshot_id = None
+        if repo_snapshot_id:
+            return repo_snapshot_id
+    return await get_admin_base_snapshot_id()
 
 
 async def _create_sandbox_with_proxy(
@@ -304,7 +308,7 @@ async def _create_sandbox_with_proxy(
     repo: dict[str, str] | None = None,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
-    snapshot_id = await _resolve_snapshot_id_for_repo(repo)
+    snapshot_id = await _resolve_snapshot_id(repo)
     sandbox_backend = await create_sandbox(snapshot_id=snapshot_id)
 
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
@@ -458,7 +462,8 @@ async def ensure_sandbox_for_thread(
 
     For LangSmith sandboxes, also refreshes the GitHub App proxy auth. When
     ``repo`` has a ``ready`` repo-scoped snapshot, newly created sandboxes boot
-    from it; otherwise the configured ``DEFAULT_SANDBOX_SNAPSHOT_ID`` is used.
+    from it; otherwise the base snapshot (admin setting, else
+    ``DEFAULT_SANDBOX_SNAPSHOT_ID``) is used.
     Re-applies git identity every run because reused/reconnected sandboxes can
     lose their ``--global`` config, and Vercel preview deploys reject commits
     whose author email can't be resolved to a GitHub account.

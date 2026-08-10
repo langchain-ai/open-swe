@@ -69,6 +69,7 @@ async def test_set_slack_assistant_status_calls_correct_endpoint(
         "channel_id": "C1",
         "thread_ts": "1.0",
         "status": "thinking…",
+        "loading_messages": [slack_utils.slack_loading_tip("1.0")],
     }
 
 
@@ -107,7 +108,7 @@ async def test_set_slack_assistant_status_caps_loading_messages_at_10(
 
 
 @pytest.mark.asyncio
-async def test_set_slack_assistant_status_omits_loading_messages_when_unset(
+async def test_set_slack_assistant_status_defaults_to_tip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
@@ -115,6 +116,20 @@ async def test_set_slack_assistant_status_omits_loading_messages_when_unset(
     client_cm = _async_client_cm(_ok_response())
     with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
         await slack_utils.set_slack_assistant_status("C1", "1.0", "thinking…")
+
+    _, kwargs = client_cm.post.call_args
+    assert kwargs["json"]["loading_messages"] == [slack_utils.slack_loading_tip("1.0")]
+
+
+@pytest.mark.asyncio
+async def test_set_slack_assistant_status_clear_omits_loading_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+
+    client_cm = _async_client_cm(_ok_response())
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        await slack_utils.set_slack_assistant_status("C1", "1.0", status="")
 
     _, kwargs = client_cm.post.call_args
     assert "loading_messages" not in kwargs["json"]

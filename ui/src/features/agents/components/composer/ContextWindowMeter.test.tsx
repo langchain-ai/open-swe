@@ -1,6 +1,12 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { ContextWindowMeter } from "./ContextWindowMeter"
@@ -9,7 +15,9 @@ afterEach(() => cleanup())
 
 /** The numbers live in a popover, so the collapsed ring carries the accessible label. */
 function meterLabel() {
-  return screen.getByTestId("context-window-indicator").getAttribute("aria-label")
+  return screen
+    .getByTestId("context-window-indicator")
+    .getAttribute("aria-label")
 }
 
 describe("ContextWindowMeter", () => {

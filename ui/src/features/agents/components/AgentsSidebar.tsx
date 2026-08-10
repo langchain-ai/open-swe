@@ -160,10 +160,7 @@ export function AgentsSidebar({
   const cloudCollapsed = isDesktop && prefs.collapsed.cloud
 
   return (
-    <SidebarFrame
-      {...layout}
-      className="border-r border-border bg-sidebar"
-    >
+    <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
       <div className="flex items-center justify-between px-4 pt-5 pb-4">
         <Link
           to="/my-settings"
@@ -196,8 +193,7 @@ export function AgentsSidebar({
               onClick={layout.closeOnMobile}
               className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
               activeProps={{
-                className:
-                  "bg-sidebar-row-hover !text-foreground font-medium",
+                className: "bg-sidebar-row-hover !text-foreground font-medium",
               }}
             >
               <Icon className="size-4" />
@@ -409,7 +405,7 @@ function LocalThreadGroup({
         </button>
         <button
           aria-label={`Remove ${project.name}`}
-          className="mr-1 flex size-5 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity hover:bg-sidebar-row-hover hover:text-destructive group-hover/project:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"
+          className="mr-1 flex size-5 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity group-hover/project:opacity-100 hover:bg-sidebar-row-hover hover:text-destructive focus:opacity-100 [@media(hover:none)]:opacity-100"
           onClick={onRemove}
           title="Remove project"
           type="button"
@@ -668,9 +664,7 @@ function ThreadRow({
             <span
               className={cn(
                 "size-2 shrink-0 rounded-full",
-                showFinishedIndicator
-                  ? "bg-primary"
-                  : "bg-border"
+                showFinishedIndicator ? "bg-primary" : "bg-border"
               )}
               aria-label={
                 showFinishedIndicator ? "Thread finished" : "Thread viewed"

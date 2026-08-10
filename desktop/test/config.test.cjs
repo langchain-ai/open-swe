@@ -138,7 +138,9 @@ test("only proxies requests from the bundled app window", () => {
 
 test("only keeps GitHub login pages in the app window", () => {
   assert.equal(isGithubOAuthUrl("https://github.com/login/oauth/authorize?client_id=1"), true)
-  assert.equal(isGithubOAuthUrl("https://github.com/login"), false)
+  assert.equal(isGithubOAuthUrl("https://github.com/login?return_to=%2Flogin%2Foauth"), true)
+  assert.equal(isGithubOAuthUrl("https://github.com/session"), true)
+  assert.equal(isGithubOAuthUrl("https://github.com/sessions/two-factor"), true)
   assert.equal(isGithubOAuthUrl("https://github.com/langchain-ai/open-swe"), false)
   assert.equal(isGithubOAuthUrl("https://evil.example/login/oauth/authorize"), false)
 })
