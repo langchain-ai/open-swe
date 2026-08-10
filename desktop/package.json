@@ -17,6 +17,8 @@
     "appId": "com.langchain.openswe",
     "productName": "Open SWE",
     "asar": true,
+    "afterSign": "notarize.cjs",
+    "npmRebuild": true,
     "icon": "resources/icon.png",
     "directories": {
       "output": "dist"
@@ -41,6 +43,10 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "resources/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
       "target": [
         "dmg",
         "zip"
@@ -63,6 +69,7 @@
   "homepage": "https://github.com/langchain-ai/open-swe",
   "packageManager": "pnpm@11.13.1",
   "devDependencies": {
+    "@electron/notarize": "3.1.1",
     "electron": "41.10.3",
     "electron-builder": "26.15.3"
   },
