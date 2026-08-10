@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   TREE_UNSAFE_CSS,
   treeThemeStyle,
-} from "@/features/agents/components/AgentGitPanel"
+} from "@/features/agents/components/DiffFilesView"
 import { cn } from "@/lib/utils"
 
 function reviewFileGitStatus(status: ReviewDiffFile["status"]): GitStatus {

@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   cancelAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-cancel", sessionId),
   getAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-session", sessionId),
   listAcpSessions: () => ipcRenderer.invoke("desktop:acp-sessions"),
+  getAcpDiff: (sessionId) => ipcRenderer.invoke("desktop:acp-diff", sessionId),
   onAcpEvent: (callback) => {
     const listener = (_event, payload) => callback(payload)
     ipcRenderer.on("desktop:acp-event", listener)
