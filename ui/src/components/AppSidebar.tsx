@@ -27,13 +27,35 @@ interface NavItem {
   adminOnly?: boolean
 }
 
-const NAV: Array<NavItem> = [
-  { to: "/my-settings", label: "Profile Settings", icon: IoOptionsOutline },
-  { to: "/cloud-agents", label: "Open SWE Agent", icon: IoCloudOutline },
-  { to: "/review", label: "Open SWE Review", icon: IoGitPullRequestOutline },
-  { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
-  { to: "/admin", label: "Admin", icon: IoSettingsOutline, adminOnly: true },
+const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
+  {
+    heading: "Personal",
+    items: [
+      { to: "/my-settings", label: "Settings", icon: IoOptionsOutline },
+      { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
+    ],
+  },
+  {
+    heading: "Workspace",
+    items: [
+      { to: "/cloud-agents", label: "Open SWE Agent", icon: IoCloudOutline },
+      {
+        to: "/review",
+        label: "Open SWE Review",
+        icon: IoGitPullRequestOutline,
+      },
+      {
+        to: "/admin",
+        label: "Admin",
+        icon: IoSettingsOutline,
+        adminOnly: true,
+      },
+    ],
+  },
 ]
+
+const LINK_CLASS =
+  "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
 
 export function AppSidebar({ user }: { user: SessionUser }) {
   const layout = useSidebarLayout()
@@ -44,46 +66,44 @@ export function AppSidebar({ user }: { user: SessionUser }) {
     >
       <div className="flex items-center justify-between px-4 pt-5 pb-4">
         <Link
-          to="/my-settings"
-          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight"
+          to="/agents"
+          className={cn(LINK_CLASS, "-mx-2.5 font-medium")}
+          onClick={layout.closeOnMobile}
         >
-          <img src="/logo-mark.png" alt="" className="size-5" />
-          open-swe
+          <IoArrowBackOutline className="size-4" />
+          <span>Back to app</span>
         </Link>
         <SidebarCollapseButton onToggle={layout.toggle} />
       </div>
 
-      <nav className="flex flex-1 flex-col gap-0.5 px-2">
-        <Link
-          to="/agents"
-          onClick={layout.closeOnMobile}
-          className={cn(
-            "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-muted-foreground transition-colors",
-            "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-          )}
-        >
-          <IoArrowBackOutline className="size-4" />
-          <span>Back to Agents</span>
-        </Link>
-        {NAV.filter((n) => !n.adminOnly || user.is_admin).map((item) => {
-          const Icon = item.icon
+      <nav className="flex flex-1 flex-col gap-5 px-2">
+        {NAV.map((group) => {
+          const items = group.items.filter((i) => !i.adminOnly || user.is_admin)
+          if (items.length === 0) return null
           return (
-            <Link
-              key={item.to}
-              to={item.to}
-              onClick={layout.closeOnMobile}
-              className={cn(
-                "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-muted-foreground transition-colors",
-                "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-              activeProps={{
-                className:
-                  "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
-              }}
-            >
-              <Icon className="size-4" />
-              <span>{item.label}</span>
-            </Link>
+            <div key={group.heading} className="flex flex-col gap-0.5">
+              <span className="px-2.5 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+                {group.heading}
+              </span>
+              {items.map((item) => {
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    onClick={layout.closeOnMobile}
+                    className={LINK_CLASS}
+                    activeProps={{
+                      className:
+                        "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
+                    }}
+                  >
+                    <Icon className="size-4" />
+                    <span>{item.label}</span>
+                  </Link>
+                )
+              })}
+            </div>
           )
         })}
       </nav>
