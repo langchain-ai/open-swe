@@ -17,6 +17,9 @@ app's local data and can be selected from the **This Mac** submenu or managed fr
 dcode runs are ephemeral: their sessions remain available only for the lifetime of the desktop
 process and cannot be resumed after it exits.
 
+The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
+started, so it shows what the agent changed and not the working tree's prior state.
+
 ## How it connects
 
 The bundled UI runs at an internal `open-swe://app` origin. Electron proxies its

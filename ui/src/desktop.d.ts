@@ -1,3 +1,4 @@
+import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 
 export interface DesktopProject {
@@ -24,6 +25,13 @@ export interface DesktopAcpSessionSummary {
 
 export interface DesktopAcpSession extends DesktopAcpSessionSummary {
   events: Array<DesktopAcpEvent>
+}
+
+/** What a local session changed, shaped like the cloud thread's turn diff. */
+export interface DesktopAcpDiff {
+  status: "ready" | "missing" | "error"
+  truncated: boolean
+  files: Array<ThreadPrDiffFile>
 }
 
 export interface DesktopAcpPromptInput {
@@ -54,6 +62,7 @@ declare global {
       cancelAcpSession: (sessionId: string) => Promise<void>
       getAcpSession: (sessionId: string) => Promise<DesktopAcpSession | null>
       listAcpSessions: () => Promise<Array<DesktopAcpSessionSummary>>
+      getAcpDiff: (sessionId: string) => Promise<DesktopAcpDiff>
       onAcpEvent: (
         callback: (payload: {
           sessionId: string

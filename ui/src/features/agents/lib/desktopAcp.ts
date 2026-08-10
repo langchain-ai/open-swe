@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 
 import { desktopAcpMessages } from "./desktopAcpMessages"
 import type {
+  DesktopAcpDiff,
   DesktopAcpEvent,
   DesktopAcpSession,
   DesktopAcpSessionSummary,
 } from "@/desktop"
+
+const NO_DIFF: DesktopAcpDiff = {
+  status: "missing",
+  truncated: false,
+  files: [],
+}
 
 function mergeSession(
   current: DesktopAcpSession | null,
@@ -86,6 +94,31 @@ export function useDesktopAcpSession(sessionId: string) {
     messages,
     loaded: loadedSessionId === sessionId,
   }
+}
+
+/**
+ * What a local session changed, read from git in the desktop main process. The
+ * agent edits the real project, so the panel polls while a run is live and
+ * settles with one more read once it finishes.
+ */
+export function useLocalSessionDiff(
+  sessionId: string,
+  enabled: boolean,
+  isRunning: boolean
+) {
+  const query = useQuery({
+    queryKey: ["local-session-diff", sessionId],
+    queryFn: () => window.openSweDesktop?.getAcpDiff(sessionId) ?? NO_DIFF,
+    enabled,
+    refetchInterval: isRunning ? 5000 : false,
+  })
+
+  const { refetch } = query
+  useEffect(() => {
+    if (enabled && !isRunning) void refetch()
+  }, [enabled, isRunning, refetch])
+
+  return query
 }
 
 function mergeSummaries(

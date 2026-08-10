@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { CircleAlert, FolderOpen } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
@@ -8,17 +8,29 @@ import {
   PANEL_MIN_CHAT_WIDTH,
 } from "@/features/agents/components/AgentPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import {
+  DiffFilesView,
+  toPanelFiles,
+} from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
-import { useDesktopAcpSession } from "@/features/agents/lib/desktopAcp"
+import {
+  useDesktopAcpSession,
+  useLocalSessionDiff,
+} from "@/features/agents/lib/desktopAcp"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
-const LOCAL_PANEL_TABS = [["terminal", "Terminal"]] as const
+const LOCAL_PANEL_TABS = [
+  ["changes", "Changes"],
+  ["terminal", "Terminal"],
+] as const
+
+type LocalPanelTab = (typeof LOCAL_PANEL_TABS)[number][0]
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const { session, messages, loaded } = useDesktopAcpSession(sessionId)
@@ -26,12 +38,34 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
   )
+  const [panelTab, setPanelTab] = useState<LocalPanelTab>("changes")
+  const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const handlePanelCollapsedChange = useCallback(
     (next: boolean) => {
       setPanelCollapsed(next)
       writeStoredPanelCollapsed(sessionId, next)
     },
     [sessionId]
+  )
+  const handleOpenFile = useCallback(
+    (filePath: string) => {
+      setRevealFilePath(filePath)
+      setPanelTab("changes")
+      handlePanelCollapsedChange(false)
+    },
+    [handlePanelCollapsedChange]
+  )
+
+  const isRunning =
+    session?.status === "running" || session?.status === "starting"
+  const diff = useLocalSessionDiff(
+    sessionId,
+    !panelCollapsed && panelTab === "changes" && Boolean(session),
+    isRunning
+  )
+  const files = useMemo(
+    () => toPanelFiles(diff.data?.files ?? []),
+    [diff.data?.files]
   )
 
   if (!session) {
@@ -51,9 +85,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       </div>
     )
   }
-
-  const isRunning =
-    session.status === "running" || session.status === "starting"
 
   return (
     <div className="flex min-w-0 flex-1">
@@ -91,6 +122,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             isStreaming={isRunning}
             isThinking={isRunning}
             messages={messages}
+            onOpenFile={handleOpenFile}
             streamIsLoading={isRunning}
           />
           <div className="shrink-0 px-4 pb-4">
@@ -118,15 +150,49 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       </div>
       <AgentPanelShell
         tabs={LOCAL_PANEL_TABS}
-        activeTab="terminal"
-        onTabChange={() => {}}
+        activeTab={panelTab}
+        onTabChange={setPanelTab}
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
       >
-        {() => (
-          <TerminalPanel id={`local-session:${session.id}`} cwd={session.cwd} />
+        {({ fullScreen }) => (
+          <>
+            {panelTab === "changes" && (
+              <DiffFilesView
+                files={files}
+                revealFilePath={revealFilePath}
+                fullScreen={fullScreen}
+                emptyLabel={localDiffEmptyLabel(
+                  diff.data?.status,
+                  diff.isPending
+                )}
+              />
+            )}
+            {/* Kept mounted across tabs: unmounting kills the user's shell. */}
+            <div
+              className={cn(
+                "min-h-0 flex-1",
+                panelTab !== "terminal" && "hidden"
+              )}
+            >
+              <TerminalPanel
+                id={`local-session:${session.id}`}
+                cwd={session.cwd}
+              />
+            </div>
+          </>
         )}
       </AgentPanelShell>
     </div>
   )
+}
+
+function localDiffEmptyLabel(
+  status: string | undefined,
+  isPending: boolean
+): string {
+  if (isPending) return "Reading changes…"
+  if (status === "missing") return "This project is not a git repository."
+  if (status === "error") return "Could not read this project's git changes."
+  return "No changes yet."
 }

@@ -13,6 +13,14 @@ const {
   shell,
 } = require("electron")
 const { AcpSession, dcodeTarget } = require("./acp-client.cjs")
+const {
+  captureCheckpoint,
+  checkpointRef,
+  deleteRefs,
+  readDiff,
+  repoRoot,
+  staleRefs,
+} = require("./git-diff.cjs")
 const { closeAllTerminals, configureTerminalIpc } = require("./terminal-manager.cjs")
 const {
   addProject,
@@ -66,6 +74,9 @@ let backendUrl = null
 let mainWindow = null
 let setupWindow = null
 const acpSessions = new Map()
+// sessionId -> { repo, ref }: the worktree snapshot a local session started from, so
+// the diff panel can show what the agent changed rather than the repo's prior state.
+const acpCheckpoints = new Map()
 
 function requireTrustedDesktopIpc(event) {
   const senderUrl = event.senderFrame?.url || event.sender.getURL()
@@ -80,6 +91,22 @@ function sendAcpEvent(sessionId, event) {
       session: acpSessions.get(sessionId)?.summary(),
     })
   }
+}
+
+async function recordAcpCheckpoint(localSession) {
+  const repo = await repoRoot(localSession.cwd)
+  if (!repo) return
+  const ref = checkpointRef(localSession.id)
+  const live = [...acpCheckpoints.values()]
+    .filter((checkpoint) => checkpoint.repo === repo)
+    .map((checkpoint) => checkpoint.ref)
+  try {
+    // Refs from sessions this or an earlier process lost track of; never pushed,
+    // but they should not pile up in the user's own repository either.
+    deleteRefs(repo, await staleRefs(repo, [...live, ref]))
+    await captureCheckpoint(repo, ref)
+    acpCheckpoints.set(localSession.id, { repo, ref })
+  } catch {}
 }
 
 function projectsPath() {
@@ -172,6 +199,7 @@ function configureDesktopIpc() {
       localSession.close()
       throw error
     }
+    await recordAcpCheckpoint(localSession)
     void localSession.prompt(input.prompt || "", input.images || []).catch(() => {})
     return localSession.snapshot()
   })
@@ -192,6 +220,24 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:acp-session", (event, sessionId) => {
     requireTrustedDesktopIpc(event)
     return acpSessions.get(sessionId)?.snapshot() || null
+  })
+
+  ipcMain.handle("desktop:acp-diff", async (event, sessionId) => {
+    requireTrustedDesktopIpc(event)
+    const localSession = acpSessions.get(sessionId)
+    const checkpoint = acpCheckpoints.get(sessionId)
+    if (
+      !localSession ||
+      !checkpoint ||
+      !listProjects().some((project) => project.cwd === localSession.cwd)
+    ) {
+      return { status: "missing", files: [], truncated: false }
+    }
+    try {
+      return await readDiff(checkpoint.repo, checkpoint.ref)
+    } catch {
+      return { status: "error", files: [], truncated: false }
+    }
   })
 
   ipcMain.handle("desktop:acp-sessions", (event) => {
@@ -653,5 +699,7 @@ if (!hasSingleInstanceLock) {
     closeAllTerminals()
     for (const localSession of acpSessions.values()) localSession.close()
     acpSessions.clear()
+    for (const { repo, ref } of acpCheckpoints.values()) deleteRefs(repo, [ref])
+    acpCheckpoints.clear()
   })
 }
