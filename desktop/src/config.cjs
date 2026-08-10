@@ -82,7 +82,9 @@ function isGithubOAuthUrl(value) {
     return (
       url.protocol === "https:" &&
       url.hostname === "github.com" &&
-      url.pathname.startsWith("/login/")
+      ["/login", "/session", "/sessions"].some(
+        (path) => url.pathname === path || url.pathname.startsWith(`${path}/`)
+      )
     )
   } catch {
     return false

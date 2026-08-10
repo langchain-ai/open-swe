@@ -19,6 +19,7 @@ from fastapi import HTTPException, Request
 from agent.utils.github_org_membership import is_user_active_org_member
 
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
+from .github_token_auth import bearer_github_token
 
 logger = logging.getLogger(__name__)
 
@@ -264,6 +265,11 @@ def require_same_origin(request: Request) -> None:
 
 def require_same_origin_for_mutations(request: Request) -> None:
     if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    # The origin allowlist defends the ambient session cookie. A request whose
+    # only credential is an explicit bearer header can't be forged by a browser,
+    # so it has nothing to defend.
+    if bearer_github_token(request) and not request.cookies.get(COOKIE_NAME):
         return
     require_same_origin(request)
 
