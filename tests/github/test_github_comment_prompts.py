@@ -157,6 +157,9 @@ def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
     assert "`save_plan`" in OPEN_SWE_SHARED_BASE
     assert "plan-review link" in OPEN_SWE_SHARED_BASE
     assert "does not enter plan mode" in OPEN_SWE_SHARED_BASE
+    assert "extremely conservative with top-level Slack channel messages" in OPEN_SWE_SHARED_BASE
+    assert "only a short headline" in OPEN_SWE_SHARED_BASE
+    assert "the tool puts those instructions in the first thread reply" in OPEN_SWE_SHARED_BASE
 
 
 def test_construct_system_prompt_includes_shared_base_explicitly() -> None:

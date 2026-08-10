@@ -10,7 +10,11 @@ from ..dashboard.repo_access import require_repo_access_for_user
 from ..dispatch import dispatch_agent_run
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.slack import post_slack_top_level_message_with_ts, store_slack_run_mapping
+from ..utils.slack import (
+    post_slack_thread_reply_with_ts,
+    post_slack_top_level_message_with_ts,
+    store_slack_run_mapping,
+)
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
 from ..webhooks.common import _is_repo_allowed
 
@@ -79,12 +83,13 @@ def _truncate_for_slack(text: str) -> str:
     return f"{text[:_VISIBLE_INSTRUCTIONS_MAX_CHARS].rstrip()}\n\n…truncated {omitted} chars; the new Open SWE thread received the full instructions."
 
 
-def _visible_message(title: str, instructions: str, repo: dict[str, str] | None) -> str:
-    repo_line = f"\n*Repository:* `{repo['owner']}/{repo['name']}`" if repo else ""
-    return (
-        f"*Open SWE breakout thread:* {title}{repo_line}\n\n"
-        f"*Instructions for the new thread:*\n{_truncate_for_slack(instructions)}"
-    )
+def _visible_message(title: str) -> str:
+    return f"*Open SWE breakout thread:* {title}"
+
+
+def _thread_details(instructions: str, repo: dict[str, str] | None) -> str:
+    repo_line = f"*Repository:* `{repo['owner']}/{repo['name']}`\n\n" if repo else ""
+    return f"{repo_line}*Instructions for the new thread:*\n{_truncate_for_slack(instructions)}"
 
 
 async def _run_links_section(thread_id: str) -> str:
@@ -146,7 +151,7 @@ async def slack_start_new_thread(
     instructions: str,
     default_repo: str | None = None,
 ) -> dict[str, Any]:
-    """Start a new Open SWE thread in a top-level Slack message in the current channel."""
+    """Start a Slack thread with a headline root and instructions as the first reply."""
     config = get_config()
     configurable = config.get("configurable", {})
     current_slack_thread = configurable.get("slack_thread")
@@ -210,9 +215,10 @@ async def slack_start_new_thread(
                 ),
             }
 
+    clean_channel_id = channel_id.strip()
     message_ts, slack_error = await post_slack_top_level_message_with_ts(
-        channel_id.strip(),
-        _visible_message(clean_title, clean_instructions, repo),
+        clean_channel_id,
+        _visible_message(clean_title),
         unfurl_links=False,
         unfurl_media=False,
     )
@@ -224,14 +230,29 @@ async def slack_start_new_thread(
             "hint": _failure_hint(slack_error),
         }
 
-    thread_id = generate_thread_id_from_slack_thread(channel_id.strip(), message_ts)
+    details_ts, details_error = await post_slack_thread_reply_with_ts(
+        clean_channel_id,
+        message_ts,
+        _thread_details(clean_instructions, repo),
+        unfurl_links=False,
+        unfurl_media=False,
+    )
+    if details_ts is None:
+        return {
+            "success": False,
+            "error": details_error or "thread details post failed",
+            "slack_error": details_error,
+            "hint": _failure_hint(details_error),
+        }
+
+    thread_id = generate_thread_id_from_slack_thread(clean_channel_id, message_ts)
     new_slack_thread = _new_slack_thread_context(
         current_slack_thread,
-        channel_id=channel_id.strip(),
+        channel_id=clean_channel_id,
         thread_ts=message_ts,
     )
     breakout_from = {
-        "channel_id": channel_id.strip(),
+        "channel_id": clean_channel_id,
         "thread_ts": current_thread_ts or "",
         "message_ts": current_slack_thread.get("triggering_event_ts", ""),
     }
@@ -285,7 +306,7 @@ async def slack_start_new_thread(
     if isinstance(run_id, str) and run_id:
         await store_slack_run_mapping(
             client,
-            channel_id.strip(),
+            clean_channel_id,
             message_ts,
             run_id,
             message_ts=message_ts,
