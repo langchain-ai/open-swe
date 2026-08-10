@@ -90,8 +90,8 @@ function OptionRow({
 
 /**
  * Model picker in the Cursor layout: the main pane configures the currently
- * selected model (context, reasoning) and ends in a `Model >` row that opens
- * the searchable model list as a submenu.
+ * selected model (context, reasoning) and ends in a `Model >` row that swaps the
+ * pane for the searchable model list, anchored to the same trigger.
  */
 export function ModelPicker({
   models,
@@ -318,7 +318,8 @@ export function ModelPicker({
           <div
             ref={mainPaneRef}
             tabIndex={-1}
-            className="dropdown-glass flex w-56 flex-col overflow-hidden rounded-xl py-1 outline-none"
+            hidden={pane !== "main"}
+            className="dropdown-glass flex w-60 flex-col overflow-hidden rounded-xl py-1 outline-none"
           >
             {contextWindow != null && (
               <>
@@ -359,17 +360,17 @@ export function ModelPicker({
               <OptionRow
                 label={selectedModel.label}
                 selected={false}
-                focused={pane === "models" || mainIndex === modelRowIndex}
+                focused={mainIndex === modelRowIndex}
                 trailing={
                   <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/60" />
                 }
-                onMouseEnter={openModelPane}
+                onMouseEnter={() => setMainIndex(modelRowIndex)}
                 onClick={openModelPane}
               />
             </div>
           </div>
           {pane === "models" && (
-            <div className="dropdown-glass absolute bottom-0 left-full ml-1 flex w-60 flex-col overflow-hidden rounded-xl">
+            <div className="dropdown-glass flex w-60 flex-col overflow-hidden rounded-xl">
               <input
                 autoFocus
                 value={query}
