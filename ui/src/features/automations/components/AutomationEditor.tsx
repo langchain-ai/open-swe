@@ -255,7 +255,7 @@ export function AutomationEditor({
           />
           <p className="mt-2 text-xs text-muted-foreground/70">
             Optional Slack channel ID. Each run starts a new thread there; the
-            Open SWE bot must be a member of the channel.
+            Jarvis bot must be a member of the channel.
           </p>
         </div>
 
@@ -264,7 +264,7 @@ export function AutomationEditor({
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="What should Open SWE do each time this runs?"
+            placeholder="What should Jarvis do each time this runs?"
             rows={5}
             className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70"
           />

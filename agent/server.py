@@ -117,7 +117,6 @@ from .tools import (
     linear_get_issue,
     linear_get_issue_comments,
     linear_list_teams,
-    linear_search_issues,
     linear_update_issue,
     open_pull_request,
     recreate_sandbox,

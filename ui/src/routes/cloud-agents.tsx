@@ -142,8 +142,8 @@ function CloudAgentsPage() {
   return (
     <AppShell
       user={session.data}
-      title="Open SWE Agent"
-      description="Configure how the Open SWE Agent picks a model, repository, and PR defaults."
+      title="Jarvis Agent"
+      description="Configure how the Jarvis Agent picks a model, repository, and PR defaults."
     >
       <SettingsSection title="Defaults">
         <div className="divide-y divide-border">
@@ -273,7 +273,7 @@ function CloudAgentsPage() {
               <Input
                 id="branch-prefix"
                 className="w-56"
-                placeholder="open-swe/"
+                placeholder="jarvis/"
                 value={branchPrefix}
                 onChange={(e) => setBranchPrefix(e.target.value)}
               />
