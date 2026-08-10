@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Check, ChevronDown } from "lucide-react"
+import { Check, ChevronDown, ChevronRight } from "lucide-react"
 
 import type { ModelOption } from "@/lib/api"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -25,7 +25,7 @@ export interface ModelPickerProps {
   onOpenChange?: (next: boolean) => void
 }
 
-type Pane = "models" | "efforts"
+type Pane = "main" | "models"
 
 function effortForModel(
   model: ModelOption,
@@ -50,6 +50,7 @@ function OptionRow({
   selected,
   disabled = false,
   focused = false,
+  trailing,
   onClick,
   onMouseEnter,
 }: {
@@ -57,6 +58,7 @@ function OptionRow({
   selected: boolean
   disabled?: boolean
   focused?: boolean
+  trailing?: React.ReactNode
   onClick?: () => void
   onMouseEnter?: () => void
 }) {
@@ -70,9 +72,7 @@ function OptionRow({
       onMouseEnter={onMouseEnter}
       className={cn(
         "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] whitespace-nowrap transition-colors",
-        selected
-          ? "text-foreground"
-          : "text-muted-foreground",
+        selected ? "text-foreground" : "text-muted-foreground",
         focused && "bg-accent",
         disabled
           ? "cursor-default opacity-40"
@@ -80,14 +80,19 @@ function OptionRow({
       )}
     >
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {selected && (
-        <Check className="size-3.5 shrink-0 text-muted-foreground/60" />
-      )}
+      {trailing ??
+        (selected && (
+          <Check className="size-3.5 shrink-0 text-muted-foreground/60" />
+        ))}
     </button>
   )
 }
 
-/** Two-pane model picker: searchable model list plus context/reasoning detail. */
+/**
+ * Model picker in the Cursor layout: the main pane configures the currently
+ * selected model (context, reasoning) and ends in a `Model >` row that opens
+ * the searchable model list as a submenu.
+ */
 export function ModelPicker({
   models,
   selection,
@@ -115,10 +120,20 @@ export function ModelPicker({
   )
   const [query, setQuery] = useState("")
   const [focusedModelId, setFocusedModelId] = useState<string | null>(null)
-  const [pane, setPane] = useState<Pane>("models")
+  const [pane, setPane] = useState<Pane>("main")
+  const [mainIndex, setMainIndex] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
+  const mainPaneRef = useRef<HTMLDivElement>(null)
 
   const pickerDisabled = disabled || models.length === 0 || !onSelectionChange
+
+  const selectedModel =
+    models.find((model) => model.id === selection?.modelId) ?? models[0]
+  const efforts = selectedModel?.efforts ?? []
+  const currentEffort = selectedModel
+    ? effortForModel(selectedModel, selection)
+    : null
+  const modelRowIndex = efforts.length
 
   const filteredModels = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -132,8 +147,24 @@ export function ModelPicker({
 
   const focusedModel =
     filteredModels.find((model) => model.id === focusedModelId) ??
-    filteredModels.find((model) => model.id === selection?.modelId) ??
+    filteredModels.find((model) => model.id === selectedModel?.id) ??
     filteredModels[0]
+
+  useEffect(() => {
+    if (!open) return
+    setPane("main")
+    setQuery("")
+    setFocusedModelId(null)
+    const index = currentEffort ? efforts.indexOf(currentEffort) : -1
+    setMainIndex(index === -1 ? 0 : index)
+    // Seeded once per open; later edits come from pointer/keyboard interaction.
+  }, [open])
+
+  // The main pane owns the keyboard handler, so it needs DOM focus whenever it
+  // is showing (the model pane hands focus to its search input instead).
+  useEffect(() => {
+    if (open && pane === "main") mainPaneRef.current?.focus()
+  }, [open, pane])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -148,82 +179,110 @@ export function ModelPicker({
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [setOpen])
 
-  const apply = useCallback(
-    (next: ModelSelection, { close }: { close: boolean }) => {
-      onSelectionChange?.(next)
-      if (!close) return
-      setOpen(false)
-      setQuery("")
-      setPane("models")
-    },
-    [onSelectionChange, setOpen]
-  )
+  const close = useCallback(() => {
+    setOpen(false)
+    setQuery("")
+    setPane("main")
+  }, [setOpen])
 
   const modelDisabled = useCallback(
     (model: ModelOption) => requireImageSupport && !model.supports_images,
     [requireImageSupport]
   )
 
+  const applyEffort = useCallback(
+    (effort: string) => {
+      if (!selectedModel) return
+      onSelectionChange?.({ modelId: selectedModel.id, effort })
+      close()
+    },
+    [close, onSelectionChange, selectedModel]
+  )
+
   const selectModel = useCallback(
     (model: ModelOption) => {
       if (modelDisabled(model)) return
-      apply(
-        { modelId: model.id, effort: effortForModel(model, selection) },
-        { close: true }
-      )
+      onSelectionChange?.({
+        modelId: model.id,
+        effort: effortForModel(model, selection),
+      })
+      close()
     },
-    [apply, modelDisabled, selection]
+    [close, modelDisabled, onSelectionChange, selection]
   )
+
+  const openModelPane = useCallback(() => {
+    setPane("models")
+    setFocusedModelId(selectedModel?.id ?? null)
+  }, [selectedModel])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
       e.preventDefault()
-      setOpen(false)
+      if (pane === "models") {
+        setPane("main")
+        setMainIndex(modelRowIndex)
+        return
+      }
+      close()
       return
     }
-    if (e.key === "ArrowRight" && focusedModel) {
-      e.preventDefault()
-      setPane("efforts")
+
+    if (pane === "models") {
+      if (e.key === "ArrowLeft" && query.length === 0) {
+        e.preventDefault()
+        setPane("main")
+        setMainIndex(modelRowIndex)
+        return
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault()
+        if (filteredModels.length === 0) return
+        const step = e.key === "ArrowDown" ? 1 : -1
+        const current = filteredModels.findIndex(
+          (model) => model.id === focusedModel?.id
+        )
+        const nextIndex = Math.min(
+          Math.max(current + step, 0),
+          filteredModels.length - 1
+        )
+        setFocusedModelId(filteredModels[nextIndex]?.id ?? null)
+        return
+      }
+      if (e.key === "Enter" && focusedModel) {
+        e.preventDefault()
+        selectModel(focusedModel)
+      }
       return
     }
-    if (e.key === "ArrowLeft") {
+
+    if (e.key === "ArrowRight") {
       e.preventDefault()
-      setPane("models")
+      openModelPane()
       return
     }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault()
       const step = e.key === "ArrowDown" ? 1 : -1
-      if (pane === "efforts" && focusedModel && !modelDisabled(focusedModel)) {
-        const efforts = focusedModel.efforts
-        const current = efforts.indexOf(effortForModel(focusedModel, selection))
-        const next =
-          efforts[Math.min(Math.max(current + step, 0), efforts.length - 1)]
-        if (next) {
-          apply({ modelId: focusedModel.id, effort: next }, { close: false })
-        }
-        return
-      }
-      if (filteredModels.length === 0) return
-      const current = filteredModels.findIndex(
-        (model) => model.id === focusedModel?.id
+      setMainIndex((index) =>
+        Math.min(Math.max(index + step, 0), modelRowIndex)
       )
-      const nextIndex = Math.min(
-        Math.max(current + step, 0),
-        filteredModels.length - 1
-      )
-      setFocusedModelId(filteredModels[nextIndex]?.id ?? null)
       return
     }
-    if (e.key === "Enter" && focusedModel) {
+    if (e.key === "Enter") {
       e.preventDefault()
-      selectModel(focusedModel)
+      if (mainIndex === modelRowIndex) {
+        openModelPane()
+        return
+      }
+      const effort = efforts[mainIndex]
+      if (effort) applyEffort(effort)
     }
   }
 
-  const focusedContextWindow =
-    typeof focusedModel?.context_window === "number"
-      ? focusedModel.context_window
+  const contextWindow =
+    typeof selectedModel?.context_window === "number"
+      ? selectedModel.context_window
       : null
 
   return (
@@ -249,96 +308,105 @@ export function ModelPicker({
           <ChevronDown className="size-3.5 shrink-0 opacity-60" />
         )}
       </button>
-      {open && !pickerDisabled && (
+      {open && !pickerDisabled && selectedModel && (
         <div
           data-testid="model-picker-panel"
           onKeyDown={handleKeyDown}
           style={{ zIndex: Z.DROPDOWN }}
-          className="dropdown-glass absolute bottom-full left-0 mb-1 flex overflow-hidden rounded-xl"
+          className="absolute bottom-full left-0 mb-1"
         >
-          <div className="flex w-60 flex-col">
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search models"
-              aria-label="Search models"
-              className="w-full border-b border-border bg-transparent px-3 py-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/60"
-            />
+          <div
+            ref={mainPaneRef}
+            tabIndex={-1}
+            className="dropdown-glass flex w-56 flex-col overflow-hidden rounded-xl py-1 outline-none"
+          >
+            {contextWindow != null && (
+              <>
+                <SectionHeading>Context</SectionHeading>
+                <div
+                  className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-foreground"
+                  title="Context window reported for this model"
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    {formatTokenCount(contextWindow)}
+                  </span>
+                  <Check className="size-3.5 shrink-0 text-muted-foreground/60" />
+                </div>
+              </>
+            )}
+            <SectionHeading>Reasoning</SectionHeading>
             <div
               role="listbox"
-              aria-label="Models"
-              className="max-h-72 overflow-y-auto py-1"
+              aria-label="Reasoning effort"
+              className="max-h-60 overflow-y-auto"
             >
-              {filteredModels.length === 0 ? (
-                <p className="px-3 py-1.5 text-[13px] text-muted-foreground/60">
-                  No matches
-                </p>
-              ) : (
-                filteredModels.map((model) => (
-                  <OptionRow
-                    key={model.id}
-                    selected={selection?.modelId === model.id}
-                    focused={focusedModel?.id === model.id}
-                    disabled={modelDisabled(model)}
-                    onMouseEnter={() => {
-                      setFocusedModelId(model.id)
-                      setPane("models")
-                    }}
-                    onClick={() => selectModel(model)}
-                    label={
-                      <>
-                        {model.label}{" "}
-                        <span className="text-muted-foreground/60">
-                          {formatEffort(effortForModel(model, selection))}
-                        </span>
-                      </>
-                    }
-                  />
-                ))
-              )}
+              {efforts.map((effort, index) => (
+                <OptionRow
+                  key={effort}
+                  label={formatEffort(effort)}
+                  selected={currentEffort === effort}
+                  focused={pane === "main" && mainIndex === index}
+                  onMouseEnter={() => {
+                    setPane("main")
+                    setMainIndex(index)
+                  }}
+                  onClick={() => applyEffort(effort)}
+                />
+              ))}
+            </div>
+            <div className="mt-1 border-t border-border pt-1">
+              <SectionHeading>Model</SectionHeading>
+              <OptionRow
+                label={selectedModel.label}
+                selected={false}
+                focused={pane === "models" || mainIndex === modelRowIndex}
+                trailing={
+                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/60" />
+                }
+                onMouseEnter={openModelPane}
+                onClick={openModelPane}
+              />
             </div>
           </div>
-          {focusedModel && (
-            <div className="flex w-52 flex-col border-l border-border py-1">
-              {focusedContextWindow != null && (
-                <>
-                  <SectionHeading>Context</SectionHeading>
-                  <div
-                    className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-foreground"
-                    title="Context window reported for this model"
-                  >
-                    <span className="min-w-0 flex-1 truncate">
-                      {formatTokenCount(focusedContextWindow)}
-                    </span>
-                    <Check className="size-3.5 shrink-0 text-muted-foreground/60" />
-                  </div>
-                </>
-              )}
-              <SectionHeading>Reasoning</SectionHeading>
+          {pane === "models" && (
+            <div className="dropdown-glass absolute bottom-0 left-full ml-1 flex w-60 flex-col overflow-hidden rounded-xl">
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search models"
+                aria-label="Search models"
+                className="w-full border-b border-border bg-transparent px-3 py-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/60"
+              />
               <div
                 role="listbox"
-                aria-label="Reasoning effort"
-                className="max-h-60 overflow-y-auto"
+                aria-label="Models"
+                className="max-h-72 overflow-y-auto py-1"
               >
-                {focusedModel.efforts.map((effort) => (
-                  <OptionRow
-                    key={effort}
-                    label={formatEffort(effort)}
-                    selected={
-                      selection?.modelId === focusedModel.id &&
-                      selection.effort === effort
-                    }
-                    disabled={modelDisabled(focusedModel)}
-                    onMouseEnter={() => setPane("efforts")}
-                    onClick={() =>
-                      apply(
-                        { modelId: focusedModel.id, effort },
-                        { close: true }
-                      )
-                    }
-                  />
-                ))}
+                {filteredModels.length === 0 ? (
+                  <p className="px-3 py-1.5 text-[13px] text-muted-foreground/60">
+                    No matches
+                  </p>
+                ) : (
+                  filteredModels.map((model) => (
+                    <OptionRow
+                      key={model.id}
+                      selected={selection?.modelId === model.id}
+                      focused={focusedModel?.id === model.id}
+                      disabled={modelDisabled(model)}
+                      onMouseEnter={() => setFocusedModelId(model.id)}
+                      onClick={() => selectModel(model)}
+                      label={
+                        <>
+                          {model.label}{" "}
+                          <span className="text-muted-foreground/60">
+                            {formatEffort(effortForModel(model, selection))}
+                          </span>
+                        </>
+                      }
+                    />
+                  ))
+                )}
               </div>
             </div>
           )}
