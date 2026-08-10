@@ -31,10 +31,11 @@ function AgentsLayout() {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
-  const [, section, threadId, localSessionId] = pathname.split("/")
+  const [, section, threadId, nestedRoute] = pathname.split("/")
   const activeThreadId =
     section === "agents" &&
     threadId &&
+    nestedRoute !== "plan" &&
     threadId !== "automations" &&
     threadId !== "skills" &&
     threadId !== "threads" &&
@@ -43,7 +44,7 @@ function AgentsLayout() {
       ? threadId
       : undefined
   const activeLocalSessionId =
-    section === "agents" && threadId === "local" ? localSessionId : undefined
+    section === "agents" && threadId === "local" ? nestedRoute : undefined
 
   if (session.isLoading) {
     return (
