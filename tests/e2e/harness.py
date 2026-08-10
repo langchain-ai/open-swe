@@ -387,6 +387,11 @@ async def slack_messages() -> JSONResponse:
     )
 
 
+@app.get("/mock/slack/statuses")
+async def slack_statuses() -> JSONResponse:
+    return JSONResponse(fakes.SLACK_STATUSES)
+
+
 # --- mock UIs --------------------------------------------------------------
 @app.get("/mock/slack", response_class=HTMLResponse)
 async def mock_slack_page() -> str:
@@ -536,7 +541,9 @@ async def slack_post_ephemeral(request: Request) -> JSONResponse:
 
 @app.post("/fake-slack/assistant.threads.setStatus")
 async def slack_set_status(request: Request) -> JSONResponse:
-    await request.body()
+    body = await request.json()
+    if isinstance(body, dict):
+        fakes.SLACK_STATUSES.append(body)
     return _ok()
 
 
