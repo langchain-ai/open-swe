@@ -176,7 +176,7 @@ export function AgentsSidebar({
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
         >
           <PlusIcon className="size-4" />
           New Agent
@@ -191,7 +191,7 @@ export function AgentsSidebar({
               key={item.to}
               to={item.to}
               onClick={layout.closeOnMobile}
-              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
               activeProps={{
                 className: "bg-sidebar-row-hover !text-foreground font-medium",
               }}
@@ -460,7 +460,9 @@ function LocalThreadRow({
       ) : (
         <span className="size-2 shrink-0 rounded-full bg-border" />
       )}
-      <span className="min-w-0 flex-1 truncate text-xs">{session.title}</span>
+      <span className="min-w-0 flex-1 truncate text-[13px]">
+        {session.title}
+      </span>
     </Link>
   )
 }
@@ -561,7 +563,7 @@ function ResolvedThreadGroup({
               to="/agents/threads"
               search={{ resolved: true, page: 1 }}
               onClick={onNavigate}
-              className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+              className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
             >
               Show all
             </Link>
@@ -679,7 +681,7 @@ function ThreadRow({
               <title>{source.label}</title>
             </SourceIcon>
           )}
-          <span className="min-w-0 flex-1 truncate text-xs">
+          <span className="min-w-0 flex-1 truncate text-[13px]">
             {thread.title}
           </span>
           {!compact && prMeta && PrIcon && (

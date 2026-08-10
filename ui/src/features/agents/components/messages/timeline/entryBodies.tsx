@@ -14,21 +14,21 @@ export const ShellEntryBody = memo(function ShellEntryBody({
   return (
     <div className="space-y-1.5">
       {command && (
-        <pre className="cursor-text overflow-x-auto font-mono text-[11px] leading-relaxed whitespace-pre text-foreground/85 select-text">
-          <span className="text-muted-foreground/60">$ </span>
+        <pre className="cursor-text overflow-x-auto font-mono text-[12px] leading-relaxed whitespace-pre text-foreground/85 select-text">
+          <span className="text-muted-foreground/80">$ </span>
           {command}
         </pre>
       )}
       {output && (
-        <pre className="max-h-64 cursor-text overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre text-muted-foreground select-text">
+        <pre className="max-h-64 cursor-text overflow-auto font-mono text-[12px] leading-relaxed whitespace-pre text-muted-foreground select-text">
           {output}
         </pre>
       )}
       {!output && chunk.status === "in_progress" && (
-        <p className="font-mono text-[11px] text-muted-foreground">Running…</p>
+        <p className="font-mono text-[12px] text-muted-foreground">Running…</p>
       )}
       {!output && chunk.status === "pending" && (
-        <p className="font-mono text-[11px] text-warning-foreground">
+        <p className="font-mono text-[12px] text-warning-foreground">
           Waiting for approval…
         </p>
       )}

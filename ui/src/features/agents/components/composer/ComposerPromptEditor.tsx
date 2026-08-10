@@ -540,7 +540,7 @@ function ComposerPromptEditorInner({
             aria-label="Message"
             aria-placeholder={placeholder}
             className={cn(
-              "block max-h-50 w-full overflow-y-auto bg-transparent text-[13px] leading-relaxed break-words whitespace-pre-wrap text-foreground focus:outline-none",
+              "block max-h-50 w-full overflow-y-auto bg-transparent text-[14px] leading-relaxed break-words whitespace-pre-wrap text-foreground focus:outline-none",
               className
             )}
             data-testid="composer-editor"
@@ -549,7 +549,7 @@ function ComposerPromptEditorInner({
           />
         }
         placeholder={
-          <div className="pointer-events-none absolute inset-0 text-[13px] leading-relaxed text-muted-foreground/60">
+          <div className="pointer-events-none absolute inset-0 text-[14px] leading-relaxed text-muted-foreground/60">
             {placeholder}
           </div>
         }
