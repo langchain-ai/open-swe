@@ -23,7 +23,6 @@ const {
   APP_ORIGIN,
   APP_URL,
   appRedirectUrl,
-  backendLoginUrl,
   backendRequestUrl,
   isAppUrl,
   isGithubOAuthUrl,
@@ -470,11 +469,10 @@ function createMenu() {
 }
 
 function handleNavigation(window, event, url) {
-  const login = backendUrl ? backendLoginUrl(url, backendUrl) : null
   const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null
-  if (login || callback) {
+  if (callback) {
     event.preventDefault()
-    void window.loadURL(login || callback)
+    void window.loadURL(callback)
     return
   }
   if (isAppUrl(url) || isGithubOAuthUrl(url)) return

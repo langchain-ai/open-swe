@@ -5,7 +5,6 @@ const {
   APP_URL,
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,
-  backendLoginUrl,
   backendRequestUrl,
   isGithubOAuthUrl,
   isTrustedPermissionRequest,
@@ -139,7 +138,9 @@ test("only proxies requests from the bundled app window", () => {
 
 test("only keeps GitHub login pages in the app window", () => {
   assert.equal(isGithubOAuthUrl("https://github.com/login/oauth/authorize?client_id=1"), true)
-  assert.equal(isGithubOAuthUrl("https://github.com/login"), false)
+  assert.equal(isGithubOAuthUrl("https://github.com/login?return_to=%2Flogin%2Foauth"), true)
+  assert.equal(isGithubOAuthUrl("https://github.com/session"), true)
+  assert.equal(isGithubOAuthUrl("https://github.com/sessions/two-factor"), true)
   assert.equal(isGithubOAuthUrl("https://github.com/langchain-ai/open-swe"), false)
   assert.equal(isGithubOAuthUrl("https://evil.example/login/oauth/authorize"), false)
 })
@@ -155,13 +156,6 @@ test("maps desktop API requests to the selected backend", () => {
   assert.equal(
     backendRequestUrl("https://backend.example", `${APP_URL}dashboard/api/auth/login`),
     "https://backend.example/dashboard/api/auth/login?desktop=true"
-  )
-  assert.equal(
-    backendLoginUrl(
-      `${APP_URL}dashboard/api/auth/login?redirect_to=%2Fagents`,
-      "http://localhost:2024"
-    ),
-    "http://localhost:2024/dashboard/api/auth/login?redirect_to=%2Fagents&desktop=true"
   )
 })
 

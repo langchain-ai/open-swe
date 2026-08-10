@@ -82,7 +82,9 @@ function isGithubOAuthUrl(value) {
     return (
       url.protocol === "https:" &&
       url.hostname === "github.com" &&
-      url.pathname.startsWith("/login/")
+      ["/login", "/session", "/sessions"].some(
+        (path) => url.pathname === path || url.pathname.startsWith(`${path}/`)
+      )
     )
   } catch {
     return false
@@ -97,17 +99,6 @@ function backendRequestUrl(backendUrl, appRequestUrl) {
     target.searchParams.set("desktop", "true")
   }
   return target.toString()
-}
-
-function backendLoginUrl(navigationUrl, backendUrl) {
-  try {
-    const target = new URL(navigationUrl)
-    return isAppUrl(navigationUrl) && target.pathname === "/dashboard/api/auth/login"
-      ? backendRequestUrl(backendUrl, navigationUrl)
-      : null
-  } catch {
-    return null
-  }
 }
 
 function localCallbackUrl(navigationUrl, backendUrl) {
@@ -148,7 +139,6 @@ module.exports = {
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,
   resolveAppRuntime,
-  backendLoginUrl,
   backendRequestUrl,
   isAppUrl,
   isGithubOAuthUrl,
