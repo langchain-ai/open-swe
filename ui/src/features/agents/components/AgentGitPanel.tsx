@@ -215,6 +215,7 @@ export function AgentGitPanel({
                   emptyLabel={
                     prDiff.isLoading ? "Loading PR diff…" : "No diff available."
                   }
+                  truncated={prDiff.data?.truncated ?? turnDiff.data?.truncated}
                   leading={tabs}
                   actions={actions}
                 />

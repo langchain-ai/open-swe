@@ -130,6 +130,8 @@ interface DiffFilesViewProps {
   /** Full-screen panels have room for the file tree alongside the diff. */
   fullScreen: boolean
   emptyLabel: string
+  /** The change set was capped, so `files` is not everything that changed. */
+  truncated?: boolean
   /** Rendered at the start of the header row (the panel's own tabs). */
   leading?: React.ReactNode
   /** Rendered in the header row, before the wrap toggle and diff stats. */
@@ -146,6 +148,7 @@ export function DiffFilesView({
   revealFilePath,
   fullScreen,
   emptyLabel,
+  truncated,
   leading,
   actions,
 }: DiffFilesViewProps) {
@@ -197,7 +200,10 @@ export function DiffFilesView({
           {actions}
           {files.length > 0 && (
             <span className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
-              <span>
+              <span
+                title={truncated ? "Only the first files are shown" : undefined}
+              >
+                {truncated ? "first " : ""}
                 {files.length} file{files.length === 1 ? "" : "s"}
               </span>
               <span className="text-success-foreground">

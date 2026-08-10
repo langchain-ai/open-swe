@@ -5,14 +5,19 @@ const { randomUUID } = require("node:crypto")
 
 const MAX_FILES = 200
 const MAX_FILE_BYTES = 400_000
+const MAX_CONTENT_BYTES = 16 * 1024 * 1024
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 const CHECKPOINT_NAMESPACE = "refs/open-swe/local"
+
+// The project is whatever directory the user picked, so never let its git config
+// start helper processes of its own on our behalf.
+const HARDENED = ["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"]
 
 function git(cwd, args, env) {
   return new Promise((resolve, reject) => {
     execFile(
       "git",
-      args,
+      [...HARDENED, ...args],
       { cwd, env: env || process.env, encoding: "buffer", maxBuffer: MAX_OUTPUT_BYTES },
       (error, stdout) => (error ? reject(error) : resolve(stdout))
     )
@@ -21,7 +26,10 @@ function git(cwd, args, env) {
 
 function gitStdin(cwd, args, input) {
   return new Promise((resolve, reject) => {
-    const child = spawn("git", args, { cwd, stdio: ["pipe", "pipe", "ignore"] })
+    const child = spawn("git", [...HARDENED, ...args], {
+      cwd,
+      stdio: ["pipe", "pipe", "ignore"],
+    })
     const chunks = []
     child.stdout.on("data", (chunk) => chunks.push(chunk))
     child.on("error", reject)
@@ -133,28 +141,63 @@ function parseNameStatus(raw) {
   return statuses
 }
 
-/** Both sides of every changed path in one `cat-file --batch`; `false` means too large. */
-async function readBlobs(repo, base, head, paths) {
-  const specs = paths.flatMap((file) => [`${base}:${file}`, `${head}:${file}`])
+/** Blob sizes for each spec: `null` when the spec does not resolve. */
+async function readBlobSizes(repo, specs) {
+  const output = await gitStdin(repo, ["cat-file", "--batch-check"], `${specs.join("\n")}\n`)
+  return output
+    .toString("utf8")
+    .split("\n")
+    .slice(0, specs.length)
+    .map((line) => {
+      const fields = line.split(" ")
+      return fields.length === 3 && fields[1] === "blob" ? Number(fields[2]) : null
+    })
+}
+
+/** Bodies of `specs`, in order, from one `cat-file --batch`. */
+async function readBlobBodies(repo, specs) {
   const output = await gitStdin(repo, ["cat-file", "--batch"], `${specs.join("\n")}\n`)
-  const blobs = []
+  const bodies = []
   let at = 0
   for (let i = 0; i < specs.length; i++) {
     const end = output.indexOf("\n", at)
-    if (end < 0) {
-      blobs.push(null)
-      continue
-    }
+    if (end < 0) break
     const header = output.subarray(at, end).toString("utf8").split(" ")
     at = end + 1
     if (header.length < 3) {
-      blobs.push(null)
+      bodies.push(null)
       continue
     }
     const size = Number(header[2])
-    blobs.push(size <= MAX_FILE_BYTES ? output.subarray(at, at + size) : false)
+    bodies.push(output.subarray(at, at + size))
     at += size + 1
   }
+  return bodies
+}
+
+/**
+ * Both sides of every changed path, `false` when too large to render. Sizes are
+ * checked before any content is read so one huge file cannot balloon the main
+ * process, and the whole read stays under a fixed budget.
+ */
+async function readBlobs(repo, base, head, paths) {
+  const specs = paths.flatMap((file) => [`${base}:${file}`, `${head}:${file}`])
+  const sizes = await readBlobSizes(repo, specs)
+  const wanted = []
+  let budget = MAX_CONTENT_BYTES
+  sizes.forEach((size, i) => {
+    if (size === null || size > MAX_FILE_BYTES || size > budget) return
+    budget -= size
+    wanted.push(i)
+  })
+
+  const bodies = wanted.length
+    ? await readBlobBodies(repo, wanted.map((i) => specs[i]))
+    : []
+  const blobs = sizes.map((size) => (size === null ? null : false))
+  wanted.forEach((specIndex, i) => {
+    blobs[specIndex] = bodies[i] ?? null
+  })
   return new Map(paths.map((file, i) => [file, { base: blobs[i * 2], head: blobs[i * 2 + 1] }]))
 }
 
@@ -168,7 +211,7 @@ function decode(blob) {
 /** Files changed between `base` and the live worktree, shaped like the cloud turn diff. */
 async function readDiff(repo, base) {
   const head = await writeWorktreeTree(repo)
-  const range = ["--no-renames", base, head]
+  const range = ["--no-renames", "--no-ext-diff", "--no-textconv", base, head]
   const numstat = (await git(repo, ["diff", "--numstat", "-z", ...range])).toString("utf8")
   const nameStatus = (await git(repo, ["diff", "--name-status", "-z", ...range])).toString("utf8")
   const stats = parseNumstat(numstat)

@@ -166,6 +166,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   diff.data?.status,
                   diff.isPending
                 )}
+                truncated={diff.data?.truncated}
               />
             )}
             {/* Kept mounted across tabs: unmounting kills the user's shell. */}
