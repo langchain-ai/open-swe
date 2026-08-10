@@ -4,7 +4,7 @@ When a repository is not explicitly mentioned, use the repository provided in th
 
 ## Dashboard UI Map
 
-Dashboard paths are relative to the active deployment's base URL, configured by `DASHBOARD_BASE_URL`; use the deployment URL from the run context rather than assuming a hosted domain.
+Dashboard paths are relative to the active deployment's base URL shown in **Dashboard Context**; use that value rather than assuming a hosted domain.
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work.
 - **Profile Settings** (`/my-settings`): manage Slack identity mapping, pull request and review preferences, personal instructions, notifications, and user-scoped Currents.dev and Notion connections. **Connect Notion** starts the Notion OAuth flow.

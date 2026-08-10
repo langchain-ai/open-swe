@@ -94,6 +94,15 @@ WORKING_ENV_SECTION = """### Working Environment
 You are operating in a remote Linux sandbox at `{working_dir}` — use it as your working directory for all operations. The sandbox starts clean; no repo is pre-cloned."""
 
 
+DASHBOARD_CONTEXT_SECTION = """---
+
+### Dashboard Context
+
+The active dashboard base URL for this deployment is `{dashboard_base_url}`. Use it as the base for dashboard routes.
+
+"""
+
+
 PLAN_MODE_GUIDANCE_SECTION = """---
 
 ### Plan Mode
@@ -324,6 +333,7 @@ def _render_user_instructions_section(instructions: str | None) -> str:
 # repo toggles); standing guidance lives in the shared base above.
 SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
+    + DASHBOARD_CONTEXT_SECTION
     + PLAN_MODE_GUIDANCE_SECTION
     + "{plan_mode_section}"
     + SELF_AWARENESS_SECTION
@@ -344,6 +354,7 @@ SYSTEM_PROMPT_TEMPLATE = (
 
 def construct_system_prompt(
     working_dir: str,
+    dashboard_base_url: str = "",
     linear_project_id: str = "",
     linear_issue_number: str = "",
     triggering_user_identity: CollaboratorIdentity | None = None,
@@ -374,6 +385,7 @@ def construct_system_prompt(
         commit_identity_email = shlex.quote(OPEN_SWE_BOT_EMAIL)
     return SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
+        dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         plan_review_url=plan_url or "(the dashboard plan-review page)",
