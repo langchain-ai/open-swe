@@ -233,4 +233,74 @@ test.describe("Plan review (HTTP comments)", () => {
     await ownerCtx.close();
     await collabCtx.close();
   });
+
+  test("plan decisions return to a connected conversation", async ({
+    browser,
+    request,
+  }) => {
+    test.setTimeout(180_000);
+    await request.post("/control/reset");
+    const send = await request.post("/mock/slack/send", {
+      data: {
+        text: "<@U0BOT> plan how to add a greet() helper",
+        mention_bot: true,
+      },
+    });
+    const { thread_id: threadId } = (await send.json()) as {
+      thread_id: string;
+    };
+    const planPath = `/agents/${threadId}/plan`;
+
+    await expect
+      .poll(async () => (await botMessages(request, threadId)).join("\n"), {
+        timeout: 60_000,
+      })
+      .toMatch(/ready for review/i);
+
+    const ownerCtx = await browser.newContext();
+    await ownerCtx.request.post("/control/login", { data: OWNER });
+    const owner = await ownerCtx.newPage();
+    await owner.goto(planPath);
+    await expect(owner.getByTestId("plan-review")).toBeVisible({
+      timeout: 30_000,
+    });
+    await addComment(owner, "Please revise the verification steps.");
+    await expect(owner.getByTestId("reject-plan")).toBeEnabled();
+
+    const hydrated = owner.waitForResponse((response) => {
+      const path = new URL(response.url()).pathname;
+      return (
+        response.request().method() === "GET" &&
+        path === `/dashboard/api/threads/${threadId}/state`
+      );
+    });
+    await owner.getByTestId("reject-plan").click();
+    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
+    expect((await hydrated).ok()).toBeTruthy();
+    await expect(
+      owner.getByText(
+        "I'll wait for your review and approval before implementing.",
+      ),
+    ).toHaveCount(2, { timeout: 60_000 });
+    await expect(
+      owner.getByText("A plan is ready for your review."),
+    ).toBeVisible({ timeout: 60_000 });
+
+    await owner.goto(planPath);
+    await expect(owner.getByTestId("approve-plan")).toBeVisible({
+      timeout: 30_000,
+    });
+    await owner.getByTestId("approve-plan").click();
+    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
+    await expect
+      .poll(async () => {
+        const prs = (await (
+          await request.get("/mock/github/data")
+        ).json()) as Array<unknown>;
+        return prs.length;
+      })
+      .toBeGreaterThan(0);
+
+    await ownerCtx.close();
+  });
 });

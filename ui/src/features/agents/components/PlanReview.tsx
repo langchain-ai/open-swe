@@ -191,14 +191,21 @@ export function PlanReview({
           return
         }
         await rejectPlan(plan.threadId)
-        setDecision("Changes requested — the agent is revising the plan.")
+        if (compact) {
+          setDecision("Changes requested — the agent is revising the plan.")
+        } else {
+          await navigate({
+            to: "/agents/$threadId",
+            params: { threadId: plan.threadId },
+          })
+        }
       } catch (e) {
         setError((e as Error).message)
       } finally {
         setBusy(null)
       }
     },
-    [navigate, onApprove, plan.threadId]
+    [compact, navigate, onApprove, plan.threadId]
   )
 
   const copyPlan = useCallback(async () => {
