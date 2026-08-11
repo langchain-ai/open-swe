@@ -1,0 +1,37 @@
+name: Build preview branch
+
+permissions:
+  contents: write
+  pull-requests: write
+
+on:
+  push:
+    branches: ["main"]
+  pull_request_target:
+    types: [labeled, unlabeled, synchronize, reopened, closed]
+  workflow_dispatch:
+
+concurrency:
+  group: build-preview-branch
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Rebuild preview from main + labeled PRs
+    if: >-
+      github.event_name != 'pull_request_target'
+      || contains(github.event.pull_request.labels.*.name, 'preview')
+      || github.event.label.name == 'preview'
+    runs-on: ubuntu-latest
+    steps:
+      # Always main's copy of the script — never the PR's.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Rebuild preview branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: ./scripts/build_preview_branch.sh

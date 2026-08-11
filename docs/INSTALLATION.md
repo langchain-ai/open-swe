@@ -265,6 +265,8 @@ GitHub triggering works automatically once your GitHub App is set up (step 3). U
 - Tag `@openswe` in issue comments for follow-up instructions
 - Tag `@openswe` in PR review comments to have it address review feedback
 
+The handles this deployment answers to default to `@openswe,@open-swe,@openswe-dev` and are configurable — set `OPEN_SWE_MENTION_TAGS` to a comma-separated list. Handles are matched on a word boundary, so `@openswe` does not fire on `@openswe-preview`. Give each deployment a distinct handle when more than one shares a GitHub org, Slack workspace, or Linear workspace.
+
 Which GitHub users can trigger the agent is controlled by the **user mapping** (GitHub login ⇄ work email ⇄ optional Slack ID), stored in the LangGraph Store rather than in code. Manage it in the dashboard under **Admin → User mappings**:
 
 - **Add / update** a single mapping (GitHub login + work email, plus an optional Slack user ID). The list is paged (20 per page).
@@ -465,6 +467,15 @@ GITHUB_APP_INSTALLATION_ID=""          # From step 3d
 
 # === GitHub Webhook (required) ===
 GITHUB_WEBHOOK_SECRET=""               # The secret you generated in step 3b
+
+# === Mention handles (optional) ===
+# Comma-separated handles this deployment answers to, across GitHub, Linear and Slack.
+# Defaults to "@openswe,@open-swe,@openswe-dev".
+OPEN_SWE_MENTION_TAGS=""               # e.g. "@openswe-preview"
+# Comma-separated bot logins to treat as internal rather than untrusted external
+# commenters. Set this to the bot logins of any other Open SWE deployments sharing
+# these repos.
+EXTRA_INTERNAL_BOT_LOGINS=""           # e.g. "openswe-preview[bot]"
 
 # === Dashboard GitHub OAuth (required for the dashboard) ===
 # Direct GitHub OAuth used by the dashboard login flow (not via LangSmith).
