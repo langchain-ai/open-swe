@@ -68,11 +68,13 @@ from ..utils.github_comments import (
     OPEN_SWE_TAGS,
     build_pr_prompt,  # noqa: F401
     derive_pr_state,
+    describe_open_swe_tags,  # noqa: F401
     extract_pr_context,  # noqa: F401
     fetch_issue_comments,  # noqa: F401
     fetch_pr_comments_since_last_tag,  # noqa: F401
     format_github_comment_body_for_prompt,
     get_thread_id_from_branch,  # noqa: F401
+    mentions_open_swe,  # noqa: F401
     react_to_github_comment,  # noqa: F401
     sanitize_github_comment_body,  # noqa: F401
     verify_github_signature,
@@ -143,6 +145,8 @@ __all__ = [
     "SLACK_BOT_USER_ID",
     "SLACK_SIGNING_SECRET",
     "_AGENT_VERSION_METADATA",
+    "describe_open_swe_tags",
+    "mentions_open_swe",
     "_GH_PR_AGENT_STATE_ACTIONS",
     "_GH_PR_FIRST_REVIEW_ACTIONS",
     "_GH_PR_WATCH_TOGGLE_ACTIONS",
