@@ -297,12 +297,13 @@ def test_github_webhook_ignores_unmentioned_comment_without_info_log(monkeypatch
         },
     )
 
+    tags = webhook_common.describe_open_swe_tags()
     assert response.status_code == 200
     assert response.json() == {
         "status": "ignored",
-        "reason": "Comment does not mention @openswe or @open-swe",
+        "reason": f"Comment does not mention {tags}",
     }
-    assert "does not mention @openswe or @open-swe" not in caplog.text
+    assert f"does not mention {tags}" not in caplog.text
 
 
 def test_github_webhook_routes_review_comment_reply_without_tag(monkeypatch) -> None:

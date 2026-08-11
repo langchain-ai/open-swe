@@ -62,9 +62,10 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         if comment_body.startswith(prefix):
             common.logger.debug("Ignoring webhook: comment is our own bot message")
             return {"status": "ignored", "reason": "Comment is our own bot message"}
-    if "@openswe" not in comment_body.lower():
-        common.logger.debug("Ignoring webhook: comment doesn't mention @openswe")
-        return {"status": "ignored", "reason": "Comment doesn't mention @openswe"}
+    if not common.mentions_open_swe(comment_body):
+        tags = common.describe_open_swe_tags()
+        common.logger.debug("Ignoring webhook: comment doesn't mention %s", tags)
+        return {"status": "ignored", "reason": f"Comment doesn't mention {tags}"}
 
     issue = data.get("issue", {})
     if not issue:

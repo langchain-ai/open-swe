@@ -42,11 +42,10 @@ async def create_sandbox(
     The provider is selected via the SANDBOX_TYPE environment variable.
     Supported values: langsmith (default), daytona, modal, runloop, e2b, local.
 
-    langsmith, modal and local provision natively async. daytona, e2b and
-    runloop stay on ``asyncio.to_thread``: their ``langchain_*`` backend
-    wrappers bind a *sync* SDK handle (``E2BSandbox(sandbox=e2b.Sandbox)``,
-    ``RunloopSandbox`` calling ``devbox.cmd.exec``), so the async SDK client
-    cannot be handed to them.
+    langsmith and modal provision natively async. local stays on
+    ``asyncio.to_thread`` because ``LocalShellBackend`` setup performs synchronous
+    filesystem I/O. daytona, e2b and runloop stay there because their
+    ``langchain_*`` wrappers bind synchronous SDK handles.
 
     Args:
         sandbox_id: Optional existing sandbox ID to reconnect to.
