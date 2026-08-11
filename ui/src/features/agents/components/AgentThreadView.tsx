@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
-import { CircleAlert as CircleAlertIcon, Map as MapIcon } from "lucide-react"
+import {
+  CircleAlert as CircleAlertIcon,
+  FolderOpen,
+  Map as MapIcon,
+} from "lucide-react"
 
 import type {
   AgentThread,
@@ -211,6 +215,21 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
       >
+        {thread.repoFullName && (
+          <div
+            className={cn(
+              "mx-auto flex w-full max-w-3xl shrink-0 items-center gap-2 px-4 pt-3 text-xs text-muted-foreground",
+              sidebarCollapsed && "pl-14",
+              panelCollapsed && "pr-14"
+            )}
+          >
+            <FolderOpen className="size-3.5" />
+            <span className="truncate" title={thread.repoFullName}>
+              {thread.repoFullName}
+            </span>
+            <span className="ml-auto shrink-0">Cloud</span>
+          </div>
+        )}
         {thread.status === "error" && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">
