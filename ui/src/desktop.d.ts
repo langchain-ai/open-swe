@@ -27,7 +27,6 @@ export interface DesktopAcpSession extends DesktopAcpSessionSummary {
   events: Array<DesktopAcpEvent>
 }
 
-/** What a local session changed, shaped like the cloud thread's turn diff. */
 export interface DesktopAcpDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
@@ -37,6 +36,113 @@ export interface DesktopAcpDiff {
 export interface DesktopAcpPromptInput {
   prompt: string
   images: Array<ImageChunk>
+}
+
+export type DesktopTerminalStatus = "starting" | "running" | "exited" | "error"
+
+export interface DesktopTerminalTarget {
+  localSessionId: string
+  terminalId: string
+}
+
+export interface DesktopTerminalSessionSnapshot extends DesktopTerminalTarget {
+  cwd: string
+  status: DesktopTerminalStatus
+  pid: number | null
+  history: string
+  exitCode: number | null
+  exitSignal: number | null
+  hasRunningSubprocess: boolean
+  label: string
+  updatedAt: string
+  sequence: number
+}
+
+export interface DesktopTerminalSummary extends DesktopTerminalTarget {
+  cwd: string
+  status: DesktopTerminalStatus
+  pid: number | null
+  exitCode: number | null
+  exitSignal: number | null
+  hasRunningSubprocess: boolean
+  label: string
+  updatedAt: string
+}
+
+export type DesktopTerminalAttachEvent =
+  | (DesktopTerminalTarget & {
+      type: "started" | "restarted"
+      snapshot: DesktopTerminalSessionSnapshot
+      sequence: number
+    })
+  | (DesktopTerminalTarget & {
+      type: "output"
+      data: string
+      sequence: number
+    })
+  | (DesktopTerminalTarget & {
+      type: "exited"
+      exitCode: number | null
+      exitSignal: number | null
+      sequence: number
+    })
+  | (DesktopTerminalTarget & {
+      type: "closed" | "cleared"
+      sequence: number
+    })
+  | (DesktopTerminalTarget & {
+      type: "error"
+      message: string
+      sequence: number
+    })
+  | (DesktopTerminalTarget & {
+      type: "activity"
+      hasRunningSubprocess: boolean
+      label: string
+      sequence: number
+    })
+
+export type DesktopTerminalMetadataEvent =
+  | { type: "upsert"; terminal: DesktopTerminalSummary }
+  | (DesktopTerminalTarget & { type: "remove" })
+
+export interface DesktopTerminalBridge {
+  attach: (
+    input: DesktopTerminalTarget & {
+      cwd?: string
+      cols?: number
+      rows?: number
+      restartIfNotRunning?: boolean
+    }
+  ) => Promise<DesktopTerminalSessionSnapshot>
+  open: (
+    input: DesktopTerminalTarget & {
+      cwd: string
+      cols?: number
+      rows?: number
+    }
+  ) => Promise<DesktopTerminalSessionSnapshot>
+  write: (input: DesktopTerminalTarget & { data: string }) => Promise<void>
+  resize: (
+    input: DesktopTerminalTarget & { cols: number; rows: number }
+  ) => Promise<void>
+  clear: (input: DesktopTerminalTarget) => Promise<void>
+  restart: (
+    input: DesktopTerminalTarget & { cwd: string; cols: number; rows: number }
+  ) => Promise<DesktopTerminalSessionSnapshot>
+  detach: (input: DesktopTerminalTarget) => Promise<void>
+  close: (
+    input: DesktopTerminalTarget & { deleteHistory?: boolean }
+  ) => Promise<void>
+  list: (localSessionId: string) => Promise<Array<DesktopTerminalSummary>>
+  subscribeMetadata: (
+    localSessionId: string
+  ) => Promise<Array<DesktopTerminalSummary>>
+  detachMetadata: (localSessionId: string) => Promise<void>
+  onEvent: (callback: (event: DesktopTerminalAttachEvent) => void) => () => void
+  onMetadata: (
+    callback: (event: DesktopTerminalMetadataEvent) => void
+  ) => () => void
 }
 
 declare global {
@@ -49,6 +155,11 @@ declare global {
       onProjectsChanged: (
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void
+      openExternal: (url: string) => Promise<boolean>
+      resolveAcpProjectPath: (input: {
+        localSessionId: string
+        path: string
+      }) => Promise<string | null>
       startAcpSession: (
         input: DesktopAcpPromptInput & {
           cwd: string
@@ -70,14 +181,7 @@ declare global {
           session: DesktopAcpSessionSummary
         }) => void
       ) => () => void
-      terminal: {
-        create: (id: string, cwd: string) => void
-        write: (id: string, data: string) => void
-        resize: (id: string, cols: number, rows: number) => void
-        destroy: (id: string) => void
-        onData: (callback: (id: string, data: string) => void) => () => void
-        onError: (callback: (id: string, message: string) => void) => () => void
-      }
+      terminal: DesktopTerminalBridge
     }
   }
 }
