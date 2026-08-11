@@ -52,7 +52,7 @@ export function AgentsHome() {
   const activeSelection = selection ?? defaultSelection
   const handleSelectionChange = (next: ModelSelection) => {
     setSelection(next)
-    persistModelSelection(next)
+    persistModelSelection(next, profileQuery.data?.login ?? "")
   }
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId

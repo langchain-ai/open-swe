@@ -1,5 +1,5 @@
 import type { ModelOption } from "@/lib/api"
-import { useOptions } from "@/lib/profile"
+import { useOptions, useProfile } from "@/lib/profile"
 
 export interface ModelSelection {
   modelId: string
@@ -14,17 +14,21 @@ export interface ModelOptionsResult {
 
 const STORAGE_KEY = "open-swe.agents.model-selection"
 
-function storedSelection(models: Array<ModelOption>): ModelSelection | null {
-  if (typeof window === "undefined") return null
+function storedSelection(
+  models: Array<ModelOption>,
+  login: string
+): ModelSelection | null {
+  if (typeof window === "undefined" || !login) return null
   try {
     const selection = JSON.parse(
       window.localStorage.getItem(STORAGE_KEY) ?? "null"
-    ) as Partial<ModelSelection> | null
-    return models.some(
-      (model) =>
-        model.id === selection?.modelId &&
-        model.efforts.includes(selection.effort ?? "")
-    )
+    ) as (Partial<ModelSelection> & { login?: string }) | null
+    return selection?.login === login &&
+      models.some(
+        (model) =>
+          model.id === selection.modelId &&
+          model.efforts.includes(selection.effort ?? "")
+      )
       ? (selection as ModelSelection)
       : null
   } catch {
@@ -32,10 +36,16 @@ function storedSelection(models: Array<ModelOption>): ModelSelection | null {
   }
 }
 
-export function persistModelSelection(selection: ModelSelection): void {
-  if (typeof window === "undefined") return
+export function persistModelSelection(
+  selection: ModelSelection,
+  login: string
+): void {
+  if (typeof window === "undefined" || !login) return
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(selection))
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...selection, login })
+    )
   } catch {}
 }
 
@@ -53,6 +63,7 @@ function toSupportedSelection(
 
 export function useModelOptions(): ModelOptionsResult {
   const optionsQuery = useOptions()
+  const profileQuery = useProfile()
   const models = optionsQuery.data?.models ?? []
   const teamDefaultSelection = toSupportedSelection(
     models,
@@ -64,13 +75,15 @@ export function useModelOptions(): ModelOptionsResult {
     ? { modelId: firstModel.id, effort: firstModel.default_effort }
     : null
   const defaultSelection = optionsQuery.data
-    ? (storedSelection(models) ?? teamDefaultSelection ?? firstSelection)
+    ? (storedSelection(models, profileQuery.data?.login ?? "") ??
+      teamDefaultSelection ??
+      firstSelection)
     : null
 
   return {
     models,
     defaultSelection,
-    isLoading: optionsQuery.isLoading,
+    isLoading: optionsQuery.isLoading || profileQuery.isLoading,
   }
 }
 
