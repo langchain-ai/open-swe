@@ -224,6 +224,11 @@ function configureDesktopIpc() {
     return resolveLocalProjectPath(input?.localSessionId, input?.path)
   })
 
+  ipcMain.handle("desktop:local-model-credential-status", (event, modelId) => {
+    requireTrustedDesktopIpc(event)
+    return backendSupervisor.credentialStatus(modelId)
+  })
+
   ipcMain.handle("desktop:start-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event)
     const cwd = allowedProjectCwd(input?.cwd)
@@ -239,9 +244,14 @@ function configureDesktopIpc() {
     return thread
   })
 
-  ipcMain.handle("desktop:consume-local-prompt", (event, threadId) => {
+  ipcMain.handle("desktop:get-local-prompt", (event, threadId) => {
     requireTrustedDesktopIpc(event)
-    return localThreadStore.consumePrompt(threadId)
+    return localThreadStore.pendingPrompt(threadId)
+  })
+
+  ipcMain.handle("desktop:clear-local-prompt", (event, threadId) => {
+    requireTrustedDesktopIpc(event)
+    return localThreadStore.clearPrompt(threadId)
   })
 
   ipcMain.handle("desktop:get-local-thread", (event, threadId) => {
@@ -267,7 +277,11 @@ function configureDesktopIpc() {
       throw new Error("Stop the local agent before deleting it")
     }
     await closeThreadTerminals(threadId)
-    await backendSupervisor.deleteThread(threadId)
+    try {
+      await backendSupervisor.deleteThread(threadId)
+    } catch (error) {
+      console.warn("Could not delete local LangGraph thread", error)
+    }
     localThreadStore.delete(threadId)
     if (thread.checkpoint.repo && thread.checkpoint.ref) {
       deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref])
@@ -450,8 +464,8 @@ async function serveBundledUi(request) {
     }
     try {
       return await backendSupervisor.proxy(request)
-    } catch (error) {
-      return new Response(String(error?.message || error), { status: 503 })
+    } catch {
+      return new Response("Local LangGraph backend unavailable", { status: 503 })
     }
   }
   if (!backendUrl) return new Response("Backend is not configured", { status: 503 })

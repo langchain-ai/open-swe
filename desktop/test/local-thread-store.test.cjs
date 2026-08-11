@@ -19,7 +19,7 @@ function temporaryStore(t) {
   }
 }
 
-test("persists local thread metadata and consumes the prompt once", (t) => {
+test("persists a prompt until it is acknowledged", (t) => {
   const fixture = temporaryStore(t)
   const store = fixture.create()
   const thread = store.create({
@@ -31,11 +31,13 @@ test("persists local thread metadata and consumes the prompt once", (t) => {
   })
   assert.equal(thread.title, "fix the tests")
   assert.equal(fs.statSync(fixture.path).mode & 0o777, 0o600)
-  assert.deepEqual(store.consumePrompt(thread.id), {
+  assert.deepEqual(store.pendingPrompt(thread.id), {
     prompt: "  fix the tests  ",
     images: [{ kind: "image", base64: "aW1n", mimeType: "image/png", fileName: "bug.png" }],
   })
-  assert.equal(store.consumePrompt(thread.id), null)
+  assert.deepEqual(store.pendingPrompt(thread.id), store.pendingPrompt(thread.id))
+  store.clearPrompt(thread.id)
+  assert.equal(store.pendingPrompt(thread.id), null)
   const restored = fixture.create().get(thread.id)
   assert.equal(restored.pending, null)
   assert.equal(restored.modelId, "anthropic:test")

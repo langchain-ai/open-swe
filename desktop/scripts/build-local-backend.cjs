@@ -31,11 +31,36 @@ try {
   if (!installed) throw new Error("uv did not install a Python runtime")
   fs.renameSync(path.join(stagingRoot, installed.name), runtimeRoot)
   const python = path.join(runtimeRoot, process.platform === "win32" ? "python.exe" : "bin/python3")
-  const result = spawnSync(uv, ["pip", "install", "--python", python, "--break-system-packages", "--no-cache", "--compile-bytecode", repositoryRoot], {
-    cwd: repositoryRoot,
-    stdio: "inherit",
-    env: { ...process.env, UV_NO_PROGRESS: "1" },
-  })
+  const requirements = path.join(stagingRoot, "requirements.txt")
+  run([
+    "export",
+    "--locked",
+    "--no-dev",
+    "--no-emit-project",
+    "--no-hashes",
+    "--output-file",
+    requirements,
+  ])
+  const result = spawnSync(
+    uv,
+    [
+      "pip",
+      "install",
+      "--python",
+      python,
+      "--break-system-packages",
+      "--no-cache",
+      "--compile-bytecode",
+      "--requirements",
+      requirements,
+      repositoryRoot,
+    ],
+    {
+      cwd: repositoryRoot,
+      stdio: "inherit",
+      env: { ...process.env, UV_NO_PROGRESS: "1" },
+    }
+  )
   if (result.error) throw result.error
   if (result.status !== 0) process.exit(result.status || 1)
   fs.cpSync(path.join(repositoryRoot, "langgraph.desktop.json"), path.join(outputRoot, "langgraph.json"))

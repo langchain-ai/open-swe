@@ -13,8 +13,11 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.on("desktop:projects-changed", listener)
     return () => ipcRenderer.removeListener("desktop:projects-changed", listener)
   },
+  localModelCredentialStatus: (modelId) =>
+    ipcRenderer.invoke("desktop:local-model-credential-status", modelId),
   startLocalThread: (input) => ipcRenderer.invoke("desktop:start-local-thread", { ...input }),
-  consumeLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:consume-local-prompt", threadId),
+  getLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:get-local-prompt", threadId),
+  clearLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:clear-local-prompt", threadId),
   getLocalThread: (threadId) => ipcRenderer.invoke("desktop:get-local-thread", threadId),
   listLocalThreads: () => ipcRenderer.invoke("desktop:list-local-threads"),
   updateLocalThread: (input) => {

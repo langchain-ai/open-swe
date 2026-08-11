@@ -137,6 +137,16 @@ export function AgentsHome() {
       setSubmitting(true)
       setLocalError(null)
       try {
+        const credential = await desktop.localModelCredentialStatus(
+          activeSelection?.modelId
+        )
+        if (!credential.available) {
+          setSubmitting(false)
+          setLocalError(
+            `Set ${credential.variable} in the environment before starting Open SWE.`
+          )
+          return
+        }
         const session = await desktop.startLocalThread({
           cwd: localProjectPath,
           prompt,

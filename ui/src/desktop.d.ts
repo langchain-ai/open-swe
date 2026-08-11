@@ -151,6 +151,10 @@ declare global {
         localSessionId: string
         path: string
       }) => Promise<string | null>
+      localModelCredentialStatus: (modelId?: string) => Promise<{
+        available: boolean
+        variable: string | null
+      }>
       startLocalThread: (
         input: DesktopLocalPromptInput & {
           cwd: string
@@ -158,9 +162,12 @@ declare global {
           effort?: string
         }
       ) => Promise<DesktopLocalThreadSummary>
-      consumeLocalPrompt: (
+      getLocalPrompt: (
         threadId: string
       ) => Promise<DesktopLocalPromptInput | null>
+      clearLocalPrompt: (
+        threadId: string
+      ) => Promise<DesktopLocalThreadSummary | null>
       getLocalThread: (
         threadId: string
       ) => Promise<DesktopLocalThreadSummary | null>

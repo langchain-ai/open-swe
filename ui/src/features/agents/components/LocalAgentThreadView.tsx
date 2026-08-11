@@ -57,7 +57,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
   const refreshThreads = useRefreshLocalThreads()
-  const initialPromptRef = useRef(false)
+  const initialPromptRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isMobile = useIsMobile()
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
@@ -116,7 +116,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
 
   const submit = useCallback(
     async (prompt: string, images: Array<ImageChunk>) => {
-      if (!thread) return
+      if (!thread) return false
       setError(null)
       await updateStatus("running")
       try {
@@ -137,23 +137,31 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           }
         )
         await updateStatus("idle")
+        return true
       } catch (cause) {
         setError(errorMessage(cause))
         await updateStatus("error")
+        return false
       }
     },
     [stream, thread, updateStatus]
   )
 
   useEffect(() => {
-    if (!thread || initialPromptRef.current) return
-    initialPromptRef.current = true
+    if (!thread || initialPromptRef.current === sessionId) return
+    initialPromptRef.current = sessionId
     void stream.hydrationPromise
-      .then(() => window.openSweDesktop?.consumeLocalPrompt(sessionId))
-      .then((pending) => {
-        if (pending) return submit(pending.prompt, pending.images)
+      .then(() => window.openSweDesktop?.getLocalPrompt(sessionId))
+      .then(async (pending) => {
+        if (!pending) return
+        if (await submit(pending.prompt, pending.images)) {
+          await window.openSweDesktop?.clearLocalPrompt(sessionId)
+        } else {
+          initialPromptRef.current = null
+        }
       })
       .catch((cause) => {
+        initialPromptRef.current = null
         setError(errorMessage(cause))
         void updateStatus("error")
       })

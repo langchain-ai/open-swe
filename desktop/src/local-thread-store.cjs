@@ -191,13 +191,17 @@ class LocalThreadStore {
     return this.get(id)
   }
 
-  consumePrompt(id) {
+  pendingPrompt(id) {
+    const pending = this.threads.get(id)?.pending
+    return pending ? structuredClone(pending) : null
+  }
+
+  clearPrompt(id) {
     const current = this.threads.get(id)
-    if (!current || !current.pending) return null
-    const pending = structuredClone(current.pending)
+    if (!current?.pending) return null
     this.threads.set(id, { ...current, pending: null, updatedAt: this.now() })
     this.persist()
-    return pending
+    return this.get(id)
   }
 
   delete(id) {

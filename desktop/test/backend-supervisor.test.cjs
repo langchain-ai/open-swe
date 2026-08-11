@@ -5,6 +5,7 @@ const path = require("node:path")
 const {
   devBackendTarget,
   localBackendTarget,
+  modelCredentialStatus,
   packagedBackendTarget,
 } = require("../src/backend-supervisor.cjs")
 
@@ -26,6 +27,25 @@ test("development target runs the repository LangGraph app through uv", () => {
       path.join(repoRoot, "langgraph.desktop.json"),
     ],
     cwd: repoRoot,
+  })
+})
+
+test("reports whether the selected provider is configured", () => {
+  assert.deepEqual(modelCredentialStatus("openai:gpt-test", {}), {
+    available: false,
+    variable: "OPENAI_API_KEY",
+  })
+  assert.deepEqual(modelCredentialStatus("openai:gpt-test", { OPENAI_API_KEY: "secret" }), {
+    available: true,
+    variable: "OPENAI_API_KEY",
+  })
+  assert.deepEqual(modelCredentialStatus("google_genai:test", { GEMINI_API_KEY: "secret" }), {
+    available: true,
+    variable: "GEMINI_API_KEY",
+  })
+  assert.deepEqual(modelCredentialStatus("custom:test", {}), {
+    available: true,
+    variable: null,
   })
 })
 

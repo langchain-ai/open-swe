@@ -7,6 +7,12 @@ const path = require("node:path")
 const HOST = "127.0.0.1"
 const START_TIMEOUT_MS = 60_000
 const STOP_TIMEOUT_MS = 5_000
+const PROVIDER_KEYS = {
+  anthropic: ["ANTHROPIC_API_KEY"],
+  fireworks: ["FIREWORKS_API_KEY"],
+  google_genai: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+  openai: ["OPENAI_API_KEY"],
+}
 
 function devBackendTarget({ repoRoot, port, env = process.env }) {
   return {
@@ -78,6 +84,14 @@ function reservePort(host = HOST) {
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+function modelCredentialStatus(modelId, env) {
+  const provider = typeof modelId === "string" ? modelId.split(":", 1)[0] : ""
+  const variables = PROVIDER_KEYS[provider]
+  if (!variables) return { available: true, variable: null }
+  const variable = variables.find((key) => env[key])
+  return { available: Boolean(variable), variable: variable || variables[0] }
 }
 
 class BackendSupervisor {
@@ -175,6 +189,10 @@ class BackendSupervisor {
     throw new Error(`Local LangGraph backend did not become healthy${detail ? `\n${detail}` : ""}`)
   }
 
+  credentialStatus(modelId) {
+    return modelCredentialStatus(modelId, { ...process.env, ...this.options.env })
+  }
+
   publicConfig() {
     return { apiUrl: "/local-graph", graphId: "local_agent" }
   }
@@ -250,6 +268,7 @@ module.exports = {
   BackendSupervisor,
   devBackendTarget,
   localBackendTarget,
+  modelCredentialStatus,
   packagedBackendTarget,
   reservePort,
 }

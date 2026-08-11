@@ -11,7 +11,8 @@ selected local project. Electron supervises one local LangGraph process bound to
 `127.0.0.1` port and protects it with a per-launch bearer token. The renderer reaches it only through
 the same-origin `/local-graph/*` protocol route, so neither the token nor the raw port enters browser
 state. Source launches run the repository graph with `uv`; packaged apps use the bundled Python
-runtime and local backend built by `build:local-backend`. No `dcode` installation is required.
+runtime and local backend built by `build:local-backend`. No `dcode` installation is required; local
+model credentials are read from the environment that launched Open SWE.
 
 Added projects, LangGraph state, and local thread metadata are atomically persisted under Electron
 `userData`. Local threads retain their model, effort, pending first prompt, status, and git checkpoint
@@ -51,8 +52,9 @@ beside an installed `Open SWE` app without sharing its login session, backend co
 projects, or single-instance lock. The dev window is labeled **Open SWE Development**; its first
 launch may require signing in and adding projects again.
 
-Install `uv` and sync the repository Python environment before starting the desktop app. Electron
-starts `uv run langgraph dev --config langgraph.desktop.json` on demand for local threads.
+Install `uv`, sync the repository Python environment, and set the selected model provider's API key
+in the environment before starting the desktop app. Electron starts
+`uv run langgraph dev --config langgraph.desktop.json` on demand for local threads.
 
 Development defaults to `http://localhost:2024` for cloud/dashboard traffic. Point to another
 backend with:
