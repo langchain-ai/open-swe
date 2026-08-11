@@ -84,9 +84,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [panel, terminals]
   )
   const handleCloseTab = useCallback(
-    (id: string) => {
-      if (panel.tabs.find((tab) => tab.id === id)?.kind === "terminal") {
-        terminals.closeGroup(id)
+    async (id: string) => {
+      if (
+        panel.tabs.find((tab) => tab.id === id)?.kind === "terminal" &&
+        !(await terminals.closeGroup(id))
+      ) {
+        return
       }
       panel.close(id)
     },

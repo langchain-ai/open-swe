@@ -22,8 +22,8 @@ export interface TerminalGroupsController {
   error: string | null
   /** Creates a terminal group and returns its id so a tab can be opened for it. */
   addGroup: () => string
-  closeGroup: (groupId: string) => void
-  closeTerminal: (terminalId: string) => void
+  closeGroup: (groupId: string) => Promise<boolean>
+  closeTerminal: (terminalId: string) => Promise<boolean>
   focus: (terminalId: string) => void
   split: (direction: TerminalSplitDirection) => void
   clear: (terminalId: string) => void
@@ -73,23 +73,27 @@ export function useTerminalGroups(
   )
 
   const run = useCallback(
-    (
+    async (
       fallback: string,
       action: (bridge: DesktopTerminalBridge) => Promise<void>
-    ) => {
+    ): Promise<boolean> => {
       const bridge = window.openSweDesktop?.terminal
-      if (!bridge) return
+      if (!bridge) return false
       setError(null)
-      void action(bridge).catch((cause: unknown) =>
+      try {
+        await action(bridge)
+        return true
+      } catch (cause) {
         setError(cause instanceof Error ? cause.message : fallback)
-      )
+        return false
+      }
     },
     []
   )
 
   const closeTerminals = useCallback(
     (terminalIds: ReadonlyArray<string>) => {
-      run("Unable to close terminal", async (bridge) => {
+      return run("Unable to close terminal", async (bridge) => {
         for (const terminalId of terminalIds) {
           await bridge.close({
             localSessionId,
