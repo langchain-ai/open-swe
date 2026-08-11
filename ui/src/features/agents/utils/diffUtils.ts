@@ -182,8 +182,6 @@ export function useDiffWrap(): [boolean, (wrap: boolean) => void] {
 }
 
 // Shared virtualization + worker-pool config for <Virtualizer>/<MultiFileDiff>.
-// Tuned for the agent git panel and the PR reviews page; keep them aligned so
-// both viewers window rows and offload highlighting identically.
 export const DIFF_VIRTUALIZER_CONFIG = {
   overscrollSize: 1200,
   intersectionObserverMargin: 4800,
@@ -196,6 +194,11 @@ export const DIFF_VIRTUAL_METRICS = {
   lineHeight: 18,
   diffHeaderHeight: 0,
   spacing: 8,
+} satisfies Partial<VirtualFileMetrics>
+
+export const DIFF_PANEL_VIRTUAL_METRICS = {
+  ...DIFF_VIRTUAL_METRICS,
+  spacing: 0,
 } satisfies Partial<VirtualFileMetrics>
 
 export const DIFF_WORKER_POOL_OPTIONS = {

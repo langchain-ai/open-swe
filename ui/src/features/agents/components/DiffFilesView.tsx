@@ -16,8 +16,8 @@ import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import {
+  DIFF_PANEL_VIRTUAL_METRICS,
   DIFF_VIRTUALIZER_CONFIG,
-  DIFF_VIRTUAL_METRICS,
   DIFF_WORKER_HIGHLIGHTER_OPTIONS,
   DIFF_WORKER_POOL_OPTIONS,
   fileContentsCacheKey,
@@ -223,7 +223,7 @@ export function DiffFilesView({
           >
             <Virtualizer
               className="min-h-0 flex-1 overflow-y-auto"
-              contentClassName="space-y-2 p-2"
+              contentClassName="bg-card"
               config={DIFF_VIRTUALIZER_CONFIG}
             >
               {files.map((file) => (
@@ -293,14 +293,12 @@ const FileDiffSection = memo(
     )
 
     return (
-      <div
-        ref={sectionRef}
-        className="mb-2 scroll-mt-2 overflow-hidden rounded-lg border border-border"
-      >
+      <div ref={sectionRef} className="bg-card">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-2 bg-accent px-3 py-2 text-left text-xs"
+          aria-expanded={open}
+          className="sticky top-0 z-10 flex min-h-8 w-full items-center gap-2 bg-card px-2 py-1.5 text-left text-xs transition-shadow hover:shadow-[inset_3px_0_color-mix(in_srgb,var(--foreground)_24%,transparent)]"
         >
           <CaretDownIcon
             className={cn("size-3 transition-transform", !open && "-rotate-90")}
@@ -308,23 +306,23 @@ const FileDiffSection = memo(
           <span className="truncate font-medium text-foreground">
             {file.treePath}
           </span>
-          <span className="ml-auto flex shrink-0 items-center gap-2">
+          <span className="ml-auto flex shrink-0 items-center gap-2 font-mono text-[11px] tabular-nums">
             <span className="text-success-foreground">+{file.additions}</span>
             <span className="text-destructive">-{file.deletions}</span>
           </span>
         </button>
         {open &&
           (file.unrenderable ? (
-            <div className="bg-card p-4 text-center text-xs text-muted-foreground/70">
+            <div className="px-3 py-4 text-center text-xs text-muted-foreground/70">
               Binary or large file — diff not shown.
             </div>
           ) : (
-            <div className="overflow-hidden bg-card p-2">
+            <div className="overflow-hidden">
               <MultiFileDiff
                 oldFile={oldFile}
                 newFile={newFile}
                 options={diffOptions}
-                metrics={DIFF_VIRTUAL_METRICS}
+                metrics={DIFF_PANEL_VIRTUAL_METRICS}
               />
             </div>
           ))}
