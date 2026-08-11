@@ -27,6 +27,9 @@ export function AppShell({
     <div className="flex h-svh overflow-hidden bg-background text-foreground">
       <AppSidebar user={user} />
       <main className="flex-1 overflow-y-auto">
+        <div className="bg-amber-400 px-4 py-2 text-center text-xs font-semibold tracking-wide text-amber-950">
+          PREVIEW SMOKE TEST — this banner ships only from the preview branch
+        </div>
         <div
           className={cn(
             "mx-auto max-w-3xl px-4 pt-14 pb-16 sm:px-8 sm:py-12",
