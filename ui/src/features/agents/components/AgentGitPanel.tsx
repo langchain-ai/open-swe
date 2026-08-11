@@ -184,6 +184,7 @@ export function AgentGitPanel({
       ]}
       activeTabId={topTab}
       onSelectTab={(id) => onTabChange(id as AgentPanelTab)}
+      onCloseTab={() => setCollapsed(true)}
       menuKinds={[]}
       collapsed={collapsed}
       onCollapsedChange={setCollapsed}
@@ -196,14 +197,14 @@ export function AgentGitPanel({
             <>
               {pr && (
                 <PrHeader
-                  className="border-b border-border px-4 py-3"
+                  compact
+                  className="border-b border-border px-3 py-2"
                   url={pr.url}
                   title={pr.title}
                   number={pr.number}
                   state={pr.state}
                   headRef={pr.headRef}
                   baseRef={pr.baseRef}
-                  titleClassName="truncate text-sm"
                 />
               )}
 
@@ -221,7 +222,7 @@ export function AgentGitPanel({
                 />
               ) : (
                 <>
-                  <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+                  <div className="flex min-h-9 items-center gap-1 border-b border-border px-3 py-1">
                     {tabs}
                     <div className="ml-auto flex min-w-0 items-center gap-2">
                       {actions}

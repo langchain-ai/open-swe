@@ -133,6 +133,7 @@ export function SidebarFrame({
 
   return (
     <aside
+      data-sidebar-frame=""
       style={{ width }}
       className={cn(
         "relative flex h-svh shrink-0 flex-col",

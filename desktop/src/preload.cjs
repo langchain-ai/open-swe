@@ -71,7 +71,7 @@ window.addEventListener("DOMContentLoaded", () => {
       user-select: none;
     }
 
-    aside > div:first-child {
+    [data-sidebar-frame] > div:first-child {
       -webkit-app-region: drag;
       box-sizing: border-box;
       height: 52px;
@@ -81,7 +81,7 @@ window.addEventListener("DOMContentLoaded", () => {
       padding-bottom: 0 !important;
     }
 
-    aside > div:first-child :is(a, button, input, textarea, select, [role="button"]) {
+    [data-sidebar-frame] > div:first-child :is(a, button, input, textarea, select, [role="button"]) {
       -webkit-app-region: no-drag;
     }
 

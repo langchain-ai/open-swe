@@ -318,14 +318,12 @@ export function AgentPanelShell({
     <aside
       ref={panelRef}
       className={cn(
-        "relative flex shrink-0 flex-col",
-        overlay
-          ? "fixed inset-0 !w-full bg-background"
-          : "h-full border-l border-border"
+        "relative flex shrink-0 flex-col bg-background",
+        overlay ? "fixed inset-0 !w-full" : "h-full border-l border-border"
       )}
       style={overlay ? { zIndex: Z.MODAL } : { width }}
     >
-      <div className="flex h-11 shrink-0 items-center px-2">
+      <div className="flex h-11 shrink-0 items-center border-b border-border px-2">
         <div className="flex min-w-0 flex-1 items-center overflow-x-auto">
           {tabs.map((tab, index) => {
             const { label, Icon } = PANEL_TAB_META[tab.kind]
