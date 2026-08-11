@@ -302,6 +302,9 @@ export function TerminalPanel({
     [metadata]
   )
   const atSplitLimit = visibleIds.length >= MAX_TERMINALS_PER_GROUP
+  const showGroupHeaders =
+    state.terminalGroups.length > 1 ||
+    state.terminalGroups.some((group) => group.terminalIds.length > 1)
 
   const runStateAction = useCallback(
     async (terminalId: string, action: "clear" | "restart") => {
@@ -462,69 +465,98 @@ export function TerminalPanel({
         </div>
 
         {state.terminalIds.length > 1 && (
-          <aside className="w-36 shrink-0 overflow-y-auto border-l border-border p-1">
-            {state.terminalGroups.map((group, groupIndex) => (
-              <div key={group.id} className="mb-1">
-                <button
-                  type="button"
-                  className="w-full rounded px-1 py-0.5 text-left text-[10px] tracking-wider text-muted-foreground uppercase hover:bg-accent"
-                  onClick={() => {
-                    const terminalId = group.terminalIds[0]
-                    if (terminalId)
-                      updateState((current) =>
-                        focusTerminal(current, terminalId)
-                      )
-                  }}
-                >
-                  Group {groupIndex + 1}
-                </button>
-                {group.terminalIds.map((terminalId) => {
-                  const summary = metadataById.get(terminalId)
-                  const running = summary?.hasRunningSubprocess === true
-                  return (
-                    <div
-                      key={terminalId}
+          <aside className="flex w-36 min-w-36 shrink-0 flex-col overflow-y-auto border-l border-border p-1">
+            {state.terminalGroups.map((group, groupIndex) => {
+              const isGroupActive = group.terminalIds.includes(
+                state.activeTerminalId
+              )
+              const groupActiveTerminalId = isGroupActive
+                ? state.activeTerminalId
+                : group.terminalIds[0]
+
+              return (
+                <div key={group.id} className="pb-0.5">
+                  {showGroupHeaders && (
+                    <button
+                      type="button"
                       className={cn(
-                        "group flex items-center rounded text-[11px]",
-                        terminalId === state.activeTerminalId
-                          ? "bg-accent text-foreground"
-                          : "text-muted-foreground hover:bg-accent/60"
+                        "flex w-full items-center rounded px-1 py-0.5 text-[10px] tracking-[0.08em] uppercase",
+                        isGroupActive
+                          ? "bg-accent/70 text-foreground"
+                          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                       )}
-                    >
-                      <button
-                        type="button"
-                        className="flex min-w-0 flex-1 items-center gap-1 px-1 py-1 text-left"
-                        onClick={() => {
+                      onClick={() => {
+                        if (groupActiveTerminalId) {
                           updateState((current) =>
-                            focusTerminal(current, terminalId)
+                            focusTerminal(current, groupActiveTerminalId)
                           )
-                          setFocusRequest((value) => value + 1)
-                        }}
-                      >
-                        <TerminalSquare className="size-3 shrink-0" />
-                        <span className="truncate">
-                          {summary?.label || terminalId}
-                        </span>
-                        {running && (
-                          <span
-                            className="ml-auto size-1.5 shrink-0 rounded-full bg-emerald-500"
-                            title="Running process"
-                          />
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Close ${summary?.label || terminalId}`}
-                        className="mr-0.5 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-background"
-                        onClick={() => void close(terminalId)}
-                      >
-                        <X className="size-2.5" />
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            ))}
+                        }
+                      }}
+                    >
+                      Group {groupIndex + 1}
+                    </button>
+                  )}
+                  <div
+                    className={cn(
+                      showGroupHeaders &&
+                        "ml-1 border-l border-border/60 pl-1.5"
+                    )}
+                  >
+                    {group.terminalIds.map((terminalId) => {
+                      const summary = metadataById.get(terminalId)
+                      const running = summary?.hasRunningSubprocess === true
+                      const isActive = terminalId === state.activeTerminalId
+                      return (
+                        <div
+                          key={terminalId}
+                          className={cn(
+                            "group flex items-center gap-1 rounded px-1 py-0.5 text-[11px]",
+                            isActive
+                              ? "bg-accent text-foreground"
+                              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                          )}
+                        >
+                          {showGroupHeaders && (
+                            <span className="text-[10px] text-muted-foreground/80">
+                              └
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            className="flex min-w-0 flex-1 items-center gap-1 text-left"
+                            onClick={() => {
+                              updateState((current) =>
+                                focusTerminal(current, terminalId)
+                              )
+                              setFocusRequest((value) => value + 1)
+                            }}
+                          >
+                            <TerminalSquare className="size-3 shrink-0" />
+                            <span className="truncate">
+                              {summary?.label || terminalId}
+                            </span>
+                            {running && (
+                              <span
+                                className="ml-auto size-1.5 shrink-0 rounded-full bg-emerald-500"
+                                title="Running process"
+                              />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Close ${summary?.label || terminalId}`}
+                            className="inline-flex size-3.5 items-center justify-center rounded text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-accent hover:text-foreground"
+                            onClick={() => void close(terminalId)}
+                          >
+                            <X className="size-2.5" />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
           </aside>
         )}
       </div>
