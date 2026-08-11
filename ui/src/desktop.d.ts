@@ -128,7 +128,7 @@ export interface DesktopTerminalBridge {
   ) => Promise<void>
   clear: (input: DesktopTerminalTarget) => Promise<void>
   restart: (
-    input: DesktopTerminalTarget & { cwd: string; cols: number; rows: number }
+    input: DesktopTerminalTarget & { cwd: string; cols?: number; rows?: number }
   ) => Promise<DesktopTerminalSessionSnapshot>
   detach: (input: DesktopTerminalTarget) => Promise<void>
   close: (

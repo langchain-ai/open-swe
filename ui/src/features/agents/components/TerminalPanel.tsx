@@ -79,6 +79,8 @@ function TerminalViewport({
   const [error, setError] = useState<string | null>(null)
   const [selection, setSelection] = useState<string | null>(null)
   const state = useAttachedTerminal(localSessionId, terminalId, cwd)
+  const latestStateRef = useRef(state)
+  latestStateRef.current = state
 
   useEffect(() => {
     const mount = mountRef.current
@@ -136,8 +138,12 @@ function TerminalViewport({
         }
         surface = created
         surfaceRef.current = created
-        previousRef.current = { buffer: state.buffer, version: state.version }
-        if (state.buffer) created.resetAndWrite(state.buffer)
+        const latestState = latestStateRef.current
+        previousRef.current = {
+          buffer: latestState.buffer,
+          version: latestState.version,
+        }
+        if (latestState.buffer) created.resetAndWrite(latestState.buffer)
         if (active) created.focus()
       })
       .catch((cause: unknown) => {
@@ -312,8 +318,6 @@ export function TerminalPanel({
           localSessionId,
           terminalId,
           cwd: surface?.cwd ?? cwd,
-          cols: 80,
-          rows: 24,
         })
       } catch (error) {
         setActionError(
