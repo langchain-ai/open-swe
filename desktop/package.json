@@ -17,6 +17,9 @@
     "appId": "com.langchain.openswe",
     "productName": "Open SWE",
     "asar": true,
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ],
     "afterSign": "notarize.cjs",
     "npmRebuild": true,
     "icon": "resources/icon.png",
@@ -38,6 +41,18 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "../ui/src/features/agents/terminal/ghostty",
+        "to": "ui/licenses/ghostty",
+        "filter": [
+          "T3-LICENSE",
+          "fonts/LICENSE"
+        ]
+      },
+      {
+        "from": "../ui/native/libghostty-vt/LICENSE",
+        "to": "ui/licenses/libghostty-vt.LICENSE"
       }
     ],
     "mac": {

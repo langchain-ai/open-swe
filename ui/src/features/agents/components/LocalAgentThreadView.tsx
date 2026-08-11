@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react"
-import { CircleAlert, FolderOpen } from "lucide-react"
+import { CircleAlert, FolderOpen, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -40,6 +40,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
   const [panelTab, setPanelTab] = useState<LocalPanelTab>("changes")
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
+  const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
   const handlePanelCollapsedChange = useCallback(
     (next: boolean) => {
       setPanelCollapsed(next)
@@ -127,6 +128,34 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           />
           <div className="shrink-0 px-4 pb-4">
             <div className="mx-auto w-full max-w-3xl min-w-0">
+              {terminalContexts.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {terminalContexts.map((text, index) => (
+                    <span
+                      key={`${text.slice(0, 24)}:${index}`}
+                      className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[11px] text-muted-foreground"
+                      title={text}
+                    >
+                      <span className="max-w-64 truncate">
+                        Terminal selection
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="Remove terminal selection"
+                        onClick={() =>
+                          setTerminalContexts((current) =>
+                            current.filter(
+                              (_, itemIndex) => itemIndex !== index
+                            )
+                          )
+                        }
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <AgentPromptBar
                 activeRun={{ threadId: session.id, running: isRunning }}
                 busy={isRunning}
@@ -136,9 +165,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   window.openSweDesktop?.cancelAcpSession(session.id)
                 }
                 onSubmit={async (prompt, images) => {
+                  const terminalContext = terminalContexts.join("\n\n")
+                  setTerminalContexts([])
                   await window.openSweDesktop?.promptAcpSession({
                     sessionId: session.id,
-                    prompt,
+                    prompt: terminalContext
+                      ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
+                      : prompt,
                     images,
                   })
                 }}
@@ -155,34 +188,29 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
       >
-        {({ fullScreen }) => (
-          <>
-            {panelTab === "changes" && (
-              <DiffFilesView
-                files={files}
-                revealFilePath={revealFilePath}
-                fullScreen={fullScreen}
-                emptyLabel={localDiffEmptyLabel(
-                  diff.data?.status,
-                  diff.isPending
-                )}
-                truncated={diff.data?.truncated}
-              />
-            )}
-            {/* Kept mounted across tabs: unmounting kills the user's shell. */}
-            <div
-              className={cn(
-                "min-h-0 flex-1",
-                panelTab !== "terminal" && "hidden"
+        {({ fullScreen }) =>
+          panelTab === "changes" ? (
+            <DiffFilesView
+              files={files}
+              revealFilePath={revealFilePath}
+              fullScreen={fullScreen}
+              emptyLabel={localDiffEmptyLabel(
+                diff.data?.status,
+                diff.isPending
               )}
-            >
-              <TerminalPanel
-                id={`local-session:${session.id}`}
-                cwd={session.cwd}
-              />
-            </div>
-          </>
-        )}
+              truncated={diff.data?.truncated}
+            />
+          ) : (
+            <TerminalPanel
+              localSessionId={session.id}
+              cwd={session.cwd}
+              onOpenFile={handleOpenFile}
+              onAddToChat={(text) =>
+                setTerminalContexts((current) => [...current, text])
+              }
+            />
+          )
+        }
       </AgentPanelShell>
     </div>
   )
