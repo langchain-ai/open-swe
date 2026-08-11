@@ -1,36 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Copy,
   Plus,
   RefreshCw,
   SquareSplitHorizontal,
   SquareSplitVertical,
-  TerminalSquare,
   Trash2,
   X,
 } from "lucide-react"
 
-import type { TerminalUiState } from "@/features/agents/lib/terminalState"
+import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import { cn } from "@/lib/utils"
-import {
-  MAX_TERMINALS_PER_GROUP,
-  addTerminalGroup,
-  closeTerminal,
-  focusTerminal,
-  readTerminalState,
-  reconcileTerminalIds,
-  splitTerminal,
-  writeTerminalState,
-} from "@/features/agents/lib/terminalState"
-import {
-  useAttachedTerminal,
-  useDesktopTerminalMetadata,
-} from "@/features/agents/lib/terminalSession"
+import { MAX_TERMINALS_PER_GROUP } from "@/features/agents/lib/terminalState"
+import { useAttachedTerminal } from "@/features/agents/lib/terminalSession"
 import { GhosttyTerminalSurface } from "@/features/agents/terminal/ghostty/surface"
 
 interface TerminalPanelProps {
   localSessionId: string
   cwd: string
+  /** The terminal group this tab renders; splits live inside it. */
+  groupId: string
+  terminals: TerminalGroupsController
   onOpenFile: (path: string) => void
   onAddToChat: (text: string) => void
 }
@@ -258,307 +248,106 @@ function ActionButton({
 export function TerminalPanel({
   localSessionId,
   cwd,
+  groupId,
+  terminals,
   onOpenFile,
   onAddToChat,
 }: TerminalPanelProps) {
-  const [state, setState] = useState<TerminalUiState>(() =>
-    readTerminalState(localSessionId)
-  )
-  const metadata = useDesktopTerminalMetadata(localSessionId)
   const [focusRequest, setFocusRequest] = useState(0)
-  const [actionError, setActionError] = useState<string | null>(null)
-
-  const updateState = useCallback(
-    (update: (current: TerminalUiState) => TerminalUiState) => {
-      setState((current) => {
-        const next = update(current)
-        writeTerminalState(localSessionId, next)
-        return next
-      })
-    },
-    [localSessionId]
+  const group = terminals.state.terminalGroups.find(
+    (candidate) => candidate.id === groupId
   )
-
-  useEffect(() => {
-    setState(readTerminalState(localSessionId))
-    setActionError(null)
-  }, [localSessionId])
-
-  useEffect(() => {
-    updateState((current) =>
-      reconcileTerminalIds(
-        current,
-        metadata.map((terminal) => terminal.terminalId)
-      )
-    )
-  }, [metadata, updateState])
-
-  const activeGroup = state.terminalGroups.find(
-    (group) => group.id === state.activeTerminalGroupId
+  const terminalIds = group?.terminalIds ?? []
+  const activeTerminalId = terminalIds.includes(
+    terminals.state.activeTerminalId
   )
-  const visibleIds = activeGroup?.terminalIds ?? []
-  const metadataById = useMemo(
-    () => new Map(metadata.map((terminal) => [terminal.terminalId, terminal])),
-    [metadata]
-  )
-  const atSplitLimit = visibleIds.length >= MAX_TERMINALS_PER_GROUP
-  const showGroupHeaders =
-    state.terminalGroups.length > 1 ||
-    state.terminalGroups.some((group) => group.terminalIds.length > 1)
-
-  const runStateAction = useCallback(
-    async (terminalId: string, action: "clear" | "restart") => {
-      const bridge = window.openSweDesktop?.terminal
-      if (!bridge) return
-      setActionError(null)
-      try {
-        if (action === "clear") {
-          await bridge.clear({ localSessionId, terminalId })
-          return
-        }
-        const surface = metadataById.get(terminalId)
-        await bridge.restart({
-          localSessionId,
-          terminalId,
-          cwd: surface?.cwd ?? cwd,
-        })
-      } catch (error) {
-        setActionError(
-          error instanceof Error
-            ? error.message
-            : `Unable to ${action} terminal`
-        )
-      }
-    },
-    [cwd, metadataById, localSessionId]
-  )
-
-  const close = useCallback(
-    async (terminalId: string) => {
-      const bridge = window.openSweDesktop?.terminal
-      if (!bridge) return
-      setActionError(null)
-      try {
-        await bridge.close({
-          localSessionId,
-          terminalId,
-          deleteHistory: true,
-        })
-        updateState((current) => closeTerminal(current, terminalId))
-      } catch (error) {
-        setActionError(
-          error instanceof Error ? error.message : "Unable to close terminal"
-        )
-      }
-    },
-    [localSessionId, updateState]
-  )
-
-  if (state.terminalIds.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <button
-          type="button"
-          className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
-          onClick={() => updateState(addTerminalGroup)}
-        >
-          New terminal
-        </button>
-      </div>
-    )
-  }
+    ? terminals.state.activeTerminalId
+    : (terminalIds[0] ?? "")
+  const atSplitLimit = terminalIds.length >= MAX_TERMINALS_PER_GROUP
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-card">
-      <div className="flex h-9 shrink-0 items-center border-b border-border px-2">
+    <div className="group/terminal relative flex h-full min-h-0 flex-col">
+      <div className="absolute top-1 right-2 z-10 flex items-center rounded-md border border-border bg-background/95 opacity-0 shadow-sm transition-opacity group-hover/terminal:opacity-100 focus-within:opacity-100">
         <ActionButton
           label={`Split horizontally${atSplitLimit ? " (maximum 4)" : ""}`}
           disabled={atSplitLimit}
-          onClick={() =>
-            updateState((current) => splitTerminal(current, "horizontal"))
-          }
+          onClick={() => terminals.split("horizontal")}
         >
           <SquareSplitHorizontal className="size-3.5" />
         </ActionButton>
         <ActionButton
           label={`Split vertically${atSplitLimit ? " (maximum 4)" : ""}`}
           disabled={atSplitLimit}
-          onClick={() =>
-            updateState((current) => splitTerminal(current, "vertical"))
-          }
+          onClick={() => terminals.split("vertical")}
         >
           <SquareSplitVertical className="size-3.5" />
         </ActionButton>
         <ActionButton
-          label="New terminal group"
-          onClick={() => updateState(addTerminalGroup)}
-        >
-          <Plus className="size-3.5" />
-        </ActionButton>
-        <div className="mx-1 h-4 w-px bg-border" />
-        <ActionButton
           label="Clear terminal"
-          onClick={() => void runStateAction(state.activeTerminalId, "clear")}
+          onClick={() => terminals.clear(activeTerminalId)}
         >
           <Trash2 className="size-3.5" />
         </ActionButton>
         <ActionButton
           label="Restart terminal"
-          onClick={() => void runStateAction(state.activeTerminalId, "restart")}
+          onClick={() => terminals.restart(activeTerminalId)}
         >
           <RefreshCw className="size-3.5" />
         </ActionButton>
-        <ActionButton
-          label="Close terminal"
-          onClick={() => void close(state.activeTerminalId)}
-        >
-          <X className="size-3.5" />
-        </ActionButton>
-        {actionError && (
-          <span className="ml-2 truncate text-xs text-destructive">
-            {actionError}
-          </span>
+        {terminalIds.length > 1 && (
+          <ActionButton
+            label="Close terminal"
+            onClick={() => terminals.closeTerminal(activeTerminalId)}
+          >
+            <X className="size-3.5" />
+          </ActionButton>
         )}
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1">
-          <div
-            className="grid h-full min-h-0"
-            style={
-              activeGroup?.splitDirection === "vertical"
-                ? {
-                    gridTemplateRows: `repeat(${visibleIds.length}, minmax(0, 1fr))`,
-                  }
-                : {
-                    gridTemplateColumns: `repeat(${visibleIds.length}, minmax(0, 1fr))`,
-                  }
-            }
-          >
-            {visibleIds.map((terminalId, index) => (
-              <div
-                key={terminalId}
-                className={cn(
-                  "min-h-0 min-w-0 p-1",
-                  index > 0 &&
-                    (activeGroup?.splitDirection === "vertical"
-                      ? "border-t border-border"
-                      : "border-l border-border")
-                )}
-              >
-                <TerminalViewport
-                  localSessionId={localSessionId}
-                  terminalId={terminalId}
-                  cwd={metadataById.get(terminalId)?.cwd ?? cwd}
-                  active={state.activeTerminalId === terminalId}
-                  focusRequest={focusRequest}
-                  onFocus={() => {
-                    updateState((current) => focusTerminal(current, terminalId))
-                    setFocusRequest((value) => value + 1)
-                  }}
-                  onOpenFile={onOpenFile}
-                  onAddToChat={onAddToChat}
-                />
-              </div>
-            ))}
-          </div>
+      {terminals.error && (
+        <div className="absolute inset-x-2 top-2 z-10 rounded-md border border-destructive/40 bg-background/95 px-3 py-2 text-xs text-destructive shadow-sm">
+          {terminals.error}
         </div>
+      )}
 
-        {state.terminalIds.length > 1 && (
-          <aside className="flex w-36 min-w-36 shrink-0 flex-col overflow-y-auto border-l border-border p-1">
-            {state.terminalGroups.map((group, groupIndex) => {
-              const isGroupActive = group.terminalIds.includes(
-                state.activeTerminalId
-              )
-              const groupActiveTerminalId = isGroupActive
-                ? state.activeTerminalId
-                : group.terminalIds[0]
-
-              return (
-                <div key={group.id} className="pb-0.5">
-                  {showGroupHeaders && (
-                    <button
-                      type="button"
-                      className={cn(
-                        "flex w-full items-center rounded px-1 py-0.5 text-[10px] tracking-[0.08em] uppercase",
-                        isGroupActive
-                          ? "bg-accent/70 text-foreground"
-                          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                      )}
-                      onClick={() => {
-                        if (groupActiveTerminalId) {
-                          updateState((current) =>
-                            focusTerminal(current, groupActiveTerminalId)
-                          )
-                        }
-                      }}
-                    >
-                      Group {groupIndex + 1}
-                    </button>
-                  )}
-                  <div
-                    className={cn(
-                      showGroupHeaders &&
-                        "ml-1 border-l border-border/60 pl-1.5"
-                    )}
-                  >
-                    {group.terminalIds.map((terminalId) => {
-                      const summary = metadataById.get(terminalId)
-                      const running = summary?.hasRunningSubprocess === true
-                      const isActive = terminalId === state.activeTerminalId
-                      return (
-                        <div
-                          key={terminalId}
-                          className={cn(
-                            "group flex items-center gap-1 rounded px-1 py-0.5 text-[11px]",
-                            isActive
-                              ? "bg-accent text-foreground"
-                              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                          )}
-                        >
-                          {showGroupHeaders && (
-                            <span className="text-[10px] text-muted-foreground/80">
-                              └
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            className="flex min-w-0 flex-1 items-center gap-1 text-left"
-                            onClick={() => {
-                              updateState((current) =>
-                                focusTerminal(current, terminalId)
-                              )
-                              setFocusRequest((value) => value + 1)
-                            }}
-                          >
-                            <TerminalSquare className="size-3 shrink-0" />
-                            <span className="truncate">
-                              {summary?.label || terminalId}
-                            </span>
-                            {running && (
-                              <span
-                                className="ml-auto size-1.5 shrink-0 rounded-full bg-emerald-500"
-                                title="Running process"
-                              />
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Close ${summary?.label || terminalId}`}
-                            className="inline-flex size-3.5 items-center justify-center rounded text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-accent hover:text-foreground"
-                            onClick={() => void close(terminalId)}
-                          >
-                            <X className="size-2.5" />
-                          </button>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
-          </aside>
-        )}
+      <div
+        className="grid min-h-0 flex-1"
+        style={
+          group?.splitDirection === "vertical"
+            ? {
+                gridTemplateRows: `repeat(${terminalIds.length}, minmax(0, 1fr))`,
+              }
+            : {
+                gridTemplateColumns: `repeat(${terminalIds.length}, minmax(0, 1fr))`,
+              }
+        }
+      >
+        {terminalIds.map((terminalId, index) => (
+          <div
+            key={terminalId}
+            className={cn(
+              "min-h-0 min-w-0",
+              index > 0 &&
+                (group?.splitDirection === "vertical"
+                  ? "border-t border-border"
+                  : "border-l border-border")
+            )}
+          >
+            <TerminalViewport
+              localSessionId={localSessionId}
+              terminalId={terminalId}
+              cwd={terminals.metadataById.get(terminalId)?.cwd ?? cwd}
+              active={activeTerminalId === terminalId}
+              focusRequest={focusRequest}
+              onFocus={() => {
+                terminals.focus(terminalId)
+                setFocusRequest((value) => value + 1)
+              }}
+              onOpenFile={onOpenFile}
+              onAddToChat={onAddToChat}
+            />
+          </div>
+        ))}
       </div>
     </div>
   )

@@ -178,9 +178,14 @@ export function AgentGitPanel({
 
   return (
     <AgentPanelShell
-      tabs={[["git", "Git"], ...(hasPlan ? ([["plan", "Plan"]] as const) : [])]}
-      activeTab={topTab}
-      onTabChange={onTabChange}
+      tabs={[
+        { id: "git", kind: "review" as const },
+        ...(hasPlan ? [{ id: "plan", kind: "plan" as const }] : []),
+      ]}
+      activeTabId={topTab}
+      onSelectTab={(id) => onTabChange(id as AgentPanelTab)}
+      onCloseTab={() => setCollapsed(true)}
+      menuKinds={[]}
       collapsed={collapsed}
       onCollapsedChange={setCollapsed}
     >
@@ -188,22 +193,18 @@ export function AgentGitPanel({
         <>
           {topTab === "plan" ? (
             <PlanView threadId={thread.id} onApprove={onPlanApproved} />
-          ) : topTab !== "git" ? (
-            <div className="flex flex-1 items-center justify-center p-6 text-xs text-muted-foreground/70">
-              Coming Soon
-            </div>
           ) : (
             <>
               {pr && (
                 <PrHeader
-                  className="border-b border-border px-4 py-3"
+                  compact
+                  className="border-b border-border px-3 py-2"
                   url={pr.url}
                   title={pr.title}
                   number={pr.number}
                   state={pr.state}
                   headRef={pr.headRef}
                   baseRef={pr.baseRef}
-                  titleClassName="truncate text-sm"
                 />
               )}
 
@@ -221,7 +222,7 @@ export function AgentGitPanel({
                 />
               ) : (
                 <>
-                  <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+                  <div className="flex min-h-9 items-center gap-1 border-b border-border px-3 py-1">
                     {tabs}
                     <div className="ml-auto flex min-w-0 items-center gap-2">
                       {actions}
