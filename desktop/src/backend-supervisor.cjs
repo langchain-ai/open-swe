@@ -10,7 +10,7 @@ const STOP_TIMEOUT_MS = 5_000
 
 function devBackendTarget({ repoRoot, port, env = process.env }) {
   return {
-    command: env.OPEN_SWE_UV_COMMAND || "uv",
+    command: env.OPEN_SWE_LOCAL_BACKEND_COMMAND || env.OPEN_SWE_UV_COMMAND || "uv",
     args: [
       "run",
       "langgraph",
@@ -28,7 +28,12 @@ function devBackendTarget({ repoRoot, port, env = process.env }) {
   }
 }
 
-function packagedBackendTarget({ resourcesPath, port, platform = process.platform }) {
+function packagedBackendTarget({
+  resourcesPath,
+  port,
+  stateDir,
+  platform = process.platform,
+}) {
   const root = path.join(resourcesPath, "local-backend")
   const executable = path.join(
     root,
@@ -39,7 +44,7 @@ function packagedBackendTarget({ resourcesPath, port, platform = process.platfor
     command: executable,
     args: [
       "-m",
-      "langgraph_cli.cli",
+      "langgraph_cli",
       "dev",
       "--no-browser",
       "--no-reload",
@@ -50,7 +55,7 @@ function packagedBackendTarget({ resourcesPath, port, platform = process.platfor
       "--config",
       path.join(root, "langgraph.json"),
     ],
-    cwd: root,
+    cwd: stateDir || root,
   }
 }
 
@@ -107,6 +112,7 @@ class BackendSupervisor {
     this.token = randomBytes(32).toString("base64url")
     const target = localBackendTarget({ ...this.options, port: this.port })
     if (!this.options.projectsFile) throw new Error("Local project allowlist is not configured")
+    if (this.options.stateDir) fs.mkdirSync(this.options.stateDir, { recursive: true })
     if (this.options.isPackaged && !fs.existsSync(target.command)) {
       throw new Error(`Bundled local backend is missing: ${target.command}`)
     }
@@ -173,21 +179,33 @@ class BackendSupervisor {
     return { apiUrl: "/local-graph", graphId: "local_agent" }
   }
 
-  async proxy(request, prefix = "/local-graph") {
+  async request(pathname, init = {}) {
     await this.start()
+    const headers = new Headers(init.headers)
+    headers.set("authorization", `Bearer ${this.token}`)
+    headers.set("accept-encoding", "identity")
+    return this.fetch(`http://${HOST}:${this.port}${pathname}`, { ...init, headers })
+  }
+
+  async deleteThread(threadId) {
+    const response = await this.request(`/threads/${encodeURIComponent(threadId)}`, {
+      method: "DELETE",
+    })
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`Could not delete local LangGraph thread (${response.status})`)
+    }
+  }
+
+  async proxy(request, prefix = "/local-graph") {
     const source = new URL(request.url)
     if (source.pathname !== prefix && !source.pathname.startsWith(`${prefix}/`)) {
       return new Response("Not found", { status: 404 })
     }
-    const pathname = source.pathname.slice(prefix.length) || "/"
-    const target = new URL(`http://${HOST}:${this.port}${pathname}${source.search}`)
     const headers = new Headers(request.headers)
     headers.delete("host")
     headers.delete("cookie")
-    headers.set("authorization", `Bearer ${this.token}`)
-    headers.set("accept-encoding", "identity")
     const body = ["GET", "HEAD"].includes(request.method) ? undefined : request.body
-    return this.fetch(target, {
+    return this.request(`${source.pathname.slice(prefix.length) || "/"}${source.search}`, {
       method: request.method,
       headers,
       body,

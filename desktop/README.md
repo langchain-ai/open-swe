@@ -13,8 +13,9 @@ the same-origin `/local-graph/*` protocol route, so neither the token nor the ra
 state. Source launches run the repository graph with `uv`; packaged apps use the bundled Python
 runtime and local backend built by `build:local-backend`. No `dcode` installation is required.
 
-Added projects and local thread metadata are atomically persisted under Electron `userData`. Local
-threads retain their model, effort, pending first prompt, status, and git checkpoint across restarts;
+Added projects, LangGraph state, and local thread metadata are atomically persisted under Electron
+`userData`. Local threads retain their model, effort, pending first prompt, status, and git checkpoint
+across restarts;
 an interrupted running thread is reconciled to `error`. Project paths are realpath-checked against
 the desktop project allowlist before thread creation and again by the local graph. The side panel's
 **Changes** tab diffs the project against the retained git checkpoint. Checkpoint refs survive app

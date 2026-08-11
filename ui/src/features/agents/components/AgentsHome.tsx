@@ -161,7 +161,7 @@ export function AgentsHome() {
         setLocalError(
           error instanceof Error
             ? error.message
-            : "Could not start Deep Agents Code"
+            : "Could not start the local Open SWE agent"
         )
         throw error
       }

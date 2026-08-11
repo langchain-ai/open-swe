@@ -33,9 +33,14 @@ test("packaged target runs the bundled backend without dcode", () => {
   const resourcesPath = path.resolve("/Applications/Open SWE.app/Contents/Resources")
   const target = packagedBackendTarget({ resourcesPath, port: 50000, platform: "darwin" })
   assert.equal(target.command, path.join(resourcesPath, "local-backend/runtime/bin/python3"))
-  assert.deepEqual(target.args.slice(0, 3), ["-m", "langgraph_cli.cli", "dev"])
+  assert.deepEqual(target.args.slice(0, 3), ["-m", "langgraph_cli", "dev"])
   assert.equal(target.args.includes("dcode"), false)
   assert.equal(target.cwd, path.join(resourcesPath, "local-backend"))
+  const stateDir = path.resolve("/tmp/open-swe-state")
+  assert.equal(
+    packagedBackendTarget({ resourcesPath, stateDir, port: 50000, platform: "darwin" }).cwd,
+    stateDir
+  )
   assert.deepEqual(
     localBackendTarget({ isPackaged: true, resourcesPath, port: 50000, platform: "darwin" }),
     target

@@ -474,8 +474,8 @@ function LocalThreadRow({
       <button
         type="button"
         aria-label={`Delete ${session.title}`}
-        className="absolute top-1/2 right-1 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent hover:text-destructive focus:opacity-100 [@media(hover:none)]:opacity-100"
-        disabled={deleting}
+        className="absolute top-1/2 right-1 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent hover:text-destructive focus:opacity-100 disabled:pointer-events-none disabled:opacity-0 [@media(hover:none)]:opacity-100"
+        disabled={deleting || running}
         onClick={() => {
           if (!window.confirm(`Delete "${session.title}"?`)) return
           setDeleting(true)

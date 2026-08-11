@@ -21,7 +21,11 @@ const {
   repoRoot,
 } = require("./git-diff.cjs")
 const { LocalThreadStore } = require("./local-thread-store.cjs")
-const { closeAllTerminals, configureTerminalIpc } = require("./terminal-manager.cjs")
+const {
+  closeAllTerminals,
+  closeThreadTerminals,
+  configureTerminalIpc,
+} = require("./terminal-manager.cjs")
 const { addProject, readProjects, removeProject } = require("./project-store.cjs")
 const {
   APP_ORIGIN,
@@ -255,10 +259,16 @@ function configureDesktopIpc() {
     return localThreadStore.update(input?.id, input?.patch)
   })
 
-  ipcMain.handle("desktop:delete-local-thread", (event, threadId) => {
+  ipcMain.handle("desktop:delete-local-thread", async (event, threadId) => {
     requireTrustedDesktopIpc(event)
-    const thread = localThreadStore.delete(threadId)
+    const thread = localThreadStore.get(threadId)
     if (!thread) return false
+    if (thread.status === "running" || thread.status === "starting") {
+      throw new Error("Stop the local agent before deleting it")
+    }
+    await closeThreadTerminals(threadId)
+    await backendSupervisor.deleteThread(threadId)
+    localThreadStore.delete(threadId)
     if (thread.checkpoint.repo && thread.checkpoint.ref) {
       deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref])
     }
@@ -710,6 +720,7 @@ if (!hasSingleInstanceLock) {
       repoRoot: path.resolve(__dirname, "../.."),
       resourcesPath: process.resourcesPath,
       projectsFile: projectsPath(),
+      stateDir: path.join(userDataPath, "local-langgraph"),
     })
     if (process.platform === "darwin") app.dock.setIcon(iconPath())
     protocol.handle("open-swe", serveBundledUi)

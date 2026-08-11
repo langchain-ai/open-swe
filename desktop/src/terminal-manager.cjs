@@ -968,6 +968,10 @@ function configureTerminalIpc({
   return configuredManager
 }
 
+function closeThreadTerminals(localSessionId) {
+  return configuredManager?.close({ localSessionId }) || Promise.resolve()
+}
+
 function closeAllTerminals() {
   return configuredManager?.shutdown() || Promise.resolve()
 }
@@ -975,6 +979,7 @@ function closeAllTerminals() {
 module.exports = {
   capHistory,
   closeAllTerminals,
+  closeThreadTerminals,
   configureTerminalIpc,
   createTerminalManager,
   ensurePtySpawnHelperExecutable,

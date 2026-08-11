@@ -169,7 +169,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     return (
       <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 text-xs text-muted-foreground">
         {threadQuery.isPending
-          ? "Loading local Deep Agents Code session…"
+          ? "Loading local Open SWE session…"
           : threadQuery.error
             ? errorMessage(threadQuery.error)
             : "This local session no longer exists."}
@@ -208,7 +208,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             <Alert variant="error">
               <CircleAlert />
               <AlertDescription>
-                {error || "Deep Agents Code stopped unexpectedly."}
+                {error || "The local Open SWE agent stopped unexpectedly."}
               </AlertDescription>
             </Alert>
           </div>
