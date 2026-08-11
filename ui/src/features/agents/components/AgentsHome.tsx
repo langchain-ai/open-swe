@@ -17,7 +17,10 @@ import {
   seedAgentThreadLists,
   useAgentSkills,
 } from "@/features/agents/lib/queries"
-import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
+import {
+  persistModelSelection,
+  useModelOptions,
+} from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { useProfile, useRepos } from "@/lib/profile"
 import {
@@ -47,6 +50,10 @@ export function AgentsHome() {
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const activeSelection = selection ?? defaultSelection
+  const handleSelectionChange = (next: ModelSelection) => {
+    setSelection(next)
+    persistModelSelection(next)
+  }
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
@@ -208,7 +215,7 @@ export function AgentsHome() {
             disabled={submitting}
             models={models}
             selection={activeSelection}
-            onSelectionChange={setSelection}
+            onSelectionChange={handleSelectionChange}
             repos={reposQuery.data?.repositories}
             selectedRepo={repo}
             onRepoChange={setRepoOverride}

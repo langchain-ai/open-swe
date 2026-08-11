@@ -1,5 +1,5 @@
 import type { ModelOption } from "@/lib/api"
-import { useOptions, useProfile } from "@/lib/profile"
+import { useOptions } from "@/lib/profile"
 
 export interface ModelSelection {
   modelId: string
@@ -10,6 +10,33 @@ export interface ModelOptionsResult {
   models: Array<ModelOption>
   defaultSelection: ModelSelection | null
   isLoading: boolean
+}
+
+const STORAGE_KEY = "open-swe.agents.model-selection"
+
+function storedSelection(models: Array<ModelOption>): ModelSelection | null {
+  if (typeof window === "undefined") return null
+  try {
+    const selection = JSON.parse(
+      window.localStorage.getItem(STORAGE_KEY) ?? "null"
+    ) as Partial<ModelSelection> | null
+    return models.some(
+      (model) =>
+        model.id === selection?.modelId &&
+        model.efforts.includes(selection.effort ?? "")
+    )
+      ? (selection as ModelSelection)
+      : null
+  } catch {
+    return null
+  }
+}
+
+export function persistModelSelection(selection: ModelSelection): void {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(selection))
+  } catch {}
 }
 
 function toSupportedSelection(
@@ -26,15 +53,7 @@ function toSupportedSelection(
 
 export function useModelOptions(): ModelOptionsResult {
   const optionsQuery = useOptions()
-  const profileQuery = useProfile()
-
   const models = optionsQuery.data?.models ?? []
-  const profile = profileQuery.data
-  const profileSelection = toSupportedSelection(
-    models,
-    profile?.default_model,
-    profile?.reasoning_effort
-  )
   const teamDefaultSelection = toSupportedSelection(
     models,
     optionsQuery.data?.default_agent_model,
@@ -44,15 +63,14 @@ export function useModelOptions(): ModelOptionsResult {
   const firstSelection = firstModel
     ? { modelId: firstModel.id, effort: firstModel.default_effort }
     : null
-  const defaultSelection =
-    optionsQuery.data && !profileQuery.isLoading
-      ? (profileSelection ?? teamDefaultSelection ?? firstSelection)
-      : null
+  const defaultSelection = optionsQuery.data
+    ? (storedSelection(models) ?? teamDefaultSelection ?? firstSelection)
+    : null
 
   return {
     models,
     defaultSelection,
-    isLoading: optionsQuery.isLoading || profileQuery.isLoading,
+    isLoading: optionsQuery.isLoading,
   }
 }
 
