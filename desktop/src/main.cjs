@@ -237,8 +237,12 @@ function configureDesktopIpc() {
     let thread = localThreadStore.create({ ...input, cwd })
     try {
       thread = await recordLocalCheckpoint(thread)
+      await backendSupervisor.createThread(thread.id)
     } catch (error) {
       localThreadStore.delete(thread.id)
+      if (thread.checkpoint.repo && thread.checkpoint.ref) {
+        deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref])
+      }
       throw error
     }
     return thread
@@ -254,9 +258,12 @@ function configureDesktopIpc() {
     return localThreadStore.clearPrompt(threadId)
   })
 
-  ipcMain.handle("desktop:get-local-thread", (event, threadId) => {
+  ipcMain.handle("desktop:get-local-thread", async (event, threadId) => {
     requireTrustedDesktopIpc(event)
-    return localThreadStore.get(threadId)
+    const thread = localThreadStore.get(threadId)
+    if (!thread) return null
+    await backendSupervisor.createThread(thread.id)
+    return thread
   })
 
   ipcMain.handle("desktop:list-local-threads", (event) => {

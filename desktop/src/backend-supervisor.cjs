@@ -205,6 +205,21 @@ class BackendSupervisor {
     return this.fetch(`http://${HOST}:${this.port}${pathname}`, { ...init, headers })
   }
 
+  async createThread(threadId) {
+    const response = await this.request("/threads", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        thread_id: threadId,
+        if_exists: "do_nothing",
+        metadata: { graph_id: "local_agent" },
+      }),
+    })
+    if (!response.ok) {
+      throw new Error(`Could not create local LangGraph thread (${response.status})`)
+    }
+  }
+
   async deleteThread(threadId) {
     const response = await this.request(`/threads/${encodeURIComponent(threadId)}`, {
       method: "DELETE",

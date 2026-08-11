@@ -12,7 +12,24 @@ const NO_DIFF: DesktopLocalDiff = {
 export const localThreadKeys = {
   all: ["local-threads"] as const,
   detail: (threadId: string) => ["local-threads", threadId] as const,
+  ready: (threadId: string) => ["local-thread-ready", threadId] as const,
   diff: (threadId: string) => ["local-thread-diff", threadId] as const,
+}
+
+export function useReadyDesktopLocalThread(threadId: string) {
+  const queryClient = useQueryClient()
+  return useQuery({
+    queryKey: localThreadKeys.ready(threadId),
+    enabled: typeof window !== "undefined" && Boolean(window.openSweDesktop),
+    queryFn: async () => {
+      const thread =
+        (await window.openSweDesktop?.getLocalThread(threadId)) ?? null
+      if (thread)
+        queryClient.setQueryData(localThreadKeys.detail(threadId), thread)
+      return thread
+    },
+    refetchOnMount: "always",
+  })
 }
 
 export function useDesktopLocalThread(threadId: string) {

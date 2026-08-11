@@ -3,6 +3,7 @@ const assert = require("node:assert/strict")
 const path = require("node:path")
 
 const {
+  BackendSupervisor,
   devBackendTarget,
   localBackendTarget,
   modelCredentialStatus,
@@ -47,6 +48,36 @@ test("reports whether the selected provider is configured", () => {
     available: true,
     variable: null,
   })
+})
+
+test("creates the local LangGraph thread before stream hydration", async () => {
+  const supervisor = new BackendSupervisor({})
+  let request
+  supervisor.request = async (pathname, init) => {
+    request = { pathname, init }
+    return new Response(null, { status: 200 })
+  }
+
+  await supervisor.createThread("thread-1")
+
+  assert.equal(request.pathname, "/threads")
+  assert.equal(request.init.method, "POST")
+  assert.equal(new Headers(request.init.headers).get("content-type"), "application/json")
+  assert.deepEqual(JSON.parse(request.init.body), {
+    thread_id: "thread-1",
+    if_exists: "do_nothing",
+    metadata: { graph_id: "local_agent" },
+  })
+})
+
+test("rejects a failed local LangGraph thread creation", async () => {
+  const supervisor = new BackendSupervisor({})
+  supervisor.request = async () => new Response(null, { status: 503 })
+
+  await assert.rejects(
+    supervisor.createThread("thread-1"),
+    /Could not create local LangGraph thread \(503\)/
+  )
 })
 
 test("packaged target runs the bundled backend without dcode", () => {
