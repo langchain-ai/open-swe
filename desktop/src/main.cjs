@@ -12,15 +12,15 @@ const {
   session,
   shell,
 } = require("electron")
-const { AcpSession, dcodeTarget } = require("./acp-client.cjs")
+const { BackendSupervisor } = require("./backend-supervisor.cjs")
 const {
   captureCheckpoint,
   checkpointRef,
   deleteRefs,
   readDiff,
   repoRoot,
-  staleRefs,
 } = require("./git-diff.cjs")
+const { LocalThreadStore } = require("./local-thread-store.cjs")
 const { closeAllTerminals, configureTerminalIpc } = require("./terminal-manager.cjs")
 const { addProject, readProjects, removeProject } = require("./project-store.cjs")
 const {
@@ -70,40 +70,39 @@ let backendUrl = null
 let mainWindow = null
 let setupWindow = null
 let quitting = false
-const acpSessions = new Map()
-// sessionId -> { repo, ref }: the worktree snapshot a local session started from, so
-// the diff panel can show what the agent changed rather than the repo's prior state.
-const acpCheckpoints = new Map()
+let localThreadStore = null
+let backendSupervisor = null
 
 function requireTrustedDesktopIpc(event) {
   const senderUrl = event.senderFrame?.url || event.sender.getURL()
   if (!isAppUrl(senderUrl)) throw new Error("Forbidden")
 }
 
-function sendAcpEvent(sessionId, event) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("desktop:acp-event", {
-      sessionId,
-      event,
-      session: acpSessions.get(sessionId)?.summary(),
-    })
-  }
+async function recordLocalCheckpoint(thread) {
+  const repo = await repoRoot(thread.cwd)
+  if (!repo) return thread
+  const ref = checkpointRef(thread.id)
+  await captureCheckpoint(repo, ref)
+  return localThreadStore.setCheckpoint(thread.id, { repo, ref })
 }
 
-async function recordAcpCheckpoint(localSession) {
-  const repo = await repoRoot(localSession.cwd)
-  if (!repo) return
-  const ref = checkpointRef(localSession.id)
-  const live = [...acpCheckpoints.values()]
-    .filter((checkpoint) => checkpoint.repo === repo)
-    .map((checkpoint) => checkpoint.ref)
+function allowedProjectCwd(value) {
+  if (typeof value !== "string" || !path.isAbsolute(value)) return null
   try {
-    // Refs from sessions this or an earlier process lost track of; never pushed,
-    // but they should not pile up in the user's own repository either.
-    deleteRefs(repo, await staleRefs(repo, [...live, ref]))
-    await captureCheckpoint(repo, ref)
-    acpCheckpoints.set(localSession.id, { repo, ref })
-  } catch {}
+    const cwd = fs.realpathSync(value)
+    if (!fs.statSync(cwd).isDirectory()) return null
+    return listProjects().some((project) => {
+      try {
+        return fs.realpathSync(project.cwd) === cwd
+      } catch {
+        return false
+      }
+    })
+      ? cwd
+      : null
+  } catch {
+    return null
+  }
 }
 
 function projectsPath() {
@@ -128,8 +127,8 @@ function pathIsInside(root, candidate) {
   )
 }
 
-function resolveAcpProjectPath(localSessionId, value) {
-  const localSession = acpSessions.get(localSessionId)
+function resolveLocalProjectPath(localSessionId, value) {
+  const localSession = localThreadStore.get(localSessionId)
   if (!localSession || typeof value !== "string" || value.length === 0) {
     return null
   }
@@ -216,89 +215,69 @@ function configureDesktopIpc() {
     return true
   })
 
-  ipcMain.handle("desktop:resolve-acp-project-path", (event, input) => {
+  ipcMain.handle("desktop:resolve-local-project-path", (event, input) => {
     requireTrustedDesktopIpc(event)
-    return resolveAcpProjectPath(input?.localSessionId, input?.path)
+    return resolveLocalProjectPath(input?.localSessionId, input?.path)
   })
 
-  ipcMain.handle("desktop:acp-start", async (event, input) => {
+  ipcMain.handle("desktop:start-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event)
-    if (
-      !input ||
-      typeof input.cwd !== "string" ||
-      !path.isAbsolute(input.cwd) ||
-      !fs.existsSync(input.cwd) ||
-      !fs.statSync(input.cwd).isDirectory()
-    ) {
-      throw new Error("Choose a valid local project directory")
-    }
-    const cwd = fs.realpathSync(input.cwd)
-    if (!listProjects().some((project) => project.cwd === cwd)) {
-      throw new Error("Add this project to Open SWE before starting a local agent")
-    }
-    const localSession = new AcpSession({
-      cwd,
-      target: dcodeTarget({
-        modelId: typeof input.modelId === "string" ? input.modelId : undefined,
-        effort: typeof input.effort === "string" ? input.effort : undefined,
-      }),
-      env: process.env,
-      onEvent: sendAcpEvent,
-      requestPermission: async () => true,
-    })
-    acpSessions.set(localSession.id, localSession)
+    const cwd = allowedProjectCwd(input?.cwd)
+    if (!cwd) throw new Error("Add a valid project to Open SWE before starting a local agent")
+    await backendSupervisor.start()
+    let thread = localThreadStore.create({ ...input, cwd })
     try {
-      await localSession.initialize()
+      thread = await recordLocalCheckpoint(thread)
     } catch (error) {
-      acpSessions.delete(localSession.id)
-      localSession.close()
+      localThreadStore.delete(thread.id)
       throw error
     }
-    await recordAcpCheckpoint(localSession)
-    void localSession.prompt(input.prompt || "", input.images || []).catch(() => {})
-    return localSession.snapshot()
+    return thread
   })
 
-  ipcMain.handle("desktop:acp-prompt", async (event, input) => {
+  ipcMain.handle("desktop:consume-local-prompt", (event, threadId) => {
     requireTrustedDesktopIpc(event)
-    const localSession = acpSessions.get(input?.sessionId)
-    if (!localSession) throw new Error("Local Deep Agents Code session not found")
-    await localSession.prompt(input.prompt || "", input.images || [])
-    return localSession.snapshot()
+    return localThreadStore.consumePrompt(threadId)
   })
 
-  ipcMain.handle("desktop:acp-cancel", (event, sessionId) => {
+  ipcMain.handle("desktop:get-local-thread", (event, threadId) => {
     requireTrustedDesktopIpc(event)
-    acpSessions.get(sessionId)?.cancel()
+    return localThreadStore.get(threadId)
   })
 
-  ipcMain.handle("desktop:acp-session", (event, sessionId) => {
+  ipcMain.handle("desktop:list-local-threads", (event) => {
     requireTrustedDesktopIpc(event)
-    return acpSessions.get(sessionId)?.snapshot() || null
+    return localThreadStore.list()
   })
 
-  ipcMain.handle("desktop:acp-diff", async (event, sessionId) => {
+  ipcMain.handle("desktop:update-local-thread", (event, input) => {
     requireTrustedDesktopIpc(event)
-    const localSession = acpSessions.get(sessionId)
-    const checkpoint = acpCheckpoints.get(sessionId)
-    if (
-      !localSession ||
-      !checkpoint ||
-      !listProjects().some((project) => project.cwd === localSession.cwd)
-    ) {
+    return localThreadStore.update(input?.id, input?.patch)
+  })
+
+  ipcMain.handle("desktop:delete-local-thread", (event, threadId) => {
+    requireTrustedDesktopIpc(event)
+    const thread = localThreadStore.delete(threadId)
+    if (!thread) return false
+    if (thread.checkpoint.repo && thread.checkpoint.ref) {
+      deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref])
+    }
+    return true
+  })
+
+  ipcMain.handle("desktop:get-local-diff", async (event, threadId) => {
+    requireTrustedDesktopIpc(event)
+    const thread = localThreadStore.get(threadId)
+    if (!thread || !allowedProjectCwd(thread.cwd) || !thread.checkpoint.repo || !thread.checkpoint.ref) {
       return { status: "missing", files: [], truncated: false }
     }
     try {
-      return await readDiff(checkpoint.repo, checkpoint.ref)
+      return await readDiff(thread.checkpoint.repo, thread.checkpoint.ref)
     } catch {
       return { status: "error", files: [], truncated: false }
     }
   })
 
-  ipcMain.handle("desktop:acp-sessions", (event) => {
-    requireTrustedDesktopIpc(event)
-    return [...acpSessions.values()].map((localSession) => localSession.summary())
-  })
 }
 
 function configPath() {
@@ -454,8 +433,18 @@ async function clearBackendCookies(url) {
 }
 
 async function serveBundledUi(request) {
-  if (!backendUrl) return new Response("Backend is not configured", { status: 503 })
   const url = new URL(request.url)
+  if (url.pathname === "/local-graph" || url.pathname.startsWith("/local-graph/")) {
+    if (!isAppUrl(mainWindow?.webContents.getURL() || "")) {
+      return new Response("Forbidden", { status: 403 })
+    }
+    try {
+      return await backendSupervisor.proxy(request)
+    } catch (error) {
+      return new Response(String(error?.message || error), { status: 503 })
+    }
+  }
+  if (!backendUrl) return new Response("Backend is not configured", { status: 503 })
   if (url.pathname.startsWith("/dashboard/api")) return proxyBackendRequest(request)
   if (!["GET", "HEAD"].includes(request.method)) {
     return new Response("Method not allowed", { status: 405 })
@@ -714,6 +703,14 @@ if (!hasSingleInstanceLock) {
       return
     }
 
+    const userDataPath = app.getPath("userData")
+    localThreadStore = new LocalThreadStore(path.join(userDataPath, "local-threads.json"))
+    backendSupervisor = new BackendSupervisor({
+      isPackaged: app.isPackaged,
+      repoRoot: path.resolve(__dirname, "../.."),
+      resourcesPath: process.resourcesPath,
+      projectsFile: projectsPath(),
+    })
     if (process.platform === "darwin") app.dock.setIcon(iconPath())
     protocol.handle("open-swe", serveBundledUi)
     configurePermissions()
@@ -725,8 +722,8 @@ if (!hasSingleInstanceLock) {
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
       listProjects,
-      getAcpSession: (sessionId) => acpSessions.get(sessionId),
-      userDataPath: app.getPath("userData"),
+      getLocalThread: (threadId) => localThreadStore.get(threadId),
+      userDataPath,
     })
 
     app.on("activate", () => {
@@ -742,12 +739,6 @@ if (!hasSingleInstanceLock) {
     if (quitting) return
     event.preventDefault()
     quitting = true
-    void closeAllTerminals().finally(() => {
-      for (const localSession of acpSessions.values()) localSession.close()
-      acpSessions.clear()
-      for (const { repo, ref } of acpCheckpoints.values()) deleteRefs(repo, [ref])
-      acpCheckpoints.clear()
-      app.quit()
-    })
+    void Promise.all([closeAllTerminals(), backendSupervisor?.close()]).finally(() => app.quit())
   })
 }

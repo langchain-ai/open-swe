@@ -6,24 +6,23 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
-  resolveAcpProjectPath: (input) =>
-    ipcRenderer.invoke("desktop:resolve-acp-project-path", { ...input }),
+  resolveLocalProjectPath: (input) =>
+    ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
   onProjectsChanged: (callback) => {
     const listener = (_event, projects) => callback(projects)
     ipcRenderer.on("desktop:projects-changed", listener)
     return () => ipcRenderer.removeListener("desktop:projects-changed", listener)
   },
-  startAcpSession: (input) => ipcRenderer.invoke("desktop:acp-start", input),
-  promptAcpSession: (input) => ipcRenderer.invoke("desktop:acp-prompt", input),
-  cancelAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-cancel", sessionId),
-  getAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-session", sessionId),
-  listAcpSessions: () => ipcRenderer.invoke("desktop:acp-sessions"),
-  getAcpDiff: (sessionId) => ipcRenderer.invoke("desktop:acp-diff", sessionId),
-  onAcpEvent: (callback) => {
-    const listener = (_event, payload) => callback(payload)
-    ipcRenderer.on("desktop:acp-event", listener)
-    return () => ipcRenderer.removeListener("desktop:acp-event", listener)
+  startLocalThread: (input) => ipcRenderer.invoke("desktop:start-local-thread", { ...input }),
+  consumeLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:consume-local-prompt", threadId),
+  getLocalThread: (threadId) => ipcRenderer.invoke("desktop:get-local-thread", threadId),
+  listLocalThreads: () => ipcRenderer.invoke("desktop:list-local-threads"),
+  updateLocalThread: (input) => {
+    const { threadId, ...patch } = input
+    return ipcRenderer.invoke("desktop:update-local-thread", { id: threadId, patch })
   },
+  deleteLocalThread: (threadId) => ipcRenderer.invoke("desktop:delete-local-thread", threadId),
+  getLocalDiff: (threadId) => ipcRenderer.invoke("desktop:get-local-diff", threadId),
   terminal: {
     attach: (input) => ipcRenderer.invoke("desktop:terminal-attach", { ...input }),
     open: (input) => ipcRenderer.invoke("desktop:terminal-attach", { ...input }),

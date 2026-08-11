@@ -25,10 +25,11 @@ import {
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
 import { useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import type { ComponentType, ReactNode, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
-import type { DesktopAcpSessionSummary, DesktopProject } from "@/desktop"
+import type { DesktopLocalThreadSummary, DesktopProject } from "@/desktop"
 import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
@@ -54,7 +55,10 @@ import {
   useSidebarThreads,
 } from "@/features/agents/lib/queries"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
-import { useDesktopAcpSessions } from "@/features/agents/lib/desktopAcp"
+import {
+  localThreadKeys,
+  useDesktopLocalThreads,
+} from "@/features/agents/lib/desktopLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { cn } from "@/lib/utils"
 
@@ -127,7 +131,7 @@ export function AgentsSidebar({
     resetFilters,
   } = useSidebarPrefs()
   const sidebar = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT, activeThreadId)
-  const localSessions = useDesktopAcpSessions()
+  const localSessions = useDesktopLocalThreads().data ?? []
   const {
     projects: localProjects,
     addProject: addLocalProject,
@@ -346,9 +350,9 @@ function SectionHeader({
 
 function groupLocalProjects(
   projects: Array<DesktopProject>,
-  sessions: Array<DesktopAcpSessionSummary>
+  sessions: Array<DesktopLocalThreadSummary>
 ) {
-  const sessionsByProject = new Map<string, Array<DesktopAcpSessionSummary>>()
+  const sessionsByProject = new Map<string, Array<DesktopLocalThreadSummary>>()
   for (const session of sessions) {
     const group = sessionsByProject.get(session.cwd) ?? []
     group.push(session)
@@ -379,7 +383,7 @@ function LocalThreadGroup({
   compact = false,
 }: {
   project: DesktopProject
-  sessions: Array<DesktopAcpSessionSummary>
+  sessions: Array<DesktopLocalThreadSummary>
   activeSessionId?: string
   onNavigate?: () => void
   onRemove: () => void
@@ -433,37 +437,59 @@ function LocalThreadRow({
   onNavigate,
   compact = false,
 }: {
-  session: DesktopAcpSessionSummary
+  session: DesktopLocalThreadSummary
   isActive: boolean
   onNavigate?: () => void
   compact?: boolean
 }) {
+  const queryClient = useQueryClient()
+  const [deleting, setDeleting] = useState(false)
   const running = session.status === "running" || session.status === "starting"
   return (
-    <Link
-      to="/agents/local/$sessionId"
-      params={{ sessionId: session.id }}
-      onClick={onNavigate}
-      className={cn(
-        "mb-0.5 flex items-center gap-2 rounded-lg px-2.5 transition-colors",
-        compact ? "h-7 gap-1.5" : "h-8",
-        isActive
-          ? "bg-accent text-foreground"
-          : "text-muted-foreground hover:bg-sidebar-row-hover"
-      )}
-    >
-      {running ? (
-        <CircleNotchIcon
-          className="size-3 shrink-0 animate-spin text-primary"
-          aria-label="Local thread running"
-        />
-      ) : (
-        <span className="size-2 shrink-0 rounded-full bg-border" />
-      )}
-      <span className="min-w-0 flex-1 truncate text-[13px]">
-        {session.title}
-      </span>
-    </Link>
+    <div className={cn("group relative", deleting && "opacity-50")}>
+      <Link
+        to="/agents/local/$sessionId"
+        params={{ sessionId: session.id }}
+        onClick={onNavigate}
+        className={cn(
+          "mb-0.5 flex items-center gap-2 rounded-lg px-2.5 pr-8 transition-colors",
+          compact ? "h-7 gap-1.5" : "h-8",
+          isActive
+            ? "bg-accent text-foreground"
+            : "text-muted-foreground hover:bg-sidebar-row-hover"
+        )}
+      >
+        {running ? (
+          <CircleNotchIcon
+            className="size-3 shrink-0 animate-spin text-primary"
+            aria-label="Local thread running"
+          />
+        ) : (
+          <span className="size-2 shrink-0 rounded-full bg-border" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-[13px]">
+          {session.title}
+        </span>
+      </Link>
+      <button
+        type="button"
+        aria-label={`Delete ${session.title}`}
+        className="absolute top-1/2 right-1 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent hover:text-destructive focus:opacity-100 [@media(hover:none)]:opacity-100"
+        disabled={deleting}
+        onClick={() => {
+          if (!window.confirm(`Delete "${session.title}"?`)) return
+          setDeleting(true)
+          void window.openSweDesktop
+            ?.deleteLocalThread(session.id)
+            .then(() =>
+              queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
+            )
+            .finally(() => setDeleting(false))
+        }}
+      >
+        <TrashIcon className="size-3.5" />
+      </button>
+    </div>
   )
 }
 

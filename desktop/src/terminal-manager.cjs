@@ -305,7 +305,7 @@ function createTerminalManager(options) {
   const fileSystem = options.fs || fs
   const logsDir = options.logsDir
   const listProjects = options.listProjects
-  const getAcpSession = options.getAcpSession
+  const getLocalThread = options.getLocalThread || options.getAcpSession
   const baseEnv = options.env || getUserShellEnv()
   const inspect = options.inspect || defaultInspect
   const historyLines = options.historyLines || HISTORY_LINES
@@ -346,9 +346,9 @@ function createTerminalManager(options) {
     }
     const localSessionId = cleanId(input.localSessionId, "local session ID")
     const terminalId = cleanId(input.terminalId, "terminal ID")
-    const localSession = getAcpSession(localSessionId)
+    const localSession = getLocalThread(localSessionId)
     if (!localSession || typeof localSession.cwd !== "string") {
-      throw new Error("Local Deep Agents Code session not found")
+      throw new Error("Local thread not found")
     }
     return { localSessionId, terminalId, localSession }
   }
@@ -807,7 +807,7 @@ function createTerminalManager(options) {
   async function close(input) {
     if (!isRecord(input)) throw new Error("Invalid terminal request")
     const localSessionId = cleanId(input.localSessionId, "local session ID")
-    if (!getAcpSession(localSessionId)) throw new Error("Local Deep Agents Code session not found")
+    if (!getLocalThread(localSessionId)) throw new Error("Local thread not found")
     if (input.terminalId !== undefined) {
       const terminalId = cleanId(input.terminalId, "terminal ID")
       return locked(localSessionId, () => closeOne(localSessionId, terminalId, input.deleteHistory === true))
@@ -838,7 +838,7 @@ function createTerminalManager(options) {
 
   function list(localSessionId) {
     cleanId(localSessionId, "local session ID")
-    if (!getAcpSession(localSessionId)) throw new Error("Local Deep Agents Code session not found")
+    if (!getLocalThread(localSessionId)) throw new Error("Local thread not found")
     return [...sessions.values()]
       .filter((session) => session.localSessionId === localSessionId)
       .map(summary)
@@ -847,7 +847,7 @@ function createTerminalManager(options) {
 
   function subscribeMetadata(localSessionId, listener) {
     cleanId(localSessionId, "local session ID")
-    if (!getAcpSession(localSessionId)) throw new Error("Local Deep Agents Code session not found")
+    if (!getLocalThread(localSessionId)) throw new Error("Local thread not found")
     const subscription = (event) => {
       const eventSessionId = event.terminal?.localSessionId ?? event.localSessionId
       if (eventSessionId === localSessionId) listener(event)
@@ -901,14 +901,14 @@ function configureTerminalIpc({
   requireTrusted,
   getWindow,
   listProjects,
-  getAcpSession,
+  getLocalThread,
   userDataPath,
 }) {
   ensurePtySpawnHelperExecutable()
   configuredManager = createTerminalManager({
     logsDir: path.join(userDataPath, "terminal-history"),
     listProjects,
-    getAcpSession,
+    getLocalThread,
   })
   const attachments = new Map()
   const metadataAttachments = new Map()

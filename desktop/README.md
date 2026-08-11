@@ -6,19 +6,19 @@
 The Electron package ships the compiled Open SWE web UI. Users configure only the URL of a
 compatible Open SWE backend; they do not need a separately hosted dashboard.
 
-Desktop users can choose **This Mac** in the new-task composer to run the Python
-`deepagents-code` agent over ACP in a selected local project. The web dashboard does not expose
-this option. The desktop app passes the selected model and reasoning effort to the user's installed
-`dcode --acp`, inheriting its authentication and configuration. Missing local provider credentials
-or packages fail during startup and surface in the composer. The app finds the standard
-`~/.local/bin/dcode` installation even when a packaged app does not inherit the terminal's `PATH`;
-`OPEN_SWE_DCODE_COMMAND` overrides the executable path. Added projects are persisted in the desktop
-app's local data and can be selected from the **This Mac** submenu or managed from the sidebar. Local
-dcode runs are ephemeral: their sessions remain available only for the lifetime of the desktop
-process and cannot be resumed after it exits.
+Desktop users can choose **This Mac** in the new-task composer to run Open SWE directly in a
+selected local project. Electron supervises one local LangGraph process bound to a random
+`127.0.0.1` port and protects it with a per-launch bearer token. The renderer reaches it only through
+the same-origin `/local-graph/*` protocol route, so neither the token nor the raw port enters browser
+state. Source launches run the repository graph with `uv`; packaged apps use the bundled Python
+runtime and local backend built by `build:local-backend`. No `dcode` installation is required.
 
-The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
-started, so it shows what the agent changed and not the working tree's prior state.
+Added projects and local thread metadata are atomically persisted under Electron `userData`. Local
+threads retain their model, effort, pending first prompt, status, and git checkpoint across restarts;
+an interrupted running thread is reconciled to `error`. Project paths are realpath-checked against
+the desktop project allowlist before thread creation and again by the local graph. The side panel's
+**Changes** tab diffs the project against the retained git checkpoint. Checkpoint refs survive app
+quit and are removed only when the user explicitly deletes the local thread.
 
 ## How it connects
 
@@ -50,10 +50,11 @@ beside an installed `Open SWE` app without sharing its login session, backend co
 projects, or single-instance lock. The dev window is labeled **Open SWE Development**; its first
 launch may require signing in and adding projects again.
 
-The Python dcode CLI must also be installed and configured. Confirm it is available with
-`dcode --version` before starting the desktop app.
+Install `uv` and sync the repository Python environment before starting the desktop app. Electron
+starts `uv run langgraph dev --config langgraph.desktop.json` on demand for local threads.
 
-Development defaults to `http://localhost:2024`. Point to another backend with:
+Development defaults to `http://localhost:2024` for cloud/dashboard traffic. Point to another
+backend with:
 
 ```bash
 pnpm --dir desktop run start -- --backend-url=https://open-swe-api.example.com
@@ -70,8 +71,10 @@ pnpm --dir desktop run pack # unpacked application for the current platform
 pnpm --dir desktop run dist # installer for the current platform
 ```
 
-Both commands build `ui/` and package its static output with Electron. Build outputs are written
-to `desktop/dist/`.
+Both commands build `ui/`, run `build:local-backend` to assemble a platform-specific managed Python
+runtime with the Open SWE package, and package both resources with Electron. Build outputs are
+written to `desktop/dist/`. Packaging therefore requires `uv` and network access to download the
+managed Python runtime and locked Python dependencies.
 
 ## macOS releases
 

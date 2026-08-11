@@ -124,7 +124,7 @@ function TerminalViewport({
         }
         const path = text.replace(/:\d+(?::\d+)?$/, "")
         void desktop
-          .resolveAcpProjectPath({ localSessionId, path })
+          .resolveLocalProjectPath({ localSessionId, path })
           .then((relativePath) => {
             if (relativePath) onOpenFile(relativePath)
           })

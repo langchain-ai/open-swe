@@ -7,33 +7,24 @@ export interface DesktopProject {
   addedAt: number
 }
 
-export interface DesktopAcpEvent {
-  sequence: number
-  timestamp: string
-  type: string
-  [key: string]: unknown
-}
-
-export interface DesktopAcpSessionSummary {
+export interface DesktopLocalThreadSummary {
   id: string
   cwd: string
   title: string
   status: "starting" | "idle" | "running" | "error"
   createdAt: number
   updatedAt: number
+  modelId: string | null
+  effort: string | null
 }
 
-export interface DesktopAcpSession extends DesktopAcpSessionSummary {
-  events: Array<DesktopAcpEvent>
-}
-
-export interface DesktopAcpDiff {
+export interface DesktopLocalDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
   files: Array<ThreadPrDiffFile>
 }
 
-export interface DesktopAcpPromptInput {
+export interface DesktopLocalPromptInput {
   prompt: string
   images: Array<ImageChunk>
 }
@@ -156,31 +147,30 @@ declare global {
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void
       openExternal: (url: string) => Promise<boolean>
-      resolveAcpProjectPath: (input: {
+      resolveLocalProjectPath: (input: {
         localSessionId: string
         path: string
       }) => Promise<string | null>
-      startAcpSession: (
-        input: DesktopAcpPromptInput & {
+      startLocalThread: (
+        input: DesktopLocalPromptInput & {
           cwd: string
           modelId?: string
           effort?: string
         }
-      ) => Promise<DesktopAcpSession>
-      promptAcpSession: (
-        input: DesktopAcpPromptInput & { sessionId: string }
-      ) => Promise<DesktopAcpSession>
-      cancelAcpSession: (sessionId: string) => Promise<void>
-      getAcpSession: (sessionId: string) => Promise<DesktopAcpSession | null>
-      listAcpSessions: () => Promise<Array<DesktopAcpSessionSummary>>
-      getAcpDiff: (sessionId: string) => Promise<DesktopAcpDiff>
-      onAcpEvent: (
-        callback: (payload: {
-          sessionId: string
-          event: DesktopAcpEvent
-          session: DesktopAcpSessionSummary
-        }) => void
-      ) => () => void
+      ) => Promise<DesktopLocalThreadSummary>
+      consumeLocalPrompt: (
+        threadId: string
+      ) => Promise<DesktopLocalPromptInput | null>
+      getLocalThread: (
+        threadId: string
+      ) => Promise<DesktopLocalThreadSummary | null>
+      listLocalThreads: () => Promise<Array<DesktopLocalThreadSummary>>
+      updateLocalThread: (input: {
+        threadId: string
+        status: DesktopLocalThreadSummary["status"]
+      }) => Promise<DesktopLocalThreadSummary | null>
+      deleteLocalThread: (threadId: string) => Promise<boolean>
+      getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
       terminal: DesktopTerminalBridge
     }
   }

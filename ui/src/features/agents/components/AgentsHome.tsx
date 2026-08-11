@@ -3,6 +3,8 @@ import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 
+import type { DesktopLocalThreadSummary } from "@/desktop"
+
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -19,6 +21,7 @@ import {
 } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
+import { localThreadKeys } from "@/features/agents/lib/desktopLocal"
 import { useProfile, useRepos } from "@/lib/profile"
 import {
   requestNotificationPermission,
@@ -134,13 +137,21 @@ export function AgentsHome() {
       setSubmitting(true)
       setLocalError(null)
       try {
-        const session = await desktop.startAcpSession({
+        const session = await desktop.startLocalThread({
           cwd: localProjectPath,
           prompt,
           images,
           modelId: activeSelection?.modelId,
           effort: activeSelection?.effort,
         })
+        queryClient.setQueryData(localThreadKeys.detail(session.id), session)
+        queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
+          localThreadKeys.all,
+          (current = []) => [
+            session,
+            ...current.filter((thread) => thread.id !== session.id),
+          ]
+        )
         await navigate({
           to: "/agents/local/$sessionId",
           params: { sessionId: session.id },

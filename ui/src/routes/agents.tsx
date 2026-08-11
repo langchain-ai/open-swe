@@ -62,9 +62,13 @@ function AgentsLayout() {
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
     >
-      <AgentThreadStreamProvider threadId={activeThreadId ?? null}>
+      {activeLocalSessionId ? (
         <Outlet />
-      </AgentThreadStreamProvider>
+      ) : (
+        <AgentThreadStreamProvider threadId={activeThreadId ?? null}>
+          <Outlet />
+        </AgentThreadStreamProvider>
+      )}
     </AgentsShell>
   )
 }

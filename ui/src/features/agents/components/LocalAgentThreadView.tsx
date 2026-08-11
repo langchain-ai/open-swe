@@ -1,7 +1,9 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { CircleAlert, FolderOpen, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
+import type { ImageChunk } from "@/features/agents/lib/types"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   AgentPanelShell,
@@ -15,13 +17,16 @@ import {
 import { Messages } from "@/features/agents/components/messages"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
 import {
+  useDesktopLocalThread,
+  useLocalThreadDiff,
+  useRefreshLocalThreads,
+} from "@/features/agents/lib/desktopLocal"
+import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
-import {
-  useDesktopAcpSession,
-  useLocalSessionDiff,
-} from "@/features/agents/lib/desktopAcp"
+import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -32,8 +37,28 @@ const LOCAL_PANEL_TABS = [
 
 type LocalPanelTab = (typeof LOCAL_PANEL_TABS)[number][0]
 
+function promptContent(text: string, images: Array<ImageChunk>) {
+  const trimmed = text.trim()
+  const imageBlocks = images.map((image) => ({
+    type: "image",
+    base64: image.base64,
+    mime_type: image.mimeType,
+    ...(image.fileName ? { file_name: image.fileName } : {}),
+  }))
+  return [...imageBlocks, ...(trimmed ? [{ type: "text", text: trimmed }] : [])]
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
-  const { session, messages, loaded } = useDesktopAcpSession(sessionId)
+  const stream = useAgentThreadStream()
+  const threadQuery = useDesktopLocalThread(sessionId)
+  const thread = threadQuery.data
+  const refreshThreads = useRefreshLocalThreads()
+  const initialPromptRef = useRef(false)
+  const [error, setError] = useState<string | null>(null)
   const isMobile = useIsMobile()
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
@@ -57,25 +82,98 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [handlePanelCollapsedChange]
   )
 
-  const isRunning =
-    session?.status === "running" || session?.status === "starting"
-  const diff = useLocalSessionDiff(
+  const isRunning = stream.isLoading || thread?.status === "running"
+  const diff = useLocalThreadDiff(
     sessionId,
-    !panelCollapsed && panelTab === "changes" && Boolean(session),
+    !panelCollapsed && panelTab === "changes" && Boolean(thread),
     isRunning
   )
   const files = useMemo(
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
   )
+  const messages = useMemo(
+    () =>
+      streamMessagesToUi(
+        stream.messages,
+        stream.toolCalls,
+        stream.subagents,
+        messageArrivalTimestamp
+      ),
+    [stream.messages, stream.toolCalls, stream.subagents]
+  )
 
-  if (!session) {
+  const updateStatus = useCallback(
+    async (status: "idle" | "running" | "error") => {
+      await window.openSweDesktop?.updateLocalThread({
+        threadId: sessionId,
+        status,
+      })
+      refreshThreads(sessionId)
+    },
+    [refreshThreads, sessionId]
+  )
+
+  const submit = useCallback(
+    async (prompt: string, images: Array<ImageChunk>) => {
+      if (!thread) return
+      setError(null)
+      await updateStatus("running")
+      try {
+        await stream.submit(
+          {
+            messages: [
+              { type: "human", content: promptContent(prompt, images) },
+            ],
+          },
+          {
+            config: {
+              configurable: {
+                local_project_path: thread.cwd,
+                ...(thread.modelId ? { agent_model_id: thread.modelId } : {}),
+                ...(thread.effort ? { agent_effort: thread.effort } : {}),
+              },
+            },
+          }
+        )
+        await updateStatus("idle")
+      } catch (cause) {
+        setError(errorMessage(cause))
+        await updateStatus("error")
+      }
+    },
+    [stream, thread, updateStatus]
+  )
+
+  useEffect(() => {
+    if (!thread || initialPromptRef.current) return
+    initialPromptRef.current = true
+    void stream.hydrationPromise
+      .then(() => window.openSweDesktop?.consumeLocalPrompt(sessionId))
+      .then((pending) => {
+        if (pending) return submit(pending.prompt, pending.images)
+      })
+      .catch((cause) => {
+        setError(errorMessage(cause))
+        void updateStatus("error")
+      })
+  }, [sessionId, stream.hydrationPromise, submit, thread, updateStatus])
+
+  useEffect(() => {
+    if (!stream.error) return
+    setError(errorMessage(stream.error))
+    void updateStatus("error")
+  }, [stream.error, updateStatus])
+
+  if (!thread) {
     return (
       <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 text-xs text-muted-foreground">
-        {loaded
-          ? "This local session is no longer running."
-          : "Loading local Deep Agents Code session…"}
-        {loaded && (
+        {threadQuery.isPending
+          ? "Loading local Deep Agents Code session…"
+          : threadQuery.error
+            ? errorMessage(threadQuery.error)
+            : "This local session no longer exists."}
+        {!threadQuery.isPending && (
           <Link
             className="text-foreground underline underline-offset-4"
             to="/agents"
@@ -96,23 +194,21 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         <div
           className={cn(
             "mx-auto flex w-full max-w-3xl items-center gap-2 px-4 pt-3 text-xs text-muted-foreground",
-            // The collapsed panel floats a fixed expand button in the top-right
-            // corner; clear it so it never covers the "This Mac" label.
             panelCollapsed && "pr-14"
           )}
         >
           <FolderOpen className="size-3.5" />
-          <span className="truncate" title={session.cwd}>
-            {session.cwd}
+          <span className="truncate" title={thread.cwd}>
+            {thread.cwd}
           </span>
           <span className="ml-auto shrink-0">This Mac</span>
         </div>
-        {session.status === "error" && (
+        {(error || thread.status === "error") && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
             <Alert variant="error">
               <CircleAlert />
               <AlertDescription>
-                Deep Agents Code stopped. Start a new local session to continue.
+                {error || "Deep Agents Code stopped unexpectedly."}
               </AlertDescription>
             </Alert>
           </div>
@@ -121,10 +217,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           <Messages
             contentWidthClass="max-w-3xl"
             isStreaming={isRunning}
-            isThinking={isRunning}
+            isThinking={stream.isLoading}
             messages={messages}
             onOpenFile={handleOpenFile}
-            streamIsLoading={isRunning}
+            streamIsLoading={stream.isLoading}
           />
           <div className="shrink-0 px-4 pb-4">
             <div className="mx-auto w-full max-w-3xl min-w-0">
@@ -157,23 +253,27 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 </div>
               )}
               <AgentPromptBar
-                activeRun={{ threadId: session.id, running: isRunning }}
+                activeRun={{ threadId: thread.id, running: isRunning }}
                 busy={isRunning}
                 compact
-                disabled={session.status === "error"}
-                onStop={() =>
-                  window.openSweDesktop?.cancelAcpSession(session.id)
-                }
+                onStop={async () => {
+                  try {
+                    await stream.stop()
+                    await updateStatus("idle")
+                  } catch (cause) {
+                    setError(errorMessage(cause))
+                    await updateStatus("error")
+                  }
+                }}
                 onSubmit={async (prompt, images) => {
                   const terminalContext = terminalContexts.join("\n\n")
                   setTerminalContexts([])
-                  await window.openSweDesktop?.promptAcpSession({
-                    sessionId: session.id,
-                    prompt: terminalContext
+                  await submit(
+                    terminalContext
                       ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
                       : prompt,
-                    images,
-                  })
+                    images
+                  )
                 }}
                 placeholder="Add a follow up"
               />
@@ -202,8 +302,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             />
           ) : (
             <TerminalPanel
-              localSessionId={session.id}
-              cwd={session.cwd}
+              localSessionId={thread.id}
+              cwd={thread.cwd}
               onOpenFile={handleOpenFile}
               onAddToChat={(text) =>
                 setTerminalContexts((current) => [...current, text])

@@ -1,0 +1,16 @@
+{
+  "python_version": "3.12",
+  "graphs": {
+    "local_agent": "agent.graphs.local_agent:get_local_agent"
+  },
+  "dependencies": [
+    "."
+  ],
+  "auth": {
+    "path": "agent.local_auth:auth",
+    "disable_studio_auth": true
+  },
+  "http": {
+    "disable_ui": true
+  }
+}
