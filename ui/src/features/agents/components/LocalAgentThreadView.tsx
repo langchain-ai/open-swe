@@ -1,11 +1,14 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { CircleAlert, FolderOpen, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
+import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
+import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   AgentPanelShell,
   PANEL_MIN_CHAT_WIDTH,
+  PanelComingSoon,
 } from "@/features/agents/components/AgentPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import {
@@ -14,6 +17,8 @@ import {
 } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
+import { usePanelTabs } from "@/features/agents/lib/panelTabs"
+import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -25,12 +30,12 @@ import {
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
-const LOCAL_PANEL_TABS = [
-  ["changes", "Changes"],
-  ["terminal", "Terminal"],
-] as const
-
-type LocalPanelTab = (typeof LOCAL_PANEL_TABS)[number][0]
+const LOCAL_PANEL_KINDS: ReadonlyArray<PanelTabKind> = [
+  "review",
+  "terminal",
+  "browser",
+  "files",
+]
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const { session, messages, loaded } = useDesktopAcpSession(sessionId)
@@ -38,7 +43,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
   )
-  const [panelTab, setPanelTab] = useState<LocalPanelTab>("changes")
+  const panel = usePanelTabs(sessionId)
+  const terminals = useTerminalGroups(sessionId, session?.cwd ?? "")
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
   const handlePanelCollapsedChange = useCallback(
@@ -51,17 +57,55 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const handleOpenFile = useCallback(
     (filePath: string) => {
       setRevealFilePath(filePath)
-      setPanelTab("changes")
+      panel.open({ id: "review", kind: "review" })
       handlePanelCollapsedChange(false)
     },
-    [handlePanelCollapsedChange]
+    [handlePanelCollapsedChange, panel]
   )
+  const handleOpenKind = useCallback(
+    (kind: PanelTabKind) => {
+      if (kind !== "terminal") {
+        panel.open({ id: kind, kind })
+        return
+      }
+      panel.open({ id: terminals.addGroup(), kind })
+    },
+    [panel, terminals]
+  )
+  const handleSelectTab = useCallback(
+    (id: string) => {
+      panel.select(id)
+      const group = terminals.state.terminalGroups.find(
+        (candidate) => candidate.id === id
+      )
+      const terminalId = group?.terminalIds[0]
+      if (terminalId) terminals.focus(terminalId)
+    },
+    [panel, terminals]
+  )
+  const handleCloseTab = useCallback(
+    (id: string) => {
+      if (panel.tabs.find((tab) => tab.id === id)?.kind === "terminal") {
+        terminals.closeGroup(id)
+      }
+      panel.close(id)
+    },
+    [panel, terminals]
+  )
+
+  const terminalGroupIds = terminals.state.terminalGroups
+    .map((group) => group.id)
+    .join(",")
+  const syncTerminals = panel.syncTerminals
+  useEffect(() => {
+    syncTerminals(terminalGroupIds ? terminalGroupIds.split(",") : [])
+  }, [syncTerminals, terminalGroupIds])
 
   const isRunning =
     session?.status === "running" || session?.status === "starting"
   const diff = useLocalSessionDiff(
     sessionId,
-    !panelCollapsed && panelTab === "changes" && Boolean(session),
+    !panelCollapsed && panel.activeTab?.kind === "review" && Boolean(session),
     isRunning
   )
   const files = useMemo(
@@ -182,37 +226,80 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         </div>
       </div>
       <AgentPanelShell
-        tabs={LOCAL_PANEL_TABS}
-        activeTab={panelTab}
-        onTabChange={setPanelTab}
+        tabs={panel.tabs.map((tab) =>
+          tab.kind === "terminal"
+            ? { ...tab, title: terminalTabTitle(terminals, tab.id) }
+            : tab
+        )}
+        activeTabId={panel.activeTabId}
+        onSelectTab={handleSelectTab}
+        onCloseTab={handleCloseTab}
+        onOpenKind={handleOpenKind}
+        menuKinds={LOCAL_PANEL_KINDS}
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
       >
-        {({ fullScreen }) =>
-          panelTab === "changes" ? (
-            <DiffFilesView
-              files={files}
-              revealFilePath={revealFilePath}
-              fullScreen={fullScreen}
-              emptyLabel={localDiffEmptyLabel(
-                diff.data?.status,
-                diff.isPending
-              )}
-              truncated={diff.data?.truncated}
-            />
-          ) : (
-            <TerminalPanel
-              localSessionId={session.id}
-              cwd={session.cwd}
-              onOpenFile={handleOpenFile}
-              onAddToChat={(text) =>
-                setTerminalContexts((current) => [...current, text])
-              }
-            />
-          )
-        }
+        {({ fullScreen }) => (
+          <>
+            {panel.activeTab?.kind === "review" && (
+              <DiffFilesView
+                files={files}
+                revealFilePath={revealFilePath}
+                fullScreen={fullScreen}
+                emptyLabel={localDiffEmptyLabel(
+                  diff.data?.status,
+                  diff.isPending
+                )}
+                truncated={diff.data?.truncated}
+              />
+            )}
+            {(panel.activeTab?.kind === "browser" ||
+              panel.activeTab?.kind === "files") && <PanelComingSoon />}
+            {/* Kept mounted across tabs: unmounting kills the user's shell. */}
+            {panel.tabs
+              .filter((tab) => tab.kind === "terminal")
+              .map((tab) => (
+                <div
+                  key={tab.id}
+                  className={cn(
+                    "min-h-0 flex-1",
+                    tab.id !== panel.activeTabId && "hidden"
+                  )}
+                >
+                  <TerminalPanel
+                    localSessionId={session.id}
+                    cwd={session.cwd}
+                    groupId={tab.id}
+                    terminals={terminals}
+                    onOpenFile={handleOpenFile}
+                    onAddToChat={(text) =>
+                      setTerminalContexts((current) => [...current, text])
+                    }
+                  />
+                </div>
+              ))}
+          </>
+        )}
       </AgentPanelShell>
     </div>
+  )
+}
+
+function terminalTabTitle(
+  terminals: TerminalGroupsController,
+  groupId: string
+): string {
+  const group = terminals.state.terminalGroups.find(
+    (candidate) => candidate.id === groupId
+  )
+  const terminalId = group?.terminalIds.includes(
+    terminals.state.activeTerminalId
+  )
+    ? terminals.state.activeTerminalId
+    : group?.terminalIds[0]
+  return (
+    (terminalId ? terminals.metadataById.get(terminalId)?.label : null) ||
+    "Terminal"
   )
 }
 

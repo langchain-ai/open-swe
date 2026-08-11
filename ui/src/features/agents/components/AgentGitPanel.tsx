@@ -178,9 +178,13 @@ export function AgentGitPanel({
 
   return (
     <AgentPanelShell
-      tabs={[["git", "Git"], ...(hasPlan ? ([["plan", "Plan"]] as const) : [])]}
-      activeTab={topTab}
-      onTabChange={onTabChange}
+      tabs={[
+        { id: "git", kind: "review" as const },
+        ...(hasPlan ? [{ id: "plan", kind: "plan" as const }] : []),
+      ]}
+      activeTabId={topTab}
+      onSelectTab={(id) => onTabChange(id as AgentPanelTab)}
+      menuKinds={[]}
       collapsed={collapsed}
       onCollapsedChange={setCollapsed}
     >
@@ -188,10 +192,6 @@ export function AgentGitPanel({
         <>
           {topTab === "plan" ? (
             <PlanView threadId={thread.id} onApprove={onPlanApproved} />
-          ) : topTab !== "git" ? (
-            <div className="flex flex-1 items-center justify-center p-6 text-xs text-muted-foreground/70">
-              Coming Soon
-            </div>
           ) : (
             <>
               {pr && (
