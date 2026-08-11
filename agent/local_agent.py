@@ -91,7 +91,11 @@ async def get_local_agent(config: RunnableConfig) -> Pregel:
     backend = LocalShellBackend(
         root_dir=project_path,
         virtual_mode=True,
-        inherit_env=True,
+        env={
+            key: value
+            for key in ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TMPDIR")
+            if (value := os.environ.get(key))
+        },
     )
     return create_deep_agent(
         model=model,
