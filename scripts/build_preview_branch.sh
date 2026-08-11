@@ -54,11 +54,15 @@ git fetch origin main
 git checkout -B "$PREVIEW_BRANCH" origin/main
 base_sha="$(git rev-parse HEAD)"
 
-prs="$(gh pr list \
-  --state open \
-  --label "$PREVIEW_LABEL" \
-  --limit "$PREVIEW_MAX_PRS" \
-  --json number,headRefOid,authorAssociation,author)"
+# The REST pulls endpoint is the only one carrying author_association alongside
+# the head sha; `gh pr list --json` does not expose it.
+prs="$(gh api --paginate "repos/${GH_REPO}/pulls?state=open&per_page=100" \
+  --jq ".[]
+        | select(any(.labels[]; .name == \"${PREVIEW_LABEL}\"))
+        | [.number, .head.sha, .author_association, .user.login]
+        | @tsv" |
+  sort -n |
+  awk -v max="$PREVIEW_MAX_PRS" 'NR<=max')"
 
 included=()
 skipped=()
@@ -100,7 +104,7 @@ while IFS=$'\t' read -r number head_sha association login; do
     upsert_pr_comment "$number" "conflict:${fetched_sha:0:7}" \
       "This PR conflicts with the \`${PREVIEW_BRANCH}\` branch (\`main\` plus the other PRs labeled \`${PREVIEW_LABEL}\` with a lower number), so it is **not** deployed to the preview environment. Rebase on \`main\` or wait for the conflicting PR to merge, then push to retry."
   fi
-done < <(echo "$prs" | jq -r 'sort_by(.number)[] | [.number, .headRefOid, .authorAssociation, .author.login] | @tsv')
+done < <(printf '%s\n' "$prs")
 
 git push --force origin "HEAD:refs/heads/${PREVIEW_BRANCH}"
 
