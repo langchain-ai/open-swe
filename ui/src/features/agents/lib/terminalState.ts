@@ -1,5 +1,4 @@
 export const MAX_TERMINALS_PER_GROUP = 4
-export const DEFAULT_TERMINAL_ID = "term-1"
 
 export type TerminalSplitDirection = "horizontal" | "vertical"
 
@@ -97,15 +96,14 @@ export function normalizeTerminalState(
   }
 }
 
+/** Sessions start with no terminals: the panel shows its launcher instead. */
 export function createTerminalState(): TerminalUiState {
   return {
-    terminalIds: [DEFAULT_TERMINAL_ID],
-    activeTerminalId: DEFAULT_TERMINAL_ID,
-    terminalGroups: [
-      { id: groupId(DEFAULT_TERMINAL_ID), terminalIds: [DEFAULT_TERMINAL_ID] },
-    ],
-    activeTerminalGroupId: groupId(DEFAULT_TERMINAL_ID),
-    nextTerminalNumber: 2,
+    terminalIds: [],
+    activeTerminalId: "",
+    terminalGroups: [],
+    activeTerminalGroupId: "",
+    nextTerminalNumber: 1,
   }
 }
 

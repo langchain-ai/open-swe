@@ -193,7 +193,7 @@ export function DiffFilesView({
 
   return (
     <>
-      <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+      <div className="flex min-h-9 items-center gap-1 border-b border-border px-3 py-1">
         {leading}
         <div className="ml-auto flex min-w-0 items-center gap-2">
           <DiffWrapToggle />
@@ -223,7 +223,7 @@ export function DiffFilesView({
           >
             <Virtualizer
               className="min-h-0 flex-1 overflow-y-auto"
-              contentClassName="space-y-2 p-2"
+              contentClassName="p-0"
               config={DIFF_VIRTUALIZER_CONFIG}
             >
               {files.map((file) => (
@@ -291,22 +291,29 @@ const FileDiffSection = memo(
       }),
       [file.filePath, file.modifiedContent, file.treePath]
     )
+    const lastSlash = file.treePath.lastIndexOf("/")
+    const directory =
+      lastSlash === -1 ? "" : file.treePath.slice(0, lastSlash + 1)
+    const fileName = file.treePath.slice(lastSlash + 1)
 
     return (
-      <div
-        ref={sectionRef}
-        className="mb-2 scroll-mt-2 overflow-hidden rounded-lg border border-border"
-      >
+      <div ref={sectionRef} className="overflow-hidden border-b border-border">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-2 bg-accent px-3 py-2 text-left text-xs"
+          className="flex w-full items-center gap-2 bg-card px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
         >
           <CaretDownIcon
-            className={cn("size-3 transition-transform", !open && "-rotate-90")}
+            className={cn(
+              "size-3 shrink-0 text-muted-foreground transition-transform",
+              !open && "-rotate-90"
+            )}
           />
-          <span className="truncate font-medium text-foreground">
-            {file.treePath}
+          <span className="min-w-0 truncate" title={file.treePath}>
+            {directory && (
+              <span className="text-muted-foreground">{directory}</span>
+            )}
+            <span className="font-medium text-foreground">{fileName}</span>
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-2">
             <span className="text-success-foreground">+{file.additions}</span>
@@ -315,11 +322,18 @@ const FileDiffSection = memo(
         </button>
         {open &&
           (file.unrenderable ? (
-            <div className="bg-card p-4 text-center text-xs text-muted-foreground/70">
+            <div className="bg-background p-4 text-center text-xs text-muted-foreground/70">
               Binary or large file — diff not shown.
             </div>
           ) : (
-            <div className="overflow-hidden bg-card p-2">
+            <div
+              className="overflow-hidden bg-background"
+              style={
+                {
+                  "--panel-diff-bg": "var(--background)",
+                } as React.CSSProperties
+              }
+            >
               <MultiFileDiff
                 oldFile={oldFile}
                 newFile={newFile}
