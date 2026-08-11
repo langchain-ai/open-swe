@@ -1,10 +1,9 @@
-import asyncio
 import os
 
 from deepagents.backends import LocalShellBackend
 
 
-async def create_local_sandbox(sandbox_id: str | None = None):
+def create_local_sandbox(sandbox_id: str | None = None):
     """Create a local shell sandbox with no isolation.
 
     WARNING: This runs commands directly on the host machine with no sandboxing.
@@ -21,7 +20,7 @@ async def create_local_sandbox(sandbox_id: str | None = None):
         LocalShellBackend instance implementing SandboxBackendProtocol.
     """
     root_dir = os.getenv("LOCAL_SANDBOX_ROOT_DIR", os.getcwd())
-    await asyncio.to_thread(os.makedirs, root_dir, exist_ok=True)
+    os.makedirs(root_dir, exist_ok=True)
 
     return LocalShellBackend(
         root_dir=root_dir,
