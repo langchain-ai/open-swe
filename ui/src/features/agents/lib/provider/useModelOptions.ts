@@ -1,5 +1,6 @@
 import type { ModelOption } from "@/lib/api"
-import { useOptions, useProfile } from "@/lib/profile"
+import { useOptions } from "@/lib/profile"
+import { useSession } from "@/lib/session"
 
 export interface ModelSelection {
   modelId: string
@@ -63,7 +64,7 @@ function toSupportedSelection(
 
 export function useModelOptions(): ModelOptionsResult {
   const optionsQuery = useOptions()
-  const profileQuery = useProfile()
+  const session = useSession()
   const models = optionsQuery.data?.models ?? []
   const teamDefaultSelection = toSupportedSelection(
     models,
@@ -75,7 +76,7 @@ export function useModelOptions(): ModelOptionsResult {
     ? { modelId: firstModel.id, effort: firstModel.default_effort }
     : null
   const defaultSelection = optionsQuery.data
-    ? (storedSelection(models, profileQuery.data?.login ?? "") ??
+    ? (storedSelection(models, session.data?.login ?? "") ??
       teamDefaultSelection ??
       firstSelection)
     : null
@@ -83,7 +84,7 @@ export function useModelOptions(): ModelOptionsResult {
   return {
     models,
     defaultSelection,
-    isLoading: optionsQuery.isLoading || profileQuery.isLoading,
+    isLoading: optionsQuery.isLoading || session.isLoading,
   }
 }
 
