@@ -313,7 +313,10 @@ _DROPPED_RESPONSE_HEADERS = {"content-encoding", "content-length", "transfer-enc
 
 async def _render_app_route(request: Request) -> Response:
     body = await request.body()
-    headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
+    # Host is forwarded verbatim, as a reverse proxy does: the app derives its own
+    # origin from it, and swapping in the UI server's port would make every render
+    # look like it came from a different origin than the API.
+    headers = dict(request.headers)
     try:
         async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as client:
             upstream = await client.request(
