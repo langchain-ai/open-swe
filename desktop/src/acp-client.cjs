@@ -243,17 +243,28 @@ class NdJsonRpcClient {
 }
 
 class AcpSession {
-  constructor({ cwd, target, env, onEvent, requestPermission }) {
-    this.id = randomUUID()
+  constructor({
+    cwd,
+    target,
+    env,
+    onEvent,
+    onChange,
+    requestPermission,
+    restored,
+  }) {
+    this.id = restored?.id || randomUUID()
     this.cwd = cwd
-    this.title = "New local agent"
-    this.createdAt = Date.now()
-    this.updatedAt = this.createdAt
+    this.title = restored?.title || "New local agent"
+    this.createdAt = restored?.createdAt || Date.now()
+    this.updatedAt = restored?.updatedAt || this.createdAt
+    this.acpSessionId = restored?.acpSessionId
     this.status = "starting"
     this.events = []
     this.onEvent = onEvent
+    this.onChange = onChange
     this.requestPermission = requestPermission
     this.tools = new Map()
+    this.replayUsers = new Map()
     this.rpc = new NdJsonRpcClient(target.command, target.args, cwd, env)
     this.rpc.onNotification = (method, params) =>
       this.handleNotification(method, params)
@@ -277,10 +288,13 @@ class AcpSession {
     }
     this.events.push(stamped)
     this.onEvent(this.id, stamped)
+    if (["user-message", "run-end", "error"].includes(event.type)) {
+      this.onChange?.(this)
+    }
   }
 
   async initialize() {
-    await this.rpc.request("initialize", {
+    const initialized = await this.rpc.request("initialize", {
       protocolVersion: ACP_PROTOCOL_VERSION,
       clientCapabilities: {
         fs: { readTextFile: false, writeTextFile: false },
@@ -292,15 +306,31 @@ class AcpSession {
         version: "0.1.0",
       },
     })
-    const result = await this.rpc.request("session/new", {
-      cwd: this.cwd,
-      mcpServers: [],
-    })
-    if (!isRecord(result) || typeof result.sessionId !== "string") {
-      throw new Error("Deep Agents Code did not create an ACP session")
+    if (this.acpSessionId) {
+      if (
+        !isRecord(initialized) ||
+        !isRecord(initialized.agentCapabilities) ||
+        initialized.agentCapabilities.loadSession !== true
+      ) {
+        throw new Error("Deep Agents Code does not support loading ACP sessions")
+      }
+      await this.rpc.request("session/load", {
+        cwd: this.cwd,
+        sessionId: this.acpSessionId,
+        mcpServers: [],
+      })
+    } else {
+      const result = await this.rpc.request("session/new", {
+        cwd: this.cwd,
+        mcpServers: [],
+      })
+      if (!isRecord(result) || typeof result.sessionId !== "string") {
+        throw new Error("Deep Agents Code did not create an ACP session")
+      }
+      this.acpSessionId = result.sessionId
     }
-    this.acpSessionId = result.sessionId
     this.status = "idle"
+    this.onChange?.(this)
   }
 
   async prompt(text, images) {
@@ -341,6 +371,26 @@ class AcpSession {
       return
     const update = params.update
     if (
+      update.sessionUpdate === "user_message_chunk" &&
+      isRecord(update.content)
+    ) {
+      if (
+        update.content.type === "text" &&
+        typeof update.content.text === "string"
+      ) {
+        const existing = this.replayUsers.get(update.messageId)
+        if (existing) existing.text += update.content.text
+        else {
+          const event = { type: "user-message", text: update.content.text }
+          this.emit(event)
+          if (typeof update.messageId === "string") {
+            this.replayUsers.set(update.messageId, event)
+          }
+        }
+      }
+      return
+    }
+    if (
       update.sessionUpdate === "agent_message_chunk" &&
       isRecord(update.content)
     ) {
@@ -353,7 +403,9 @@ class AcpSession {
       return
     }
     if (
-      update.sessionUpdate === "agent_thought_chunk" &&
+      ["agent_thought_chunk", "thought_message_chunk"].includes(
+        update.sessionUpdate
+      ) &&
       isRecord(update.content)
     ) {
       if (

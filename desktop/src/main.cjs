@@ -14,6 +14,10 @@ const {
 } = require("electron");
 const { AcpSession, dcodeTarget } = require("./acp-client.cjs");
 const {
+  readAcpSessions,
+  writeAcpSessions,
+} = require("./acp-session-store.cjs");
+const {
   captureCheckpoint,
   checkpointRef,
   deleteRefs,
@@ -78,6 +82,8 @@ let mainWindow = null;
 let setupWindow = null;
 let quitting = false;
 const acpSessions = new Map();
+const acpRestores = new Map();
+const persistedAcpSessions = new Map();
 // sessionId -> { repo, ref }: the worktree snapshot a local session started from, so
 // the diff panel can show what the agent changed rather than the repo's prior state.
 const acpCheckpoints = new Map();
@@ -101,20 +107,61 @@ async function recordAcpCheckpoint(localSession) {
   const repo = await repoRoot(localSession.cwd);
   if (!repo) return;
   const ref = checkpointRef(localSession.id);
-  const live = [...acpCheckpoints.values()]
-    .filter((checkpoint) => checkpoint.repo === repo)
-    .map((checkpoint) => checkpoint.ref);
+  const live = [...persistedAcpSessions.values()]
+    .filter(
+      (session) =>
+        session.checkpoint?.repo === repo &&
+        session.checkpoint.ref === checkpointRef(session.id),
+    )
+    .map((session) => session.checkpoint.ref);
   try {
-    // Refs from sessions this or an earlier process lost track of; never pushed,
-    // but they should not pile up in the user's own repository either.
     deleteRefs(repo, await staleRefs(repo, [...live, ref]));
     await captureCheckpoint(repo, ref);
     acpCheckpoints.set(localSession.id, { repo, ref });
+    persistAcpSession(localSession);
   } catch {}
 }
 
 function projectsPath() {
   return path.join(app.getPath("userData"), "desktop-projects.json");
+}
+
+function acpSessionsPath() {
+  return path.join(app.getPath("userData"), "desktop-acp-sessions.json");
+}
+
+function sessionRecord(localSession) {
+  const previous = persistedAcpSessions.get(localSession.id) || {};
+  return {
+    id: localSession.id,
+    acpSessionId: localSession.acpSessionId,
+    cwd: localSession.cwd,
+    title: localSession.title,
+    createdAt: localSession.createdAt,
+    updatedAt: localSession.updatedAt,
+    ...(previous.modelId ? { modelId: previous.modelId } : {}),
+    ...(previous.effort ? { effort: previous.effort } : {}),
+    ...(acpCheckpoints.get(localSession.id)
+      ? { checkpoint: acpCheckpoints.get(localSession.id) }
+      : {}),
+  };
+}
+
+function persistAcpSession(localSession) {
+  if (!localSession.acpSessionId) return;
+  persistedAcpSessions.set(localSession.id, sessionRecord(localSession));
+  writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
+}
+
+function sessionSummary(record) {
+  return {
+    id: record.id,
+    cwd: record.cwd,
+    title: record.title,
+    status: "idle",
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
 }
 
 function listProjects() {
@@ -167,6 +214,69 @@ function resolveAcpProjectPath(localSessionId, value) {
     return relative === "" ? "." : relative.split(path.sep).join("/");
   } catch {
     return null;
+  }
+}
+
+function registeredProject(cwd) {
+  try {
+    const canonical = fs.realpathSync(cwd);
+    return listProjects().some((project) => project.cwd === canonical)
+      ? canonical
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function createAcpSession({ cwd, modelId, effort, restored }) {
+  return new AcpSession({
+    cwd,
+    target: dcodeTarget({ modelId, effort }),
+    env: process.env,
+    onEvent: sendAcpEvent,
+    onChange: persistAcpSession,
+    requestPermission: async () => true,
+    restored,
+  });
+}
+
+async function restoreAcpSession(sessionId) {
+  if (acpSessions.has(sessionId)) return acpSessions.get(sessionId);
+  if (acpRestores.has(sessionId)) return acpRestores.get(sessionId);
+  const stored = persistedAcpSessions.get(sessionId);
+  if (!stored) return null;
+  const restore = (async () => {
+    const cwd = registeredProject(stored.cwd);
+    if (!cwd || cwd !== stored.cwd) return null;
+    const checkpointValid =
+      !stored.checkpoint ||
+      ((await repoRoot(cwd)) === stored.checkpoint.repo &&
+        stored.checkpoint.ref === checkpointRef(stored.id));
+    if (!checkpointValid) acpCheckpoints.delete(sessionId);
+    const localSession = createAcpSession({
+      cwd,
+      modelId: stored.modelId,
+      effort: stored.effort,
+      restored: stored,
+    });
+    acpSessions.set(sessionId, localSession);
+    if (stored.checkpoint && checkpointValid) {
+      acpCheckpoints.set(sessionId, stored.checkpoint);
+    }
+    try {
+      await localSession.initialize();
+      return localSession;
+    } catch (error) {
+      acpSessions.delete(sessionId);
+      localSession.close();
+      throw error;
+    }
+  })();
+  acpRestores.set(sessionId, restore);
+  try {
+    return await restore;
+  } finally {
+    acpRestores.delete(sessionId);
   }
 }
 
@@ -249,21 +359,22 @@ function configureDesktopIpc() {
         "Add this project to Open SWE before starting a local agent",
       );
     }
-    const localSession = new AcpSession({
-      cwd,
-      target: dcodeTarget({
-        modelId: typeof input.modelId === "string" ? input.modelId : undefined,
-        effort: typeof input.effort === "string" ? input.effort : undefined,
-      }),
-      env: process.env,
-      onEvent: sendAcpEvent,
-      requestPermission: async () => true,
+    const modelId =
+      typeof input.modelId === "string" ? input.modelId : undefined;
+    const effort = typeof input.effort === "string" ? input.effort : undefined;
+    const localSession = createAcpSession({ cwd, modelId, effort });
+    persistedAcpSessions.set(localSession.id, {
+      ...sessionRecord(localSession),
+      ...(modelId ? { modelId } : {}),
+      ...(effort ? { effort } : {}),
     });
     acpSessions.set(localSession.id, localSession);
     try {
       await localSession.initialize();
     } catch (error) {
       acpSessions.delete(localSession.id);
+      persistedAcpSessions.delete(localSession.id);
+      writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
       localSession.close();
       throw error;
     }
@@ -276,7 +387,7 @@ function configureDesktopIpc() {
 
   ipcMain.handle("desktop:acp-prompt", async (event, input) => {
     requireTrustedDesktopIpc(event);
-    const localSession = acpSessions.get(input?.sessionId);
+    const localSession = await restoreAcpSession(input?.sessionId);
     if (!localSession)
       throw new Error("Local Deep Agents Code session not found");
     await localSession.prompt(input.prompt || "", input.images || []);
@@ -288,19 +399,27 @@ function configureDesktopIpc() {
     acpSessions.get(sessionId)?.cancel();
   });
 
-  ipcMain.handle("desktop:acp-session", (event, sessionId) => {
+  ipcMain.handle("desktop:acp-session", async (event, sessionId) => {
     requireTrustedDesktopIpc(event);
-    return acpSessions.get(sessionId)?.snapshot() || null;
+    return (await restoreAcpSession(sessionId))?.snapshot() || null;
   });
 
   ipcMain.handle("desktop:acp-diff", async (event, sessionId) => {
     requireTrustedDesktopIpc(event);
+    const stored = persistedAcpSessions.get(sessionId);
     const localSession = acpSessions.get(sessionId);
-    const checkpoint = acpCheckpoints.get(sessionId);
+    const checkpoint =
+      acpCheckpoints.get(sessionId) ||
+      (stored?.checkpoint?.ref === checkpointRef(sessionId)
+        ? stored.checkpoint
+        : null);
+    const cwd = localSession?.cwd || stored?.cwd;
+    const canonical = cwd && registeredProject(cwd);
     if (
-      !localSession ||
       !checkpoint ||
-      !listProjects().some((project) => project.cwd === localSession.cwd)
+      !canonical ||
+      (await repoRoot(canonical)) !== checkpoint.repo ||
+      checkpoint.ref !== checkpointRef(sessionId)
     ) {
       return { status: "missing", files: [], truncated: false };
     }
@@ -313,8 +432,8 @@ function configureDesktopIpc() {
 
   ipcMain.handle("desktop:acp-sessions", (event) => {
     requireTrustedDesktopIpc(event);
-    return [...acpSessions.values()].map((localSession) =>
-      localSession.summary(),
+    return [...persistedAcpSessions.values()].map((stored) =>
+      acpSessions.get(stored.id)?.summary() || sessionSummary(stored),
     );
   });
 }
@@ -785,6 +904,10 @@ if (!hasSingleInstanceLock) {
     }
 
     if (process.platform === "darwin") app.dock.setIcon(iconPath());
+    for (const stored of readAcpSessions(acpSessionsPath())) {
+      persistedAcpSessions.set(stored.id, stored);
+      if (stored.checkpoint) acpCheckpoints.set(stored.id, stored.checkpoint);
+    }
     protocol.handle("open-swe", serveBundledUi);
     configurePermissions();
     configureDesktopIpc();
@@ -813,10 +936,11 @@ if (!hasSingleInstanceLock) {
     event.preventDefault();
     quitting = true;
     void closeAllTerminals().finally(() => {
-      for (const localSession of acpSessions.values()) localSession.close();
+      for (const localSession of acpSessions.values()) {
+        persistAcpSession(localSession);
+        localSession.close();
+      }
       acpSessions.clear();
-      for (const { repo, ref } of acpCheckpoints.values())
-        deleteRefs(repo, [ref]);
       acpCheckpoints.clear();
       app.quit();
     });
