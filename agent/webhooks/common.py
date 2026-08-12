@@ -114,7 +114,6 @@ from ..utils.slack import (
     post_slack_trace_reply,  # noqa: F401
     resolve_slack_links_in_context,  # noqa: F401
     select_slack_context_messages,  # noqa: F401
-    set_slack_assistant_status,  # noqa: F401
     store_slack_run_mapping,  # noqa: F401
     strip_bot_mention,  # noqa: F401
     verify_slack_signature,
@@ -252,7 +251,6 @@ __all__ = [
     "sanitize_github_comment_body",
     "select_slack_context_messages",
     "set_reviewer_thread_metadata",
-    "set_slack_assistant_status",
     "store_slack_run_mapping",
     "strip_bot_mention",
     "update_agent_thread_pr_state",
