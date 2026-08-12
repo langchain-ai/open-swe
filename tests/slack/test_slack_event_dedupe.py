@@ -114,6 +114,25 @@ async def test_redelivered_event_starts_only_one_run() -> None:
     assert [task[0] for task in background_tasks.tasks] == [slack_service.process_slack_mention]
 
 
+async def test_redelivered_event_without_retry_header_is_deduped() -> None:
+    background_tasks = _FakeBackgroundTasks()
+
+    await _post(_mention_payload(), background_tasks)
+    second = await _post(_mention_payload(), background_tasks)
+
+    assert second["status"] == "ignored"
+    assert len(background_tasks.tasks) == 1
+
+
+async def test_retry_header_alone_does_not_drop_an_unseen_event() -> None:
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await _post(_mention_payload("EvNew"), background_tasks, {"X-Slack-Retry-Num": "2"})
+
+    assert response["status"] == "accepted"
+    assert len(background_tasks.tasks) == 1
+
+
 async def test_concurrent_cross_instance_redeliveries_start_one_run() -> None:
     background_tasks = _FakeBackgroundTasks()
 
