@@ -1,9 +1,9 @@
 """Server-side, read-only LangSmith tools.
 
-Credentials live in team settings (encrypted at rest). The tools run in the
-LangGraph server process and call the LangSmith API directly — the sandbox never
-holds a LangSmith key. The surface is intentionally read-only: fetch a single
-run/trace and list recent runs in a project.
+Credentials are encrypted at rest. The tools run in the LangGraph server process
+and call the LangSmith API directly — the sandbox never holds a LangSmith key.
+The surface is intentionally read-only: fetch a single run/trace and list recent
+runs in a project.
 """
 
 from __future__ import annotations
@@ -14,7 +14,13 @@ from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
 
-from ..dashboard.team_credentials import LangSmithCredentials, get_langsmith_credentials
+from ..dashboard.team_credentials import (
+    LangSmithCredentials,
+)
+from ..dashboard.team_credentials import (
+    get_langsmith_credentials as get_team_langsmith_credentials,
+)
+from ..dashboard.user_credentials import get_langsmith_credentials as get_user_langsmith_credentials
 from ..utils.langsmith import async_langsmith_client, sync_langsmith_client
 
 logger = logging.getLogger(__name__)
@@ -108,9 +114,11 @@ def _make_tools(creds: LangSmithCredentials) -> list[BaseTool]:
     ]
 
 
-async def load_langsmith_tools() -> list[BaseTool]:
-    """Return read-only LangSmith tools when the team has connected LangSmith."""
-    creds = await get_langsmith_credentials()
-    if creds is None:
-        return []
-    return _make_tools(creds)
+async def load_langsmith_tools(
+    login: str | None = None, *, allow_team: bool = True
+) -> list[BaseTool]:
+    """Return read-only LangSmith tools for the user or authorized team fallback."""
+    creds = await get_user_langsmith_credentials(login) if login else None
+    if creds is None and allow_team:
+        creds = await get_team_langsmith_credentials()
+    return _make_tools(creds) if creds else []

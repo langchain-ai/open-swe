@@ -215,11 +215,13 @@ export interface LangSmithConnectBody {
   endpoint?: string | null
 }
 
-export interface CurrentsCredentialStatus {
+export interface ApiKeyCredentialStatus {
   connected: boolean
   api_key_last4?: string
   updated_at?: string | null
 }
+
+export type CurrentsCredentialStatus = ApiKeyCredentialStatus
 
 export interface CurrentsConnectBody {
   api_key: string
@@ -797,6 +799,17 @@ export const api = {
     }),
   disconnectCurrents: () =>
     request<CurrentsCredentialStatus>("/my-credentials/currents", {
+      method: "DELETE",
+    }),
+  getMyLangSmithStatus: () =>
+    request<ApiKeyCredentialStatus>("/my-credentials/langsmith"),
+  connectMyLangSmith: (body: CurrentsConnectBody) =>
+    request<ApiKeyCredentialStatus>("/my-credentials/langsmith", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  disconnectMyLangSmith: () =>
+    request<ApiKeyCredentialStatus>("/my-credentials/langsmith", {
       method: "DELETE",
     }),
   getMyNotionStatus: () =>
