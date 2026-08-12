@@ -166,9 +166,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         "dashboard_url": f"https://dashboard.example/agents/{expected_thread_id}",
     }
     assert captured["top_level_post"]["channel_id"] == "C1"
-    assert captured["top_level_post"]["text"] == (
-        "*Open SWE breakout thread:* Investigate follow-up"
-    )
+    assert captured["top_level_post"]["text"] == ("*Jarvis breakout thread:* Investigate follow-up")
     assert captured["top_level_post"]["unfurl_links"] is False
     assert captured["thread_reply"] == {
         "channel_id": "C1",
