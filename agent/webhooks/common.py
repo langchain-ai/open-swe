@@ -118,6 +118,10 @@ from ..utils.slack import (
     strip_bot_mention,  # noqa: F401
     verify_slack_signature,
 )
+from ..utils.slack_events import (
+    claim_slack_event,
+    slack_event_already_seen,
+)
 from ..utils.slack_feedback import (
     FEEDBACK_REACTIONS,
     process_slack_reaction_added,
@@ -187,6 +191,7 @@ __all__ = [
     "_upsert_slack_thread_repo_metadata",
     "append_finding_interaction",
     "build_pr_prompt",
+    "claim_slack_event",
     "complete_review_check_run",
     "create_review_check_run",
     "dashboard_thread_url",
@@ -251,6 +256,7 @@ __all__ = [
     "sanitize_github_comment_body",
     "select_slack_context_messages",
     "set_reviewer_thread_metadata",
+    "slack_event_already_seen",
     "store_slack_run_mapping",
     "strip_bot_mention",
     "update_agent_thread_pr_state",
@@ -736,16 +742,11 @@ async def upsert_agent_thread_owner_metadata(
     mirror the owner-identifying fields onto the thread here.
     """
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
-    resolved_login = github_login or await resolve_login_from_email_async(user_email) or ""
     metadata: dict[str, Any] = {"source": source, "updated_at_ms": now_ms}
     if isinstance(repo_config, dict) and repo_config.get("owner") and repo_config.get("name"):
         metadata["repo"] = repo_config
         metadata["repo_owner"] = repo_config["owner"]
         metadata["repo_name"] = repo_config["name"]
-    if resolved_login:
-        metadata["github_login"] = resolved_login
-    if user_email:
-        metadata["triggering_user_email"] = user_email.strip().lower()
     if title:
         metadata["title"] = title[:80]
 
@@ -761,6 +762,26 @@ async def upsert_agent_thread_owner_metadata(
     existing_meta = (
         existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
+    existing_context = existing_meta.get("source_context")
+    same_slack_owner = bool(
+        isinstance(existing_context, dict)
+        and isinstance(source_context, dict)
+        and isinstance(existing_slack := existing_context.get("slack_thread"), dict)
+        and isinstance(incoming_slack := source_context.get("slack_thread"), dict)
+        and existing_slack.get("triggering_user_id")
+        and existing_slack["triggering_user_id"] == incoming_slack.get("triggering_user_id")
+    )
+    owner_initialized = any(
+        existing_meta.get(key) for key in ("github_login", "triggering_user_email")
+    ) or bool(existing_context and not same_slack_owner)
+    if not owner_initialized:
+        resolved_login = github_login or await resolve_login_from_email_async(user_email) or ""
+        if resolved_login:
+            metadata["github_login"] = resolved_login
+        if user_email:
+            metadata["triggering_user_email"] = user_email.strip().lower()
+    else:
+        source_context = existing_context if isinstance(existing_context, dict) else None
     if source_context:
         metadata["source_context"] = await _source_context_with_slack_permalink(
             source_context, existing_meta
