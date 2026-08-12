@@ -1,7 +1,9 @@
 import { redirect } from "@tanstack/react-router"
 import { createIsomorphicFn } from "@tanstack/react-start"
+import { getRequestUrl } from "@tanstack/react-start/server"
 import type { QueryClient } from "@tanstack/react-query"
 
+import { isCrossOriginApiBase } from "./api-base"
 import { sanitizeAuthRedirect } from "./auth-redirect-core"
 import { sessionQueryOptions } from "./session"
 
@@ -25,6 +27,19 @@ export const resolveSessionOnServer = createIsomorphicFn()
     // Prerendering the shell has no cookie, and its 401 must not become a
     // redirect — that would leave the build without a shell to write.
     if (process.env.TSS_PRERENDERING === "true") return
+
+    // A cross-origin deployment's `osw_session` belongs to the API's origin, so
+    // this request cannot carry it and `/me` would 401 for a signed-in user —
+    // redirecting them to a login page that bounces them straight back. Auth
+    // resolution stays client-side there.
+    if (
+      isCrossOriginApiBase(
+        import.meta.env.VITE_DASHBOARD_API_BASE_URL,
+        getRequestUrl().origin
+      )
+    ) {
+      return
+    }
 
     const user = await queryClient
       .ensureQueryData(sessionQueryOptions)
