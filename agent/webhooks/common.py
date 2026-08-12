@@ -118,6 +118,10 @@ from ..utils.slack import (
     strip_bot_mention,  # noqa: F401
     verify_slack_signature,
 )
+from ..utils.slack_events import (
+    claim_slack_event,
+    slack_event_already_seen,
+)
 from ..utils.slack_feedback import (
     FEEDBACK_REACTIONS,
     process_slack_reaction_added,
@@ -187,6 +191,7 @@ __all__ = [
     "_upsert_slack_thread_repo_metadata",
     "append_finding_interaction",
     "build_pr_prompt",
+    "claim_slack_event",
     "complete_review_check_run",
     "create_review_check_run",
     "dashboard_thread_url",
@@ -251,6 +256,7 @@ __all__ = [
     "sanitize_github_comment_body",
     "select_slack_context_messages",
     "set_reviewer_thread_metadata",
+    "slack_event_already_seen",
     "store_slack_run_mapping",
     "strip_bot_mention",
     "update_agent_thread_pr_state",
