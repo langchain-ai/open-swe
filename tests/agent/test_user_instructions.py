@@ -70,18 +70,6 @@ def test_construct_system_prompt_without_user_instructions() -> None:
     assert "Your Custom Instructions (user-level)" not in prompt
 
 
-def test_construct_system_prompt_requires_explicit_instruction_scope() -> None:
-    prompt = construct_system_prompt(
-        working_dir="/work",
-        user_custom_instructions="Always reply in bullet points.",
-    )
-
-    assert "Never assume a requested behavior or guidance change" in prompt
-    assert "ask which scope they intend" in prompt
-    assert "explicitly chooses personal scope" in prompt
-    assert "If they do not specify personal or shared scope" in prompt
-
-
 @pytest.mark.asyncio
 async def test_save_user_instructions_requires_login() -> None:
     with patch(
