@@ -6,16 +6,9 @@
  */
 
 import { dashboardApiBase } from "./api-base"
+import { dashboardApiUrl, dashboardForwardedHeaders } from "./dashboard-fetch"
 
 const API_BASE = dashboardApiBase()
-
-if (
-  !API_BASE &&
-  typeof window !== "undefined" &&
-  window.location.protocol !== "open-swe:"
-) {
-  console.warn("VITE_DASHBOARD_API_BASE_URL is not set")
-}
 
 const GITHUB_IMAGE_HOST_RE =
   /^(?:www\.)?github\.com$|\.githubusercontent\.com$/i
@@ -71,11 +64,12 @@ export function isGithubReauthError(error: unknown): boolean {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
+  const res = await fetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...dashboardForwardedHeaders(),
       ...(init.headers ?? {}),
     },
   })
