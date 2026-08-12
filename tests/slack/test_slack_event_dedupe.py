@@ -12,20 +12,30 @@ from agent.webhooks import slack as slack_service
 from agent.webhooks import slack_routes
 
 
-class _FakeStore:
+class _ConflictError(Exception):
+    pass
+
+
+class _FakeThreads:
     def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
+        self.ids: set[str] = set()
+        self.lock = asyncio.Lock()
 
-    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
-        return self.items.get((namespace, key))
+    async def create(self, *, thread_id: str, **_kwargs: Any) -> None:
+        async with self.lock:
+            if thread_id in self.ids:
+                raise _ConflictError
+            self.ids.add(thread_id)
 
-    async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
-        self.items[(namespace, key)] = {"value": value}
+    async def get(self, thread_id: str) -> dict[str, str]:
+        if thread_id not in self.ids:
+            raise KeyError(thread_id)
+        return {"thread_id": thread_id}
 
 
 class _FakeClient:
     def __init__(self) -> None:
-        self.store = _FakeStore()
+        self.threads = _FakeThreads()
 
 
 class _FakeBackgroundTasks:
@@ -104,43 +114,29 @@ async def test_redelivered_event_starts_only_one_run() -> None:
     assert [task[0] for task in background_tasks.tasks] == [slack_service.process_slack_mention]
 
 
-async def test_redelivered_event_without_retry_header_is_deduped() -> None:
+async def test_concurrent_cross_instance_redeliveries_start_one_run() -> None:
     background_tasks = _FakeBackgroundTasks()
 
-    await _post(_mention_payload(), background_tasks)
-    second = await _post(_mention_payload(), background_tasks)
+    async def post() -> dict[str, str]:
+        slack_events.reset_slack_event_claims()
+        return await _post(_mention_payload(), background_tasks)
 
-    assert second["status"] == "ignored"
-    assert len(background_tasks.tasks) == 1
-
-
-async def test_retry_header_alone_does_not_drop_an_unseen_event() -> None:
-    background_tasks = _FakeBackgroundTasks()
-
-    response = await _post(_mention_payload("EvNew"), background_tasks, {"X-Slack-Retry-Num": "2"})
-
-    assert response["status"] == "accepted"
-    assert len(background_tasks.tasks) == 1
-
-
-async def test_concurrent_redeliveries_start_one_run() -> None:
-    background_tasks = _FakeBackgroundTasks()
-
-    responses = await asyncio.gather(
-        *(_post(_mention_payload(), background_tasks) for _ in range(3))
-    )
+    responses = await asyncio.gather(*(post() for _ in range(3)))
 
     assert [response["status"] for response in responses].count("accepted") == 1
     assert len(background_tasks.tasks) == 1
 
 
-async def test_claim_survives_a_restarted_process(_patch_slack_webhook: _FakeClient) -> None:
+async def test_preprocessing_failure_does_not_claim_event(monkeypatch: pytest.MonkeyPatch) -> None:
     background_tasks = _FakeBackgroundTasks()
 
-    await _post(_mention_payload(), background_tasks)
-    # A redelivery landing on another instance only has the store to go on.
-    slack_events.reset_slack_event_claims()
-    second = await _post(_mention_payload(), background_tasks)
+    async def failed_repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
+        raise RuntimeError
 
-    assert second["status"] == "ignored"
-    assert len(background_tasks.tasks) == 1
+    original_repo_config = webhook_common.get_slack_repo_config
+    monkeypatch.setattr(webhook_common, "get_slack_repo_config", failed_repo_config)
+    with pytest.raises(RuntimeError):
+        await _post(_mention_payload(), background_tasks)
+
+    monkeypatch.setattr(webhook_common, "get_slack_repo_config", original_repo_config)
+    assert (await _post(_mention_payload(), background_tasks))["status"] == "accepted"

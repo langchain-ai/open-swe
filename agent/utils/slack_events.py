@@ -1,14 +1,11 @@
-"""Deduplication of Slack Event API deliveries.
-
-Slack redelivers an event up to three times when it doesn't get a 2xx within
-three seconds, so every delivery that can start an agent run has to be claimed
-exactly once.
-"""
+"""Deduplication of Slack Event API deliveries."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import uuid
 from collections import OrderedDict
 
 from langgraph_sdk import get_client
@@ -19,14 +16,13 @@ LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
 )
 
-_EVENT_NAMESPACE = "slack_mention_events"
 _LOCAL_CLAIM_LIMIT = 2048
-
 _claimed_event_ids: OrderedDict[str, None] = OrderedDict()
+_claim_lock = asyncio.Lock()
 
 
-def _namespace(channel_id: str) -> tuple[str, str]:
-    return (_EVENT_NAMESPACE, channel_id or "unknown")
+def _claim_thread_id(event_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-event:{event_id}"))
 
 
 def _claim_locally(event_id: str) -> None:
@@ -40,37 +36,32 @@ def reset_slack_event_claims() -> None:
     _claimed_event_ids.clear()
 
 
-async def slack_event_already_seen(channel_id: str, event_id: str) -> bool:
-    """Check-only lookup, for short-circuiting a redelivery before any other work."""
-    if not event_id:
-        return False
-    if event_id in _claimed_event_ids:
-        return True
-    try:
-        item = await get_client(url=LANGGRAPH_URL).store.get_item(_namespace(channel_id), event_id)
-    except Exception:
-        logger.warning("Slack event lookup failed for event_id=%s", event_id, exc_info=True)
-        return False
-    return bool(item)
+async def slack_event_already_seen(event_id: str) -> bool:
+    """Check whether this process has already claimed the event."""
+    return bool(event_id and event_id in _claimed_event_ids)
 
 
-async def claim_slack_event(channel_id: str, event_id: str) -> bool:
-    """Claim an event id; False means another delivery already owns this event."""
+async def claim_slack_event(event_id: str) -> bool:
+    """Atomically claim an event id; fail open when the platform is unavailable."""
     if not event_id:
         return True
 
-    # Claimed in-process before the first await so concurrent redeliveries on
-    # this instance can't both pass; the store below covers other instances.
-    if event_id in _claimed_event_ids:
-        return False
-    _claim_locally(event_id)
-
-    namespace = _namespace(channel_id)
-    try:
-        client = get_client(url=LANGGRAPH_URL)
-        if await client.store.get_item(namespace, event_id):
+    async with _claim_lock:
+        if event_id in _claimed_event_ids:
             return False
-        await client.store.put_item(namespace, event_id, {"event_id": event_id})
-    except Exception:
-        logger.warning("Slack event claim failed for event_id=%s", event_id, exc_info=True)
-    return True
+
+        claim_thread_id = _claim_thread_id(event_id)
+        client = get_client(url=LANGGRAPH_URL)
+        try:
+            await client.threads.create(thread_id=claim_thread_id, if_exists="raise", ttl=10)
+        except Exception:  # noqa: BLE001
+            try:
+                await client.threads.get(claim_thread_id)
+            except Exception:  # noqa: BLE001
+                logger.warning("Slack event claim failed for event_id=%s", event_id)
+                return True
+            _claim_locally(event_id)
+            return False
+
+        _claim_locally(event_id)
+        return True
