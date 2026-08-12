@@ -41,6 +41,8 @@ describe("isCrossOriginApiBase", () => {
   })
 
   it("treats an unparseable base as same-origin rather than skipping the gate", () => {
-    expect(isCrossOriginApiBase("not a url", "https://dash.example")).toBe(false)
+    expect(isCrossOriginApiBase("not a url", "https://dash.example")).toBe(
+      false
+    )
   })
 })
