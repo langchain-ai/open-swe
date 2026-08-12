@@ -154,6 +154,7 @@ export function AgentGitPanel({
       ),
     [files]
   )
+  const truncated = prDiff.data?.truncated ?? turnDiff.data?.truncated
   const tabLabels = { diff: "Branch", review: "Review", commits: "Committed" }
   const refreshDiff = () => void (pr ? prDiff.refetch() : turnDiff.refetch())
 
@@ -183,16 +184,10 @@ export function AgentGitPanel({
         {files.length > 0 && (
           <span className="flex items-center gap-2 text-sm">
             <span
-              title={
-                prDiff.data?.truncated || turnDiff.data?.truncated
-                  ? "Only the first files are shown"
-                  : undefined
-              }
+              title={truncated ? "Only the first files are shown" : undefined}
               className="text-xs text-muted-foreground"
             >
-              {prDiff.data?.truncated || turnDiff.data?.truncated
-                ? "first "
-                : ""}
+              {truncated ? "first " : ""}
               {files.length} file{files.length === 1 ? "" : "s"}
             </span>
             <span className="text-success-foreground">+{totals.additions}</span>
@@ -284,7 +279,7 @@ export function AgentGitPanel({
                   emptyLabel={
                     prDiff.isLoading ? "Loading PR diff…" : "No diff available."
                   }
-                  truncated={prDiff.data?.truncated ?? turnDiff.data?.truncated}
+                  truncated={truncated}
                 />
               ) : (
                 <div className="flex min-h-0 flex-1">
