@@ -55,7 +55,9 @@ def test_example_id_is_deterministic() -> None:
 
 
 class _FakeDataset:
-    id = "ds_123"
+    def __init__(self, dataset_id: str, name: str) -> None:
+        self.id = dataset_id
+        self.name = name
 
 
 class _FakeClient:
@@ -71,7 +73,8 @@ class _FakeClient:
         return None
 
     async def list_datasets(self, dataset_name: str):  # noqa: ANN001
-        yield _FakeDataset()
+        yield _FakeDataset("ds_wrong", "other-dataset")
+        yield _FakeDataset("ds_123", dataset_name)
 
     async def create_example(self, **kwargs: Any) -> None:
         if self.conflict_once:
