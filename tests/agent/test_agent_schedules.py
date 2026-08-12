@@ -150,6 +150,24 @@ def test_slack_channel_validation_normalizes_ids() -> None:
         ScheduleCreateBody(prompt="hello", schedule="0 9 * * *", slack_channel_id="#general")
 
 
+def test_slack_notification_mode_defaults_and_validates() -> None:
+    default_body = ScheduleCreateBody(prompt="hello", schedule="0 9 * * *")
+    conditional_body = ScheduleCreateBody(
+        prompt="hello", schedule="0 9 * * *", slack_notification_mode="on_action"
+    )
+
+    assert default_body.slack_notification_mode == "always"
+    assert conditional_body.slack_notification_mode == "on_action"
+    with pytest.raises(ValidationError):
+        ScheduleCreateBody.model_validate(
+            {
+                "prompt": "hello",
+                "schedule": "0 9 * * *",
+                "slack_notification_mode": "sometimes",
+            }
+        )
+
+
 async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
         name="Daily report",
@@ -164,6 +182,7 @@ async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth)
     assert result["name"] == "Daily report"
     assert result["enabled"] is True
     assert result["slackChannelId"] == "C0123456789"
+    assert result["slackNotificationMode"] == "always"
     assert result["cronId"] == "cron_1"
     created = fake_client.crons.created[0]
     assert created["assistant_id"] == "scheduler"
@@ -249,6 +268,7 @@ async def test_list_agent_schedules_uses_owner_filters_and_paginates(fake_client
 
     assert len(result) == 125
     assert {item["id"] for item in result} == {f"alice_{i}" for i in range(125)}
+    assert all(item["slackNotificationMode"] == "always" for item in result)
 
 
 async def test_update_agent_schedule_rechecks_repo_access(fake_client, auth, monkeypatch) -> None:  # noqa: ANN001, ARG001
@@ -312,6 +332,37 @@ async def test_update_agent_schedule_clears_slack_channel(fake_client) -> None: 
     )
 
     assert result["slackChannelId"] is None
+
+
+async def test_update_agent_schedule_changes_slack_notification_mode(fake_client) -> None:  # noqa: ANN001
+    record = {
+        "id": "sched_1",
+        "name": "Daily",
+        "prompt": "Run daily",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "slack_channel_id": "C0123456789",
+        "model": "Default",
+        "effort": None,
+        "enabled": True,
+        "cron_id": "cron_old",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    result = await schedules.update_agent_schedule(
+        "sched_1",
+        "alice",
+        ScheduleUpdateBody(slack_notification_mode="on_action"),
+        email="alice@example.com",
+    )
+
+    assert result["slackNotificationMode"] == "on_action"
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert stored["slack_notification_mode"] == "on_action"
 
 
 async def test_update_agent_schedule_pause_deletes_cron(fake_client) -> None:  # noqa: ANN001
@@ -474,6 +525,54 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
         (("slack_run_map", "C0123456789"), "thread:1784302353.900029")
     ]
     assert mapping["run_id"] == "run_123"
+
+
+async def test_launch_conditional_slack_schedule_starts_silently(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    record = {
+        "id": "sched_1",
+        "name": "Dependency check",
+        "prompt": "Open a PR if dependencies need updates",
+        "schedule": "0 9 * * 1",
+        "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "slack_channel_id": "C0123456789",
+        "slack_notification_mode": "on_action",
+        "model": "Default",
+        "effort": None,
+        "base_branch": "main",
+        "branch_prefix": "open-swe",
+        "enabled": True,
+        "cron_id": "cron_1",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    async def fail_if_posted(*args: Any, **kwargs: Any) -> tuple[None, None]:
+        raise AssertionError("conditional schedule should not post at launch")
+
+    monkeypatch.setattr(schedules, "post_slack_top_level_message_with_ts", fail_if_posted)
+
+    result = await schedules.launch_scheduled_agent_run("sched_1")
+
+    assert result["status"] == "started"
+    run = fake_client.runs.created[0]
+    configurable = run["config"]["configurable"]
+    assert "slack_thread" not in configurable
+    assert configurable["automation_slack_notification"] == {
+        "channel_id": "C0123456789",
+        "mode": "on_action",
+        "schedule_id": "sched_1",
+        "schedule_name": "Dependency check",
+    }
+    prompt = run["input"]["messages"][0]["content"]
+    assert "notify_automation_channel" in prompt
+    assert "read-only checks" in prompt
+    metadata = fake_client.threads.created[0]["metadata"]
+    assert "source_context" not in metadata
 
 
 async def test_launch_scheduled_agent_run_stops_when_slack_post_fails(
