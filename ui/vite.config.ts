@@ -6,7 +6,6 @@ import viteReact from "@vitejs/plugin-react"
 import viteTsConfigPaths from "vite-tsconfig-paths"
 import tailwindcss from "@tailwindcss/vite"
 import { nitro } from "nitro/vite"
-import { VitePWA } from "vite-plugin-pwa"
 import type { Plugin } from "vite"
 
 // Paths the backend owns, not the app router. `/dashboard/api` is the only one a
@@ -167,12 +166,6 @@ const SHELL_PAGE = {
   sitemap: { exclude: true },
 }
 
-// Nitro's Vercel preset writes to `.vercel/output`; every other target keeps
-// `.output`. The service worker has to land in whichever one holds the client build.
-const PUBLIC_DIR = process.env.VERCEL
-  ? ".vercel/output/static"
-  : ".output/public"
-
 const config = defineConfig({
   base: "/",
   // Server renders read the same resolved target as the proxy route rule, so the
@@ -182,7 +175,6 @@ const config = defineConfig({
   },
   optimizeDeps: {
     include: [
-      "workbox-window",
       "streamdown",
       "shiki",
       "@pierre/diffs",
@@ -223,52 +215,6 @@ const config = defineConfig({
     }),
     tailwindcss(),
     tanstackStart({ pages: [SHELL_PAGE] }),
-    VitePWA({
-      injectRegister: false,
-      registerType: "prompt",
-      outDir: PUBLIC_DIR,
-      devOptions: {
-        // Off in dev: the service worker precaches assets and defeats HMR (and
-        // a stale registration lingers per-origin). Dev is HMR-only.
-        enabled: false,
-      },
-      integration: {
-        closeBundleOrder: "pre",
-      },
-      manifest: {
-        id: "/",
-        name: "Open SWE",
-        short_name: "Open SWE",
-        description: "Open-source coding agents for Slack, Linear, and GitHub.",
-        start_url: "/",
-        scope: "/",
-        display: "standalone",
-        theme_color: "#000000",
-        background_color: "#ffffff",
-        icons: [
-          {
-            src: "/favicon.png",
-            sizes: "192x192",
-            type: "image/png",
-          },
-          {
-            src: "/logo512.png",
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "any maskable",
-          },
-        ],
-      },
-      workbox: {
-        // A fallback registers a NavigationRoute that answers every navigation
-        // from the precache, including online ones, which would stop the server
-        // from ever rendering a route. This has to be explicit: vite-plugin-pwa
-        // otherwise defaults it to `index.html`, which the SSR build never emits.
-        // Assets are still precached; navigations always reach the server.
-        navigateFallback: undefined,
-        globPatterns: ["**/*.{js,css,png,svg,ico,webmanifest}"],
-      },
-    }),
     viteReact(),
   ],
 })

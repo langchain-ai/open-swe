@@ -24,9 +24,6 @@ export default defineConfig({
     trace: "on",
     video: "on",
     screenshot: "only-on-failure",
-    // The built UI ships a PWA service worker; block it so tests never hit a
-    // stale cache and always see live API responses.
-    serviceWorkers: "block",
     // SLOW_MO=700 npx playwright test --headed  → watch it run in human time.
     launchOptions: { slowMo: Number(process.env.SLOW_MO ?? 0) },
   },
