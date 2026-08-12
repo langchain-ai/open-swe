@@ -295,17 +295,51 @@ async def control_logout() -> JSONResponse:
     return resp
 
 
-# --- serve the REAL built ui/ SPA, same-origin so the session cookie works ----
+# --- serve the REAL built ui/ app, same-origin so the session cookie works ----
 # The "Open in Web" link (DASHBOARD_BASE_URL/agents/{id}) lands on the real app;
 # it calls /dashboard/api/* (same origin) and streams via the dashboard proxy.
+#
+# HTML comes from the app's own Nitro server (started by ``global-setup.ts``) so
+# the tests exercise server rendering, the root session gate, and hydration —
+# serving the prerendered shell here would skip all three. Static assets are
+# still read off disk: same bytes, no extra hop.
 UI_PUBLIC = REPO_ROOT / "ui" / ".output" / "public"
 _ASSETS_ROOT = (UI_PUBLIC / "assets").resolve()
+UI_SERVER_URL = os.environ.get("E2E_UI_SERVER", "http://127.0.0.1:3100").rstrip("/")
+
+# Set by the proxy: the response is already decoded and re-framed by httpx.
+_DROPPED_RESPONSE_HEADERS = {"content-encoding", "content-length", "transfer-encoding"}
+
+
+async def _render_app_route(request: Request) -> Response:
+    body = await request.body()
+    headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as client:
+            upstream = await client.request(
+                request.method,
+                f"{UI_SERVER_URL}{request.url.path}",
+                params=dict(request.query_params),
+                headers=headers,
+                content=body,
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            502, f"UI server unreachable at {UI_SERVER_URL} — is global-setup running it?"
+        ) from exc
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers={
+            k: v for k, v in upstream.headers.items() if k.lower() not in _DROPPED_RESPONSE_HEADERS
+        },
+    )
 
 
 def _ui_file(name: str) -> FileResponse:
     path = UI_PUBLIC / name
     if not path.is_file():
-        raise HTTPException(404, f"{name} not built — run `bun run build` in ui/")
+        raise HTTPException(404, f"{name} not built — run `pnpm run build` at the repo root")
     return FileResponse(path)
 
 
@@ -344,22 +378,33 @@ async def ui_logo_mark() -> FileResponse:
     return _ui_file("logo-mark.png")
 
 
-# Client routes used by the handoff tests: serve the SPA shell; the client
-# router boots at the current URL. Kept explicit (no catch-all) so LangGraph's
-# own root routes — which the dashboard proxy calls server-side — are untouched.
+# App routes used by the handoff tests. Kept explicit (no catch-all) so
+# LangGraph's own root routes — which the dashboard proxy calls server-side —
+# are untouched.
+@app.get("/agents", response_class=HTMLResponse)
+async def ui_agents_home(request: Request) -> Response:
+    return await _render_app_route(request)
+
+
 @app.get("/agents/{thread_id}", response_class=HTMLResponse)
-async def ui_agents_thread(thread_id: str) -> FileResponse:  # noqa: ARG001
-    return _ui_file("_shell.html")
+async def ui_agents_thread(request: Request, thread_id: str) -> Response:  # noqa: ARG001
+    return await _render_app_route(request)
 
 
 @app.get("/agents/{thread_id}/plan", response_class=HTMLResponse)
-async def ui_agents_plan(thread_id: str) -> FileResponse:  # noqa: ARG001
-    return _ui_file("_shell.html")
+async def ui_agents_plan(request: Request, thread_id: str) -> Response:  # noqa: ARG001
+    return await _render_app_route(request)
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def ui_login() -> FileResponse:
-    return _ui_file("_shell.html")
+async def ui_login(request: Request) -> Response:
+    return await _render_app_route(request)
+
+
+# Server functions and the SSR data stream the rendered pages fetch after load.
+@app.api_route("/_serverFn/{fn_path:path}", methods=["GET", "POST"])
+async def ui_server_fn(request: Request, fn_path: str) -> Response:  # noqa: ARG001
+    return await _render_app_route(request)
 
 
 @app.get("/mock/users")

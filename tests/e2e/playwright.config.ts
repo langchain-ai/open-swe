@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 
 const repoRoot = resolve(__dirname, "..", "..");
 const PORT = Number(process.env.E2E_PORT ?? 2024);
+const UI_PORT = Number(process.env.E2E_UI_PORT ?? 3100);
 const baseURL = `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
@@ -42,6 +43,12 @@ export default defineConfig({
     timeout: 180_000,
     // Deterministic busy window for the interrupt-debounce spec: the fake LLM
     // holds the first run open this long so follow-ups reliably land mid-run.
-    env: { ...process.env, E2E_BUSY_HOLD_SECONDS: "20" },
+    // E2E_UI_SERVER is where the harness proxies page requests for rendering;
+    // global-setup starts that server on the same port.
+    env: {
+      ...process.env,
+      E2E_BUSY_HOLD_SECONDS: "20",
+      E2E_UI_SERVER: `http://127.0.0.1:${UI_PORT}`,
+    },
   },
 });

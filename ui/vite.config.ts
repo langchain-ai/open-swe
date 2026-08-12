@@ -9,6 +9,20 @@ import { nitro } from "nitro/vite"
 import { VitePWA } from "vite-plugin-pwa"
 import type { Plugin } from "vite"
 
+// Paths the backend owns, not the app router. `/dashboard/api` is the only one a
+// deployed dashboard serves; the rest exist when the backend is the mock harness,
+// and a browser navigates to `/fake-gh` mid-login, so dev has to reach them too.
+const BACKEND_PREFIXES = [
+  "/dashboard/api",
+  "/webhooks",
+  "/mock",
+  "/control",
+  "/fake-gh",
+  "/fake-slack",
+  "/static",
+  "/ok",
+]
+
 // Dev-only: when E2E_HARNESS is set (the `dev:mock` local harness) serve the app
 // and the harness from one origin by proxying the API routes + the Yjs collab
 // WebSocket to the harness. Same-origin keeps the session cookie on the WS, which
@@ -16,16 +30,7 @@ import type { Plugin } from "vite"
 function mockHarnessProxy(): Plugin | null {
   const target = process.env.E2E_HARNESS
   if (!target) return null
-  const prefixes = [
-    "/dashboard/api",
-    "/webhooks",
-    "/mock",
-    "/control",
-    "/fake-gh",
-    "/fake-slack",
-    "/static",
-    "/ok",
-  ]
+  const prefixes = BACKEND_PREFIXES
   const matches = (url?: string): boolean =>
     !!url &&
     prefixes.some(
@@ -116,8 +121,65 @@ const SHIKI_LANGS = [
   "yaml",
 ]
 
+// Browser `/dashboard/api/*` calls are proxied to the Python backend by the
+// server rather than sent cross-origin, so the session cookie stays same-origin.
+// On Vercel this route rule compiles to a platform rewrite, keeping streaming
+// responses out of the serverless function.
+const IS_PRODUCTION = process.env.NODE_ENV === "production"
+
+const DASHBOARD_API_URL =
+  process.env.DASHBOARD_API_URL ??
+  (IS_PRODUCTION
+    ? "https://open-swe-v3-f2834ffc0df05a46a10262a9690e8490.us.langgraph.app"
+    : "http://localhost:2024")
+
+// A deployed dashboard only fronts the API; dev fronts every backend path so a
+// local mock backend's login redirects resolve on this origin.
+const PROXIED_PREFIXES = IS_PRODUCTION ? ["/dashboard/api"] : BACKEND_PREFIXES
+
+// Nitro's proxy follows redirects itself, which swallows the OAuth 3xx hops: the
+// browser's address bar never moves and login dies at the first hop. Vercel's
+// rewrite passes 3xx through on its own, and any fetchOptions here would push
+// these requests through the serverless function instead of that rewrite.
+const PROXY_OPTIONS = process.env.VERCEL
+  ? {}
+  : { fetchOptions: { redirect: "manual" as const } }
+
+const backendRouteRules = Object.fromEntries(
+  PROXIED_PREFIXES.map((prefix) => [
+    `${prefix}/**`,
+    { proxy: { to: `${DASHBOARD_API_URL}${prefix}/**`, ...PROXY_OPTIONS } },
+  ])
+)
+
+// The Electron app and the service worker's offline navigation both load a
+// client-only `_shell.html`. SSR alone doesn't emit one, so prerender `/` with
+// the header that tells the Start handler to render the shell instead of the route.
+const SHELL_PAGE = {
+  path: "/",
+  prerender: {
+    enabled: true,
+    outputPath: "/_shell",
+    autoSubfolderIndex: false,
+    crawlLinks: false,
+    headers: { "X-TSS_SHELL": "true" },
+  },
+  sitemap: { exclude: true },
+}
+
+// Nitro's Vercel preset writes to `.vercel/output`; every other target keeps
+// `.output`. The service worker has to land in whichever one holds the client build.
+const PUBLIC_DIR = process.env.VERCEL
+  ? ".vercel/output/static"
+  : ".output/public"
+
 const config = defineConfig({
   base: "/",
+  // Server renders read the same resolved target as the proxy route rule, so the
+  // two can't disagree about which backend the app is talking to.
+  define: {
+    "process.env.DASHBOARD_API_URL": JSON.stringify(DASHBOARD_API_URL),
+  },
   optimizeDeps: {
     include: [
       "workbox-window",
@@ -136,16 +198,35 @@ const config = defineConfig({
   plugins: [
     mockHarnessProxy(),
     devtools(),
-    nitro(),
+    nitro({
+      routeRules: backendRouteRules,
+      // Nitro gives every node_modules package its own server chunk. The
+      // LangGraph SDK reaches CJS-only `eventemitter3` through `p-queue`, and
+      // splitting that cycle puts the CommonJS interop helper in the SDK's chunk
+      // while eventemitter3's chunk calls it at module scope — one tick before
+      // it exists. Rendering any route that imports the SDK then throws
+      // `__commonJSMin is not a function` and falls back to the client. Keeping
+      // the cycle in one chunk gives it one initialisation order.
+      // One server chunk instead of one per package. The `@langchain/*` +
+      // `langsmith` + `p-queue` + `eventemitter3` dependency cycle is CommonJS,
+      // and splitting it across chunks leaves each chunk reading the other's
+      // interop helper before it initialises (`__commonJSMin is not a function`,
+      // `Cannot access 'PQueueMod' before initialization`). Those throw during
+      // `renderToReadableStream`, so every route silently fell back to client
+      // rendering. Nitro's chunk groups can't be overridden — its own catch-all
+      // group is merged ahead of any user group — but disabling code splitting
+      // gives the cycle a single initialisation order.
+      inlineDynamicImports: true,
+    }),
     viteTsConfigPaths({
       projects: ["./tsconfig.json"],
     }),
     tailwindcss(),
-    tanstackStart({ spa: { enabled: true } }),
+    tanstackStart({ pages: [SHELL_PAGE] }),
     VitePWA({
       injectRegister: false,
       registerType: "prompt",
-      outDir: ".output/public",
+      outDir: PUBLIC_DIR,
       devOptions: {
         // Off in dev: the service worker precaches assets and defeats HMR (and
         // a stale registration lingers per-origin). Dev is HMR-only.
@@ -179,12 +260,13 @@ const config = defineConfig({
         ],
       },
       workbox: {
-        navigateFallback: "/_shell.html",
-        navigateFallbackDenylist: [/^\/dashboard\/api\//, /^\/_serverFn\//],
+        // A fallback registers a NavigationRoute that answers every navigation
+        // from the precache, including online ones, which would stop the server
+        // from ever rendering a route. This has to be explicit: vite-plugin-pwa
+        // otherwise defaults it to `index.html`, which the SSR build never emits.
+        // Assets are still precached; navigations always reach the server.
+        navigateFallback: undefined,
         globPatterns: ["**/*.{js,css,png,svg,ico,webmanifest}"],
-        additionalManifestEntries: [
-          { url: "/_shell.html", revision: new Date().toISOString() },
-        ],
       },
     }),
     viteReact(),
