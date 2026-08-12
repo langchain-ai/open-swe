@@ -48,6 +48,13 @@ export interface ScheduleUpdateRequest {
   enabled?: boolean | null
 }
 
+export interface ScheduleTriggerResult {
+  status: "started"
+  schedule_id: string
+  thread_id: string
+  run_id: string | null
+}
+
 export interface ThreadPrDiffFile {
   path: string
   previousPath: string | null
@@ -243,6 +250,11 @@ export const agentsApi = {
         method: "PATCH",
         body: JSON.stringify(body),
       }
+    ),
+  triggerSchedule: (scheduleId: string) =>
+    agentsRequest<ScheduleTriggerResult>(
+      `/schedules/${encodeURIComponent(scheduleId)}/trigger`,
+      { method: "POST" }
     ),
   deleteSchedule: (scheduleId: string) =>
     agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {

@@ -288,6 +288,18 @@ export function useUpdateAgentSchedule() {
   })
 }
 
+export function useTriggerAgentSchedule() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: agentsApi.triggerSchedule,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+      invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
 export function useDeleteAgentSchedule() {
   const queryClient = useQueryClient()
 
