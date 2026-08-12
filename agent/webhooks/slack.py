@@ -306,11 +306,6 @@ async def _notify_slack_processing_error(
     except Exception:  # noqa: BLE001
         common.logger.warning("Could not mark Slack thread %s as errored", thread_id, exc_info=True)
 
-    try:
-        await common.set_slack_assistant_status(channel_id, thread_ts, status="")
-    except Exception:  # noqa: BLE001
-        common.logger.debug("Could not clear Slack assistant status", exc_info=True)
-
     dashboard_url = common.dashboard_thread_url(thread_id)
     message = warning(
         "Open SWE hit an unexpected error while handling this Slack thread. "
@@ -351,8 +346,6 @@ async def _process_slack_mention_impl(
             event_ts,
         )
         return
-
-    await common.set_slack_assistant_status(channel_id, thread_ts)
 
     thread_id = common.generate_thread_id_from_slack_thread(channel_id, thread_ts)
 
@@ -533,7 +526,6 @@ async def _process_slack_mention_impl(
             await common._post_account_link_prompt(
                 channel_id, thread_ts, user_id, user_email, reason=reason
             )
-        await common.set_slack_assistant_status(channel_id, thread_ts, status="")
         return
 
     if await _maybe_approve_ready_plan_reply(
@@ -606,7 +598,6 @@ async def _process_slack_mention_impl(
     )
     run_id = run.get("run_id")
     if is_first_mention:
-        await common.set_slack_assistant_status(channel_id, thread_ts)
         if isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(
                 langgraph_client,

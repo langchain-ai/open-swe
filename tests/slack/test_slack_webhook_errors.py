@@ -30,7 +30,6 @@ async def test_slack_processing_error_posts_dashboard_link(
 
     client = _FakeClient()
     upsert = AsyncMock()
-    set_status = AsyncMock()
     post_reply = AsyncMock(return_value=True)
 
     monkeypatch.setattr(slack_webhook, "_process_slack_mention_impl", fail_processing)
@@ -42,7 +41,6 @@ async def test_slack_processing_error_posts_dashboard_link(
     )
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_owner_metadata", upsert)
     monkeypatch.setattr(slack_webhook.common, "get_client", lambda *, url: client)
-    monkeypatch.setattr(slack_webhook.common, "set_slack_assistant_status", set_status)
     monkeypatch.setattr(
         slack_webhook.common, "dashboard_thread_url", lambda thread_id: f"https://ui/{thread_id}"
     )
@@ -67,7 +65,6 @@ async def test_slack_processing_error_posts_dashboard_link(
     assert update["metadata"]["latest_run_status"] == "error"
     assert "failure_reply_posted" not in update["metadata"]
     assert isinstance(update["metadata"]["updated_at_ms"], int)
-    set_status.assert_awaited_once_with("C1", "123.45", status="")
     post_reply.assert_awaited_once()
     await_args = post_reply.await_args
     assert await_args is not None

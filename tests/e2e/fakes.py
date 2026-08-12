@@ -18,7 +18,6 @@ from e2e_env import BARE_REMOTE, BASE_BRANCH, OWNER, REPO
 # --- Slack -----------------------------------------------------------------
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
 SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
-SLACK_STATUSES: list[dict[str, Any]] = []
 _slack_seq = [1]
 
 
@@ -175,7 +174,6 @@ def repo_private() -> bool:
 
 def reset() -> None:
     SLACK_MESSAGES.clear()
-    SLACK_STATUSES.clear()
     PULLS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0
