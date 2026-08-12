@@ -157,8 +157,11 @@ def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
     assert "Default to one sentence" in OPEN_SWE_SHARED_BASE
     assert "applies only to Slack tool messages" in OPEN_SWE_SHARED_BASE
     assert "not normal assistant messages shown in the web UI" in OPEN_SWE_SHARED_BASE
-    assert "post a very short acknowledgement" in OPEN_SWE_SHARED_BASE
-    assert "before cloning/checking out repositories" in OPEN_SWE_SHARED_BASE
+    assert "For every initial Slack-triggered request" in OPEN_SWE_SHARED_BASE
+    assert "rephrases your understanding of the request" in OPEN_SWE_SHARED_BASE
+    assert "never use only a generic acknowledgement" in OPEN_SWE_SHARED_BASE
+    assert "Make `slack_thread_reply` your first tool call" in OPEN_SWE_SHARED_BASE
+    assert "do not call investigative tools or run shell commands" in OPEN_SWE_SHARED_BASE
     assert "Choose a common reaction" in OPEN_SWE_SHARED_BASE
     assert "`saluting_face` for taking ownership" in OPEN_SWE_SHARED_BASE
     assert "Do not reflexively repeat one emoji" in OPEN_SWE_SHARED_BASE
