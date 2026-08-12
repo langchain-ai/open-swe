@@ -7,12 +7,10 @@ from langchain_core.messages import AIMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 
 from agent.middleware.refresh_slack_status import (
-    _LOADING_TIPS,
     SlackAssistantStatusMiddleware,
-    _loading_tip_for_run,
     _status_from_recent_tool_calls,
 )
-from agent.utils.slack import DEFAULT_ASSISTANT_STATUS
+from agent.utils.slack import DEFAULT_ASSISTANT_STATUS, SLACK_LOADING_TIPS, slack_loading_tip
 
 
 class TestSlackAssistantStatusMiddleware:
@@ -47,12 +45,12 @@ class TestSlackAssistantStatusMiddleware:
         kwargs = await_args.kwargs
         assert args == ("C1", "1.0")
         assert kwargs["status"] == DEFAULT_ASSISTANT_STATUS
-        assert kwargs["loading_messages"] == [_loading_tip_for_run("run-a")]
+        assert kwargs["loading_messages"] == [slack_loading_tip("run-a")]
 
     def test_loading_tip_is_stable_per_run_and_varies_across_runs(self) -> None:
-        assert _loading_tip_for_run("run-a") == _loading_tip_for_run("run-a")
-        selected_tips = {_loading_tip_for_run(f"run-{index}") for index in range(20)}
-        assert selected_tips <= set(_LOADING_TIPS)
+        assert slack_loading_tip("run-a") == slack_loading_tip("run-a")
+        selected_tips = {slack_loading_tip(f"run-{index}") for index in range(20)}
+        assert selected_tips <= set(SLACK_LOADING_TIPS)
         assert len(selected_tips) > 1
 
     @pytest.mark.asyncio
@@ -171,7 +169,7 @@ class TestSlackAssistantStatusMiddleware:
 
         assert response.result[0].content == "done"
         assert set_count >= 2
-        assert loading_messages == [[_loading_tip_for_run("run-a")]] * set_count
+        assert loading_messages == [[slack_loading_tip("run-a")]] * set_count
 
     @pytest.mark.asyncio
     async def test_skips_when_slack_thread_missing(self) -> None:

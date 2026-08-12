@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
@@ -30,26 +29,13 @@ from langgraph.types import Command
 from ..utils.slack import (
     DEFAULT_ASSISTANT_STATUS,
     set_slack_assistant_status,
+    slack_loading_tip,
 )
 
 logger = logging.getLogger(__name__)
 
 _HEARTBEAT_INTERVAL_SECONDS = 60.0
 _MAX_HEARTBEAT_SECONDS = 60 * 60
-_LOADING_TIPS: tuple[str, ...] = (
-    "Tip: Use repo:owner/name to override the repository",
-    "Tip: Send follow-ups mid-run; I read them before my next step",
-    "Tip: Ask for plan mode to review my approach before edits",
-    "Tip: Paste a LangSmith trace link for built-in inspection",
-    "Tip: Ask me to check back after CI or a deploy finishes",
-    'Tip: Say "split this out" to start a new Slack thread',
-    "Tip: Ask me to create a reusable skill for future runs",
-    'Tip: Say "always..." to save a standing preference',
-    "Tip: Toggle Always Create PRs in your Profile",
-    "Tip: Add Repository Instructions for repo-specific behavior",
-    "Tip: Use @open-swe autofix off to pause fixes on one PR",
-    "Tip: Customize reviewer style prompts in the dashboard",
-)
 
 _T = TypeVar("_T")
 
@@ -87,11 +73,6 @@ _TOOL_STATUS: dict[str, str] = {
 }
 
 
-def _loading_tip_for_run(run_id: str) -> str:
-    digest = hashlib.sha256(run_id.encode()).digest()
-    return _LOADING_TIPS[int.from_bytes(digest[:8], "big") % len(_LOADING_TIPS)]
-
-
 def _slack_status_context_from_config() -> tuple[str, str, str] | None:
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
@@ -108,7 +89,7 @@ def _slack_status_context_from_config() -> tuple[str, str, str] | None:
 
     prepare_run_id = configurable.get("prepare_run_id")
     tip_key = prepare_run_id if isinstance(prepare_run_id, str) and prepare_run_id else thread_ts
-    return channel_id, thread_ts, _loading_tip_for_run(tip_key)
+    return channel_id, thread_ts, slack_loading_tip(tip_key)
 
 
 def _tool_call_name(tool_call: object) -> str | None:

@@ -3,6 +3,12 @@ import importlib
 from agent.utils import dashboard_links
 
 
+def test_dashboard_base_url_uses_configured_deployment(monkeypatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", " https://dashboard.example/ ")
+
+    assert dashboard_links.dashboard_base_url() == "https://dashboard.example"
+
+
 def test_dashboard_review_url_points_to_reviews_page(monkeypatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://example.com")
     importlib.reload(dashboard_links)

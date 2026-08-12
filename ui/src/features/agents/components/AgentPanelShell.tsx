@@ -4,10 +4,34 @@ import {
   ArrowsOutIcon,
   SidebarSimpleIcon,
 } from "@phosphor-icons/react"
+import {
+  FileDiff,
+  Folder,
+  Globe,
+  ListChecks,
+  Plus,
+  SquareTerminal,
+  X,
+} from "lucide-react"
 
+import type { PanelTab, PanelTabKind } from "@/features/agents/lib/panelTabs"
+import { isMultiInstanceKind } from "@/features/agents/lib/panelTabs"
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { Z } from "@/features/agents/components/z-index"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
+
+const PANEL_TAB_META: Record<
+  PanelTabKind,
+  { label: string; hint?: string; Icon: typeof FileDiff }
+> = {
+  review: { label: "Review", hint: "⌃⇧G", Icon: FileDiff },
+  terminal: { label: "Terminal", Icon: SquareTerminal },
+  browser: { label: "Browser", hint: "⌘T", Icon: Globe },
+  files: { label: "Files", hint: "⌘P", Icon: Folder },
+  plan: { label: "Plan", Icon: ListChecks },
+}
 
 const PANEL_STORAGE_WIDTH = "open-swe.gitpanel.width"
 const PANEL_DEFAULT_WIDTH = 420
@@ -123,8 +147,9 @@ function PanelResizeHandle({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       className={cn(
-        "absolute top-0 left-0 z-20 h-full w-1 cursor-col-resize touch-none select-none",
-        "after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-transparent after:transition-colors",
+        // Straddles the seam so the grab strip never sits on top of panel content.
+        "absolute top-0 -left-1 z-20 h-full w-2 cursor-col-resize touch-none select-none",
+        "after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent after:transition-colors",
         "hover:after:bg-border",
         dragging && "after:bg-border"
       )}
@@ -132,29 +157,101 @@ function PanelResizeHandle({
   )
 }
 
-interface AgentPanelShellProps<TTab extends string> {
-  tabs: ReadonlyArray<readonly [TTab, string]>
-  activeTab: TTab
-  onTabChange: (tab: TTab) => void
+function PanelControl({
+  label,
+  onClick,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        aria-label={label}
+        className="rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+        onClick={onClick}
+        type="button"
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup>{label}</TooltipPopup>
+    </Tooltip>
+  )
+}
+
+function PanelLauncher({
+  kinds,
+  onOpen,
+}: {
+  kinds: ReadonlyArray<PanelTabKind>
+  onOpen: (kind: PanelTabKind) => void
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col justify-center gap-1 p-3">
+      {kinds.map((kind) => {
+        const { label, hint, Icon } = PANEL_TAB_META[kind]
+        return (
+          <button
+            key={kind}
+            type="button"
+            onClick={() => onOpen(kind)}
+            className="flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-foreground transition-colors hover:bg-accent"
+          >
+            <Icon className="size-4 text-muted-foreground" />
+            <span>{label}</span>
+            {hint && (
+              <span className="ml-auto text-xs tracking-widest text-muted-foreground/60">
+                {hint}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+export function PanelComingSoon() {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-xs text-muted-foreground/70">
+      Coming Soon
+    </div>
+  )
+}
+
+interface AgentPanelShellProps {
+  tabs: ReadonlyArray<PanelTab>
+  activeTabId: string | null
+  onSelectTab: (id: string) => void
+  /** Omit to make tabs non-closable (cloud threads). */
+  onCloseTab?: (id: string) => void
+  onOpenKind?: (kind: PanelTabKind) => void
+  /** Kinds offered by the launcher and the "+" menu. */
+  menuKinds: ReadonlyArray<PanelTabKind>
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
-  /** Rendered inside the panel card; `fullScreen` drives layout-only extras. */
+  /** Rendered as the panel body; `fullScreen` drives layout-only extras. */
   children: (state: { fullScreen: boolean }) => React.ReactNode
 }
 
 /**
  * The resizable right-hand column shared by cloud threads and local desktop
- * sessions: tab bar, collapse/full-screen controls, and the card the active tab
- * renders into. On mobile it becomes a full-screen overlay instead of a column.
+ * sessions: a tab strip with a "+" menu, panel controls, and the body the
+ * active tab renders into. On mobile it becomes a full-screen overlay.
  */
-export function AgentPanelShell<TTab extends string>({
+export function AgentPanelShell({
   tabs,
-  activeTab,
-  onTabChange,
+  activeTabId,
+  onSelectTab,
+  onCloseTab,
+  onOpenKind,
+  menuKinds,
   collapsed,
   onCollapsedChange,
   children,
-}: AgentPanelShellProps<TTab>) {
+}: AgentPanelShellProps) {
   const [width, setWidthState] = useState(() => readStoredPanelWidth())
   const [fullScreen, setFullScreen] = useState(false)
   const isMobile = useIsMobile()
@@ -201,8 +298,8 @@ export function AgentPanelShell<TTab extends string>({
       <button
         type="button"
         onClick={() => onCollapsedChange(false)}
-        aria-label="Expand panel"
-        title="Expand panel"
+        aria-label="Show panel"
+        title="Show panel"
         className="fixed top-3 right-3 z-30 flex size-7 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
       >
         <SidebarSimpleIcon className="size-4" />
@@ -210,70 +307,132 @@ export function AgentPanelShell<TTab extends string>({
     )
   }
 
+  const openableKinds = onOpenKind
+    ? menuKinds.filter(
+        (kind) =>
+          isMultiInstanceKind(kind) || !tabs.some((tab) => tab.kind === kind)
+      )
+    : []
+
   return (
     <aside
       ref={panelRef}
       className={cn(
-        // No background or rule of its own: the panel shares the main surface
-        // (and its grain) with the conversation. The seam is the gap between
-        // the two cards; the resize handle only paints on hover.
-        "relative flex shrink-0 flex-col",
-        overlay ? "fixed inset-0 !w-full bg-background" : "h-full"
+        "relative flex shrink-0 flex-col bg-background",
+        overlay ? "fixed inset-0 !w-full" : "h-full border-l border-border"
       )}
       style={overlay ? { zIndex: Z.MODAL } : { width }}
     >
-      <div className="flex h-11 shrink-0 items-center gap-1 px-3">
-        {tabs.map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            aria-current={activeTab === id ? "page" : undefined}
-            onClick={() => onTabChange(id)}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-xs transition-colors",
-              activeTab === id
-                ? "bg-accent font-medium text-foreground"
-                : "text-muted-foreground/70 hover:bg-accent"
-            )}
+      <div className="flex h-11 shrink-0 items-center border-b border-border px-2">
+        <div className="flex min-w-0 flex-1 items-center overflow-x-auto">
+          {tabs.map((tab, index) => {
+            const { label, Icon } = PANEL_TAB_META[tab.kind]
+            const title = tab.title ?? label
+            const active = tab.id === activeTabId
+            return (
+              <div key={tab.id} className="flex min-w-0 items-center">
+                {index > 0 && (
+                  <div
+                    className={cn(
+                      "h-4 w-px shrink-0 bg-border",
+                      (active || tabs[index - 1]?.id === activeTabId) &&
+                        "bg-transparent"
+                    )}
+                  />
+                )}
+                <div
+                  className={cn(
+                    "flex min-w-0 items-center rounded-md",
+                    active && "bg-accent"
+                  )}
+                >
+                  <button
+                    type="button"
+                    aria-current={active ? "page" : undefined}
+                    onClick={() => onSelectTab(tab.id)}
+                    title={title}
+                    className={cn(
+                      "flex min-w-0 items-center gap-1.5 px-2 py-1 text-xs transition-colors",
+                      active
+                        ? "font-medium text-foreground"
+                        : "text-muted-foreground/70 hover:text-foreground"
+                    )}
+                  >
+                    <Icon className="size-3.5 shrink-0" />
+                    <span className="max-w-28 truncate">{title}</span>
+                  </button>
+                  {active && onCloseTab && (
+                    <button
+                      type="button"
+                      aria-label={`Close ${title}`}
+                      onClick={() => onCloseTab(tab.id)}
+                      className="pr-1.5 text-muted-foreground/70 transition-colors hover:text-foreground"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+          {openableKinds.length > 0 && (
+            <Menu>
+              <MenuTrigger
+                aria-label="Open a new tab"
+                className="ml-1 shrink-0 rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Plus className="size-4" />
+              </MenuTrigger>
+              <MenuPopup align="start" className="w-44">
+                {openableKinds.map((kind) => {
+                  const { label, hint, Icon } = PANEL_TAB_META[kind]
+                  return (
+                    <MenuItem key={kind} onClick={() => onOpenKind?.(kind)}>
+                      <Icon />
+                      {label}
+                      {hint && (
+                        <span className="ml-auto tracking-widest text-muted-foreground/60">
+                          {hint}
+                        </span>
+                      )}
+                    </MenuItem>
+                  )
+                })}
+              </MenuPopup>
+            </Menu>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center">
+          {!isMobile && (
+            <PanelControl
+              label={fullScreen ? "Exit full screen" : "Expand panel"}
+              onClick={() => setFullScreen((v) => !v)}
+            >
+              {fullScreen ? (
+                <ArrowsInIcon className="size-4" />
+              ) : (
+                <ArrowsOutIcon className="size-4" />
+              )}
+            </PanelControl>
+          )}
+          <PanelControl
+            label="Hide panel"
+            onClick={() => {
+              setFullScreen(false)
+              onCollapsedChange(true)
+            }}
           >
-            {label}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => {
-            setFullScreen(false)
-            onCollapsedChange(true)
-          }}
-          aria-label="Collapse panel"
-          title="Collapse panel"
-          className="ml-auto rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <SidebarSimpleIcon className="size-4" />
-        </button>
-        {!isMobile && (
-          <button
-            type="button"
-            onClick={() => setFullScreen((v) => !v)}
-            aria-label={fullScreen ? "Exit full screen" : "Enter full screen"}
-            className="rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-          >
-            {fullScreen ? (
-              <ArrowsInIcon className="size-4" />
-            ) : (
-              <ArrowsOutIcon className="size-4" />
-            )}
-          </button>
-        )}
+            <SidebarSimpleIcon className="size-4" />
+          </PanelControl>
+        </div>
       </div>
 
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card",
-          overlay ? "mx-3 mb-3" : "mr-4 mb-4 ml-1"
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {tabs.length === 0 && onOpenKind ? (
+          <PanelLauncher kinds={menuKinds} onOpen={onOpenKind} />
+        ) : (
+          children({ fullScreen })
         )}
-      >
-        {children({ fullScreen })}
       </div>
       {!overlay && (
         <PanelResizeHandle

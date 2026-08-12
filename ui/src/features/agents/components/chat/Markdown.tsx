@@ -31,17 +31,17 @@ const STREAMDOWN_ANIMATED = {
 
 const STREAMDOWN_COMPONENTS = {
   h1: ({ children }: { children?: ReactNode }) => (
-    <div className="mt-4 mb-1.5 text-[15px] font-medium tracking-tight text-foreground">
+    <div className="mt-4 mb-1.5 text-[17px] font-medium tracking-tight text-foreground">
       {children}
     </div>
   ),
   h2: ({ children }: { children?: ReactNode }) => (
-    <div className="mt-3 mb-1.5 text-[14px] font-medium tracking-tight text-foreground">
+    <div className="mt-3 mb-1.5 text-[15px] font-medium tracking-tight text-foreground">
       {children}
     </div>
   ),
   h3: ({ children }: { children?: ReactNode }) => (
-    <div className="mt-3 mb-1 text-[13px] font-medium text-foreground">
+    <div className="mt-3 mb-1 text-[14px] font-medium text-foreground">
       {children}
     </div>
   ),
@@ -175,7 +175,7 @@ export const Markdown = memo(function Markdown({
   }, [transformImageUrl])
 
   return (
-    <div className="max-w-full min-w-0 text-[13px] leading-6 [overflow-wrap:anywhere] break-words [&_.streamdown]:text-foreground">
+    <div className="max-w-full min-w-0 text-[14px] leading-[1.6] [overflow-wrap:anywhere] break-words [&_.streamdown]:text-foreground">
       <MarkdownErrorBoundary content={content}>
         <Streamdown
           mode={isLive ? "streaming" : "static"}

@@ -1,9 +1,13 @@
-import { Link, createFileRoute } from "@tanstack/react-router"
-import { CaretRightIcon } from "@phosphor-icons/react"
+import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 
 import type { ModelOption } from "@/lib/api"
-import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
+import {
+  AppShell,
+  SettingsNavRow,
+  SettingsRow,
+  SettingsSection,
+} from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Input } from "@/components/ui/input"
@@ -317,37 +321,17 @@ function CloudAgentsPage() {
       </SettingsSection>
 
       <SettingsSection title="Rules">
-        <Link
+        <SettingsNavRow
           to="/agents/instructions"
-          className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
-        >
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium text-foreground">
-              Repository Instructions
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Per-repo custom instructions injected into the agent's system
-              prompt.
-            </span>
-          </div>
-          <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        </Link>
+          label="Repository Instructions"
+          description="Per-repo custom instructions injected into the agent's system prompt."
+        />
         {session.data.is_admin && (
-          <Link
+          <SettingsNavRow
             to="/agents/snapshots"
-            className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
-          >
-            <div className="flex flex-col gap-0.5">
-              <span className="text-xs font-medium text-foreground">
-                Repository Snapshots
-              </span>
-              <span className="text-xs text-muted-foreground">
-                Build a per-repo sandbox image from a custom Dockerfile. Falls
-                back to the default image.
-              </span>
-            </div>
-            <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          </Link>
+            label="Repository Snapshots"
+            description="Build a per-repo sandbox image from a custom Dockerfile. Falls back to the default image."
+          />
         )}
       </SettingsSection>
 

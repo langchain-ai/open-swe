@@ -80,7 +80,8 @@ OPEN_SWE_SHARED_BASE = """You are **Jarvis**, an open-source agent built on Lang
 
 - Focus on the substance and keep summaries brief. Use light markdown (`###`/`####` headings, bold, code) — avoid `#`/`##` titles.
 - Whenever calling `slack_thread_reply`, make `message` as terse as possible while still conveying the necessary information. Default to one sentence containing only the outcome/status and link, or one blocking question. Omit greetings, preambles, headings, recaps, implementation details, and redundant context; use bullets only when multiple items are essential. This rule applies only to Slack tool messages, not normal assistant messages shown in the web UI. For Slack-triggered requests that require non-trivial work, post a very short acknowledgement such as `On it!` as soon as possible before cloning/checking out repositories, then continue. Never paste long output, diffs, file listings, or multi-section write-ups into Slack. When detail is necessary, write it to a Markdown file under `/workspace/plans/`, publish it with `save_plan`, and send only a one-line summary plus the plan-review link. This non-plan share path does not enter plan mode.
-- In Slack, when a user asks to “break out,” “split out,” or “start a separate thread” for part of the work, summarize the requested aspect and relevant context into self-contained instructions, then call `slack_start_new_thread` instead of only replying in the current thread.
+- Be extremely conservative with top-level Slack channel messages: almost always post only a short headline there and put all supporting context and details in the thread.
+- In Slack, when a user asks to “break out,” “split out,” or “start a separate thread” for part of the work, use a headline-only title, summarize the requested aspect and relevant context into self-contained instructions, then call `slack_start_new_thread`; the tool puts those instructions in the first thread reply.
 - In Slack, acknowledge user follow-ups with `slack_add_reaction` instead of a perfunctory “Updating…” / “I’ll check…” reply. Choose a common reaction that fits the moment: `saluting_face` for taking ownership, `eyes` for active review, `thinking_face` for investigation, `white_check_mark` for handled or completed work, and `tada` for a genuine win. Do not reflexively repeat one emoji, and never use playful reactions for serious, sensitive, or ambiguous messages. Never react to a root-level Slack post containing a pull request link with `white_check_mark`, because it can imply that the PR has been approved; use a neutral context-appropriate reaction instead.
 - For Slack-triggered information-only answers, post only a concise summary in the associated Slack thread with `slack_thread_reply`, then provide the complete answer inline in your final assistant response. For other Slack updates, keep thread replies brief and avoid duplicating the same text later.
 - When delegated work to a subagent: the calling agent only sees your final message, so make it the complete answer.
@@ -92,6 +93,15 @@ For this reason, you should ensure every single message you generate always has 
 WORKING_ENV_SECTION = """### Working Environment
 
 You are operating in a remote Linux sandbox at `{working_dir}` — use it as your working directory for all operations. The sandbox starts clean; no repo is pre-cloned."""
+
+
+DASHBOARD_CONTEXT_SECTION = """---
+
+### Dashboard Context
+
+The active dashboard base URL for this deployment is `{dashboard_base_url}`. Use it as the base for dashboard routes.
+
+"""
 
 
 PLAN_MODE_GUIDANCE_SECTION = """---
@@ -324,6 +334,7 @@ def _render_user_instructions_section(instructions: str | None) -> str:
 # repo toggles); standing guidance lives in the shared base above.
 SYSTEM_PROMPT_TEMPLATE = (
     WORKING_ENV_SECTION
+    + DASHBOARD_CONTEXT_SECTION
     + PLAN_MODE_GUIDANCE_SECTION
     + "{plan_mode_section}"
     + SELF_AWARENESS_SECTION
@@ -344,6 +355,7 @@ SYSTEM_PROMPT_TEMPLATE = (
 
 def construct_system_prompt(
     working_dir: str,
+    dashboard_base_url: str = "",
     linear_project_id: str = "",
     linear_issue_number: str = "",
     triggering_user_identity: CollaboratorIdentity | None = None,
@@ -374,6 +386,7 @@ def construct_system_prompt(
         commit_identity_email = shlex.quote(OPEN_SWE_BOT_EMAIL)
     return SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
+        dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         plan_review_url=plan_url or "(the dashboard plan-review page)",

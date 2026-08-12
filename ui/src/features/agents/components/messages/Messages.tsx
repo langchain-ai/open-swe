@@ -32,7 +32,7 @@ function QueuedMessages({
         return (
           <div
             key={message.id}
-            className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-border bg-accent/40 px-3 py-2 text-[13px] text-foreground shadow-sm"
+            className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-border bg-accent/40 px-3 py-2 text-[14px] text-foreground shadow-sm"
             data-testid="queued-message"
           >
             <div className="mb-1 flex items-center gap-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
@@ -255,7 +255,9 @@ export const Messages = memo(function MessagesComponent({
       <div className="relative min-h-0 min-w-0 flex-1">
         <div
           ref={scrollRef}
-          className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto py-5 text-[13px] leading-6 antialiased"
+          // Gutter on both edges: the centered column keeps its position when the
+          // scrollbar appears, so it stays aligned with the composer below it.
+          className="h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-5 text-[14px] leading-[1.6] antialiased"
         >
           <div
             ref={contentRef}

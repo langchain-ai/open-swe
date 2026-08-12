@@ -51,8 +51,12 @@ function openPicker(
       {...props}
     />
   )
-  fireEvent.click(screen.getByRole("button", { name: /GPT-5.6 Sol High/ }))
+  fireEvent.click(screen.getByRole("button", { expanded: false }))
   return { onSelectionChange, panel: screen.getByTestId("model-picker-panel") }
+}
+
+function openModelPane() {
+  fireEvent.click(screen.getByRole("option", { name: "GPT-5.6 Sol" }))
 }
 
 describe("ModelPicker", () => {
@@ -70,8 +74,49 @@ describe("ModelPicker", () => {
     ).toBeTruthy()
   })
 
+  it("shows the selected model's context, reasoning and model row", () => {
+    const { panel } = openPicker()
+
+    expect(panel.textContent).toContain("Context")
+    expect(panel.textContent).toContain("272.0K")
+    expect(
+      within(screen.getByRole("listbox", { name: "Reasoning effort" }))
+        .getAllByRole("option")
+        .map((option) => option.textContent)
+    ).toEqual(["None", "Low", "Medium", "High", "Extra High"])
+    expect(screen.getByRole("option", { name: "GPT-5.6 Sol" })).toBeTruthy()
+    expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
+  })
+
+  it("omits the context section for models without a context window", () => {
+    openPicker({
+      selection: { modelId: "google_genai:gemini-3.6-flash", effort: "medium" },
+    })
+
+    expect(screen.getByTestId("model-picker-panel").textContent).not.toContain(
+      "Context"
+    )
+  })
+
+  it("selects a reasoning effort for the selected model", () => {
+    const { onSelectionChange } = openPicker()
+
+    fireEvent.click(
+      within(
+        screen.getByRole("listbox", { name: "Reasoning effort" })
+      ).getByRole("option", { name: "Low" })
+    )
+
+    expect(onSelectionChange).toHaveBeenCalledWith({
+      modelId: "openai:gpt-5.6-sol",
+      effort: "low",
+    })
+    expect(screen.queryByTestId("model-picker-panel")).toBeNull()
+  })
+
   it("lists every model with its effort and filters on search", () => {
     openPicker()
+    openModelPane()
 
     const models = screen.getByRole("listbox", { name: "Models" })
     expect(
@@ -91,63 +136,9 @@ describe("ModelPicker", () => {
     ).toEqual(["Kimi K3 High"])
   })
 
-  it("shows the context window and reasoning options for the focused model", () => {
-    openPicker()
-
-    const panel = screen.getByTestId("model-picker-panel")
-    expect(panel.textContent).toContain("Context")
-    expect(panel.textContent).toContain("272.0K")
-
-    expect(
-      within(screen.getByRole("listbox", { name: "Reasoning effort" }))
-        .getAllByRole("option")
-        .map((option) => option.textContent)
-    ).toEqual(["None", "Low", "Medium", "High", "Extra High"])
-
-    fireEvent.mouseEnter(
-      screen.getByRole("option", { name: "Gemini 3.6 Flash Medium" })
-    )
-
-    expect(
-      within(screen.getByRole("listbox", { name: "Reasoning effort" }))
-        .getAllByRole("option")
-        .map((option) => option.textContent)
-    ).toEqual(["Minimal", "Low", "Medium", "High"])
-  })
-
-  it("omits the context section for models without a context window", () => {
-    openPicker()
-
-    fireEvent.mouseEnter(
-      screen.getByRole("option", { name: "Gemini 3.6 Flash Medium" })
-    )
-
-    expect(screen.getByTestId("model-picker-panel").textContent).not.toContain(
-      "Context"
-    )
-  })
-
-  it("selects a reasoning effort for the focused model", () => {
-    const { onSelectionChange } = openPicker()
-
-    fireEvent.mouseEnter(
-      screen.getByRole("option", { name: "Gemini 3.6 Flash Medium" })
-    )
-    fireEvent.click(
-      within(
-        screen.getByRole("listbox", { name: "Reasoning effort" })
-      ).getByRole("option", { name: "Low" })
-    )
-
-    expect(onSelectionChange).toHaveBeenCalledWith({
-      modelId: "google_genai:gemini-3.6-flash",
-      effort: "low",
-    })
-    expect(screen.queryByTestId("model-picker-panel")).toBeNull()
-  })
-
   it("selects a model row with that model's default effort", () => {
     const { onSelectionChange } = openPicker()
+    openModelPane()
 
     fireEvent.click(screen.getByRole("option", { name: "Kimi K3 High" }))
 
@@ -155,10 +146,12 @@ describe("ModelPicker", () => {
       modelId: "fireworks:accounts/fireworks/models/kimi-k3",
       effort: "high",
     })
+    expect(screen.queryByTestId("model-picker-panel")).toBeNull()
   })
 
   it("disables models without image support when images are attached", () => {
     const { onSelectionChange } = openPicker({ requireImageSupport: true })
+    openModelPane()
 
     const kimi = screen.getByRole("option", { name: "Kimi K3 High" })
     expect(kimi).toHaveProperty("disabled", true)
@@ -167,25 +160,26 @@ describe("ModelPicker", () => {
     expect(onSelectionChange).not.toHaveBeenCalled()
   })
 
-  it("moves model focus and effort with the arrow keys", () => {
-    const { onSelectionChange } = openPicker()
-    const panel = screen.getByTestId("model-picker-panel")
-
-    fireEvent.keyDown(panel, { key: "ArrowDown" })
-    expect(
-      within(screen.getByRole("listbox", { name: "Reasoning effort" }))
-        .getAllByRole("option")
-        .map((option) => option.textContent)
-    ).toEqual(["Minimal", "Low", "Medium", "High"])
+  it("opens the model pane with ArrowRight and returns with ArrowLeft", () => {
+    const { panel } = openPicker()
 
     fireEvent.keyDown(panel, { key: "ArrowRight" })
-    fireEvent.keyDown(panel, { key: "ArrowDown" })
+    expect(screen.getByRole("listbox", { name: "Models" })).toBeTruthy()
+
+    fireEvent.keyDown(panel, { key: "ArrowLeft" })
+    expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
+  })
+
+  it("moves reasoning focus with the arrow keys and applies it on Enter", () => {
+    const { onSelectionChange, panel } = openPicker()
+
+    fireEvent.keyDown(panel, { key: "ArrowUp" })
+    fireEvent.keyDown(panel, { key: "Enter" })
 
     expect(onSelectionChange).toHaveBeenCalledWith({
-      modelId: "google_genai:gemini-3.6-flash",
-      effort: "high",
+      modelId: "openai:gpt-5.6-sol",
+      effort: "medium",
     })
-    expect(screen.getByTestId("model-picker-panel")).toBeTruthy()
   })
 
   it("closes on Escape", () => {
@@ -196,5 +190,15 @@ describe("ModelPicker", () => {
     })
 
     expect(screen.queryByTestId("model-picker-panel")).toBeNull()
+  })
+
+  it("returns to the main pane when Escape closes the model pane", () => {
+    const { panel } = openPicker()
+    openModelPane()
+
+    fireEvent.keyDown(panel, { key: "Escape" })
+
+    expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
+    expect(screen.getByTestId("model-picker-panel")).toBeTruthy()
   })
 })

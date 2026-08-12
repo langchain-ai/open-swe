@@ -5,6 +5,9 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
+  openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
+  resolveAcpProjectPath: (input) =>
+    ipcRenderer.invoke("desktop:resolve-acp-project-path", { ...input }),
   onProjectsChanged: (callback) => {
     const listener = (_event, projects) => callback(projects)
     ipcRenderer.on("desktop:projects-changed", listener)
@@ -15,26 +18,35 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   cancelAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-cancel", sessionId),
   getAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-session", sessionId),
   listAcpSessions: () => ipcRenderer.invoke("desktop:acp-sessions"),
+  getAcpDiff: (sessionId) => ipcRenderer.invoke("desktop:acp-diff", sessionId),
   onAcpEvent: (callback) => {
     const listener = (_event, payload) => callback(payload)
     ipcRenderer.on("desktop:acp-event", listener)
     return () => ipcRenderer.removeListener("desktop:acp-event", listener)
   },
   terminal: {
-    create: (id, cwd) => ipcRenderer.send("desktop:terminal-create", id, cwd),
-    write: (id, data) => ipcRenderer.send("desktop:terminal-write", id, data),
-    resize: (id, cols, rows) =>
-      ipcRenderer.send("desktop:terminal-resize", id, cols, rows),
-    destroy: (id) => ipcRenderer.send("desktop:terminal-destroy", id),
-    onData: (callback) => {
-      const listener = (_event, id, data) => callback(id, data)
-      ipcRenderer.on("desktop:terminal-data", listener)
-      return () => ipcRenderer.removeListener("desktop:terminal-data", listener)
+    attach: (input) => ipcRenderer.invoke("desktop:terminal-attach", { ...input }),
+    open: (input) => ipcRenderer.invoke("desktop:terminal-attach", { ...input }),
+    write: (input) => ipcRenderer.invoke("desktop:terminal-write", { ...input }),
+    resize: (input) => ipcRenderer.invoke("desktop:terminal-resize", { ...input }),
+    clear: (input) => ipcRenderer.invoke("desktop:terminal-clear", { ...input }),
+    restart: (input) => ipcRenderer.invoke("desktop:terminal-restart", { ...input }),
+    detach: (input) => ipcRenderer.invoke("desktop:terminal-detach", { ...input }),
+    close: (input) => ipcRenderer.invoke("desktop:terminal-close", { ...input }),
+    list: (localSessionId) => ipcRenderer.invoke("desktop:terminal-list", localSessionId),
+    subscribeMetadata: (localSessionId) =>
+      ipcRenderer.invoke("desktop:terminal-metadata-subscribe", localSessionId),
+    detachMetadata: (localSessionId) =>
+      ipcRenderer.invoke("desktop:terminal-metadata-detach", localSessionId),
+    onEvent: (callback) => {
+      const listener = (_event, terminalEvent) => callback(terminalEvent)
+      ipcRenderer.on("desktop:terminal-event", listener)
+      return () => ipcRenderer.removeListener("desktop:terminal-event", listener)
     },
-    onError: (callback) => {
-      const listener = (_event, id, message) => callback(id, message)
-      ipcRenderer.on("desktop:terminal-error", listener)
-      return () => ipcRenderer.removeListener("desktop:terminal-error", listener)
+    onMetadata: (callback) => {
+      const listener = (_event, metadataEvent) => callback(metadataEvent)
+      ipcRenderer.on("desktop:terminal-metadata", listener)
+      return () => ipcRenderer.removeListener("desktop:terminal-metadata", listener)
     },
   },
 })
@@ -59,7 +71,7 @@ window.addEventListener("DOMContentLoaded", () => {
       user-select: none;
     }
 
-    aside > div:first-child {
+    [data-sidebar-frame] > div:first-child {
       -webkit-app-region: drag;
       box-sizing: border-box;
       height: 52px;
@@ -69,7 +81,7 @@ window.addEventListener("DOMContentLoaded", () => {
       padding-bottom: 0 !important;
     }
 
-    aside > div:first-child :is(a, button, input, textarea, select, [role="button"]) {
+    [data-sidebar-frame] > div:first-child :is(a, button, input, textarea, select, [role="button"]) {
       -webkit-app-region: no-drag;
     }
 

@@ -117,6 +117,7 @@ const SHIKI_LANGS = [
 ]
 
 const config = defineConfig({
+  base: "/",
   optimizeDeps: {
     include: [
       "workbox-window",

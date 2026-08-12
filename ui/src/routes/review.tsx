@@ -5,7 +5,12 @@ import { useEffect, useMemo, useState } from "react"
 import { IoLogoGithub } from "react-icons/io5"
 
 import type { TeamSettings } from "@/lib/api"
-import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
+import {
+  AppShell,
+  SettingsNavRow,
+  SettingsRow,
+  SettingsSection,
+} from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
@@ -97,20 +102,11 @@ function ReviewPage() {
       <RepositoriesSection canEdit={canEdit} />
 
       <SettingsSection title="Rules">
-        <Link
+        <SettingsNavRow
           to="/review/styles"
-          className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
-        >
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium text-foreground">
-              Review Style Prompts
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Per-repo style guides learned from past PR review feedback.
-            </span>
-          </div>
-          <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        </Link>
+          label="Review Style Prompts"
+          description="Per-repo style guides learned from past PR review feedback."
+        />
       </SettingsSection>
 
       <SettingsSection

@@ -17,6 +17,9 @@ app's local data and can be selected from the **This Mac** submenu or managed fr
 dcode runs are ephemeral: their sessions remain available only for the lifetime of the desktop
 process and cannot be resumed after it exits.
 
+The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
+started, so it shows what the agent changed and not the working tree's prior state.
+
 ## How it connects
 
 The bundled UI runs at an internal `open-swe://app` origin. Electron proxies its
@@ -69,6 +72,27 @@ pnpm --dir desktop run dist # installer for the current platform
 
 Both commands build `ui/` and package its static output with Electron. Build outputs are written
 to `desktop/dist/`.
+
+## macOS releases
+
+Maintainers can run **Release Desktop** from the GitHub Actions page on `main` and choose a patch,
+minor, or major version bump. The workflow builds the current `ui/` bundle, signs and notarizes the
+Electron app, verifies the resulting app and DMG, bumps `desktop/package.json`, creates a
+`desktop-vX.Y.Z` tag, and publishes the DMG, macOS zip, and app zip to a GitHub release. The
+desktop-prefixed tags keep this release stream separate from web and backend releases; the workflow
+packages the web UI but does not deploy or otherwise change the hosted web app.
+
+The workflow requires these GitHub Actions secrets:
+
+- `RELEASE_PAT`: token allowed to push to `main` and create tags
+- `APPLE_SIGNING_CERT`: base64-encoded Developer ID Application `.p12` certificate
+- `APPLE_SIGNING_CERT_PASSWORD`: password for the certificate
+- `APPLE_API_KEY`: App Store Connect `.p8` key contents
+- `APPLE_API_KEY_ID`: App Store Connect key ID
+- `APPLE_API_ISSUER`: App Store Connect issuer ID
+
+Local packaging remains available without those credentials; signing and notarization are performed
+by the release workflow.
 
 ## Deployment security
 

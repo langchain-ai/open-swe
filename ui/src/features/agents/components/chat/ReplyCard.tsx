@@ -179,7 +179,7 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
       </div>
       {body && (
         <div className="overflow-hidden rounded-xl border border-border/60 bg-muted/40">
-          <div className="max-h-[250px] overflow-auto px-3 py-2 text-[13px] text-foreground">
+          <div className="max-h-[250px] overflow-auto px-3 py-2 text-[14px] text-foreground">
             {isLinear ? (
               <Markdown content={body} />
             ) : blocks ? (

@@ -1,0 +1,198 @@
+name: Release Desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: "Version increment type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+jobs:
+  release-desktop:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - run: corepack enable
+
+      - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
+        with:
+          mode: firewall-free
+
+      - name: Bump desktop version
+        id: bump
+        env:
+          BUMP_TYPE: ${{ inputs.version_bump }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'desktop/package.json';
+          const bump = process.env.BUMP_TYPE;
+
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const current = pkg.version;
+          const parts = current.split('.').map(Number);
+
+          if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
+            throw new Error(`Invalid semver in ${path}: ${current}`);
+          }
+
+          let [major, minor, patch] = parts;
+          if (bump === 'major') {
+            major += 1;
+            minor = 0;
+            patch = 0;
+          } else if (bump === 'minor') {
+            minor += 1;
+            patch = 0;
+          } else if (bump === 'patch') {
+            patch += 1;
+          } else {
+            throw new Error(`Unsupported bump type: ${bump}`);
+          }
+
+          const next = `${major}.${minor}.${patch}`;
+          pkg.version = next;
+          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `new_version=${next}\n`);
+          NODE
+
+      - name: Commit desktop version
+        env:
+          VERSION: ${{ steps.bump.outputs.new_version }}
+        run: |
+          git add desktop/package.json
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "chore(desktop): release v${VERSION}"
+          git push origin HEAD:main
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: pnpm install --frozen-lockfile
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        env:
+          ELECTRON_GET_USE_PROXY: "true"
+        run: pnpm install --frozen-lockfile
+
+      - name: Import signing certificate
+        env:
+          SIGNING_CERT_B64: ${{ secrets.APPLE_SIGNING_CERT }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.APPLE_SIGNING_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          printf '%s' "$SIGNING_CERT_B64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/signing.p12" -P "$SIGNING_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "CSC_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Write App Store Connect API key
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+
+      - name: Build macOS distribution
+        working-directory: desktop
+        env:
+          APPLE_API_KEY: ${{ env.APPLE_API_KEY_PATH }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: pnpm run build:ui && pnpm exec electron-builder --mac zip dmg --publish never
+
+      - name: Verify and package release assets
+        id: assets
+        env:
+          VERSION: ${{ steps.bump.outputs.new_version }}
+        run: |
+          shopt -s nullglob
+          mac_zips=(desktop/dist/"Open SWE-${VERSION}"-*-mac.zip)
+          mac_dmgs=(desktop/dist/"Open SWE-${VERSION}"-*.dmg)
+
+          if [ "${#mac_zips[@]}" -ne 1 ] || [ "${#mac_dmgs[@]}" -ne 1 ]; then
+            echo "Expected one macOS zip and one DMG for version ${VERSION}"
+            ls -la desktop/dist
+            exit 1
+          fi
+
+          unpacked="desktop/dist/release-unpacked"
+          mkdir -p "$unpacked"
+          ditto -x -k "${mac_zips[0]}" "$unpacked"
+
+          apps=("$unpacked"/*.app)
+          if [ "${#apps[@]}" -ne 1 ]; then
+            echo "Expected one app bundle in ${mac_zips[0]}"
+            ls -la "$unpacked"
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=2 "${apps[0]}"
+          xcrun stapler validate "${apps[0]}"
+          spctl --assess --type execute --verbose=2 "${apps[0]}"
+          hdiutil verify "${mac_dmgs[0]}"
+
+          app_zip="desktop/dist/Open SWE-${VERSION}.app.zip"
+          ditto -c -k --sequesterRsrc --keepParent "${apps[0]}" "$app_zip"
+
+          echo "mac_zip=${mac_zips[0]}" >> "$GITHUB_OUTPUT"
+          echo "mac_dmg=${mac_dmgs[0]}" >> "$GITHUB_OUTPUT"
+          echo "app_zip=$app_zip" >> "$GITHUB_OUTPUT"
+
+      - name: Tag desktop version
+        env:
+          VERSION: ${{ steps.bump.outputs.new_version }}
+        run: |
+          git tag "desktop-v${VERSION}"
+          git push origin "desktop-v${VERSION}"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: desktop-v${{ steps.bump.outputs.new_version }}
+          name: Open SWE Desktop v${{ steps.bump.outputs.new_version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.assets.outputs.mac_zip }}
+            ${{ steps.assets.outputs.mac_dmg }}
+            ${{ steps.assets.outputs.app_zip }}
+
+      - name: Remove signing credentials
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/signing.p12" "$RUNNER_TEMP/AuthKey.p8"

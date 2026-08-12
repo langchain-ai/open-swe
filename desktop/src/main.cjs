@@ -13,12 +13,16 @@ const {
   shell,
 } = require("electron")
 const { AcpSession, dcodeTarget } = require("./acp-client.cjs")
-const { closeAllTerminals, configureTerminalIpc } = require("./terminal-manager.cjs")
 const {
-  addProject,
-  readProjects,
-  removeProject,
-} = require("./project-store.cjs")
+  captureCheckpoint,
+  checkpointRef,
+  deleteRefs,
+  readDiff,
+  repoRoot,
+  staleRefs,
+} = require("./git-diff.cjs")
+const { closeAllTerminals, configureTerminalIpc } = require("./terminal-manager.cjs")
+const { addProject, readProjects, removeProject } = require("./project-store.cjs")
 const {
   APP_ORIGIN,
   APP_URL,
@@ -65,7 +69,11 @@ protocol.registerSchemesAsPrivileged([
 let backendUrl = null
 let mainWindow = null
 let setupWindow = null
+let quitting = false
 const acpSessions = new Map()
+// sessionId -> { repo, ref }: the worktree snapshot a local session started from, so
+// the diff panel can show what the agent changed rather than the repo's prior state.
+const acpCheckpoints = new Map()
 
 function requireTrustedDesktopIpc(event) {
   const senderUrl = event.senderFrame?.url || event.sender.getURL()
@@ -82,6 +90,22 @@ function sendAcpEvent(sessionId, event) {
   }
 }
 
+async function recordAcpCheckpoint(localSession) {
+  const repo = await repoRoot(localSession.cwd)
+  if (!repo) return
+  const ref = checkpointRef(localSession.id)
+  const live = [...acpCheckpoints.values()]
+    .filter((checkpoint) => checkpoint.repo === repo)
+    .map((checkpoint) => checkpoint.ref)
+  try {
+    // Refs from sessions this or an earlier process lost track of; never pushed,
+    // but they should not pile up in the user's own repository either.
+    deleteRefs(repo, await staleRefs(repo, [...live, ref]))
+    await captureCheckpoint(repo, ref)
+    acpCheckpoints.set(localSession.id, { repo, ref })
+  } catch {}
+}
+
 function projectsPath() {
   return path.join(app.getPath("userData"), "desktop-projects.json")
 }
@@ -93,6 +117,45 @@ function listProjects() {
 function sendProjectsChanged() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("desktop:projects-changed", listProjects())
+  }
+}
+
+function pathIsInside(root, candidate) {
+  const relative = path.relative(root, candidate)
+  return (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+  )
+}
+
+function resolveAcpProjectPath(localSessionId, value) {
+  const localSession = acpSessions.get(localSessionId)
+  if (!localSession || typeof value !== "string" || value.length === 0) {
+    return null
+  }
+  try {
+    const projectRoot = fs.realpathSync(localSession.cwd)
+    if (
+      !listProjects().some((project) => {
+        try {
+          return fs.realpathSync(project.cwd) === projectRoot
+        } catch {
+          return false
+        }
+      })
+    ) {
+      return null
+    }
+    const windowsAbsolute = path.win32.isAbsolute(value)
+    if (windowsAbsolute && process.platform !== "win32") return null
+    const candidate = fs.realpathSync(
+      path.isAbsolute(value) || windowsAbsolute ? value : path.resolve(projectRoot, value)
+    )
+    if (!pathIsInside(projectRoot, candidate)) return null
+    const relative = path.relative(projectRoot, candidate)
+    return relative === "" ? "." : relative.split(path.sep).join("/")
+  } catch {
+    return null
   }
 }
 
@@ -139,6 +202,25 @@ function configureDesktopIpc() {
     return removed
   })
 
+  ipcMain.handle("desktop:open-external", async (event, value) => {
+    requireTrustedDesktopIpc(event)
+    if (typeof value !== "string" || value.length > 8_192) return false
+    let url
+    try {
+      url = new URL(value)
+    } catch {
+      return false
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false
+    await shell.openExternal(url.href)
+    return true
+  })
+
+  ipcMain.handle("desktop:resolve-acp-project-path", (event, input) => {
+    requireTrustedDesktopIpc(event)
+    return resolveAcpProjectPath(input?.localSessionId, input?.path)
+  })
+
   ipcMain.handle("desktop:acp-start", async (event, input) => {
     requireTrustedDesktopIpc(event)
     if (
@@ -172,6 +254,7 @@ function configureDesktopIpc() {
       localSession.close()
       throw error
     }
+    await recordAcpCheckpoint(localSession)
     void localSession.prompt(input.prompt || "", input.images || []).catch(() => {})
     return localSession.snapshot()
   })
@@ -194,11 +277,27 @@ function configureDesktopIpc() {
     return acpSessions.get(sessionId)?.snapshot() || null
   })
 
+  ipcMain.handle("desktop:acp-diff", async (event, sessionId) => {
+    requireTrustedDesktopIpc(event)
+    const localSession = acpSessions.get(sessionId)
+    const checkpoint = acpCheckpoints.get(sessionId)
+    if (
+      !localSession ||
+      !checkpoint ||
+      !listProjects().some((project) => project.cwd === localSession.cwd)
+    ) {
+      return { status: "missing", files: [], truncated: false }
+    }
+    try {
+      return await readDiff(checkpoint.repo, checkpoint.ref)
+    } catch {
+      return { status: "error", files: [], truncated: false }
+    }
+  })
+
   ipcMain.handle("desktop:acp-sessions", (event) => {
     requireTrustedDesktopIpc(event)
-    return [...acpSessions.values()].map((localSession) =>
-      localSession.summary()
-    )
+    return [...acpSessions.values()].map((localSession) => localSession.summary())
   })
 }
 
@@ -209,9 +308,7 @@ function configPath() {
 function readStoredBackendUrl() {
   try {
     const config = JSON.parse(fs.readFileSync(configPath(), "utf8"))
-    return typeof config.backendUrl === "string"
-      ? validateBackendUrl(config.backendUrl)
-      : undefined
+    return typeof config.backendUrl === "string" ? validateBackendUrl(config.backendUrl) : undefined
   } catch {
     return undefined
   }
@@ -267,9 +364,7 @@ function errorPage(error) {
 
 function escapeHtml(value) {
   return value.replace(/[&<>"']/g, (character) => {
-    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[
-      character
-    ]
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]
   })
 }
 
@@ -519,12 +614,8 @@ function createWindow() {
     }
     return { action: "deny" }
   })
-  window.webContents.on("will-navigate", (event, url) =>
-    handleNavigation(window, event, url)
-  )
-  window.webContents.on("will-redirect", (event, url) =>
-    handleNavigation(window, event, url)
-  )
+  window.webContents.on("will-navigate", (event, url) => handleNavigation(window, event, url))
+  window.webContents.on("will-redirect", (event, url) => handleNavigation(window, event, url))
   window.webContents.on("will-attach-webview", (event) => event.preventDefault())
 
   mainWindow = window
@@ -589,16 +680,12 @@ function configurePermissions() {
   session.defaultSession.setPermissionRequestHandler(
     (webContents, permission, callback, details) => {
       callback(
-        isTrustedPermissionRequest(
-          permission,
-          details.requestingUrl || webContents.getURL()
-        )
+        isTrustedPermissionRequest(permission, details.requestingUrl || webContents.getURL())
       )
     }
   )
-  session.defaultSession.setPermissionCheckHandler(
-    (_webContents, permission, requestingOrigin) =>
-      isTrustedPermissionRequest(permission, requestingOrigin)
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) =>
+    isTrustedPermissionRequest(permission, requestingOrigin)
   )
 }
 
@@ -638,6 +725,8 @@ if (!hasSingleInstanceLock) {
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
       listProjects,
+      getAcpSession: (sessionId) => acpSessions.get(sessionId),
+      userDataPath: app.getPath("userData"),
     })
 
     app.on("activate", () => {
@@ -649,9 +738,16 @@ if (!hasSingleInstanceLock) {
     if (process.platform !== "darwin") app.quit()
   })
 
-  app.on("before-quit", () => {
-    closeAllTerminals()
-    for (const localSession of acpSessions.values()) localSession.close()
-    acpSessions.clear()
+  app.on("before-quit", (event) => {
+    if (quitting) return
+    event.preventDefault()
+    quitting = true
+    void closeAllTerminals().finally(() => {
+      for (const localSession of acpSessions.values()) localSession.close()
+      acpSessions.clear()
+      for (const { repo, ref } of acpCheckpoints.values()) deleteRefs(repo, [ref])
+      acpCheckpoints.clear()
+      app.quit()
+    })
   })
 }

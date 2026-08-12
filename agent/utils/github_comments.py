@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import os
 import re
 from typing import Any
 
@@ -20,19 +21,54 @@ __all__ = [
     "GitHubAuthError",
     "OPEN_SWE_TAGS",
     "build_pr_prompt",
+    "describe_open_swe_tags",
     "extract_pr_context",
     "fetch_issue_comments",
     "fetch_pr_branch",
     "fetch_pr_comments_since_last_tag",
     "format_github_comment_body_for_prompt",
     "get_thread_id_from_branch",
+    "mentions_open_swe",
     "post_github_comment",
     "react_to_github_comment",
     "sanitize_github_comment_body",
     "verify_github_signature",
 ]
 
-OPEN_SWE_TAGS = ("@jarvis-aeteq",)
+_DEFAULT_OPEN_SWE_TAGS = ("@jarvis-aeteq",)
+
+
+def _load_open_swe_tags() -> tuple[str, ...]:
+    configured = tuple(
+        tag.strip().lower()
+        for tag in os.environ.get("OPEN_SWE_MENTION_TAGS", "").split(",")
+        if tag.strip()
+    )
+    return configured or _DEFAULT_OPEN_SWE_TAGS
+
+
+OPEN_SWE_TAGS = _load_open_swe_tags()
+
+# Deployments sharing a workspace each own a distinct handle, so a tag must not
+# match when it is only a prefix of a longer one (@openswe vs @openswe-preview).
+_OPEN_SWE_TAG_RE = re.compile(
+    "(?:"
+    + "|".join(re.escape(tag) for tag in sorted(OPEN_SWE_TAGS, key=len, reverse=True))
+    + r")(?![\w-])",
+    re.IGNORECASE,
+)
+
+
+def mentions_open_swe(text: str | None) -> bool:
+    """Whether text mentions one of this deployment's handles."""
+    return bool(text) and _OPEN_SWE_TAG_RE.search(text or "") is not None
+
+
+def describe_open_swe_tags() -> str:
+    """Human-readable handle list for ignore reasons in webhook responses."""
+    return " or ".join(OPEN_SWE_TAGS)
+
+
 UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "<dangerous-external-untrusted-users-comment>"
 UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG = "</dangerous-external-untrusted-users-comment>"
 _SANITIZED_UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "[blocked-untrusted-comment-tag-open]"
@@ -259,10 +295,10 @@ async def fetch_issue_comments(
 async def fetch_pr_comments_since_last_tag(
     repo_config: dict[str, str], pr_number: int, *, token: str
 ) -> list[dict[str, Any]]:
-    """Fetch all PR comments/reviews since the last @jarvis-aeteq tag.
+    """Fetch all PR comments/reviews since the last @open-swe tag.
 
     Fetches from all 3 GitHub comment sources, merges and sorts chronologically,
-    then returns every comment from the last @jarvis-aeteq mention onwards.
+    then returns every comment from the last @open-swe mention onwards.
 
     For inline review comments the dict also includes:
     - 'path': file path commented on
@@ -275,7 +311,7 @@ async def fetch_pr_comments_since_last_tag(
         token: GitHub access token.
 
     Returns:
-        List of comment dicts ordered chronologically from last @jarvis-aeteq tag.
+        List of comment dicts ordered chronologically from last @open-swe tag.
     """
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
@@ -345,17 +381,14 @@ async def fetch_pr_comments_since_last_tag(
     # Sort all comments chronologically
     all_comments.sort(key=lambda c: c.get("created_at", ""))
 
-    # Find all @jarvis-aeteq / @jarvis-aeteq mention positions
     tag_indices = [
-        i
-        for i, comment in enumerate(all_comments)
-        if any(tag in (comment.get("body") or "").lower() for tag in OPEN_SWE_TAGS)
+        i for i, comment in enumerate(all_comments) if mentions_open_swe(comment.get("body"))
     ]
 
     if not tag_indices:
         return []
 
-    # If this is the first @jarvis-aeteq invocation (only one tag), return ALL
+    # If this is the first @openswe invocation (only one tag), return ALL
     # comments so the agent has full context — inline review comments are
     # drafted before submission and appear earlier in the sorted list.
     # For repeat invocations, return everything since the previous tag.
