@@ -26,7 +26,11 @@ from ..utils.json_types import (
     thread_metadata,
 )
 from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.slack import lookup_slack_thread_run_mapping, update_slack_trace_reply_for_web_handoff
+from ..utils.slack import (
+    lookup_slack_thread_run_mapping,
+    parse_github_pr_url,
+    update_slack_trace_reply_for_web_handoff,
+)
 from ..utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
@@ -1972,7 +1976,10 @@ async def get_dashboard_thread_pr_diff(
 ) -> dict[str, Any]:
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     pr_number = metadata.get("pr_number")
+    pr_ref = parse_github_pr_url(str(metadata.get("pr_url") or ""))
     _, _, full_name = _metadata_repo(metadata)
+    if pr_ref and pr_ref.number == pr_number:
+        full_name = f"{pr_ref.owner}/{pr_ref.repo}"
     if not isinstance(pr_number, int) or not full_name:
         raise HTTPException(404, "thread has no pull request")
 
