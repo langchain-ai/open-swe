@@ -77,7 +77,11 @@ jobs:
           mode: firewall-free
       - name: Install workspace dependencies
         env:
-          ELECTRON_GET_USE_PROXY: "true"
+          # `pnpm run check` only syntax-checks the sources, runs node tests, and
+          # builds the UI — none of it launches Electron, so downloading ~100 MB
+          # of binary here buys nothing and fails the job whenever the fetch does.
+          # The release workflow, which actually packages the app, still gets it.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: pnpm install --frozen-lockfile
       - name: Run desktop checks
         run: pnpm run check
