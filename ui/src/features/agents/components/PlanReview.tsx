@@ -225,7 +225,7 @@ export function PlanReview({
     >
       <div
         className={cn(
-          "flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between md:gap-4",
+          "flex flex-col gap-3 border-b border-border px-4 py-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4",
           !compact && "md:px-6"
         )}
       >
@@ -239,11 +239,11 @@ export function PlanReview({
             <span data-testid="plan-status">{plan.status}</span>
           </p>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-2 md:shrink-0 md:justify-end">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end">
           {decision && (
             <span
               data-testid="plan-decision"
-              className="w-full text-xs text-muted-foreground/70 md:w-auto"
+              className="w-full text-xs text-muted-foreground/70 lg:w-auto"
             >
               {decision}
             </span>
