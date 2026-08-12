@@ -154,8 +154,6 @@ export function AgentGitPanel({
       ),
     [files]
   )
-  const headRef = pr?.headRef ?? thread.branch
-  const baseRef = pr?.baseRef ?? "main"
   const tabLabels = { diff: "Branch", review: "Review", commits: "Committed" }
   const refreshDiff = () => void (pr ? prDiff.refetch() : turnDiff.refetch())
 
@@ -184,6 +182,19 @@ export function AgentGitPanel({
         </Menu>
         {files.length > 0 && (
           <span className="flex items-center gap-2 text-sm">
+            <span
+              title={
+                prDiff.data?.truncated || turnDiff.data?.truncated
+                  ? "Only the first files are shown"
+                  : undefined
+              }
+              className="text-xs text-muted-foreground"
+            >
+              {prDiff.data?.truncated || turnDiff.data?.truncated
+                ? "first "
+                : ""}
+              {files.length} file{files.length === 1 ? "" : "s"}
+            </span>
             <span className="text-success-foreground">+{totals.additions}</span>
             <span className="text-destructive">-{totals.deletions}</span>
           </span>
@@ -269,23 +280,7 @@ export function AgentGitPanel({
                   files={files}
                   revealFilePath={revealFilePath}
                   fullScreen={fullScreen}
-                  leading={
-                    <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                      <span
-                        className="min-w-0 truncate font-mono"
-                        title={headRef}
-                      >
-                        {headRef}
-                      </span>
-                      <span className="shrink-0">→</span>
-                      <span
-                        className="min-w-0 truncate font-mono"
-                        title={baseRef}
-                      >
-                        {baseRef}
-                      </span>
-                    </div>
-                  }
+                  hideHeader
                   emptyLabel={
                     prDiff.isLoading ? "Loading PR diff…" : "No diff available."
                   }

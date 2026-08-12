@@ -132,6 +132,7 @@ interface DiffFilesViewProps {
   emptyLabel: string
   /** The change set was capped, so `files` is not everything that changed. */
   truncated?: boolean
+  hideHeader?: boolean
   /** Rendered at the start of the header row (the panel's own tabs). */
   leading?: React.ReactNode
   /** Rendered in the header row, before the wrap toggle and diff stats. */
@@ -149,6 +150,7 @@ export function DiffFilesView({
   fullScreen,
   emptyLabel,
   truncated,
+  hideHeader,
   leading,
   actions,
 }: DiffFilesViewProps) {
@@ -193,27 +195,31 @@ export function DiffFilesView({
 
   return (
     <>
-      <div className="flex min-h-9 items-center gap-1 border-b border-border px-3 py-1">
-        {leading}
-        <div className="ml-auto flex min-w-0 items-center gap-2">
-          <DiffWrapToggle />
-          {actions}
-          {files.length > 0 && (
-            <span className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
-              <span
-                title={truncated ? "Only the first files are shown" : undefined}
-              >
-                {truncated ? "first " : ""}
-                {files.length} file{files.length === 1 ? "" : "s"}
+      {!hideHeader && (
+        <div className="flex min-h-9 items-center gap-1 border-b border-border px-3 py-1">
+          {leading}
+          <div className="ml-auto flex min-w-0 items-center gap-2">
+            <DiffWrapToggle />
+            {actions}
+            {files.length > 0 && (
+              <span className="flex items-center gap-2 text-[11px] text-muted-foreground/70">
+                <span
+                  title={
+                    truncated ? "Only the first files are shown" : undefined
+                  }
+                >
+                  {truncated ? "first " : ""}
+                  {files.length} file{files.length === 1 ? "" : "s"}
+                </span>
+                <span className="text-success-foreground">
+                  +{totals.additions}
+                </span>
+                <span className="text-destructive">-{totals.deletions}</span>
               </span>
-              <span className="text-success-foreground">
-                +{totals.additions}
-              </span>
-              <span className="text-destructive">-{totals.deletions}</span>
-            </span>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         {files.length > 0 ? (
