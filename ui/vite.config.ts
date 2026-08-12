@@ -126,11 +126,20 @@ const SHIKI_LANGS = [
 // responses out of the serverless function.
 const IS_PRODUCTION = process.env.NODE_ENV === "production"
 
+// No default on a hosted build. A fallback here would be a production backend
+// URL, which the preview deployment would silently inherit — pointing preview's
+// dashboard at production's agents, threads, and sandboxes. Failing the build is
+// the recoverable outcome.
+if (process.env.VERCEL && !process.env.DASHBOARD_API_URL) {
+  throw new Error(
+    "DASHBOARD_API_URL is required for a hosted build: it becomes the platform " +
+      "rewrite for /dashboard/api/* and the backend that server renders call. " +
+      "Set it in the Vercel project to this deployment's own backend URL."
+  )
+}
+
 const DASHBOARD_API_URL =
-  process.env.DASHBOARD_API_URL ??
-  (IS_PRODUCTION
-    ? "https://open-swe-v3-f2834ffc0df05a46a10262a9690e8490.us.langgraph.app"
-    : "http://localhost:2024")
+  process.env.DASHBOARD_API_URL ?? "http://localhost:2024"
 
 // A deployed dashboard only fronts the API; dev fronts every backend path so a
 // local mock backend's login redirects resolve on this origin.

@@ -63,6 +63,10 @@ the GitHub App callback URL, and the `DASHBOARD_ALLOWED_ORIGINS` entry must all 
 the preview Vercel domain. That allowlist is the backend's CSRF gate as well as its CORS
 config, so a missing entry leaves the preview dashboard readable but unable to save.
 
+> The build **fails** if `DASHBOARD_API_URL` is unset on Vercel, rather than falling back
+> to a default — a default would be production's backend, and preview would inherit it
+> and drive production's agents, threads, and sandboxes from the preview dashboard.
+>
 > `DASHBOARD_API_URL` is read at build time. A change to it only takes effect on the next
 > deployment, not on redeploy of an existing build.
 
