@@ -16,7 +16,7 @@ from .github_app import (
 logger = logging.getLogger(__name__)
 
 INTERNAL_BOT_LOGINS: frozenset[str] = frozenset(
-    {"open-swe[bot]", "openswe-dev[bot]"}
+    {"jarvis-aeteq[bot]"}
     | {
         login.strip()
         for login in os.environ.get("EXTRA_INTERNAL_BOT_LOGINS", "").split(",")

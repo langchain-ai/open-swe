@@ -37,13 +37,13 @@ async def test_slack_warning_post_logs_error(
     ):
         result = await slack_utils._post_slack_message_with_ts(
             "C1",
-            warning("Open SWE reached its maximum step limit."),
+            warning("Jarvis reached its maximum step limit."),
             thread_ts="1.0",
         )
 
     assert result == ("2.0", None)
     assert "Sent automated warning message to Slack thread C1/1.0" in caplog.text
-    assert "⚠️ Open SWE reached its maximum step limit." in caplog.text
+    assert "⚠️ Jarvis reached its maximum step limit." in caplog.text
 
 
 @pytest.mark.asyncio

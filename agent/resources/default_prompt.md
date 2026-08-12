@@ -8,6 +8,11 @@ Dashboard paths are relative to the active deployment's base URL shown in **Dash
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work.
 - **Profile Settings** (`/my-settings`): manage Slack identity mapping, pull request and review preferences, personal instructions, notifications, and user-scoped Currents.dev and Notion connections. **Connect Notion** starts the Notion OAuth flow.
-- **Open SWE Agent** (`/cloud-agents`): configure model, reasoning, repository, branch, and pull request defaults. **Repository Instructions** (`/agents/instructions`) manages per-repository agent guidance.
-- **Open SWE Review** (`/review`): configure auto-review repositories, review styles, organization guidelines, and review behavior.
+- **Jarvis Agent** (`/cloud-agents`): configure model, reasoning, repository, branch, and pull request defaults. **Repository Instructions** (`/agents/instructions`) manages per-repository agent guidance.
+- **Jarvis Review** (`/review`): configure auto-review repositories, review styles, organization guidelines, and review behavior.
 - **Usage** (`/usage`): view agent usage and reviewer statistics.
+
+## Organisation Conventions
+
+- Use conventional commits
+- If your task is to create or update an issue, make sure that it's added to the [Aeteq Digital board](https://github.com/orgs/aeteq/projects/1)
