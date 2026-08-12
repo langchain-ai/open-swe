@@ -357,6 +357,7 @@ async def _process_slack_mention_impl(
 
     user_email = None
     user_name = ""
+    user_timezone = ""
     if user_id:
         slack_user = await common.get_slack_user_info(user_id)
         if slack_user:
@@ -370,6 +371,9 @@ async def _process_slack_mention_impl(
                     or slack_user.get("name")
                     or ""
                 )
+            timezone_value = slack_user.get("tz")
+            if isinstance(timezone_value, str):
+                user_timezone = timezone_value.strip()
 
     thread_messages = await common.fetch_slack_thread_messages(channel_id, thread_ts)
     current_message = next(
@@ -422,6 +426,9 @@ async def _process_slack_mention_impl(
         or "(no text in mention)"
     )
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
+    trigger_user_timezone_section = (
+        f"## Triggering User Time Zone\n{user_timezone}\n\n" if user_timezone else ""
+    )
 
     # Auto-resolve cross-posted Slack message links in context
     resolved_links_section, image_urls_from_links = await common.resolve_slack_links_in_context(
@@ -437,6 +444,7 @@ async def _process_slack_mention_impl(
         f"{repo_config.get('owner')}/{repo_config.get('name')}\n"
         "Use this only if the Slack conversation does not identify a different repository.\n\n"
         f"## Triggered by\n{trigger_user}\n\n"
+        f"{trigger_user_timezone_section}"
         f"{slack_thread_section}\n\n"
         f"{await _format_slack_run_links_section(thread_id)}\n\n"
         f"## Conversation Context\n{context_text}\n\n"
@@ -533,17 +541,21 @@ async def _process_slack_mention_impl(
     ):
         return
 
+    slack_thread_context: dict[str, Any] = {
+        "channel_id": channel_id,
+        "channel_context": channel_context,
+        "thread_ts": thread_ts,
+        "triggering_user_id": user_id,
+        "triggering_user_name": user_name,
+        "triggering_user_email": user_email,
+        "triggering_event_ts": event_ts,
+    }
+    if user_timezone:
+        slack_thread_context["triggering_user_timezone"] = user_timezone
+
     configurable: dict[str, Any] = {
         "repo": repo_config,
-        "slack_thread": {
-            "channel_id": channel_id,
-            "channel_context": channel_context,
-            "thread_ts": thread_ts,
-            "triggering_user_id": user_id,
-            "triggering_user_name": user_name,
-            "triggering_user_email": user_email,
-            "triggering_event_ts": event_ts,
-        },
+        "slack_thread": slack_thread_context,
         "user_email": user_email,
         "source": "slack",
     }

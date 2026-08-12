@@ -750,7 +750,8 @@ def _setup_slack_mention_fakes(
             "profile": {
                 "email": "mason@example.com",
                 "display_name": "Mason",
-            }
+            },
+            "tz": "America/New_York",
         }
 
     async def fake_fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict]:
@@ -935,9 +936,12 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert kwargs["if_not_exists"] == "create"
     assert kwargs["multitask_strategy"] == "interrupt"
     assert kwargs["durability"] == "sync"
-    assert kwargs["config"]["configurable"]["slack_thread"]["thread_ts"] == thread_ts
+    slack_thread_context = kwargs["config"]["configurable"]["slack_thread"]
+    assert slack_thread_context["thread_ts"] == thread_ts
+    assert slack_thread_context["triggering_user_timezone"] == "America/New_York"
     prompt_block = kwargs["input"]["messages"][0]["content"][0]
     assert "## Default Repository Hint\nlangchain-ai/open-swe" in prompt_block["text"]
+    assert "## Triggering User Time Zone\nAmerica/New_York" in prompt_block["text"]
     assert (
         "Use this only if the Slack conversation does not identify a different repository."
         in (prompt_block["text"])
