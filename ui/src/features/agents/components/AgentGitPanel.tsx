@@ -240,15 +240,6 @@ export function AgentGitPanel({
           </Menu>
         </div>
       </div>
-      <div className="flex min-w-0 items-center gap-2 px-2 text-xs text-muted-foreground">
-        <span className="min-w-0 truncate font-mono" title={headRef}>
-          {headRef}
-        </span>
-        <span className="shrink-0">→</span>
-        <span className="min-w-0 truncate font-mono" title={baseRef}>
-          {baseRef}
-        </span>
-      </div>
     </div>
   )
 
@@ -278,6 +269,23 @@ export function AgentGitPanel({
                   files={files}
                   revealFilePath={revealFilePath}
                   fullScreen={fullScreen}
+                  leading={
+                    <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                      <span
+                        className="min-w-0 truncate font-mono"
+                        title={headRef}
+                      >
+                        {headRef}
+                      </span>
+                      <span className="shrink-0">→</span>
+                      <span
+                        className="min-w-0 truncate font-mono"
+                        title={baseRef}
+                      >
+                        {baseRef}
+                      </span>
+                    </div>
+                  }
                   emptyLabel={
                     prDiff.isLoading ? "Loading PR diff…" : "No diff available."
                   }
