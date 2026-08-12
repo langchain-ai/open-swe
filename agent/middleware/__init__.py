@@ -15,7 +15,6 @@ _MIDDLEWARE_MODULES = {
     "BasePrepareRunMiddleware": ".prepare_run",
     "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
-    "SlackAssistantStatusMiddleware": ".refresh_slack_status",
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
     "SandboxCircuitBreakerMiddleware": ".sandbox_circuit_breaker",
     "SanitizeFireworksMessagesMiddleware": ".sanitize_fireworks_messages",
@@ -48,7 +47,6 @@ __all__ = [
     "TimeoutWrapupMiddleware",
     "WorkflowPushGuardMiddleware",
     "SandboxCircuitBreakerMiddleware",
-    "SlackAssistantStatusMiddleware",
     "check_message_queue_before_model",
     "ensure_no_empty_msg",
     "notify_step_limit_reached",
@@ -70,7 +68,6 @@ if TYPE_CHECKING:
     from .pr_creation_guard import PullRequestCreationGuardMiddleware
     from .prepare_run import BasePrepareRunMiddleware, PrepareRunState
     from .refresh_github_proxy import refresh_github_proxy_before_model
-    from .refresh_slack_status import SlackAssistantStatusMiddleware
     from .repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
     from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
     from .sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware

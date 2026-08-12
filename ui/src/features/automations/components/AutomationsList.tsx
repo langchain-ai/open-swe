@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import {
   ClockIcon,
   LightningIcon,
@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { describeCron } from "@/features/automations/lib/cron"
 import {
   useAgentSchedules,
+  useTriggerAgentSchedule,
   useUpdateAgentSchedule,
 } from "@/features/agents/lib/queries"
 import { cn } from "@/lib/utils"
@@ -142,14 +143,37 @@ function EmptyState() {
 }
 
 function AutomationRow({ schedule }: { schedule: AgentSchedule }) {
+  const navigate = useNavigate()
   const updateSchedule = useUpdateAgentSchedule()
+  const triggerSchedule = useTriggerAgentSchedule()
   const isToggling =
     updateSchedule.isPending &&
     updateSchedule.variables.scheduleId === schedule.id
+  const isTesting =
+    triggerSchedule.isPending && triggerSchedule.variables === schedule.id
+  const testError =
+    triggerSchedule.isError && triggerSchedule.variables === schedule.id
+      ? triggerSchedule.error.message
+      : null
+
+  const onTest = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (isTesting || isToggling) return
+    triggerSchedule.mutate(schedule.id, {
+      onSuccess: (result) => {
+        void navigate({
+          to: "/agents/$threadId",
+          params: { threadId: result.thread_id },
+        })
+      },
+    })
+  }
 
   const onToggle = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    if (isTesting || isToggling) return
     updateSchedule.mutate({
       scheduleId: schedule.id,
       body: { enabled: !schedule.enabled },
@@ -157,45 +181,60 @@ function AutomationRow({ schedule }: { schedule: AgentSchedule }) {
   }
 
   return (
-    <Link
-      to="/agents/automations/$scheduleId"
-      params={{ scheduleId: schedule.id }}
-      className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-muted-foreground/70"
-    >
-      <span
-        className={cn(
-          "size-2 shrink-0 rounded-full",
-          schedule.enabled ? "bg-success" : "bg-border"
-        )}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium text-foreground">
-            {schedule.name}
-          </span>
-          {schedule.lastError && (
-            <WarningCircleIcon
-              className="size-3.5 shrink-0 text-destructive"
-              aria-label="Last run failed"
-            >
-              <title>Last run failed</title>
-            </WarningCircleIcon>
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-muted-foreground/70">
+      <Link
+        to="/agents/automations/$scheduleId"
+        params={{ scheduleId: schedule.id }}
+        className="flex min-w-0 flex-1 items-center gap-3"
+      >
+        <span
+          className={cn(
+            "size-2 shrink-0 rounded-full",
+            schedule.enabled ? "bg-success" : "bg-border"
+          )}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-medium text-foreground">
+              {schedule.name}
+            </span>
+            {schedule.lastError && (
+              <WarningCircleIcon
+                className="size-3.5 shrink-0 text-destructive"
+                aria-label="Last run failed"
+              >
+                <title>Last run failed</title>
+              </WarningCircleIcon>
+            )}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
+            <span className="flex items-center gap-1">
+              <ClockIcon className="size-3.5" />
+              {describeCron(schedule.schedule)}
+            </span>
+            {schedule.repo && <span>{schedule.repo}</span>}
+            {schedule.slackChannelId && <span>{schedule.slackChannelId}</span>}
+            <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
+          </div>
+          {testError && (
+            <p className="mt-1 text-xs text-destructive">{testError}</p>
           )}
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
-          <span className="flex items-center gap-1">
-            <ClockIcon className="size-3.5" />
-            {describeCron(schedule.schedule)}
-          </span>
-          {schedule.repo && <span>{schedule.repo}</span>}
-          {schedule.slackChannelId && <span>{schedule.slackChannelId}</span>}
-          <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
-        </div>
-      </div>
+      </Link>
+      <button
+        type="button"
+        onClick={onTest}
+        disabled={isTesting || isToggling}
+        aria-label="Test automation"
+        className="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+      >
+        <LightningIcon className="size-3.5" />
+        {isTesting ? "Starting…" : "Test"}
+      </button>
       <button
         type="button"
         onClick={onToggle}
-        disabled={isToggling}
+        disabled={isTesting || isToggling}
         aria-label={schedule.enabled ? "Pause automation" : "Resume automation"}
         className="shrink-0 rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
       >
@@ -205,6 +244,6 @@ function AutomationRow({ schedule }: { schedule: AgentSchedule }) {
           <PlayIcon className="size-4" />
         )}
       </button>
-    </Link>
+    </div>
   )
 }
