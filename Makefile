@@ -14,7 +14,7 @@ run:
 	uv run uvicorn agent.webapp:app --reload --port 8000
 
 desktop:
-	cd desktop && pnpm run dev
+	pnpm run dev:desktop
 
 install:
 	uv sync --extra dev

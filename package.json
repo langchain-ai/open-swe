@@ -3,10 +3,10 @@
   "private": true,
   "packageManager": "pnpm@11.18.0",
   "scripts": {
-    "dev": "turbo run dev --filter=open-swe-dashboard",
-    "dev:desktop": "turbo run dev --filter=open-swe-desktop",
+    "dev": "node scripts/prepare-pnpm-workspace.cjs && turbo run dev --filter=open-swe-dashboard",
+    "dev:desktop": "node scripts/prepare-pnpm-workspace.cjs && turbo run dev --filter=open-swe-desktop",
     "dev:mock": "bash tests/e2e/dev-mock.sh",
-    "build": "turbo run build",
+    "build": "node scripts/prepare-pnpm-workspace.cjs && turbo run build",
     "check": "turbo run check",
     "format:check": "turbo run format:check",
     "lint": "turbo run lint",
