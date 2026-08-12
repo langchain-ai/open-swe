@@ -117,9 +117,10 @@ def test_source_context_does_not_reuse_permalink_for_different_slack_thread(
     assert "permalink" not in slack_thread
 
 
-def test_upsert_thread_metadata_keeps_original_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_upsert_thread_metadata_does_not_overwrite_original_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     owner = {
-        "github_login": "owner-gh",
         "triggering_user_email": "owner@example.com",
         "source_context": {"slack_thread": {"triggering_user_id": "UOWNER"}},
     }
@@ -141,9 +142,9 @@ def test_upsert_thread_metadata_keeps_original_owner(monkeypatch: pytest.MonkeyP
     )
 
     updated = threads.updates[0]
-    assert updated["github_login"] == owner["github_login"]
-    assert updated["triggering_user_email"] == owner["triggering_user_email"]
-    assert updated["source_context"] == owner["source_context"]
+    assert "github_login" not in updated
+    assert "triggering_user_email" not in updated
+    assert "source_context" not in updated
 
 
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:

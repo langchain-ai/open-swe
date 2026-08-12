@@ -721,20 +721,6 @@ async def _source_context_with_slack_permalink(
     return enriched
 
 
-def _preserve_slack_owner(
-    source_context: dict[str, Any], existing_metadata: dict[str, Any]
-) -> None:
-    existing_context = existing_metadata.get("source_context")
-    existing_slack = (
-        existing_context.get("slack_thread") if isinstance(existing_context, dict) else None
-    )
-    updated_slack = source_context.get("slack_thread")
-    if isinstance(existing_slack, dict) and isinstance(updated_slack, dict):
-        for key in ("triggering_user_id", "triggering_user_name", "triggering_user_email"):
-            if existing_slack.get(key):
-                updated_slack[key] = existing_slack[key]
-
-
 async def upsert_agent_thread_owner_metadata(
     thread_id: str,
     *,
@@ -749,7 +735,8 @@ async def upsert_agent_thread_owner_metadata(
 
     Webhook-triggered runs only pass ``source``/``github_login`` through the run
     config; the Agents UI lists and authorizes threads by thread *metadata*, so we
-    mirror the owner-identifying fields onto the thread here.
+    mirror the owner-identifying fields onto the thread here. Once initialized,
+    those fields remain unchanged when another user interacts with the thread.
     """
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
     metadata: dict[str, Any] = {"source": source, "updated_at_ms": now_ms}
@@ -772,27 +759,28 @@ async def upsert_agent_thread_owner_metadata(
     existing_meta = (
         existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
-    existing_login = existing_meta.get("github_login")
-    resolved_login = (
-        existing_login
-        if isinstance(existing_login, str) and existing_login
-        else github_login or await resolve_login_from_email_async(user_email) or ""
+    existing_context = existing_meta.get("source_context")
+    owner_initialized = any(
+        existing_meta.get(key)
+        for key in ("github_login", "triggering_user_email", "source_context")
     )
-    existing_email = existing_meta.get("triggering_user_email")
-    resolved_email = (
-        existing_email
-        if isinstance(existing_email, str) and existing_email
-        else user_email.strip().lower()
-    )
-    if resolved_login:
-        metadata["github_login"] = resolved_login
-    if resolved_email:
-        metadata["triggering_user_email"] = resolved_email
-    if source_context:
-        metadata["source_context"] = await _source_context_with_slack_permalink(
-            source_context, existing_meta
+    if not owner_initialized:
+        resolved_login = github_login or await resolve_login_from_email_async(user_email) or ""
+        if resolved_login:
+            metadata["github_login"] = resolved_login
+        resolved_email = user_email.strip().lower()
+        if resolved_email:
+            metadata["triggering_user_email"] = resolved_email
+        if source_context:
+            metadata["source_context"] = await _source_context_with_slack_permalink(
+                source_context, existing_meta
+            )
+    elif isinstance(existing_context, dict) and existing_context:
+        enriched_context = await _source_context_with_slack_permalink(
+            existing_context, existing_meta
         )
-        _preserve_slack_owner(metadata["source_context"], existing_meta)
+        if enriched_context != existing_context:
+            metadata["source_context"] = enriched_context
     if existing_meta.get("created_at_ms") is None:
         metadata["created_at_ms"] = now_ms
     if existing_meta.get("title") and "title" in metadata:
