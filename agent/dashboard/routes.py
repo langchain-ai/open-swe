@@ -142,6 +142,7 @@ from .schedules import (
     create_agent_schedule,
     delete_agent_schedule,
     list_agent_schedules,
+    trigger_agent_schedule,
     update_agent_schedule,
 )
 from .skills import (
@@ -1630,6 +1631,14 @@ async def api_update_schedule(
     return await update_agent_schedule(
         schedule_id, session["sub"], body, email=session.get("email")
     )
+
+
+@router.post("/schedules/{schedule_id}/trigger")
+async def api_trigger_schedule(
+    schedule_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await trigger_agent_schedule(schedule_id, session["sub"], email=session.get("email"))
 
 
 @router.delete("/schedules/{schedule_id}")
