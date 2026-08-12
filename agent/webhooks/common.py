@@ -721,6 +721,24 @@ async def _source_context_with_slack_permalink(
     return enriched
 
 
+def _preserve_thread_owner(metadata: dict[str, Any], existing_metadata: dict[str, Any]) -> None:
+    for key in ("github_login", "triggering_user_email"):
+        if existing_metadata.get(key):
+            metadata[key] = existing_metadata[key]
+    existing_context = existing_metadata.get("source_context")
+    updated_context = metadata.get("source_context")
+    existing_slack = (
+        existing_context.get("slack_thread") if isinstance(existing_context, dict) else None
+    )
+    updated_slack = (
+        updated_context.get("slack_thread") if isinstance(updated_context, dict) else None
+    )
+    if isinstance(existing_slack, dict) and isinstance(updated_slack, dict):
+        for key in ("triggering_user_id", "triggering_user_name", "triggering_user_email"):
+            if existing_slack.get(key):
+                updated_slack[key] = existing_slack[key]
+
+
 async def upsert_agent_thread_owner_metadata(
     thread_id: str,
     *,
@@ -767,6 +785,7 @@ async def upsert_agent_thread_owner_metadata(
         metadata["source_context"] = await _source_context_with_slack_permalink(
             source_context, existing_meta
         )
+    _preserve_thread_owner(metadata, existing_meta)
     if existing_meta.get("created_at_ms") is None:
         metadata["created_at_ms"] = now_ms
     if existing_meta.get("title") and "title" in metadata:

@@ -113,6 +113,23 @@ def test_source_context_does_not_reuse_permalink_for_different_slack_thread(
     assert "permalink" not in slack_thread
 
 
+def test_preserve_thread_owner_keeps_original_slack_identity() -> None:
+    owner = {
+        "github_login": "owner-gh",
+        "triggering_user_email": "owner@example.com",
+        "source_context": {"slack_thread": {"triggering_user_id": "UOWNER"}},
+    }
+    updated = {
+        "github_login": "commenter-gh",
+        "triggering_user_email": "commenter@example.com",
+        "source_context": {"slack_thread": {"triggering_user_id": "UCOMMENTER"}},
+    }
+
+    webhook_common._preserve_thread_owner(updated, owner)
+
+    assert updated == owner
+
+
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
     bot_user_id = "UBOT"
     messages = [
