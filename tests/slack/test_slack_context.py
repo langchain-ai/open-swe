@@ -33,7 +33,6 @@ class _FakeThreadsClient:
         self.thread = thread
         self.raise_not_found = raise_not_found
         self.requested_thread_id: str | None = None
-        self.updates: list[dict] = []
 
     async def get(self, thread_id: str) -> dict:
         self.requested_thread_id = thread_id
@@ -44,7 +43,7 @@ class _FakeThreadsClient:
         return self.thread
 
     async def update(self, *, thread_id: str, metadata: dict) -> None:
-        self.updates.append(metadata)
+        cast(dict, self.thread)["metadata"].update(metadata)
 
 
 class _FakeClient:
@@ -117,34 +116,26 @@ def test_source_context_does_not_reuse_permalink_for_different_slack_thread(
     assert "permalink" not in slack_thread
 
 
-def test_upsert_thread_metadata_does_not_overwrite_original_owner(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    owner = {
-        "triggering_user_email": "owner@example.com",
-        "source_context": {"slack_thread": {"triggering_user_id": "UOWNER"}},
-    }
-    threads = _FakeThreadsClient(thread={"metadata": owner})
-
-    async def fail_resolve(_email: str) -> str:
-        raise AssertionError("existing thread owner must not be resolved again")
-
+def test_upsert_preserves_partially_initialized_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    owner_context = {"slack_thread": {"triggering_user_id": "UOWNER"}}
+    threads = _FakeThreadsClient({"metadata": {"source_context": owner_context}})
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
-    monkeypatch.setattr(webhook_common, "resolve_login_from_email_async", fail_resolve)
-    asyncio.run(
-        webhook_common.upsert_agent_thread_owner_metadata(
+
+    async def upsert(github_login: str, user_email: str, slack_user_id: str) -> None:
+        await webhook_common.upsert_agent_thread_owner_metadata(
             "thread-id",
             source="slack",
-            github_login="commenter-gh",
-            user_email="commenter@example.com",
-            source_context={"slack_thread": {"triggering_user_id": "UCOMMENTER"}},
+            github_login=github_login,
+            user_email=user_email,
+            source_context={"slack_thread": {"triggering_user_id": slack_user_id}},
         )
-    )
 
-    updated = threads.updates[0]
-    assert "github_login" not in updated
-    assert "triggering_user_email" not in updated
-    assert "source_context" not in updated
+    asyncio.run(upsert("owner-gh", "owner@example.com", "UOWNER"))
+    asyncio.run(upsert("commenter-gh", "commenter@example.com", "UCOMMENTER"))
+    metadata = cast(dict, threads.thread)["metadata"]
+    assert metadata["github_login"] == "owner-gh"
+    assert metadata["triggering_user_email"] == "owner@example.com"
+    assert metadata["source_context"] == owner_context
 
 
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
