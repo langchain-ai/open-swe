@@ -223,21 +223,15 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               panelCollapsed && "pr-14"
             )}
           >
-            <span
-              className="min-w-0 flex-1 truncate text-sm font-medium"
-              title={thread.title}
-            >
-              {thread.title}
-            </span>
             {thread.repoFullName && (
-              <span className="hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground sm:flex">
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
                 <FolderOpen className="size-3.5 shrink-0" />
                 <span className="truncate" title={thread.repoFullName}>
                   {thread.repoFullName}
                 </span>
               </span>
             )}
-            <span className="shrink-0 text-xs text-muted-foreground">
+            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
               Cloud
             </span>
           </div>
