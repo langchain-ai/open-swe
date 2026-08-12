@@ -59,6 +59,16 @@ async def slack_webhook(
             return {"status": "accepted", "message": "Reaction removal queued"}
         return {"status": "ignored", "reason": "Reaction not tracked for feedback"}
 
+    event_id = str(payload.get("event_id") or "")
+    retry_num = request.headers.get("X-Slack-Retry-Num", "")
+    if retry_num and await common.slack_event_already_seen(
+        str(event.get("channel") or ""), event_id
+    ):
+        common.logger.info(
+            "Ignoring Slack retry %s of already-handled event %s", retry_num, event_id
+        )
+        return {"status": "ignored", "reason": "Duplicate Slack event delivery"}
+
     bot_user_id = common.SLACK_BOT_USER_ID
     if not bot_user_id:
         authorizations = payload.get("authorizations", [])
@@ -135,6 +145,10 @@ async def slack_webhook(
 
     if bot_user_id and user_id == bot_user_id:
         return {"status": "ignored", "reason": "Event from this bot user"}
+
+    if not await common.claim_slack_event(channel_id, event_id):
+        common.logger.info("Ignoring duplicate delivery of Slack event %s", event_id)
+        return {"status": "ignored", "reason": "Duplicate Slack event delivery"}
 
     channel_context = await common._get_slack_channel_context(channel_id)
 
