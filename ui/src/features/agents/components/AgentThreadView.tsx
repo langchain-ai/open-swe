@@ -94,6 +94,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadStream()
   const isMobile = useIsMobile()
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const sidebarCollapsed = useSidebarCollapsed()
   const skills = useAgentSkills()
 
@@ -215,11 +217,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
       >
-        <header className="relative z-10 h-14 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
+        <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
           <div
             className={cn(
-              "mx-auto flex h-full w-full max-w-3xl items-center gap-3 px-4",
-              sidebarCollapsed && "pl-14",
+              "flex h-full w-full items-center gap-3 px-4",
+              sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
               panelCollapsed && "pr-14"
             )}
           >
@@ -271,7 +273,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               "mx-auto w-full max-w-3xl shrink-0 px-4 pt-3",
               // Both collapsed panels float a fixed expand button in a top
               // corner; clear them so neither covers the banner.
-              sidebarCollapsed && "pl-14",
+              sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
               panelCollapsed && "pr-14"
             )}
           >

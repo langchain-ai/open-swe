@@ -56,8 +56,8 @@ const DRAG_REGION_ID = "open-swe-desktop-drag-region"
 window.addEventListener("DOMContentLoaded", () => {
   if (process.platform !== "darwin") return
 
-  // Mirror T3 Code's 52px title bar and 90px traffic-light inset while keeping the header's
-  // interactive descendants clickable.
+  // Keep a draggable strip beside the native controls without forcing sidebar
+  // content into the titlebar row.
   const style = document.createElement("style")
   style.textContent = `
     #${DRAG_REGION_ID} {
@@ -69,20 +69,6 @@ window.addEventListener("DOMContentLoaded", () => {
       height: 12px;
       z-index: 2147483647;
       user-select: none;
-    }
-
-    [data-sidebar-frame] > div:first-child {
-      -webkit-app-region: drag;
-      box-sizing: border-box;
-      height: 52px;
-      min-height: 52px;
-      padding-left: 90px !important;
-      padding-top: 0 !important;
-      padding-bottom: 0 !important;
-    }
-
-    [data-sidebar-frame] > div:first-child :is(a, button, input, textarea, select, [role="button"]) {
-      -webkit-app-region: no-drag;
     }
 
     [data-sidebar-expand] {

@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router"
 import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import {
   AgentPanelShell,
   PANEL_MIN_CHAT_WIDTH,
@@ -40,6 +41,7 @@ const LOCAL_PANEL_KINDS: ReadonlyArray<PanelTabKind> = [
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const { session, messages, loaded } = useDesktopAcpSession(sessionId)
   const isMobile = useIsMobile()
+  const sidebarCollapsed = useSidebarCollapsed()
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
   )
@@ -142,9 +144,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       >
         <div
           className={cn(
-            "mx-auto flex w-full max-w-3xl items-center gap-2 px-4 pt-3 text-xs text-muted-foreground",
-            // The collapsed panel floats a fixed expand button in the top-right
-            // corner; clear it so it never covers the "This Mac" label.
+            "flex w-full items-center gap-2 px-4 pt-3 text-xs text-muted-foreground",
+            // Collapsed sidebars float controls in the top corners; keep the
+            // path and target labels clear of them.
+            sidebarCollapsed && "pl-32",
             panelCollapsed && "pr-14"
           )}
         >
