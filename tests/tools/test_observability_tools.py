@@ -138,16 +138,30 @@ async def test_notion_wrapper_fails_when_token_missing_at_call_time() -> None:
 
 @pytest.mark.asyncio
 async def test_load_langsmith_tools_empty_when_not_connected() -> None:
-    with patch.object(langsmith_tools, "get_langsmith_credentials", AsyncMock(return_value=None)):
-        assert await langsmith_tools.load_langsmith_tools() == []
+    with (
+        patch.object(
+            langsmith_tools, "get_user_langsmith_credentials", AsyncMock(return_value=None)
+        ),
+        patch.object(
+            langsmith_tools, "get_team_langsmith_credentials", AsyncMock(return_value=None)
+        ),
+    ):
+        assert await langsmith_tools.load_langsmith_tools("alice") == []
 
 
 @pytest.mark.asyncio
 async def test_load_langsmith_tools_names() -> None:
     creds = LangSmithCredentials(api_key="k", endpoint="https://api.smith.langchain.com")
-    with patch.object(langsmith_tools, "get_langsmith_credentials", AsyncMock(return_value=creds)):
-        tools = await langsmith_tools.load_langsmith_tools()
+    team_credentials = AsyncMock()
+    with (
+        patch.object(
+            langsmith_tools, "get_user_langsmith_credentials", AsyncMock(return_value=creds)
+        ),
+        patch.object(langsmith_tools, "get_team_langsmith_credentials", team_credentials),
+    ):
+        tools = await langsmith_tools.load_langsmith_tools("alice")
     assert {t.name for t in tools} == {"langsmith_get_trace", "langsmith_list_runs"}
+    team_credentials.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -218,7 +232,7 @@ async def test_load_observability_tools_skipped_when_unauthorized() -> None:
         patch.object(server, "load_datadog_tools", AsyncMock(return_value=["dd"])),
         patch.object(server, "load_langsmith_tools", AsyncMock(return_value=["ls"])),
     ):
-        assert await server._load_observability_tools(authorized=False) == []
+        assert await server._load_observability_tools(authorized=False, profile_login=None) == []
 
 
 @pytest.mark.asyncio
@@ -227,7 +241,10 @@ async def test_load_observability_tools_loaded_when_authorized() -> None:
         patch.object(server, "load_datadog_tools", AsyncMock(return_value=["dd"])),
         patch.object(server, "load_langsmith_tools", AsyncMock(return_value=["ls"])),
     ):
-        assert await server._load_observability_tools(authorized=True) == ["dd", "ls"]
+        assert await server._load_observability_tools(authorized=True, profile_login="alice") == [
+            "dd",
+            "ls",
+        ]
 
 
 @pytest.mark.asyncio

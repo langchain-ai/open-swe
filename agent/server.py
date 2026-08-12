@@ -733,21 +733,13 @@ async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list
         return []
 
 
-async def _load_observability_tools(authorized: bool) -> list[Any]:
-    """Datadog (MCP) + LangSmith read tools when the team has connected them.
-
-    Credentials live server-side in team settings; the sandbox never holds them.
-    Only loaded for authorized (admin / allow-listed) triggering users so an
-    untrusted run cannot exfiltrate team observability data. Failures degrade to
-    no tools so the agent still starts.
-    """
+async def _load_observability_tools(authorized: bool, profile_login: str | None) -> list[Any]:
+    """Load team observability tools for an authorized triggering user."""
     if not authorized:
         return []
     datadog_tools, langsmith_tools = await asyncio.gather(
         _cached_tool_loader(f"tools:datadog:{id(load_datadog_tools)}", 600, load_datadog_tools),
-        _cached_tool_loader(
-            f"tools:langsmith:{id(load_langsmith_tools)}", 600, load_langsmith_tools
-        ),
+        load_langsmith_tools(profile_login),
     )
     return [*datadog_tools, *langsmith_tools]
 
@@ -1101,13 +1093,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     observability_authorized = await _observability_authorized(config, profile_login)
     if observability_authorized:
-        observability_tools = await _load_observability_tools(True)
+        observability_tools = await _load_observability_tools(True, profile_login)
     elif await _allowed_org_member(config, profile_login):
-        observability_tools = await _cached_tool_loader(
-            f"tools:langsmith:{id(load_langsmith_tools)}", 600, load_langsmith_tools
-        )
+        observability_tools = await load_langsmith_tools(profile_login)
     else:
-        observability_tools = []
+        observability_tools = await load_langsmith_tools(profile_login, allow_team=False)
     corridor_tools = await _load_corridor_mcp_tools()
     browser_tools = load_browser_tools()
 

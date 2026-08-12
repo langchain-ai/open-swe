@@ -1,9 +1,9 @@
 """Server-side, read-only LangSmith tools.
 
-Credentials live in team settings (encrypted at rest). The tools run in the
-LangGraph server process and call the LangSmith API directly — the sandbox never
-holds a LangSmith key. The surface is intentionally read-only: fetch a single
-run/trace and list recent runs in a project.
+Credentials are encrypted at rest. The tools run in the LangGraph server process
+and call the LangSmith API directly — the sandbox never holds a LangSmith key.
+The surface is intentionally read-only: fetch a single run/trace and list recent
+runs in a project.
 """
 
 from __future__ import annotations
@@ -13,9 +13,16 @@ import logging
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
+from langsmith import AsyncClient as AsyncLangSmithClient
+from langsmith import Client as LangSmithClient
 
-from ..dashboard.team_credentials import LangSmithCredentials, get_langsmith_credentials
-from ..utils.langsmith import async_langsmith_client, sync_langsmith_client
+from ..dashboard.team_credentials import (
+    LangSmithCredentials,
+)
+from ..dashboard.team_credentials import (
+    get_langsmith_credentials as get_team_langsmith_credentials,
+)
+from ..dashboard.user_credentials import get_langsmith_credentials as get_user_langsmith_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +30,15 @@ _MAX_LIST_RUNS = 50
 
 
 def _client(creds: LangSmithCredentials):
-    return async_langsmith_client(creds.api_key, creds.endpoint)
+    return AsyncLangSmithClient(api_key=creds.api_key, api_url=creds.endpoint)
+
+
+def _read_run_with_children(creds: LangSmithCredentials, run_id: str):
+    client = LangSmithClient(api_key=creds.api_key, api_url=creds.endpoint)
+    try:
+        return client.read_run(run_id, load_child_runs=True)
+    finally:
+        client.close()
 
 
 def _serialize_run(run: Any) -> dict[str, Any]:
@@ -59,13 +74,10 @@ def _make_tools(creds: LangSmithCredentials) -> list[BaseTool]:
         try:
             if load_child_runs:
                 # AsyncClient.read_run has no load_child_runs; the sync one runs off-loop.
-                run = await asyncio.to_thread(
-                    sync_langsmith_client(creds.api_key, creds.endpoint).read_run,
-                    run_id,
-                    load_child_runs=True,
-                )
+                run = await asyncio.to_thread(_read_run_with_children, creds, run_id)
             else:
-                run = await _client(creds).read_run(run_id)
+                async with _client(creds) as client:
+                    run = await client.read_run(run_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("langsmith_get_trace failed", exc_info=True)
             return {"success": False, "error": f"{type(e).__name__}: {e}"}
@@ -89,14 +101,15 @@ def _make_tools(creds: LangSmithCredentials) -> list[BaseTool]:
         capped = max(1, min(limit, _MAX_LIST_RUNS))
 
         try:
-            runs = [
-                run
-                async for run in _client(creds).list_runs(
-                    project_name=project_name,
-                    filter=filter,
-                    limit=capped,
-                )
-            ]
+            async with _client(creds) as client:
+                runs = [
+                    run
+                    async for run in client.list_runs(
+                        project_name=project_name,
+                        filter=filter,
+                        limit=capped,
+                    )
+                ]
         except Exception as e:  # noqa: BLE001
             logger.warning("langsmith_list_runs failed", exc_info=True)
             return {"success": False, "error": f"{type(e).__name__}: {e}"}
@@ -108,9 +121,11 @@ def _make_tools(creds: LangSmithCredentials) -> list[BaseTool]:
     ]
 
 
-async def load_langsmith_tools() -> list[BaseTool]:
-    """Return read-only LangSmith tools when the team has connected LangSmith."""
-    creds = await get_langsmith_credentials()
-    if creds is None:
-        return []
-    return _make_tools(creds)
+async def load_langsmith_tools(
+    login: str | None = None, *, allow_team: bool = True
+) -> list[BaseTool]:
+    """Return read-only LangSmith tools for the user or authorized team fallback."""
+    creds = await get_user_langsmith_credentials(login) if login else None
+    if creds is None and allow_team:
+        creds = await get_team_langsmith_credentials()
+    return _make_tools(creds) if creds else []
