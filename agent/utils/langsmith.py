@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import os
 import uuid
@@ -18,19 +17,18 @@ from .tracing import AGENT_TRACING_PROJECT
 logger = logging.getLogger(__name__)
 
 _PROJECT_ID_CACHE: dict[str, str] = {}
-_ASYNC_CLIENTS: dict[tuple[bytes, str], AsyncLangSmithClient] = {}
-_SYNC_CLIENTS: dict[tuple[bytes, str], LangSmithClient] = {}
+_ASYNC_CLIENTS: dict[tuple[str, str], AsyncLangSmithClient] = {}
+_SYNC_CLIENTS: dict[tuple[str, str], LangSmithClient] = {}
 
 
 def async_langsmith_client(api_key: str, api_url: str) -> AsyncLangSmithClient:
     """Return a pooled ``AsyncClient`` for these credentials.
 
     Each client owns an ``httpx`` connection pool bound to the event loop that
-    built it, so this assumes one loop per process. Keyed on a credential digest
-    so a test that repoints the env gets a fresh client without retaining raw keys
-    as cache identifiers.
+    built it, so this assumes one loop per process. Keyed on the credentials so
+    a test that repoints the env gets a fresh client instead of a stale pool.
     """
-    key = (hashlib.sha256(api_key.encode()).digest(), api_url)
+    key = (api_key, api_url)
     client = _ASYNC_CLIENTS.get(key)
     if client is None:
         client = _ASYNC_CLIENTS[key] = AsyncLangSmithClient(api_key=api_key, api_url=api_url)
@@ -39,7 +37,7 @@ def async_langsmith_client(api_key: str, api_url: str) -> AsyncLangSmithClient:
 
 def sync_langsmith_client(api_key: str, api_url: str) -> LangSmithClient:
     """Return a pooled sync ``Client``, for the few endpoints AsyncClient lacks."""
-    key = (hashlib.sha256(api_key.encode()).digest(), api_url)
+    key = (api_key, api_url)
     client = _SYNC_CLIENTS.get(key)
     if client is None:
         client = _SYNC_CLIENTS[key] = LangSmithClient(api_key=api_key, api_url=api_url)
