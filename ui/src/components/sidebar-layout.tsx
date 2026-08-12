@@ -117,6 +117,9 @@ export function SidebarFrame({
   className,
   children,
 }: SidebarFrameProps) {
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+
   if (collapsed) {
     return (
       <button
@@ -124,7 +127,10 @@ export function SidebarFrame({
         aria-label="Expand sidebar"
         data-sidebar-expand=""
         onClick={toggle}
-        className="fixed top-3 left-3 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+        className={cn(
+          "fixed top-3 left-3 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground",
+          isDesktop && "top-2 left-[90px] border-0 bg-transparent shadow-none"
+        )}
       >
         <SidebarSimpleIcon className="size-4" />
       </button>
@@ -217,6 +223,9 @@ export function SidebarCollapseButton({
   onToggle,
   className,
 }: SidebarCollapseButtonProps) {
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+
   return (
     <button
       type="button"
@@ -224,6 +233,7 @@ export function SidebarCollapseButton({
       onClick={onToggle}
       className={cn(
         "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
+        isDesktop && "fixed top-2 left-[90px] z-30 size-7",
         className
       )}
     >

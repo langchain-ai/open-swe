@@ -302,7 +302,7 @@ export function AgentPanelShell({
         onClick={() => onCollapsedChange(false)}
         aria-label="Show panel"
         title="Show panel"
-        className="fixed top-3 right-3 z-30 flex size-7 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+        className="fixed top-2 right-2 z-30 flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
       >
         <SidebarSimpleIcon className="size-4" />
       </button>

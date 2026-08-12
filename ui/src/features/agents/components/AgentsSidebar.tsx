@@ -161,13 +161,18 @@ export function AgentsSidebar({
 
   return (
     <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
-      <div className="flex items-center justify-between px-4 pt-5 pb-4">
+      <div
+        className={cn(
+          "flex items-center justify-between px-4 pb-4",
+          isDesktop ? "pt-13" : "pt-5"
+        )}
+      >
         <Link
           to="/my-settings"
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
           <img src="/logo-mark.png" alt="" className="size-5" />
-          open-swe
+          Open SWE
         </Link>
         <SidebarCollapseButton onToggle={layout.toggle} />
       </div>

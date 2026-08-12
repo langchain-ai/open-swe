@@ -188,55 +188,57 @@ export function AgentGitPanel({
             <span className="text-destructive">-{totals.deletions}</span>
           </span>
         )}
-        {recoveryError && (
-          <span
-            title={recoveryError}
-            className="ml-auto max-w-32 truncate text-[11px] text-destructive"
-          >
-            {recoveryError}
-          </span>
-        )}
-        {pr && (
-          <a
-            href={pr.url}
-            target="_blank"
-            rel="noreferrer"
-            className="ml-auto flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-          >
-            <GitPullRequestIcon className="size-3.5" />
-            View PR
-          </a>
-        )}
-        <Menu>
-          <MenuTrigger
-            aria-label="Review options"
-            className="ml-auto flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <EllipsisIcon className="size-4" />
-          </MenuTrigger>
-          <MenuPopup align="end" className="w-48">
-            <MenuItem onClick={refreshDiff}>
-              <RefreshCwIcon />
-              Refresh
-            </MenuItem>
-            <MenuItem onClick={() => setWrap(!wrap)}>
-              <TextAlignStartIcon />
-              {wrap ? "Disable" : "Enable"} word wrap
-            </MenuItem>
-            {canDownloadRecovery && (
-              <>
-                <MenuSeparator />
-                <MenuItem
-                  disabled={recoveringPatch}
-                  onClick={downloadRecoveryPatch}
-                >
-                  <DownloadIcon />
-                  {recoveringPatch ? "Preparing…" : "Download patch"}
-                </MenuItem>
-              </>
-            )}
-          </MenuPopup>
-        </Menu>
+        <div className="ml-auto flex items-center gap-2">
+          {recoveryError && (
+            <span
+              title={recoveryError}
+              className="max-w-32 truncate text-[11px] text-destructive"
+            >
+              {recoveryError}
+            </span>
+          )}
+          {pr && (
+            <a
+              href={pr.url}
+              target="_blank"
+              rel="noreferrer"
+              className="flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              <GitPullRequestIcon className="size-3.5" />
+              View PR
+            </a>
+          )}
+          <Menu>
+            <MenuTrigger
+              aria-label="Review options"
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <EllipsisIcon className="size-4" />
+            </MenuTrigger>
+            <MenuPopup align="end" className="w-48">
+              <MenuItem onClick={refreshDiff}>
+                <RefreshCwIcon />
+                Refresh
+              </MenuItem>
+              <MenuItem onClick={() => setWrap(!wrap)}>
+                <TextAlignStartIcon />
+                {wrap ? "Disable" : "Enable"} word wrap
+              </MenuItem>
+              {canDownloadRecovery && (
+                <>
+                  <MenuSeparator />
+                  <MenuItem
+                    disabled={recoveringPatch}
+                    onClick={downloadRecoveryPatch}
+                  >
+                    <DownloadIcon />
+                    {recoveringPatch ? "Preparing…" : "Download patch"}
+                  </MenuItem>
+                </>
+              )}
+            </MenuPopup>
+          </Menu>
+        </div>
       </div>
       <div className="flex min-w-0 items-center gap-2 px-2 text-xs text-muted-foreground">
         <span className="min-w-0 truncate font-mono" title={headRef}>
