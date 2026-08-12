@@ -229,7 +229,7 @@ export function PlanReview({
           !compact && "md:px-6"
         )}
       >
-        <div className="min-w-0">
+        <div data-testid="plan-summary" className="min-w-0">
           <h1 className="text-base font-semibold text-foreground">
             {isShared ? "Shared response" : "Implementation plan"}
           </h1>
@@ -239,7 +239,10 @@ export function PlanReview({
             <span data-testid="plan-status">{plan.status}</span>
           </p>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end">
+        <div
+          data-testid="plan-actions"
+          className="flex min-w-0 flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end"
+        >
           {decision && (
             <span
               data-testid="plan-decision"
