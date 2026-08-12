@@ -144,7 +144,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       >
         <div
           className={cn(
-            "mx-auto flex w-full max-w-3xl items-center gap-2 px-4 pt-3 text-xs text-muted-foreground",
+            "flex w-full items-center gap-2 px-4 pt-3 text-xs text-muted-foreground",
             // Collapsed sidebars float controls in the top corners; keep the
             // path and target labels clear of them.
             sidebarCollapsed && "pl-32",

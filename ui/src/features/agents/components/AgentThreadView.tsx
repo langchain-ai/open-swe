@@ -220,7 +220,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
           <div
             className={cn(
-              "mx-auto flex h-full w-full max-w-3xl items-center gap-3 px-4",
+              "flex h-full w-full items-center gap-3 px-4",
               sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
               panelCollapsed && "pr-14"
             )}
