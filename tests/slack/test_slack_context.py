@@ -33,6 +33,7 @@ class _FakeThreadsClient:
         self.thread = thread
         self.raise_not_found = raise_not_found
         self.requested_thread_id: str | None = None
+        self.updates: list[dict] = []
 
     async def get(self, thread_id: str) -> dict:
         self.requested_thread_id = thread_id
@@ -41,6 +42,9 @@ class _FakeThreadsClient:
         if self.thread is None:
             raise AssertionError("thread must be provided when raise_not_found is False")
         return self.thread
+
+    async def update(self, *, thread_id: str, metadata: dict) -> None:
+        self.updates.append(metadata)
 
 
 class _FakeClient:
@@ -113,21 +117,33 @@ def test_source_context_does_not_reuse_permalink_for_different_slack_thread(
     assert "permalink" not in slack_thread
 
 
-def test_preserve_thread_owner_keeps_original_slack_identity() -> None:
+def test_upsert_thread_metadata_keeps_original_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     owner = {
         "github_login": "owner-gh",
         "triggering_user_email": "owner@example.com",
         "source_context": {"slack_thread": {"triggering_user_id": "UOWNER"}},
     }
-    updated = {
-        "github_login": "commenter-gh",
-        "triggering_user_email": "commenter@example.com",
-        "source_context": {"slack_thread": {"triggering_user_id": "UCOMMENTER"}},
-    }
+    threads = _FakeThreadsClient(thread={"metadata": owner})
 
-    webhook_common._preserve_thread_owner(updated, owner)
+    async def fail_resolve(_email: str) -> str:
+        raise AssertionError("existing thread owner must not be resolved again")
 
-    assert updated == owner
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    monkeypatch.setattr(webhook_common, "resolve_login_from_email_async", fail_resolve)
+    asyncio.run(
+        webhook_common.upsert_agent_thread_owner_metadata(
+            "thread-id",
+            source="slack",
+            github_login="commenter-gh",
+            user_email="commenter@example.com",
+            source_context={"slack_thread": {"triggering_user_id": "UCOMMENTER"}},
+        )
+    )
+
+    updated = threads.updates[0]
+    assert updated["github_login"] == owner["github_login"]
+    assert updated["triggering_user_email"] == owner["triggering_user_email"]
+    assert updated["source_context"] == owner["source_context"]
 
 
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
