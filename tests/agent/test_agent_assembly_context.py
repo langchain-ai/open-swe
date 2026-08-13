@@ -9,6 +9,7 @@ is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction a
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,7 +18,7 @@ from langgraph.graph.state import RunnableConfig
 
 from agent.server import get_agent
 from agent.utils.read_only_backend import ReadOnlyBackend
-from agent.utils.sandbox_state import SandboxBackendProxy
+from agent.utils.sandbox_state import SandboxBackendProxy, clear_sandbox_backend
 
 
 class _DummyAgent:
@@ -44,6 +45,7 @@ async def _capture_create_deep_agent_kwargs() -> dict[str, object]:
         captured.update(kwargs)
         return _DummyAgent()
 
+    clear_sandbox_backend("thread-ctx")
     with (
         patch(
             "agent.server.resolve_github_token",
@@ -74,7 +76,48 @@ async def _capture_create_deep_agent_kwargs() -> dict[str, object]:
     ):
         await get_agent(_base_config())
 
+    clear_sandbox_backend("thread-ctx")
     return captured
+
+
+@pytest.mark.asyncio
+async def test_agent_starts_sandbox_while_loading_settings() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def ensure_sandbox(*args: object, **kwargs: object) -> MagicMock:
+        del args, kwargs
+        started.set()
+        await release.wait()
+        return MagicMock()
+
+    async def load_defaults(*args: object) -> tuple[tuple[str, str], tuple[str, str]]:
+        del args
+        await started.wait()
+        return (("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low"))
+
+    clear_sandbox_backend("thread-ctx")
+    with (
+        patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
+        patch("agent.server._cached_team_default_model_pair", side_effect=load_defaults),
+        patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
+        patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
+        patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
+        patch("agent.server._observability_authorized", new_callable=AsyncMock, return_value=False),
+        patch("agent.server._allowed_org_member", new_callable=AsyncMock, return_value=False),
+        patch("agent.server._load_corridor_mcp_tools", new_callable=AsyncMock, return_value=[]),
+        patch("agent.server.load_browser_tools", return_value=[]),
+        patch("agent.server.make_model", return_value=MagicMock()),
+        patch("agent.server.fallback_model_id_for", return_value=None),
+        patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
+    ):
+        agent_task = asyncio.create_task(get_agent(_base_config()))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert not agent_task.done()
+        release.set()
+        await agent_task
+
+    clear_sandbox_backend("thread-ctx")
 
 
 @pytest.mark.asyncio

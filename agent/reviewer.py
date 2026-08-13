@@ -110,7 +110,7 @@ from .utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from .utils.api_standards_skill import fetch_api_standards_skill
 from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import get_github_app_installation_token_with_expiry
-from .utils.github_token import cache_github_token_for_thread
+from .utils.github_token import cache_github_token_for_thread, get_github_token
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.repo_prep import materialize_trusted_skills, prepare_review_repo
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
@@ -975,10 +975,13 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         thread_id: str,
         config: RunnableConfig,
         use_gateway: bool,
+        sandbox_backend: SandboxBackendProtocol | None = None,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
         self._use_gateway = use_gateway
+        self._sandbox_backend = sandbox_backend
+        self._sandbox_setup = ensure_sandbox_for_thread
 
     def _prepare_config_fingerprint(self) -> Any:
         configurable = self._config.get("configurable", {})
@@ -1011,9 +1014,16 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         configurable = self._config.get("configurable") or {}
         repo_config = configurable.get("repo") or {}
         try:
-            sandbox_backend, github_token = await _ensure_reviewer_sandbox_for_thread(
-                self._thread_id, configurable
-            )
+            if (
+                self._sandbox_backend is None
+                or self._sandbox_setup is not ensure_sandbox_for_thread
+            ):
+                sandbox_backend, github_token = await _ensure_reviewer_sandbox_for_thread(
+                    self._thread_id, configurable
+                )
+            else:
+                sandbox_backend = await self._sandbox_backend.ready()
+                github_token = get_github_token(self._config)
         except SandboxUnreachableError as exc:
             # Replacement was allowed and still failed, so this run dies without a
             # sandbox. Say so on the PR instead of leaving it looking unreviewed.
@@ -1332,6 +1342,18 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
+    async def reconnect_backend(
+        _thread_id: str = thread_id,
+        _configurable: dict[str, Any] = configurable,
+    ) -> SandboxBackendProtocol:
+        sandbox_backend, _github_token = await _ensure_reviewer_sandbox_for_thread(
+            _thread_id, _configurable
+        )
+        return sandbox_backend
+
+    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    backend.start()
+
     configured_model_id = configurable.get("reviewer_model_id")
     configured_effort = configurable.get("reviewer_reasoning_effort")
     if isinstance(configured_model_id, str) and configured_model_id:
@@ -1387,17 +1409,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs
     )
 
-    async def reconnect_backend(
-        _thread_id: str = thread_id,
-        _configurable: dict[str, Any] = configurable,
-    ) -> SandboxBackendProtocol:
-        sandbox_backend, _github_token = await _ensure_reviewer_sandbox_for_thread(
-            _thread_id, _configurable
-        )
-        return sandbox_backend
-
-    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-
     return create_deep_agent(
         model=reviewer_model,
         system_prompt="",
@@ -1422,6 +1433,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                     thread_id=thread_id,
                     config=config,
                     use_gateway=use_gateway,
+                    sandbox_backend=backend,
                 ),
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),

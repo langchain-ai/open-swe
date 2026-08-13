@@ -135,7 +135,7 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
-        sandbox_backend = await ensure_sandbox_for_thread(self._thread_id)
+        sandbox_backend = await get_cached_sandbox_backend(self._thread_id).ready()
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
         configurable = self._config.get("configurable") or {}
         full_name = str(configurable.get("review_style_full_name") or "owner/repo")
@@ -174,6 +174,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
         return await ensure_sandbox_for_thread(_thread_id)
 
     default_backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    default_backend.start()
     backend = CompositeBackend(default=default_backend, routes={SKILLS_ROUTE: StateBackend()})
 
     model_id = DEFAULT_LLM_MODEL_ID
