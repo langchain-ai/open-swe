@@ -407,7 +407,7 @@ def _blocked_message(
         "error_type": "WorkflowPushApprovalRequired",
         "error": (
             "This git push includes GitHub workflow file changes and requires human "
-            "approval before Open SWE can push it. Retry the same standalone git push "
+            "approval before Jarvis can push it. Retry the same standalone git push "
             "after the thread owner approves the workflow diff in Slack or the web UI."
         ),
         "workflow_approval_status": status,
@@ -447,7 +447,7 @@ def _approval_slack_message(change: WorkflowPushChange, approval_url: str | None
     web_review = f"\n\n*Review diff:* <{approval_url}|Open in Web>" if approval_url else ""
     return (
         "*Workflow file approval required*\n"
-        f"Open SWE is trying to push changes to GitHub workflow files in `{repo}` on `{branch}`.\n\n"
+        f"Jarvis is trying to push changes to GitHub workflow files in `{repo}` on `{branch}`.\n\n"
         f"*Files:*\n{files}\n\n"
         f"*Diff stat:* {stats.get('files', len(change.files))} files, "
         f"+{stats.get('additions', 0)} / -{stats.get('deletions', 0)}\n"

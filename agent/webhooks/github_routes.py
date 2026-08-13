@@ -61,9 +61,22 @@ async def github_webhook(
             return {"status": "accepted", "message": f"Processing PR {action} for reviewer watch"}
         if action in common._GH_PR_FIRST_REVIEW_ACTIONS:
             if not await common._is_repo_auto_review_enabled(webhook_repo_config):
+                common.logger.info(
+                    "Skipping auto-review for %s/%s PR %s webhook: "
+                    "repo not in enabled-review-repos list",
+                    webhook_repo_config.get("owner"),
+                    webhook_repo_config.get("name"),
+                    action,
+                )
                 return {"status": "ignored", "reason": "Automatic review disabled for repository"}
             gate_rejection = await common._enforce_public_repo_org_gate(payload, "pull_request")
             if gate_rejection is not None:
+                common.logger.info(
+                    "Skipping auto-review for %s/%s PR %s webhook: public-repo org gate rejected sender",
+                    webhook_repo_config.get("owner"),
+                    webhook_repo_config.get("name"),
+                    action,
+                )
                 return gate_rejection
             common.logger.info("Accepted GitHub PR %s webhook, scheduling auto-review task", action)
             background_tasks.add_task(service.process_github_pr_ready, payload)

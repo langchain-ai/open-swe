@@ -888,10 +888,10 @@ async def _maybe_post_slack_completion_reply(
         return
 
     if surfaced_count == 0:
-        headline = "*Open SWE Review*: No issues found."
+        headline = "*Jarvis Review*: No issues found."
     else:
         issue_word = "issue" if surfaced_count == 1 else "issues"
-        headline = f"*Open SWE Review* found {surfaced_count} potential {issue_word}."
+        headline = f"*Jarvis Review* found {surfaced_count} potential {issue_word}."
 
     review_url = f"https://github.com/{owner}/{repo}/pull/{pr_number}"
     if isinstance(review_id, int):
