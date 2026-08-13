@@ -275,12 +275,13 @@ def test_construct_system_prompt_does_not_require_pr_for_questions() -> None:
     assert "Always push, open/update the draft PR" not in prompt
 
 
-def test_shared_base_summarizes_slack_information_answers() -> None:
+def test_shared_base_avoids_duplicate_slack_output() -> None:
     from agent.prompt import OPEN_SWE_SHARED_BASE
 
-    assert "Slack-triggered information-only answers" in OPEN_SWE_SHARED_BASE
-    assert "post only a concise summary" in OPEN_SWE_SHARED_BASE
-    assert "complete answer inline" in OPEN_SWE_SHARED_BASE
+    assert "Slack-triggered runs" in OPEN_SWE_SHARED_BASE
+    assert "also visible in the Web UI" in OPEN_SWE_SHARED_BASE
+    assert "Do not repeat that message's content" in OPEN_SWE_SHARED_BASE
+    assert "complete answer inline" not in OPEN_SWE_SHARED_BASE
 
 
 def test_construct_system_prompt_includes_always_create_prs_override() -> None:
