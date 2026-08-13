@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -68,6 +69,12 @@ SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
 STATIC_DIR = Path(__file__).parent / "static"
 
 CURRENT_THREAD: dict[str, str | None] = {"channel": DEMO_CHANNEL, "thread_ts": None}
+LAST_SLACK_EVENT: dict[str, Any] = {"payload": None}
+
+# Message timestamps restart from a fixed base on every boot, but the store the
+# webhook dedupes against is persisted — so event ids need a per-process salt or
+# a rerun's mentions look like redeliveries of the previous run's.
+EVENT_ID_SALT = uuid.uuid4().hex[:8]
 
 fakes.seed_bare_remote()
 
@@ -78,6 +85,7 @@ async def control_reset() -> JSONResponse:
     fakes.reset()
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
+    LAST_SLACK_EVENT["payload"] = None
     return JSONResponse({"ok": True})
 
 
@@ -116,11 +124,70 @@ async def control_queued(thread_id: str = "") -> JSONResponse:
     return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
 
 
+async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> httpx.Response:
+    """POST a signed Events-API delivery to the real /webhooks/slack route."""
+    raw = json.dumps(payload).encode()
+    req_ts = str(int(time.time()))
+    base = f"v0:{req_ts}:{raw.decode()}".encode()
+    sig = "v0=" + hmac.new(SLACK_SIGNING_SECRET.encode(), base, hashlib.sha256).hexdigest()
+    headers = {
+        "X-Slack-Signature": sig,
+        "X-Slack-Request-Timestamp": req_ts,
+        "Content-Type": "application/json",
+    }
+    if retry_num:
+        headers["X-Slack-Retry-Num"] = retry_num
+        headers["X-Slack-Retry-Reason"] = "http_timeout"
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://harness") as client:
+        return await client.post("/webhooks/slack", content=raw, headers=headers)
+
+
+def _slack_send_result(payload: dict[str, Any], resp: httpx.Response) -> JSONResponse:
+    event = payload["event"]
+    channel = str(event["channel"])
+    thread_ts = str(event["thread_ts"])
+    return JSONResponse(
+        {
+            "thread_ts": thread_ts,
+            "thread_id": generate_thread_id_from_slack_thread(channel, thread_ts),
+            "event_id": payload["event_id"],
+            "webhook_status": resp.status_code,
+            "webhook": resp.json(),
+        }
+    )
+
+
+@app.post("/control/forget-slack-events")
+async def control_forget_slack_events() -> JSONResponse:
+    """Drop the in-process record of handled Slack events.
+
+    A redelivery normally lands on a different instance than the original, which
+    only has the LangGraph store to dedupe on. Clearing the local cache lets the
+    E2E exercise that path instead of the same-process fast path."""
+    from agent.utils.slack_events import reset_slack_event_claims
+
+    reset_slack_event_claims()
+    return JSONResponse({"ok": True})
+
+
 @app.post("/mock/slack/send")
 async def slack_send(request: Request) -> JSONResponse:
     """Simulate a user posting in Slack: store the message, then deliver the
-    signed Events-API webhook to the real /webhooks/slack route."""
+    signed Events-API webhook to the real /webhooks/slack route.
+
+    ``redeliver`` replays the previous delivery verbatim — same ``event_id``, no
+    new Slack message — which is what Slack does when it doesn't get a 2xx in
+    three seconds."""
     form = await request.json()
+    if form.get("redeliver"):
+        payload = LAST_SLACK_EVENT.get("payload")
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="No Slack event to redeliver")
+        resp = await _deliver_slack_event(payload, str(form.get("retry_num") or "1"))
+        return _slack_send_result(payload, resp)
+
     text = str(form.get("text", ""))
     mention_bot = bool(form.get("mention_bot", True))
     channel_type = str(form.get("channel_type") or "")
@@ -156,34 +223,12 @@ async def slack_send(request: Request) -> JSONResponse:
         event["channel_type"] = channel_type
     payload = {
         "type": "event_callback",
-        "event_id": f"Ev{event_ts}",
+        "event_id": f"Ev{EVENT_ID_SALT}{event_ts}",
         "authorizations": [{"user_id": BOT_USER_ID}],
         "event": event,
     }
-    raw = json.dumps(payload).encode()
-    req_ts = str(int(time.time()))
-    base = f"v0:{req_ts}:{raw.decode()}".encode()
-    sig = "v0=" + hmac.new(SLACK_SIGNING_SECRET.encode(), base, hashlib.sha256).hexdigest()
-
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://harness") as client:
-        resp = await client.post(
-            "/webhooks/slack",
-            content=raw,
-            headers={
-                "X-Slack-Signature": sig,
-                "X-Slack-Request-Timestamp": req_ts,
-                "Content-Type": "application/json",
-            },
-        )
-    return JSONResponse(
-        {
-            "thread_ts": thread_ts,
-            "thread_id": generate_thread_id_from_slack_thread(channel, thread_ts),
-            "webhook_status": resp.status_code,
-            "webhook": resp.json(),
-        }
-    )
+    LAST_SLACK_EVENT["payload"] = payload
+    return _slack_send_result(payload, await _deliver_slack_event(payload))
 
 
 @app.post("/control/login")
