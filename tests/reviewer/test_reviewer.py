@@ -9,16 +9,6 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent import reviewer
-from agent.utils.sandbox_state import SANDBOX_BACKENDS, clear_sandbox_backend
-
-
-@pytest.fixture(autouse=True)
-def _clear_sandbox_backends() -> None:
-    for thread_id in list(SANDBOX_BACKENDS):
-        clear_sandbox_backend(thread_id)
-    yield
-    for thread_id in list(SANDBOX_BACKENDS):
-        clear_sandbox_backend(thread_id)
 
 
 def test_reviewer_system_prompt_formats_without_keyerror() -> None:
