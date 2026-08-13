@@ -154,6 +154,8 @@ export interface Project {
   gitBranch?: string
 }
 
+export type SlackNotificationMode = "always" | "on_action"
+
 export interface AgentSchedule {
   id: string
   name: string
@@ -161,6 +163,7 @@ export interface AgentSchedule {
   schedule: string
   repo: string | null
   slackChannelId?: string | null
+  slackNotificationMode: SlackNotificationMode
   model: string
   effort?: string | null
   enabled: boolean

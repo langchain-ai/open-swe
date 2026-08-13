@@ -19,6 +19,7 @@ _TOOL_MODULES = {
     "linear_update_issue": ".linear_update_issue",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
+    "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
     "publish_review": ".publish_review",
     "read_repo_file": ".read_repo_file",
@@ -58,6 +59,7 @@ __all__ = [
     "linear_update_issue",
     "list_findings",
     "list_review_findings",
+    "notify_automation_channel",
     "open_pull_request",
     "publish_review",
     "read_repo_file",
@@ -97,6 +99,7 @@ if TYPE_CHECKING:
     from .linear_update_issue import linear_update_issue
     from .list_findings import list_findings
     from .list_review_findings import list_review_findings
+    from .notify_automation_channel import notify_automation_channel
     from .open_pull_request import open_pull_request
     from .publish_review import publish_review
     from .read_repo_file import read_repo_file
