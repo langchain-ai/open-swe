@@ -5,7 +5,7 @@
   "description": "Experimental Open SWE desktop client",
   "main": "src/main.cjs",
   "scripts": {
-    "build:ui": "cd ../ui && pnpm run build",
+    "build:ui": "pnpm --filter open-swe-dashboard run build",
     "dev": "pnpm run build:ui && electron . --dev",
     "start": "pnpm run build:ui && electron .",
     "test": "node --test test/*.test.cjs",
@@ -82,7 +82,6 @@
   "author": "LangChain",
   "license": "MIT",
   "homepage": "https://github.com/langchain-ai/open-swe",
-  "packageManager": "pnpm@11.13.1",
   "devDependencies": {
     "@electron/notarize": "3.1.1",
     "electron": "41.10.3",

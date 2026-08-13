@@ -6,6 +6,10 @@ import type {
   WorkflowPushApprovalsResponse,
 } from "./types"
 import { dashboardApiBase } from "@/lib/api-base"
+import {
+  dashboardApiUrl,
+  dashboardForwardedHeaders,
+} from "@/lib/dashboard-fetch"
 
 export type { AgentSchedule, AgentThread, Message }
 
@@ -46,6 +50,13 @@ export interface ScheduleUpdateRequest {
   model_id?: string | null
   effort?: string | null
   enabled?: boolean | null
+}
+
+export interface ScheduleTriggerResult {
+  status: "started"
+  schedule_id: string
+  thread_id: string
+  run_id: string | null
 }
 
 export interface ThreadPrDiffFile {
@@ -117,11 +128,12 @@ async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
+  const res = await fetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...dashboardForwardedHeaders(),
       ...(init.headers ?? {}),
     },
   })
@@ -150,9 +162,9 @@ function filenameFromContentDisposition(value: string | null): string | null {
 }
 
 async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
-  const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
+  const res = await fetch(dashboardApiUrl(path), {
     credentials: "include",
-    headers: { Accept: "text/x-diff" },
+    headers: { Accept: "text/x-diff", ...dashboardForwardedHeaders() },
   })
   if (!res.ok) {
     let message = res.statusText
@@ -243,6 +255,11 @@ export const agentsApi = {
         method: "PATCH",
         body: JSON.stringify(body),
       }
+    ),
+  triggerSchedule: (scheduleId: string) =>
+    agentsRequest<ScheduleTriggerResult>(
+      `/schedules/${encodeURIComponent(scheduleId)}/trigger`,
+      { method: "POST" }
     ),
   deleteSchedule: (scheduleId: string) =>
     agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {

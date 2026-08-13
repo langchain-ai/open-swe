@@ -181,6 +181,14 @@ def test_shared_base_requires_terse_slack_replies_with_share_path() -> None:
     assert "the tool puts those instructions in the first thread reply" in OPEN_SWE_SHARED_BASE
 
 
+def test_shared_base_formats_times_in_the_triggering_users_timezone() -> None:
+    from agent.prompt import OPEN_SWE_SHARED_BASE
+
+    assert "triggering user's time zone" in OPEN_SWE_SHARED_BASE
+    assert "corresponding UTC time in parentheses" in OPEN_SWE_SHARED_BASE
+    assert "Do not guess a time zone" in OPEN_SWE_SHARED_BASE
+
+
 def test_construct_system_prompt_includes_shared_base_explicitly() -> None:
     from agent.prompt import OPEN_SWE_SHARED_BASE
 

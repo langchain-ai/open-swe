@@ -3,7 +3,7 @@ import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
 import { SiNotion } from "react-icons/si"
 
-import type { SessionUser } from "@/lib/api"
+import type { ApiKeyCredentialStatus, SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -135,41 +135,52 @@ function NotionRow({ setError }: { setError: SetError }) {
   )
 }
 
-function CurrentsRow({ setError }: { setError: SetError }) {
+interface ApiKeyRowProps {
+  queryKey: string
+  label: string
+  description: string
+  placeholder: string
+  load: () => Promise<ApiKeyCredentialStatus>
+  connect: (apiKey: string) => Promise<ApiKeyCredentialStatus>
+  disconnect: () => Promise<ApiKeyCredentialStatus>
+  setError: SetError
+}
+
+function ApiKeyRow({
+  queryKey,
+  label,
+  description,
+  placeholder,
+  load,
+  connect: save,
+  disconnect: remove,
+  setError,
+}: ApiKeyRowProps) {
   const qc = useQueryClient()
-  const creds = useQuery({
-    queryKey: ["myCurrents"],
-    queryFn: api.getMyCurrentsStatus,
-  })
+  const creds = useQuery({ queryKey: [queryKey], queryFn: load })
   const [apiKey, setApiKey] = useState("")
 
   const onSuccess = () => {
-    void qc.invalidateQueries({ queryKey: ["myCurrents"] })
+    void qc.invalidateQueries({ queryKey: [queryKey] })
     setApiKey("")
     setError(null)
   }
   const onError = (e: Error) => setError(e.message)
-
   const connect = useMutation({
-    mutationFn: () => api.connectCurrents({ api_key: apiKey.trim() }),
+    mutationFn: () => save(apiKey.trim()),
     onSuccess,
     onError,
   })
-  const disconnect = useMutation({
-    mutationFn: () => api.disconnectCurrents(),
-    onSuccess,
-    onError,
-  })
-
+  const disconnect = useMutation({ mutationFn: remove, onSuccess, onError })
   const connected = !!creds.data?.connected
 
   return (
     <SettingsRow
-      label="Currents.dev"
+      label={label}
       description={
         connected
           ? `Connected · key ••••${creds.data?.api_key_last4 ?? ""}`
-          : "Add your API key (Currents → Organization → API & Record Keys) to let runs inspect e2e test results. Encrypted at rest and scoped to your account."
+          : description
       }
       control={
         connected ? (
@@ -188,7 +199,7 @@ function CurrentsRow({ setError }: { setError: SetError }) {
           <div className="flex items-center gap-2">
             <Input
               className="w-48"
-              placeholder="Currents API key"
+              placeholder={placeholder}
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
@@ -218,7 +229,26 @@ export function ConnectionsSection({ user }: { user: SessionUser }) {
     >
       <SlackRow user={user} />
       <NotionRow setError={setError} />
-      <CurrentsRow setError={setError} />
+      <ApiKeyRow
+        queryKey="myLangSmith"
+        label="LangSmith"
+        description="Add your API key to let runs inspect LangSmith traces. Encrypted at rest and scoped to your account."
+        placeholder="LangSmith API key"
+        load={api.getMyLangSmithStatus}
+        connect={(apiKey) => api.connectMyLangSmith({ api_key: apiKey })}
+        disconnect={api.disconnectMyLangSmith}
+        setError={setError}
+      />
+      <ApiKeyRow
+        queryKey="myCurrents"
+        label="Currents.dev"
+        description="Add your API key (Currents → Organization → API & Record Keys) to let runs inspect e2e test results. Encrypted at rest and scoped to your account."
+        placeholder="Currents API key"
+        load={api.getMyCurrentsStatus}
+        connect={(apiKey) => api.connectCurrents({ api_key: apiKey })}
+        disconnect={api.disconnectCurrents}
+        setError={setError}
+      />
       {error && <p className="px-4 py-2 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   )

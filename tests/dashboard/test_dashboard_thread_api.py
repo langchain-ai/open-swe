@@ -1779,6 +1779,25 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     assert payload["default_agent_subagent_model"] in model_ids
 
 
+async def test_pr_diff_uses_repository_from_pr_url(monkeypatch) -> None:
+    metadata = {
+        "repo_owner": "langchain-ai",
+        "repo_name": "deepagents",
+        "pr_number": 1925,
+        "pr_url": "https://github.com/langchain-ai/open-swe/pull/1925",
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    monkeypatch.setattr(thread_api, "_github_token_for_login", AsyncMock(return_value="token"))
+    build_diff = AsyncMock(
+        return_value={"base_sha": "base", "head_sha": "head", "truncated": False, "files": []}
+    )
+    monkeypatch.setattr(thread_api, "build_pr_diff_files", build_diff)
+
+    await thread_api.get_dashboard_thread_pr_diff("thread-1", "owner")
+
+    assert build_diff.await_args.args[1:] == ("langchain-ai/open-swe", 1925)
+
+
 async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypatch) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
     thread = {

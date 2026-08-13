@@ -32,21 +32,6 @@ SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
-DEFAULT_ASSISTANT_STATUS = "is thinking…"
-SLACK_LOADING_TIPS: tuple[str, ...] = (
-    "Tip: Use repo:owner/name to override the repository",
-    "Tip: Send follow-ups mid-run; I read them before my next step",
-    "Tip: Ask for plan mode to review my approach before edits",
-    "Tip: Paste a LangSmith trace link for built-in inspection",
-    "Tip: Ask me to check back after CI or a deploy finishes",
-    'Tip: Say "split this out" to start a new Slack thread',
-    "Tip: Ask me to create a reusable skill for future runs",
-    'Tip: Say "always..." to save a standing preference',
-    "Tip: Toggle Always Create PRs in your Profile",
-    "Tip: Add Repository Instructions for repo-specific behavior",
-    "Tip: Use @open-swe autofix off to pause fixes on one PR",
-    "Tip: Customize reviewer style prompts in the dashboard",
-)
 
 SlackChannelContext = dict[str, str]
 _SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -329,62 +314,6 @@ def format_slack_messages_for_prompt(
             line += f"\n{forwarded}"
         lines.append(line)
     return "\n".join(lines)
-
-
-def slack_loading_tip(key: str) -> str:
-    digest = hashlib.sha256(key.encode()).digest()
-    return SLACK_LOADING_TIPS[int.from_bytes(digest[:8], "big") % len(SLACK_LOADING_TIPS)]
-
-
-async def set_slack_assistant_status(
-    channel_id: str,
-    thread_ts: str,
-    status: str = DEFAULT_ASSISTANT_STATUS,
-    loading_messages: list[str] | tuple[str, ...] | None = None,
-) -> bool:
-    """Set the assistant typing/status indicator on a Slack thread.
-
-    Wraps Slack's `assistant.threads.setStatus` API. The `chat:write` scope
-    on the bot token is sufficient. Status auto-clears when the bot posts to
-    the thread, and Slack itself expires it after ~2 minutes — callers that
-    want it visible across longer runs must refresh it periodically.
-
-    `loading_messages` is an optional list (max 10) of strings Slack rotates
-    through while the indicator is visible. Active statuses default to one tip.
-
-    No-op (returning False) when the bot token is missing or the
-    channel/thread is not provided. Failures are logged but never raised —
-    the indicator is a UX nicety, not a correctness requirement.
-    """
-    if not SLACK_BOT_TOKEN or not channel_id or not thread_ts:
-        return False
-
-    payload: dict[str, Any] = {
-        "channel_id": channel_id,
-        "thread_ts": thread_ts,
-        "status": status,
-    }
-    if status and not loading_messages:
-        loading_messages = [slack_loading_tip(thread_ts)]
-    if loading_messages:
-        payload["loading_messages"] = list(loading_messages)[:10]
-
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-        try:
-            response = await http_client.post(
-                f"{SLACK_API_BASE_URL}/assistant.threads.setStatus",
-                headers=_slack_headers(),
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-            if not data.get("ok"):
-                logger.warning("Slack assistant.threads.setStatus failed: %s", data.get("error"))
-                return False
-            return True
-        except httpx.HTTPError:
-            logger.exception("Slack assistant.threads.setStatus request failed")
-            return False
 
 
 def _log_automated_warning_sent_to_slack(

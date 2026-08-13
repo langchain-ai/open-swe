@@ -232,6 +232,7 @@ interface AgentPanelShellProps {
   menuKinds: ReadonlyArray<PanelTabKind>
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
+  seamlessHeader?: boolean
   /** Rendered as the panel body; `fullScreen` drives layout-only extras. */
   children: (state: { fullScreen: boolean }) => React.ReactNode
 }
@@ -250,6 +251,7 @@ export function AgentPanelShell({
   menuKinds,
   collapsed,
   onCollapsedChange,
+  seamlessHeader = false,
   children,
 }: AgentPanelShellProps) {
   const [width, setWidthState] = useState(() => readStoredPanelWidth())
@@ -300,7 +302,7 @@ export function AgentPanelShell({
         onClick={() => onCollapsedChange(false)}
         aria-label="Show panel"
         title="Show panel"
-        className="fixed top-3 right-3 z-30 flex size-7 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+        className="fixed top-2 right-2 z-30 flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
       >
         <SidebarSimpleIcon className="size-4" />
       </button>
@@ -323,7 +325,12 @@ export function AgentPanelShell({
       )}
       style={overlay ? { zIndex: Z.MODAL } : { width }}
     >
-      <div className="flex h-11 shrink-0 items-center border-b border-border px-2">
+      <div
+        className={cn(
+          "flex h-11 shrink-0 items-center px-2",
+          !seamlessHeader && "border-b border-border"
+        )}
+      >
         <div className="flex min-w-0 flex-1 items-center overflow-x-auto">
           {tabs.map((tab, index) => {
             const { label, Icon } = PANEL_TAB_META[tab.kind]

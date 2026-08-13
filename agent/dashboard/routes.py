@@ -142,6 +142,7 @@ from .schedules import (
     create_agent_schedule,
     delete_agent_schedule,
     list_agent_schedules,
+    trigger_agent_schedule,
     update_agent_schedule,
 )
 from .skills import (
@@ -203,12 +204,22 @@ from .thread_api import (
 )
 from .user_credentials import (
     CurrentsCredentialsUpdate,
+    UserLangSmithCredentialsUpdate,
     connect_currents,
     connect_notion,
     disconnect_currents,
     disconnect_notion,
     get_currents_status,
     get_notion_status,
+)
+from .user_credentials import (
+    connect_langsmith as connect_user_langsmith,
+)
+from .user_credentials import (
+    disconnect_langsmith as disconnect_user_langsmith,
+)
+from .user_credentials import (
+    get_langsmith_status as get_user_langsmith_status,
 )
 from .user_instructions import (
     UserInstructionsUpdate,
@@ -588,6 +599,31 @@ async def disconnect_my_currents(
 ) -> dict[str, Any]:
     status = await disconnect_currents(session["sub"])
     return status.get("currents", {"connected": False})
+
+
+@router.get("/my-credentials/langsmith")
+async def get_my_langsmith_status(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    status = await get_user_langsmith_status(session["sub"])
+    return status.get("langsmith", {"connected": False})
+
+
+@router.put("/my-credentials/langsmith")
+async def connect_my_langsmith(
+    update: UserLangSmithCredentialsUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    status = await connect_user_langsmith(session["sub"], update)
+    return status.get("langsmith", {"connected": False})
+
+
+@router.delete("/my-credentials/langsmith")
+async def disconnect_my_langsmith(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    status = await disconnect_user_langsmith(session["sub"])
+    return status.get("langsmith", {"connected": False})
 
 
 @router.get("/my-credentials/notion")
@@ -1630,6 +1666,14 @@ async def api_update_schedule(
     return await update_agent_schedule(
         schedule_id, session["sub"], body, email=session.get("email")
     )
+
+
+@router.post("/schedules/{schedule_id}/trigger")
+async def api_trigger_schedule(
+    schedule_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await trigger_agent_schedule(schedule_id, session["sub"], email=session.get("email"))
 
 
 @router.delete("/schedules/{schedule_id}")

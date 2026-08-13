@@ -40,9 +40,8 @@ creating dashboard sessions.
 Install both packages, run the backend at `http://localhost:2024`, then start Electron:
 
 ```bash
-pnpm --dir ui install
-pnpm --dir desktop install
-pnpm --dir desktop run dev
+pnpm install                  # from the repo root
+pnpm run dev:desktop
 ```
 
 Source launches use an isolated `Open SWE Development` Electron profile, so the dev app can run
