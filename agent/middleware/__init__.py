@@ -18,6 +18,7 @@ _MIDDLEWARE_MODULES = {
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
     "SandboxCircuitBreakerMiddleware": ".sandbox_circuit_breaker",
     "SanitizeFireworksMessagesMiddleware": ".sanitize_fireworks_messages",
+    "SanitizeOpenAIResponsesMiddleware": ".sanitize_openai_responses",
     "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
     "SanitizeToolInputsMiddleware": ".sanitize_tool_inputs",
     "settle_review_check_on_exit": ".settle_review_check",
@@ -40,6 +41,7 @@ __all__ = [
     "PullRequestCreationGuardMiddleware",
     "RepairOrphanedToolCallsMiddleware",
     "SanitizeFireworksMessagesMiddleware",
+    "SanitizeOpenAIResponsesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "SanitizeToolInputsMiddleware",
     "SubdirAgentsReadMiddleware",
@@ -71,6 +73,7 @@ if TYPE_CHECKING:
     from .repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
     from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
     from .sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
+    from .sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
     from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
     from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
     from .settle_review_check import settle_review_check_on_exit

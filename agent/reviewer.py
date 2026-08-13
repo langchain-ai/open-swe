@@ -52,6 +52,7 @@ from .middleware import (
     ModelCallTimeoutMiddleware,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     TimeoutWrapupMiddleware,
@@ -359,7 +360,10 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
         "model": model,
         # Subagents compile into their own graphs, so the reviewer's own
         # middleware never wraps their model calls.
-        "middleware": cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()]),
+        "middleware": cast(
+            list[AgentMiddleware[Any, Any, Any]],
+            [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
+        ),
     }
 
 
@@ -1430,6 +1434,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 check_message_queue_before_model,
                 TimeoutWrapupMiddleware(),
                 SanitizeFireworksMessagesMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
                 ModelCallTimeoutMiddleware(),
