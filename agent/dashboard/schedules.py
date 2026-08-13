@@ -438,7 +438,7 @@ def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> st
     run_kind = "test" if test_run else "scheduled"
     return (
         f"*Jarvis automation:* {record.get('name') or 'Scheduled agent'}{repo_line}\n\n"
-        "A scheduled run started. Reply in this thread to follow up with the agent."
+        f"A {run_kind} run started. Reply in this thread to follow up with the agent."
     )
 
 
