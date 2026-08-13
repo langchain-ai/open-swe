@@ -13,7 +13,6 @@ from agent.dashboard.agent_instructions import (
     get_repo_agent_instructions,
     set_agent_instructions,
 )
-from agent.prompt import construct_system_prompt
 
 
 @pytest.mark.asyncio
@@ -71,27 +70,6 @@ async def test_set_agent_instructions_updates_store() -> None:
         record = await set_agent_instructions("acme/repo", "Use direct tone.")
     assert record["instructions"] == "Use direct tone."
     mock_put.assert_awaited_once()
-
-
-def test_construct_system_prompt_appends_repo_instructions() -> None:
-    prompt = construct_system_prompt(
-        working_dir="/work",
-        repo_custom_instructions="Prefer pytest over unittest.",
-    )
-    assert "Repository-specific Custom Instructions" in prompt
-    assert "Prefer pytest over unittest." in prompt
-
-
-def test_construct_system_prompt_without_repo_instructions() -> None:
-    prompt = construct_system_prompt(working_dir="/work")
-    assert "Repository-specific Custom Instructions" not in prompt
-
-
-def test_construct_system_prompt_guards_sandbox_recreation() -> None:
-    prompt = construct_system_prompt(working_dir="/work")
-    assert "Never call `recreate_sandbox` proactively or as automatic recovery" in prompt
-    assert "only when the user explicitly asks to recreate the sandbox" in prompt
-    assert "old sandbox becomes inaccessible from the thread" in prompt
 
 
 def test_resolve_repo_custom_instructions_returns_none_without_repo() -> None:

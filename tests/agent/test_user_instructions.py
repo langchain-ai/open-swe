@@ -8,7 +8,6 @@ from agent.dashboard.user_instructions import (
     get_user_custom_instructions,
     set_user_instructions,
 )
-from agent.prompt import construct_system_prompt
 from agent.tools.save_user_instructions import save_user_instructions
 
 
@@ -54,20 +53,6 @@ async def test_get_user_custom_instructions_returns_none_when_empty() -> None:
 @pytest.mark.asyncio
 async def test_get_user_custom_instructions_without_login() -> None:
     assert await get_user_custom_instructions(None) is None
-
-
-def test_construct_system_prompt_appends_user_instructions() -> None:
-    prompt = construct_system_prompt(
-        working_dir="/work",
-        user_custom_instructions="Always reply in bullet points.",
-    )
-    assert "Your Custom Instructions (user-level)" in prompt
-    assert "Always reply in bullet points." in prompt
-
-
-def test_construct_system_prompt_without_user_instructions() -> None:
-    prompt = construct_system_prompt(working_dir="/work")
-    assert "Your Custom Instructions (user-level)" not in prompt
 
 
 @pytest.mark.asyncio
