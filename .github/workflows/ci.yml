@@ -59,7 +59,7 @@ jobs:
       # The root package too, for Turborepo — but not desktop, whose Electron
       # download this job has no use for.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --filter jarvis-dashboard... --filter open-swe
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
       - name: Run format check
         run: pnpm run format:check
 
