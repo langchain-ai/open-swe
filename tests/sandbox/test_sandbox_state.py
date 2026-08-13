@@ -194,6 +194,27 @@ async def test_sandbox_proxy_uses_registered_reconnect_once(
 
 
 @pytest.mark.asyncio
+async def test_sandbox_proxy_refreshes_initialized_backend_when_started() -> None:
+    refreshed = _FakeSandboxBackend()
+    calls = 0
+
+    async def reconnect():
+        nonlocal calls
+        calls += 1
+        return refreshed
+
+    proxy = SandboxBackendProxy(
+        _FakeSandboxBackend(),
+        thread_id="thread-1",
+        reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
+    )
+    proxy.start()
+
+    assert await proxy.ready() is refreshed
+    assert calls == 1
+
+
+@pytest.mark.asyncio
 async def test_sandbox_proxy_starts_reconnect_before_first_operation() -> None:
     started = asyncio.Event()
     release = asyncio.Event()

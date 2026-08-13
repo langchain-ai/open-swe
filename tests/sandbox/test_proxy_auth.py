@@ -13,6 +13,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.integrations.langsmith import _configure_github_proxy
+from agent.utils.sandbox_state import SandboxBackendProxy
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -378,7 +379,7 @@ class TestRefreshProxyOnSandboxReuse:
             patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
             patch.dict(
                 "agent.server.SANDBOX_BACKENDS",
-                {"thread-123": mock_sandbox},
+                {"thread-123": SandboxBackendProxy(mock_sandbox, thread_id="thread-123")},
                 clear=True,
             ),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),

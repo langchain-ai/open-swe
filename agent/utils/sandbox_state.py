@@ -101,13 +101,13 @@ class SandboxBackendProxy(BaseSandbox):
         self._reconnect = reconnect
 
     def start(self) -> None:
-        if self._backend is not None:
-            return
         if self._startup_task is not None:
             if not self._startup_task.cancelled():
                 return
             self._startup_task = None
         if self._reconnect is None:
+            if self._backend is not None:
+                return
             raise RuntimeError("Cannot start sandbox without a reconnect callback")
         self._startup_task = asyncio.create_task(self._reconnect())
         self._startup_task.add_done_callback(self._startup_completed)
@@ -139,13 +139,13 @@ class SandboxBackendProxy(BaseSandbox):
         return self._lock
 
     async def _aget_backend(self) -> SandboxBackendProtocol:
-        if self._backend is not None:
+        if self._backend is not None and self._startup_task is None:
             return self._backend
         if not self._thread_id:
             raise RuntimeError("No sandbox backend cached")
 
         async with self._get_lock():
-            if self._backend is not None:
+            if self._backend is not None and self._startup_task is None:
                 return self._backend
             if self._startup_task is None:
                 if self._reconnect is not None:
@@ -175,11 +175,10 @@ class SandboxBackendProxy(BaseSandbox):
             raise
 
         async with self._get_lock():
-            if self._backend is None:
-                self._backend = unwrap_sandbox_backend(sandbox_backend)
-                SANDBOX_BACKENDS[self._thread_id] = self
             if self._startup_task is startup_task:
+                self._backend = unwrap_sandbox_backend(sandbox_backend)
                 self._startup_task = None
+                SANDBOX_BACKENDS[self._thread_id] = self
             return self._backend
 
     def ls(self, path: str) -> LsResult:
