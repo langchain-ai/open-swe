@@ -738,7 +738,7 @@ async def _load_observability_tools(authorized: bool, profile_login: str | None)
     if not authorized:
         return []
     datadog_tools, langsmith_tools = await asyncio.gather(
-        _cached_tool_loader(f"tools:datadog:{id(load_datadog_tools)}", 600, load_datadog_tools),
+        _cached_tool_loader("tools:datadog", 600, load_datadog_tools),
         load_langsmith_tools(profile_login),
     )
     return [*datadog_tools, *langsmith_tools]
@@ -746,14 +746,12 @@ async def _load_observability_tools(authorized: bool, profile_login: str | None)
 
 async def _load_corridor_mcp_tools() -> list[Any]:
     """Corridor MCP tools when the deployment environment has configured them."""
-    return await _cached_tool_loader(
-        f"tools:corridor:{id(load_corridor_tools)}", 600, load_corridor_tools
-    )
+    return await _cached_tool_loader("tools:corridor", 600, load_corridor_tools)
 
 
 async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
     return await ttl_cache.cached(
-        f"team-default-model-pair:{kind}:{id(get_team_default_model_pair)}",
+        f"team-default-model-pair:{kind}",
         60,
         lambda: get_team_default_model_pair(kind),
     )
@@ -761,7 +759,7 @@ async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
 
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )
@@ -769,7 +767,7 @@ async def _cached_gateway_enabled() -> bool:
 
 async def _cached_fable_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:fable-enabled:{id(get_team_fable_enabled)}",
+        "team:fable-enabled",
         60,
         get_team_fable_enabled,
     )
@@ -779,7 +777,7 @@ async def _cached_profile(profile_login: str | None):
     if not profile_login:
         return None
     return await ttl_cache.cached(
-        f"profile:{profile_login}:{id(load_profile)}", 30, lambda: load_profile(profile_login)
+        f"profile:{profile_login}", 30, lambda: load_profile(profile_login)
     )
 
 
@@ -1106,12 +1104,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if profile_login:
         currents_tools, notion_tools = await asyncio.gather(
             _cached_tool_loader(
-                f"tools:currents:{profile_login}:{id(load_currents_tools)}",
+                f"tools:currents:{profile_login}",
                 300,
                 lambda: load_currents_tools(profile_login),
             ),
             _cached_tool_loader(
-                f"tools:notion:{profile_login}:{id(load_notion_tools)}",
+                f"tools:notion:{profile_login}",
                 300,
                 lambda: load_notion_tools(profile_login),
             ),

@@ -132,7 +132,7 @@ Guidance:
 
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )
@@ -140,7 +140,7 @@ async def _cached_gateway_enabled() -> bool:
 
 async def _cached_team_chat_model() -> tuple[str, str]:
     return await ttl_cache.cached(
-        f"team-default-model:chat:{id(get_team_default_model)}",
+        "team-default-model:chat",
         60,
         lambda: get_team_default_model("chat"),
     )

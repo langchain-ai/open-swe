@@ -102,7 +102,7 @@ async def _configure_sandbox_github_proxy(
 
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )

@@ -890,7 +890,7 @@ async def _resolve_grouping_model(
 
 async def _cached_reviewer_team_defaults():
     return await ttl_cache.cached(
-        f"team-default-model-pair:reviewer:{id(get_team_default_model_pair)}",
+        "team-default-model-pair:reviewer",
         60,
         lambda: get_team_default_model_pair("reviewer"),
     )
@@ -898,7 +898,7 @@ async def _cached_reviewer_team_defaults():
 
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )
@@ -906,7 +906,7 @@ async def _cached_gateway_enabled() -> bool:
 
 async def _cached_org_review_guidelines() -> str | None:
     return await ttl_cache.cached(
-        f"reviewer:org-guidelines:{id(get_org_review_guidelines)}",
+        "reviewer:org-guidelines",
         300,
         get_org_review_guidelines,
     )
@@ -914,7 +914,7 @@ async def _cached_org_review_guidelines() -> str | None:
 
 async def _cached_api_standards_skill() -> str | None:
     return await ttl_cache.cached(
-        f"reviewer:api-standards-skill:{id(fetch_api_standards_skill)}",
+        "reviewer:api-standards-skill",
         300,
         fetch_api_standards_skill,
     )
