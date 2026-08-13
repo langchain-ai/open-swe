@@ -160,7 +160,6 @@ from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .utils.sandbox_state import (
     SANDBOX_BACKENDS,
     SandboxUnreachableError,
-    clear_sandbox_backend,
     get_or_create_sandbox_backend_proxy,
     get_sandbox_id_from_metadata,
     set_sandbox_backend,
@@ -468,9 +467,12 @@ async def ensure_sandbox_for_thread(
     lose their ``--global`` config, and Vercel preview deploys reject commits
     whose author email can't be resolved to a GitHub account.
     """
-    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
-    if sandbox_backend is not None and not sandbox_backend.has_backend:
-        sandbox_backend = None
+    cached_proxy = SANDBOX_BACKENDS.get(thread_id)
+    sandbox_backend = (
+        unwrap_sandbox_backend(cached_proxy)
+        if cached_proxy is not None and cached_proxy.has_backend
+        else None
+    )
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
 
     if sandbox_backend is None and sandbox_id is None:
@@ -880,7 +882,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
         )
         sandbox_task = asyncio.create_task(
-            ensure_sandbox_for_thread(self._thread_id, repo=prompt_default_repo)
+            get_or_create_sandbox_backend_proxy(self._thread_id).ready()
         )
         try:
             triggering_user_identity, sandbox_backend = await asyncio.gather(
@@ -890,7 +892,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         except SandboxUnreachableError as exc:
             # The run is about to die with no sandbox; make sure the user hears
             # why rather than getting silence.
-            clear_sandbox_backend(self._thread_id)
             await post_sandbox_unreachable_notification(
                 self._config or {}, sandbox_id=exc.sandbox_id
             )
@@ -963,6 +964,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(config)
 
+    async def reconnect_backend(
+        _thread_id: str = thread_id,
+        _configurable: dict[str, Any] = configurable,
+    ) -> SandboxBackendProtocol:
+        prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
+        return await ensure_sandbox_for_thread(_thread_id, repo=prompt_default_repo)
+
+    backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    backend.start()
+
     profile_login = resolve_github_login(as_json_object(config))
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
@@ -976,15 +987,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     linear_issue = as_json_object(configurable.get("linear_issue"))
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
-
-    async def reconnect_backend(
-        _thread_id: str = thread_id,
-        _configurable: dict[str, Any] = configurable,
-    ) -> SandboxBackendProtocol:
-        prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
-        return await ensure_sandbox_for_thread(_thread_id, repo=prompt_default_repo)
-
-    backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
