@@ -418,7 +418,11 @@ async def auth_login(
         redirect_to=safe_redirect,
         nonce_hash=hash_state_nonce(nonce),
     )
-    api_base_url = str(request.base_url).rstrip("/") if desktop else _api_base_url()
+    api_base_url = _api_base_url()
+    if desktop:
+        forwarded_proto = request.headers.get("x-forwarded-proto", "").partition(",")[0].strip()
+        scheme = forwarded_proto if forwarded_proto in {"http", "https"} else request.url.scheme
+        api_base_url = str(request.base_url.replace(scheme=scheme)).rstrip("/")
     redirect_uri = f"{api_base_url}/dashboard/api/auth/callback"
     query = urlencode(
         {
