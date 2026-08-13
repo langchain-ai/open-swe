@@ -37,6 +37,7 @@ from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     BasePrepareRunMiddleware,
     PrepareRunState,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeToolInputsMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
@@ -202,6 +203,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
                 ),
                 ToolErrorMiddleware(),
                 TimeoutWrapupMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
             ],
         ),
     ).with_config(config)

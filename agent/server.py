@@ -82,6 +82,7 @@ from .middleware import (
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
     SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SubdirAgentsReadMiddleware,
@@ -592,15 +593,15 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
 )
 
 
-def _subagent_model_timeout_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
-    """Deadline for a subagent's own model calls.
+def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
+    """Provider guards for subagent model calls.
 
-    Subagents are compiled into their own graphs, so the parent's middleware
-    never wraps them — while a delegated `task` runs, the parent is only waiting
-    on tool execution. Without this a stalled provider call inside a subagent
-    hangs the run exactly like it did in the parent.
+    Subagents compile into their own graphs, so parent middleware never wraps them.
     """
-    return cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()])
+    return cast(
+        list[AgentMiddleware[Any, Any, Any]],
+        [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
+    )
 
 
 def _general_purpose_subagent(
@@ -618,7 +619,7 @@ def _general_purpose_subagent(
         "model": model,
         "middleware": [
             *([dynamic_tools] if dynamic_tools else []),
-            *_subagent_model_timeout_middleware(),
+            *_subagent_model_middleware(),
         ],
     }
     if skills:
@@ -665,7 +666,7 @@ def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
         "system_prompt": BROWSER_SUBAGENT_SYSTEM_PROMPT,
         "tools": tools,
         "model": model,
-        "middleware": _subagent_model_timeout_middleware(),
+        "middleware": _subagent_model_middleware(),
     }
 
 
@@ -1228,6 +1229,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *fallback_middleware,
                 *plan_mode_middleware,
                 SanitizeFireworksMessagesMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 # Innermost, so the deadline covers the provider call itself and a
                 # timeout escalates outward to the fallback model.

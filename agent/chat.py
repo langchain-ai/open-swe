@@ -50,6 +50,7 @@ from .middleware import (
     ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
     SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
@@ -96,6 +97,7 @@ def _chat_general_purpose_subagent() -> SubAgent:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 FilesystemMiddleware(tools=["read_file", "ls", "glob", "grep"]),
+                SanitizeOpenAIResponsesMiddleware(),
                 ModelCallTimeoutMiddleware(),
             ],
         ),
@@ -254,6 +256,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),
                 SanitizeFireworksMessagesMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 ModelCallTimeoutMiddleware(),
             ],
