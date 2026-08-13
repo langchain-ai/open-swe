@@ -289,7 +289,16 @@ class AcpSession {
     this.events.push(stamped)
     this.onEvent(this.id, stamped)
     if (["user-message", "run-end", "error"].includes(event.type)) {
+      this.notifyChange()
+    }
+    return stamped
+  }
+
+  notifyChange() {
+    try {
       this.onChange?.(this)
+    } catch (error) {
+      console.error("Failed to persist ACP session", error)
     }
   }
 
@@ -330,7 +339,7 @@ class AcpSession {
       this.acpSessionId = result.sessionId
     }
     this.status = "idle"
-    this.onChange?.(this)
+    this.notifyChange()
   }
 
   async prompt(text, images) {
@@ -381,8 +390,10 @@ class AcpSession {
         const existing = this.replayUsers.get(update.messageId)
         if (existing) existing.text += update.content.text
         else {
-          const event = { type: "user-message", text: update.content.text }
-          this.emit(event)
+          const event = this.emit({
+            type: "user-message",
+            text: update.content.text,
+          })
           if (typeof update.messageId === "string") {
             this.replayUsers.set(update.messageId, event)
           }
