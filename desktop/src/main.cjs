@@ -76,6 +76,7 @@ protocol.registerSchemesAsPrivileged([
 let backendUrl = null;
 let mainWindow = null;
 let setupWindow = null;
+let oauthNavigationActive = false;
 let quitting = false;
 const acpSessions = new Map();
 // sessionId -> { repo, ref }: the worktree snapshot a local session started from, so
@@ -523,6 +524,7 @@ async function serveBundledUi(request) {
 }
 
 async function loadApp(window) {
+  oauthNavigationActive = false;
   if (!backendUrl) return;
   try {
     await window.loadURL(APP_URL);
@@ -620,13 +622,22 @@ function createMenu() {
 function handleNavigation(window, event, url) {
   const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null;
   if (callback) {
+    oauthNavigationActive = false;
     event.preventDefault();
     void window.loadURL(callback);
     return;
   }
-  if (isAppUrl(url) || isGithubOAuthUrl(url)) return;
-  event.preventDefault();
+  if (isAppUrl(url)) {
+    oauthNavigationActive = false;
+    return;
+  }
+  if (isGithubOAuthUrl(url)) {
+    oauthNavigationActive = true;
+    return;
+  }
   const target = new URL(url);
+  if (oauthNavigationActive && target.protocol === "https:") return;
+  event.preventDefault();
   if (["http:", "https:", "mailto:"].includes(target.protocol)) {
     void shell.openExternal(url);
   }
@@ -663,7 +674,14 @@ function createWindow() {
     if (mainWindow === window) mainWindow = null;
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (["http:", "https:", "mailto:"].includes(new URL(url).protocol)) {
+    const protocol = new URL(url).protocol;
+    if (
+      isGithubOAuthUrl(url) ||
+      (oauthNavigationActive && protocol === "https:")
+    ) {
+      oauthNavigationActive = true;
+      void window.loadURL(url);
+    } else if (["http:", "https:", "mailto:"].includes(protocol)) {
       void shell.openExternal(url);
     }
     return { action: "deny" };
