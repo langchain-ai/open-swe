@@ -57,7 +57,7 @@ test.describe("Plan review (HTTP comments)", () => {
   test("Slack plan request → comments → owner approves → PR", async ({
     browser,
     request,
-  }) => {
+  }, testInfo) => {
     // 1. A user asks the bot to PLAN something in Slack.
     await request.post("/control/reset");
     const send = await request.post("/mock/slack/send", {
@@ -109,7 +109,9 @@ test.describe("Plan review (HTTP comments)", () => {
 
     // 3. A logged-out user follows the plan deep link, signs in through the fake
     //    GitHub OAuth simulator, and lands back on the same plan page.
-    const loggedOutCtx = await browser.newContext();
+    const loggedOutCtx = await browser.newContext({
+      viewport: { width: 900, height: 700 },
+    });
     const loggedOut = await loggedOutCtx.newPage();
     await loggedOut.goto(planPath);
     await expect(loggedOut).toHaveURL(
@@ -133,6 +135,25 @@ test.describe("Plan review (HTTP comments)", () => {
         timeout: 30_000,
       },
     );
+    const summaryBox = await loggedOut
+      .getByTestId("plan-summary")
+      .boundingBox();
+    const actionsBox = await loggedOut
+      .getByTestId("plan-actions")
+      .boundingBox();
+    expect(summaryBox).not.toBeNull();
+    expect(actionsBox).not.toBeNull();
+    expect(actionsBox!.y).toBeGreaterThanOrEqual(
+      summaryBox!.y + summaryBox!.height,
+    );
+    const screenshotPath = testInfo.outputPath("plan-review-tablet.png");
+    await loggedOut
+      .getByTestId("plan-review")
+      .screenshot({ path: screenshotPath });
+    await testInfo.attach("plan-review-tablet", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
     await loggedOutCtx.close();
 
     // 4. The OWNER opens the conversation, follows the "Review plan" banner, and

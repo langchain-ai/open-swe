@@ -56,14 +56,19 @@ GitHub App only on the repositories it should touch.
 
 ## Vercel
 
-Root directory `ui/`, production branch `preview`, and `VITE_DASHBOARD_API_BASE_URL` set
-to the preview LangGraph deployment URL. The UI calls that URL directly (cross-origin
-with credentials), so add the preview Vercel domain to `DASHBOARD_ALLOWED_ORIGINS`.
+Root directory `ui/`, production branch `preview`, and `DASHBOARD_API_URL` set to the
+preview LangGraph deployment URL. Requests stay same-origin — the build turns that
+variable into the platform rewrite for `/dashboard/api/*` — so `DASHBOARD_API_BASE_URL`,
+the GitHub App callback URL, and the `DASHBOARD_ALLOWED_ORIGINS` entry must all point at
+the preview Vercel domain. That allowlist is the backend's CSRF gate as well as its CORS
+config, so a missing entry leaves the preview dashboard readable but unable to save.
 
-> `ui/vercel.json` hardcodes the production LangGraph URL in a `/dashboard/api/:path*`
-> rewrite. Vercel does not interpolate environment variables in `vercel.json`, so the
-> preview project cannot override it. It is unused as long as
-> `VITE_DASHBOARD_API_BASE_URL` is an absolute URL — which it must be for preview.
+> The build **fails** if `DASHBOARD_API_URL` is unset on Vercel, rather than falling back
+> to a default — a default would be production's backend, and preview would inherit it
+> and drive production's agents, threads, and sandboxes from the preview dashboard.
+>
+> `DASHBOARD_API_URL` is read at build time. A change to it only takes effect on the next
+> deployment, not on redeploy of an existing build.
 
 ## Verifying isolation
 

@@ -6,16 +6,9 @@
  */
 
 import { dashboardApiBase } from "./api-base"
+import { dashboardApiUrl, dashboardForwardedHeaders } from "./dashboard-fetch"
 
 const API_BASE = dashboardApiBase()
-
-if (
-  !API_BASE &&
-  typeof window !== "undefined" &&
-  window.location.protocol !== "open-swe:"
-) {
-  console.warn("VITE_DASHBOARD_API_BASE_URL is not set")
-}
 
 const GITHUB_IMAGE_HOST_RE =
   /^(?:www\.)?github\.com$|\.githubusercontent\.com$/i
@@ -71,11 +64,12 @@ export function isGithubReauthError(error: unknown): boolean {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
+  const res = await fetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...dashboardForwardedHeaders(),
       ...(init.headers ?? {}),
     },
   })
@@ -215,11 +209,13 @@ export interface LangSmithConnectBody {
   endpoint?: string | null
 }
 
-export interface CurrentsCredentialStatus {
+export interface ApiKeyCredentialStatus {
   connected: boolean
   api_key_last4?: string
   updated_at?: string | null
 }
+
+export type CurrentsCredentialStatus = ApiKeyCredentialStatus
 
 export interface CurrentsConnectBody {
   api_key: string
@@ -797,6 +793,17 @@ export const api = {
     }),
   disconnectCurrents: () =>
     request<CurrentsCredentialStatus>("/my-credentials/currents", {
+      method: "DELETE",
+    }),
+  getMyLangSmithStatus: () =>
+    request<ApiKeyCredentialStatus>("/my-credentials/langsmith"),
+  connectMyLangSmith: (body: CurrentsConnectBody) =>
+    request<ApiKeyCredentialStatus>("/my-credentials/langsmith", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  disconnectMyLangSmith: () =>
+    request<ApiKeyCredentialStatus>("/my-credentials/langsmith", {
       method: "DELETE",
     }),
   getMyNotionStatus: () =>

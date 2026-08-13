@@ -52,9 +52,15 @@ app** — served same-origin from the harness so the session cookie and
 (minted via `/control/login`), so per-user authorization is genuine; the only
 extra fake is the OAuth-token store (an external credential).
 
-The UI is built by `global-setup.ts` with `VITE_DASHBOARD_API_BASE_URL` pointed at
-the harness. It builds once; set `E2E_FORCE_UI_BUILD=1` to rebuild (e.g. after a
-UI change or port change). Requires Corepack with `pnpm` enabled.
+The UI is built by `global-setup.ts` with both API bases pointed at the harness,
+which then runs the app's own Nitro server on `E2E_UI_PORT` (default 3100). The
+harness proxies page requests to it, so the specs exercise real server rendering
+— the root session gate, the redirect, hydration — instead of a static shell.
+`ssr.spec.ts` asserts that on the raw response, because a server-rendering
+regression falls back to the client and otherwise passes unnoticed.
+
+It builds once; set `E2E_FORCE_UI_BUILD=1` to rebuild (e.g. after a UI change or
+port change). Requires Corepack with `pnpm` enabled.
 
 ## Run
 

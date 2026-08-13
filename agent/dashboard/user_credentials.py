@@ -9,15 +9,17 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from langgraph_sdk import get_client
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from ..encryption import decrypt_token, encrypt_token
 from .notion_oauth import is_reauth_required_error, refresh_notion_access_token
+from .team_credentials import DEFAULT_LANGSMITH_ENDPOINT, LangSmithCredentials
 
 logger = logging.getLogger(__name__)
 
 USER_CREDENTIALS_NAMESPACE: list[str] = ["user_credentials"]
 CURRENTS_KEY = "currents"
+LANGSMITH_KEY = "langsmith"
 NOTION_KEY = "notion"
 
 CURRENTS_API_BASE = "https://api.currents.dev/v1"
@@ -66,6 +68,19 @@ class CurrentsCredentialsUpdate(BaseModel):
         if not isinstance(v, str) or not v.strip():
             raise ValueError("api_key must be a non-empty string")
         return v.strip()
+
+
+class UserLangSmithCredentialsUpdate(CurrentsCredentialsUpdate):
+    """Connect LangSmith with an API key."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("api_key")
+    @classmethod
+    def _require_redactable(cls, value: str) -> str:
+        if len(value) < 5:
+            raise ValueError("api_key must be at least 5 characters")
+        return value
 
 
 @dataclass(frozen=True)
@@ -349,3 +364,46 @@ async def get_currents_api_key(login: str) -> str | None:
         return None
     api_key = decrypt_token(currents.get("encrypted_api_key", ""))
     return api_key or None
+
+
+async def get_langsmith_status(login: str) -> dict[str, Any]:
+    """Return a redacted, dashboard-safe view of the user's LangSmith key."""
+    langsmith = await _get_provider(login, LANGSMITH_KEY)
+    return {
+        "langsmith": {
+            "connected": True,
+            "api_key_last4": langsmith.get("api_key_last4", ""),
+            "updated_at": langsmith.get("updated_at"),
+        }
+        if langsmith
+        else {"connected": False},
+    }
+
+
+async def connect_langsmith(login: str, update: UserLangSmithCredentialsUpdate) -> dict[str, Any]:
+    await _put_provider(
+        login,
+        LANGSMITH_KEY,
+        {
+            "encrypted_api_key": encrypt_token(update.api_key),
+            "api_key_last4": _last4(update.api_key),
+            "updated_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    return await get_langsmith_status(login)
+
+
+async def disconnect_langsmith(login: str) -> dict[str, Any]:
+    await _delete_provider(login, LANGSMITH_KEY)
+    return await get_langsmith_status(login)
+
+
+async def get_langsmith_credentials(login: str) -> LangSmithCredentials | None:
+    """Return decrypted LangSmith credentials, or ``None`` when not connected."""
+    langsmith = await _get_provider(login, LANGSMITH_KEY)
+    if not isinstance(langsmith, dict):
+        return None
+    api_key = decrypt_token(langsmith.get("encrypted_api_key", ""))
+    if not api_key:
+        return None
+    return LangSmithCredentials(api_key=api_key, endpoint=DEFAULT_LANGSMITH_ENDPOINT)

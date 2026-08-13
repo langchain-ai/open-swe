@@ -94,6 +94,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadStream()
   const isMobile = useIsMobile()
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const sidebarCollapsed = useSidebarCollapsed()
   const skills = useAgentSkills()
 
@@ -215,21 +217,27 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
       >
-        {thread.repoFullName && (
+        <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
           <div
             className={cn(
-              "mx-auto flex w-full max-w-3xl shrink-0 items-center gap-2 px-4 pt-3 text-xs text-muted-foreground",
-              sidebarCollapsed && "pl-14",
+              "flex h-full w-full items-center gap-3 px-4",
+              sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
               panelCollapsed && "pr-14"
             )}
           >
-            <FolderOpen className="size-3.5" />
-            <span className="truncate" title={thread.repoFullName}>
-              {thread.repoFullName}
+            {thread.repoFullName && (
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+                <FolderOpen className="size-3.5 shrink-0" />
+                <span className="truncate" title={thread.repoFullName}>
+                  {thread.repoFullName}
+                </span>
+              </span>
+            )}
+            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+              Cloud
             </span>
-            <span className="ml-auto shrink-0">Cloud</span>
           </div>
-        )}
+        </header>
         {thread.status === "error" && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">
@@ -265,7 +273,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               "mx-auto w-full max-w-3xl shrink-0 px-4 pt-3",
               // Both collapsed panels float a fixed expand button in a top
               // corner; clear them so neither covers the banner.
-              sidebarCollapsed && "pl-14",
+              sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
               panelCollapsed && "pr-14"
             )}
           >

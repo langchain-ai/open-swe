@@ -306,11 +306,6 @@ async def _notify_slack_processing_error(
     except Exception:  # noqa: BLE001
         common.logger.warning("Could not mark Slack thread %s as errored", thread_id, exc_info=True)
 
-    try:
-        await common.set_slack_assistant_status(channel_id, thread_ts, status="")
-    except Exception:  # noqa: BLE001
-        common.logger.debug("Could not clear Slack assistant status", exc_info=True)
-
     dashboard_url = common.dashboard_thread_url(thread_id)
     message = warning(
         "Jarvis hit an unexpected error while handling this Slack thread. "
@@ -352,8 +347,6 @@ async def _process_slack_mention_impl(
         )
         return
 
-    await common.set_slack_assistant_status(channel_id, thread_ts)
-
     thread_id = common.generate_thread_id_from_slack_thread(channel_id, thread_ts)
 
     # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
@@ -364,6 +357,7 @@ async def _process_slack_mention_impl(
 
     user_email = None
     user_name = ""
+    user_timezone = ""
     if user_id:
         slack_user = await common.get_slack_user_info(user_id)
         if slack_user:
@@ -377,6 +371,9 @@ async def _process_slack_mention_impl(
                     or slack_user.get("name")
                     or ""
                 )
+            timezone_value = slack_user.get("tz")
+            if isinstance(timezone_value, str):
+                user_timezone = timezone_value.strip()
 
     thread_messages = await common.fetch_slack_thread_messages(channel_id, thread_ts)
     current_message = next(
@@ -429,6 +426,9 @@ async def _process_slack_mention_impl(
         or "(no text in mention)"
     )
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
+    trigger_user_timezone_section = (
+        f"## Triggering User Time Zone\n{user_timezone}\n\n" if user_timezone else ""
+    )
 
     # Auto-resolve cross-posted Slack message links in context
     resolved_links_section, image_urls_from_links = await common.resolve_slack_links_in_context(
@@ -444,6 +444,7 @@ async def _process_slack_mention_impl(
         f"{repo_config.get('owner')}/{repo_config.get('name')}\n"
         "Use this only if the Slack conversation does not identify a different repository.\n\n"
         f"## Triggered by\n{trigger_user}\n\n"
+        f"{trigger_user_timezone_section}"
         f"{slack_thread_section}\n\n"
         f"{await _format_slack_run_links_section(thread_id)}\n\n"
         f"## Conversation Context\n{context_text}\n\n"
@@ -533,7 +534,6 @@ async def _process_slack_mention_impl(
             await common._post_account_link_prompt(
                 channel_id, thread_ts, user_id, user_email, reason=reason
             )
-        await common.set_slack_assistant_status(channel_id, thread_ts, status="")
         return
 
     if await _maybe_approve_ready_plan_reply(
@@ -541,17 +541,21 @@ async def _process_slack_mention_impl(
     ):
         return
 
+    slack_thread_context: dict[str, Any] = {
+        "channel_id": channel_id,
+        "channel_context": channel_context,
+        "thread_ts": thread_ts,
+        "triggering_user_id": user_id,
+        "triggering_user_name": user_name,
+        "triggering_user_email": user_email,
+        "triggering_event_ts": event_ts,
+    }
+    if user_timezone:
+        slack_thread_context["triggering_user_timezone"] = user_timezone
+
     configurable: dict[str, Any] = {
         "repo": repo_config,
-        "slack_thread": {
-            "channel_id": channel_id,
-            "channel_context": channel_context,
-            "thread_ts": thread_ts,
-            "triggering_user_id": user_id,
-            "triggering_user_name": user_name,
-            "triggering_user_email": user_email,
-            "triggering_event_ts": event_ts,
-        },
+        "slack_thread": slack_thread_context,
         "user_email": user_email,
         "source": "slack",
     }
@@ -606,7 +610,6 @@ async def _process_slack_mention_impl(
     )
     run_id = run.get("run_id")
     if is_first_mention:
-        await common.set_slack_assistant_status(channel_id, thread_ts)
         if isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(
                 langgraph_client,

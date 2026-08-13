@@ -59,6 +59,14 @@ async def slack_webhook(
             return {"status": "accepted", "message": "Reaction removal queued"}
         return {"status": "ignored", "reason": "Reaction not tracked for feedback"}
 
+    event_id = str(payload.get("event_id") or "")
+    retry_num = request.headers.get("X-Slack-Retry-Num", "")
+    if retry_num and await common.slack_event_already_seen(event_id):
+        common.logger.info(
+            "Ignoring Slack retry %s of already-handled event %s", retry_num, event_id
+        )
+        return {"status": "ignored", "reason": "Duplicate Slack event delivery"}
+
     bot_user_id = common.SLACK_BOT_USER_ID
     if not bot_user_id:
         authorizations = payload.get("authorizations", [])
@@ -139,32 +147,35 @@ async def slack_webhook(
     channel_context = await common._get_slack_channel_context(channel_id)
 
     if await common._is_docs_plz_slack_channel(channel_id, channel_context):
-        background_tasks.add_task(
-            common.post_slack_thread_reply,
-            channel_id,
-            thread_ts,
-            common.DOCS_PLZ_SLACK_GATE_REPLY,
+        if await common.claim_slack_event(event_id):
+            background_tasks.add_task(
+                common.post_slack_thread_reply,
+                channel_id,
+                thread_ts,
+                common.DOCS_PLZ_SLACK_GATE_REPLY,
+            )
+            return {"status": "accepted", "message": "Slack mention gated for docs-plz"}
+    else:
+        event_data = {
+            "channel_id": channel_id,
+            "channel_context": channel_context,
+            "thread_ts": thread_ts,
+            "event_ts": event_ts,
+            "user_id": user_id,
+            "text": text,
+            "attachments": event.get("attachments", []),
+            "bot_user_id": bot_user_id,
+            "treat_all_messages_as_mentions": is_direct_message,
+        }
+        repo_config = await common.get_slack_repo_config(
+            channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
         )
-        return {"status": "accepted", "message": "Slack mention gated for docs-plz"}
+        if await common.claim_slack_event(event_id):
+            background_tasks.add_task(service.process_slack_mention, event_data, repo_config)
+            return {"status": "accepted", "message": "Slack mention queued"}
 
-    event_data = {
-        "channel_id": channel_id,
-        "channel_context": channel_context,
-        "thread_ts": thread_ts,
-        "event_ts": event_ts,
-        "user_id": user_id,
-        "text": text,
-        "attachments": event.get("attachments", []),
-        "bot_user_id": bot_user_id,
-        "treat_all_messages_as_mentions": is_direct_message,
-    }
-    repo_config = await common.get_slack_repo_config(
-        channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
-    )
-
-    background_tasks.add_task(service.process_slack_mention, event_data, repo_config)
-
-    return {"status": "accepted", "message": "Slack mention queued"}
+    common.logger.info("Ignoring duplicate delivery of Slack event %s", event_id)
+    return {"status": "ignored", "reason": "Duplicate Slack event delivery"}
 
 
 @router.post("/webhooks/slack/interactivity")
