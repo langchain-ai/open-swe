@@ -13,6 +13,7 @@ from agent.dashboard.agent_instructions import (
     get_repo_agent_instructions,
     set_agent_instructions,
 )
+from agent.prompt import construct_system_prompt
 
 
 @pytest.mark.asyncio
@@ -70,6 +71,16 @@ async def test_set_agent_instructions_updates_store() -> None:
         record = await set_agent_instructions("acme/repo", "Use direct tone.")
     assert record["instructions"] == "Use direct tone."
     mock_put.assert_awaited_once()
+
+
+def test_construct_system_prompt_interpolates_custom_instructions() -> None:
+    prompt = construct_system_prompt(
+        working_dir="/work",
+        repo_custom_instructions="Repository rule sentinel.",
+        user_custom_instructions="User rule sentinel.",
+    )
+
+    assert prompt.index("Repository rule sentinel.") < prompt.index("User rule sentinel.")
 
 
 def test_resolve_repo_custom_instructions_returns_none_without_repo() -> None:

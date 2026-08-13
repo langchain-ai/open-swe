@@ -7,6 +7,14 @@ import pytest
 
 from agent import server
 from agent.dashboard import thread_api
+from agent.prompt import construct_system_prompt
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_construct_system_prompt_gates_active_plan_mode(enabled: bool) -> None:
+    prompt = construct_system_prompt(working_dir="/work", plan_mode=enabled)
+
+    assert ("### Plan Mode (ACTIVE)" in prompt) is enabled
 
 
 def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
