@@ -6,6 +6,7 @@ const test = require("node:test")
 const {
   createTerminalManager,
   ensurePtySpawnHelperExecutable,
+  getUserShellEnv,
 } = require("../src/terminal-manager.cjs")
 
 class FakeProcess {
@@ -90,6 +91,22 @@ function request(cwd, extra = {}) {
 function tick() {
   return new Promise((resolve) => setImmediate(resolve))
 }
+
+test("loads environment set by interactive shell prompt hooks", () => {
+  const env = getUserShellEnv({
+    cwd: "/project",
+    env: { SHELL: "/bin/zsh", EXISTING: "kept" },
+    execFileSync: (_shell, args, options) => {
+      assert.deepEqual(args, ["-il"])
+      assert.equal(options.cwd, "/project")
+      const mark = /echo '([0-9a-f]+)'/.exec(options.input)[1]
+      return `${mark}\nOPENAI_BASE_URL=https://gateway.example/openai/v1\n${mark}\n`
+    },
+  })
+
+  assert.equal(env.EXISTING, "kept")
+  assert.equal(env.OPENAI_BASE_URL, "https://gateway.example/openai/v1")
+})
 
 test("keeps terminal identity scoped to the ACP session and validates launch boundaries", async (t) => {
   const value = fixture()

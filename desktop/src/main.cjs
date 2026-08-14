@@ -28,6 +28,7 @@ const {
 const {
   closeAllTerminals,
   configureTerminalIpc,
+  getUserShellEnv,
 } = require("./terminal-manager.cjs");
 const {
   addProject,
@@ -230,10 +231,11 @@ function registeredProject(cwd) {
 }
 
 function createAcpSession({ cwd, modelId, effort, restored }) {
+  const env = getUserShellEnv({ cwd });
   return new AcpSession({
     cwd,
-    target: dcodeTarget({ modelId, effort }),
-    env: process.env,
+    target: dcodeTarget({ env, modelId, effort }),
+    env,
     onEvent: sendAcpEvent,
     onChange: persistAcpSession,
     requestPermission: async () => true,
