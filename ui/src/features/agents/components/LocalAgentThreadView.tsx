@@ -121,9 +121,15 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   if (!session) {
     return (
       <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 text-xs text-muted-foreground">
-        {loaded
-          ? "This local session is no longer running."
-          : "Loading local Deep Agents Code session…"}
+        {loaded ? (
+          "This local session is no longer running."
+        ) : (
+          <img
+            src="/logo-mark.png"
+            alt="Loading local Deep Agents Code session"
+            className="size-12 animate-pulse"
+          />
+        )}
         {loaded && (
           <Link
             className="text-foreground underline underline-offset-4"
