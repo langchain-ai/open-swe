@@ -607,19 +607,30 @@ def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     )
 
 
+def _is_slack_tool(tool: Any) -> bool:
+    """Return whether a tool reaches Slack."""
+    name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
+    return name.startswith("slack_") or name == "notify_automation_channel"
+
+
 def _general_purpose_subagent(
     model: BaseChatModel,
+    tools: Sequence[Any],
     skills: list[str] | None = None,
     dynamic_tools: DynamicToolMiddleware | None = None,
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
-        "description": GENERAL_PURPOSE_SUBAGENT["description"],
+        "description": (
+            GENERAL_PURPOSE_SUBAGENT["description"]
+            + " It cannot access Slack tools; relay all Slack communication from the main agent."
+        ),
         # Deep Agents' default GP prompt covers only task mechanics; the shared
         # base carries the Open SWE identity and conventions (gh proxy usage,
         # tool-call cadence) that delegated work also needs.
         "system_prompt": OPEN_SWE_SHARED_BASE + "\n\n" + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
+        "tools": [tool for tool in tools if not _is_slack_tool(tool)],
         "middleware": [
             *([dynamic_tools] if dynamic_tools else []),
             *_subagent_model_middleware(),
@@ -1187,7 +1198,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         system_prompt="",
         tools=static_tools,
         subagents=[
-            _general_purpose_subagent(subagent_model, skill_sources, dynamic_tool_middleware),
+            _general_purpose_subagent(
+                subagent_model,
+                tools=static_tools,
+                skills=skill_sources,
+                dynamic_tools=dynamic_tool_middleware,
+            ),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],
         skills=skill_sources,
