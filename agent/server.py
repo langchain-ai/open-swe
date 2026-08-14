@@ -30,7 +30,6 @@ import asyncio
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
-from deepagents.backends import LangSmithSandbox
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
@@ -70,7 +69,7 @@ from .dashboard.user_mappings import email_for_login
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
-from .integrations.langsmith import _configure_github_proxy, get_async_sandbox_client
+from .integrations.langsmith import _configure_github_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
 from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
@@ -161,6 +160,7 @@ from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .utils.sandbox_state import (
     SANDBOX_BACKENDS,
+    SandboxBackendProxy,
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
     get_sandbox_id_from_metadata,
@@ -248,31 +248,6 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
         return None
 
 
-async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProtocol) -> None:
-    """Start a LangSmith sandbox before operations that require it to be running."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
-        return
-    current_backend = unwrap_sandbox_backend(sandbox_backend)
-    if not isinstance(current_backend, LangSmithSandbox):
-        return
-
-    name = current_backend.id
-    async with get_async_sandbox_client() as client:
-        status = await client.get_sandbox_status(name)
-        status_name = getattr(status, "status", status)
-        status_name = getattr(status_name, "value", status_name)
-        status_text = str(status_name or "").lower()
-        if status_text in {"running", "ready"}:
-            return
-
-        logger.info(
-            "Starting LangSmith sandbox %s before proxy refresh (status=%s)",
-            name,
-            status_text or "unknown",
-        )
-        await client.start_sandbox(name)
-
-
 async def _resolve_proxy_token(
     github_proxy_token: str | None,
 ) -> tuple[str | None, str | None, None]:
@@ -319,7 +294,6 @@ async def _create_sandbox_with_proxy(
             msg = "Cannot configure proxy: GitHub App installation token is unavailable"
             logger.error(msg)
             raise ValueError(msg)
-        await _start_langsmith_sandbox_if_needed(sandbox_backend)
         await _configure_github_proxy(sandbox_backend.id, token)
         record_proxy_token_expiry(
             thread_id,
@@ -351,7 +325,6 @@ async def _refresh_github_proxy(
         return
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
-    await _start_langsmith_sandbox_if_needed(current_backend)
     await _configure_github_proxy(current_backend.id, token)
     record_proxy_token_expiry(
         thread_id,
@@ -678,7 +651,7 @@ def _get_cached_sandbox_backend(
     thread_id: str,
     *,
     reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
-) -> SandboxBackendProtocol:
+) -> SandboxBackendProxy:
     return get_or_create_sandbox_backend_proxy(thread_id, reconnect=reconnect)
 
 
@@ -783,6 +756,19 @@ async def _cached_profile(profile_login: str | None):
         return None
     return await ttl_cache.cached(
         f"profile:{profile_login}", 30, lambda: load_profile(profile_login)
+    )
+
+
+def _slack_tools_enabled(configurable: dict[str, Any]) -> bool:
+    """Return whether the run has trusted Slack source context."""
+    if configurable.get("source") not in {"slack", "schedule"}:
+        return False
+    slack_thread = configurable.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return False
+    return all(
+        isinstance(slack_thread.get(key), str) and bool(slack_thread[key].strip())
+        for key in ("channel_id", "thread_ts")
     )
 
 
@@ -948,6 +934,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 user_custom_instructions=user_custom_instructions,
                 thread_url=dashboard_thread_url(self._thread_id),
                 corridor_enabled=self._corridor_enabled,
+                source=self._source,
+                slack_context=_slack_tools_enabled(configurable),
             ),
         }
 
@@ -1120,6 +1108,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ),
         )
 
+    slack_tools = [
+        slack_add_reaction,
+        slack_read_thread_messages,
+        slack_start_new_thread,
+        slack_thread_reply,
+    ]
     static_tools = [
         http_request,
         fetch_url,
@@ -1150,6 +1144,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_start_new_thread,
         slack_thread_reply,
     ]
+    reserved_tool_names = {tool.__name__ for tool in static_tools}
+    if not _slack_tools_enabled(configurable):
+        static_tools = [tool for tool in static_tools if tool not in slack_tools]
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups = {
         "Corridor": corridor_tools,
@@ -1160,7 +1157,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if any(integration_tool_groups.values()):
         dynamic_tool_middleware = DynamicToolMiddleware(
             integration_tool_groups,
-            reserved_names={*DEEP_AGENT_TOOL_NAMES, *(tool.__name__ for tool in static_tools)},
+            reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
         )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
