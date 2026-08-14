@@ -273,7 +273,16 @@ async def test_general_purpose_subagent_carries_open_swe_shared_base() -> None:
 
 @pytest.mark.asyncio
 async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
-    captured = await _capture_create_deep_agent_kwargs()
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(
+        {
+            "source": "slack",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+        }
+    )
+    captured = await _capture_create_deep_agent_kwargs(config)
     parent_tools = captured["tools"]
     subagents = captured["subagents"]
     assert isinstance(parent_tools, list)
