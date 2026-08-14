@@ -202,9 +202,9 @@ async def approve_plan_for_thread(
     await set_plan_status(thread_id, PLAN_STATUS_APPROVED, plan_mode=False)
     if plan_markdown:
         text = (
-            "The plan has been approved. Implement it now exactly as written "
-            "below (it may have been edited by the reviewer, so treat this as "
-            f"the source of truth):\n\n{plan_markdown}"
+            "The plan has been approved. Use the reviewed plan below as the implementation "
+            "guide. Apply reasonable engineering judgment where details need adjustment while "
+            f"preserving its goals and reviewer edits:\n\n{plan_markdown}"
         )
     else:
         text = "The plan has been approved. Implement it now as described in the plan."

@@ -17,6 +17,13 @@ def test_construct_system_prompt_gates_active_plan_mode(enabled: bool) -> None:
     assert ("### Plan Mode (ACTIVE)" in prompt) is enabled
 
 
+def test_plan_mode_prompt_requests_slack_approval_options() -> None:
+    prompt = construct_system_prompt(working_dir="/work", plan_mode=True)
+
+    assert 'options=["Approve & implement", "Request changes"]' in prompt
+    assert "do not use Block Kit or approval buttons" not in prompt
+
+
 def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     excluded = server.PLAN_MODE_EXCLUDED_TOOLS
     for tool in (
@@ -254,6 +261,8 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     assert messages[0].tool_call_id == "call-1"
     assert "# Plan" in messages[0].content
     assert "add tests" in messages[0].content
+    assert "reasonable engineering judgment" in messages[0].content
+    assert "source of truth" not in messages[0].content
 
 
 async def test_approve_plan_tool_rejects_non_owner_followup(
@@ -338,6 +347,7 @@ async def test_approve_plan_tool_rejects_non_owner(monkeypatch: pytest.MonkeyPat
     "reply",
     [
         "approve",
+        "Approve & implement",
         "Approved!",
         "Looks good to me.",
         "go ahead",

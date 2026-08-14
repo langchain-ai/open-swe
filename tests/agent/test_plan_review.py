@@ -711,9 +711,10 @@ async def test_approve_plan_dispatches_published_markdown(
 
     result = await plan_api.approve_plan("t1", session={"sub": "a", "email": None})
     assert result == {"status": "approved", "run_id": "run-1"}
-    # The (possibly edited) published plan is the source of truth, plus feedback.
     assert "# Edited plan" in dispatched["text"]
     assert "use snake_case" in dispatched["text"]
+    assert "reasonable engineering judgment" in dispatched["text"]
+    assert "exactly as written" not in dispatched["text"]
     assert dispatched["plan_mode"] is False
 
 
