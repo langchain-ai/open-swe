@@ -42,15 +42,45 @@
         } catch (_) {}
       }
 
+      async function sendAction(message, action, button) {
+        button.disabled = true;
+        const response = await fetch("/mock/slack/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action,
+            message_ts: message.ts,
+            thread_ts: message.thread_ts,
+            user: $("user").value,
+          }),
+        });
+        if (!response.ok) button.disabled = false;
+        poll();
+      }
+
       function render(messages) {
         const html = messages
-          .map((m) => {
+          .map((m, index) => {
             const who = m.is_bot ? "open-swe (bot)" : userNames[m.user] || m.user;
             const linked = m.text.replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '<a href="$1">$2</a>');
-            return `<div class="msg ${m.is_bot ? "bot" : ""}" data-bot="${m.is_bot}" data-thread-ts="${m.thread_ts || ""}"><div class="who">${who}</div><div class="text">${linked}</div></div>`;
+            return `<div class="msg ${m.is_bot ? "bot" : ""}" data-bot="${m.is_bot}" data-thread-ts="${m.thread_ts || ""}" data-message-index="${index}"><div class="who">${who}</div><div class="text">${linked}</div><div class="actions"></div></div>`;
           })
           .join("");
         $("thread").innerHTML = html || "<p style='color:#888'>No messages yet.</p>";
+        messages.forEach((message, index) => {
+          const actions = (message.blocks || [])
+            .filter((block) => block.type === "actions")
+            .flatMap((block) => block.elements || []);
+          const container = document.querySelector(`[data-message-index="${index}"] .actions`);
+          for (const action of actions) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = action.text?.text || "Choose";
+            if (action.style === "primary") button.classList.add("primary");
+            button.addEventListener("click", () => sendAction(message, action, button));
+            container.appendChild(button);
+          }
+        });
       }
 
       async function poll() {

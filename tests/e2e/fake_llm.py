@@ -250,7 +250,8 @@ def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
                 "name": "slack_thread_reply",
                 "args": {
                     "message": f"✅ The plan is ready for review: <{url}|open the plan>. "
-                    "Take a look, leave comments, and approve it when you're happy."
+                    "Take a look, leave comments, and choose what to do next.",
+                    "options": ["Approve & implement", "Request changes"],
                 },
                 "id": "call-plan-done",
             }
