@@ -730,6 +730,15 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
     )
 
 
+# Added to an admin thread's tools; see the admin-thread section of the prompt.
+ENVIRONMENT_TOOLS = (
+    list_environments,
+    save_environment,
+    capture_environment_snapshot,
+    delete_environment,
+)
+
+
 def _environment_slug(configurable: Mapping[str, Any] | None) -> str | None:
     """The environment this thread selected, if any."""
     slug = (configurable or {}).get("environment")
@@ -1175,6 +1184,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ),
         )
 
+    admin_environments = _admin_thread(config, profile_login)
+    if admin_environments:
+        logger.info("Admin thread %s: adding environment management tools", thread_id)
     static_tools = [
         http_request,
         fetch_url,
@@ -1203,16 +1215,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,
+        *(ENVIRONMENT_TOOLS if admin_environments else ()),
     ]
-    admin_environments = _admin_thread(config, profile_login)
-    if admin_environments:
-        logger.info("Admin thread %s: adding environment management tools", thread_id)
-        static_tools += [
-            list_environments,
-            save_environment,
-            capture_environment_snapshot,
-            delete_environment,
-        ]
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups = {
         "Corridor": corridor_tools,
