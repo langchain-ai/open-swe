@@ -269,3 +269,28 @@ async def test_general_purpose_subagent_carries_open_swe_shared_base() -> None:
     assert prompt.startswith(OPEN_SWE_SHARED_BASE)
     # GP task-mechanics guidance still trails the shared base.
     assert "calling agent only sees your final" in prompt
+
+
+@pytest.mark.asyncio
+async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
+    captured = await _capture_create_deep_agent_kwargs()
+    parent_tools = captured["tools"]
+    subagents = captured["subagents"]
+    assert isinstance(parent_tools, list)
+    assert isinstance(subagents, list)
+
+    gp = next(s for s in subagents if s["name"] == "general-purpose")
+    assert "cannot access Slack tools" in gp["description"]
+    parent_names = {tool.__name__ for tool in parent_tools}
+    subagent_names = {tool.__name__ for tool in gp["tools"]}
+    slack_names = {
+        "notify_automation_channel",
+        "slack_add_reaction",
+        "slack_read_thread_messages",
+        "slack_start_new_thread",
+        "slack_thread_reply",
+    }
+
+    assert slack_names <= parent_names
+    assert slack_names.isdisjoint(subagent_names)
+    assert subagent_names == parent_names - slack_names
