@@ -87,6 +87,7 @@ from .middleware import (
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
+    WorkingRepoMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
     refresh_github_proxy_before_model,
@@ -1187,6 +1188,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
+                WorkingRepoMiddleware(thread_id=thread_id, backend=backend, thread_client=client),
                 SubdirAgentsReadMiddleware(),
                 ToolRetryMiddleware(
                     max_retries=2,
