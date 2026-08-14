@@ -28,7 +28,7 @@ fi
 
 system_app="/Applications/Open SWE.app"
 user_app="$HOME/Applications/Open SWE.app"
-if [[ -e "$system_app" && -w "$system_app" || ! -e "$system_app" && -w /Applications ]]; then
+if [[ -w /Applications ]]; then
   target="$system_app"
 else
   mkdir -p "$HOME/Applications"
