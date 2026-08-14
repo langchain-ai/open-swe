@@ -35,6 +35,18 @@ The backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` 
 Set `ALLOWED_GITHUB_ORGS` on the backend to prevent GitHub users outside the organization from
 creating dashboard sessions.
 
+## Install on macOS
+
+Install Git and Node.js 22, clone this repository, then run this from its root:
+
+```bash
+make install-desktop
+```
+
+The command fast-forwards to the latest `main`, builds Open SWE Desktop, and installs it in
+`/Applications` (or `~/Applications` when needed). Run it again to update and replace the app; saved
+backend settings, login sessions, and projects are preserved.
+
 ## Local development
 
 Install both packages, run the backend at `http://localhost:2024`, then start Electron:
