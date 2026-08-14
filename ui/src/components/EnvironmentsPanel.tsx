@@ -139,8 +139,8 @@ export function EnvironmentsPanel() {
         </div>
         <p className="text-xs text-muted-foreground">
           Runs boot from the environment named <code>default</code>; any other
-          name is a draft. Build the snapshot from an admin thread: provision its
-          sandbox, then have the agent capture it.
+          name is a draft. Build the snapshot from an admin thread: provision
+          its sandbox, then have the agent capture it.
         </p>
       </section>
 
