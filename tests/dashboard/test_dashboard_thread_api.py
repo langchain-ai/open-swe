@@ -329,8 +329,9 @@ async def test_thread_summary_uses_working_repo_for_display_only() -> None:
 
     summary = await thread_api._thread_summary(_thread_with_metadata(metadata))
 
-    assert summary["repo"] == "checkout"
-    assert summary["repoFullName"] == "observed/checkout"
+    assert summary["repo"] == "default"
+    assert summary["repoFullName"] == "trusted/default"
+    assert summary["workingRepoFullName"] == "observed/checkout"
     assert metadata["repo"] == {"owner": "trusted", "name": "default"}
 
 

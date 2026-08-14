@@ -405,10 +405,8 @@ async def _thread_summary(
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
     working_repo = metadata.get("working_repo_full_name")
-    if isinstance(working_repo, str) and working_repo.count("/") == 1:
-        working_owner, working_name = working_repo.split("/", 1)
-        if working_owner and working_name:
-            name, full_name = working_name, working_repo
+    if not isinstance(working_repo, str) or working_repo.count("/") != 1:
+        working_repo = None
     created_at = metadata.get("created_at_ms")
     updated_at = metadata.get("updated_at_ms")
     title = metadata.get("title") if isinstance(metadata.get("title"), str) else "Untitled agent"
@@ -442,6 +440,7 @@ async def _thread_summary(
         "title": title,
         "repo": name,
         "repoFullName": full_name,
+        "workingRepoFullName": working_repo,
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
