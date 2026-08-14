@@ -50,6 +50,27 @@ git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
 """.strip()
 
+_IFRAME_HTML_PATH = "/workspace/iframe-output.html"
+_IFRAME_DATA_PATH = "/workspace/iframe-data.json"
+_IFRAME_CSS_PATH = "/workspace/iframe-theme.css"
+_IFRAME_HTML = """<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Iframe E2E Preview</title></head>
+<body>
+  <main>
+    <h1>Iframe preview</h1>
+    <p id="output-data">Loading bundled data...</p>
+  </main>
+  <script>
+    const data = JSON.parse(window.__FILES__["data.json"]);
+    document.getElementById("output-data").textContent = data.label;
+  </script>
+</body>
+</html>
+"""
+_IFRAME_DATA = '{"label":"Bundled data loaded"}'
+_IFRAME_CSS = "body { min-height: 420px; margin: 0; color: rebeccapurple; }"
+
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
 
@@ -282,6 +303,43 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
 
 
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    "iframe": (
+        _tool_step(
+            "Acknowledging the iframe preview request.",
+            "slack_thread_reply",
+            {"message": "Preparing the iframe preview now."},
+            "call-iframe-ack",
+        ),
+        _tool_step(
+            "Writing the iframe HTML.",
+            "write_file",
+            {"file_path": _IFRAME_HTML_PATH, "content": _IFRAME_HTML},
+            "call-iframe-html",
+        ),
+        _tool_step(
+            "Writing the iframe data.",
+            "write_file",
+            {"file_path": _IFRAME_DATA_PATH, "content": _IFRAME_DATA},
+            "call-iframe-data",
+        ),
+        _tool_step(
+            "Writing the iframe stylesheet.",
+            "write_file",
+            {"file_path": _IFRAME_CSS_PATH, "content": _IFRAME_CSS},
+            "call-iframe-css",
+        ),
+        _tool_step(
+            "Rendering the iframe preview.",
+            "output_iframe",
+            {
+                "path": _IFRAME_HTML_PATH,
+                "title": "Iframe E2E Preview",
+                "files": {"data.json": _IFRAME_DATA_PATH, "theme.css": _IFRAME_CSS_PATH},
+            },
+            "call-output-iframe",
+        ),
+        StepSpec(content="Rendered the iframe preview."),
+    ),
     "implement": (
         _tool_step(
             "Acknowledging the Slack request before starting work.",
@@ -346,6 +404,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
 }
 
 
+def _is_iframe_request(text: str) -> bool:
+    return "E2E_IFRAME" in text
+
+
 def _is_plan_request(text: str) -> bool:
     return "plan" in text.lower()
 
@@ -366,6 +428,7 @@ def _is_revision(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
     ScriptRule("plan", lambda ctx: _is_revision(ctx.last_text)),
     ScriptRule("plan", lambda ctx: ctx.human_count <= 1 and _is_plan_request(ctx.first_text)),
