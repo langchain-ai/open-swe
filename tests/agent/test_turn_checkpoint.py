@@ -65,6 +65,7 @@ def test_merge_checkpoint_preserves_repository_and_plan_mode() -> None:
             "started_at": "t0",
             "repo_path": "/workspace/repo",
             "plan_mode": True,
+            "plan_ref": "refs/open-swe/turns/msg-1",
         }
     ]
     assert merge_checkpoint(entries, "msg-1", "other", "t1") == entries
@@ -85,6 +86,7 @@ def test_mark_checkpoint_plan_mode_marks_only_the_requested_turn() -> None:
 
     assert "plan_mode" not in marked[0]
     assert marked[1]["plan_mode"] is True
+    assert marked[1]["plan_ref"] == "ref-2"
     assert marked[1]["repo_path"] == "/workspace/repo"
 
 

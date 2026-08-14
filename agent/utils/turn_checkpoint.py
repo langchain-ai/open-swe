@@ -47,6 +47,10 @@ def checkpoint_ref(turn_key: str) -> str:
     return f"refs/open-swe/turns/{_UNSAFE_KEY.sub('-', turn_key)[:100]}"
 
 
+def plan_checkpoint_ref(turn_key: str) -> str:
+    return f"{checkpoint_ref(turn_key)}-plan"
+
+
 def _cd_repo(work_dir: str | None, repo_path: str | None = None) -> str:
     roots = " ".join(
         shlex.quote(root) for root in ([work_dir] if work_dir else []) + ["/workspace"]
@@ -231,6 +235,8 @@ def _checkpoint_entries(existing: Any) -> list[dict[str, Any]]:
         }
         if isinstance(value.get("repo_path"), str) and value["repo_path"]:
             entry["repo_path"] = value["repo_path"]
+        if isinstance(value.get("plan_ref"), str) and value["plan_ref"]:
+            entry["plan_ref"] = value["plan_ref"]
         if value.get("plan_mode") is True:
             entry["plan_mode"] = True
         entries.append(entry)
@@ -255,18 +261,43 @@ def merge_checkpoint(
         entry["repo_path"] = repo_path
     if plan_mode:
         entry["plan_mode"] = True
+        entry["plan_ref"] = ref
     entries.append(entry)
     return entries[-MAX_CHECKPOINTS:]
 
 
-def mark_checkpoint_plan_mode(existing: Any, key: str) -> list[dict[str, Any]]:
+def mark_checkpoint_plan_mode(
+    existing: Any, key: str, plan_ref: str | None = None
+) -> list[dict[str, Any]]:
     """Mark one existing turn checkpoint as read-only planning."""
     entries = _checkpoint_entries(existing)
     for entry in entries:
         if entry["key"] == key:
             entry["plan_mode"] = True
+            entry["plan_ref"] = plan_ref or entry["ref"]
             break
     return entries
+
+
+async def record_plan_checkpoint(
+    sandbox: Any,
+    work_dir: str | None,
+    turn_key: str,
+    *,
+    repo_path: str | None = None,
+) -> str | None:
+    """Snapshot the worktree where a turn enters plan mode."""
+    ref = plan_checkpoint_ref(turn_key)
+    try:
+        response = await _execute(
+            sandbox,
+            _checkpoint_command(work_dir, ref, repo_path),
+            CHECKPOINT_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        logger.debug("plan checkpoint failed for %s", turn_key, exc_info=True)
+        return None
+    return ref if _ok(response) else None
 
 
 async def record_turn_checkpoint(

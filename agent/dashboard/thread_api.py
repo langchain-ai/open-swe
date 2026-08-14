@@ -1962,11 +1962,16 @@ async def get_dashboard_thread_turn_diff(
         return {"status": "missing", "files": [], "truncated": False}
 
     checkpoint = checkpoints[index]
-    if turn_key is not None and checkpoint.get("plan_mode") is True:
+    plan_ref = checkpoint.get("plan_ref")
+    if (
+        turn_key is not None
+        and checkpoint.get("plan_mode") is True
+        and (not isinstance(plan_ref, str) or plan_ref == checkpoint.get("ref"))
+    ):
         return {"status": "ready", "files": [], "truncated": False}
 
-    head = None
-    if turn_key and index + 1 < len(checkpoints):
+    head = plan_ref if turn_key is not None and isinstance(plan_ref, str) else None
+    if head is None and turn_key and index + 1 < len(checkpoints):
         next_checkpoint = checkpoints[index + 1]
         repo_path = checkpoint.get("repo_path")
         next_repo_path = next_checkpoint.get("repo_path")

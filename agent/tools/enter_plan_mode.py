@@ -13,7 +13,8 @@ from langgraph.types import Command
 from langgraph_sdk import get_client
 
 from ..dashboard.plan_store import PLAN_STATUS_PLANNING, set_plan_status
-from ..utils.turn_checkpoint import mark_checkpoint_plan_mode
+from ..utils.sandbox_state import get_sandbox_backend
+from ..utils.turn_checkpoint import mark_checkpoint_plan_mode, record_plan_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,25 @@ async def _mark_turn_checkpoint(thread_id: str, turn_key: str) -> None:
     )
     metadata = metadata if isinstance(metadata, dict) else {}
     existing = metadata.get("turn_checkpoints")
-    updated = mark_checkpoint_plan_mode(existing, turn_key)
+    checkpoint = next(
+        (
+            entry
+            for entry in (existing if isinstance(existing, list) else [])
+            if isinstance(entry, dict) and entry.get("key") == turn_key
+        ),
+        None,
+    )
+    plan_ref = None
+    if checkpoint:
+        backend = await get_sandbox_backend(thread_id)
+        repo_path = checkpoint.get("repo_path")
+        plan_ref = await record_plan_checkpoint(
+            backend,
+            None,
+            turn_key,
+            repo_path=repo_path if isinstance(repo_path, str) else None,
+        )
+    updated = mark_checkpoint_plan_mode(existing, turn_key, plan_ref)
     if updated != existing:
         await client.threads.update(
             thread_id=thread_id,
