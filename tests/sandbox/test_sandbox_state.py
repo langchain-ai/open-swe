@@ -204,7 +204,7 @@ async def test_sandbox_proxy_refreshes_initialized_backend_when_started() -> Non
         return refreshed
 
     proxy = SandboxBackendProxy(
-        _FakeSandboxBackend(),
+        cast(SandboxBackendProtocol, _FakeSandboxBackend()),
         thread_id="thread-1",
         reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
     )
