@@ -1162,8 +1162,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
-        *(slack_tools if _slack_tools_enabled(configurable) else []),
+        slack_add_reaction,
+        slack_read_thread_messages,
+        slack_start_new_thread,
+        slack_thread_reply,
     ]
+    reserved_tool_names = {tool.__name__ for tool in static_tools}
+    if not _slack_tools_enabled(configurable):
+        static_tools = [tool for tool in static_tools if tool not in slack_tools]
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups = {
         "Corridor": corridor_tools,
@@ -1174,10 +1180,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if any(integration_tool_groups.values()):
         dynamic_tool_middleware = DynamicToolMiddleware(
             integration_tool_groups,
-            reserved_names={
-                *DEEP_AGENT_TOOL_NAMES,
-                *(tool.__name__ for tool in [*static_tools, *slack_tools]),
-            },
+            reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
         )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
