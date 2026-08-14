@@ -141,6 +141,12 @@ test("only keeps GitHub login pages in the app window", () => {
   assert.equal(isGithubOAuthUrl("https://github.com/login?return_to=%2Flogin%2Foauth"), true)
   assert.equal(isGithubOAuthUrl("https://github.com/session"), true)
   assert.equal(isGithubOAuthUrl("https://github.com/sessions/two-factor"), true)
+  assert.equal(
+    isGithubOAuthUrl(
+      "https://github.com/orgs/langchain-ai/saml/initiate?return_to=%2Flogin%2Foauth"
+    ),
+    true
+  )
   assert.equal(isGithubOAuthUrl("https://github.com/langchain-ai/open-swe"), false)
   assert.equal(isGithubOAuthUrl("https://evil.example/login/oauth/authorize"), false)
 })

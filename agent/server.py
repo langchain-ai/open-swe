@@ -68,6 +68,7 @@ from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model_pair,
     get_team_default_repo,
+    get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
 from .dashboard.user_mappings import email_for_login
@@ -110,6 +111,7 @@ from .runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
 )
 from .runtime.execution import graph_loaded_for_execution
+from .thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from .tools import (
     approve_plan,
     capture_environment_snapshot,
@@ -789,6 +791,14 @@ async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
     )
 
 
+async def _cached_thread_title_model() -> tuple[str, str]:
+    return await ttl_cache.cached(
+        "team:thread-title-model",
+        60,
+        get_team_default_thread_title_model,
+    )
+
+
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
         "team:gateway-enabled",
@@ -848,6 +858,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         profile_login: str | None,
         model_id: str,
         effort: str | None,
+        title_model: BaseChatModel,
         source: str,
         user_email: str,
         linear_project_id: str,
@@ -863,6 +874,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._profile_login = profile_login
         self._model_id = model_id
         self._effort = effort
+        self._title_model = title_model
         self._source = source
         self._user_email = user_email
         self._linear_project_id = linear_project_id
@@ -916,6 +928,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return merge_checkpoint(existing, turn_key, ref, datetime.now(UTC).isoformat())
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        schedule_thread_title_generation(
+            thread_id=self._thread_id,
+            messages=state.get("messages") or [],
+            model=self._title_model,
+            client=client,
+        )
         github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
@@ -1031,8 +1049,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     profile_login = resolve_github_login(as_json_object(config))
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
-    team_defaults, use_gateway, profile, fable_enabled = await asyncio.gather(
+    team_defaults, title_defaults, use_gateway, profile, fable_enabled = await asyncio.gather(
         _cached_team_default_model_pair("agent"),
+        _cached_thread_title_model(),
         _cached_gateway_enabled(),
         _cached_profile(profile_login),
         _cached_fable_enabled(),
@@ -1043,6 +1062,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
+    title_model_id, title_effort = title_defaults
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
 
     if profile_login and profile:
@@ -1103,6 +1123,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     subagent_model_id, subagent_effort = gate_fable_model(
         subagent_model_id, subagent_effort, fable_enabled=fable_enabled
     )
+    title_model_id, title_effort = gate_fable_model(
+        title_model_id, title_effort, fable_enabled=fable_enabled
+    )
 
     model_kwargs = provider_model_kwargs(
         model_id,
@@ -1113,6 +1136,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagent_model_id,
         subagent_effort,
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
+    )
+    title_model_kwargs = provider_model_kwargs(
+        title_model_id,
+        title_effort,
+        max_tokens=TITLE_GENERATION_MAX_TOKENS,
     )
 
     fallback_model_id = os.environ.get("LLM_FALLBACK_MODEL_ID") or fallback_model_id_for(model_id)
@@ -1249,6 +1277,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         use_gateway=use_gateway,
         **subagent_model_kwargs,
     )
+    title_model = _make_model_or_defer(
+        title_model_id,
+        use_gateway=use_gateway,
+        **title_model_kwargs,
+    )
     return create_deep_agent(
         model=main_model,
         system_prompt="",
@@ -1268,6 +1301,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     profile_login=profile_login,
                     model_id=model_id,
                     effort=profile_effort,
+                    title_model=title_model,
                     source=source,
                     user_email=user_email,
                     linear_project_id=linear_project_id,
