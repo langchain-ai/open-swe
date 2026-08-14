@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from langgraph.graph.state import RunnableConfig
 
 from agent import server
 from agent.prompt import construct_system_prompt
@@ -11,8 +13,8 @@ from agent.tools import environments as env_tools
 _READY = {"slug": "base", "name": "Base", "snapshot_status": "ready", "snapshot_id": "env-snap"}
 
 
-def _config(**configurable: object) -> dict[str, object]:
-    return {"configurable": configurable}
+def _config(**configurable: object) -> RunnableConfig:
+    return cast(RunnableConfig, {"configurable": configurable})
 
 
 # --- snapshot precedence ---

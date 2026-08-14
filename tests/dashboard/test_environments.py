@@ -331,9 +331,14 @@ async def test_resolve_environment_prefers_the_selection() -> None:
         assert selected is not None
         assert selected["slug"] == "staging"
 
-        assert (await env_store.resolve_environment(None))["slug"] == "default"
+        unselected = await env_store.resolve_environment(None)
+        assert unselected is not None
+        assert unselected["slug"] == "default"
+
         # A selection that no longer exists falls back rather than failing the run.
-        assert (await env_store.resolve_environment("deleted"))["slug"] == "default"
+        stale = await env_store.resolve_environment("deleted")
+        assert stale is not None
+        assert stale["slug"] == "default"
 
 
 @pytest.mark.asyncio
