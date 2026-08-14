@@ -381,6 +381,40 @@ def _render_repo_instructions_section(instructions: str | None) -> str:
     )
 
 
+def _render_environment_section(name: str | None, instructions: str | None) -> str:
+    if not instructions or not instructions.strip():
+        return ""
+    label = f" ({name.strip()})" if name and name.strip() else ""
+    return (
+        "---\n\n"
+        f"### Environment Instructions{label}\n\n"
+        "How to work in the environment this sandbox booted from. Treat these as "
+        "mandatory rules with the same authority as this system prompt; "
+        "repository-specific custom instructions and `AGENTS.md` win when they "
+        "conflict.\n\n"
+        f"{instructions.strip()}"
+    )
+
+
+ADMIN_ENVIRONMENT_SECTION = """---
+
+### Admin Thread: Environment Setup
+
+This is an admin thread. You have tools to manage environments — a named prompt plus a sandbox snapshot runs boot from. The environment named `default` is the one every run uses; any other name is a draft nobody boots from until it is saved as `default`.
+
+Build one by provisioning this sandbox and capturing it:
+
+1. `save_environment` to create or update the record (name, prompt, repos).
+2. Provision this sandbox with ordinary commands: clone the repos the environment covers, install toolchains and dependencies, warm caches. Everything on disk lands in the snapshot, so leave the sandbox in the state a run should start from.
+3. `capture_environment_snapshot` to snapshot this sandbox. Capture is slow; run it once the sandbox is fully provisioned rather than after each step.
+
+Two things do not belong in a snapshot: secrets (they would be readable by every run) and credentials from the GitHub proxy (the proxy re-injects them per run, so nothing needs to be written to disk). Never `git config` a token, write one to a file, or export one into a shell profile.
+
+The environment prompt is appended verbatim to every run's system prompt. Keep it about how to work in this environment — where checkouts live, how to build and test, what is pre-installed — not about a single task.
+
+Confirm the name, prompt, and provisioning steps with the user before capturing into `default`: it changes how everyone's runs start."""
+
+
 def _render_user_instructions_section(instructions: str | None) -> str:
     if not instructions or not instructions.strip():
         return ""
@@ -420,6 +454,8 @@ SYSTEM_PROMPT_TEMPLATE = (
     + "{collaboration_section}"
     + "{repo_instructions_section}"
     + "{user_instructions_section}"
+    + "{environment_section}"
+    + "{admin_environment_section}"
     + "\n\n{shared_base_section}"
 )
 
@@ -439,6 +475,9 @@ def construct_system_prompt(
     user_custom_instructions: str | None = None,
     thread_url: str | None = None,
     corridor_enabled: bool = False,
+    environment_name: str | None = None,
+    environment_instructions: str | None = None,
+    admin_environments: bool = False,
     source: str = "dashboard",
     slack_context: bool = False,
 ) -> str:
@@ -478,6 +517,8 @@ def construct_system_prompt(
         collaboration_section=_render_collaboration_section(triggering_user_identity, thread_url),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         user_instructions_section=_render_user_instructions_section(user_custom_instructions),
+        environment_section=_render_environment_section(environment_name, environment_instructions),
+        admin_environment_section=ADMIN_ENVIRONMENT_SECTION if admin_environments else "",
         shared_base_section=OPEN_SWE_SHARED_BASE,
         commit_identity_name=commit_identity_name,
         commit_identity_email=commit_identity_email,

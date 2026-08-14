@@ -23,6 +23,7 @@ import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
 import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
 import { Route as AgentsThreadsRouteImport } from './routes/agents/threads'
+import { Route as AgentsEnvironmentsRouteImport } from './routes/agents_.environments'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
 import { Route as AgentsSnapshotsRouteImport } from './routes/agents_.snapshots'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
@@ -106,6 +107,11 @@ const AgentsThreadsRoute = AgentsThreadsRouteImport.update({
   path: '/threads',
   getParentRoute: () => AgentsRoute,
 } as any)
+const AgentsEnvironmentsRoute = AgentsEnvironmentsRouteImport.update({
+  id: '/agents_/environments',
+  path: '/agents/environments',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgentsInstructionsRoute = AgentsInstructionsRouteImport.update({
   id: '/agents_/instructions',
   path: '/agents/instructions',
@@ -183,6 +189,7 @@ export interface FileRoutesByFullPath {
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/threads': typeof AgentsThreadsRoute
+  '/agents/environments': typeof AgentsEnvironmentsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/snapshots': typeof AgentsSnapshotsRoute
   '/review/styles': typeof ReviewStylesRoute
@@ -210,6 +217,7 @@ export interface FileRoutesByTo {
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/threads': typeof AgentsThreadsRoute
+  '/agents/environments': typeof AgentsEnvironmentsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/snapshots': typeof AgentsSnapshotsRoute
   '/review/styles': typeof ReviewStylesRoute
@@ -239,6 +247,7 @@ export interface FileRoutesById {
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/threads': typeof AgentsThreadsRoute
+  '/agents_/environments': typeof AgentsEnvironmentsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/snapshots': typeof AgentsSnapshotsRoute
   '/review_/styles': typeof ReviewStylesRoute
@@ -269,6 +278,7 @@ export interface FileRouteTypes {
     | '/agents/$threadId'
     | '/agents/skills'
     | '/agents/threads'
+    | '/agents/environments'
     | '/agents/instructions'
     | '/agents/snapshots'
     | '/review/styles'
@@ -296,6 +306,7 @@ export interface FileRouteTypes {
     | '/agents/$threadId'
     | '/agents/skills'
     | '/agents/threads'
+    | '/agents/environments'
     | '/agents/instructions'
     | '/agents/snapshots'
     | '/review/styles'
@@ -324,6 +335,7 @@ export interface FileRouteTypes {
     | '/agents/$threadId'
     | '/agents/skills'
     | '/agents/threads'
+    | '/agents_/environments'
     | '/agents_/instructions'
     | '/agents_/snapshots'
     | '/review_/styles'
@@ -350,6 +362,7 @@ export interface RootRouteChildren {
   ReviewRoute: typeof ReviewRoute
   UsageRoute: typeof UsageRoute
   AdminEvalsRoute: typeof AdminEvalsRoute
+  AgentsEnvironmentsRoute: typeof AgentsEnvironmentsRoute
   AgentsInstructionsRoute: typeof AgentsInstructionsRoute
   AgentsSnapshotsRoute: typeof AgentsSnapshotsRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
@@ -456,6 +469,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/agents/threads'
       preLoaderRoute: typeof AgentsThreadsRouteImport
       parentRoute: typeof AgentsRoute
+    }
+    '/agents_/environments': {
+      id: '/agents_/environments'
+      path: '/agents/environments'
+      fullPath: '/agents/environments'
+      preLoaderRoute: typeof AgentsEnvironmentsRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/agents_/instructions': {
       id: '/agents_/instructions'
@@ -586,6 +606,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReviewRoute: ReviewRoute,
   UsageRoute: UsageRoute,
   AdminEvalsRoute: AdminEvalsRoute,
+  AgentsEnvironmentsRoute: AgentsEnvironmentsRoute,
   AgentsInstructionsRoute: AgentsInstructionsRoute,
   AgentsSnapshotsRoute: AgentsSnapshotsRoute,
   ReviewStylesRoute: ReviewStylesRoute,
