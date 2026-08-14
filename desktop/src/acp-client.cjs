@@ -5,6 +5,7 @@ const readline = require("node:readline")
 const { randomUUID } = require("node:crypto")
 
 const ACP_PROTOCOL_VERSION = 1
+const DELETE_TIMEOUT_MS = 15_000
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -183,14 +184,26 @@ class NdJsonRpcClient {
     })
   }
 
-  request(method, params) {
+  request(method, params, timeoutMs) {
     if (this.closed)
       return Promise.reject(new Error("Deep Agents Code is not running"))
     const id = this.nextId++
-    this.write({ jsonrpc: "2.0", id, method, params })
-    return new Promise((resolve, reject) =>
-      this.pending.set(id, { method, resolve, reject })
-    )
+    return new Promise((resolve, reject) => {
+      const timer = timeoutMs
+        ? setTimeout(() => {
+            if (!this.pending.delete(id)) return
+            reject(new Error(`[acp:${method}] Request timed out`))
+          }, timeoutMs)
+        : null
+      this.pending.set(id, { method, resolve, reject, timer })
+      try {
+        this.write({ jsonrpc: "2.0", id, method, params })
+      } catch (error) {
+        this.pending.delete(id)
+        clearTimeout(timer)
+        reject(error)
+      }
+    })
   }
 
   notify(method, params) {
@@ -224,6 +237,7 @@ class NdJsonRpcClient {
       const pending = this.pending.get(message.id)
       if (!pending) return
       this.pending.delete(message.id)
+      clearTimeout(pending.timer)
       if ("error" in message) {
         const rpcError = isRecord(message.error) ? message.error : {}
         const detail =
@@ -270,7 +284,10 @@ class NdJsonRpcClient {
   rejectPending(error) {
     const pending = [...this.pending.values()]
     this.pending.clear()
-    for (const request of pending) request.reject(error)
+    for (const request of pending) {
+      clearTimeout(request.timer)
+      request.reject(error)
+    }
   }
 
   close() {
@@ -418,7 +435,11 @@ class AcpSession {
 
   async delete() {
     if (!this.deleteSupported || !this.acpSessionId) return false
-    await this.rpc.request("session/delete", { sessionId: this.acpSessionId })
+    await this.rpc.request(
+      "session/delete",
+      { sessionId: this.acpSessionId },
+      DELETE_TIMEOUT_MS
+    )
     return true
   }
 
