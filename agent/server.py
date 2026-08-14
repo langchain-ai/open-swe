@@ -1158,6 +1158,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
     ]
 
+    admin_environments = _admin_thread(config, profile_login)
+    if admin_environments:
+        logger.info("Admin thread %s: adding environment management tools", thread_id)
+
     observability_authorized = await _observability_authorized(config, profile_login)
     if observability_authorized:
         observability_tools = await _load_observability_tools(True, profile_login)
@@ -1184,9 +1188,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ),
         )
 
-    admin_environments = _admin_thread(config, profile_login)
-    if admin_environments:
-        logger.info("Admin thread %s: adding environment management tools", thread_id)
     static_tools = [
         http_request,
         fetch_url,
