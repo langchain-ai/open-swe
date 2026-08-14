@@ -23,7 +23,6 @@ from agent.integrations.langsmith import (
     _install_create_extra_fields,
     _is_sandbox_name_taken_error,
     _sandbox_name_for_thread,
-    _wait_for_reconnected_sandbox,
 )
 
 
@@ -185,17 +184,6 @@ class _FakeStatusSandbox:
         self.status = status
 
 
-class _FakeReconnectClient:
-    def __init__(self, statuses: list[str]) -> None:
-        self.statuses = statuses
-        self.calls = 0
-
-    async def get_sandbox(self, *, name: str) -> _FakeStatusSandbox:
-        self.calls += 1
-        status = self.statuses[min(self.calls - 1, len(self.statuses) - 1)]
-        return _FakeStatusSandbox(status)
-
-
 @pytest.mark.asyncio
 async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -> None:  # noqa: ANN001
     client = _FakeSandboxClient(failures=2)
@@ -216,24 +204,6 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
     assert result == {"sandbox": "snap-1"}
     assert client.calls == 3
     assert client.last_kwargs["name"] == "openswe-abc"
-
-
-@pytest.mark.asyncio
-async def test_wait_for_reconnected_sandbox_polls_until_ready(monkeypatch) -> None:  # noqa: ANN001
-    client = _FakeReconnectClient(["starting", "starting", "running"])
-    sleep = AsyncMock()
-    monkeypatch.setattr("agent.integrations.langsmith.asyncio.sleep", sleep)
-
-    sandbox = await _wait_for_reconnected_sandbox(
-        cast(AsyncSandboxClient, client),
-        "sandbox-1",
-        timeout_seconds=30,
-        poll_seconds=2,
-    )
-
-    assert sandbox.status == "running"
-    assert client.calls == 3
-    assert sleep.await_count == 2
 
 
 def test_extra_fields_unset_is_empty() -> None:
@@ -322,16 +292,17 @@ class _NameTakenClient:
 
 
 @pytest.mark.asyncio
-async def test_name_collision_adopts_the_orphaned_sandbox() -> None:
+@pytest.mark.parametrize("status", ["running", "creating", "stopped"])
+async def test_name_collision_adopts_the_orphaned_sandbox(status: str) -> None:
     from agent.integrations.langsmith import _reuse_existing_sandbox
 
-    client = _NameTakenClient()
+    client = _NameTakenClient(status=status)
     try:
         await client.create_sandbox(name="openswe-abc", snapshot_id="snap-1")
     except RuntimeError as exc:
         assert _is_sandbox_name_taken_error(exc)
         adopted = await _reuse_existing_sandbox(cast(AsyncSandboxClient, client), "openswe-abc")
-        assert adopted.status == "running"
+        assert adopted.status == status
         assert client.requested == ["openswe-abc"]
     else:  # pragma: no cover
         pytest.fail("expected a name collision")
