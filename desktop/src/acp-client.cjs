@@ -39,6 +39,47 @@ function dcodeTarget({
   return { command: "dcode", args }
 }
 
+function deleteDcodeSession({ target, cwd, env, sessionId }) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(target.command, ["threads", "delete", sessionId], {
+      cwd,
+      env: { ...env, PWD: cwd, PYTHONUNBUFFERED: "1" },
+      stdio: ["ignore", "ignore", "pipe"],
+    })
+    let stderr = ""
+    let settled = false
+    const finish = (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL")
+      } catch {}
+      finish(new Error("Deep Agents Code session deletion timed out"))
+    }, 15_000)
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk.toString("utf8")}`.slice(-8_000)
+    })
+    child.once("error", finish)
+    child.once("exit", (code, signal) => {
+      if (code === 0) finish()
+      else {
+        const reason = signal ? `signal ${signal}` : `exit code ${code}`
+        const detail = stderr.trim()
+        finish(
+          new Error(
+            `Deep Agents Code could not delete the session (${reason})${detail ? `: ${detail}` : ""}`
+          )
+        )
+      }
+    })
+  })
+}
+
 function sessionTitle(text) {
   const value = text.trim().replace(/\s+/g, " ")
   return value.slice(0, 80) || "New local agent"
@@ -254,11 +295,15 @@ class AcpSession {
   }) {
     this.id = restored?.id || randomUUID()
     this.cwd = cwd
+    this.target = target
+    this.env = env
     this.title = restored?.title || "New local agent"
     this.createdAt = restored?.createdAt || Date.now()
     this.updatedAt = restored?.updatedAt || this.createdAt
     this.acpSessionId = restored?.acpSessionId
     this.status = "starting"
+    this.closed = false
+    this.deleteSupported = false
     this.events = []
     this.onEvent = onEvent
     this.onChange = onChange
@@ -315,6 +360,11 @@ class AcpSession {
         version: "0.1.0",
       },
     })
+    const sessionCapabilities = isRecord(initialized?.agentCapabilities)
+      ? initialized.agentCapabilities.sessionCapabilities
+      : null
+    this.deleteSupported =
+      isRecord(sessionCapabilities) && isRecord(sessionCapabilities.delete)
     if (this.acpSessionId) {
       if (
         !isRecord(initialized) ||
@@ -356,6 +406,7 @@ class AcpSession {
       this.status = "idle"
       this.emit({ type: "run-end" })
     } catch (error) {
+      if (this.closed) throw error
       if (this.status !== "error") {
         this.status = "idle"
         this.emit({ type: "error", message: String(error?.message || error) })
@@ -363,6 +414,12 @@ class AcpSession {
       }
       throw error
     }
+  }
+
+  async delete() {
+    if (!this.deleteSupported || !this.acpSessionId) return false
+    await this.rpc.request("session/delete", { sessionId: this.acpSessionId })
+    return true
   }
 
   cancel() {
@@ -471,6 +528,8 @@ class AcpSession {
   }
 
   close() {
+    this.closed = true
+    this.onChange = null
     this.rpc.close()
   }
 }
@@ -478,6 +537,7 @@ class AcpSession {
 module.exports = {
   AcpSession,
   dcodeTarget,
+  deleteDcodeSession,
   promptBlocks,
   sessionTitle,
 }

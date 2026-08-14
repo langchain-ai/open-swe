@@ -22,6 +22,7 @@ function validRecord(value) {
   }
   if (value.modelId !== undefined && !validString(value.modelId)) return false
   if (value.effort !== undefined && !validString(value.effort)) return false
+  if (value.dcodeCommand !== undefined && !validString(value.dcodeCommand)) return false
   return (
     value.checkpoint === undefined ||
     (value.checkpoint &&

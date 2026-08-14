@@ -888,6 +888,25 @@ function createTerminalManager(options) {
     emit(session, "closed")
   }
 
+  async function deleteSession(localSessionId) {
+    cleanId(localSessionId, "local session ID")
+    return locked(localSessionId, () => {
+      for (const session of [...sessions.values()]) {
+        if (session.localSessionId === localSessionId) {
+          closeOne(localSessionId, session.terminalId, true)
+        }
+      }
+      const prefix = `terminal_${safePart(localSessionId)}_`
+      try {
+        for (const name of fileSystem.readdirSync(logsDir)) {
+          if (name.startsWith(prefix) && name.endsWith(".log")) {
+            fileSystem.rmSync(path.join(logsDir, name), { force: true })
+          }
+        }
+      } catch {}
+    })
+  }
+
   function list(localSessionId) {
     cleanId(localSessionId, "local session ID")
     if (!getAcpSession(localSessionId)) throw new Error("Local Deep Agents Code session not found")
@@ -938,6 +957,7 @@ function createTerminalManager(options) {
     attach,
     clear,
     close,
+    deleteSession,
     list,
     open,
     resize,
@@ -1024,10 +1044,15 @@ function closeAllTerminals() {
   return configuredManager?.shutdown() || Promise.resolve()
 }
 
+function deleteSessionTerminals(localSessionId) {
+  return configuredManager?.deleteSession(localSessionId) || Promise.resolve()
+}
+
 module.exports = {
   capHistory,
   closeAllTerminals,
   configureTerminalIpc,
+  deleteSessionTerminals,
   createTerminalManager,
   ensurePtySpawnHelperExecutable,
   getProjectShellEnv,

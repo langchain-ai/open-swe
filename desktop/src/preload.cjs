@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   startAcpSession: (input) => ipcRenderer.invoke("desktop:acp-start", input),
   promptAcpSession: (input) => ipcRenderer.invoke("desktop:acp-prompt", input),
   cancelAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-cancel", sessionId),
+  deleteAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-delete", sessionId),
   getAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-session", sessionId),
   listAcpSessions: () => ipcRenderer.invoke("desktop:acp-sessions"),
   getAcpDiff: (sessionId) => ipcRenderer.invoke("desktop:acp-diff", sessionId),

@@ -12,7 +12,11 @@ const {
   session,
   shell,
 } = require("electron");
-const { AcpSession, dcodeTarget } = require("./acp-client.cjs");
+const {
+  AcpSession,
+  dcodeTarget,
+  deleteDcodeSession,
+} = require("./acp-client.cjs");
 const {
   readAcpSessions,
   writeAcpSessions,
@@ -28,6 +32,7 @@ const {
 const {
   closeAllTerminals,
   configureTerminalIpc,
+  deleteSessionTerminals,
   getProjectShellEnv,
 } = require("./terminal-manager.cjs");
 const {
@@ -85,6 +90,7 @@ let authWindow = null;
 let quitting = false;
 const acpSessions = new Map();
 const acpRestores = new Map();
+const deletingAcpSessions = new Set();
 const persistedAcpSessions = new Map();
 // sessionId -> { repo, ref }: the worktree snapshot a local session started from, so
 // the diff panel can show what the agent changed rather than the repo's prior state.
@@ -141,6 +147,7 @@ function sessionRecord(localSession) {
     title: localSession.title,
     createdAt: localSession.createdAt,
     updatedAt: localSession.updatedAt,
+    dcodeCommand: localSession.target.command,
     ...(previous.modelId ? { modelId: previous.modelId } : {}),
     ...(previous.effort ? { effort: previous.effort } : {}),
     ...(acpCheckpoints.get(localSession.id)
@@ -150,7 +157,11 @@ function sessionRecord(localSession) {
 }
 
 function persistAcpSession(localSession) {
-  if (!localSession.acpSessionId) return;
+  if (
+    !localSession.acpSessionId ||
+    deletingAcpSessions.has(localSession.id)
+  )
+    return;
   persistedAcpSessions.set(localSession.id, sessionRecord(localSession));
   writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
 }
@@ -244,6 +255,7 @@ async function createAcpSession({ cwd, modelId, effort, restored }) {
 }
 
 async function restoreAcpSession(sessionId) {
+  if (deletingAcpSessions.has(sessionId)) return null;
   if (acpSessions.has(sessionId)) return acpSessions.get(sessionId);
   if (acpRestores.has(sessionId)) return acpRestores.get(sessionId);
   const stored = persistedAcpSessions.get(sessionId);
@@ -280,6 +292,56 @@ async function restoreAcpSession(sessionId) {
     return await restore;
   } finally {
     acpRestores.delete(sessionId);
+  }
+}
+
+async function deleteAcpSession(sessionId) {
+  if (typeof sessionId !== "string") return false;
+  const stored = persistedAcpSessions.get(sessionId);
+  if (!stored || deletingAcpSessions.has(sessionId)) return false;
+
+  deletingAcpSessions.add(sessionId);
+  try {
+    await acpRestores.get(sessionId)?.catch(() => null);
+    const localSession = acpSessions.get(sessionId);
+    localSession?.cancel();
+
+    let deletedThroughAcp = false;
+    if (localSession) {
+      try {
+        deletedThroughAcp = await localSession.delete();
+      } catch {}
+      localSession.close();
+      acpSessions.delete(sessionId);
+    }
+
+    if (!deletedThroughAcp) {
+      const env = localSession?.env || process.env;
+      const target =
+        localSession?.target ||
+        (stored.dcodeCommand
+          ? { command: stored.dcodeCommand, args: [] }
+          : dcodeTarget({ env }));
+      await deleteDcodeSession({
+        target,
+        cwd: stored.cwd,
+        env,
+        sessionId: stored.acpSessionId,
+      });
+    }
+
+    await deleteSessionTerminals(sessionId);
+    const checkpoint = acpCheckpoints.get(sessionId) || stored.checkpoint;
+    if (checkpoint?.ref === checkpointRef(sessionId)) {
+      deleteRefs(checkpoint.repo, [checkpoint.ref]);
+    }
+    acpSessions.delete(sessionId);
+    acpCheckpoints.delete(sessionId);
+    persistedAcpSessions.delete(sessionId);
+    writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
+    return true;
+  } finally {
+    deletingAcpSessions.delete(sessionId);
   }
 }
 
@@ -366,14 +428,15 @@ function configureDesktopIpc() {
       typeof input.modelId === "string" ? input.modelId : undefined;
     const effort = typeof input.effort === "string" ? input.effort : undefined;
     const localSession = await createAcpSession({ cwd, modelId, effort });
-    persistedAcpSessions.set(localSession.id, {
-      ...sessionRecord(localSession),
-      ...(modelId ? { modelId } : {}),
-      ...(effort ? { effort } : {}),
-    });
     acpSessions.set(localSession.id, localSession);
     try {
       await localSession.initialize();
+      persistedAcpSessions.set(localSession.id, {
+        ...sessionRecord(localSession),
+        ...(modelId ? { modelId } : {}),
+        ...(effort ? { effort } : {}),
+      });
+      writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
     } catch (error) {
       acpSessions.delete(localSession.id);
       persistedAcpSessions.delete(localSession.id);
@@ -400,6 +463,11 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:acp-cancel", (event, sessionId) => {
     requireTrustedDesktopIpc(event);
     acpSessions.get(sessionId)?.cancel();
+  });
+
+  ipcMain.handle("desktop:acp-delete", async (event, sessionId) => {
+    requireTrustedDesktopIpc(event);
+    return deleteAcpSession(sessionId);
   });
 
   ipcMain.handle("desktop:acp-session", async (event, sessionId) => {
