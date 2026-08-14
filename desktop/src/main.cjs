@@ -203,6 +203,20 @@ function localSessionContext(localSessionId) {
   return acpSessions.get(localSessionId) || acpDrafts.get(localSessionId);
 }
 
+async function deleteAcpDrafts(ownerId, sessionId) {
+  for (const draft of acpDrafts.values()) {
+    if (draft.ownerId !== ownerId || (sessionId && draft.id !== sessionId)) {
+      continue;
+    }
+    if (draft.starting) {
+      draft.deleteRequested = true;
+      continue;
+    }
+    acpDrafts.delete(draft.id);
+    await deleteSessionTerminals(draft.id);
+  }
+}
+
 function resolveAcpProjectPath(localSessionId, value) {
   const localSession = localSessionContext(localSessionId);
   if (!localSession || typeof value !== "string" || value.length === 0) {
@@ -420,6 +434,7 @@ function configureDesktopIpc() {
     const draft = {
       id: randomUUID(),
       cwd,
+      ownerId: event.sender.id,
       starting: false,
       deleteRequested: false,
     };
@@ -431,13 +446,8 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     const draft =
       typeof sessionId === "string" ? acpDrafts.get(sessionId) : null;
-    if (!draft) return false;
-    if (draft.starting) {
-      draft.deleteRequested = true;
-      return true;
-    }
-    acpDrafts.delete(sessionId);
-    await deleteSessionTerminals(sessionId);
+    if (!draft || draft.ownerId !== event.sender.id) return false;
+    await deleteAcpDrafts(event.sender.id, sessionId);
     return true;
   });
 
@@ -466,7 +476,13 @@ function configureDesktopIpc() {
         ? input.draftSessionId
         : undefined;
     const draft = draftSessionId ? acpDrafts.get(draftSessionId) : null;
-    if (draftSessionId && (!draft || draft.cwd !== cwd || draft.starting)) {
+    if (
+      draftSessionId &&
+      (!draft ||
+        draft.ownerId !== event.sender.id ||
+        draft.cwd !== cwd ||
+        draft.starting)
+    ) {
       throw new Error("Local agent draft is no longer available");
     }
     if (draft) draft.starting = true;
@@ -1009,6 +1025,11 @@ function createWindow() {
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
   );
+  const ownerId = window.webContents.id;
+  const deleteDrafts = () => void deleteAcpDrafts(ownerId);
+  window.webContents.on("did-start-navigation", deleteDrafts);
+  window.webContents.on("render-process-gone", deleteDrafts);
+  window.webContents.on("destroyed", deleteDrafts);
 
   mainWindow = window;
   void loadApp(window);
