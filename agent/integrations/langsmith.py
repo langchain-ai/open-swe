@@ -271,6 +271,37 @@ def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
     }
 
 
+def _is_sandbox_name_taken_error(exc: BaseException) -> bool:
+    return "already exists" in str(exc).lower()
+
+
+async def _reuse_existing_sandbox(client: AsyncSandboxClient, sandbox_id: str) -> Any:
+    try:
+        sandbox = await client.get_sandbox(name=sandbox_id)
+    except Exception as e:
+        msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
+        raise RuntimeError(msg) from e
+    status = _status_text(sandbox)
+    if status and status not in SANDBOX_READY_STATUSES:
+        if status in SANDBOX_RECONNECT_STARTABLE_STATUSES:
+            try:
+                logger.info(
+                    "Starting LangSmith sandbox %s before reconnect (status=%s)",
+                    sandbox_id,
+                    status,
+                )
+                await client.start_sandbox(sandbox_id)
+                sandbox = await _wait_for_reconnected_sandbox(client, sandbox_id)
+                status = _status_text(sandbox)
+            except Exception as e:
+                msg = f"Failed to start existing sandbox '{sandbox_id}' ({status})"
+                raise RuntimeError(msg) from e
+        if status not in SANDBOX_READY_STATUSES:
+            msg = f"Existing sandbox '{sandbox_id}' is {status or 'unknown'}, not reusable"
+            raise RuntimeError(msg)
+    return sandbox
+
+
 async def _wait_for_reconnected_sandbox(
     client: AsyncSandboxClient,
     sandbox_id: str,
@@ -648,29 +679,7 @@ class LangSmithProvider(SandboxProvider):
             api_key=self._api_key, api_endpoint=self._api_endpoint
         ) as client:
             if sandbox_id:
-                try:
-                    sandbox = await client.get_sandbox(name=sandbox_id)
-                except Exception as e:
-                    msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
-                    raise RuntimeError(msg) from e
-                status = _status_text(sandbox)
-                if status and status not in SANDBOX_READY_STATUSES:
-                    if status in SANDBOX_RECONNECT_STARTABLE_STATUSES:
-                        try:
-                            logger.info(
-                                "Starting LangSmith sandbox %s before reconnect (status=%s)",
-                                sandbox_id,
-                                status,
-                            )
-                            await client.start_sandbox(sandbox_id)
-                            sandbox = await _wait_for_reconnected_sandbox(client, sandbox_id)
-                            status = _status_text(sandbox)
-                        except Exception as e:
-                            msg = f"Failed to start existing sandbox '{sandbox_id}' ({status})"
-                            raise RuntimeError(msg) from e
-                    if status not in SANDBOX_READY_STATUSES:
-                        msg = f"Existing sandbox '{sandbox_id}' is {status or 'unknown'}, not reusable"
-                        raise RuntimeError(msg)
+                sandbox = await _reuse_existing_sandbox(client, sandbox_id)
                 return TimeoutLangSmithSandbox(sandbox.to_sync())
 
             if not snapshot_id:
@@ -695,7 +704,13 @@ class LangSmithProvider(SandboxProvider):
                     timeout=timeout,
                 )
             except Exception as e:
-                msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
-                raise RuntimeError(msg) from e
+                if not (name and _is_sandbox_name_taken_error(e)):
+                    msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
+                    raise RuntimeError(msg) from e
+                # Sandbox names are deterministic per thread, so the holder is this
+                # thread's own sandbox from a run that died before persisting its id.
+                # Creating is impossible and failing strands the thread forever.
+                logger.warning("Sandbox %s already exists; adopting it instead of creating", name)
+                sandbox = await _reuse_existing_sandbox(client, name)
 
             return TimeoutLangSmithSandbox(sandbox.to_sync())

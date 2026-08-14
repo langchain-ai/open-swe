@@ -21,6 +21,7 @@ from agent.integrations.langsmith import (
     _get_sandbox_create_extra_fields,
     _get_sandbox_snapshot_config,
     _install_create_extra_fields,
+    _is_sandbox_name_taken_error,
     _sandbox_name_for_thread,
     _wait_for_reconnected_sandbox,
 )
@@ -301,3 +302,41 @@ async def test_install_create_extra_fields_noop_when_empty() -> None:
     client = _FakeClient()
     _install_create_extra_fields(cast(AsyncSandboxClient, client), {})
     assert client._http.post == "sentinel"
+
+
+class _NameTakenClient:
+    """create_sandbox always collides; get_sandbox returns the orphan by that name."""
+
+    def __init__(self, status: str = "running") -> None:
+        self.create_calls = 0
+        self.status = status
+        self.requested: list[str] = []
+
+    async def create_sandbox(self, **kwargs):  # noqa: ANN003, ANN202
+        self.create_calls += 1
+        raise RuntimeError(f"Sandbox '{kwargs['name']}' already exists")
+
+    async def get_sandbox(self, *, name: str) -> _FakeStatusSandbox:
+        self.requested.append(name)
+        return _FakeStatusSandbox(self.status)
+
+
+@pytest.mark.asyncio
+async def test_name_collision_adopts_the_orphaned_sandbox() -> None:
+    from agent.integrations.langsmith import _reuse_existing_sandbox
+
+    client = _NameTakenClient()
+    try:
+        await client.create_sandbox(name="openswe-abc", snapshot_id="snap-1")
+    except RuntimeError as exc:
+        assert _is_sandbox_name_taken_error(exc)
+        adopted = await _reuse_existing_sandbox(cast(AsyncSandboxClient, client), "openswe-abc")
+        assert adopted.status == "running"
+        assert client.requested == ["openswe-abc"]
+    else:  # pragma: no cover
+        pytest.fail("expected a name collision")
+
+
+def test_unrelated_create_errors_are_not_treated_as_collisions() -> None:
+    assert not _is_sandbox_name_taken_error(RuntimeError("snapshot not found"))
+    assert _is_sandbox_name_taken_error(RuntimeError("Sandbox 'x' already exists"))
