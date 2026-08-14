@@ -86,6 +86,7 @@ test("builds ACP text and image prompt blocks", () => {
 test("switches model before continuing an ACP session", async () => {
   let closed = false
   let initialized = false
+  let emitted
   const session = Object.assign(Object.create(AcpSession.prototype), {
     status: "idle",
     modelId: "old:model",
@@ -95,6 +96,7 @@ test("switches model before continuing an ACP session", async () => {
     connect() {},
     initialize: async () => (initialized = true),
     notifyChange() {},
+    emit: (event) => (emitted = event),
   })
 
   await session.configure("new:model", "high", {}, {})
@@ -103,6 +105,13 @@ test("switches model before continuing an ACP session", async () => {
   assert.equal(initialized, true)
   assert.equal(session.modelId, "new:model")
   assert.equal(session.effort, "high")
+
+  session.initialize = async () => {
+    throw new Error("load failed")
+  }
+  await assert.rejects(session.configure("other:model", "low", {}, {}))
+  assert.equal(session.status, "error")
+  assert.deepEqual(emitted, { type: "error", message: "load failed" })
 })
 
 test("combines chunked user messages when replaying an ACP session", () => {

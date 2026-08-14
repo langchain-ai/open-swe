@@ -365,6 +365,11 @@ class AcpSession {
       this.modelId = modelId
       this.effort = effort
       this.notifyChange()
+    } catch (error) {
+      this.rpc.close()
+      this.status = "error"
+      this.emit({ type: "error", message: String(error?.message || error) })
+      throw error
     } finally {
       this.suppressUpdates = false
     }

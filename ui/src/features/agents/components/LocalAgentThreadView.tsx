@@ -44,6 +44,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const { session, messages, loaded } = useDesktopAcpSession(sessionId)
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
+  useEffect(() => setSelection(null), [sessionId])
   const sessionSelection = useMemo<ModelSelection | null>(() => {
     const modelId = session?.modelId
     const effort = session?.effort
