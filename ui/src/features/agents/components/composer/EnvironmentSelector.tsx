@@ -53,7 +53,7 @@ export function EnvironmentSelector({
       >
         <StackIcon className="size-3.5 shrink-0" />
         <span className="flex-1 truncate text-left">
-          {selected?.name ?? "Default environment"}
+          {selected?.name ?? "No environment"}
         </span>
         <CaretDownIcon className="size-3 shrink-0 opacity-70" />
       </button>

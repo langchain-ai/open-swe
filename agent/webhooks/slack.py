@@ -580,8 +580,12 @@ async def _process_slack_mention_impl(
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
-    if environment_slug:
-        configurable["environment"] = environment_slug
+    # Later mentions carry no tag, so the thread's environment comes back from
+    # metadata — a follow-up must not be told about `default` while its sandbox
+    # was built from the environment the opening message picked.
+    thread_environment = environment_slug or await common._get_thread_environment(thread_id)
+    if thread_environment:
+        configurable["environment"] = thread_environment
     if image_model_override:
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
@@ -603,6 +607,7 @@ async def _process_slack_mention_impl(
         user_email=user_email or "",
         title=clean_text if is_first_mention else "",
         source_context={"slack_thread": configurable["slack_thread"]},
+        environment=environment_slug,
     )
 
     # A DM (treat_all_messages_as_mentions) is inherently directed at the bot, so

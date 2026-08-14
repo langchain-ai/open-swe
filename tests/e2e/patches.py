@@ -86,9 +86,13 @@ def apply() -> None:
     # provider, so there is nothing to capture from — record the request in the
     # fake store instead. The environment tools, store writes, name/tag scheme
     # and status transitions all still run for real.
+    from agent.dashboard import environments as environments_store
     from agent.integrations import langsmith as langsmith_integration
 
     langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
+    # The capture path refuses to run off the langsmith provider; with that
+    # provider's snapshot API faked above, the E2E's local sandbox is capturable.
+    environments_store._require_capture_support = lambda: None
 
     _applied = True
 

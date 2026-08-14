@@ -230,7 +230,7 @@ async def test_capture_walks_the_name_suffix_past_a_conflict() -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_capture_keeps_previous_snapshot() -> None:
+async def test_failed_recapture_keeps_booting_from_the_previous_snapshot() -> None:
     client, _ = _fake_client()
     capture = AsyncMock(side_effect=RuntimeError("capture exploded"))
     delete_snapshot = AsyncMock()
@@ -251,11 +251,55 @@ async def test_failed_capture_keeps_previous_snapshot() -> None:
         record = await env_store.get_environment("base")
 
     assert record is not None
-    assert record["snapshot_status"] == "failed"
+    # Still ready, so runs keep booting from snap-1 instead of dropping to the
+    # base image; the error rides along in status_message.
+    assert record["snapshot_status"] == "ready"
+    assert environment_snapshot_id(record) == "snap-1"
     assert record["status_message"] == "capture exploded"
-    # The environment still boots from what it had, and nothing was deleted.
-    assert record["snapshot_id"] == "snap-1"
     delete_snapshot.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_first_capture_failure_marks_the_environment_failed() -> None:
+    client, _ = _fake_client()
+    capture = AsyncMock(side_effect=RuntimeError("capture exploded"))
+    with (
+        patch.object(env_store, "get_client", return_value=client),
+        patch(
+            "agent.integrations.langsmith.get_async_sandbox_client",
+            return_value=_sandbox_client(capture),
+        ),
+    ):
+        await env_store.create_environment(EnvironmentCreate(name="base"), "ramon")
+
+        with pytest.raises(RuntimeError, match="capture exploded"):
+            await env_store.capture_environment_snapshot("base", "sb-123")
+
+        record = await env_store.get_environment("base")
+
+    # Nothing to fall back to, so the record says so rather than claiming ready.
+    assert record is not None
+    assert record["snapshot_status"] == "failed"
+    assert environment_snapshot_id(record) is None
+
+
+@pytest.mark.asyncio
+async def test_capture_requires_the_langsmith_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SANDBOX_TYPE", "local")
+    client, _ = _fake_client()
+    capture = AsyncMock()
+    with (
+        patch.object(env_store, "get_client", return_value=client),
+        patch(
+            "agent.integrations.langsmith.get_async_sandbox_client",
+            return_value=_sandbox_client(capture),
+        ),
+    ):
+        await env_store.create_environment(EnvironmentCreate(name="base"), "ramon")
+        with pytest.raises(RuntimeError, match="SANDBOX_TYPE=langsmith"):
+            await env_store.capture_environment_snapshot("base", "sb-123")
+
+    capture.assert_not_awaited()
 
 
 # --- per-thread selection ---

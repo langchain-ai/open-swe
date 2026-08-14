@@ -342,6 +342,15 @@ async def _set_snapshot_state(
     return record
 
 
+def _require_capture_support() -> None:
+    """Only the langsmith provider has a snapshot API to capture into."""
+    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+    if sandbox_type != "langsmith":
+        raise RuntimeError(
+            f"capturing an environment snapshot needs SANDBOX_TYPE=langsmith, not {sandbox_type!r}"
+        )
+
+
 async def _delete_snapshot(snapshot_id: object) -> None:
     """Best-effort delete of a superseded snapshot."""
     if not isinstance(snapshot_id, str) or not snapshot_id:
@@ -392,16 +401,23 @@ async def capture_environment_snapshot(
 ) -> dict[str, Any]:
     """Capture ``sandbox_id``'s filesystem as this environment's snapshot.
 
-    The previous snapshot is deleted only after the new one is ready, so a failed
-    capture leaves the environment booting from what it had before.
+    The previous snapshot survives a failed capture, in both senses: it is deleted
+    only once the new one is ready, and the record stays ``ready`` so runs keep
+    booting from it instead of dropping to the base image.
+
+    Only the langsmith provider can capture; other providers have no snapshot API
+    to capture into, so this raises rather than failing deep in the SDK.
     """
     from agent.integrations.langsmith import get_async_sandbox_client
+
+    _require_capture_support()
 
     record = await get_environment(slug)
     if record is None:
         raise ValueError(f"no environment named {slug!r}")
 
     previous_snapshot_id = record.get("snapshot_id")
+    previous_was_ready = bool(previous_snapshot_id) and record.get("snapshot_status") == "ready"
     await _set_snapshot_state(slug, "capturing")
     try:
         async with get_async_sandbox_client() as client:
@@ -410,7 +426,11 @@ async def capture_environment_snapshot(
             )
     except Exception as exc:
         logger.warning("snapshot capture failed for environment %s", slug, exc_info=True)
-        await _set_snapshot_state(slug, "failed", status_message=str(exc)[:1000])
+        await _set_snapshot_state(
+            slug,
+            "ready" if previous_was_ready else "failed",
+            status_message=str(exc)[:1000],
+        )
         raise
 
     updated = await _set_snapshot_state(

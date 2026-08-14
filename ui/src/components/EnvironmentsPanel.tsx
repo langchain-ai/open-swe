@@ -282,9 +282,13 @@ export function EnvironmentsPanel() {
               />
             </div>
 
-            {active.snapshot_status === "failed" && active.status_message && (
+            {/* Shown even when Ready: a failed recapture keeps the previous
+                snapshot bootable, so the error is the only sign it happened. */}
+            {active.status_message && (
               <p className="text-xs text-destructive">
-                {active.status_message}
+                {active.snapshot_status === "ready"
+                  ? `Last capture failed, still booting from the previous snapshot: ${active.status_message}`
+                  : active.status_message}
               </p>
             )}
           </>
