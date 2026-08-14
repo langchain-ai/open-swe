@@ -132,8 +132,9 @@ def _format_comments(comments: list[dict[str, Any]]) -> str:
 def _approved_message(plan_markdown: str, feedback: str) -> str:
     if plan_markdown:
         message = (
-            "Plan mode is now inactive because the plan was approved. "
-            "Implement the approved plan now. Treat this published plan as the source of truth:\n\n"
+            "Plan mode is now inactive because the plan was approved. Use the reviewed plan "
+            "below as the implementation guide. Apply reasonable engineering judgment where "
+            "details need adjustment while preserving its goals and reviewer edits:\n\n"
             f"{plan_markdown}"
         )
     else:

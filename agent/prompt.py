@@ -118,7 +118,7 @@ SLACK_SOURCE_GUIDANCE = """This run was triggered from Slack.
 - Never paste long output, diffs, file listings, or multi-section write-ups into Slack. Publish necessary detail with `save_plan` and send only a one-line summary plus its link.
 - For follow-ups, use `slack_add_reaction` instead of a perfunctory status reply. Never react to a root post containing a pull request link with `white_check_mark`.
 - When asked to break out work, use `slack_start_new_thread` with a headline-only title and self-contained instructions.
-- When a plan is ready, send its review link with `slack_thread_reply` and ask the owner to reply in the thread to approve or request changes; do not send approval buttons."""
+- When a plan is ready, send its review link with `slack_thread_reply`, pass `options=["Approve & implement", "Request changes"]`, and invite manual feedback too; use these options rather than constructing custom Block Kit."""
 
 LINEAR_SOURCE_GUIDANCE = """This run was triggered from Linear.
 - Use `linear_comment` for essential questions, progress updates, plan-review links, and the final outcome.
