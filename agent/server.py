@@ -960,6 +960,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 user_custom_instructions=user_custom_instructions,
                 thread_url=dashboard_thread_url(self._thread_id),
                 corridor_enabled=self._corridor_enabled,
+                source=self._source,
+                slack_context=_slack_tools_enabled(configurable),
             ),
         }
 

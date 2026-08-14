@@ -610,6 +610,7 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
     assert content[1] == {"type": "text", "text": "@teammate: continue here"}
     assert content[0]["text"].startswith("<open_swe_web_handoff>\n")
     assert content[0]["text"].endswith("\n</open_swe_web_handoff>")
+    assert enriched["params"]["config"]["configurable"]["source"] == "dashboard"
 
 
 async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(monkeypatch) -> None:

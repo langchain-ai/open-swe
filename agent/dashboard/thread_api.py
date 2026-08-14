@@ -1356,7 +1356,10 @@ async def _enrich_run_start_command(
         if metadata.get("source") == "slack":
             content = _prepend_message_content_block(content, DASHBOARD_HANDOFF_INSTRUCTION)
         _set_command_last_message_content(params, content)
-        metadata_update: dict[str, Any] = {"plan_mode": plan_mode_requested}
+        metadata_update: dict[str, Any] = {
+            "source": _DASHBOARD_SOURCE,
+            "plan_mode": plan_mode_requested,
+        }
         if command_images and run_model and run_effort:
             overrides["agent_model_id"] = run_model
             overrides["agent_effort"] = run_effort
