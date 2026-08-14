@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron")
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
+  getProjectBranch: (cwd) => ipcRenderer.invoke("desktop:project-branch", cwd),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),

@@ -179,10 +179,7 @@ function sessionSummary(record) {
 }
 
 function listProjects() {
-  return readProjects(projectsPath()).map((project) => ({
-    ...project,
-    branch: currentBranch(project.cwd),
-  }));
+  return readProjects(projectsPath());
 }
 
 function sendProjectsChanged() {
@@ -355,6 +352,12 @@ function configureDesktopIpc() {
     return listProjects();
   });
 
+  ipcMain.handle("desktop:project-branch", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    return project ? currentBranch(project) : null;
+  });
+
   ipcMain.handle("desktop:add-project", async (event) => {
     requireTrustedDesktopIpc(event);
     const options = {
@@ -367,7 +370,7 @@ function configureDesktopIpc() {
     if (result.canceled || !result.filePaths[0]) return null;
     const project = addProject(projectsPath(), result.filePaths[0]);
     sendProjectsChanged();
-    return { ...project, branch: currentBranch(project.cwd) };
+    return project;
   });
 
   ipcMain.handle("desktop:remove-project", async (event, cwd) => {

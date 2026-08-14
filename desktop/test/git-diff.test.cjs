@@ -29,7 +29,7 @@ test("diffs the worktree against a session checkpoint", async (t) => {
   git(dir, ["commit", "-qm", "init"])
 
   const repo = await repoRoot(dir)
-  assert.equal(currentBranch(dir), "main")
+  assert.equal(await currentBranch(dir), "main")
   const ref = checkpointRef("session-id")
   await captureCheckpoint(repo, ref)
 

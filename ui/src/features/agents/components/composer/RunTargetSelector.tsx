@@ -31,9 +31,11 @@ interface RunTargetSelectorProps {
   localEnabled?: boolean
   projects: Array<DesktopProject>
   selectedProjectPath: string | null
+  selectedProjectBranch: string | null
   onSelectProject: (cwd: string) => void
   onAddProject: () => void
   onRemoveProject: (cwd: string) => void
+  onRefreshBranch: () => void
 }
 
 export function RunTargetSelector({
@@ -42,9 +44,11 @@ export function RunTargetSelector({
   localEnabled = false,
   projects,
   selectedProjectPath,
+  selectedProjectBranch,
   onSelectProject,
   onAddProject,
   onRemoveProject,
+  onRefreshBranch,
 }: RunTargetSelectorProps) {
   const selectedProject = projects.find(
     (project) => project.cwd === selectedProjectPath
@@ -53,12 +57,12 @@ export function RunTargetSelector({
   const label =
     value === "local"
       ? selectedProject
-        ? `This Mac · ${selectedProject.name}${selectedProject.branch ? ` · ${selectedProject.branch}` : ""}`
+        ? `This Mac · ${selectedProject.name}${selectedProjectBranch ? ` · ${selectedProjectBranch}` : ""}`
         : "This Mac"
       : "Cloud"
 
   return (
-    <Menu>
+    <Menu onOpenChange={(open) => open && onRefreshBranch()}>
       <MenuTrigger
         className="flex max-w-[260px] items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80"
         title={selectedProject?.cwd}
@@ -99,11 +103,12 @@ export function RunTargetSelector({
                     <FolderOpen />
                     <span className="min-w-0 flex-1 truncate">
                       {project.name}
-                      {project.branch && (
-                        <span className="text-muted-foreground/60">
-                          {` · ${project.branch}`}
-                        </span>
-                      )}
+                      {project.cwd === selectedProjectPath &&
+                        selectedProjectBranch && (
+                          <span className="text-muted-foreground/60">
+                            {` · ${selectedProjectBranch}`}
+                          </span>
+                        )}
                     </span>
                     {selectedProjectPath === project.cwd && (
                       <Check className="ml-auto" />

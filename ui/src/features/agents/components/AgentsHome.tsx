@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -81,6 +81,11 @@ export function AgentsHome() {
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const [runTarget, setRunTarget] = useState<RunTarget>("cloud")
   const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
+  const localProjectPathRef = useRef(localProjectPath)
+  localProjectPathRef.current = localProjectPath
+  const [localProjectBranch, setLocalProjectBranch] = useState<string | null>(
+    null
+  )
   const [localError, setLocalError] = useState<string | null>(null)
   const {
     projects: localProjects,
@@ -126,6 +131,23 @@ export function AgentsHome() {
     if (!localProjectPath) setRunTarget("local")
   }, [isDesktop, localProjectPath, localProjects])
 
+  const refreshLocalProjectBranch = useCallback(async () => {
+    const cwd = localProjectPathRef.current
+    const branch = cwd
+      ? ((await window.openSweDesktop?.getProjectBranch(cwd)) ?? null)
+      : null
+    if (localProjectPathRef.current === cwd) setLocalProjectBranch(branch)
+  }, [])
+
+  useEffect(() => {
+    void refreshLocalProjectBranch()
+  }, [localProjectPath, refreshLocalProjectBranch])
+
+  useEffect(() => {
+    window.addEventListener("focus", refreshLocalProjectBranch)
+    return () => window.removeEventListener("focus", refreshLocalProjectBranch)
+  }, [refreshLocalProjectBranch])
+
   const handleRunTargetChange = (next: RunTarget) => {
     setRunTarget(next)
     setLocalError(null)
@@ -161,6 +183,7 @@ export function AgentsHome() {
       setSubmitting(true)
       setLocalError(null)
       window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, localProjectPath)
+      await refreshLocalProjectBranch()
       try {
         const localSession = await desktop.startAcpSession({
           cwd: localProjectPath,
@@ -246,9 +269,11 @@ export function AgentsHome() {
             onRunTargetChange={isDesktop ? handleRunTargetChange : undefined}
             localProjects={localProjects}
             selectedLocalProjectPath={localProjectPath}
+            selectedLocalProjectBranch={localProjectBranch}
             onSelectLocalProject={handleSelectLocalProject}
             onAddLocalProject={() => void handleAddLocalProject()}
             onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
+            onRefreshLocalProjectBranch={() => void refreshLocalProjectBranch()}
             planMode={planMode}
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
             environments={environments}
