@@ -195,7 +195,21 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
     actions = captured["blocks"][1]
     assert actions["type"] == "actions"
     assert [button["text"]["text"] for button in actions["elements"]] == ["A", "B"]
-    assert actions["elements"][0]["action_id"] == "open_swe_option_select"
+    action_ids = [button["action_id"] for button in actions["elements"]]
+    assert action_ids == ["open_swe_option_select_0", "open_swe_option_select_1"]
+    assert len(action_ids) == len(set(action_ids))
+
+
+def test_slack_action_ids_are_unique_and_recognized() -> None:
+    slack_routes = importlib.import_module("agent.webhooks.slack_routes")
+    blocks = slack_reply_tool.build_workflow_approval_blocks("Review", "abc")
+    actions = blocks[1]["elements"]
+
+    assert len({action["action_id"] for action in actions}) == len(actions)
+    assert slack_routes._first_open_swe_option_action(actions) is actions[0]
+    legacy = {"action_id": "open_swe_option_select"}
+    assert slack_routes._first_open_swe_option_action([legacy]) is legacy
+    assert slack_routes._first_open_swe_option_action([{"action_id": "unrelated"}]) is None
 
 
 async def test_slack_thread_reply_passes_model_reported_usage(
