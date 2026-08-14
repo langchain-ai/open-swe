@@ -5,9 +5,7 @@
   "git": {
     "deploymentEnabled": {
       "**": false,
-      "main": true,
-      "prod": true,
-      "preview": true
+      "main": true
     }
   }
 }
