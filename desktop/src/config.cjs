@@ -79,12 +79,16 @@ function isTrustedProxyRequest(method, pageUrl, requestUrl) {
 function isGithubOAuthUrl(value) {
   try {
     const url = new URL(value)
+    const pathSegments = url.pathname.split("/").filter(Boolean)
+    const loginPage = ["login", "session", "sessions"].includes(pathSegments[0])
+    const organizationSsoPage =
+      pathSegments[0] === "orgs" &&
+      Boolean(pathSegments[1]) &&
+      ["saml", "sso"].includes(pathSegments[2])
     return (
       url.protocol === "https:" &&
       url.hostname === "github.com" &&
-      ["/login", "/session", "/sessions"].some(
-        (path) => url.pathname === path || url.pathname.startsWith(`${path}/`)
-      )
+      (loginPage || organizationSsoPage)
     )
   } catch {
     return false

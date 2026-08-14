@@ -18,10 +18,12 @@ def test_construct_system_prompt_gates_active_plan_mode(enabled: bool) -> None:
 
 
 def test_plan_mode_prompt_requests_slack_approval_options() -> None:
-    prompt = construct_system_prompt(working_dir="/work", plan_mode=True)
+    prompt = construct_system_prompt(
+        working_dir="/work", plan_mode=True, source="slack", slack_context=True
+    )
 
     assert 'options=["Approve & implement", "Request changes"]' in prompt
-    assert "do not use Block Kit or approval buttons" not in prompt
+    assert "do not send approval buttons" not in prompt
 
 
 def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
