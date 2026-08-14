@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -176,6 +177,27 @@ async def test_enter_plan_mode_tool_returns_command() -> None:
     assert len(messages) == 1
     assert isinstance(messages[0], ToolMessage)
     assert messages[0].tool_call_id == "call-1"
+
+
+async def test_enter_plan_mode_marks_the_current_turn_checkpoint(monkeypatch) -> None:
+    import importlib
+
+    from langchain_core.messages import HumanMessage
+
+    enter_plan_mode_module = importlib.import_module("agent.tools.enter_plan_mode")
+    set_plan_status = AsyncMock()
+    mark_checkpoint = AsyncMock()
+    monkeypatch.setattr(enter_plan_mode_module, "_thread_id_from_config", lambda: "thread-1")
+    monkeypatch.setattr(enter_plan_mode_module, "set_plan_status", set_plan_status)
+    monkeypatch.setattr(enter_plan_mode_module, "_mark_turn_checkpoint", mark_checkpoint)
+
+    await enter_plan_mode_module.enter_plan_mode(
+        tool_call_id="call-1",
+        state={"messages": [HumanMessage(content="plan it", id="msg-1")]},
+    )
+
+    set_plan_status.assert_awaited_once_with("thread-1", "planning", plan_mode=True)
+    mark_checkpoint.assert_awaited_once_with("thread-1", "msg-1")
 
 
 def test_enter_plan_mode_exported() -> None:

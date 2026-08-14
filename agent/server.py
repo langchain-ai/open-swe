@@ -10,6 +10,7 @@ the agent itself is stateless.
 
 import logging
 import os
+import posixpath
 import warnings
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
@@ -844,8 +845,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
     async def _record_turn_checkpoint(
-        self, state: PrepareRunState, sandbox_backend: Any, work_dir: str
-    ) -> list[dict[str, str]] | None:
+        self,
+        state: PrepareRunState,
+        sandbox_backend: Any,
+        work_dir: str,
+        preferred_repo_path: str | None,
+    ) -> list[dict[str, Any]] | None:
         """Snapshot the worktree so the dashboard can diff this turn from git.
 
         Keyed by the user message that opened the turn, which is the same id the
@@ -861,16 +866,29 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         if not turn_key:
             return None
-        ref = await record_turn_checkpoint(sandbox_backend, work_dir, turn_key)
-        if ref is None:
+        checkpoint = await record_turn_checkpoint(
+            sandbox_backend,
+            work_dir,
+            turn_key,
+            repo_path=preferred_repo_path,
+        )
+        if checkpoint is None:
             return None
+        ref, repo_path = checkpoint
         try:
             thread = await client.threads.get(thread_id=self._thread_id)
             existing = (thread.get("metadata") or {}).get("turn_checkpoints")
         except Exception:
             logger.debug("Could not read turn checkpoints for %s", self._thread_id, exc_info=True)
             existing = None
-        return merge_checkpoint(existing, turn_key, ref, datetime.now(UTC).isoformat())
+        return merge_checkpoint(
+            existing,
+            turn_key,
+            ref,
+            datetime.now(UTC).isoformat(),
+            repo_path=repo_path,
+            plan_mode=self._plan_mode,
+        )
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
@@ -903,7 +921,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             _resolve_repo_custom_instructions(prompt_default_repo),
             _resolve_user_custom_instructions(self._profile_login),
         )
-        turn_checkpoints = await self._record_turn_checkpoint(state, sandbox_backend, work_dir)
+        preferred_repo_path = (
+            posixpath.join(work_dir, prompt_default_repo["name"])
+            if prompt_default_repo and prompt_default_repo.get("name")
+            else None
+        )
+        turn_checkpoints = await self._record_turn_checkpoint(
+            state,
+            sandbox_backend,
+            work_dir,
+            preferred_repo_path,
+        )
 
         try:
             await client.threads.update(

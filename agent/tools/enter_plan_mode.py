@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import InjectedToolCallId
 from langgraph.config import get_config
+from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
+from langgraph_sdk import get_client
 
 from ..dashboard.plan_store import PLAN_STATUS_PLANNING, set_plan_status
+from ..utils.turn_checkpoint import mark_checkpoint_plan_mode
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +26,10 @@ _ENTERED_MESSAGE = (
 )
 
 
-async def enter_plan_mode(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+async def enter_plan_mode(
+    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
+) -> Command:
     """Activate plan mode mid-run.
 
     Call this when you believe the task would benefit from a structured
@@ -43,6 +49,9 @@ async def enter_plan_mode(tool_call_id: Annotated[str, InjectedToolCallId]) -> C
     if thread_id:
         try:
             await set_plan_status(thread_id, PLAN_STATUS_PLANNING, plan_mode=True)
+            turn_key = _latest_human_message_id(state)
+            if turn_key:
+                await _mark_turn_checkpoint(thread_id, turn_key)
         except Exception:
             logger.warning("Failed to persist plan-mode entry for %s", thread_id, exc_info=True)
     return Command(
@@ -51,6 +60,31 @@ async def enter_plan_mode(tool_call_id: Annotated[str, InjectedToolCallId]) -> C
             "messages": [ToolMessage(content=_ENTERED_MESSAGE, tool_call_id=tool_call_id)],
         }
     )
+
+
+def _latest_human_message_id(state: dict[str, Any] | None) -> str | None:
+    if not isinstance(state, dict):
+        return None
+    for message in reversed(state.get("messages") or []):
+        if isinstance(message, HumanMessage) and message.id:
+            return message.id
+    return None
+
+
+async def _mark_turn_checkpoint(thread_id: str, turn_key: str) -> None:
+    client = get_client()
+    thread = await client.threads.get(thread_id)
+    metadata = (
+        thread.get("metadata") if isinstance(thread, dict) else getattr(thread, "metadata", None)
+    )
+    metadata = metadata if isinstance(metadata, dict) else {}
+    existing = metadata.get("turn_checkpoints")
+    updated = mark_checkpoint_plan_mode(existing, turn_key)
+    if updated != existing:
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={"turn_checkpoints": updated},
+        )
 
 
 def _thread_id_from_config() -> str | None:

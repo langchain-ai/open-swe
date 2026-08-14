@@ -1961,14 +1961,37 @@ async def get_dashboard_thread_turn_diff(
     if index < 0 or not checkpoints or not isinstance(sandbox_id, str) or not sandbox_id:
         return {"status": "missing", "files": [], "truncated": False}
 
+    checkpoint = checkpoints[index]
+    if turn_key is not None and checkpoint.get("plan_mode") is True:
+        return {"status": "ready", "files": [], "truncated": False}
+
+    head = None
+    if turn_key and index + 1 < len(checkpoints):
+        next_checkpoint = checkpoints[index + 1]
+        repo_path = checkpoint.get("repo_path")
+        next_repo_path = next_checkpoint.get("repo_path")
+        if (
+            isinstance(repo_path, str)
+            and isinstance(next_repo_path, str)
+            and repo_path != next_repo_path
+        ):
+            return {"status": "missing", "files": [], "truncated": False}
+        head = next_checkpoint["ref"]
+
     try:
         sandbox = await create_sandbox(sandbox_id)
     except Exception:  # noqa: BLE001
         logger.debug("Could not connect to sandbox %s for turn diff", sandbox_id, exc_info=True)
         return {"status": "missing", "files": [], "truncated": False}
 
-    head = checkpoints[index + 1]["ref"] if turn_key and index + 1 < len(checkpoints) else None
-    return await read_turn_diff(sandbox, None, str(checkpoints[index]["ref"]), head)
+    repo_path = checkpoint.get("repo_path")
+    return await read_turn_diff(
+        sandbox,
+        None,
+        str(checkpoint["ref"]),
+        head,
+        repo_path=repo_path if isinstance(repo_path, str) else None,
+    )
 
 
 async def get_dashboard_thread_pr_diff(

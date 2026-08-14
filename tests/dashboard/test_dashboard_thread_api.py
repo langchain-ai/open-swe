@@ -1779,6 +1779,92 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     assert payload["default_agent_subagent_model"] in model_ids
 
 
+async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
+    metadata = {
+        "sandbox_id": "sandbox-1",
+        "turn_checkpoints": [
+            {
+                "key": "msg-1",
+                "ref": "refs/open-swe/turns/msg-1",
+                "started_at": "t0",
+                "repo_path": "/workspace/repo",
+                "plan_mode": True,
+            }
+        ],
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    create_sandbox = AsyncMock()
+    monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
+
+    result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+
+    assert result == {"status": "ready", "files": [], "truncated": False}
+    create_sandbox.assert_not_awaited()
+
+
+async def test_turn_diff_reads_the_checkpoint_repository(monkeypatch) -> None:
+    metadata = {
+        "sandbox_id": "sandbox-1",
+        "turn_checkpoints": [
+            {
+                "key": "msg-1",
+                "ref": "refs/open-swe/turns/msg-1",
+                "started_at": "t0",
+                "repo_path": "/workspace/repo",
+            },
+            {
+                "key": "msg-2",
+                "ref": "refs/open-swe/turns/msg-2",
+                "started_at": "t1",
+                "repo_path": "/workspace/repo",
+            },
+        ],
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    sandbox = object()
+    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
+    read_diff = AsyncMock(return_value={"status": "ready", "files": [], "truncated": False})
+    monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
+
+    await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+
+    read_diff.assert_awaited_once_with(
+        sandbox,
+        None,
+        "refs/open-swe/turns/msg-1",
+        "refs/open-swe/turns/msg-2",
+        repo_path="/workspace/repo",
+    )
+
+
+async def test_turn_diff_rejects_checkpoints_from_different_repositories(monkeypatch) -> None:
+    metadata = {
+        "sandbox_id": "sandbox-1",
+        "turn_checkpoints": [
+            {
+                "key": "msg-1",
+                "ref": "refs/open-swe/turns/msg-1",
+                "started_at": "t0",
+                "repo_path": "/workspace/one",
+            },
+            {
+                "key": "msg-2",
+                "ref": "refs/open-swe/turns/msg-2",
+                "started_at": "t1",
+                "repo_path": "/workspace/two",
+            },
+        ],
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    create_sandbox = AsyncMock()
+    monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
+
+    result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+
+    assert result == {"status": "missing", "files": [], "truncated": False}
+    create_sandbox.assert_not_awaited()
+
+
 async def test_pr_diff_uses_repository_from_pr_url(monkeypatch) -> None:
     metadata = {
         "repo_owner": "langchain-ai",
