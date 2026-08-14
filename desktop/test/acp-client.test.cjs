@@ -5,6 +5,7 @@ const os = require("node:os")
 const path = require("node:path")
 
 const {
+  AcpSession,
   dcodeTarget,
   promptBlocks,
   sessionTitle,
@@ -80,4 +81,28 @@ test("builds ACP text and image prompt blocks", () => {
       { type: "image", data: "cG5n", mimeType: "image/png" },
     ]
   )
+})
+
+test("combines chunked user messages when replaying an ACP session", () => {
+  const session = Object.assign(Object.create(AcpSession.prototype), {
+    id: "session",
+    title: "Restored session",
+    events: [],
+    replayUsers: new Map(),
+    onEvent() {},
+    onChange() {},
+  })
+  const replay = (text) =>
+    session.handleNotification("session/update", {
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "message",
+        content: { type: "text", text },
+      },
+    })
+
+  replay("first ")
+  replay("second")
+
+  assert.equal(session.events[0].text, "first second")
 })
