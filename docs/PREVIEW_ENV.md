@@ -63,10 +63,11 @@ the GitHub App callback URL, and the `DASHBOARD_ALLOWED_ORIGINS` entry must all 
 the preview Vercel domain. That allowlist is the backend's CSRF gate as well as its CORS
 config, so a missing entry leaves the preview dashboard readable but unable to save.
 
-`ui/vercel.json` limits git deployments to `main`. Both projects use root directory `ui/`
-and therefore read that same file, so the preview project gets no automatic deployment
-from `preview` — deploy it with a deploy hook or `vercel --prod`, or override the rule in
-that project's Vercel dashboard settings.
+`ui/vercel.json` limits git deployments to `main` and `preview`, the two projects'
+production branches, so feature branches no longer build. Both projects read that one file
+(same root directory), so each still preview-deploys the other's production branch — to
+stop the preview project building anything but `preview`, set its Ignored Build Step to
+`[ "$VERCEL_ENV" != "production" ]` in the Vercel dashboard.
 
 > The build **fails** if `DASHBOARD_API_URL` is unset on Vercel, rather than falling back
 > to a default — a default would be production's backend, and preview would inherit it
