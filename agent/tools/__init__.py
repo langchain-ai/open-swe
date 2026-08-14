@@ -34,7 +34,6 @@ _TOOL_MODULES = {
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": ".search_repo_code",
-    "set_thread_title": ".set_thread_title",
     "slack_add_reaction": ".slack_add_reaction",
     "slack_read_thread_messages": ".slack_read_thread_messages",
     "slack_start_new_thread": ".slack_start_new_thread",
@@ -75,7 +74,6 @@ __all__ = [
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_repo_code",
-    "set_thread_title",
     "slack_add_reaction",
     "slack_read_thread_messages",
     "slack_start_new_thread",
@@ -114,7 +112,6 @@ if TYPE_CHECKING:
     from .save_user_instructions import save_user_instructions
     from .schedule_thread_wakeup import schedule_thread_wakeup
     from .search_repo_code import search_repo_code
-    from .set_thread_title import set_thread_title
     from .slack_add_reaction import slack_add_reaction
     from .slack_read_thread_messages import slack_read_thread_messages
     from .slack_start_new_thread import slack_start_new_thread
