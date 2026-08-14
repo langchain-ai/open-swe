@@ -171,6 +171,7 @@ declare global {
         input: DesktopAcpPromptInput & { sessionId: string }
       ) => Promise<DesktopAcpSession>
       cancelAcpSession: (sessionId: string) => Promise<void>
+      deleteAcpSession: (sessionId: string) => Promise<boolean>
       getAcpSession: (sessionId: string) => Promise<DesktopAcpSession | null>
       listAcpSessions: () => Promise<Array<DesktopAcpSessionSummary>>
       getAcpDiff: (sessionId: string) => Promise<DesktopAcpDiff>
