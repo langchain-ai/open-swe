@@ -7,6 +7,12 @@ import pytest
 from agent.integrations import currents_tools
 
 
+@pytest.fixture(autouse=True)
+def _resolve_key():
+    with patch.object(currents_tools, "_api_key_for", AsyncMock(return_value="test-key")):
+        yield
+
+
 @pytest.mark.asyncio
 async def test_load_currents_tools_empty_when_not_connected() -> None:
     with patch.object(currents_tools, "get_currents_api_key", AsyncMock(return_value=None)):
@@ -30,18 +36,18 @@ async def test_load_currents_tools_names() -> None:
 async def test_currents_get_run_success() -> None:
     payload = {"status": "OK", "data": {"runId": "run_123", "status": "failed"}}
     with patch.object(currents_tools, "_get", AsyncMock(return_value=payload)):
-        tools = currents_tools._make_tools("test-key")
+        tools = currents_tools._make_tools()
         get_run = next(t for t in tools if t.name == "currents_get_run")
-        result = await get_run.ainvoke({"run_id": "run_123"})
+        result = await get_run.ainvoke({"on_behalf_of": "octo", "run_id": "run_123"})
     assert result == payload
 
 
 @pytest.mark.asyncio
 async def test_currents_get_run_error() -> None:
     with patch.object(currents_tools, "_get", AsyncMock(side_effect=RuntimeError("boom"))):
-        tools = currents_tools._make_tools("bad-key")
+        tools = currents_tools._make_tools()
         get_run = next(t for t in tools if t.name == "currents_get_run")
-        result = await get_run.ainvoke({"run_id": "run_123"})
+        result = await get_run.ainvoke({"on_behalf_of": "octo", "run_id": "run_123"})
     assert result["success"] is False
     assert "boom" in result["error"]
 
@@ -56,9 +62,9 @@ async def test_currents_list_projects_caps_limit() -> None:
         return {"status": "OK", "data": []}
 
     with patch.object(currents_tools, "_get", side_effect=fake_get):
-        tools = currents_tools._make_tools("k")
+        tools = currents_tools._make_tools()
         list_projects = next(t for t in tools if t.name == "currents_list_projects")
-        result = await list_projects.ainvoke({"limit": 9999})
+        result = await list_projects.ainvoke({"on_behalf_of": "octo", "limit": 9999})
     assert result["status"] == "OK"
     assert captured["limit"] == 50
     assert captured["path"] == "/projects"
@@ -74,10 +80,15 @@ async def test_currents_find_run_passes_params() -> None:
         return {"status": "OK", "data": {"runId": "r1"}}
 
     with patch.object(currents_tools, "_get", side_effect=fake_get):
-        tools = currents_tools._make_tools("k")
+        tools = currents_tools._make_tools()
         find_run = next(t for t in tools if t.name == "currents_find_run")
         result = await find_run.ainvoke(
-            {"project_id": "proj_1", "ci_build_id": "build-42", "branch": "main"}
+            {
+                "on_behalf_of": "octo",
+                "project_id": "proj_1",
+                "ci_build_id": "build-42",
+                "branch": "main",
+            }
         )
     assert result["status"] == "OK"
     assert captured["path"] == "/runs/find"
@@ -96,10 +107,11 @@ async def test_currents_list_project_runs_caps_limit() -> None:
         return {"status": "OK", "data": []}
 
     with patch.object(currents_tools, "_get", side_effect=fake_get):
-        tools = currents_tools._make_tools("k")
+        tools = currents_tools._make_tools()
         list_runs = next(t for t in tools if t.name == "currents_list_project_runs")
         await list_runs.ainvoke(
             {
+                "on_behalf_of": "octo",
                 "project_id": "proj_1",
                 "limit": 9999,
                 "status": "FAILED",
@@ -118,7 +130,7 @@ async def test_currents_list_project_runs_caps_limit() -> None:
 async def test_currents_get_instance() -> None:
     payload = {"status": "OK", "data": {"instanceId": "inst_1"}}
     with patch.object(currents_tools, "_get", AsyncMock(return_value=payload)):
-        tools = currents_tools._make_tools("k")
+        tools = currents_tools._make_tools()
         get_instance = next(t for t in tools if t.name == "currents_get_instance")
-        result = await get_instance.ainvoke({"instance_id": "inst_1"})
+        result = await get_instance.ainvoke({"on_behalf_of": "octo", "instance_id": "inst_1"})
     assert result == payload

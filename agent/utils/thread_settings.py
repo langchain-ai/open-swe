@@ -1,0 +1,75 @@
+"""Per-thread snapshot of the profile settings a conversation runs under.
+
+Threads are multi-party and long-lived: anyone can reply, and the owner can edit
+their dashboard profile at any time. Both would otherwise change how an
+in-flight conversation behaves — swapping the model mid-history, or rewriting
+the standing instructions the earlier turns were produced under. Settings are
+therefore resolved once, on the thread's first run, and stored on the thread.
+
+Later changes reach a thread only when something explicitly rewrites the
+snapshot, which today means a per-run model override.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, TypedDict
+
+from . import ttl_cache
+
+logger = logging.getLogger(__name__)
+
+THREAD_SETTINGS_KEY = "agent_settings"
+_CACHE_TTL_SECONDS = 300
+
+
+class ThreadSettings(TypedDict, total=False):
+    owner_login: str | None
+    model_id: str
+    effort: str | None
+    subagent_model_id: str
+    subagent_effort: str | None
+    create_prs: bool
+    draft_prs: bool
+    user_instructions: str | None
+    repo_instructions: str | None
+    commit_name: str | None
+    commit_email: str | None
+    display_name: str | None
+
+
+def _cache_key(thread_id: str) -> str:
+    return f"thread-settings:{thread_id}"
+
+
+async def load_thread_settings(client: Any, thread_id: str) -> ThreadSettings:
+    """The thread's stored settings, or an empty mapping when it has none yet."""
+
+    async def _load() -> ThreadSettings:
+        thread = await client.threads.get(thread_id=thread_id)
+        metadata = thread.get("metadata") or {}
+        stored = metadata.get(THREAD_SETTINGS_KEY)
+        settings: ThreadSettings = dict(stored) if isinstance(stored, dict) else {}  # type: ignore[assignment]
+        if not settings.get("owner_login"):
+            owner = metadata.get("github_login")
+            if isinstance(owner, str) and owner.strip():
+                settings["owner_login"] = owner.strip()
+        return settings
+
+    try:
+        return await ttl_cache.cached(_cache_key(thread_id), _CACHE_TTL_SECONDS, _load)
+    except Exception:
+        logger.debug("Could not read settings for thread %s", thread_id, exc_info=True)
+        return {}
+
+
+async def store_thread_settings(client: Any, thread_id: str, settings: ThreadSettings) -> None:
+    """Persist the thread's settings, replacing any previous snapshot."""
+    try:
+        await client.threads.update(
+            thread_id=thread_id, metadata={THREAD_SETTINGS_KEY: dict(settings)}
+        )
+    except Exception:
+        logger.debug("Could not store settings for thread %s", thread_id, exc_info=True)
+        return
+    ttl_cache.set_cached(_cache_key(thread_id), settings, _CACHE_TTL_SECONDS)

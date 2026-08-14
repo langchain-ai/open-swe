@@ -18,6 +18,7 @@ import httpx
 from langchain_core.tools import BaseTool, StructuredTool
 
 from ..dashboard.user_credentials import CURRENTS_API_BASE, get_currents_api_key
+from ..utils.thread_participants import resolve_participant
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +41,24 @@ async def _get(path: str, api_key: str, **params: Any) -> dict[str, Any]:
         return resp.json()
 
 
-def _make_tools(api_key: str) -> list[BaseTool]:
+async def _api_key_for(on_behalf_of: str) -> str:
+    login = await resolve_participant(on_behalf_of)
+    api_key = await get_currents_api_key(login)
+    if not api_key:
+        raise ValueError(f"{login} has not connected Currents in their dashboard Profile tab.")
+    return api_key
+
+
+def _make_tools() -> list[BaseTool]:
     async def currents_list_projects(
+        on_behalf_of: str,
         limit: int = 10,
         starting_after: str | None = None,
     ) -> dict[str, Any]:
         """List Currents.dev projects for your organization.
 
         Args:
+            on_behalf_of: GitHub login of the thread participant to act for.
             limit: Maximum number of items to return (default 10, max 50).
             starting_after: Cursor for pagination.
 
@@ -55,6 +66,7 @@ def _make_tools(api_key: str) -> list[BaseTool]:
             Dictionary with project list, or an error message.
         """
         try:
+            api_key = await _api_key_for(on_behalf_of)
             params: dict[str, Any] = {"limit": max(1, min(limit, 50))}
             if starting_after:
                 params["starting_after"] = starting_after
@@ -63,25 +75,28 @@ def _make_tools(api_key: str) -> list[BaseTool]:
             logger.warning("currents_list_projects failed", exc_info=True)
             return {"success": False, "error": f"{type(e).__name__}: {e}"}
 
-    async def currents_get_run(run_id: str) -> dict[str, Any]:
+    async def currents_get_run(on_behalf_of: str, run_id: str) -> dict[str, Any]:
         """Get a single Currents.dev test run by ID with full details.
 
         Use this to inspect a specific e2e test run including specs,
         screenshots, video URLs, and test stats.
 
         Args:
+            on_behalf_of: GitHub login of the thread participant to act for.
             run_id: The Currents run ID (e.g. "run_abc123").
 
         Returns:
             Dictionary with the run details, or an error message.
         """
         try:
+            api_key = await _api_key_for(on_behalf_of)
             return await _get(f"/runs/{run_id}", api_key)
         except Exception as e:  # noqa: BLE001
             logger.warning("currents_get_run failed", exc_info=True)
             return {"success": False, "error": f"{type(e).__name__}: {e}"}
 
     async def currents_find_run(
+        on_behalf_of: str,
         project_id: str,
         ci_build_id: str | None = None,
         branch: str | None = None,
@@ -89,6 +104,7 @@ def _make_tools(api_key: str) -> list[BaseTool]:
         """Find the most recent completed Currents.dev run matching criteria.
 
         Args:
+            on_behalf_of: GitHub login of the thread participant to act for.
             project_id: The Currents project ID (e.g. "proj_abc123").
             ci_build_id: Optional CI build ID to find an exact run.
             branch: Optional branch name or prefix (append * for prefix match).
@@ -97,6 +113,7 @@ def _make_tools(api_key: str) -> list[BaseTool]:
             Dictionary with the run details, or an error message.
         """
         try:
+            api_key = await _api_key_for(on_behalf_of)
             params: dict[str, Any] = {"projectId": project_id}
             if ci_build_id:
                 params["ciBuildId"] = ci_build_id
@@ -108,6 +125,7 @@ def _make_tools(api_key: str) -> list[BaseTool]:
             return {"success": False, "error": f"{type(e).__name__}: {e}"}
 
     async def currents_list_project_runs(
+        on_behalf_of: str,
         project_id: str,
         limit: int = 10,
         status: str | None = None,
@@ -118,6 +136,7 @@ def _make_tools(api_key: str) -> list[BaseTool]:
         """List runs for a Currents.dev project with optional filters.
 
         Args:
+            on_behalf_of: GitHub login of the thread participant to act for.
             project_id: The Currents project ID.
             limit: Maximum number of runs to return (default 10, max 50).
             status: Optional status filter: PASSED, FAILED, RUNNING, FAILING.
@@ -129,6 +148,7 @@ def _make_tools(api_key: str) -> list[BaseTool]:
             Dictionary with a list of runs, or an error message.
         """
         try:
+            api_key = await _api_key_for(on_behalf_of)
             params: dict[str, Any] = {"limit": max(1, min(limit, 50))}
             if status:
                 params["status"] = status
@@ -143,19 +163,21 @@ def _make_tools(api_key: str) -> list[BaseTool]:
             logger.warning("currents_list_project_runs failed", exc_info=True)
             return {"success": False, "error": f"{type(e).__name__}: {e}"}
 
-    async def currents_get_instance(instance_id: str) -> dict[str, Any]:
+    async def currents_get_instance(on_behalf_of: str, instance_id: str) -> dict[str, Any]:
         """Get a single Currents.dev spec file execution instance by ID.
 
         An instance represents one spec file's execution within a run,
         including detailed test results, errors, and attempt history.
 
         Args:
+            on_behalf_of: GitHub login of the thread participant to act for.
             instance_id: The Currents instance ID (e.g. "inst_abc123").
 
         Returns:
             Dictionary with the instance details, or an error message.
         """
         try:
+            api_key = await _api_key_for(on_behalf_of)
             return await _get(f"/instances/{instance_id}", api_key)
         except Exception as e:  # noqa: BLE001
             logger.warning("currents_get_instance failed", exc_info=True)
@@ -171,8 +193,12 @@ def _make_tools(api_key: str) -> list[BaseTool]:
 
 
 async def load_currents_tools(login: str) -> list[BaseTool]:
-    """Return read-only Currents tools when the user has connected Currents."""
-    api_key = await get_currents_api_key(login)
-    if not api_key:
+    """Return read-only Currents tools when ``login`` has connected Currents.
+
+    ``login`` decides only whether the thread offers Currents at all; each call
+    names the participant to act for and resolves that person's key then, so the
+    tool schema stays the same whoever is speaking.
+    """
+    if not await get_currents_api_key(login):
         return []
-    return _make_tools(api_key)
+    return _make_tools()
