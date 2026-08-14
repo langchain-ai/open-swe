@@ -160,11 +160,11 @@ async def capture_environment_snapshot(name: str) -> dict[str, Any]:
         return {"ok": False, "error": "no thread_id in the current run config"}
 
     try:
-        from ..server import _start_langsmith_sandbox_if_needed
         from ..utils.sandbox_state import get_sandbox_backend, unwrap_sandbox_backend
 
+        # ready() reconnects through the provider, which starts a stopped/idle box
+        # before handing it back — so the capture always targets a running sandbox.
         backend = unwrap_sandbox_backend(await get_sandbox_backend(thread_id))
-        await _start_langsmith_sandbox_if_needed(backend)
         record = await store.capture_environment_snapshot(slug, backend.id)
     except Exception as exc:
         logger.exception("Failed to capture snapshot for environment %s", slug)
