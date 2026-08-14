@@ -55,6 +55,13 @@ export interface DiffData {
   totalLines: number
 }
 
+export interface OutputIframeDisplay {
+  type: "output_iframe"
+  html: string
+  title: string
+  filename: string
+}
+
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
@@ -65,6 +72,7 @@ export interface ToolExecutionChunk {
   input?: Record<string, unknown>
   status: AcpToolStatus
   output?: string
+  display?: OutputIframeDisplay
   elapsedMs?: number
   approvalRequestId?: string
   diffData?: DiffData

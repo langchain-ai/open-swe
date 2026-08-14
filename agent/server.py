@@ -122,6 +122,7 @@ from .tools import (
     linear_update_issue,
     notify_automation_channel,
     open_pull_request,
+    output_iframe,
     recreate_sandbox,
     report_platform_issue,
     request_pr_review,
@@ -184,6 +185,13 @@ DEEP_AGENT_TOOL_NAMES = {
     "task",
     "write_file",
 }
+
+
+def _registered_tool_name(value: Any) -> str:
+    name = getattr(value, "name", None) or getattr(value, "__name__", None)
+    if not isinstance(name, str) or not name:
+        raise TypeError(f"tool has no registered name: {value!r}")
+    return name
 
 
 def _tool_loader_timeout_seconds() -> float:
@@ -1139,6 +1147,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         linear_update_issue,
         notify_automation_channel,
         open_pull_request,
+        output_iframe,
         request_pr_review,
         recreate_sandbox,
         report_platform_issue,
@@ -1158,7 +1167,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if any(integration_tool_groups.values()):
         dynamic_tool_middleware = DynamicToolMiddleware(
             integration_tool_groups,
-            reserved_names={*DEEP_AGENT_TOOL_NAMES, *(tool.__name__ for tool in static_tools)},
+            reserved_names={
+                *DEEP_AGENT_TOOL_NAMES,
+                *(_registered_tool_name(tool) for tool in static_tools),
+            },
         )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
