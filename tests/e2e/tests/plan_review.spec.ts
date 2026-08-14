@@ -54,6 +54,43 @@ async function addComment(
 }
 
 test.describe("Plan review (HTTP comments)", () => {
+  test("Slack plan approval button starts implementation", async ({ page }) => {
+    test.setTimeout(180_000);
+    await page.goto("/mock/slack");
+    await page.locator("#reset").click();
+    await expect(page.locator("#thread")).toContainText("No messages yet");
+
+    await page
+      .locator("#text")
+      .fill("<@U0BOT> plan how to add a greet() helper");
+    await page.locator("#send").click();
+
+    const ready = page
+      .locator(".msg.bot")
+      .filter({ hasText: /plan is ready for review/i });
+    await expect(ready).toBeVisible({ timeout: 60_000 });
+    const approve = ready.getByRole("button", {
+      name: "Approve & implement",
+    });
+    await expect(approve).toBeVisible();
+    await expect(
+      ready.getByRole("button", { name: "Request changes" }),
+    ).toBeVisible();
+
+    await approve.click();
+
+    const reply = page
+      .locator(".msg.bot")
+      .filter({ has: page.locator('a[href*="/pull/"]') });
+    await expect(reply).toBeVisible({ timeout: 90_000 });
+    await expect(reply).toContainText("Add greet() helper");
+
+    await page.goto("/mock/github");
+    await expect(page.locator('.pr[data-pr="1"]')).toContainText(
+      "Add greet() helper",
+    );
+  });
+
   test("Slack plan request → comments → owner approves → PR", async ({
     browser,
     request,
