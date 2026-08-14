@@ -22,6 +22,8 @@ code runs for real.
 | The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
 | `api.github.com` REST (PR create) + dashboard GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github`                |
 | `slack.com/api` (post message, etc.)                             | **fake** (`/fake-slack/...`), thread rendered at `/mock/slack`             |
+| Environment tools, store records, snapshot naming + status       | **real**                                                                   |
+| LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the local sandbox has nothing to snapshot         |
 | GitHub App token mint, `api.github.com/user` identity            | stubbed (offline)                                                          |
 
 The fake GitHub/Slack stores are the single source of truth the mock UIs render,

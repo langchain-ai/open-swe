@@ -16,6 +16,7 @@ import {
   optimisticThread,
   seedAgentThreadLists,
   useAgentSkills,
+  useEnvironmentOptions,
 } from "@/features/agents/lib/queries"
 import {
   persistModelSelection,
@@ -60,6 +61,19 @@ export function AgentsHome() {
     (model) => model.id === activeSelection?.modelId
   )
   const [planMode, setPlanMode] = useState(false)
+  const [adminThread, setAdminThread] = useState(false)
+  const environmentOptions = useEnvironmentOptions()
+  const environments = environmentOptions.data?.environments ?? []
+  // undefined = untouched, so the run falls back to the default environment.
+  const [environmentOverride, setEnvironmentOverride] = useState<string | null>(
+    null
+  )
+  const defaultEnvironmentSlug = environmentOptions.data?.default_slug ?? null
+  const selectedEnvironment =
+    environmentOverride ??
+    (environments.some((env) => env.slug === defaultEnvironmentSlug)
+      ? defaultEnvironmentSlug
+      : null)
   const [submitting, setSubmitting] = useState(false)
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
@@ -183,6 +197,8 @@ export function AgentsHome() {
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
     if (planMode) configurable.plan_mode = true
+    if (adminThread) configurable.admin_thread = true
+    if (selectedEnvironment) configurable.environment = selectedEnvironment
 
     await stream
       .submit(
@@ -230,6 +246,17 @@ export function AgentsHome() {
             onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
             planMode={planMode}
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
+            environments={environments}
+            selectedEnvironment={selectedEnvironment}
+            onEnvironmentChange={
+              runTarget === "cloud" ? setEnvironmentOverride : undefined
+            }
+            adminThread={adminThread}
+            onAdminThreadChange={
+              runTarget === "cloud" && session.data?.is_admin
+                ? setAdminThread
+                : undefined
+            }
             skills={skills.data}
             contextUsage={{
               contextWindow:

@@ -209,9 +209,18 @@ export function AgentsSidebar({
         })}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+      <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
         {isDesktop && (
-          <div className="mb-3">
+          <div
+            className={cn(
+              "mb-3 flex min-h-0 flex-col",
+              prefs.collapsed.local
+                ? "shrink-0"
+                : cloudCollapsed
+                  ? "flex-1"
+                  : "max-h-1/2 shrink-0"
+            )}
+          >
             <SectionHeader
               label="Local"
               count={localSessionCount}
@@ -229,7 +238,7 @@ export function AgentsSidebar({
               </button>
             </SectionHeader>
             {!prefs.collapsed.local && (
-              <>
+              <div className="min-h-0 overflow-y-auto">
                 {localGroups.map((group) => (
                   <LocalThreadGroup
                     key={group.project.cwd}
@@ -247,7 +256,7 @@ export function AgentsSidebar({
                     No projects yet
                   </p>
                 )}
-              </>
+              </div>
             )}
           </div>
         )}
@@ -263,7 +272,7 @@ export function AgentsSidebar({
           />
         )}
         {!cloudCollapsed && (
-          <>
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {prefs.group === "none"
               ? sections[0]?.threads.map((thread) => (
                   <ThreadRow
@@ -299,7 +308,7 @@ export function AgentsSidebar({
                 No threads match these filters.
               </p>
             )}
-          </>
+          </div>
         )}
       </div>
 

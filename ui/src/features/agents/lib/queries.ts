@@ -66,6 +66,19 @@ export const agentSkillKeys = {
   all: ["agent-skills"] as const,
 }
 
+export const environmentOptionKeys = {
+  all: ["environment-options"] as const,
+}
+
+/** Environments a new thread can boot from. Empty when none are configured. */
+export function useEnvironmentOptions() {
+  return useQuery({
+    queryKey: environmentOptionKeys.all,
+    queryFn: api.listEnvironmentOptions,
+    staleTime: 60_000,
+  })
+}
+
 export function useAgentSkills() {
   return useQuery({
     queryKey: agentSkillKeys.all,
