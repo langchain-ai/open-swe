@@ -64,7 +64,8 @@ async def test_discover_working_repo_rejects_ambiguous_repos() -> None:
     assert await discover_working_repo(backend) is None
 
 
-async def test_execute_updates_thread_repo_metadata_once() -> None:
+@pytest.mark.parametrize("tool_name", ["execute", "task"])
+async def test_sandbox_tool_updates_thread_repo_metadata_once(tool_name: str) -> None:
     backend = FakeBackend("https://github.com/langchain-ai/open-swe.git\n")
     threads = FakeThreads()
     middleware = WorkingRepoMiddleware(
@@ -72,7 +73,7 @@ async def test_execute_updates_thread_repo_metadata_once() -> None:
         backend=backend,
         thread_client=SimpleNamespace(threads=threads),
     )
-    request: Any = SimpleNamespace(tool_call={"name": "execute", "args": {}, "id": "call-1"})
+    request: Any = SimpleNamespace(tool_call={"name": tool_name, "args": {}, "id": "call-1"})
 
     async def handler(_request: Any) -> ToolMessage:
         return ToolMessage(content="ok", tool_call_id="call-1")
@@ -83,10 +84,6 @@ async def test_execute_updates_thread_repo_metadata_once() -> None:
     assert threads.updates == [
         {
             "thread_id": "thread-1",
-            "metadata": {
-                "repo": {"owner": "langchain-ai", "name": "open-swe"},
-                "repo_owner": "langchain-ai",
-                "repo_name": "open-swe",
-            },
+            "metadata": {"working_repo_full_name": "langchain-ai/open-swe"},
         }
     ]

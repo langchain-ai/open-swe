@@ -404,6 +404,11 @@ async def _thread_summary(
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
+    working_repo = metadata.get("working_repo_full_name")
+    if isinstance(working_repo, str) and working_repo.count("/") == 1:
+        working_owner, working_name = working_repo.split("/", 1)
+        if working_owner and working_name:
+            name, full_name = working_name, working_repo
     created_at = metadata.get("created_at_ms")
     updated_at = metadata.get("updated_at_ms")
     title = metadata.get("title") if isinstance(metadata.get("title"), str) else "Untitled agent"

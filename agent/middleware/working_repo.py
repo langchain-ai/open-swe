@@ -95,11 +95,7 @@ class WorkingRepoMiddleware(AgentMiddleware):
         try:
             await self._thread_client.threads.update(
                 thread_id=self._thread_id,
-                metadata={
-                    "repo": {"owner": owner, "name": name},
-                    "repo_owner": owner,
-                    "repo_name": name,
-                },
+                metadata={"working_repo_full_name": f"{owner}/{name}"},
             )
         except Exception:
             logger.debug(
