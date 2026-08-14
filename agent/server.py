@@ -785,6 +785,19 @@ async def _cached_profile(profile_login: str | None):
     )
 
 
+def _slack_tools_enabled(configurable: dict[str, Any]) -> bool:
+    """Return whether the run has trusted Slack source context."""
+    if configurable.get("source") not in {"slack", "schedule"}:
+        return False
+    slack_thread = configurable.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return False
+    return all(
+        isinstance(slack_thread.get(key), str) and bool(slack_thread[key].strip())
+        for key in ("channel_id", "thread_ts")
+    )
+
+
 def _make_model_or_defer(
     model_id: str,
     *,
@@ -1119,6 +1132,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ),
         )
 
+    slack_tools = [
+        slack_add_reaction,
+        slack_read_thread_messages,
+        slack_start_new_thread,
+        slack_thread_reply,
+    ]
     static_tools = [
         http_request,
         fetch_url,
@@ -1143,10 +1162,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
-        slack_add_reaction,
-        slack_read_thread_messages,
-        slack_start_new_thread,
-        slack_thread_reply,
+        *(slack_tools if _slack_tools_enabled(configurable) else []),
     ]
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups = {
@@ -1158,7 +1174,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if any(integration_tool_groups.values()):
         dynamic_tool_middleware = DynamicToolMiddleware(
             integration_tool_groups,
-            reserved_names={*DEEP_AGENT_TOOL_NAMES, *(tool.__name__ for tool in static_tools)},
+            reserved_names={
+                *DEEP_AGENT_TOOL_NAMES,
+                *(tool.__name__ for tool in [*static_tools, *slack_tools]),
+            },
         )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
