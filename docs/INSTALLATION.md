@@ -389,8 +389,6 @@ Users can also override the team/project mapping per-comment by including `repo:
             "request_url": "https://<your-ngrok-url>/webhooks/slack",
             "bot_events": [
                 "app_mention",
-                "message.channels",
-                "message.groups",
                 "message.im",
                 "message.mpim"
             ]
@@ -418,12 +416,6 @@ Both Slack URLs must point at the Open SWE backend that serves `agent.webapp:app
 - **Interactivity & Shortcuts → Interactivity Request URL:** `https://<your-backend-url>/webhooks/slack/interactivity`
 
 Slack Block Kit option buttons only work when Interactivity is enabled and pointed at `/webhooks/slack/interactivity`.
-
-**Bot events checklist:**
-
-`app_mention` alone only covers explicit `@`-mentions. The `message.channels` and `message.groups` subscriptions are what let Open SWE reply in a channel thread without being tagged — it answers an untagged follow-up when it has already posted in that thread and exactly one human is participating. Without them Slack never delivers the message, so untagged replies (and plan approvals typed in a channel thread) are silently dropped.
-
-Subscribing to these means the webhook receives every message in every channel the bot is invited to; Open SWE ignores the ones it does not need. Keep the bot out of high-traffic channels where it has no reason to be.
 
 **Credentials you'll need:**
 
@@ -762,7 +754,7 @@ Alternatively, you can have the browser call the backend cross-origin: set `VITE
 
 - Verify ngrok is running and the URL matches what's configured in GitHub/Linear/Slack
 - Check the ngrok web inspector at `http://localhost:4040` for incoming requests
-- Ensure you enabled the correct event types (Comments → Create for Linear, `app_mention` + `message.*` for Slack, Issues + Issue comment for GitHub)
+- Ensure you enabled the correct event types (Comments → Create for Linear, `app_mention` for Slack, Issues + Issue comment for GitHub)
 - **Webhook secrets are required** — if `GITHUB_WEBHOOK_SECRET`, `LINEAR_WEBHOOK_SECRET`, or `SLACK_SIGNING_SECRET` is not set, all requests to that endpoint will be rejected with 401
 
 ### GitHub authentication errors
@@ -796,7 +788,7 @@ Alternatively, you can have the browser call the backend cross-origin: set `VITE
 
 - For GitHub: ensure the comment or issue contains `@openswe` (case-insensitive), and the commenter has a user mapping (Admin → User mappings; see "Configure triggering surfaces"). Add any missing user with **Add / update** in that section.
 - For Linear: ensure the comment contains `@openswe` (case-insensitive)
-- For Slack: ensure the bot is invited to the channel and the message is an `@mention`. For untagged follow-ups in a thread, also confirm the app subscribes to `message.channels` / `message.groups` (see "Bot events checklist") and that the thread has only Open SWE and one human in it
+- For Slack: ensure the bot is invited to the channel and the message is an `@mention`
 - Check server logs for webhook processing errors
 
 ### Token encryption errors
