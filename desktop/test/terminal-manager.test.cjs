@@ -6,7 +6,7 @@ const test = require("node:test")
 const {
   createTerminalManager,
   ensurePtySpawnHelperExecutable,
-  getUserShellEnv,
+  getProjectShellEnv,
 } = require("../src/terminal-manager.cjs")
 
 class FakeProcess {
@@ -92,14 +92,14 @@ function tick() {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
-test("loads environment set by interactive shell prompt hooks", () => {
-  const env = getUserShellEnv({
+test("loads environment set by interactive shell prompt hooks", async () => {
+  const env = await getProjectShellEnv({
     cwd: "/project",
     env: { SHELL: "/bin/zsh", EXISTING: "kept" },
-    execFileSync: (_shell, args, options) => {
+    run: async (_shell, args, options, input) => {
       assert.deepEqual(args, ["-il"])
       assert.equal(options.cwd, "/project")
-      const mark = /echo '([0-9a-f]+)'/.exec(options.input)[1]
+      const mark = /echo '([0-9a-f]+)'/.exec(input)[1]
       return `${mark}\nOPENAI_BASE_URL=https://gateway.example/openai/v1\n${mark}\n`
     },
   })

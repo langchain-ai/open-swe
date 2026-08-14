@@ -47,12 +47,55 @@ function ensurePtySpawnHelperExecutable(options = {}) {
   } catch {}
 }
 
-function getUserShellEnv(options = {}) {
+function shellEnvFromOutput(result, mark, baseEnv) {
+  const start = result.indexOf(mark)
+  const end = result.lastIndexOf(mark)
+  if (start === -1 || start === end) return null
+  const resolved = { ...baseEnv }
+  for (const line of result.slice(start + mark.length, end).split("\n")) {
+    const separator = line.indexOf("=")
+    if (separator > 0) resolved[line.slice(0, separator)] = line.slice(separator + 1)
+  }
+  return resolved
+}
+
+function getUserShellEnv() {
+  if (shellEnv) return shellEnv
+  const shell = process.env.SHELL || "/bin/zsh"
+  for (const args of [["-il", "-c"], ["-l", "-c"], ["-i", "-c"]]) {
+    try {
+      const mark = randomBytes(8).toString("hex")
+      const result = execFileSync(shell, [...args, `echo '${mark}'; env; echo '${mark}'`], {
+        encoding: "utf8",
+        timeout: 10_000,
+        stdio: ["pipe", "pipe", "pipe"],
+      })
+      const resolved = shellEnvFromOutput(result, mark, process.env)
+      if (!resolved) continue
+      shellEnv = resolved
+      return shellEnv
+    } catch {}
+  }
+  shellEnv = { ...process.env }
+  return shellEnv
+}
+
+function runShell(shell, args, options, input) {
+  return new Promise((resolve, reject) => {
+    const child = execFile(shell, args, options, (error, stdout) => {
+      if (error) reject(error)
+      else resolve(stdout)
+    })
+    if (input && child.stdin) {
+      child.stdin.on("error", () => {})
+      child.stdin.end(input)
+    }
+  })
+}
+
+async function getProjectShellEnv(options = {}) {
   const baseEnv = options.env || process.env
-  const run = options.execFileSync || execFileSync
-  const cache =
-    options.cwd === undefined && options.env === undefined && options.execFileSync === undefined
-  if (cache && shellEnv) return shellEnv
+  const run = options.run || runShell
   const shell = baseEnv.SHELL || "/bin/zsh"
   const attempts = [
     { args: ["-il"], stdin: true },
@@ -64,33 +107,22 @@ function getUserShellEnv(options = {}) {
     try {
       const mark = randomBytes(8).toString("hex")
       const command = `echo '${mark}'; env; echo '${mark}'`
-      const result = run(
+      const result = await run(
         shell,
         attempt.stdin ? attempt.args : [...attempt.args, command],
         {
           encoding: "utf8",
           timeout: 10_000,
-          stdio: ["pipe", "pipe", "pipe"],
           env: baseEnv,
           ...(options.cwd ? { cwd: options.cwd } : {}),
-          ...(attempt.stdin ? { input: `${command}\nexit\n` } : {}),
-        }
+        },
+        attempt.stdin ? `${command}\nexit\n` : undefined
       )
-      const start = result.indexOf(mark)
-      const end = result.lastIndexOf(mark)
-      if (start === -1 || start === end) continue
-      const resolved = { ...baseEnv }
-      for (const line of result.slice(start + mark.length, end).split("\n")) {
-        const separator = line.indexOf("=")
-        if (separator > 0) resolved[line.slice(0, separator)] = line.slice(separator + 1)
-      }
-      if (cache) shellEnv = resolved
-      return resolved
+      const resolved = shellEnvFromOutput(result, mark, baseEnv)
+      if (resolved) return resolved
     } catch {}
   }
-  const fallback = { ...baseEnv }
-  if (cache) shellEnv = fallback
-  return fallback
+  return { ...baseEnv }
 }
 
 function shellCandidates(env, platform = process.platform) {
@@ -998,6 +1030,6 @@ module.exports = {
   configureTerminalIpc,
   createTerminalManager,
   ensurePtySpawnHelperExecutable,
-  getUserShellEnv,
+  getProjectShellEnv,
   sanitizeHistoryChunk,
 }

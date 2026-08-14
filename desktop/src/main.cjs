@@ -28,7 +28,7 @@ const {
 const {
   closeAllTerminals,
   configureTerminalIpc,
-  getUserShellEnv,
+  getProjectShellEnv,
 } = require("./terminal-manager.cjs");
 const {
   addProject,
@@ -230,8 +230,8 @@ function registeredProject(cwd) {
   }
 }
 
-function createAcpSession({ cwd, modelId, effort, restored }) {
-  const env = getUserShellEnv({ cwd });
+async function createAcpSession({ cwd, modelId, effort, restored }) {
+  const env = await getProjectShellEnv({ cwd });
   return new AcpSession({
     cwd,
     target: dcodeTarget({ env, modelId, effort }),
@@ -256,7 +256,7 @@ async function restoreAcpSession(sessionId) {
       ((await repoRoot(cwd)) === stored.checkpoint.repo &&
         stored.checkpoint.ref === checkpointRef(stored.id));
     if (!checkpointValid) acpCheckpoints.delete(sessionId);
-    const localSession = createAcpSession({
+    const localSession = await createAcpSession({
       cwd,
       modelId: stored.modelId,
       effort: stored.effort,
@@ -365,7 +365,7 @@ function configureDesktopIpc() {
     const modelId =
       typeof input.modelId === "string" ? input.modelId : undefined;
     const effort = typeof input.effort === "string" ? input.effort : undefined;
-    const localSession = createAcpSession({ cwd, modelId, effort });
+    const localSession = await createAcpSession({ cwd, modelId, effort });
     persistedAcpSessions.set(localSession.id, {
       ...sessionRecord(localSession),
       ...(modelId ? { modelId } : {}),
