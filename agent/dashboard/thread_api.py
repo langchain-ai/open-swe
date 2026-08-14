@@ -1095,10 +1095,11 @@ async def _create_dashboard_thread_record(
         metadata_model = resolved_model
         metadata_effort = resolved_effort
     has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
+    initial_title = title or prompt[:80] or "New agent"
     metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "github_login": login,
-        "title": title or prompt[:80] or "New agent",
+        "title": initial_title,
         "base_branch": profile.get("base_branch") or "main",
         "branch_prefix": profile.get("branch_prefix"),
         "model": metadata_model,
@@ -1109,6 +1110,8 @@ async def _create_dashboard_thread_record(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
+    if not title:
+        metadata["title_seed"] = initial_title
     if has_repo:
         metadata["repo_owner"] = repo_config["owner"]
         metadata["repo_name"] = repo_config["name"]
