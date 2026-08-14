@@ -92,6 +92,6 @@ def test_general_purpose_subagent_includes_dynamic_tools() -> None:
     from agent.server import _general_purpose_subagent
 
     middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
-    subagent = _general_purpose_subagent(MagicMock(), dynamic_tools=middleware)
+    subagent = _general_purpose_subagent(MagicMock(), tools=[], dynamic_tools=middleware)
 
     assert middleware in subagent.get("middleware", [])

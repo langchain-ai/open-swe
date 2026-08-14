@@ -12,6 +12,7 @@ from typing import Any, cast
 import httpx
 from langchain_core.messages.content import create_text_block
 
+from agent.dashboard.environments import get_environment, parse_environment_tag
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 
@@ -425,6 +426,24 @@ async def _process_slack_mention_impl(
         common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
         or "(no text in mention)"
     )
+    is_first_mention = not await common._thread_exists(thread_id)
+    # `env:<name>` on the message that opens a thread picks the environment its
+    # sandbox boots from. Only the opening message can: the sandbox is created
+    # once, so honoring a later tag would change the prompt but not the image. The
+    # tag is stripped only when it resolves, so a typo stays visible in the
+    # transcript instead of vanishing.
+    environment_slug: str | None = None
+    if is_first_mention:
+        tagged_slug, text_without_tag = parse_environment_tag(clean_text)
+        if tagged_slug and await get_environment(tagged_slug) is not None:
+            environment_slug = tagged_slug
+            clean_text = text_without_tag or "(no text in mention)"
+        elif tagged_slug:
+            common.logger.info(
+                "Slack thread %s tagged unknown environment %s; using the default",
+                thread_id,
+                tagged_slug,
+            )
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
     trigger_user_timezone_section = (
         f"## Triggering User Time Zone\n{user_timezone}\n\n" if user_timezone else ""
@@ -561,6 +580,12 @@ async def _process_slack_mention_impl(
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
+    # Later mentions carry no tag, so the thread's environment comes back from
+    # metadata — a follow-up must not be told about `default` while its sandbox
+    # was built from the environment the opening message picked.
+    thread_environment = environment_slug or await common._get_thread_environment(thread_id)
+    if thread_environment:
+        configurable["environment"] = thread_environment
     if image_model_override:
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
@@ -570,7 +595,6 @@ async def _process_slack_mention_impl(
         configurable["plan_mode"] = thread_plan_mode
 
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    is_first_mention = not await common._thread_exists(thread_id)
     await common._upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
@@ -583,6 +607,7 @@ async def _process_slack_mention_impl(
         user_email=user_email or "",
         title=clean_text if is_first_mention else "",
         source_context={"slack_thread": configurable["slack_thread"]},
+        environment=environment_slug,
     )
 
     # A DM (treat_all_messages_as_mentions) is inherently directed at the bot, so

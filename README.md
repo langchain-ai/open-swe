@@ -149,6 +149,7 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 ## Getting Started
 
 - **[Installation Guide](docs/INSTALLATION.md)** — local dev (backend + dashboard), GitHub App creation, LangSmith, Linear/Slack/GitHub triggers, and production deployment
+- **macOS Desktop beta** — clone this repository and run `make install-desktop` from the root to install or update the app
 - **[Customization Guide](docs/CUSTOMIZATION.md)** — swap the sandbox, model, tools, triggers, system prompt, and middleware for your org
 
 ## License

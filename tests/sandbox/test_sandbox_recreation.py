@@ -46,6 +46,7 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
     create.assert_awaited_once_with(
         thread_id=thread_id,
         repo={"owner": "langchain-ai", "name": "open-swe"},
+        environment_slug=None,
     )
     configure.assert_awaited_once_with(new_sandbox)
     update.assert_awaited_once_with(

@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev desktop
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev desktop install-desktop
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -15,6 +15,12 @@ run:
 
 desktop:
 	cd desktop && pnpm run dev
+
+install-desktop:
+	@test -z "$$(git status --porcelain)" || { echo 'Commit or stash repository changes first.' >&2; exit 1; }
+	@git switch main
+	@git pull --ff-only origin main
+	@./scripts/install_desktop.sh
 
 install:
 	uv sync --extra dev
@@ -68,6 +74,7 @@ help:
 	@echo 'dev                          - run LangGraph dev server'
 	@echo 'run                          - run webhook server'
 	@echo 'desktop                      - run the Electron desktop app (backend must be running)'
+	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'

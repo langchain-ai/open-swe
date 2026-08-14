@@ -383,7 +383,10 @@ def _first_open_swe_option_action(actions: common.Any) -> dict[str, common.Any] 
     if not isinstance(actions, list):
         return None
     for action in actions:
-        if isinstance(action, dict) and action.get("action_id") == "open_swe_option_select":
+        action_id = action.get("action_id") if isinstance(action, dict) else None
+        if isinstance(action_id, str) and (
+            action_id == "open_swe_option_select" or action_id.startswith("open_swe_option_select_")
+        ):
             return action
     return None
 

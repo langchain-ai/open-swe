@@ -93,16 +93,41 @@ def test_construct_system_prompt_includes_operational_safeguards() -> None:
 def test_slack_information_only_response_uses_single_output_path() -> None:
     from agent.tools.slack_thread_reply import slack_thread_reply
 
-    prompt = construct_system_prompt(working_dir="/workspace")
+    prompt = construct_system_prompt(working_dir="/workspace", source="slack", slack_context=True)
     tool_guidance = " ".join((slack_thread_reply.__doc__ or "").split())
 
-    assert "send the complete answer there" in prompt
-    assert "send the complete answer through `slack_thread_reply`" in prompt
+    assert "`slack_thread_reply` is the canonical user-facing output" in prompt
+    assert "put the complete answer there" in prompt
     assert "complete answer in `message`, not merely a summary" in tool_guidance
     assert "do not repeat it in the final assistant response" in prompt
     assert "do not repeat it in the final assistant response" in tool_guidance
-    assert "answer fully inline" not in prompt
-    assert "not normal web UI assistant messages" not in tool_guidance
+
+
+def test_dashboard_prompt_uses_normal_assistant_responses() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace")
+
+    assert "This run is being handled in the dashboard/Web UI" in prompt
+    assert "put the complete answer in the normal assistant response" in prompt
+    assert "slack_thread_reply" not in prompt
+    assert "slack_add_reaction" not in prompt
+
+
+def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
+    expected = {
+        "linear": "Use `linear_comment`",
+        "github": "Use `gh issue comment` or `gh pr comment`",
+        "schedule": "call `notify_automation_channel` once",
+    }
+
+    for source, guidance in expected.items():
+        prompt = construct_system_prompt(working_dir="/workspace", source=source)
+        assert guidance in prompt
+        assert "Make `slack_thread_reply` your first tool call" not in prompt
+
+    scheduled_slack = construct_system_prompt(
+        working_dir="/workspace", source="schedule", slack_context=True
+    )
+    assert "validated Slack destination" in scheduled_slack
 
 
 def test_construct_system_prompt_includes_shared_base_explicitly() -> None:

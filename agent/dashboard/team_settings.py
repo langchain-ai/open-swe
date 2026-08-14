@@ -35,6 +35,8 @@ TEAM_SETTINGS_KEY = "default"
 # prompt. Generous enough for a detailed policy, small enough to stay bounded.
 ORG_GUIDELINES_MAX_CHARS = 10_000
 REVIEW_TRACING_PROJECT_MAX_CHARS = 256
+DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-5.6-luna"
+DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
 
 
 class TeamSettingsUpdate(BaseModel):
@@ -60,6 +62,8 @@ class TeamSettingsUpdate(BaseModel):
     default_grouping_reasoning_effort: str | None = None
     default_chat_model: str | None = None
     default_chat_reasoning_effort: str | None = None
+    default_thread_title_model: str | None = None
+    default_thread_title_reasoning_effort: str | None = None
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -129,6 +133,12 @@ class TeamSettingsUpdate(BaseModel):
             self.default_chat_model,
             self.default_chat_reasoning_effort,
         )
+        self.default_thread_title_model, self.default_thread_title_reasoning_effort = (
+            _normalize_stale_model_pair(
+                self.default_thread_title_model,
+                self.default_thread_title_reasoning_effort,
+            )
+        )
         _validate_model_effort_pair(
             self.default_agent_model, self.default_agent_reasoning_effort, "agent"
         )
@@ -153,6 +163,11 @@ class TeamSettingsUpdate(BaseModel):
         _validate_model_effort_pair(
             self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
         )
+        _validate_model_effort_pair(
+            self.default_thread_title_model,
+            self.default_thread_title_reasoning_effort,
+            "thread title",
+        )
         if not self.fable_enabled:
             # Disabling Fable is the ZDR kill switch and must always succeed: rather
             # than reject a payload that still carries a Fable default, swap each
@@ -165,6 +180,7 @@ class TeamSettingsUpdate(BaseModel):
                 ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
                 ("default_grouping_model", "default_grouping_reasoning_effort"),
                 ("default_chat_model", "default_chat_reasoning_effort"),
+                ("default_thread_title_model", "default_thread_title_reasoning_effort"),
             ):
                 model = getattr(self, model_field)
                 if model in FABLE_MODEL_IDS:
@@ -205,6 +221,7 @@ _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
     ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
     ("default_grouping_model", "default_grouping_reasoning_effort"),
     ("default_chat_model", "default_chat_reasoning_effort"),
+    ("default_thread_title_model", "default_thread_title_reasoning_effort"),
 )
 
 
@@ -266,6 +283,8 @@ def _default_settings() -> dict[str, Any]:
         # No hardcoded chat default: unset means "inherit the Agent default".
         "default_chat_model": None,
         "default_chat_reasoning_effort": None,
+        "default_thread_title_model": DEFAULT_THREAD_TITLE_MODEL,
+        "default_thread_title_reasoning_effort": DEFAULT_THREAD_TITLE_REASONING_EFFORT,
         "updated_at": None,
     }
 
@@ -319,6 +338,8 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "default_grouping_reasoning_effort": update.default_grouping_reasoning_effort,
         "default_chat_model": update.default_chat_model,
         "default_chat_reasoning_effort": update.default_chat_reasoning_effort,
+        "default_thread_title_model": update.default_thread_title_model,
+        "default_thread_title_reasoning_effort": update.default_thread_title_reasoning_effort,
         "updated_at": datetime.now(UTC).isoformat(),
     }
     await _client().store.put_item(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY, value)
@@ -416,6 +437,20 @@ async def get_team_default_grouping_model() -> tuple[str, str]:
         settings.get("default_reviewer_subagent_model"),
         settings.get("default_reviewer_subagent_reasoning_effort"),
     )
+
+
+async def get_team_default_thread_title_model() -> tuple[str, str]:
+    settings = await get_team_settings()
+    model = settings.get("default_thread_title_model")
+    effort = settings.get("default_thread_title_reasoning_effort")
+    if (
+        isinstance(model, str)
+        and isinstance(effort, str)
+        and model in SUPPORTED_MODEL_IDS
+        and model_supports_effort(model, effort)
+    ):
+        return _resolve_default_pair(model, effort)
+    return DEFAULT_THREAD_TITLE_MODEL, DEFAULT_THREAD_TITLE_REASONING_EFFORT
 
 
 async def get_team_review_trace_links_enabled() -> bool:

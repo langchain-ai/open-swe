@@ -44,8 +44,9 @@ async def slack_thread_reply(
     render interactive buttons and the web UI will render the same choices.
     The user can still reply manually in the Slack thread.
 
-    When a plan is ready, post a plain-text summary with the dashboard review link
-    and ask the user to reply in the thread to approve it or request changes.
+    When a plan is ready, post a concise summary with the dashboard review link and
+    pass `options=["Approve & implement", "Request changes"]`. The user can still
+    reply manually with feedback.
 
     To mention/tag a user, use Slack's mention format: <@USER_ID>.
     You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
@@ -100,9 +101,9 @@ def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[s
                     "type": "button",
                     "text": {"type": "plain_text", "text": option[:75], "emoji": True},
                     "value": json.dumps({"type": "open_swe_option", "response": option}),
-                    "action_id": "open_swe_option_select",
+                    "action_id": f"open_swe_option_select_{index}",
                 }
-                for option in clean_options[:5]
+                for index, option in enumerate(clean_options[:5])
             ],
         },
     ]
@@ -125,7 +126,7 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
                             "fingerprint": fingerprint,
                         }
                     ),
-                    "action_id": "open_swe_option_select",
+                    "action_id": "open_swe_option_select_approve",
                 },
                 {
                     "type": "button",
@@ -138,7 +139,7 @@ def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[
                             "fingerprint": fingerprint,
                         }
                     ),
-                    "action_id": "open_swe_option_select",
+                    "action_id": "open_swe_option_select_reject",
                 },
             ],
         },
