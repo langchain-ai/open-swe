@@ -109,7 +109,7 @@ class SandboxBackendProxy(BaseSandbox):
             if self._backend is not None:
                 return
             raise RuntimeError("Cannot start sandbox without a reconnect callback")
-        self._startup_task = asyncio.create_task(self._reconnect())
+        self._startup_task = asyncio.ensure_future(self._reconnect())
         self._startup_task.add_done_callback(self._startup_completed)
 
     def _startup_completed(self, task: asyncio.Task[SandboxBackendProtocol]) -> None:
@@ -164,6 +164,8 @@ class SandboxBackendProxy(BaseSandbox):
                     self._startup_task = asyncio.create_task(create_sandbox(sandbox_id))
                     self._startup_task.add_done_callback(self._startup_completed)
             startup_task = self._startup_task
+            if startup_task is None:
+                raise RuntimeError(f"Sandbox startup task missing for thread {self._thread_id}")
 
         try:
             sandbox_backend = await asyncio.shield(startup_task)
@@ -179,7 +181,10 @@ class SandboxBackendProxy(BaseSandbox):
                 self._backend = unwrap_sandbox_backend(sandbox_backend)
                 self._startup_task = None
                 SANDBOX_BACKENDS[self._thread_id] = self
-            return self._backend
+            backend = self._backend
+            if backend is None:
+                raise RuntimeError(f"No sandbox backend cached for thread {self._thread_id}")
+            return backend
 
     def ls(self, path: str) -> LsResult:
         raise NotImplementedError(_SYNC_UNSUPPORTED)

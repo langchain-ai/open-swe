@@ -1796,6 +1796,7 @@ async def test_pr_diff_uses_repository_from_pr_url(monkeypatch) -> None:
 
     await thread_api.get_dashboard_thread_pr_diff("thread-1", "owner")
 
+    assert build_diff.await_args is not None
     assert build_diff.await_args.args[1:] == ("langchain-ai/open-swe", 1925)
 
 
