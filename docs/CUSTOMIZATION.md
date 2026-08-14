@@ -43,7 +43,7 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"                # Optional, d
 REPO_SNAPSHOT_BASE_IMAGE="<registry>/<open-swe-sandbox-image>"      # Optional; required for admin-generated repo snapshot templates
 ```
 
-This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `GH_TOKEN=dummy gh <command>` and rely on the LangSmith proxy for the real credentials.
+This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `gh <command>` and rely on the LangSmith proxy for the real credentials.
 
 `DEFAULT_SANDBOX_SNAPSHOT_ID` is only the deployment default. Admins can override it at runtime — from the **Repository Snapshots** page or via `PUT /dashboard/api/sandbox-settings` — so a rebuilt image can be rolled out without a redeploy. See [INSTALLATION.md](./INSTALLATION.md) and `examples/github-actions/set-base-snapshot.yml` for the CI flow.
 
@@ -220,7 +220,7 @@ Routing is applied centrally in `make_model` (`agent/utils/model.py`), which res
 
 ## 3. Tools
 
-Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents). GitHub operations are handled by `GH_TOKEN=dummy gh` inside the sandbox.
+Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents). GitHub operations are handled by `gh` inside the sandbox.
 
 | Tool | File | Purpose |
 |---|---|---|

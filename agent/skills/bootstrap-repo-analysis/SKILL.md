@@ -10,7 +10,7 @@ system prompt. There is no outcomes history yet, so your signal comes entirely f
 the repo's own historical PR review feedback. Do not call `read_finding_outcomes` in
 this mode — it will be empty.
 
-Always invoke gh as: `GH_TOKEN=dummy gh <command>`.
+`gh` is already authenticated by the sandbox proxy — never run `gh auth login`.
 
 ## 1. Research (required)
 
@@ -19,10 +19,10 @@ Browse historical **merged** PR review feedback until you have catalogued at lea
 like codecov / dependabot). Useful commands:
 
 ```
-GH_TOKEN=dummy gh pr list --repo <owner>/<repo> --state merged --limit 30
-GH_TOKEN=dummy gh api repos/<owner>/<repo>/pulls/<PR_NUMBER>/reviews
-GH_TOKEN=dummy gh api repos/<owner>/<repo>/pulls/<PR_NUMBER>/comments
-GH_TOKEN=dummy gh api repos/<owner>/<repo>/issues/<PR_NUMBER>/comments
+gh pr list --repo <owner>/<repo> --state merged --limit 30
+gh api repos/<owner>/<repo>/pulls/<PR_NUMBER>/reviews
+gh api repos/<owner>/<repo>/pulls/<PR_NUMBER>/comments
+gh api repos/<owner>/<repo>/issues/<PR_NUMBER>/comments
 ```
 
 If the first batch is sparse, raise `--limit` or walk older PR numbers. The user

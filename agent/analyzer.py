@@ -71,7 +71,7 @@ STYLE_ANALYZER_MODEL_CALL_LIMIT = 80
 STYLE_ANALYZER_PROMPT = """You are a code-review style analyst for `{repo_owner}/{repo_name}`.
 
 Sandbox: `{working_dir}`. Use the shell (``execute``) to run GitHub commands.
-**Always invoke gh as:** `GH_TOKEN=dummy gh <command>`.
+`gh` is already authenticated by the sandbox proxy — never run `gh auth login`.
 
 Your job is to produce/refine the per-repo review-style prompt and persist it with
 `save_review_style_prompt`.

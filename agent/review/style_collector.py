@@ -297,7 +297,7 @@ def format_samples_for_analyzer(samples: ReviewStyleSamples) -> str:
     if not samples.samples:
         lines.append(
             "Pre-collection found no substantive review text on recent merged PRs. "
-            "You must browse merged PRs yourself with `GH_TOKEN=dummy gh` (reviews, "
+            "You must browse merged PRs yourself with `gh` (reviews, "
             "pull comments, and issue comments) before saving."
         )
         return "\n".join(lines)
