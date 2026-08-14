@@ -96,6 +96,20 @@ async def control_state() -> JSONResponse:
     )
 
 
+@app.get("/control/snapshots")
+async def control_snapshots() -> JSONResponse:
+    """Snapshot captures/deletes the environment tools asked the platform for."""
+    return JSONResponse({"captured": fakes.SNAPSHOTS, "deleted": fakes.DELETED_SNAPSHOTS})
+
+
+@app.get("/control/last-system-prompt")
+async def control_last_system_prompt() -> JSONResponse:
+    """The system prompt of the most recent model call (what the agent was told)."""
+    from fake_llm import LAST_SYSTEM_PROMPT
+
+    return JSONResponse({"text": LAST_SYSTEM_PROMPT["text"]})
+
+
 @app.post("/control/repo-private")
 async def control_repo_private(request: Request) -> JSONResponse:
     body = await request.json()

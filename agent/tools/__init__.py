@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Any
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "approve_plan": ".approve_plan",
+    "capture_environment_snapshot": ".environments",
+    "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
@@ -17,6 +19,7 @@ _TOOL_MODULES = {
     "linear_list_teams": ".linear_list_teams",
     "linear_search_issues": ".linear_search_issues",
     "linear_update_issue": ".linear_update_issue",
+    "list_environments": ".environments",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
     "notify_automation_channel": ".notify_automation_channel",
@@ -28,6 +31,7 @@ _TOOL_MODULES = {
     "request_pr_review": ".request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
+    "save_environment": ".environments",
     "save_plan": ".save_plan",
     "save_user_instructions": ".save_user_instructions",
     "save_user_skill": ".user_skills",
@@ -45,6 +49,8 @@ _TOOL_MODULES = {
 __all__ = [
     "add_finding",
     "approve_plan",
+    "capture_environment_snapshot",
+    "delete_environment",
     "enter_plan_mode",
     "fetch_review_diff",
     "fetch_url",
@@ -57,6 +63,7 @@ __all__ = [
     "linear_list_teams",
     "linear_search_issues",
     "linear_update_issue",
+    "list_environments",
     "list_findings",
     "list_review_findings",
     "notify_automation_channel",
@@ -68,6 +75,7 @@ __all__ = [
     "request_pr_review",
     "reply_to_finding_thread",
     "resolve_finding_thread",
+    "save_environment",
     "save_plan",
     "save_user_instructions",
     "save_user_skill",
@@ -86,6 +94,12 @@ if TYPE_CHECKING:
     from .add_finding import add_finding
     from .approve_plan import approve_plan
     from .enter_plan_mode import enter_plan_mode
+    from .environments import (
+        capture_environment_snapshot,
+        delete_environment,
+        list_environments,
+        save_environment,
+    )
     from .fetch_review_diff import fetch_review_diff
     from .fetch_url import fetch_url
     from .http_request import http_request

@@ -26,7 +26,13 @@ from e2e_env import (
 )
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 # One shell command that does the whole git workflow. Each execute() runs in a
@@ -49,6 +55,10 @@ git commit -m "{PR_TITLE}"
 git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
 """.strip()
+
+# The system prompt of the most recent model call, so specs can assert what the
+# agent was actually told (e.g. the environment section) rather than infer it.
+LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
 
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
@@ -258,6 +268,12 @@ def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+ENVIRONMENT_NAME = "default"
+ENVIRONMENT_PROMPT = (
+    "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`."
+)
+ENVIRONMENT_PROVISION_SCRIPT = "mkdir -p repos && echo provisioned > repos/.provisioned && ls repos"
+
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
 
 
@@ -342,12 +358,41 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_plan_complete_step),
         StepSpec(content="I'll wait for your review and approval before implementing."),
     ),
+    "environment": (
+        _tool_step(
+            "Provisioning this sandbox before capturing it.",
+            "execute",
+            {"command": ENVIRONMENT_PROVISION_SCRIPT},
+            "call-env-provision",
+        ),
+        _tool_step(
+            "Saving the environment record.",
+            "save_environment",
+            {
+                "name": ENVIRONMENT_NAME,
+                "prompt": ENVIRONMENT_PROMPT,
+                "repos": [f"{OWNER}/{REPO}"],
+            },
+            "call-env-save",
+        ),
+        _tool_step(
+            "Capturing this sandbox as the environment snapshot.",
+            "capture_environment_snapshot",
+            {"name": ENVIRONMENT_NAME},
+            "call-env-capture",
+        ),
+        StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
+    ),
     "followup": (_dynamic_step(_followup_step),),
 }
 
 
 def _is_plan_request(text: str) -> bool:
     return "plan" in text.lower()
+
+
+def _is_environment_request(text: str) -> bool:
+    return "environment" in text.lower()
 
 
 def _is_breakout_request(text: str) -> bool:
@@ -366,6 +411,9 @@ def _is_revision(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule(
+        "environment", lambda ctx: ctx.human_count <= 1 and _is_environment_request(ctx.first_text)
+    ),
     ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
     ScriptRule("plan", lambda ctx: _is_revision(ctx.last_text)),
     ScriptRule("plan", lambda ctx: ctx.human_count <= 1 and _is_plan_request(ctx.first_text)),
@@ -407,6 +455,10 @@ class FakeScriptedChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,  # noqa: ARG002
         **kwargs: Any,
     ) -> ChatResult:
+        for message in messages:
+            if isinstance(message, SystemMessage):
+                LAST_SYSTEM_PROMPT["text"] = _text(message.content)
+                break
         humans = [m for m in messages if isinstance(m, HumanMessage)]
         context = ScriptContext(
             first_text=_text(humans[0].content) if humans else "",
