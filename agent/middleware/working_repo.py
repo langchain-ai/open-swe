@@ -114,6 +114,6 @@ class WorkingRepoMiddleware(AgentMiddleware):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
         result = await handler(request)
-        if _tool_name(request) == "execute":
+        if _tool_name(request) in {"execute", "task"}:
             await self._sync_repo()
         return result
