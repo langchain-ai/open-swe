@@ -21,6 +21,8 @@ export interface DesktopAcpSessionSummary {
   status: "starting" | "idle" | "running" | "error"
   createdAt: number
   updatedAt: number
+  modelId?: string
+  effort?: string
 }
 
 export interface DesktopAcpSession extends DesktopAcpSessionSummary {
@@ -168,7 +170,11 @@ declare global {
         }
       ) => Promise<DesktopAcpSession>
       promptAcpSession: (
-        input: DesktopAcpPromptInput & { sessionId: string }
+        input: DesktopAcpPromptInput & {
+          sessionId: string
+          modelId?: string
+          effort?: string
+        }
       ) => Promise<DesktopAcpSession>
       cancelAcpSession: (sessionId: string) => Promise<void>
       getAcpSession: (sessionId: string) => Promise<DesktopAcpSession | null>

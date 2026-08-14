@@ -83,6 +83,28 @@ test("builds ACP text and image prompt blocks", () => {
   )
 })
 
+test("switches model before continuing an ACP session", async () => {
+  let closed = false
+  let initialized = false
+  const session = Object.assign(Object.create(AcpSession.prototype), {
+    status: "idle",
+    modelId: "old:model",
+    effort: "low",
+    replayUsers: new Map(),
+    rpc: { close: () => (closed = true) },
+    connect() {},
+    initialize: async () => (initialized = true),
+    notifyChange() {},
+  })
+
+  await session.configure("new:model", "high", {}, {})
+
+  assert.equal(closed, true)
+  assert.equal(initialized, true)
+  assert.equal(session.modelId, "new:model")
+  assert.equal(session.effort, "high")
+})
+
 test("combines chunked user messages when replaying an ACP session", () => {
   const session = Object.assign(Object.create(AcpSession.prototype), {
     id: "session",
