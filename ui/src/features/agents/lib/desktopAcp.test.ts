@@ -3,7 +3,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { useDesktopAcpSession } from "./desktopAcp"
+import { useDesktopAcpSession, useDesktopAcpSessions } from "./desktopAcp"
 import { desktopAcpMessages } from "./desktopAcpMessages"
 import type {
   DesktopAcpEvent,
@@ -185,5 +185,44 @@ describe("useDesktopAcpSession", () => {
 
     await waitFor(() => expect(result.current.session?.status).toBe("idle"))
     expect(result.current.session?.events).toHaveLength(2)
+  })
+})
+
+describe("useDesktopAcpSessions", () => {
+  it("does not restore a deleted session from stale events or listing", async () => {
+    const listing = deferred<Array<DesktopAcpSessionSummary>>()
+    let emit!: (payload: {
+      sessionId: string
+      event: DesktopAcpEvent
+      session: DesktopAcpSessionSummary
+    }) => void
+    window.openSweDesktop = {
+      listAcpSessions: () => listing.promise,
+      deleteAcpSession: async () => true,
+      onAcpEvent: (callback) => {
+        emit = callback
+        return vi.fn()
+      },
+    } as Window["openSweDesktop"]
+    const { result } = renderHook(() => useDesktopAcpSessions())
+    const summary = session("local")
+    const event: DesktopAcpEvent = {
+      sequence: 0,
+      timestamp: "2026-08-05T20:00:00Z",
+      type: "run-end",
+    }
+
+    act(() => emit({ sessionId: "local", event, session: summary }))
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1))
+    await act(async () => {
+      expect(await result.current.deleteSession("local")).toBe(true)
+    })
+    act(() => emit({ sessionId: "local", event, session: summary }))
+    await act(async () => {
+      listing.resolve([summary])
+      await listing.promise
+    })
+
+    expect(result.current.sessions).toEqual([])
   })
 })

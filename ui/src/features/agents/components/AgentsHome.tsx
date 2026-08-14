@@ -8,6 +8,7 @@ import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import { NewAgentTerminalPanel } from "@/features/agents/components/NewAgentTerminalPanel"
 import { OnboardingDialog } from "@/features/agents/components/OnboardingDialog"
 import { Logo } from "@/features/agents/components/chat/Logo"
 import {
@@ -16,18 +17,25 @@ import {
   optimisticThread,
   seedAgentThreadLists,
   useAgentSkills,
+  useEnvironmentOptions,
 } from "@/features/agents/lib/queries"
 import {
   persistModelSelection,
   useModelOptions,
 } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
+import {
+  readStoredPanelCollapsed,
+  writeStoredPanelCollapsed,
+} from "@/features/agents/lib/gitPanelPreferences"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
   requestNotificationPermission,
   setNotificationsPref,
 } from "@/lib/notifications"
+
+const NEW_AGENT_PANEL_ID = "new-agent"
 
 function promptContent(text: string, images: Array<ImageChunk>) {
   const trimmed = text.trim()
@@ -60,12 +68,37 @@ export function AgentsHome() {
     (model) => model.id === activeSelection?.modelId
   )
   const [planMode, setPlanMode] = useState(false)
+  const [adminThread, setAdminThread] = useState(false)
+  const environmentOptions = useEnvironmentOptions()
+  const environments = environmentOptions.data?.environments ?? []
+  // undefined = untouched, so the run falls back to the default environment.
+  const [environmentOverride, setEnvironmentOverride] = useState<string | null>(
+    null
+  )
+  const defaultEnvironmentSlug = environmentOptions.data?.default_slug ?? null
+  const selectedEnvironment =
+    environmentOverride ??
+    (environments.some((env) => env.slug === defaultEnvironmentSlug)
+      ? defaultEnvironmentSlug
+      : null)
   const [submitting, setSubmitting] = useState(false)
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const [runTarget, setRunTarget] = useState<RunTarget>("cloud")
+  const [runTarget, setRunTarget] = useState<RunTarget>(() =>
+    isDesktop ? "local" : "cloud"
+  )
   const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
+  const [localDraftSessionId, setLocalDraftSessionId] = useState<string | null>(
+    null
+  )
+  const localDraftRef = useRef<{
+    cwd: string
+    promise: Promise<string>
+  } | null>(null)
+  const [panelCollapsed, setPanelCollapsed] = useState(() =>
+    readStoredPanelCollapsed(NEW_AGENT_PANEL_ID)
+  )
   const {
     projects: localProjects,
     addProject,
@@ -109,6 +142,69 @@ export function AgentsHome() {
     }
   }, [localProjectPath, localProjects])
 
+  useEffect(() => {
+    if (!isDesktop || localProjectPath || localProjects.length === 0) return
+    setLocalProjectPath(localProjects[0]!.cwd)
+  }, [isDesktop, localProjectPath, localProjects])
+
+  useEffect(() => {
+    const desktop = window.openSweDesktop
+    const createDraft = desktop?.createAcpDraftSession
+    const deleteDraft = desktop?.deleteAcpDraftSession
+    setLocalDraftSessionId(null)
+    if (
+      !createDraft ||
+      !deleteDraft ||
+      runTarget !== "local" ||
+      !localProjectPath
+    ) {
+      localDraftRef.current = null
+      return
+    }
+
+    let active = true
+    const request = {
+      cwd: localProjectPath,
+      promise: createDraft(localProjectPath).then((draft) => draft.id),
+    }
+    localDraftRef.current = request
+    void request.promise
+      .then((sessionId) => {
+        if (active) setLocalDraftSessionId(sessionId)
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setLocalError(
+            error instanceof Error
+              ? error.message
+              : "Could not prepare the local terminal"
+          )
+        }
+      })
+
+    return () => {
+      active = false
+      if (localDraftRef.current === request) localDraftRef.current = null
+      void request.promise
+        .then((sessionId) => deleteDraft(sessionId))
+        .catch(() => {})
+    }
+  }, [localProjectPath, runTarget])
+
+  useEffect(() => {
+    if (localDraftSessionId) {
+      writeStoredPanelCollapsed(localDraftSessionId, panelCollapsed)
+    }
+  }, [localDraftSessionId, panelCollapsed])
+
+  const handlePanelCollapsedChange = (next: boolean) => {
+    setPanelCollapsed(next)
+    writeStoredPanelCollapsed(NEW_AGENT_PANEL_ID, next)
+    if (localDraftSessionId) {
+      writeStoredPanelCollapsed(localDraftSessionId, next)
+    }
+  }
+
   const handleRunTargetChange = (next: RunTarget) => {
     setRunTarget(next)
     setLocalError(null)
@@ -143,10 +239,16 @@ export function AgentsHome() {
       setSubmitting(true)
       setLocalError(null)
       try {
+        const draftRequest = localDraftRef.current
+        const draftSessionId =
+          draftRequest?.cwd === localProjectPath
+            ? await draftRequest.promise
+            : undefined
         const session = await desktop.startAcpSession({
           cwd: localProjectPath,
           prompt,
           images,
+          draftSessionId,
           modelId: activeSelection?.modelId,
           effort: activeSelection?.effort,
         })
@@ -183,6 +285,8 @@ export function AgentsHome() {
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
     if (planMode) configurable.plan_mode = true
+    if (adminThread) configurable.admin_thread = true
+    if (selectedEnvironment) configurable.environment = selectedEnvironment
 
     await stream
       .submit(
@@ -201,45 +305,66 @@ export function AgentsHome() {
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-8">
-      <OnboardingDialog />
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center">
-        <div className="flex w-full flex-col items-center gap-6">
-          <Logo />
-          {localError && (
-            <div className="w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              {localError}
-            </div>
-          )}
-          <AgentPromptBar
-            autoFocus
-            onSubmit={handleSubmit}
-            disabled={submitting}
-            models={models}
-            selection={activeSelection}
-            onSelectionChange={handleSelectionChange}
-            repos={reposQuery.data?.repositories}
-            selectedRepo={repo}
-            onRepoChange={setRepoOverride}
-            runTarget={isDesktop ? runTarget : undefined}
-            onRunTargetChange={isDesktop ? handleRunTargetChange : undefined}
-            localProjects={localProjects}
-            selectedLocalProjectPath={localProjectPath}
-            onSelectLocalProject={handleSelectLocalProject}
-            onAddLocalProject={() => void handleAddLocalProject()}
-            onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
-            planMode={planMode}
-            onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
-            skills={skills.data}
-            contextUsage={{
-              contextWindow:
-                runTarget === "cloud"
-                  ? (activeModel?.context_window ?? null)
-                  : null,
-            }}
-          />
+    <>
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-8">
+        <OnboardingDialog />
+        <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center">
+          <div className="flex w-full flex-col items-center gap-6">
+            <Logo />
+            {localError && (
+              <div className="w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                {localError}
+              </div>
+            )}
+            <AgentPromptBar
+              autoFocus
+              onSubmit={handleSubmit}
+              disabled={submitting}
+              models={models}
+              selection={activeSelection}
+              onSelectionChange={handleSelectionChange}
+              repos={reposQuery.data?.repositories}
+              selectedRepo={repo}
+              onRepoChange={setRepoOverride}
+              runTarget={isDesktop ? runTarget : undefined}
+              onRunTargetChange={isDesktop ? handleRunTargetChange : undefined}
+              localProjects={localProjects}
+              selectedLocalProjectPath={localProjectPath}
+              onSelectLocalProject={handleSelectLocalProject}
+              onAddLocalProject={() => void handleAddLocalProject()}
+              onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
+              planMode={planMode}
+              onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
+              environments={environments}
+              selectedEnvironment={selectedEnvironment}
+              onEnvironmentChange={
+                runTarget === "cloud" ? setEnvironmentOverride : undefined
+              }
+              adminThread={adminThread}
+              onAdminThreadChange={
+                runTarget === "cloud" && session.data?.is_admin
+                  ? setAdminThread
+                  : undefined
+              }
+              skills={skills.data}
+              contextUsage={{
+                contextWindow:
+                  runTarget === "cloud"
+                    ? (activeModel?.context_window ?? null)
+                    : null,
+              }}
+            />
+          </div>
         </div>
       </div>
-    </div>
+      {runTarget === "local" && localProjectPath && localDraftSessionId && (
+        <NewAgentTerminalPanel
+          sessionId={localDraftSessionId}
+          cwd={localProjectPath}
+          collapsed={panelCollapsed}
+          onCollapsedChange={handlePanelCollapsedChange}
+        />
+      )}
+    </>
   )
 }

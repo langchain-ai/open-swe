@@ -137,9 +137,15 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   if (!session) {
     return (
       <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 text-xs text-muted-foreground">
-        {loaded
-          ? "This local session is no longer running."
-          : "Loading local Deep Agents Code session…"}
+        {loaded ? (
+          "This local session is no longer running."
+        ) : (
+          <img
+            src="/logo-mark.png"
+            alt="Loading local Deep Agents Code session"
+            className="size-12 animate-pulse"
+          />
+        )}
         {loaded && (
           <Link
             className="text-foreground underline underline-offset-4"
@@ -158,21 +164,25 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
       >
-        <div
-          className={cn(
-            "flex w-full items-center gap-2 px-4 pt-3 text-xs text-muted-foreground",
-            // Collapsed sidebars float controls in the top corners; keep the
-            // path and target labels clear of them.
-            sidebarCollapsed && "pl-32",
-            panelCollapsed && "pr-14"
-          )}
-        >
-          <FolderOpen className="size-3.5" />
-          <span className="truncate" title={session.cwd}>
-            {session.cwd}
-          </span>
-          <span className="ml-auto shrink-0">This Mac</span>
-        </div>
+        <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
+          <div
+            className={cn(
+              "flex h-full w-full items-center gap-3 px-4",
+              sidebarCollapsed && "pl-32",
+              panelCollapsed && "pr-14"
+            )}
+          >
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+              <FolderOpen className="size-3.5 shrink-0" />
+              <span className="truncate" title={session.cwd}>
+                {session.cwd}
+              </span>
+            </span>
+            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+              This Mac
+            </span>
+          </div>
+        </header>
         {session.status === "error" && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
             <Alert variant="error">

@@ -22,6 +22,7 @@ test("persists valid ACP session metadata and ignores malformed records", (t) =>
     updatedAt: 456,
     modelId: "provider:model",
     effort: "high",
+    dcodeCommand: "/opt/bin/dcode",
     checkpoint: { repo: root, ref: "refs/open-swe/local/desktop-id" },
   }
 

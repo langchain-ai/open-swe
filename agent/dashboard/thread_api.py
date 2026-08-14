@@ -37,7 +37,9 @@ from ..utils.thread_ops import (
     langgraph_url,
     queue_message_for_thread,
 )
+from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
+from .environments import get_environment, slugify
 from .options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -441,6 +443,8 @@ async def _thread_summary(
         "model": model,
         "effort": effort,
         "planMode": metadata.get("plan_mode") is True,
+        "adminThread": metadata.get("admin_thread") is True,
+        "environment": metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
         "source": _thread_source(metadata),
         "status": status,
@@ -1059,6 +1063,21 @@ async def get_dashboard_thread(
     )
 
 
+async def _resolve_requested_environment(requested: Any) -> str | None:
+    """Normalize a requested environment slug, dropping one that does not exist.
+
+    The picker only offers configured environments, so a miss means a stale client
+    — the thread falls back to the default rather than booting from nothing.
+    """
+    if not isinstance(requested, str) or not requested.strip():
+        return None
+    try:
+        slug = slugify(requested)
+    except ValueError:
+        return None
+    return slug if await get_environment(slug) is not None else None
+
+
 def _resolve_repo_config(repo: str | None) -> dict[str, str]:
     """Resolve the run's repo from the request, or ``{}`` when none is given."""
     return _parse_repo(repo) or {}
@@ -1076,6 +1095,8 @@ async def _create_dashboard_thread_record(
     model_id: str | None = None,
     effort: str | None = None,
     plan_mode: bool = False,
+    admin_thread: bool = False,
+    environment: str | None = None,
 ) -> dict[str, Any]:
     """Create or update dashboard thread metadata without starting a run."""
     profile = await get_profile(login) or {}
@@ -1110,6 +1131,10 @@ async def _create_dashboard_thread_record(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
+    if admin_thread:
+        metadata["admin_thread"] = True
+    if environment:
+        metadata["environment"] = environment
     if not title:
         metadata["title_seed"] = initial_title
     if has_repo:
@@ -1159,6 +1184,13 @@ async def _build_dashboard_configurable(
             configurable.setdefault(key, value)
     if metadata.get("plan_mode") is True:
         configurable["plan_mode"] = True
+    # The agent re-checks the requesting user against CONFIGURED_ADMINS before it
+    # hands out the environment tools, so this only marks intent.
+    if metadata.get("admin_thread") is True:
+        configurable["admin_thread"] = True
+    environment = metadata.get("environment")
+    if isinstance(environment, str) and environment:
+        configurable["environment"] = environment
     if overrides:
         for key, value in overrides.items():
             if value is not None:
@@ -1330,6 +1362,12 @@ async def _enrich_run_start_command(
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             plan_mode=plan_mode_requested,
+            admin_thread=(
+                client_configurable.get("admin_thread") is True and is_admin(email, login=login)
+            ),
+            environment=await _resolve_requested_environment(
+                client_configurable.get("environment")
+            ),
         )
         metadata = thread_metadata(thread)
         if command_images:

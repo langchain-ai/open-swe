@@ -192,6 +192,21 @@ test("persists bounded sanitized history and supports clear, restart, detach, an
 })
 
 
+test("deleting a local session stops its terminals and removes their history", async (t) => {
+  const value = fixture()
+  t.after(() => value.manager.shutdown())
+  await value.manager.open(request(value.root))
+  value.processes[0].data("saved output\n")
+
+  await value.manager.deleteSession("acp-1")
+
+  assert.deepEqual(value.manager.list("acp-1"), [])
+  assert.equal(value.processes[0].kills[0], "SIGTERM")
+  const attached = await value.manager.attach(request(value.root), () => {})
+  assert.equal(attached.snapshot.history, "")
+  attached.detach()
+})
+
 test("drains queued and trailing PTY output before publishing exit", async (t) => {
   const value = fixture()
   t.after(() => value.manager.shutdown())

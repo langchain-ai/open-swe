@@ -29,6 +29,11 @@ export interface DesktopAcpSession extends DesktopAcpSessionSummary {
   events: Array<DesktopAcpEvent>
 }
 
+export interface DesktopAcpDraftSession {
+  id: string
+  cwd: string
+}
+
 export interface DesktopAcpDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
@@ -162,9 +167,12 @@ declare global {
         localSessionId: string
         path: string
       }) => Promise<string | null>
+      createAcpDraftSession?: (cwd: string) => Promise<DesktopAcpDraftSession>
+      deleteAcpDraftSession?: (sessionId: string) => Promise<boolean>
       startAcpSession: (
         input: DesktopAcpPromptInput & {
           cwd: string
+          draftSessionId?: string
           modelId?: string
           effort?: string
         }
@@ -177,6 +185,7 @@ declare global {
         }
       ) => Promise<DesktopAcpSession>
       cancelAcpSession: (sessionId: string) => Promise<void>
+      deleteAcpSession: (sessionId: string) => Promise<boolean>
       getAcpSession: (sessionId: string) => Promise<DesktopAcpSession | null>
       listAcpSessions: () => Promise<Array<DesktopAcpSessionSummary>>
       getAcpDiff: (sessionId: string) => Promise<DesktopAcpDiff>
