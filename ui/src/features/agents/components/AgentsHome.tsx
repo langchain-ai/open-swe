@@ -30,6 +30,8 @@ import {
   setNotificationsPref,
 } from "@/lib/notifications"
 
+const LAST_LOCAL_PROJECT_KEY = "open-swe.desktop.last-project"
+
 function promptContent(text: string, images: Array<ImageChunk>) {
   const trimmed = text.trim()
   const imageBlocks = images.map((image) => ({
@@ -115,13 +117,14 @@ export function AgentsHome() {
   }, [stream.threadId, queryClient, navigate])
 
   useEffect(() => {
-    if (
-      localProjectPath &&
-      !localProjects.some((project) => project.cwd === localProjectPath)
-    ) {
-      setLocalProjectPath(null)
-    }
-  }, [localProjectPath, localProjects])
+    if (!isDesktop || localProjects.length === 0) return
+    const stored = window.localStorage.getItem(LAST_LOCAL_PROJECT_KEY)
+    const selected = localProjects.find(
+      (project) => project.cwd === localProjectPath || project.cwd === stored
+    )
+    setLocalProjectPath(selected?.cwd ?? localProjects[0]?.cwd ?? null)
+    if (!localProjectPath) setRunTarget("local")
+  }, [isDesktop, localProjectPath, localProjects])
 
   const handleRunTargetChange = (next: RunTarget) => {
     setRunTarget(next)
@@ -130,6 +133,7 @@ export function AgentsHome() {
 
   const handleSelectLocalProject = (cwd: string) => {
     setLocalProjectPath(cwd)
+    window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
     setRunTarget("local")
     setLocalError(null)
   }
@@ -156,8 +160,9 @@ export function AgentsHome() {
       }
       setSubmitting(true)
       setLocalError(null)
+      window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, localProjectPath)
       try {
-        const session = await desktop.startAcpSession({
+        const localSession = await desktop.startAcpSession({
           cwd: localProjectPath,
           prompt,
           images,
@@ -166,7 +171,7 @@ export function AgentsHome() {
         })
         await navigate({
           to: "/agents/local/$sessionId",
-          params: { sessionId: session.id },
+          params: { sessionId: localSession.id },
         })
       } catch (error) {
         setSubmitting(false)

@@ -24,6 +24,7 @@ const {
 const {
   captureCheckpoint,
   checkpointRef,
+  currentBranch,
   deleteRefs,
   readDiff,
   repoRoot,
@@ -178,7 +179,10 @@ function sessionSummary(record) {
 }
 
 function listProjects() {
-  return readProjects(projectsPath());
+  return readProjects(projectsPath()).map((project) => ({
+    ...project,
+    branch: currentBranch(project.cwd),
+  }));
 }
 
 function sendProjectsChanged() {
@@ -363,7 +367,7 @@ function configureDesktopIpc() {
     if (result.canceled || !result.filePaths[0]) return null;
     const project = addProject(projectsPath(), result.filePaths[0]);
     sendProjectsChanged();
-    return project;
+    return { ...project, branch: currentBranch(project.cwd) };
   });
 
   ipcMain.handle("desktop:remove-project", async (event, cwd) => {

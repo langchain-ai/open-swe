@@ -24,6 +24,18 @@ function git(cwd, args, env) {
   })
 }
 
+function currentBranch(cwd) {
+  try {
+    return execFileSync("git", [...HARDENED, "symbolic-ref", "--quiet", "--short", "HEAD"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || null
+  } catch {
+    return null
+  }
+}
+
 function gitStdin(cwd, args, input) {
   return new Promise((resolve, reject) => {
     const child = spawn("git", [...HARDENED, ...args], {
@@ -245,6 +257,7 @@ async function readDiff(repo, base) {
 module.exports = {
   captureCheckpoint,
   checkpointRef,
+  currentBranch,
   deleteRefs,
   readDiff,
   repoRoot,

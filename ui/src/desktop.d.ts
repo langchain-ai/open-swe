@@ -4,6 +4,7 @@ import type { ImageChunk } from "@/features/agents/lib/types"
 export interface DesktopProject {
   cwd: string
   name: string
+  branch?: string | null
   addedAt: number
 }
 

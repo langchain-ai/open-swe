@@ -53,7 +53,7 @@ export function RunTargetSelector({
   const label =
     value === "local"
       ? selectedProject
-        ? `This Mac · ${selectedProject.name}`
+        ? `This Mac · ${selectedProject.name}${selectedProject.branch ? ` · ${selectedProject.branch}` : ""}`
         : "This Mac"
       : "Cloud"
 
@@ -97,7 +97,14 @@ export function RunTargetSelector({
                     title={project.cwd}
                   >
                     <FolderOpen />
-                    <span className="truncate">{project.name}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {project.name}
+                      {project.branch && (
+                        <span className="text-muted-foreground/60">
+                          {` · ${project.branch}`}
+                        </span>
+                      )}
+                    </span>
                     {selectedProjectPath === project.cwd && (
                       <Check className="ml-auto" />
                     )}
