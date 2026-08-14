@@ -11,7 +11,7 @@ from agent.dashboard import autofix_state
 
 
 @pytest.mark.asyncio
-async def test_set_and_check_pr_disabled() -> None:
+async def test_pr_cycle_count_uses_sibling_state_record() -> None:
     store: dict[tuple[Any, ...], Any] = {}
     client = MagicMock()
 
@@ -27,7 +27,12 @@ async def test_set_and_check_pr_disabled() -> None:
 
     with patch.object(autofix_state, "get_client", return_value=client):
         assert await autofix_state.is_pr_autofix_disabled("O", "R", 5) is False
+        assert await autofix_state.get_pr_autofix_cycle_count("O", "R", 5) == 0
         await autofix_state.set_pr_autofix_disabled("O", "R", 5, True)
+        await autofix_state.set_pr_autofix_cycle_count("O", "R", 5, 1)
         assert await autofix_state.is_pr_autofix_disabled("o", "r", 5) is True
-        await autofix_state.set_pr_autofix_disabled("o", "r", 5, False)
-        assert await autofix_state.is_pr_autofix_disabled("o", "r", 5) is False
+        assert await autofix_state.get_pr_autofix_cycle_count("o", "r", 5) == 1
+
+    namespace = ("autofix_pr_state",)
+    assert store[(namespace, "o/r#5")]["disabled"] is True
+    assert store[(namespace, "o/r#5:review_autofix_cycles")]["cycle_count"] == 1

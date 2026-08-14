@@ -61,6 +61,7 @@ async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.Monkey
 
 @pytest.mark.asyncio
 async def test_reviewer_error_settles_tracked_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("REVIEW_CHECK_BLOCKING", raising=False)
     metadata = {
         "kind": "reviewer",
         "review_check_run_id": 42,
@@ -92,6 +93,35 @@ async def test_reviewer_error_settles_tracked_check(monkeypatch: pytest.MonkeyPa
             "Re-trigger the review by pushing a commit or re-requesting it."
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_reviewer_error_settles_failure_when_blocking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("REVIEW_CHECK_BLOCKING", "true")
+    metadata = {
+        "kind": "reviewer",
+        "review_check_run_id": 42,
+        "pr": {"owner": "acme", "name": "widgets"},
+        "source": "schedule",
+    }
+    client = _FakeClient(metadata)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        completion, "get_github_app_installation_token", AsyncMock(return_value="token")
+    )
+    settle = AsyncMock()
+    monkeypatch.setattr(completion, "settle_review_check_run", settle)
+
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error"}
+    )
+
+    # A crashed reviewer must not satisfy a blocking (required) check.
+    settle_args = settle.await_args
+    assert settle_args is not None
+    assert settle_args.kwargs["conclusion"] == "failure"
 
 
 @pytest.mark.asyncio
