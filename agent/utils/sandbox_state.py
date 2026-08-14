@@ -73,6 +73,7 @@ class SandboxBackendProxy(BaseSandbox):
         self._reconnect = reconnect
         self._startup_task: asyncio.Task[SandboxBackendProtocol] | None = None
         self._lock: asyncio.Lock | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def current(self) -> SandboxBackendProtocol:
@@ -109,6 +110,7 @@ class SandboxBackendProxy(BaseSandbox):
             if self._backend is not None:
                 return
             raise RuntimeError("Cannot start sandbox without a reconnect callback")
+        self._loop = asyncio.get_running_loop()
         self._startup_task = asyncio.create_task(self._reconnect())
         self._startup_task.add_done_callback(self._startup_completed)
 
@@ -136,9 +138,27 @@ class SandboxBackendProxy(BaseSandbox):
     def _get_lock(self) -> asyncio.Lock:
         if self._lock is None:
             self._lock = asyncio.Lock()
+            self._loop = asyncio.get_running_loop()
         return self._lock
 
+    def _rebind_loop(self) -> None:
+        """Drop asyncio state owned by a previous loop.
+
+        ``SANDBOX_BACKENDS`` outlives any single run, and BG_JOB_ISOLATED_LOOPS gives
+        each background run its own loop in the same process. Awaiting a task or lock
+        created on another loop raises "attached to a different loop".
+        """
+        loop = asyncio.get_running_loop()
+        if self._loop is loop:
+            return
+        if self._startup_task is not None and not self._startup_task.done():
+            self._startup_task.cancel()
+        self._startup_task = None
+        self._lock = None
+        self._loop = loop
+
     async def _aget_backend(self) -> SandboxBackendProtocol:
+        self._rebind_loop()
         if self._backend is not None and self._startup_task is None:
             return self._backend
         if not self._thread_id:
@@ -161,6 +181,7 @@ class SandboxBackendProxy(BaseSandbox):
                     logger.info(
                         "Reconnecting sandbox backend for thread %s from metadata", self._thread_id
                     )
+                    self._loop = asyncio.get_running_loop()
                     self._startup_task = asyncio.create_task(create_sandbox(sandbox_id))
                     self._startup_task.add_done_callback(self._startup_completed)
             startup_task = self._startup_task
