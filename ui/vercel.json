@@ -1,5 +1,12 @@
 {
   "framework": null,
   "buildCommand": "pnpm run build",
-  "installCommand": "pnpm install --frozen-lockfile --filter open-swe-dashboard..."
+  "installCommand": "pnpm install --frozen-lockfile --filter open-swe-dashboard...",
+  "git": {
+    "deploymentEnabled": {
+      "**": false,
+      "main": true,
+      "preview": true
+    }
+  }
 }

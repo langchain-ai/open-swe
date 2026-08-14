@@ -80,6 +80,7 @@ protocol.registerSchemesAsPrivileged([
 let backendUrl = null;
 let mainWindow = null;
 let setupWindow = null;
+let authWindow = null;
 let quitting = false;
 const acpSessions = new Map();
 const acpRestores = new Map();
@@ -736,6 +737,80 @@ function createMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+function handleAuthNavigation(window, event, url) {
+  const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null;
+  if (callback) {
+    event.preventDefault();
+    void window.loadURL(callback);
+    return;
+  }
+  if (isAppUrl(url)) {
+    event.preventDefault();
+    window.close();
+    if (mainWindow && !mainWindow.isDestroyed()) void loadApp(mainWindow);
+    return;
+  }
+  const target = new URL(url);
+  if (target.protocol === "https:") return;
+  event.preventDefault();
+  if (["http:", "mailto:"].includes(target.protocol)) {
+    void shell.openExternal(url);
+  }
+}
+
+function createAuthWindow(url) {
+  if (authWindow && !authWindow.isDestroyed()) {
+    authWindow.show();
+    authWindow.focus();
+    void authWindow.loadURL(url);
+    return;
+  }
+  const window = new BrowserWindow({
+    title: "Sign in to Open SWE",
+    parent: mainWindow,
+    width: 1000,
+    height: 800,
+    minWidth: 640,
+    minHeight: 480,
+    backgroundColor: "#ffffff",
+    icon: iconPath(),
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      navigateOnDragDrop: false,
+      nodeIntegration: false,
+      sandbox: true,
+      session: session.defaultSession,
+    },
+  });
+
+  window.once("ready-to-show", () => window.show());
+  window.on("closed", () => {
+    if (authWindow === window) authWindow = null;
+  });
+  window.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
+    const target = new URL(popupUrl);
+    if (target.protocol === "https:") {
+      void window.loadURL(popupUrl);
+    } else if (["http:", "mailto:"].includes(target.protocol)) {
+      void shell.openExternal(popupUrl);
+    }
+    return { action: "deny" };
+  });
+  window.webContents.on("will-navigate", (event, navigationUrl) =>
+    handleAuthNavigation(window, event, navigationUrl),
+  );
+  window.webContents.on("will-redirect", (event, navigationUrl) =>
+    handleAuthNavigation(window, event, navigationUrl),
+  );
+  window.webContents.on("will-attach-webview", (event) =>
+    event.preventDefault(),
+  );
+
+  authWindow = window;
+  void window.loadURL(url);
+}
+
 function handleNavigation(window, event, url) {
   const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null;
   if (callback) {
@@ -743,7 +818,12 @@ function handleNavigation(window, event, url) {
     void window.loadURL(callback);
     return;
   }
-  if (isAppUrl(url) || isGithubOAuthUrl(url)) return;
+  if (isAppUrl(url)) return;
+  if (isGithubOAuthUrl(url)) {
+    event.preventDefault();
+    createAuthWindow(url);
+    return;
+  }
   event.preventDefault();
   const target = new URL(url);
   if (["http:", "https:", "mailto:"].includes(target.protocol)) {
@@ -782,7 +862,10 @@ function createWindow() {
     if (mainWindow === window) mainWindow = null;
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (["http:", "https:", "mailto:"].includes(new URL(url).protocol)) {
+    const protocol = new URL(url).protocol;
+    if (isGithubOAuthUrl(url)) {
+      createAuthWindow(url);
+    } else if (["http:", "https:", "mailto:"].includes(protocol)) {
       void shell.openExternal(url);
     }
     return { action: "deny" };

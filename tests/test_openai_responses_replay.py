@@ -4,12 +4,20 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
+from agent.middleware.sanitize_openai_responses import _sanitize_messages
+
 
 def test_stateless_responses_replay_preserves_tool_history_without_mutation() -> None:
     messages = [
         HumanMessage("test the todo middleware"),
         AIMessage(
             content=[
+                {
+                    "type": "reasoning",
+                    "id": "rs_unstored",
+                    "summary": [],
+                    "encrypted_content": None,
+                },
                 {
                     "type": "reasoning",
                     "id": "rs_reasoning",
@@ -50,8 +58,8 @@ def test_stateless_responses_replay_preserves_tool_history_without_mutation() ->
         output_version="responses/v1",
     )
 
-    first_payload = model._get_request_payload(messages)
-    second_payload = model._get_request_payload(messages)
+    first_payload = model._get_request_payload(_sanitize_messages(messages))
+    second_payload = model._get_request_payload(_sanitize_messages(messages))
 
     expected_call = {
         "type": "function_call",
@@ -65,6 +73,7 @@ def test_stateless_responses_replay_preserves_tool_history_without_mutation() ->
         "output": "/workspace/open-swe",
         "call_id": "call_execute",
     }
+    assert not any(item.get("id") == "rs_unstored" for item in first_payload["input"])
     assert expected_call in first_payload["input"]
     assert expected_output in first_payload["input"]
     assert second_payload["input"] == first_payload["input"]

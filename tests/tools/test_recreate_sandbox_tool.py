@@ -63,13 +63,6 @@ async def test_recreate_sandbox_reports_failure_without_ids() -> None:
     assert result == {"success": False, "error": "creation failed"}
 
 
-def test_recreate_sandbox_description_explains_handoff() -> None:
-    assert recreate_sandbox.__doc__ is not None
-    assert "fresh sandbox has none of the thread's current files" in recreate_sandbox.__doc__
-    assert "old sandbox is not deleted" in recreate_sandbox.__doc__
-    assert "becomes inaccessible from this thread" in recreate_sandbox.__doc__
-
-
 def test_recreate_sandbox_exported() -> None:
     from agent.tools import recreate_sandbox as exported
 

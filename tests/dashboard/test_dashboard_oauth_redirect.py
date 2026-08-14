@@ -67,10 +67,11 @@ def test_desktop_login_uses_the_requested_backend_callback(monkeypatch) -> None:
 
     app = FastAPI()
     app.include_router(routes.router)
-    with TestClient(app, base_url="https://backend.example") as client:
+    with TestClient(app, base_url="http://backend.example") as client:
         response = client.get(
             "/dashboard/api/auth/login",
             params={"desktop": "true"},
+            headers={"x-forwarded-proto": "https"},
             follow_redirects=False,
         )
 

@@ -610,6 +610,7 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
     assert content[1] == {"type": "text", "text": "@teammate: continue here"}
     assert content[0]["text"].startswith("<open_swe_web_handoff>\n")
     assert content[0]["text"].endswith("\n</open_swe_web_handoff>")
+    assert enriched["params"]["config"]["configurable"]["source"] == "dashboard"
 
 
 async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(monkeypatch) -> None:
@@ -1795,6 +1796,7 @@ async def test_pr_diff_uses_repository_from_pr_url(monkeypatch) -> None:
 
     await thread_api.get_dashboard_thread_pr_diff("thread-1", "owner")
 
+    assert build_diff.await_args is not None
     assert build_diff.await_args.args[1:] == ("langchain-ai/open-swe", 1925)
 
 

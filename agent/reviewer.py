@@ -52,6 +52,7 @@ from .middleware import (
     ModelCallTimeoutMiddleware,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     TimeoutWrapupMiddleware,
@@ -127,7 +128,7 @@ HISTORICAL_REVIEW_GUIDANCE = """- **Anything that overlaps an existing PR review
 REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
 
 Sandbox: `{working_dir}`. Review target: `{repo_owner}/{repo_name}#{pr_number}`.
-Invoke `gh` as `GH_TOKEN=dummy gh <command>`.
+`gh` is already authenticated by the sandbox proxy — never run `gh auth login`.
 
 Call `fetch_review_diff` to materialize the current review range in the sandbox.
 It returns only the file path and bounded metadata. Inspect that file with `grep`
@@ -359,7 +360,10 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
         "model": model,
         # Subagents compile into their own graphs, so the reviewer's own
         # middleware never wraps their model calls.
-        "middleware": cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()]),
+        "middleware": cast(
+            list[AgentMiddleware[Any, Any, Any]],
+            [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
+        ),
     }
 
 
@@ -371,15 +375,15 @@ present but stale (at an old commit). Do NOT trust local files until you have
 re-prepped the tree yourself. Run:
 
 ```
-cd {working_dir} || {{ cd {parent_dir} && GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name}; }}
-GH_TOKEN=dummy git fetch origin {head_sha_or_placeholder} --quiet || GH_TOKEN=dummy git fetch origin refs/pull/{pr_number}/head --quiet
+cd {working_dir} || {{ cd {parent_dir} && gh repo clone {repo_owner}/{repo_name} && cd {repo_name}; }}
+git fetch origin {head_sha_or_placeholder} --quiet || git fetch origin refs/pull/{pr_number}/head --quiet
 git checkout --force {head_sha_or_placeholder} --quiet
 ```
 
 and verify `git rev-parse HEAD` matches the PR head before reading local
 files. If you cannot get the tree onto the PR head, rely exclusively on the
-diff and `gh api` file contents (`GH_TOKEN=dummy gh api
-repos/{repo_owner}/{repo_name}/contents/<path>?ref=<head_sha>`) — never on
+diff and file contents from
+`gh api repos/{repo_owner}/{repo_name}/contents/<path>?ref=<head_sha>` — never on
 the local checkout."""
 
 
@@ -890,7 +894,7 @@ async def _resolve_grouping_model(
 
 async def _cached_reviewer_team_defaults():
     return await ttl_cache.cached(
-        f"team-default-model-pair:reviewer:{id(get_team_default_model_pair)}",
+        "team-default-model-pair:reviewer",
         60,
         lambda: get_team_default_model_pair("reviewer"),
     )
@@ -898,7 +902,7 @@ async def _cached_reviewer_team_defaults():
 
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )
@@ -906,7 +910,7 @@ async def _cached_gateway_enabled() -> bool:
 
 async def _cached_org_review_guidelines() -> str | None:
     return await ttl_cache.cached(
-        f"reviewer:org-guidelines:{id(get_org_review_guidelines)}",
+        "reviewer:org-guidelines",
         300,
         get_org_review_guidelines,
     )
@@ -914,7 +918,7 @@ async def _cached_org_review_guidelines() -> str | None:
 
 async def _cached_api_standards_skill() -> str | None:
     return await ttl_cache.cached(
-        f"reviewer:api-standards-skill:{id(fetch_api_standards_skill)}",
+        "reviewer:api-standards-skill",
         300,
         fetch_api_standards_skill,
     )
@@ -1430,6 +1434,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 check_message_queue_before_model,
                 TimeoutWrapupMiddleware(),
                 SanitizeFireworksMessagesMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
                 ModelCallTimeoutMiddleware(),

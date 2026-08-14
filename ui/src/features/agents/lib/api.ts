@@ -3,6 +3,7 @@ import type {
   AgentThread,
   ImageChunk,
   Message,
+  SlackNotificationMode,
   WorkflowPushApprovalsResponse,
 } from "./types"
 import { dashboardApiBase } from "@/lib/api-base"
@@ -11,7 +12,7 @@ import {
   dashboardForwardedHeaders,
 } from "@/lib/dashboard-fetch"
 
-export type { AgentSchedule, AgentThread, Message }
+export type { AgentSchedule, AgentThread, Message, SlackNotificationMode }
 
 export class AgentsApiError extends Error {
   constructor(
@@ -37,6 +38,7 @@ export interface ScheduleCreateRequest {
   name?: string | null
   repo?: string | null
   slack_channel_id?: string | null
+  slack_notification_mode?: SlackNotificationMode
   model_id?: string | null
   effort?: string | null
 }
@@ -47,6 +49,7 @@ export interface ScheduleUpdateRequest {
   name?: string | null
   repo?: string | null
   slack_channel_id?: string | null
+  slack_notification_mode?: SlackNotificationMode
   model_id?: string | null
   effort?: string | null
   enabled?: boolean | null

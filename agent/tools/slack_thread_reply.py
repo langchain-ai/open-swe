@@ -24,15 +24,16 @@ async def slack_thread_reply(
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Post a message to the current Slack thread.
+    """Post a message to the current Slack thread and the Web UI.
 
     Use this for clarifying questions, essential progress updates, and the final
-    outcome. Make `message` as terse as possible: default to one sentence with
-    only the outcome/status and link, or one blocking question. Omit greetings,
-    preambles, headings, recaps, implementation details, and redundant context;
-    use bullets only when multiple items are essential. This terseness rule is
-    specific to Slack tool messages, not normal web UI assistant messages.
-    Always end the run with a terse final outcome.
+    answer or outcome. For Slack-triggered information-only requests, put the
+    complete answer in `message`, not merely a summary, and do not repeat it in
+    the final assistant response. Make `message` as concise as possible: default
+    to one sentence with only the outcome/status and link, or one blocking
+    question. Omit greetings, preambles, headings, recaps, implementation
+    details, and redundant context; use bullets only when multiple items are
+    essential. End the run by posting a concise final outcome here.
 
     Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,

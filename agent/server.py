@@ -30,7 +30,6 @@ import asyncio
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
-from deepagents.backends import LangSmithSandbox
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
@@ -64,13 +63,14 @@ from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model_pair,
     get_team_default_repo,
+    get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
 from .dashboard.user_mappings import email_for_login
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
-from .integrations.langsmith import _configure_github_proxy, get_async_sandbox_client
+from .integrations.langsmith import _configure_github_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
 from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
@@ -82,6 +82,7 @@ from .middleware import (
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
     SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     SubdirAgentsReadMiddleware,
@@ -105,6 +106,7 @@ from .runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
 )
 from .runtime.execution import graph_loaded_for_execution
+from .thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from .tools import (
     approve_plan,
     delete_user_skill,
@@ -119,6 +121,7 @@ from .tools import (
     linear_list_teams,
     linear_search_issues,
     linear_update_issue,
+    notify_automation_channel,
     open_pull_request,
     recreate_sandbox,
     report_platform_issue,
@@ -158,8 +161,8 @@ from .utils.sandbox import create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .utils.sandbox_state import (
     SANDBOX_BACKENDS,
+    SandboxBackendProxy,
     SandboxUnreachableError,
-    clear_sandbox_backend,
     get_or_create_sandbox_backend_proxy,
     get_sandbox_id_from_metadata,
     set_sandbox_backend,
@@ -246,31 +249,6 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
         return None
 
 
-async def _start_langsmith_sandbox_if_needed(sandbox_backend: SandboxBackendProtocol) -> None:
-    """Start a LangSmith sandbox before operations that require it to be running."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
-        return
-    current_backend = unwrap_sandbox_backend(sandbox_backend)
-    if not isinstance(current_backend, LangSmithSandbox):
-        return
-
-    name = current_backend.id
-    async with get_async_sandbox_client() as client:
-        status = await client.get_sandbox_status(name)
-        status_name = getattr(status, "status", status)
-        status_name = getattr(status_name, "value", status_name)
-        status_text = str(status_name or "").lower()
-        if status_text in {"running", "ready"}:
-            return
-
-        logger.info(
-            "Starting LangSmith sandbox %s before proxy refresh (status=%s)",
-            name,
-            status_text or "unknown",
-        )
-        await client.start_sandbox(name)
-
-
 async def _resolve_proxy_token(
     github_proxy_token: str | None,
 ) -> tuple[str | None, str | None, None]:
@@ -317,7 +295,6 @@ async def _create_sandbox_with_proxy(
             msg = "Cannot configure proxy: GitHub App installation token is unavailable"
             logger.error(msg)
             raise ValueError(msg)
-        await _start_langsmith_sandbox_if_needed(sandbox_backend)
         await _configure_github_proxy(sandbox_backend.id, token)
         record_proxy_token_expiry(
             thread_id,
@@ -349,7 +326,6 @@ async def _refresh_github_proxy(
         return
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
-    await _start_langsmith_sandbox_if_needed(current_backend)
     await _configure_github_proxy(current_backend.id, token)
     record_proxy_token_expiry(
         thread_id,
@@ -467,9 +443,12 @@ async def ensure_sandbox_for_thread(
     lose their ``--global`` config, and Vercel preview deploys reject commits
     whose author email can't be resolved to a GitHub account.
     """
-    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
-    if sandbox_backend is not None and not sandbox_backend.has_backend:
-        sandbox_backend = None
+    cached_proxy = SANDBOX_BACKENDS.get(thread_id)
+    sandbox_backend = (
+        unwrap_sandbox_backend(cached_proxy)
+        if cached_proxy is not None and cached_proxy.has_backend
+        else None
+    )
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
 
     if sandbox_backend is None and sandbox_id is None:
@@ -592,15 +571,15 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
 )
 
 
-def _subagent_model_timeout_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
-    """Deadline for a subagent's own model calls.
+def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
+    """Provider guards for subagent model calls.
 
-    Subagents are compiled into their own graphs, so the parent's middleware
-    never wraps them — while a delegated `task` runs, the parent is only waiting
-    on tool execution. Without this a stalled provider call inside a subagent
-    hangs the run exactly like it did in the parent.
+    Subagents compile into their own graphs, so parent middleware never wraps them.
     """
-    return cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()])
+    return cast(
+        list[AgentMiddleware[Any, Any, Any]],
+        [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
+    )
 
 
 def _general_purpose_subagent(
@@ -618,7 +597,7 @@ def _general_purpose_subagent(
         "model": model,
         "middleware": [
             *([dynamic_tools] if dynamic_tools else []),
-            *_subagent_model_timeout_middleware(),
+            *_subagent_model_middleware(),
         ],
     }
     if skills:
@@ -665,7 +644,7 @@ def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
         "system_prompt": BROWSER_SUBAGENT_SYSTEM_PROMPT,
         "tools": tools,
         "model": model,
-        "middleware": _subagent_model_timeout_middleware(),
+        "middleware": _subagent_model_middleware(),
     }
 
 
@@ -673,7 +652,7 @@ def _get_cached_sandbox_backend(
     thread_id: str,
     *,
     reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
-) -> SandboxBackendProtocol:
+) -> SandboxBackendProxy:
     return get_or_create_sandbox_backend_proxy(thread_id, reconnect=reconnect)
 
 
@@ -738,7 +717,7 @@ async def _load_observability_tools(authorized: bool, profile_login: str | None)
     if not authorized:
         return []
     datadog_tools, langsmith_tools = await asyncio.gather(
-        _cached_tool_loader(f"tools:datadog:{id(load_datadog_tools)}", 600, load_datadog_tools),
+        _cached_tool_loader("tools:datadog", 600, load_datadog_tools),
         load_langsmith_tools(profile_login),
     )
     return [*datadog_tools, *langsmith_tools]
@@ -746,22 +725,28 @@ async def _load_observability_tools(authorized: bool, profile_login: str | None)
 
 async def _load_corridor_mcp_tools() -> list[Any]:
     """Corridor MCP tools when the deployment environment has configured them."""
-    return await _cached_tool_loader(
-        f"tools:corridor:{id(load_corridor_tools)}", 600, load_corridor_tools
-    )
+    return await _cached_tool_loader("tools:corridor", 600, load_corridor_tools)
 
 
 async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
     return await ttl_cache.cached(
-        f"team-default-model-pair:{kind}:{id(get_team_default_model_pair)}",
+        f"team-default-model-pair:{kind}",
         60,
         lambda: get_team_default_model_pair(kind),
     )
 
 
+async def _cached_thread_title_model() -> tuple[str, str]:
+    return await ttl_cache.cached(
+        "team:thread-title-model",
+        60,
+        get_team_default_thread_title_model,
+    )
+
+
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )
@@ -769,7 +754,7 @@ async def _cached_gateway_enabled() -> bool:
 
 async def _cached_fable_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:fable-enabled:{id(get_team_fable_enabled)}",
+        "team:fable-enabled",
         60,
         get_team_fable_enabled,
     )
@@ -779,7 +764,20 @@ async def _cached_profile(profile_login: str | None):
     if not profile_login:
         return None
     return await ttl_cache.cached(
-        f"profile:{profile_login}:{id(load_profile)}", 30, lambda: load_profile(profile_login)
+        f"profile:{profile_login}", 30, lambda: load_profile(profile_login)
+    )
+
+
+def _slack_tools_enabled(configurable: dict[str, Any]) -> bool:
+    """Return whether the run has trusted Slack source context."""
+    if configurable.get("source") not in {"slack", "schedule"}:
+        return False
+    slack_thread = configurable.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return False
+    return all(
+        isinstance(slack_thread.get(key), str) and bool(slack_thread[key].strip())
+        for key in ("channel_id", "thread_ts")
     )
 
 
@@ -805,6 +803,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         profile_login: str | None,
         model_id: str,
         effort: str | None,
+        title_model: BaseChatModel,
         source: str,
         user_email: str,
         linear_project_id: str,
@@ -819,6 +818,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._profile_login = profile_login
         self._model_id = model_id
         self._effort = effort
+        self._title_model = title_model
         self._source = source
         self._user_email = user_email
         self._linear_project_id = linear_project_id
@@ -871,6 +871,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return merge_checkpoint(existing, turn_key, ref, datetime.now(UTC).isoformat())
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        schedule_thread_title_generation(
+            thread_id=self._thread_id,
+            messages=state.get("messages") or [],
+            model=self._title_model,
+            client=client,
+        )
         github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
@@ -881,7 +887,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
         )
         sandbox_task = asyncio.create_task(
-            ensure_sandbox_for_thread(self._thread_id, repo=prompt_default_repo)
+            get_or_create_sandbox_backend_proxy(self._thread_id).ready()
         )
         try:
             triggering_user_identity, sandbox_backend = await asyncio.gather(
@@ -891,7 +897,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         except SandboxUnreachableError as exc:
             # The run is about to die with no sandbox; make sure the user hears
             # why rather than getting silence.
-            clear_sandbox_backend(self._thread_id)
             await post_sandbox_unreachable_notification(
                 self._config or {}, sandbox_id=exc.sandbox_id
             )
@@ -946,6 +951,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 user_custom_instructions=user_custom_instructions,
                 thread_url=dashboard_thread_url(self._thread_id),
                 corridor_enabled=self._corridor_enabled,
+                source=self._source,
+                slack_context=_slack_tools_enabled(configurable),
             ),
         }
 
@@ -964,11 +971,22 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(config)
 
+    async def reconnect_backend(
+        _thread_id: str = thread_id,
+        _configurable: dict[str, Any] = configurable,
+    ) -> SandboxBackendProtocol:
+        prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
+        return await ensure_sandbox_for_thread(_thread_id, repo=prompt_default_repo)
+
+    backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    backend.start()
+
     profile_login = resolve_github_login(as_json_object(config))
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
-    team_defaults, use_gateway, profile, fable_enabled = await asyncio.gather(
+    team_defaults, title_defaults, use_gateway, profile, fable_enabled = await asyncio.gather(
         _cached_team_default_model_pair("agent"),
+        _cached_thread_title_model(),
         _cached_gateway_enabled(),
         _cached_profile(profile_login),
         _cached_fable_enabled(),
@@ -978,16 +996,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
-    async def reconnect_backend(
-        _thread_id: str = thread_id,
-        _configurable: dict[str, Any] = configurable,
-    ) -> SandboxBackendProtocol:
-        prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
-        return await ensure_sandbox_for_thread(_thread_id, repo=prompt_default_repo)
-
-    backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
+    title_model_id, title_effort = title_defaults
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
 
     if profile_login and profile:
@@ -1048,6 +1058,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     subagent_model_id, subagent_effort = gate_fable_model(
         subagent_model_id, subagent_effort, fable_enabled=fable_enabled
     )
+    title_model_id, title_effort = gate_fable_model(
+        title_model_id, title_effort, fable_enabled=fable_enabled
+    )
 
     model_kwargs = provider_model_kwargs(
         model_id,
@@ -1058,6 +1071,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagent_model_id,
         subagent_effort,
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
+    )
+    title_model_kwargs = provider_model_kwargs(
+        title_model_id,
+        title_effort,
+        max_tokens=TITLE_GENERATION_MAX_TOKENS,
     )
 
     fallback_model_id = os.environ.get("LLM_FALLBACK_MODEL_ID") or fallback_model_id_for(model_id)
@@ -1106,17 +1124,23 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if profile_login:
         currents_tools, notion_tools = await asyncio.gather(
             _cached_tool_loader(
-                f"tools:currents:{profile_login}:{id(load_currents_tools)}",
+                f"tools:currents:{profile_login}",
                 300,
                 lambda: load_currents_tools(profile_login),
             ),
             _cached_tool_loader(
-                f"tools:notion:{profile_login}:{id(load_notion_tools)}",
+                f"tools:notion:{profile_login}",
                 300,
                 lambda: load_notion_tools(profile_login),
             ),
         )
 
+    slack_tools = [
+        slack_add_reaction,
+        slack_read_thread_messages,
+        slack_start_new_thread,
+        slack_thread_reply,
+    ]
     static_tools = [
         http_request,
         fetch_url,
@@ -1135,6 +1159,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         linear_list_teams,
         linear_search_issues,
         linear_update_issue,
+        notify_automation_channel,
         open_pull_request,
         request_pr_review,
         recreate_sandbox,
@@ -1145,6 +1170,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_start_new_thread,
         slack_thread_reply,
     ]
+    reserved_tool_names = {tool.__name__ for tool in static_tools}
+    if not _slack_tools_enabled(configurable):
+        static_tools = [tool for tool in static_tools if tool not in slack_tools]
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups = {
         "Corridor": corridor_tools,
@@ -1155,7 +1183,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if any(integration_tool_groups.values()):
         dynamic_tool_middleware = DynamicToolMiddleware(
             integration_tool_groups,
-            reserved_names={*DEEP_AGENT_TOOL_NAMES, *(tool.__name__ for tool in static_tools)},
+            reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
         )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
@@ -1179,6 +1207,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         use_gateway=use_gateway,
         **subagent_model_kwargs,
     )
+    title_model = _make_model_or_defer(
+        title_model_id,
+        use_gateway=use_gateway,
+        **title_model_kwargs,
+    )
     return create_deep_agent(
         model=main_model,
         system_prompt="",
@@ -1198,6 +1231,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     profile_login=profile_login,
                     model_id=model_id,
                     effort=profile_effort,
+                    title_model=title_model,
                     source=source,
                     user_email=user_email,
                     linear_project_id=linear_project_id,
@@ -1228,6 +1262,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *fallback_middleware,
                 *plan_mode_middleware,
                 SanitizeFireworksMessagesMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 # Innermost, so the deadline covers the provider call itself and a
                 # timeout escalates outward to the fallback model.

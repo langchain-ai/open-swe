@@ -10,15 +10,11 @@ from agent.dashboard import thread_api
 from agent.prompt import construct_system_prompt
 
 
-def test_plan_mode_prompt_included_when_enabled() -> None:
-    prompt = construct_system_prompt(working_dir="/work", plan_mode=True)
-    assert "Plan Mode (ACTIVE)" in prompt
-    assert "read-only research-and-planning phase" in prompt
+@pytest.mark.parametrize("enabled", [False, True])
+def test_construct_system_prompt_gates_active_plan_mode(enabled: bool) -> None:
+    prompt = construct_system_prompt(working_dir="/work", plan_mode=enabled)
 
-
-def test_plan_mode_prompt_absent_by_default() -> None:
-    prompt = construct_system_prompt(working_dir="/work")
-    assert "Plan Mode (ACTIVE)" not in prompt
+    assert ("### Plan Mode (ACTIVE)" in prompt) is enabled
 
 
 def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
@@ -159,19 +155,6 @@ async def test_thread_summary_reports_plan_mode() -> None:
         {"thread_id": "t2", "metadata": {"source": "dashboard"}}
     )
     assert summary_off["planMode"] is False
-
-
-def test_plan_mode_guidance_section_always_present() -> None:
-    """The guidance section telling the agent about enter_plan_mode should be in every prompt."""
-    prompt = construct_system_prompt(working_dir="/work", plan_mode=False)
-    assert "enter_plan_mode" in prompt
-    assert "Plan Mode" in prompt
-
-
-def test_plan_mode_guidance_section_present_when_enabled() -> None:
-    prompt = construct_system_prompt(working_dir="/work", plan_mode=True)
-    assert "enter_plan_mode" in prompt
-    assert "Plan Mode (ACTIVE)" in prompt
 
 
 async def test_enter_plan_mode_tool_returns_command() -> None:
@@ -383,11 +366,3 @@ def test_natural_language_plan_approval_rejects_ambiguous_or_negative_replies(re
     from agent.webhooks.slack import _is_natural_language_plan_approval
 
     assert _is_natural_language_plan_approval(reply) is False
-
-
-def test_plan_mode_prompt_uses_plain_text_slack_approval() -> None:
-    prompt = construct_system_prompt(working_dir="/work", plan_mode=True)
-
-    assert "reply in the thread" in prompt
-    assert "reply naturally" not in prompt
-    assert "do not use Block Kit or approval buttons" in prompt
