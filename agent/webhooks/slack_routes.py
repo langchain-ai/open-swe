@@ -86,6 +86,7 @@ async def slack_webhook(
         and event.get("channel_type") == "im"
         and bool(event.get("user"))
     )
+    is_untagged_two_party_reply = False
     if event.get("type") != "app_mention":
         message_text = event.get("text", "")
         has_username_mention = bool(
@@ -116,6 +117,8 @@ async def slack_webhook(
                 str(event.get("thread_ts") or ""),
                 message_text,
                 bot_user_id,
+                str(event.get("user") or ""),
+                str(event.get("ts") or ""),
             )
         )
         should_handle_message = any(
@@ -166,6 +169,7 @@ async def slack_webhook(
             "attachments": event.get("attachments", []),
             "bot_user_id": bot_user_id,
             "treat_all_messages_as_mentions": is_direct_message,
+            "untagged_reply": is_untagged_two_party_reply,
         }
         repo_config = await common.get_slack_repo_config(
             channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
