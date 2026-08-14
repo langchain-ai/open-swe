@@ -12,7 +12,7 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.integrations.langsmith import _configure_github_proxy
+from agent.integrations.langsmith import PROXY_GH_TOKEN_PLACEHOLDER, _configure_github_proxy
 from agent.utils.sandbox_state import SandboxBackendProxy
 
 
@@ -78,6 +78,10 @@ class TestConfigureGithubProxy:
             assert api_headers[0]["name"] == "Authorization"
             assert api_headers[0]["type"] == "opaque"
             assert api_headers[0]["value"] == f"Bearer {token}"
+
+            # env_vars are stored plaintext, so the real token must never land here.
+            assert api_rule["env_vars"] == {"GH_TOKEN": PROXY_GH_TOKEN_PLACEHOLDER}
+            assert token not in api_rule["env_vars"]["GH_TOKEN"]
 
             web_rule = rules[1]
             assert web_rule["name"] == "github"

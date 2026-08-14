@@ -128,7 +128,7 @@ HISTORICAL_REVIEW_GUIDANCE = """- **Anything that overlaps an existing PR review
 REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
 
 Sandbox: `{working_dir}`. Review target: `{repo_owner}/{repo_name}#{pr_number}`.
-Invoke `gh` as `GH_TOKEN=dummy gh <command>`.
+`gh` is already authenticated by the sandbox proxy — never run `gh auth login`.
 
 Call `fetch_review_diff` to materialize the current review range in the sandbox.
 It returns only the file path and bounded metadata. Inspect that file with `grep`
@@ -375,15 +375,15 @@ present but stale (at an old commit). Do NOT trust local files until you have
 re-prepped the tree yourself. Run:
 
 ```
-cd {working_dir} || {{ cd {parent_dir} && GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name}; }}
-GH_TOKEN=dummy git fetch origin {head_sha_or_placeholder} --quiet || GH_TOKEN=dummy git fetch origin refs/pull/{pr_number}/head --quiet
+cd {working_dir} || {{ cd {parent_dir} && gh repo clone {repo_owner}/{repo_name} && cd {repo_name}; }}
+git fetch origin {head_sha_or_placeholder} --quiet || git fetch origin refs/pull/{pr_number}/head --quiet
 git checkout --force {head_sha_or_placeholder} --quiet
 ```
 
 and verify `git rev-parse HEAD` matches the PR head before reading local
 files. If you cannot get the tree onto the PR head, rely exclusively on the
-diff and `gh api` file contents (`GH_TOKEN=dummy gh api
-repos/{repo_owner}/{repo_name}/contents/<path>?ref=<head_sha>`) — never on
+diff and file contents from
+`gh api repos/{repo_owner}/{repo_name}/contents/<path>?ref=<head_sha>` — never on
 the local checkout."""
 
 

@@ -47,6 +47,7 @@ PROXY_CONFIG_MAX_ATTEMPTS = 3
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -214,6 +215,9 @@ def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
                     "value": f"Bearer {github_token}",
                 }
             ],
+            # `gh` refuses to run without a token in its environment even though the
+            # proxy injects the real one on the wire.
+            "env_vars": {"GH_TOKEN": PROXY_GH_TOKEN_PLACEHOLDER},
         },
         {
             "name": "github",
