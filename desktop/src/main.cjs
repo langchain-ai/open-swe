@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { randomUUID } = require("node:crypto");
 const { pathToFileURL } = require("node:url");
 const {
   app,
@@ -89,6 +90,7 @@ let setupWindow = null;
 let authWindow = null;
 let quitting = false;
 const acpSessions = new Map();
+const acpDrafts = new Map();
 const acpRestores = new Map();
 const deletingAcpSessions = new Set();
 const persistedAcpSessions = new Map();
@@ -197,8 +199,12 @@ function pathIsInside(root, candidate) {
   );
 }
 
+function localSessionContext(localSessionId) {
+  return acpSessions.get(localSessionId) || acpDrafts.get(localSessionId);
+}
+
 function resolveAcpProjectPath(localSessionId, value) {
-  const localSession = acpSessions.get(localSessionId);
+  const localSession = localSessionContext(localSessionId);
   if (!localSession || typeof value !== "string" || value.length === 0) {
     return null;
   }
@@ -407,6 +413,34 @@ function configureDesktopIpc() {
     return resolveAcpProjectPath(input?.localSessionId, input?.path);
   });
 
+  ipcMain.handle("desktop:acp-draft-create", (event, value) => {
+    requireTrustedDesktopIpc(event);
+    const cwd = typeof value === "string" ? registeredProject(value) : null;
+    if (!cwd) throw new Error("Choose a valid local project directory");
+    const draft = {
+      id: randomUUID(),
+      cwd,
+      starting: false,
+      deleteRequested: false,
+    };
+    acpDrafts.set(draft.id, draft);
+    return { id: draft.id, cwd: draft.cwd };
+  });
+
+  ipcMain.handle("desktop:acp-draft-delete", async (event, sessionId) => {
+    requireTrustedDesktopIpc(event);
+    const draft =
+      typeof sessionId === "string" ? acpDrafts.get(sessionId) : null;
+    if (!draft) return false;
+    if (draft.starting) {
+      draft.deleteRequested = true;
+      return true;
+    }
+    acpDrafts.delete(sessionId);
+    await deleteSessionTerminals(sessionId);
+    return true;
+  });
+
   ipcMain.handle("desktop:acp-start", async (event, input) => {
     requireTrustedDesktopIpc(event);
     if (
@@ -427,9 +461,25 @@ function configureDesktopIpc() {
     const modelId =
       typeof input.modelId === "string" ? input.modelId : undefined;
     const effort = typeof input.effort === "string" ? input.effort : undefined;
-    const localSession = await createAcpSession({ cwd, modelId, effort });
-    acpSessions.set(localSession.id, localSession);
+    const draftSessionId =
+      typeof input.draftSessionId === "string"
+        ? input.draftSessionId
+        : undefined;
+    const draft = draftSessionId ? acpDrafts.get(draftSessionId) : null;
+    if (draftSessionId && (!draft || draft.cwd !== cwd || draft.starting)) {
+      throw new Error("Local agent draft is no longer available");
+    }
+    if (draft) draft.starting = true;
+
+    let localSession;
     try {
+      localSession = await createAcpSession({
+        cwd,
+        modelId,
+        effort,
+        restored: draft ? { id: draft.id } : undefined,
+      });
+      acpSessions.set(localSession.id, localSession);
       await localSession.initialize();
       persistedAcpSessions.set(localSession.id, {
         ...sessionRecord(localSession),
@@ -437,11 +487,21 @@ function configureDesktopIpc() {
         ...(effort ? { effort } : {}),
       });
       writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
+      if (draft) acpDrafts.delete(draft.id);
     } catch (error) {
-      acpSessions.delete(localSession.id);
-      persistedAcpSessions.delete(localSession.id);
-      writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
-      localSession.close();
+      if (localSession) {
+        acpSessions.delete(localSession.id);
+        persistedAcpSessions.delete(localSession.id);
+        writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
+        localSession.close();
+      }
+      if (draft) {
+        draft.starting = false;
+        if (draft.deleteRequested) {
+          acpDrafts.delete(draft.id);
+          await deleteSessionTerminals(draft.id);
+        }
+      }
       throw error;
     }
     await recordAcpCheckpoint(localSession);
@@ -1032,7 +1092,12 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, commandLine) => {
+    if (isDevelopment) {
+      app.relaunch({ args: commandLine.slice(1) });
+      app.quit();
+      return;
+    }
     const window = mainWindow || setupWindow || createWindow();
     if (window.isMinimized()) window.restore();
     window.show();
@@ -1071,7 +1136,7 @@ if (!hasSingleInstanceLock) {
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
       listProjects,
-      getAcpSession: (sessionId) => acpSessions.get(sessionId),
+      getAcpSession: localSessionContext,
       userDataPath: app.getPath("userData"),
     });
 

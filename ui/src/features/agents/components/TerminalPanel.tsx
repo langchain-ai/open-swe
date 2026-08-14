@@ -21,8 +21,8 @@ interface TerminalPanelProps {
   /** The terminal group this tab renders; splits live inside it. */
   groupId: string
   terminals: TerminalGroupsController
-  onOpenFile: (path: string) => void
-  onAddToChat: (text: string) => void
+  onOpenFile?: (path: string) => void
+  onAddToChat?: (text: string) => void
 }
 
 interface TerminalViewportProps {
@@ -32,8 +32,8 @@ interface TerminalViewportProps {
   active: boolean
   focusRequest: number
   onFocus: () => void
-  onOpenFile: (path: string) => void
-  onAddToChat: (text: string) => void
+  onOpenFile?: (path: string) => void
+  onAddToChat?: (text: string) => void
 }
 
 function terminalTheme() {
@@ -112,6 +112,7 @@ function TerminalViewport({
           void desktop.openExternal(text)
           return
         }
+        if (!onOpenFile) return
         const path = text.replace(/:\d+(?::\d+)?$/, "")
         void desktop
           .resolveAcpProjectPath({ localSessionId, path })
@@ -188,20 +189,25 @@ function TerminalViewport({
       <div ref={mountRef} className="h-full w-full overflow-hidden" />
       {selection && (
         <div className="absolute right-2 bottom-2 z-10 flex overflow-hidden rounded-md border border-border bg-background shadow-sm">
-          <button
-            type="button"
-            className="flex items-center gap-1 px-2 py-1 text-[11px] hover:bg-accent"
-            onClick={() => {
-              onAddToChat(selection)
-              surfaceRef.current?.clearSelection()
-            }}
-          >
-            <Plus className="size-3" /> Add to chat
-          </button>
+          {onAddToChat && (
+            <button
+              type="button"
+              className="flex items-center gap-1 px-2 py-1 text-[11px] hover:bg-accent"
+              onClick={() => {
+                onAddToChat(selection)
+                surfaceRef.current?.clearSelection()
+              }}
+            >
+              <Plus className="size-3" /> Add to chat
+            </button>
+          )}
           <button
             type="button"
             aria-label="Copy selection"
-            className="border-l border-border p-1.5 hover:bg-accent"
+            className={cn(
+              "p-1.5 hover:bg-accent",
+              onAddToChat && "border-l border-border"
+            )}
             onClick={() => {
               void navigator.clipboard.writeText(selection)
               surfaceRef.current?.clearSelection()
