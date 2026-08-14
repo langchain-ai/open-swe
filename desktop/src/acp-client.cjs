@@ -314,8 +314,6 @@ class AcpSession {
   }) {
     this.id = restored?.id || randomUUID()
     this.cwd = cwd
-    this.target = target
-    this.env = env
     this.title = restored?.title || "New local agent"
     this.createdAt = restored?.createdAt || Date.now()
     this.updatedAt = restored?.updatedAt || this.createdAt
@@ -336,6 +334,8 @@ class AcpSession {
   }
 
   connect(target, env) {
+    this.target = target
+    this.env = env
     this.rpc = new NdJsonRpcClient(target.command, target.args, this.cwd, env)
     this.rpc.onNotification = (method, params) =>
       this.handleNotification(method, params)
