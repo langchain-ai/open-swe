@@ -85,7 +85,17 @@ export interface ThreadPrDiff {
 export interface ThreadTurnDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
+  summary: {
+    files: number
+    additions: number
+    deletions: number
+  }
   files: Array<ThreadPrDiffFile>
+}
+
+export interface ThreadTurnDiffOptions {
+  maxFiles?: number
+  includeContent?: boolean
 }
 
 export interface ThreadRecoveryPatch {
@@ -318,12 +328,24 @@ export const agentsApi = {
     agentsRequest<ThreadPrDiff>(
       `/threads/${encodeURIComponent(threadId)}/pr-diff`
     ),
-  getThreadTurnDiff: (threadId: string, turnKey?: string | null) =>
-    agentsRequest<ThreadTurnDiff>(
-      `/threads/${encodeURIComponent(threadId)}/turn-diff${
-        turnKey ? `?turn_key=${encodeURIComponent(turnKey)}` : ""
-      }`
-    ),
+  getThreadTurnDiff: (
+    threadId: string,
+    turnKey?: string | null,
+    options: ThreadTurnDiffOptions = {}
+  ) => {
+    const params = new URLSearchParams()
+    if (turnKey) params.set("turn_key", turnKey)
+    if (options.maxFiles != null) {
+      params.set("max_files", String(options.maxFiles))
+    }
+    if (options.includeContent != null) {
+      params.set("include_content", String(options.includeContent))
+    }
+    const query = params.size > 0 ? `?${params.toString()}` : ""
+    return agentsRequest<ThreadTurnDiff>(
+      `/threads/${encodeURIComponent(threadId)}/turn-diff${query}`
+    )
+  },
   downloadThreadRecoveryPatch: (threadId: string) =>
     agentsBlobRequest(
       `/threads/${encodeURIComponent(threadId)}/recovery.patch`

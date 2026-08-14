@@ -26,6 +26,7 @@ from ..utils.json_types import (
     thread_metadata,
 )
 from ..utils.langsmith import get_langsmith_trace_url
+from ..utils.sandbox_paths import aresolve_sandbox_work_dir
 from ..utils.slack import (
     lookup_slack_thread_run_mapping,
     parse_github_pr_url,
@@ -1935,7 +1936,13 @@ async def _github_token_for_login(login: str) -> str:
 
 
 async def get_dashboard_thread_turn_diff(
-    thread_id: str, login: str, *, turn_key: str | None = None, email: str | None = None
+    thread_id: str,
+    login: str,
+    *,
+    turn_key: str | None = None,
+    max_files: int = 200,
+    include_content: bool = True,
+    email: str | None = None,
 ) -> dict[str, Any]:
     """What one turn (or the whole thread) changed, straight from git.
 
@@ -1959,16 +1966,39 @@ async def get_dashboard_thread_turn_diff(
     )
     sandbox_id = metadata.get("sandbox_id")
     if index < 0 or not checkpoints or not isinstance(sandbox_id, str) or not sandbox_id:
-        return {"status": "missing", "files": [], "truncated": False}
+        return {
+            "status": "missing",
+            "files": [],
+            "truncated": False,
+            "summary": {"files": 0, "additions": 0, "deletions": 0},
+        }
 
     try:
         sandbox = await create_sandbox(sandbox_id)
     except Exception:  # noqa: BLE001
         logger.debug("Could not connect to sandbox %s for turn diff", sandbox_id, exc_info=True)
-        return {"status": "missing", "files": [], "truncated": False}
+        return {
+            "status": "missing",
+            "files": [],
+            "truncated": False,
+            "summary": {"files": 0, "additions": 0, "deletions": 0},
+        }
+
+    try:
+        work_dir = await aresolve_sandbox_work_dir(sandbox)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not resolve sandbox work dir for %s", thread_id, exc_info=True)
+        work_dir = None
 
     head = checkpoints[index + 1]["ref"] if turn_key and index + 1 < len(checkpoints) else None
-    return await read_turn_diff(sandbox, None, str(checkpoints[index]["ref"]), head)
+    return await read_turn_diff(
+        sandbox,
+        work_dir,
+        str(checkpoints[index]["ref"]),
+        head,
+        max_files=max_files,
+        include_content=include_content,
+    )
 
 
 async def get_dashboard_thread_pr_diff(

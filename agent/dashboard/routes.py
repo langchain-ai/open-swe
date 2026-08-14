@@ -1782,12 +1782,16 @@ async def api_get_thread_recovery_patch(
 async def api_get_thread_turn_diff(
     thread_id: str,
     turn_key: str | None = None,
+    max_files: int = Query(200, ge=1, le=200),
+    include_content: bool = True,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_dashboard_thread_turn_diff(
         thread_id,
         session["sub"],
         turn_key=turn_key,
+        max_files=max_files,
+        include_content=include_content,
         email=session.get("email"),
     )
 

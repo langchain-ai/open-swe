@@ -27,9 +27,8 @@ CHECKPOINT_TIMEOUT_SECONDS = 15
 DIFF_TIMEOUT_SECONDS = 30
 MAX_CHECKPOINTS = 100
 
-_MAX_FILES = 200
+MAX_TURN_DIFF_FILES = 200
 _MAX_FILE_BYTES = 400_000
-_SECTION = "\x1e"
 _UNSAFE_KEY = re.compile(r"[^A-Za-z0-9._-]")
 
 # Builds a tree from the current worktree in a scratch index: no lock contention
@@ -68,14 +67,42 @@ def _checkpoint_command(work_dir: str | None, ref: str) -> str:
     )
 
 
-def _diff_command(work_dir: str | None, base: str, head: str | None) -> str:
+def _diff_command(work_dir: str | None, base: str, head: str | None, max_files: int) -> str:
     resolve_head = f"H={shlex.quote(head)}" if head else f"{_WRITE_WORKTREE_TREE}; H=$T"
-    rng = f"{shlex.quote(base)} $H"
-    return (
-        f"{_cd_repo(work_dir)}; {resolve_head}; "
-        f"git diff --numstat -z --no-renames {rng}; printf '{_SECTION}'; "
-        f"git diff --name-status -z --no-renames {rng}; printf '{_SECTION}%s' \"$H\""
-    )
+    script = r"""python3 - "$B" "$H" __MAX_FILES__ <<'PY'
+import json, subprocess, sys
+
+base, head, limit = sys.argv[1], sys.argv[2], int(sys.argv[3])
+numstat = subprocess.run(
+    ['git', 'diff', '--numstat', '-z', '--no-renames', base, head],
+    check=True,
+    stdout=subprocess.PIPE,
+).stdout
+name_status = subprocess.run(
+    ['git', 'diff', '--name-status', '-z', '--no-renames', base, head],
+    check=True,
+    stdout=subprocess.PIPE,
+).stdout
+records = [record for record in numstat.split(b'\0') if record]
+fields = [field for field in name_status.split(b'\0') if field]
+additions = deletions = 0
+for record in records:
+    parts = record.split(b'\t', 2)
+    if len(parts) != 3:
+        continue
+    if parts[0].isdigit():
+        additions += int(parts[0])
+    if parts[1].isdigit():
+        deletions += int(parts[1])
+print(json.dumps({
+    'head': head,
+    'numstat': (b'\0'.join(records[:limit]) + (b'\0' if records else b'')).decode(errors='replace'),
+    'nameStatus': (b'\0'.join(fields[:limit * 2]) + (b'\0' if fields else b'')).decode(errors='replace'),
+    'summary': {'files': len(records), 'additions': additions, 'deletions': deletions},
+}))
+PY"""
+    script = script.replace("__MAX_FILES__", str(max_files))
+    return f"{_cd_repo(work_dir)}; {resolve_head}; B={shlex.quote(base)}; {script}"
 
 
 def _contents_command(work_dir: str | None, base: str, head: str, paths: Sequence[str]) -> str:
@@ -184,7 +211,7 @@ def build_diff_files(
 ) -> list[dict[str, Any]]:
     statuses = parse_name_status(name_status_raw)
     files: list[dict[str, Any]] = []
-    for path, additions, deletions in parse_numstat(numstat_raw)[:_MAX_FILES]:
+    for path, additions, deletions in parse_numstat(numstat_raw)[:MAX_TURN_DIFF_FILES]:
         sides = contents.get(path) if isinstance(contents, Mapping) else None
         sides = sides if isinstance(sides, Mapping) else {}
         original, original_bad = _decode(sides.get("base"))
@@ -242,32 +269,68 @@ async def record_turn_checkpoint(sandbox: Any, work_dir: str | None, turn_key: s
 
 
 async def read_turn_diff(
-    sandbox: Any, work_dir: str | None, base: str, head: str | None
+    sandbox: Any,
+    work_dir: str | None,
+    base: str,
+    head: str | None,
+    *,
+    max_files: int = MAX_TURN_DIFF_FILES,
+    include_content: bool = True,
 ) -> dict[str, Any]:
     """Files changed between ``base`` and ``head`` (or the live worktree)."""
+    max_files = max(1, min(max_files, MAX_TURN_DIFF_FILES))
+    empty_summary = {"files": 0, "additions": 0, "deletions": 0}
     try:
         response = await _execute(
-            sandbox, _diff_command(work_dir, base, head), DIFF_TIMEOUT_SECONDS
+            sandbox, _diff_command(work_dir, base, head, max_files), DIFF_TIMEOUT_SECONDS
         )
     except Exception:
         logger.debug("turn diff failed for %s", base, exc_info=True)
-        return {"status": "error", "files": [], "truncated": False}
+        return {
+            "status": "error",
+            "files": [],
+            "truncated": False,
+            "summary": empty_summary,
+        }
     if not _ok(response):
-        return {"status": "missing", "files": [], "truncated": False}
+        return {
+            "status": "missing",
+            "files": [],
+            "truncated": False,
+            "summary": empty_summary,
+        }
 
-    sections = _output(response).split(_SECTION)
-    if len(sections) != 3:
-        return {"status": "error", "files": [], "truncated": False}
-    numstat_raw, name_status_raw, head_tree = sections
+    try:
+        payload = json.loads(_output(response).strip().splitlines()[-1])
+        if not isinstance(payload, Mapping):
+            raise TypeError
+        summary_payload = payload["summary"]
+        if not isinstance(summary_payload, Mapping):
+            raise TypeError
+        summary = {
+            key: max(0, int(summary_payload[key])) for key in ("files", "additions", "deletions")
+        }
+        numstat_raw = payload["numstat"]
+        name_status_raw = payload["nameStatus"]
+        head_tree = payload["head"]
+        if not all(isinstance(value, str) for value in (numstat_raw, name_status_raw, head_tree)):
+            raise TypeError
+    except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return {
+            "status": "error",
+            "files": [],
+            "truncated": False,
+            "summary": empty_summary,
+        }
+
     stats = parse_numstat(numstat_raw)
-    paths = [path for path, _, _ in stats[:_MAX_FILES]]
-
+    paths = [path for path, _, _ in stats]
     contents: Mapping[str, Any] = {}
-    if paths:
+    if include_content and paths:
         try:
             blobs = await _execute(
                 sandbox,
-                _contents_command(work_dir, base, head_tree.strip(), paths),
+                _contents_command(work_dir, base, head_tree, paths),
                 DIFF_TIMEOUT_SECONDS,
             )
             decoded = json.loads(_output(blobs).strip().splitlines()[-1])
@@ -275,8 +338,10 @@ async def read_turn_diff(
         except Exception:
             logger.debug("turn diff contents failed for %s", base, exc_info=True)
 
+    files = build_diff_files(numstat_raw, name_status_raw, contents)
     return {
         "status": "ready",
-        "files": build_diff_files(numstat_raw, name_status_raw, contents),
-        "truncated": len(stats) > _MAX_FILES,
+        "files": files,
+        "truncated": summary["files"] > len(files),
+        "summary": summary,
     }
