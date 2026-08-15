@@ -6,9 +6,9 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-for command in node corepack ditto; do
+for command in node pnpm ditto; do
   command -v "$command" >/dev/null || {
-    echo "Missing $command. Install Node.js 22, then try again." >&2
+    echo "Missing $command. Install Node.js and pnpm, then try again." >&2
     exit 1
   }
 done
@@ -16,9 +16,9 @@ done
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-corepack pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile
 rm -rf desktop/dist
-corepack pnpm --dir desktop run pack
+pnpm --dir desktop run pack
 
 apps=(desktop/dist/mac*/"Open SWE.app")
 if [[ ${#apps[@]} -ne 1 || ! -d "${apps[0]}" ]]; then
