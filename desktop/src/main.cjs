@@ -29,6 +29,7 @@ const {
   deleteRefs,
   readDiff,
   repoRoot,
+  repositoryMetadata,
   staleRefs,
 } = require("./git-diff.cjs");
 const {
@@ -593,7 +594,11 @@ function configureDesktopIpc() {
       return { status: "missing", files: [], truncated: false };
     }
     try {
-      return await readDiff(checkpoint.repo, checkpoint.ref);
+      const [diff, repository] = await Promise.all([
+        readDiff(checkpoint.repo, checkpoint.ref),
+        repositoryMetadata(checkpoint.repo, localSession?.env),
+      ]);
+      return { ...diff, repository };
     } catch {
       return { status: "error", files: [], truncated: false };
     }

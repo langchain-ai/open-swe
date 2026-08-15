@@ -18,7 +18,8 @@ dcode runs are ephemeral: their sessions remain available only for the lifetime 
 process and cannot be resumed after it exits.
 
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
-started, so it shows what the agent changed and not the working tree's prior state.
+started, so it shows what the agent changed and not the working tree's prior state. It also shows
+the current branch and discovers its pull request when the GitHub CLI is installed and authenticated.
 
 ## How it connects
 
