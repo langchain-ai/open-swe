@@ -5,6 +5,7 @@ import hashlib
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+import jwt
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -303,3 +304,40 @@ def test_desktop_login_rejects_a_malformed_handoff_challenge(monkeypatch) -> Non
             follow_redirects=False,
         )
         assert out_of_range.status_code == 422
+
+
+def test_desktop_handoff_code_carries_no_session(monkeypatch) -> None:
+    """The handoff code rides in a URL the browser records and extensions can read.
+
+    A JWT is signed, not encrypted, so anything in its payload is readable
+    without the verifier — a session in there would make the PKCE check moot.
+    """
+    _desktop_login_env(monkeypatch)
+    verifier = "desktop-verifier"
+    challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    )
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://dashboard.example") as client:
+        login_response = client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop_handoff": challenge, "desktop_port": 51234},
+            follow_redirects=False,
+        )
+        state = parse_qs(urlparse(login_response.headers["location"]).query)["state"][0]
+        callback_response = client.get(
+            "/dashboard/api/auth/callback",
+            params={"code": "oauth-code", "state": state},
+            follow_redirects=False,
+        )
+        location = urlparse(callback_response.headers["location"])
+        handoff = parse_qs(location.query)["code"][0]
+
+    payload = jwt.decode(handoff, "test-secret", algorithms=["HS256"])
+    assert "session" not in payload
+    assert not any(
+        isinstance(v, str) and v.count(".") == 2 and len(v) > 60 for v in payload.values()
+    ), f"handoff payload looks like it embeds a token: {payload}"
+    assert payload["sub"] == "alice"

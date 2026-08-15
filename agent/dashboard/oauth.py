@@ -238,10 +238,21 @@ def desktop_callback_url(port: int, code: str) -> str:
     return f"http://127.0.0.1:{port}/callback?code={quote(code, safe='')}"
 
 
-def issue_desktop_handoff(*, session_jwt: str, challenge: str) -> str:
+def issue_desktop_handoff(
+    *, login: str, email: str | None, avatar_url: str | None, challenge: str
+) -> str:
+    """Mint the code the browser hands back to the desktop app.
+
+    Carries the identity a session will be minted from, never a session
+    itself: a JWT is signed but not encrypted, so anything that sees the
+    loopback URL — browser history, an extension — can read the payload, and a
+    session in there would be a bearer token that makes the verifier pointless.
+    """
     now = int(time.time())
     payload = {
-        "session": session_jwt,
+        "sub": login,
+        "email": email,
+        "avatar_url": avatar_url,
         "challenge": challenge,
         "iat": now,
         "exp": now + HANDOFF_TTL_SECONDS,
@@ -250,23 +261,29 @@ def issue_desktop_handoff(*, session_jwt: str, challenge: str) -> str:
 
 
 def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
-    """Return the session JWT carried by a desktop handoff code.
+    """Mint the session a desktop handoff code was issued for.
 
-    The code travels over the ``open-swe://`` scheme, which any locally
-    installed app can claim, so redeeming it also requires the verifier the
-    challenge committed to — and that never leaves the desktop app.
+    The code reaches a loopback port through the user's browser, so redeeming
+    it also requires the verifier the challenge committed to — and that never
+    leaves the desktop app.
     """
     try:
         payload = jwt.decode(code, _secret(), algorithms=[JWT_ALG])
     except jwt.PyJWTError as e:
         raise HTTPException(400, f"invalid handoff code: {e}") from e
     challenge = payload.get("challenge")
-    session_jwt = payload.get("session")
-    if not isinstance(challenge, str) or not isinstance(session_jwt, str):
+    login = payload.get("sub")
+    if not isinstance(challenge, str) or not isinstance(login, str) or not login:
         raise HTTPException(400, "malformed handoff code")
     if not hmac.compare_digest(_s256(verifier), challenge):
         raise HTTPException(400, "handoff verifier mismatch")
-    return session_jwt
+    email = payload.get("email")
+    avatar_url = payload.get("avatar_url")
+    return issue_session(
+        login=login,
+        email=email if isinstance(email, str) else None,
+        avatar_url=avatar_url if isinstance(avatar_url, str) else None,
+    )
 
 
 # Dashboard route where users manage their GitHub↔Slack link.

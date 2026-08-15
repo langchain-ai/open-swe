@@ -61,9 +61,11 @@ const server = http.createServer(async (request, response) => {
 
   if (url.pathname === "/dashboard/api/auth/login") {
     const challenge = url.searchParams.get("desktop_handoff")
-    const loopback = url.searchParams.get("desktop_port")
-    if (!challenge || !loopback) {
-      console.log("  ✗ login is missing desktop_handoff/desktop_port")
+    // Mirror the backend: only a port number crosses the wire, so the redirect
+    // target can never be steered off loopback.
+    const loopback = Number(url.searchParams.get("desktop_port"))
+    if (!challenge || !Number.isInteger(loopback) || loopback < 1024 || loopback > 65535) {
+      console.log("  ✗ login is missing a valid desktop_handoff/desktop_port")
       return send(response, 400, { error: "not a desktop login" })
     }
     const code = randomBytes(24).toString("base64url")

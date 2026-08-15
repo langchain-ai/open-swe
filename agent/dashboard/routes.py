@@ -486,19 +486,23 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
-    session_jwt = issue_session(login=login, email=email, avatar_url=user.get("avatar_url"))
-
     challenge = state_payload.get("handoff_challenge")
     port = state_payload.get("handoff_port")
     if isinstance(challenge, str) and isinstance(port, int):
         # Desktop login runs in the user's own browser, so the session belongs to
         # the app rather than to this browser: hand back a PKCE-bound code the
-        # app redeems, and leave no session cookie behind here.
-        handoff = issue_desktop_handoff(session_jwt=session_jwt, challenge=challenge)
+        # app redeems for one, and leave no session cookie behind here.
+        handoff = issue_desktop_handoff(
+            login=login,
+            email=email,
+            avatar_url=user.get("avatar_url"),
+            challenge=challenge,
+        )
         response = RedirectResponse(desktop_callback_url(port, handoff), status_code=302)
         _clear_state_cookie(response)
         return response
 
+    session_jwt = issue_session(login=login, email=email, avatar_url=user.get("avatar_url"))
     response = RedirectResponse(redirect_to, status_code=302)
     _set_session_cookie(response, session_jwt)
     _clear_state_cookie(response)
