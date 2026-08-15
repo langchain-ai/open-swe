@@ -258,6 +258,9 @@ router = APIRouter(
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
 _GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+# Module-level so a local harness can point the browser leg at a fake consent
+# page and still run the real login/callback code.
+GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
 
 
@@ -451,7 +454,7 @@ async def auth_login(
             "state": state,
         }
     )
-    url = f"https://github.com/login/oauth/authorize?{query}"
+    url = f"{GITHUB_AUTHORIZE_URL}?{query}"
     response = RedirectResponse(url, status_code=302)
     _set_state_cookie(response, nonce)
     return response
