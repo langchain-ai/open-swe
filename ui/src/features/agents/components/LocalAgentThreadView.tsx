@@ -3,6 +3,7 @@ import { CircleAlert, FolderOpen, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
 import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
+import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
@@ -19,6 +20,7 @@ import {
 import { Messages } from "@/features/agents/components/messages"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
 import { usePanelTabs } from "@/features/agents/lib/panelTabs"
+import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
   readStoredPanelCollapsed,
@@ -40,6 +42,20 @@ const LOCAL_PANEL_KINDS: ReadonlyArray<PanelTabKind> = [
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const { session, messages, loaded } = useDesktopAcpSession(sessionId)
+  const { models, defaultSelection } = useModelOptions()
+  const [selection, setSelection] = useState<ModelSelection | null>(null)
+  useEffect(() => setSelection(null), [sessionId])
+  const sessionSelection = useMemo<ModelSelection | null>(() => {
+    const modelId = session?.modelId
+    const effort = session?.effort
+    if (!modelId || !effort) return null
+    return models.some(
+      (model) => model.id === modelId && model.efforts.includes(effort)
+    )
+      ? { modelId, effort }
+      : null
+  }, [models, session?.effort, session?.modelId])
+  const activeSelection = selection ?? sessionSelection ?? defaultSelection
   const isMobile = useIsMobile()
   const sidebarCollapsed = useSidebarCollapsed()
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
@@ -233,8 +249,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                       ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
                       : prompt,
                     images,
+                    modelId: activeSelection?.modelId,
+                    effort: activeSelection?.effort,
                   })
                 }}
+                models={models}
+                selection={activeSelection}
+                onSelectionChange={setSelection}
                 placeholder="Add a follow up"
               />
             </div>

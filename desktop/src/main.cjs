@@ -141,7 +141,6 @@ function acpSessionsPath() {
 }
 
 function sessionRecord(localSession) {
-  const previous = persistedAcpSessions.get(localSession.id) || {};
   return {
     id: localSession.id,
     acpSessionId: localSession.acpSessionId,
@@ -150,8 +149,8 @@ function sessionRecord(localSession) {
     createdAt: localSession.createdAt,
     updatedAt: localSession.updatedAt,
     dcodeCommand: localSession.target.command,
-    ...(previous.modelId ? { modelId: previous.modelId } : {}),
-    ...(previous.effort ? { effort: previous.effort } : {}),
+    ...(localSession.modelId ? { modelId: localSession.modelId } : {}),
+    ...(localSession.effort ? { effort: localSession.effort } : {}),
     ...(acpCheckpoints.get(localSession.id)
       ? { checkpoint: acpCheckpoints.get(localSession.id) }
       : {}),
@@ -176,6 +175,8 @@ function sessionSummary(record) {
     status: "idle",
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+    modelId: record.modelId,
+    effort: record.effort,
   };
 }
 
@@ -271,6 +272,8 @@ async function createAcpSession({ cwd, modelId, effort, restored }) {
     onChange: persistAcpSession,
     requestPermission: async () => true,
     restored,
+    modelId,
+    effort,
   });
 }
 
@@ -532,6 +535,18 @@ function configureDesktopIpc() {
     const localSession = await restoreAcpSession(input?.sessionId);
     if (!localSession)
       throw new Error("Local Deep Agents Code session not found");
+    const modelId =
+      typeof input.modelId === "string" ? input.modelId : undefined;
+    const effort = typeof input.effort === "string" ? input.effort : undefined;
+    if (modelId !== localSession.modelId || effort !== localSession.effort) {
+      const env = await getProjectShellEnv({ cwd: localSession.cwd });
+      await localSession.configure(
+        modelId,
+        effort,
+        dcodeTarget({ env, modelId, effort }),
+        env,
+      );
+    }
     await localSession.prompt(input.prompt || "", input.images || []);
     return localSession.snapshot();
   });
