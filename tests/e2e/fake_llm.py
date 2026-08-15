@@ -475,10 +475,12 @@ class FakeScriptedChatModel(BaseChatModel):
 
         # Keep a run busy on demand so E2E can land follow-ups mid-run (exercising
         # the interrupt-debounce path). Only the triggering message carries the
-        # marker, and only the first model call of that run blocks. `E2E_BUSY_HOLD:<n>`
-        # overrides the window so a spec needing a short hold does not leave a run
-        # in flight for the specs that follow it.
-        hold = _BUSY_HOLD_RE.search(context.last_text) if step_index == 0 else None
+        # marker. The block lands on the second model call so the Slack
+        # acknowledgement — and the web link a spec may need to click — is already
+        # out by the time the run stalls. `E2E_BUSY_HOLD:<n>` overrides the window
+        # so a spec needing a short hold does not leave a run in flight for the
+        # specs that follow it.
+        hold = _BUSY_HOLD_RE.search(context.last_text) if step_index == 1 else None
         if hold:
             time.sleep(float(hold.group(1) or os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
         step = script[step_index] if step_index < len(script) else SCRIPT_LIBRARY["followup"][0]
