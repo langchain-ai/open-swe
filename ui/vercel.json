@@ -6,7 +6,8 @@
     "deploymentEnabled": {
       "**": false,
       "main": true,
-      "preview": true
+      "preview": true,
+      "prod": true
     }
   }
 }
