@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -7,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agent.dashboard import routes
-from agent.dashboard.oauth import COOKIE_NAME, sanitize_redirect_to
+from agent.dashboard.oauth import COOKIE_NAME, decode_session, sanitize_redirect_to
 
 
 def test_sanitize_redirect_to_preserves_allowed_dashboard_target(monkeypatch) -> None:
@@ -194,3 +196,103 @@ def test_auth_callback_cross_origin_redirect(monkeypatch) -> None:
         assert callback_response.status_code == 302
         assert callback_response.headers["location"] == f"http://localhost:3000{target}"
         assert not callback_response.headers["location"].startswith("http://localhost:2024")
+
+
+def _desktop_login_env(monkeypatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("GITHUB_APP_CLIENT_ID", "client-id")
+
+    async def fake_exchange_code(code: str) -> dict[str, Any]:
+        return {"access_token": "gho_test"}
+
+    async def fake_fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
+        return {"login": "alice", "avatar_url": None}, "alice@example.com"
+
+    async def fake_enforce_org_login_gate(login: str) -> None:
+        pass
+
+    async def fake_upsert_access_token_from_github_response(
+        login: str, email: str, data: dict[str, Any]
+    ) -> None:
+        pass
+
+    monkeypatch.setattr(routes, "exchange_code", fake_exchange_code)
+    monkeypatch.setattr(routes, "fetch_github_user", fake_fetch_github_user)
+    monkeypatch.setattr(routes, "enforce_org_login_gate", fake_enforce_org_login_gate)
+    monkeypatch.setattr(
+        routes,
+        "upsert_access_token_from_github_response",
+        fake_upsert_access_token_from_github_response,
+    )
+
+
+def test_desktop_login_hands_the_session_back_over_loopback(monkeypatch) -> None:
+    _desktop_login_env(monkeypatch)
+    verifier = "desktop-verifier"
+    challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    )
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://dashboard.example") as client:
+        login_response = client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop_handoff": challenge, "desktop_port": 51234},
+            follow_redirects=False,
+        )
+        state = parse_qs(urlparse(login_response.headers["location"]).query)["state"][0]
+
+        callback_response = client.get(
+            "/dashboard/api/auth/callback",
+            params={"code": "oauth-code", "state": state},
+            follow_redirects=False,
+        )
+        assert callback_response.status_code == 302
+        location = urlparse(callback_response.headers["location"])
+        assert (location.scheme, location.netloc, location.path) == (
+            "http",
+            "127.0.0.1:51234",
+            "/callback",
+        )
+        # The browser is only a courier here — it must not keep a session.
+        assert not callback_response.cookies.get(COOKIE_NAME)
+
+        handoff = parse_qs(location.query)["code"][0]
+        exchange = client.post(
+            "/dashboard/api/auth/desktop/exchange",
+            json={"code": handoff, "verifier": verifier},
+            headers={"origin": "open-swe://app"},
+        )
+        assert exchange.status_code == 200
+        assert decode_session(exchange.json()["session"])["sub"] == "alice"
+
+        forged = client.post(
+            "/dashboard/api/auth/desktop/exchange",
+            json={"code": handoff, "verifier": "wrong-verifier"},
+            headers={"origin": "open-swe://app"},
+        )
+        assert forged.status_code == 400
+
+
+def test_desktop_login_rejects_a_malformed_handoff_challenge(monkeypatch) -> None:
+    _desktop_login_env(monkeypatch)
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://dashboard.example") as client:
+        response = client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop_handoff": "../evil", "desktop_port": 51234},
+            follow_redirects=False,
+        )
+        assert response.status_code == 400
+
+        out_of_range = client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop_handoff": "a" * 43, "desktop_port": 80},
+            follow_redirects=False,
+        )
+        assert out_of_range.status_code == 422

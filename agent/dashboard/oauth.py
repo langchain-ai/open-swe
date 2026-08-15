@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import logging
 import os
+import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 import jwt
@@ -28,6 +30,7 @@ STATE_COOKIE_NAME = "osw_oauth_state"
 _DESKTOP_APP_ORIGIN = "open-swe://app"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 STATE_TTL_SECONDS = 600
+HANDOFF_TTL_SECONDS = 120
 JWT_ALG = "HS256"
 
 GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "")
@@ -182,7 +185,13 @@ def hash_state_nonce(nonce: str) -> str:
     return hmac.new(_secret().encode(), nonce.encode(), hashlib.sha256).hexdigest()
 
 
-def issue_state(*, redirect_to: str, nonce_hash: str) -> str:
+def issue_state(
+    *,
+    redirect_to: str,
+    nonce_hash: str,
+    handoff_challenge: str | None = None,
+    handoff_port: int | None = None,
+) -> str:
     now = int(time.time())
     payload: dict[str, Any] = {
         "nonce_hash": nonce_hash,
@@ -190,6 +199,9 @@ def issue_state(*, redirect_to: str, nonce_hash: str) -> str:
         "iat": now,
         "exp": now + STATE_TTL_SECONDS,
     }
+    if handoff_challenge and handoff_port:
+        payload["handoff_challenge"] = handoff_challenge
+        payload["handoff_port"] = handoff_port
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
 
 
@@ -198,6 +210,63 @@ def decode_state(state: str) -> dict[str, Any]:
         return jwt.decode(state, _secret(), algorithms=[JWT_ALG])
     except jwt.PyJWTError as e:
         raise HTTPException(400, f"invalid state: {e}") from e
+
+
+_S256_CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")
+
+
+def _s256(verifier: str) -> str:
+    digest = hashlib.sha256(verifier.encode()).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def valid_handoff_challenge(value: str | None) -> str | None:
+    """Return the desktop app's PKCE S256 challenge, or ``None`` when absent."""
+    if not value:
+        return None
+    if not _S256_CHALLENGE.fullmatch(value):
+        raise HTTPException(400, "invalid desktop handoff challenge")
+    return value
+
+
+def desktop_callback_url(port: int, code: str) -> str:
+    """Loopback redirect target for the desktop app's local login listener.
+
+    Only the port crosses the wire; the host and path are fixed here so this
+    can never be steered into an open redirect.
+    """
+    return f"http://127.0.0.1:{port}/callback?code={quote(code, safe='')}"
+
+
+def issue_desktop_handoff(*, session_jwt: str, challenge: str) -> str:
+    now = int(time.time())
+    payload = {
+        "session": session_jwt,
+        "challenge": challenge,
+        "iat": now,
+        "exp": now + HANDOFF_TTL_SECONDS,
+    }
+    return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+
+
+def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
+    """Return the session JWT carried by a desktop handoff code.
+
+    The code travels over the ``open-swe://`` scheme, which any locally
+    installed app can claim, so redeeming it also requires the verifier the
+    challenge committed to — and that never leaves the desktop app.
+    """
+    try:
+        payload = jwt.decode(code, _secret(), algorithms=[JWT_ALG])
+    except jwt.PyJWTError as e:
+        raise HTTPException(400, f"invalid handoff code: {e}") from e
+    challenge = payload.get("challenge")
+    session_jwt = payload.get("session")
+    if not isinstance(challenge, str) or not isinstance(session_jwt, str):
+        raise HTTPException(400, "malformed handoff code")
+    if not hmac.compare_digest(_s256(verifier), challenge):
+        raise HTTPException(400, "handoff verifier mismatch")
+    return session_jwt
 
 
 # Dashboard route where users manage their GitHub↔Slack link.

@@ -62,16 +62,20 @@ from .oauth import (
     STATE_COOKIE_NAME,
     STATE_TTL_SECONDS,
     decode_state,
+    desktop_callback_url,
     enforce_org_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
+    issue_desktop_handoff,
     issue_session,
     issue_state,
     new_state_nonce,
+    redeem_desktop_handoff,
     require_same_origin_for_mutations,
     require_session,
     sanitize_redirect_to,
+    valid_handoff_challenge,
 )
 from .oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
 from .options import (
@@ -419,6 +423,8 @@ async def auth_login(
     request: Request,
     redirect_to: str | None = None,
     desktop: bool = False,
+    desktop_handoff: str | None = None,
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
 ) -> RedirectResponse:
     client_id = os.environ.get("GITHUB_APP_CLIENT_ID", "")
     if not client_id:
@@ -429,6 +435,8 @@ async def auth_login(
     state = issue_state(
         redirect_to=safe_redirect,
         nonce_hash=hash_state_nonce(nonce),
+        handoff_challenge=valid_handoff_challenge(desktop_handoff),
+        handoff_port=desktop_port,
     )
     api_base_url = _api_base_url()
     if desktop:
@@ -450,7 +458,7 @@ async def auth_login(
 
 
 @router.get("/auth/callback")
-async def auth_callback(request: Request, code: str, state: str) -> RedirectResponse:
+async def auth_callback(request: Request, code: str, state: str) -> Response:
     state_payload = decode_state(state)
     state_nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)
@@ -479,10 +487,35 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
     session_jwt = issue_session(login=login, email=email, avatar_url=user.get("avatar_url"))
+
+    challenge = state_payload.get("handoff_challenge")
+    port = state_payload.get("handoff_port")
+    if isinstance(challenge, str) and isinstance(port, int):
+        # Desktop login runs in the user's own browser, so the session belongs to
+        # the app rather than to this browser: hand back a PKCE-bound code the
+        # app redeems, and leave no session cookie behind here.
+        handoff = issue_desktop_handoff(session_jwt=session_jwt, challenge=challenge)
+        response = RedirectResponse(desktop_callback_url(port, handoff), status_code=302)
+        _clear_state_cookie(response)
+        return response
+
     response = RedirectResponse(redirect_to, status_code=302)
     _set_session_cookie(response, session_jwt)
     _clear_state_cookie(response)
     return response
+
+
+class DesktopHandoffExchange(BaseModel):
+    code: str
+    verifier: str
+
+
+@router.post("/auth/desktop/exchange")
+async def auth_desktop_exchange(body: DesktopHandoffExchange) -> dict[str, Any]:
+    return {
+        "session": redeem_desktop_handoff(code=body.code, verifier=body.verifier),
+        "expires_in": SESSION_TTL_SECONDS,
+    }
 
 
 @router.post("/auth/logout")
