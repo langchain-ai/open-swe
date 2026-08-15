@@ -309,15 +309,17 @@ class AcpSession {
     onChange,
     requestPermission,
     restored,
+    modelId,
+    effort,
   }) {
     this.id = restored?.id || randomUUID()
     this.cwd = cwd
-    this.target = target
-    this.env = env
     this.title = restored?.title || "New local agent"
     this.createdAt = restored?.createdAt || Date.now()
     this.updatedAt = restored?.updatedAt || this.createdAt
     this.acpSessionId = restored?.acpSessionId
+    this.modelId = modelId
+    this.effort = effort
     this.status = "starting"
     this.closed = false
     this.deleteSupported = false
@@ -327,7 +329,14 @@ class AcpSession {
     this.requestPermission = requestPermission
     this.tools = new Map()
     this.replayUsers = new Map()
-    this.rpc = new NdJsonRpcClient(target.command, target.args, cwd, env)
+    this.suppressUpdates = false
+    this.connect(target, env)
+  }
+
+  connect(target, env) {
+    this.target = target
+    this.env = env
+    this.rpc = new NdJsonRpcClient(target.command, target.args, this.cwd, env)
     this.rpc.onNotification = (method, params) =>
       this.handleNotification(method, params)
     this.rpc.onRequest = (method, params) => this.handleRequest(method, params)
@@ -364,7 +373,7 @@ class AcpSession {
     }
   }
 
-  async initialize() {
+  async initialize(persist = true) {
     const initialized = await this.rpc.request("initialize", {
       protocolVersion: ACP_PROTOCOL_VERSION,
       clientCapabilities: {
@@ -406,7 +415,31 @@ class AcpSession {
       this.acpSessionId = result.sessionId
     }
     this.status = "idle"
-    this.notifyChange()
+    if (persist) this.notifyChange()
+  }
+
+  async configure(modelId, effort, target, env) {
+    if (modelId === this.modelId && effort === this.effort) return
+    if (this.status === "running")
+      throw new Error("Deep Agents Code is already running")
+    this.rpc.close()
+    this.status = "starting"
+    this.replayUsers.clear()
+    this.connect(target, env)
+    this.suppressUpdates = true
+    try {
+      await this.initialize(false)
+      this.modelId = modelId
+      this.effort = effort
+      this.notifyChange()
+    } catch (error) {
+      this.rpc.close()
+      this.status = "error"
+      this.emit({ type: "error", message: String(error?.message || error) })
+      throw error
+    } finally {
+      this.suppressUpdates = false
+    }
   }
 
   async prompt(text, images) {
@@ -451,6 +484,7 @@ class AcpSession {
 
   handleNotification(method, params) {
     if (
+      this.suppressUpdates ||
       method !== "session/update" ||
       !isRecord(params) ||
       !isRecord(params.update)
@@ -545,6 +579,8 @@ class AcpSession {
       status: this.status,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
+      modelId: this.modelId,
+      effort: this.effort,
     }
   }
 

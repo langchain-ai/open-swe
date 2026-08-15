@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { randomUUID } = require("node:crypto");
 const { pathToFileURL } = require("node:url");
 const {
   app,
@@ -90,6 +91,7 @@ let setupWindow = null;
 let authWindow = null;
 let quitting = false;
 const acpSessions = new Map();
+const acpDrafts = new Map();
 const acpRestores = new Map();
 const deletingAcpSessions = new Set();
 const persistedAcpSessions = new Map();
@@ -140,7 +142,6 @@ function acpSessionsPath() {
 }
 
 function sessionRecord(localSession) {
-  const previous = persistedAcpSessions.get(localSession.id) || {};
   return {
     id: localSession.id,
     acpSessionId: localSession.acpSessionId,
@@ -149,8 +150,8 @@ function sessionRecord(localSession) {
     createdAt: localSession.createdAt,
     updatedAt: localSession.updatedAt,
     dcodeCommand: localSession.target.command,
-    ...(previous.modelId ? { modelId: previous.modelId } : {}),
-    ...(previous.effort ? { effort: previous.effort } : {}),
+    ...(localSession.modelId ? { modelId: localSession.modelId } : {}),
+    ...(localSession.effort ? { effort: localSession.effort } : {}),
     ...(acpCheckpoints.get(localSession.id)
       ? { checkpoint: acpCheckpoints.get(localSession.id) }
       : {}),
@@ -175,6 +176,8 @@ function sessionSummary(record) {
     status: "idle",
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+    modelId: record.modelId,
+    effort: record.effort,
   };
 }
 
@@ -198,8 +201,26 @@ function pathIsInside(root, candidate) {
   );
 }
 
+function localSessionContext(localSessionId) {
+  return acpSessions.get(localSessionId) || acpDrafts.get(localSessionId);
+}
+
+async function deleteAcpDrafts(ownerId, sessionId) {
+  for (const draft of acpDrafts.values()) {
+    if (draft.ownerId !== ownerId || (sessionId && draft.id !== sessionId)) {
+      continue;
+    }
+    if (draft.starting) {
+      draft.deleteRequested = true;
+      continue;
+    }
+    acpDrafts.delete(draft.id);
+    await deleteSessionTerminals(draft.id);
+  }
+}
+
 function resolveAcpProjectPath(localSessionId, value) {
-  const localSession = acpSessions.get(localSessionId);
+  const localSession = localSessionContext(localSessionId);
   if (!localSession || typeof value !== "string" || value.length === 0) {
     return null;
   }
@@ -252,6 +273,8 @@ async function createAcpSession({ cwd, modelId, effort, restored }) {
     onChange: persistAcpSession,
     requestPermission: async () => true,
     restored,
+    modelId,
+    effort,
   });
 }
 
@@ -414,6 +437,30 @@ function configureDesktopIpc() {
     return resolveAcpProjectPath(input?.localSessionId, input?.path);
   });
 
+  ipcMain.handle("desktop:acp-draft-create", (event, value) => {
+    requireTrustedDesktopIpc(event);
+    const cwd = typeof value === "string" ? registeredProject(value) : null;
+    if (!cwd) throw new Error("Choose a valid local project directory");
+    const draft = {
+      id: randomUUID(),
+      cwd,
+      ownerId: event.sender.id,
+      starting: false,
+      deleteRequested: false,
+    };
+    acpDrafts.set(draft.id, draft);
+    return { id: draft.id, cwd: draft.cwd };
+  });
+
+  ipcMain.handle("desktop:acp-draft-delete", async (event, sessionId) => {
+    requireTrustedDesktopIpc(event);
+    const draft =
+      typeof sessionId === "string" ? acpDrafts.get(sessionId) : null;
+    if (!draft || draft.ownerId !== event.sender.id) return false;
+    await deleteAcpDrafts(event.sender.id, sessionId);
+    return true;
+  });
+
   ipcMain.handle("desktop:acp-start", async (event, input) => {
     requireTrustedDesktopIpc(event);
     if (
@@ -434,9 +481,31 @@ function configureDesktopIpc() {
     const modelId =
       typeof input.modelId === "string" ? input.modelId : undefined;
     const effort = typeof input.effort === "string" ? input.effort : undefined;
-    const localSession = await createAcpSession({ cwd, modelId, effort });
-    acpSessions.set(localSession.id, localSession);
+    const draftSessionId =
+      typeof input.draftSessionId === "string"
+        ? input.draftSessionId
+        : undefined;
+    const draft = draftSessionId ? acpDrafts.get(draftSessionId) : null;
+    if (
+      draftSessionId &&
+      (!draft ||
+        draft.ownerId !== event.sender.id ||
+        draft.cwd !== cwd ||
+        draft.starting)
+    ) {
+      throw new Error("Local agent draft is no longer available");
+    }
+    if (draft) draft.starting = true;
+
+    let localSession;
     try {
+      localSession = await createAcpSession({
+        cwd,
+        modelId,
+        effort,
+        restored: draft ? { id: draft.id } : undefined,
+      });
+      acpSessions.set(localSession.id, localSession);
       await localSession.initialize();
       persistedAcpSessions.set(localSession.id, {
         ...sessionRecord(localSession),
@@ -444,11 +513,21 @@ function configureDesktopIpc() {
         ...(effort ? { effort } : {}),
       });
       writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
+      if (draft) acpDrafts.delete(draft.id);
     } catch (error) {
-      acpSessions.delete(localSession.id);
-      persistedAcpSessions.delete(localSession.id);
-      writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
-      localSession.close();
+      if (localSession) {
+        acpSessions.delete(localSession.id);
+        persistedAcpSessions.delete(localSession.id);
+        writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
+        localSession.close();
+      }
+      if (draft) {
+        draft.starting = false;
+        if (draft.deleteRequested) {
+          acpDrafts.delete(draft.id);
+          await deleteSessionTerminals(draft.id);
+        }
+      }
       throw error;
     }
     await recordAcpCheckpoint(localSession);
@@ -463,6 +542,18 @@ function configureDesktopIpc() {
     const localSession = await restoreAcpSession(input?.sessionId);
     if (!localSession)
       throw new Error("Local Deep Agents Code session not found");
+    const modelId =
+      typeof input.modelId === "string" ? input.modelId : undefined;
+    const effort = typeof input.effort === "string" ? input.effort : undefined;
+    if (modelId !== localSession.modelId || effort !== localSession.effort) {
+      const env = await getProjectShellEnv({ cwd: localSession.cwd });
+      await localSession.configure(
+        modelId,
+        effort,
+        dcodeTarget({ env, modelId, effort }),
+        env,
+      );
+    }
     await localSession.prompt(input.prompt || "", input.images || []);
     return localSession.snapshot();
   });
@@ -956,6 +1047,11 @@ function createWindow() {
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
   );
+  const ownerId = window.webContents.id;
+  const deleteDrafts = () => void deleteAcpDrafts(ownerId);
+  window.webContents.on("did-start-navigation", deleteDrafts);
+  window.webContents.on("render-process-gone", deleteDrafts);
+  window.webContents.on("destroyed", deleteDrafts);
 
   mainWindow = window;
   void loadApp(window);
@@ -1039,7 +1135,12 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, commandLine) => {
+    if (isDevelopment) {
+      app.relaunch({ args: commandLine.slice(1) });
+      app.quit();
+      return;
+    }
     const window = mainWindow || setupWindow || createWindow();
     if (window.isMinimized()) window.restore();
     window.show();
@@ -1078,7 +1179,7 @@ if (!hasSingleInstanceLock) {
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
       listProjects,
-      getAcpSession: (sessionId) => acpSessions.get(sessionId),
+      getAcpSession: localSessionContext,
       userDataPath: app.getPath("userData"),
     });
 
