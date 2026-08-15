@@ -85,32 +85,46 @@ test("builds ACP text and image prompt blocks", () => {
 
 test("switches model before continuing an ACP session", async () => {
   let closed = false
-  let initialized = false
   let emitted
   const session = Object.assign(Object.create(AcpSession.prototype), {
     status: "idle",
     modelId: "old:model",
     effort: "low",
+    target: { command: "old" },
+    env: { MODEL: "old" },
     replayUsers: new Map(),
     rpc: { close: () => (closed = true) },
-    connect() {},
-    initialize: async () => (initialized = true),
+    connect(target, env) {
+      this.target = target
+      this.env = env
+      this.rpc = { close() {} }
+    },
+    initialize: async function () {
+      this.status = "idle"
+    },
     notifyChange() {},
     emit: (event) => (emitted = event),
   })
+  const workingTarget = { command: "new" }
+  const workingEnv = { MODEL: "new" }
 
-  await session.configure("new:model", "high", {}, {})
+  await session.configure("new:model", "high", workingTarget, workingEnv)
 
   assert.equal(closed, true)
-  assert.equal(initialized, true)
   assert.equal(session.modelId, "new:model")
   assert.equal(session.effort, "high")
 
-  session.initialize = async () => {
-    throw new Error("load failed")
+  let attempts = 0
+  session.initialize = async function () {
+    if (attempts++ === 0) throw new Error("load failed")
+    this.status = "idle"
   }
   await assert.rejects(session.configure("other:model", "low", {}, {}))
-  assert.equal(session.status, "error")
+  assert.equal(session.status, "idle")
+  assert.equal(session.target, workingTarget)
+  assert.equal(session.env, workingEnv)
+  assert.equal(session.modelId, "new:model")
+  assert.equal(session.effort, "high")
   assert.deepEqual(emitted, { type: "error", message: "load failed" })
 })
 
