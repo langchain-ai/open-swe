@@ -288,6 +288,48 @@ def test_desktop_login_hands_the_session_back_over_loopback(monkeypatch) -> None
         assert forged.status_code == 400
 
 
+def test_desktop_login_callback_follows_the_forwarded_host(monkeypatch) -> None:
+    """A rewrite in front of the API replaces the Host the app dialled.
+
+    The browser starts the login on the proxy's host and keeps the state
+    cookie there, so the callback has to come back to that host and not to the
+    upstream one the request arrived with.
+    """
+    _desktop_login_env(monkeypatch)
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://upstream.langgraph.example") as client:
+        response = client.get(
+            "/dashboard/api/auth/login",
+            params=DESKTOP_LOGIN_PARAMS | {"desktop_handoff": "a" * 43},
+            headers={"x-forwarded-proto": "https", "x-forwarded-host": "preview.example"},
+            follow_redirects=False,
+        )
+
+    query = parse_qs(urlparse(response.headers["location"]).query)
+    assert query["redirect_uri"] == [f"{DESKTOP_PREVIEW_HOST}/dashboard/api/auth/callback"]
+
+
+def test_desktop_login_ignores_a_malformed_forwarded_host(monkeypatch) -> None:
+    _desktop_login_env(monkeypatch)
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://upstream.langgraph.example") as client:
+        response = client.get(
+            "/dashboard/api/auth/login",
+            params=DESKTOP_LOGIN_PARAMS | {"desktop_handoff": "a" * 43},
+            headers={"x-forwarded-host": "evil.example/path?x=1"},
+            follow_redirects=False,
+        )
+
+    query = parse_qs(urlparse(response.headers["location"]).query)
+    assert query["redirect_uri"] == [
+        "https://upstream.langgraph.example/dashboard/api/auth/callback"
+    ]
+
+
 def test_desktop_login_rejects_a_malformed_handoff_challenge(monkeypatch) -> None:
     _desktop_login_env(monkeypatch)
 
