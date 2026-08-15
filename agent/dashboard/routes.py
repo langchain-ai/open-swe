@@ -478,6 +478,17 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
+    # Populate the login→email mapping so GitHub-sourced webhook handlers
+    # (process_github_issue, process_github_pr_comment) can resolve a
+    # per-user token without requiring Slack OAuth.
+    if email:
+        await upsert_mapping(
+            github_login=login,
+            work_email=email,
+            source="github_oauth",
+            status="active",
+        )
+
     session_jwt = issue_session(login=login, email=email, avatar_url=user.get("avatar_url"))
     response = RedirectResponse(redirect_to, status_code=302)
     _set_session_cookie(response, session_jwt)

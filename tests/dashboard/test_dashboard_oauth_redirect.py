@@ -107,6 +107,16 @@ def test_auth_callback_preserves_relative_plan_redirect(monkeypatch) -> None:
     ) -> None:
         persisted.update({"login": login, "email": email, "data": data})
 
+    async def fake_upsert_mapping(
+        *,
+        github_login: str,
+        work_email: str,
+        slack_user_id: str | None = None,
+        source: str = "github_oauth",
+        status: str = "active",
+    ) -> dict[str, Any]:
+        return {"github_login": github_login, "work_email": work_email}
+
     monkeypatch.setattr(routes, "exchange_code", fake_exchange_code)
     monkeypatch.setattr(routes, "fetch_github_user", fake_fetch_github_user)
     monkeypatch.setattr(routes, "enforce_org_login_gate", fake_enforce_org_login_gate)
