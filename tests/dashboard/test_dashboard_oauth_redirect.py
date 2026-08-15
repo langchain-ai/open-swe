@@ -198,16 +198,9 @@ def test_auth_callback_cross_origin_redirect(monkeypatch) -> None:
         assert not callback_response.headers["location"].startswith("http://localhost:2024")
 
 
-DESKTOP_PREVIEW_HOST = "https://preview.example"
-# Mirrors desktopLoginUrl in desktop/src/config.cjs; keep both in step.
-DESKTOP_LOGIN_PARAMS = {"desktop": "true", "desktop_handoff": "", "desktop_port": 51234}
-
-
 def _desktop_login_env(monkeypatch) -> None:
-    # Deliberately unequal: the desktop app can point at any deployment, so a
-    # test that sets these to the same host cannot tell which one wins.
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://production.example")
-    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://production.example")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
     monkeypatch.setenv("GITHUB_APP_CLIENT_ID", "client-id")
 
@@ -244,16 +237,19 @@ def test_desktop_login_hands_the_session_back_over_loopback(monkeypatch) -> None
 
     app = FastAPI()
     app.include_router(routes.router)
-    with TestClient(app, base_url=DESKTOP_PREVIEW_HOST) as client:
+    # Not the same host as DASHBOARD_API_BASE_URL: browser login only works when
+    # the callback lands back on the configured API origin, where the state
+    # cookie was set, and equal hosts here would hide a regression.
+    with TestClient(app, base_url="https://upstream.langgraph.example") as client:
         login_response = client.get(
             "/dashboard/api/auth/login",
-            params=DESKTOP_LOGIN_PARAMS | {"desktop_handoff": challenge},
+            params={"desktop_handoff": challenge, "desktop_port": 51234},
             follow_redirects=False,
         )
         authorize = parse_qs(urlparse(login_response.headers["location"]).query)
-        # GitHub must come back to the deployment the app targeted, not to
-        # whatever DASHBOARD_API_BASE_URL that deployment was configured with.
-        assert authorize["redirect_uri"] == [f"{DESKTOP_PREVIEW_HOST}/dashboard/api/auth/callback"]
+        assert authorize["redirect_uri"] == [
+            "https://dashboard.example/dashboard/api/auth/callback"
+        ]
         state = authorize["state"][0]
 
         callback_response = client.get(
@@ -288,64 +284,22 @@ def test_desktop_login_hands_the_session_back_over_loopback(monkeypatch) -> None
         assert forged.status_code == 400
 
 
-def test_desktop_login_callback_follows_the_forwarded_host(monkeypatch) -> None:
-    """A rewrite in front of the API replaces the Host the app dialled.
-
-    The browser starts the login on the proxy's host and keeps the state
-    cookie there, so the callback has to come back to that host and not to the
-    upstream one the request arrived with.
-    """
-    _desktop_login_env(monkeypatch)
-
-    app = FastAPI()
-    app.include_router(routes.router)
-    with TestClient(app, base_url="https://upstream.langgraph.example") as client:
-        response = client.get(
-            "/dashboard/api/auth/login",
-            params=DESKTOP_LOGIN_PARAMS | {"desktop_handoff": "a" * 43},
-            headers={"x-forwarded-proto": "https", "x-forwarded-host": "preview.example"},
-            follow_redirects=False,
-        )
-
-    query = parse_qs(urlparse(response.headers["location"]).query)
-    assert query["redirect_uri"] == [f"{DESKTOP_PREVIEW_HOST}/dashboard/api/auth/callback"]
-
-
-def test_desktop_login_ignores_a_malformed_forwarded_host(monkeypatch) -> None:
-    _desktop_login_env(monkeypatch)
-
-    app = FastAPI()
-    app.include_router(routes.router)
-    with TestClient(app, base_url="https://upstream.langgraph.example") as client:
-        response = client.get(
-            "/dashboard/api/auth/login",
-            params=DESKTOP_LOGIN_PARAMS | {"desktop_handoff": "a" * 43},
-            headers={"x-forwarded-host": "evil.example/path?x=1"},
-            follow_redirects=False,
-        )
-
-    query = parse_qs(urlparse(response.headers["location"]).query)
-    assert query["redirect_uri"] == [
-        "https://upstream.langgraph.example/dashboard/api/auth/callback"
-    ]
-
-
 def test_desktop_login_rejects_a_malformed_handoff_challenge(monkeypatch) -> None:
     _desktop_login_env(monkeypatch)
 
     app = FastAPI()
     app.include_router(routes.router)
-    with TestClient(app, base_url=DESKTOP_PREVIEW_HOST) as client:
+    with TestClient(app, base_url="https://dashboard.example") as client:
         response = client.get(
             "/dashboard/api/auth/login",
-            params=DESKTOP_LOGIN_PARAMS | {"desktop_handoff": "../evil"},
+            params={"desktop_handoff": "../evil", "desktop_port": 51234},
             follow_redirects=False,
         )
         assert response.status_code == 400
 
         out_of_range = client.get(
             "/dashboard/api/auth/login",
-            params=DESKTOP_LOGIN_PARAMS | {"desktop_handoff": "a" * 43, "desktop_port": 80},
+            params={"desktop_handoff": "a" * 43, "desktop_port": 80},
             follow_redirects=False,
         )
         assert out_of_range.status_code == 422

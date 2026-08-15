@@ -5,7 +5,6 @@ from __future__ import annotations
 import hmac
 import logging
 import os
-import re
 from typing import Any, Literal
 from urllib.parse import urlencode
 
@@ -419,33 +418,6 @@ def _clear_notion_state_cookie(response: Response) -> None:
     )
 
 
-_FORWARDED_HOST = re.compile(r"[A-Za-z0-9.\-]+(?::\d{1,5})?")
-
-
-def _forwarded_base_url(request: Request) -> str:
-    """The origin the client actually reached, as seen from outside any proxy.
-
-    A desktop client can point at any deployment, so its OAuth callback has to
-    come back to the host the browser started on. Behind a rewrite that host
-    only survives in the forwarded headers — ``request.base_url`` is whatever
-    the proxy dialled — and a callback on the wrong origin loses the state
-    cookie set on the first hop.
-    """
-    headers = request.headers
-
-    def forwarded(name: str) -> str:
-        return headers.get(name, "").partition(",")[0].strip()
-
-    proto = forwarded("x-forwarded-proto")
-    base = request.base_url.replace(
-        scheme=proto if proto in {"http", "https"} else request.url.scheme
-    )
-    host = forwarded("x-forwarded-host")
-    if host and _FORWARDED_HOST.fullmatch(host):
-        base = base.replace(netloc=host)
-    return str(base).rstrip("/")
-
-
 @router.get("/auth/login")
 async def auth_login(
     request: Request,
@@ -468,7 +440,9 @@ async def auth_login(
     )
     api_base_url = _api_base_url()
     if desktop:
-        api_base_url = _forwarded_base_url(request)
+        forwarded_proto = request.headers.get("x-forwarded-proto", "").partition(",")[0].strip()
+        scheme = forwarded_proto if forwarded_proto in {"http", "https"} else request.url.scheme
+        api_base_url = str(request.base_url.replace(scheme=scheme)).rstrip("/")
     redirect_uri = f"{api_base_url}/dashboard/api/auth/callback"
     query = urlencode(
         {

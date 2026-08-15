@@ -127,11 +127,9 @@ test("sends login to the user's browser instead of the app window", () => {
 })
 
 test("carries the loopback port and PKCE challenge into the browser login", () => {
-  // desktop=true keeps the OAuth callback on the configured backend, so a
-  // preview login cannot be redirected to production.
   assert.equal(
     desktopLoginUrl("https://backend.example", { challenge: "abc", port: 51234 }),
-    "https://backend.example/dashboard/api/auth/login?desktop=true&desktop_handoff=abc&desktop_port=51234"
+    "https://backend.example/dashboard/api/auth/login?desktop_handoff=abc&desktop_port=51234"
   )
   assert.equal(
     desktopExchangeUrl("https://backend.example/base/"),
@@ -148,8 +146,8 @@ test("maps desktop API requests to the selected backend", () => {
     "https://backend.example/dashboard/api/threads?limit=20"
   )
   assert.equal(
-    backendRequestUrl("https://backend.example", `${APP_URL}dashboard/api/me`),
-    "https://backend.example/dashboard/api/me"
+    backendRequestUrl("https://backend.example", `${APP_URL}dashboard/api/auth/login`),
+    "https://backend.example/dashboard/api/auth/login?desktop=true"
   )
 })
 
