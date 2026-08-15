@@ -38,16 +38,16 @@ async function setRepoPrivate(page: Page, value: boolean) {
   expect(res.ok()).toBeTruthy();
 }
 
-// E2E_BUSY_HOLD:5 makes the fake LLM hold the run open for 5s. The window has to
-// outlast the click through to the thread plus one reload — once the run
-// finishes the retry loop below can never pass — so it keeps a wide margin.
+// E2E_BUSY_HOLD:8 makes the fake LLM hold the run open for 8s. The window has to
+// outlast the click through to the thread plus one reload, which takes over 5s
+// on a CI runner; once the run finishes the retry loop below can never pass.
 async function openRunningThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
   await page.locator("#reset").click();
   await expect(page.locator("#thread")).toContainText("No messages yet");
   await page
     .locator("#text")
-    .fill("<@U0BOT> E2E_BUSY_HOLD:5 please add a greet() helper and open a PR");
+    .fill("<@U0BOT> E2E_BUSY_HOLD:8 please add a greet() helper and open a PR");
   await page.locator("#send").click();
 
   const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
