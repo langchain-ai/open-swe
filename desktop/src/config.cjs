@@ -75,6 +75,10 @@ function isAppLoginUrl(value) {
 
 function desktopLoginUrl(backendUrl, { challenge, port }) {
   const target = new URL(LOGIN_PATH, backendUrl)
+  // Pin the OAuth callback to the backend this app was pointed at; otherwise
+  // the deployment's own DASHBOARD_API_BASE_URL wins and a preview login can
+  // land on production.
+  target.searchParams.set("desktop", "true")
   target.searchParams.set("desktop_handoff", challenge)
   target.searchParams.set("desktop_port", String(port))
   return target.toString()
@@ -95,11 +99,7 @@ function isTrustedProxyRequest(pageUrl) {
 function backendRequestUrl(backendUrl, appRequestUrl) {
   if (!isAppUrl(appRequestUrl)) throw new Error("Invalid desktop request URL")
   const source = new URL(appRequestUrl)
-  const target = new URL(`${source.pathname}${source.search}`, backendUrl)
-  if (source.pathname === "/dashboard/api/auth/login") {
-    target.searchParams.set("desktop", "true")
-  }
-  return target.toString()
+  return new URL(`${source.pathname}${source.search}`, backendUrl).toString()
 }
 
 function localCallbackUrl(navigationUrl, backendUrl) {
