@@ -238,10 +238,10 @@ def test_desktop_login_hands_the_session_back_over_loopback(monkeypatch) -> None
 
     app = FastAPI()
     app.include_router(routes.router)
-    # Not the same host as DASHBOARD_API_BASE_URL: browser login only works when
-    # the callback lands back on the configured API origin, where the state
-    # cookie was set, and equal hosts here would hide a regression.
-    with TestClient(app, base_url="https://upstream.langgraph.example") as client:
+    # Same host as DASHBOARD_API_BASE_URL, because that is the only arrangement a
+    # real browser can complete: it carries the state cookie from login to
+    # callback, and the cookie is bound to the origin that set it.
+    with TestClient(app, base_url="https://dashboard.example") as client:
         login_response = client.get(
             "/dashboard/api/auth/login",
             params={"desktop_handoff": challenge, "desktop_port": 51234},
@@ -341,3 +341,57 @@ def test_desktop_handoff_code_carries_no_session(monkeypatch) -> None:
         isinstance(v, str) and v.count(".") == 2 and len(v) > 60 for v in payload.values()
     ), f"handoff payload looks like it embeds a token: {payload}"
     assert payload["sub"] == "alice"
+
+
+def test_desktop_login_callback_follows_the_configured_api_origin(monkeypatch) -> None:
+    """`redirect_uri` comes from DASHBOARD_API_BASE_URL, not the request host.
+
+    Driven from a host that differs from the configured one so the two cannot
+    be confused; the companion test below covers what that costs when a
+    deployment sets the variable to an origin the browser never visits.
+    """
+    _desktop_login_env(monkeypatch)
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://upstream.langgraph.example") as client:
+        response = client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop_handoff": "a" * 43, "desktop_port": 51234},
+            follow_redirects=False,
+        )
+
+    query = parse_qs(urlparse(response.headers["location"]).query)
+    assert query["redirect_uri"] == ["https://dashboard.example/dashboard/api/auth/callback"]
+
+
+def test_auth_callback_rejects_a_callback_on_a_different_origin(monkeypatch) -> None:
+    """A callback that lands somewhere other than where login started fails.
+
+    The state nonce lives in a cookie bound to the origin that issued it, so a
+    deployment whose DASHBOARD_API_BASE_URL names a host the browser never
+    visited during login cannot complete sign-in — it dies here rather than
+    somewhere subtler.
+    """
+    _desktop_login_env(monkeypatch)
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app, base_url="https://upstream.langgraph.example") as login_client:
+        login_response = login_client.get(
+            "/dashboard/api/auth/login",
+            params={"desktop_handoff": "a" * 43, "desktop_port": 51234},
+            follow_redirects=False,
+        )
+        state = parse_qs(urlparse(login_response.headers["location"]).query)["state"][0]
+
+    # A different origin: a fresh client holds none of the login's cookies.
+    with TestClient(app, base_url="https://dashboard.example") as callback_client:
+        callback_response = callback_client.get(
+            "/dashboard/api/auth/callback",
+            params={"code": "oauth-code", "state": state},
+            follow_redirects=False,
+        )
+
+    assert callback_response.status_code == 400
+    assert "oauth state mismatch" in callback_response.json()["detail"]
