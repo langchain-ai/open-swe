@@ -20,10 +20,12 @@ export default defineConfig({
     baseURL,
     // Locally, always capture the replayable artifacts: a trace (DOM snapshots,
     // network, console, source — open with `npx playwright show-trace`) and a
-    // screen recording. Recording both costs ~20% of the run, so CI captures
-    // them only for the failures it actually uploads.
+    // screen recording. Recording costs real time per spec, so CI records
+    // nothing on the first attempt and captures both on the retry a failure
+    // gets. `retain-on-failure` would not do: it still records everything and
+    // only discards the files afterwards.
     trace: process.env.CI ? "on-first-retry" : "on",
-    video: process.env.CI ? "retain-on-failure" : "on",
+    video: process.env.CI ? "on-first-retry" : "on",
     screenshot: "only-on-failure",
     // SLOW_MO=700 npx playwright test --headed  → watch it run in human time.
     launchOptions: { slowMo: Number(process.env.SLOW_MO ?? 0) },
