@@ -422,6 +422,8 @@ class AcpSession {
     if (modelId === this.modelId && effort === this.effort) return
     if (this.status === "running")
       throw new Error("Deep Agents Code is already running")
+    const previousTarget = this.target
+    const previousEnv = this.env
     this.rpc.close()
     this.status = "starting"
     this.replayUsers.clear()
@@ -434,7 +436,20 @@ class AcpSession {
       this.notifyChange()
     } catch (error) {
       this.rpc.close()
-      this.status = "error"
+      try {
+        this.status = "starting"
+        this.replayUsers.clear()
+        this.connect(previousTarget, previousEnv)
+        await this.initialize(false)
+      } catch (restoreError) {
+        this.rpc.close()
+        this.status = "error"
+        this.emit({
+          type: "error",
+          message: String(restoreError?.message || restoreError),
+        })
+        throw error
+      }
       this.emit({ type: "error", message: String(error?.message || error) })
       throw error
     } finally {

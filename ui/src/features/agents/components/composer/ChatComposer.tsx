@@ -97,9 +97,11 @@ export interface ChatComposerProps {
   onRunTargetChange?: (next: RunTarget) => void
   localProjects?: Array<DesktopProject>
   selectedLocalProjectPath?: string | null
+  selectedLocalProjectBranch?: string | null
   onSelectLocalProject?: (cwd: string) => void
   onAddLocalProject?: () => void
   onRemoveLocalProject?: (cwd: string) => void
+  onRefreshLocalProjectBranch?: () => void
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
@@ -212,9 +214,11 @@ export const ChatComposer = memo(function ChatComposer({
   onRunTargetChange,
   localProjects = [],
   selectedLocalProjectPath = null,
+  selectedLocalProjectBranch = null,
   onSelectLocalProject,
   onAddLocalProject,
   onRemoveLocalProject,
+  onRefreshLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
   adminThread = false,
@@ -532,15 +536,18 @@ export const ChatComposer = memo(function ChatComposer({
             onRunTargetChange &&
             onSelectLocalProject &&
             onAddLocalProject &&
-            onRemoveLocalProject && (
+            onRemoveLocalProject &&
+            onRefreshLocalProjectBranch && (
               <RunTargetSelector
                 localEnabled={Boolean(window.openSweDesktop)}
                 onChange={onRunTargetChange}
                 onAddProject={onAddLocalProject}
                 onRemoveProject={onRemoveLocalProject}
+                onRefreshBranch={onRefreshLocalProjectBranch}
                 onSelectProject={onSelectLocalProject}
                 projects={localProjects}
                 selectedProjectPath={selectedLocalProjectPath}
+                selectedProjectBranch={selectedLocalProjectBranch}
                 value={runTarget}
               />
             )}

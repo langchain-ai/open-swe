@@ -25,6 +25,7 @@ const {
 const {
   captureCheckpoint,
   checkpointRef,
+  currentBranch,
   deleteRefs,
   readDiff,
   repoRoot,
@@ -372,6 +373,12 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:projects", (event) => {
     requireTrustedDesktopIpc(event);
     return listProjects();
+  });
+
+  ipcMain.handle("desktop:project-branch", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    return project ? currentBranch(project) : null;
   });
 
   ipcMain.handle("desktop:add-project", async (event) => {
