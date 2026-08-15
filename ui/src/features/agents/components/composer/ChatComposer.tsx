@@ -745,6 +745,7 @@ export const ChatComposer = memo(function ChatComposer({
             canSubmit={canSubmit}
             onSubmit={() => void handleSubmit()}
             onStop={onStop}
+            stopOnEscape={!menuOpen && !modelPickerOpen}
             submitting={isSubmitting}
           />
         </div>
