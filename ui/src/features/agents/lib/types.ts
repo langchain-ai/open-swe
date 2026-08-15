@@ -225,6 +225,7 @@ export interface AgentThread {
   effort?: string | null
   planMode?: boolean
   planStatus?: string | null
+  adminThread?: boolean
   source?: AgentSource
   status: AgentStatus
   viewed: boolean
