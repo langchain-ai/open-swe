@@ -18,11 +18,12 @@ export default defineConfig({
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
     baseURL,
-    // Always capture the replayable artifacts: a trace (DOM snapshots, network,
-    // console, source — open with `npx playwright show-trace`) and a screen
-    // recording, plus a screenshot on failure. The CI job uploads them.
-    trace: "on",
-    video: "on",
+    // Locally, always capture the replayable artifacts: a trace (DOM snapshots,
+    // network, console, source — open with `npx playwright show-trace`) and a
+    // screen recording. Recording both costs ~20% of the run, so CI captures
+    // them only for the failures it actually uploads.
+    trace: process.env.CI ? "on-first-retry" : "on",
+    video: process.env.CI ? "retain-on-failure" : "on",
     screenshot: "only-on-failure",
     // SLOW_MO=700 npx playwright test --headed  → watch it run in human time.
     launchOptions: { slowMo: Number(process.env.SLOW_MO ?? 0) },
