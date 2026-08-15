@@ -13,6 +13,7 @@ error; login is what this harness covers.
 from __future__ import annotations
 
 import os
+from html import escape
 from typing import Any
 from urllib.parse import quote
 
@@ -27,7 +28,7 @@ os.environ.setdefault("DASHBOARD_ALLOWED_ORIGINS", BASE_URL)
 os.environ.setdefault("ALLOWED_GITHUB_ORGS", "")
 
 import uvicorn  # noqa: E402
-from fastapi import FastAPI  # noqa: E402
+from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.responses import HTMLResponse, RedirectResponse  # noqa: E402
 
 from agent.dashboard import routes  # noqa: E402
@@ -66,12 +67,17 @@ app.include_router(routes.router)
 @app.get("/fake-gh/login/oauth/authorize")
 async def fake_github_authorize(redirect_uri: str, state: str, client_id: str = "") -> HTMLResponse:
     """Stand-in for GitHub's consent screen."""
-    target = f"{redirect_uri}?code=fake-oauth-code&state={quote(state, safe='')}"
+    # Both values arrive in the query string, so pin the target to this
+    # harness's own callback and escape what reaches the page.
+    callback = f"{BASE_URL}/dashboard/api/auth/callback"
+    if redirect_uri != callback:
+        raise HTTPException(400, "unexpected redirect_uri")
+    target = escape(f"{callback}?code=fake-oauth-code&state={quote(state, safe='')}", quote=True)
     return HTMLResponse(
         f"""<!doctype html><meta charset=utf-8><title>Fake GitHub</title>
         <body style="font:16px system-ui;max-width:30rem;margin:4rem auto;text-align:center">
         <h1 style="font-size:1.1rem">Authorize Open SWE</h1>
-        <p style="opacity:.7">Signing in as <b>{LOGIN}</b> — this is a local fake, not GitHub.</p>
+        <p style="opacity:.7">Signing in as <b>{escape(LOGIN)}</b> — a local fake, not GitHub.</p>
         <p><a href="{target}"
               style="display:inline-block;padding:.6rem 1rem;border:1px solid;border-radius:.4rem">
            Authorize</a></p>
