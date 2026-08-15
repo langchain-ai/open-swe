@@ -749,6 +749,22 @@ export const api = {
     request<void>(`/skills/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
+  listOrganizationSkills: (offset = 0) =>
+    request<SkillsPage>(`/organization-skills?limit=100&offset=${offset}`),
+  createOrganizationSkill: (name: string, body: SkillInput) =>
+    request<Skill>("/organization-skills", {
+      method: "POST",
+      body: JSON.stringify({ name, ...body }),
+    }),
+  saveOrganizationSkill: (name: string, body: SkillInput) =>
+    request<Skill>(`/organization-skills/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteOrganizationSkill: (name: string) =>
+    request<void>(`/organization-skills/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
   listAgentInstructions: () =>
     request<Array<AgentInstructions>>("/agent-instructions"),
   createAgentInstructions: (full_name: string) =>

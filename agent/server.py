@@ -64,7 +64,7 @@ from .dashboard.options import (
 )
 from .dashboard.repo_snapshots import resolve_repo_snapshot_id
 from .dashboard.sandbox_settings import get_admin_base_snapshot_id
-from .dashboard.skills import SKILLS_NAMESPACE
+from .dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model_pair,
@@ -185,6 +185,7 @@ client = get_client()
 
 DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
+ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
     "edit_file",
@@ -1297,19 +1298,18 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
-    skill_sources: list[str] | None = None
-    if profile_login:
-        agent_backend = CompositeBackend(
-            default=backend,
-            routes={
-                USER_SKILLS_ROUTE: ReadOnlyBackend(
-                    StoreBackend(
-                        namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login)
-                    )
-                )
-            },
+    skill_routes: dict[str, BackendProtocol] = {
+        ORGANIZATION_SKILLS_ROUTE: ReadOnlyBackend(
+            StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
         )
-        skill_sources = [USER_SKILLS_ROUTE]
+    }
+    skill_sources = [ORGANIZATION_SKILLS_ROUTE]
+    if profile_login:
+        skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
+            StoreBackend(namespace=lambda _runtime: (SKILLS_NAMESPACE, profile_login))
+        )
+        skill_sources.insert(0, USER_SKILLS_ROUTE)
+    agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     subagent_model = _make_model_or_defer(
         subagent_model_id,

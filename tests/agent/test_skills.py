@@ -5,7 +5,12 @@ from unittest.mock import ANY, AsyncMock, patch
 import pytest
 from pydantic import ValidationError
 
-from agent.dashboard.skills import SkillCreate, create_skill, list_skills
+from agent.dashboard.skills import (
+    SkillCreate,
+    create_organization_skill,
+    create_skill,
+    list_skills,
+)
 from agent.tools.user_skills import save_user_skill
 
 
@@ -17,10 +22,9 @@ async def test_skill_validation_and_persistence() -> None:
     with pytest.raises(ValidationError):
         SkillCreate(name="Invalid Name", description="Useful")
 
-    with (
-        patch("agent.dashboard.skills._client", return_value=client),
-        patch("agent.dashboard.skills.get_skill", new_callable=AsyncMock, return_value=None),
-    ):
+    client.store.get_item.return_value = None
+
+    with patch("agent.dashboard.skills._client", return_value=client):
         record = await create_skill(
             "octocat",
             SkillCreate(
@@ -39,6 +43,22 @@ async def test_skill_validation_and_persistence() -> None:
         ["user_skills", "octocat"],
         "/review-feedback/SKILL.md",
         record,
+    )
+
+
+async def test_organization_skill_uses_singleton_namespace() -> None:
+    client = AsyncMock()
+    client.store.get_item.return_value = None
+
+    with patch("agent.dashboard.skills._client", return_value=client):
+        await create_organization_skill(
+            SkillCreate(name="security-review", description="Apply organization security rules")
+        )
+
+    client.store.put_item.assert_awaited_once()
+    assert client.store.put_item.await_args.args[:2] == (
+        ["organization_skills"],
+        "/security-review/SKILL.md",
     )
 
 

@@ -10,7 +10,7 @@ import type {
   ThreadsPageParams,
 } from "./api"
 import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
-import type { SkillInput } from "@/lib/api"
+import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
 
 export const agentThreadKeys = {
@@ -63,7 +63,8 @@ export const agentScheduleKeys = {
 }
 
 export const agentSkillKeys = {
-  all: ["agent-skills"] as const,
+  personal: ["agent-skills", "personal"] as const,
+  organization: ["agent-skills", "organization"] as const,
 }
 
 export const environmentOptionKeys = {
@@ -79,48 +80,96 @@ export function useEnvironmentOptions() {
   })
 }
 
-export function useAgentSkills() {
+async function listAllSkills(
+  list: (offset: number) => Promise<{
+    items: Array<Skill>
+    next_offset: number | null
+  }>
+) {
+  const items = []
+  let offset = 0
+  do {
+    const page = await list(offset)
+    items.push(...page.items)
+    offset = page.next_offset ?? 0
+  } while (offset)
+  return items
+}
+
+export function usePersonalAgentSkills() {
   return useQuery({
-    queryKey: agentSkillKeys.all,
-    queryFn: async () => {
-      const items = []
-      let offset = 0
-      do {
-        const page = await api.listSkills(offset)
-        items.push(...page.items)
-        offset = page.next_offset ?? 0
-      } while (offset)
-      return items
-    },
+    queryKey: agentSkillKeys.personal,
+    queryFn: () => listAllSkills(api.listSkills),
   })
 }
 
-export function useCreateAgentSkill() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({ name, ...body }: SkillInput & { name: string }) =>
-      api.createSkill(name, body),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: agentSkillKeys.all }),
+export function useOrganizationAgentSkills() {
+  return useQuery({
+    queryKey: agentSkillKeys.organization,
+    queryFn: () => listAllSkills(api.listOrganizationSkills),
   })
 }
 
-export function useUpdateAgentSkill() {
+export function useAgentSkills() {
+  const personal = usePersonalAgentSkills()
+  const organization = useOrganizationAgentSkills()
+  return {
+    ...personal,
+    data:
+      personal.data || organization.data
+        ? [
+            ...new Map(
+              [...(personal.data ?? []), ...(organization.data ?? [])].map(
+                (skill) => [skill.name, skill]
+              )
+            ).values(),
+          ]
+        : undefined,
+    error: personal.error ?? organization.error,
+    isError: personal.isError || organization.isError,
+    isLoading: personal.isLoading || organization.isLoading,
+  }
+}
+
+function useSkillMutation(
+  mutationFn: (vars: SkillInput & { name: string }) => Promise<Skill>,
+  queryKey: ReadonlyArray<string>
+) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ name, ...body }: SkillInput & { name: string }) =>
-      api.saveSkill(name, body),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: agentSkillKeys.all }),
+    mutationFn,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
   })
 }
 
-export function useDeleteAgentSkill() {
+export function useCreateAgentSkill(organization = false) {
+  return useSkillMutation(
+    ({ name, ...body }) =>
+      organization
+        ? api.createOrganizationSkill(name, body)
+        : api.createSkill(name, body),
+    organization ? agentSkillKeys.organization : agentSkillKeys.personal
+  )
+}
+
+export function useUpdateAgentSkill(organization = false) {
+  return useSkillMutation(
+    ({ name, ...body }) =>
+      organization
+        ? api.saveOrganizationSkill(name, body)
+        : api.saveSkill(name, body),
+    organization ? agentSkillKeys.organization : agentSkillKeys.personal
+  )
+}
+
+export function useDeleteAgentSkill(organization = false) {
   const queryClient = useQueryClient()
+  const queryKey = organization
+    ? agentSkillKeys.organization
+    : agentSkillKeys.personal
   return useMutation({
-    mutationFn: api.deleteSkill,
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: agentSkillKeys.all }),
+    mutationFn: organization ? api.deleteOrganizationSkill : api.deleteSkill,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
   })
 }
 

@@ -162,9 +162,13 @@ from .skills import (
     MAX_SKILLS_PAGE_SIZE,
     SkillCreate,
     SkillUpdate,
+    create_organization_skill,
     create_skill,
+    delete_organization_skill,
     delete_skill,
+    list_organization_skills,
     list_skills,
+    update_organization_skill,
     update_skill,
 )
 from .slack_oauth import (
@@ -1706,6 +1710,41 @@ async def api_delete_skill(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> Response:
     await delete_skill(session["sub"], name)
+    return Response(status_code=204)
+
+
+@router.get("/organization-skills")
+async def api_list_organization_skills(
+    limit: int = Query(DEFAULT_SKILLS_PAGE_SIZE, ge=1, le=MAX_SKILLS_PAGE_SIZE),
+    offset: int = Query(0, ge=0),
+    _session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await list_organization_skills(limit=limit, offset=offset)
+
+
+@router.post("/organization-skills")
+async def api_create_organization_skill(
+    body: SkillCreate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await create_organization_skill(body)
+
+
+@router.put("/organization-skills/{name}")
+async def api_update_organization_skill(
+    name: str,
+    body: SkillUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await update_organization_skill(name, body)
+
+
+@router.delete("/organization-skills/{name}")
+async def api_delete_organization_skill(
+    name: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> Response:
+    await delete_organization_skill(name)
     return Response(status_code=204)
 
 
