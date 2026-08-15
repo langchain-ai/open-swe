@@ -112,6 +112,11 @@ async def slack_webhook(
             event.get("type") == "message"
             and not event.get("subtype")
             and not is_direct_message
+            # An explicit tag is never an untagged reply: the gate below admits
+            # messages mentioning only Open SWE, so without this an explicitly
+            # tagged request would tell the agent it was not tagged.
+            and not has_username_mention
+            and not has_id_mention
             and await service._slack_thread_allows_untagged_reply(
                 str(event.get("channel") or ""),
                 str(event.get("thread_ts") or ""),
