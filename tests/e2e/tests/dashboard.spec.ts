@@ -38,13 +38,15 @@ async function setRepoPrivate(page: Page, value: boolean) {
   expect(res.ok()).toBeTruthy();
 }
 
+// E2E_BUSY_HOLD:8 makes the fake LLM hold the run open for 8s, so the thread is
+// still running by the time the browser lands on it.
 async function openRunningThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
   await page.locator("#reset").click();
   await expect(page.locator("#thread")).toContainText("No messages yet");
   await page
     .locator("#text")
-    .fill("<@U0BOT> please add a greet() helper and open a PR");
+    .fill("<@U0BOT> E2E_BUSY_HOLD:8 please add a greet() helper and open a PR");
   await page.locator("#send").click();
 
   const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
