@@ -2137,24 +2137,19 @@ async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> N
 
 
 @pytest.mark.asyncio
-async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -> None:
-    """When the unresolved_anchor 422 fires but the diff_line_set rules out
-    no findings (e.g., diff data unavailable), the tool must NOT retry — it
-    must surface the structured error so the agent stops looping."""
+async def test_publish_review_demotes_all_findings_when_bad_anchor_is_unknown() -> None:
     from agent.tools.publish_review import _publish_review_async
 
     findings = [
         _f(id="f_only", severity="high", file="in_diff.py", start_line=10, end_line=10),
     ]
-    # No cached diff_line_set, and the on-demand fetch fails — no way to tell
-    # which finding is bad.
     first_response = {
         "_error": "HTTP 422: ...",
         "_error_kind": "unresolved_anchor",
         "_raw_errors": ["Path could not be resolved"],
         "_status": 422,
     }
-    post_review = AsyncMock(return_value=first_response)
+    post_review = AsyncMock(side_effect=[first_response, {"id": 7777}])
 
     with (
         patch(
@@ -2162,10 +2157,7 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
             return_value={"configurable": {"thread_id": "tid"}},
         ),
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch(
-            "agent.tools.publish_review.list_findings_async",
-            AsyncMock(return_value=findings),
-        ),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
         patch("agent.tools.publish_review.post_pull_request_review", post_review),
         patch(
             "agent.tools.publish_review._resolve_diff_line_set",
@@ -2178,6 +2170,9 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
             return_value=0,
         ),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch(
+            "agent.tools.publish_review._maybe_post_slack_completion_reply", new_callable=AsyncMock
+        ),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -2190,11 +2185,13 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
             is_re_review=False,
         )
 
-    # Only one attempt — never retry blindly.
-    assert post_review.await_count == 1
-    assert result["success"] is False
-    assert result["unresolvable_findings"] == []
-    assert "update_finding" in result["hint"]
+    retry = post_review.await_args_list[1].kwargs
+    assert retry["inline_comments"] == []
+    assert "`in_diff.py line 10`" in retry["body"]
+    assert result["success"] is True
+    assert result["review_id"] == 7777
+    assert result["surfaced_count"] == 1
+    assert result["unresolvable_findings"] == ["f_only"]
 
 
 @pytest.mark.asyncio

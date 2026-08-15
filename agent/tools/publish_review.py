@@ -97,7 +97,9 @@ async def publish_review(
           claim publication.
 
         Only a numeric ``review_id`` (with neither flag set) confirms a real
-        GitHub Review was created.
+        GitHub Review was created. Findings listed in ``unresolvable_findings``
+        were preserved in the review summary because GitHub rejected their
+        inline anchors; do not retry them.
     """
     if severity_threshold not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
@@ -367,6 +369,7 @@ async def _publish_review_async(
         additional_findings_count=additional_findings_count,
     )
 
+    demoted_findings: list[Finding] = []
     review_response = await post_pull_request_review(
         owner=owner,
         repo=repo,
@@ -432,19 +435,33 @@ async def _publish_review_async(
                     ),
                 }
         else:
-            # Either nothing to drop (no diff_line_set available, so we can't
-            # tell which findings are bad) or everything would be dropped.
-            # Either way, do not retry — surface the structural signal so the
-            # agent stops retrying with the same args.
-            return {
-                "success": False,
-                "error": f"Failed to POST PR review: {review_response['_error']}",
-                "unresolvable_findings": dropped_ids,
-                "hint": (
-                    "Call update_finding(status='resolved') on these ids "
-                    "or fix their file/line before retrying."
+            # GitHub does not identify the bad comment in this 422. Preserve the
+            # findings in the review body and retry without inline anchors.
+            demoted_findings = [finding for finding, _ in eligible_with_payload]
+            dropped_ids = [
+                finding_id
+                for finding in demoted_findings
+                if isinstance((finding_id := finding.get("id")), str)
+            ]
+            review_response = await post_pull_request_review(
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                body=render_review_body(
+                    pr_number=pr_number,
+                    surfaced_count=0,
+                    trace_url=review_trace_url,
+                    ui_url=review_ui_url,
+                    out_of_diff_findings=demoted_findings,
+                    additional_findings_count=additional_findings_count,
                 ),
-            }
+                inline_comments=[],
+                token=token,
+            )
+            inline_comments = []
+            eligible_with_payload = []
+            unresolvable_findings = dropped_ids
     if isinstance(review_response, dict) and "_error" in review_response:
         return {
             "success": False,
@@ -514,6 +531,7 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
 
+    surfaced_count = len(inline_comments) + len(demoted_findings)
     if not is_re_review:
         await _maybe_post_slack_completion_reply(
             thread_id=thread_id,
@@ -521,12 +539,12 @@ async def _publish_review_async(
             repo=repo,
             pr_number=pr_number,
             review_id=review_id,
-            surfaced_count=len(inline_comments),
+            surfaced_count=surfaced_count,
         )
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
-    conclusion, check_title, check_summary = review_check_conclusion(len(inline_comments))
+    conclusion, check_title, check_summary = review_check_conclusion(surfaced_count)
     await settle_review_check_run(
         thread_id=thread_id,
         owner=owner,
@@ -540,15 +558,15 @@ async def _publish_review_async(
     result: dict[str, Any] = {
         "success": True,
         "review_id": review_id,
-        "surfaced_count": len(inline_comments),
-        "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
+        "surfaced_count": surfaced_count,
+        "hidden_count": max(len(open_unpublished) - surfaced_count, 0),
         "resolved_thread_count": resolved_thread_count,
     }
     if unresolvable_findings:
         result["unresolvable_findings"] = unresolvable_findings
         result["hint"] = (
-            "Some findings had anchors not in the PR diff; "
-            "call update_finding to fix or resolve them."
+            "These findings were preserved in the review summary because GitHub rejected "
+            "their inline anchors; use update_finding before a future publish, not a retry."
         )
     return result
 
