@@ -8,6 +8,7 @@ import binascii
 import json
 import logging
 import os
+import posixpath
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -80,6 +81,7 @@ _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", 
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
 _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
+_SANDBOX_CREATING_SENTINEL = "__creating__"
 
 
 async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
@@ -427,10 +429,11 @@ async def _thread_summary(
     trace_url = await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
 
     raw_sandbox_id = metadata.get("sandbox_id")
-    # "__creating__" is the in-flight sentinel written before the real id lands.
     sandbox_id = (
         raw_sandbox_id
-        if isinstance(raw_sandbox_id, str) and raw_sandbox_id and raw_sandbox_id != "__creating__"
+        if isinstance(raw_sandbox_id, str)
+        and raw_sandbox_id
+        and raw_sandbox_id != _SANDBOX_CREATING_SENTINEL
         else None
     )
 
@@ -1015,6 +1018,29 @@ async def _mark_thread_viewed(
         logger.debug("Could not mark thread %s viewed", thread_id, exc_info=True)
         return metadata
     return {**metadata, **metadata_update}
+
+
+async def get_dashboard_terminal_sandbox(
+    thread_id: str, login: str, *, email: str | None = None
+) -> tuple[str, str | None]:
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+    metadata = thread_metadata(thread)
+    _assert_thread_owner(metadata, login, email)
+    sandbox_id = metadata.get("sandbox_id")
+    if (
+        not isinstance(sandbox_id, str)
+        or not sandbox_id
+        or sandbox_id == _SANDBOX_CREATING_SENTINEL
+    ):
+        raise HTTPException(404, "thread sandbox is not ready")
+    repo_name = metadata.get("repo_name")
+    if not isinstance(repo_name, str) or posixpath.basename(repo_name) != repo_name:
+        repo_name = None
+    return sandbox_id, repo_name
 
 
 async def get_dashboard_thread(

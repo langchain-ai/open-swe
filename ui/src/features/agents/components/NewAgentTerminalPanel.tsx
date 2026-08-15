@@ -22,7 +22,7 @@ export function NewAgentTerminalPanel({
   onCollapsedChange: (next: boolean) => void
 }) {
   const panel = usePanelTabs(sessionId)
-  const terminals = useTerminalGroups(sessionId, cwd)
+  const terminals = useTerminalGroups({ kind: "local", sessionId }, cwd)
 
   const handleOpenKind = useCallback(() => {
     panel.open({ id: terminals.addGroup(), kind: "terminal" })
@@ -78,7 +78,7 @@ export function NewAgentTerminalPanel({
               )}
             >
               <TerminalPanel
-                localSessionId={sessionId}
+                target={{ kind: "local", sessionId }}
                 cwd={cwd}
                 groupId={tab.id}
                 terminals={terminals}

@@ -2,14 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
+import json
 import logging
 import os
+import posixpath
+import shlex
 from typing import Any, Literal
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
@@ -198,6 +211,7 @@ from .thread_api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     delete_dashboard_thread,
+    get_dashboard_terminal_sandbox,
     get_dashboard_thread,
     get_dashboard_thread_pr_diff,
     get_dashboard_thread_recovery_patch,
@@ -254,6 +268,7 @@ router = APIRouter(
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
 _GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+_CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
 
 
@@ -1843,6 +1858,97 @@ async def api_get_thread(
         email=session.get("email"),
         mark_viewed=mark_viewed,
     )
+
+
+async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[str, Any]) -> None:
+    if os.environ.get("SANDBOX_TYPE", "langsmith") != "langsmith":
+        await websocket.close(code=1008, reason="Cloud terminal requires a LangSmith sandbox")
+        return
+    try:
+        sandbox_id, repo_name = await get_dashboard_terminal_sandbox(
+            thread_id, session["sub"], email=session.get("email")
+        )
+    except HTTPException as exc:
+        await websocket.close(code=1008, reason=str(exc.detail)[:123])
+        return
+
+    await websocket.accept()
+    client = handle = None
+    try:
+        await asyncio.wait_for(_CLOUD_TERMINAL_SLOTS.acquire(), timeout=0.01)
+    except TimeoutError:
+        await websocket.close(code=1013, reason="Cloud terminal capacity reached")
+        return
+    try:
+        from ..integrations.langsmith import connect_async_langsmith_sandbox
+
+        client, sandbox = await connect_async_langsmith_sandbox(sandbox_id)
+        cwd = posixpath.join("/workspace", repo_name) if repo_name else "/workspace"
+        if not (await sandbox.run(f"test -d {shlex.quote(cwd)}")).success:
+            cwd = "/workspace"
+        handle = await sandbox.run(
+            "exec ${SHELL:-/bin/bash} -l",
+            cwd=cwd,
+            timeout=0,
+            idle_timeout=300,
+            kill_on_disconnect=True,
+            pty=True,
+            wait=False,
+        )
+
+        async def output() -> None:
+            assert handle is not None
+            async for chunk in handle:
+                await websocket.send_text(json.dumps({"type": "output", "data": chunk.data}))
+            result = await handle.result
+            await websocket.send_text(json.dumps({"type": "exit", "exitCode": result.exit_code}))
+
+        async def input_() -> None:
+            assert handle is not None
+            while True:
+                message = await websocket.receive_json()
+                if not isinstance(message, dict):
+                    continue
+                if message.get("type") == "input" and isinstance(message.get("data"), str):
+                    data = message["data"]
+                    if len(data.encode()) <= 64 * 1024:
+                        await handle.send_input(data)
+
+        output_task = asyncio.create_task(output())
+        input_task = asyncio.create_task(input_())
+        done, pending = await asyncio.wait(
+            {output_task, input_task}, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for task in done:
+            task.result()
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Cloud terminal failed for thread %s: %s", thread_id, type(exc).__name__)
+        try:
+            await websocket.send_text(
+                json.dumps({"type": "error", "message": "Cloud terminal disconnected"})
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        if handle is not None:
+            await handle.kill()
+        if client is not None:
+            await client.aclose()
+        _CLOUD_TERMINAL_SLOTS.release()
+
+
+@router.websocket("/threads/{thread_id}/terminal")
+async def api_thread_terminal(
+    websocket: WebSocket,
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> None:
+    await _cloud_terminal(websocket, thread_id, session)
 
 
 @router.get("/threads/{thread_id}/recovery.patch")

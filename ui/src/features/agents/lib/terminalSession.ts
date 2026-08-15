@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type {
   DesktopTerminalAttachEvent,
   DesktopTerminalSessionSnapshot,
   DesktopTerminalSummary,
 } from "@/desktop"
+import { dashboardApiUrl } from "@/lib/dashboard-fetch"
+
+export type TerminalTarget =
+  { kind: "local"; sessionId: string } | { kind: "cloud"; threadId: string }
 
 export interface TerminalSessionState {
   buffer: string
@@ -142,12 +146,15 @@ export function applyTerminalEvent(
   }
 }
 
-export function useDesktopTerminalMetadata(localSessionId: string) {
+export function useDesktopTerminalMetadata(
+  localSessionId: string,
+  enabled = true
+) {
   const [terminals, setTerminals] = useState<Array<DesktopTerminalSummary>>([])
 
   useEffect(() => {
     const bridge = window.openSweDesktop?.terminal
-    if (!bridge) return
+    if (!enabled || !bridge) return
     let disposed = false
     const pending: Array<
       | { type: "upsert"; terminal: DesktopTerminalSummary }
@@ -200,7 +207,7 @@ export function useDesktopTerminalMetadata(localSessionId: string) {
       remove()
       void bridge.detachMetadata(localSessionId)
     }
-  }, [localSessionId])
+  }, [enabled, localSessionId])
 
   return useMemo(
     () =>
@@ -213,30 +220,139 @@ export function useDesktopTerminalMetadata(localSessionId: string) {
   )
 }
 
+export interface AttachedTerminal extends TerminalSessionState {
+  write: (data: string) => Promise<void>
+  resize: (cols: number, rows: number) => void
+}
+
+function cloudTerminalUrl(threadId: string): string {
+  const base = dashboardApiUrl(
+    `/threads/${encodeURIComponent(threadId)}/terminal`
+  )
+  const url = new URL(base, window.location.href)
+  if (!/^https?:$/.test(url.protocol)) {
+    throw new Error("Cloud terminal requires an HTTP dashboard API")
+  }
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+  return url.toString()
+}
+
 export function useAttachedTerminal(
-  localSessionId: string,
+  target: TerminalTarget,
   terminalId: string,
-  cwd: string
-): TerminalSessionState {
+  cwd: string,
+  clearRequest = 0,
+  restartRequest = 0
+): AttachedTerminal {
   const [state, setState] = useState<TerminalSessionState>(
     EMPTY_TERMINAL_SESSION
   )
+  const socketRef = useRef<WebSocket | null>(null)
+  const sessionId = target.kind === "local" ? target.sessionId : target.threadId
 
   useEffect(() => {
-    const bridge = window.openSweDesktop?.terminal
-    if (!bridge) {
-      setState({
-        ...EMPTY_TERMINAL_SESSION,
-        status: "error",
-        error: "Local terminal is only available in the desktop app.",
-      })
-      return
+    if (target.kind === "cloud") {
+      let disposed = false
+      let sequence = 0
+      let socket: WebSocket
+      try {
+        socket = new WebSocket(cloudTerminalUrl(target.threadId))
+      } catch (error) {
+        setState({
+          ...EMPTY_TERMINAL_SESSION,
+          status: "error",
+          error: error instanceof Error ? error.message : "Unable to connect",
+        })
+        return
+      }
+      socketRef.current = socket
+      setState({ ...EMPTY_TERMINAL_SESSION, status: "starting" })
+      socket.onopen = () => {
+        if (socketRef.current === socket && !disposed) {
+          setState((current) => ({
+            ...current,
+            status: "running",
+            error: null,
+          }))
+        }
+      }
+      socket.onmessage = (event) => {
+        if (
+          disposed ||
+          socketRef.current !== socket ||
+          typeof event.data !== "string"
+        )
+          return
+        let message: {
+          type: string
+          data?: string
+          exitCode?: number
+          message?: string
+        }
+        try {
+          message = JSON.parse(event.data)
+        } catch {
+          return
+        }
+        if (message.type === "output" && typeof message.data === "string") {
+          setState((current) => ({
+            ...current,
+            buffer: trimBuffer(`${current.buffer}${message.data}`),
+            status: "running",
+            error: null,
+            version: current.version + 1,
+            sequence: ++sequence,
+          }))
+        } else if (message.type === "exit") {
+          setState((current) => ({
+            ...current,
+            status: "exited",
+            version: current.version + 1,
+            sequence: ++sequence,
+          }))
+        } else if (message.type === "error") {
+          setState((current) => ({
+            ...current,
+            status: "error",
+            error: message.message ?? "Cloud terminal disconnected",
+            version: current.version + 1,
+          }))
+        }
+      }
+      socket.onerror = () => {
+        if (socketRef.current !== socket || disposed) return
+        setState((current) => ({
+          ...current,
+          status: "error",
+          error: "Unable to connect to cloud terminal",
+          version: current.version + 1,
+        }))
+      }
+      socket.onclose = () => {
+        const active = socketRef.current === socket
+        if (active) socketRef.current = null
+        if (active && !disposed) {
+          setState((current) =>
+            current.status === "error"
+              ? current
+              : { ...current, status: "closed", version: current.version + 1 }
+          )
+        }
+      }
+      return () => {
+        disposed = true
+        socket.close()
+        if (socketRef.current === socket) socketRef.current = null
+      }
     }
+
+    const bridge = window.openSweDesktop?.terminal
+    if (!bridge) return
     let disposed = false
     setState(EMPTY_TERMINAL_SESSION)
     const remove = bridge.onEvent((event) => {
       if (
-        event.localSessionId === localSessionId &&
+        event.localSessionId === target.sessionId &&
         event.terminalId === terminalId &&
         !disposed
       ) {
@@ -244,15 +360,10 @@ export function useAttachedTerminal(
       }
     })
     void bridge
-      .attach({
-        localSessionId,
-        terminalId,
-        cwd,
-      })
+      .attach({ localSessionId: target.sessionId, terminalId, cwd })
       .then((snapshot) => {
-        if (!disposed) {
+        if (!disposed)
           setState((current) => applyTerminalSnapshot(current, snapshot))
-        }
       })
       .catch((error: unknown) => {
         if (!disposed) {
@@ -267,13 +378,49 @@ export function useAttachedTerminal(
           }))
         }
       })
-
     return () => {
       disposed = true
       remove()
-      void bridge.detach({ localSessionId, terminalId })
+      void bridge.detach({ localSessionId: target.sessionId, terminalId })
     }
-  }, [cwd, localSessionId, terminalId])
+  }, [cwd, restartRequest, sessionId, target.kind, terminalId])
 
-  return state
+  useEffect(() => {
+    if (!clearRequest || target.kind === "local") return
+    setState((current) => ({
+      ...current,
+      buffer: "",
+      version: current.version + 1,
+    }))
+  }, [clearRequest, target.kind])
+
+  const send = useCallback((message: object) => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify(message))
+    }
+  }, [])
+
+  return {
+    ...state,
+    write: (data) =>
+      target.kind === "local"
+        ? (window.openSweDesktop?.terminal.write({
+            localSessionId: target.sessionId,
+            terminalId,
+            data,
+          }) ?? Promise.reject(new Error("Local terminal unavailable")))
+        : Promise.resolve(send({ type: "input", data })),
+    resize: (cols, rows) => {
+      if (target.kind === "local") {
+        void window.openSweDesktop?.terminal.resize({
+          localSessionId: target.sessionId,
+          terminalId,
+          cols,
+          rows,
+        })
+      } else {
+        send({ type: "resize", cols, rows })
+      }
+    },
+  }
 }

@@ -62,7 +62,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     readStoredPanelCollapsed(sessionId)
   )
   const panel = usePanelTabs(sessionId)
-  const terminals = useTerminalGroups(sessionId, session?.cwd ?? "")
+  const terminals = useTerminalGroups(
+    { kind: "local", sessionId },
+    session?.cwd ?? ""
+  )
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
   const handlePanelCollapsedChange = useCallback(
@@ -304,7 +307,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   )}
                 >
                   <TerminalPanel
-                    localSessionId={session.id}
+                    target={{ kind: "local", sessionId: session.id }}
                     cwd={session.cwd}
                     groupId={tab.id}
                     terminals={terminals}
