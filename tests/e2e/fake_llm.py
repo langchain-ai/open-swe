@@ -39,7 +39,6 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 # fresh shell rooted at the sandbox dir, so the clone+commit+push is bundled.
 _IMPLEMENT_SCRIPT = f"""
 set -e
-sleep 8
 rm -rf repo
 git clone "$E2E_REMOTE" repo
 cd repo
@@ -60,6 +59,7 @@ echo PUSHED_OK
 # agent was actually told (e.g. the environment section) rather than infer it.
 LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
 
+_BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
 
@@ -475,8 +475,13 @@ class FakeScriptedChatModel(BaseChatModel):
 
         # Keep a run busy on demand so E2E can land follow-ups mid-run (exercising
         # the interrupt-debounce path). Only the triggering message carries the
-        # marker, and only the first model call of that run blocks.
-        if step_index == 0 and "E2E_BUSY_HOLD" in context.last_text:
-            time.sleep(float(os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
+        # marker. The block lands on the second model call so the Slack
+        # acknowledgement — and the web link a spec may need to click — is already
+        # out by the time the run stalls. `E2E_BUSY_HOLD:<n>` overrides the window
+        # so a spec needing a short hold does not leave a run in flight for the
+        # specs that follow it.
+        hold = _BUSY_HOLD_RE.search(context.last_text) if step_index == 1 else None
+        if hold:
+            time.sleep(float(hold.group(1) or os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
         step = script[step_index] if step_index < len(script) else SCRIPT_LIBRARY["followup"][0]
         return ChatResult(generations=[ChatGeneration(message=_render_step(step, messages))])

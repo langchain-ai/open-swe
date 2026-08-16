@@ -10,7 +10,7 @@ const MEMBER = { login: "bob", email: "bob@example.com" };
 const DEFAULT_SLUG = "default";
 const DRAFT_NAME = "Staging Box";
 const DRAFT_SLUG = "staging-box";
-const EXPECTED_SNAPSHOT_NAME = "openswe-environment-default:latest";
+const EXPECTED_SNAPSHOT_NAME = "openswe-environment-default";
 const ALT_NAME = "Alt Box";
 const ALT_SLUG = "alt-box";
 const DEFAULT_ENV_PROMPT = "Default environment: run make test.";
@@ -273,8 +273,14 @@ test.describe("Environments", () => {
     await openNewAgentHome(page);
     const adminToggle = page.getByRole("button", { name: "Admin" });
     await expect(adminToggle).toBeVisible();
-    await adminToggle.click();
-    await expect(adminToggle).toHaveAttribute("aria-pressed", "true");
+    // Retry the click: a click landing before hydration attaches the handler is
+    // silently dropped, and the toggle stays unpressed.
+    await expect(async () => {
+      await adminToggle.click();
+      await expect(adminToggle).toHaveAttribute("aria-pressed", "true", {
+        timeout: 2000,
+      });
+    }).toPass({ timeout: 20_000 });
 
     await typeIntoComposer(
       page,

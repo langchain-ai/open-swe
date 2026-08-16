@@ -38,13 +38,16 @@ async function setRepoPrivate(page: Page, value: boolean) {
   expect(res.ok()).toBeTruthy();
 }
 
+// E2E_BUSY_HOLD:8 makes the fake LLM hold the run open for 8s. The window has to
+// outlast the click through to the thread plus one reload, which takes over 5s
+// on a CI runner; once the run finishes the retry loop below can never pass.
 async function openRunningThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
   await page.locator("#reset").click();
   await expect(page.locator("#thread")).toContainText("No messages yet");
   await page
     .locator("#text")
-    .fill("<@U0BOT> please add a greet() helper and open a PR");
+    .fill("<@U0BOT> E2E_BUSY_HOLD:8 please add a greet() helper and open a PR");
   await page.locator("#send").click();
 
   const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
@@ -103,6 +106,19 @@ async function waitForThreadIdle(page: Page, threadId: string) {
       { timeout: 30_000, intervals: [500] },
     )
     .not.toBe("running");
+}
+
+async function waitForThreadNotBusy(page: Page, threadId: string) {
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get(`/threads/${threadId}`);
+        if (!res.ok()) return "unknown";
+        return ((await res.json()) as { status?: string }).status ?? "unknown";
+      },
+      { timeout: 30_000, intervals: [500] },
+    )
+    .not.toBe("busy");
 }
 
 async function latestPrBody(page: Page): Promise<string> {
@@ -256,6 +272,46 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect.poll(() => latestPrBody(page)).toContain("Slack thread");
   });
 
+  // The queued card is optimistic, so a regression shows up as a flash the DOM
+  // holds for only the length of one request — too short for a locator poll.
+  test("never flashes a queued card when no run is in progress", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+    await waitForThreadIdle(page, threadId);
+    // The dashboard's status can report a finished run before LangGraph drops
+    // the thread out of `busy`, and `busy` is the exact condition the queue
+    // endpoint accepts on. Wait for it, or the send legitimately queues.
+    await waitForThreadNotBusy(page, threadId);
+
+    await page.evaluate(() => {
+      const seen = { value: false };
+      (window as unknown as Record<string, unknown>).__queuedCardSeen = seen;
+      new MutationObserver(() => {
+        if (document.querySelector('[data-testid="queued-message"]'))
+          seen.value = true;
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+
+    await typeIntoComposer(page, "Can you also add a docstring?");
+    await expect(
+      page.getByText(/anything else you'd like changed/),
+    ).toBeVisible();
+
+    const flashed = await page.evaluate(
+      () =>
+        (
+          (window as unknown as Record<string, unknown>).__queuedCardSeen as {
+            value: boolean;
+          }
+        ).value,
+    );
+    expect(flashed).toBe(false);
+  });
+
   test("keeps follow-ups visible while queued during a running agent", async ({
     page,
   }, testInfo) => {
@@ -324,6 +380,49 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       );
     });
     await stopButton.click();
+
+    const cancelResponse = await cancelResponsePromise;
+    expect(cancelResponse.ok()).toBeTruthy();
+    await expect(cancelResponse.json()).resolves.toMatchObject({
+      id: threadId,
+      status: "interrupted",
+    });
+    await expect(
+      page.getByRole("button", { name: "Send message" }),
+    ).toBeVisible();
+    await expect(stopButton).toHaveCount(0);
+  });
+
+  // Escape has to survive the composer's own editor, which registers a Lexical
+  // escape command of its own — hence pressing it with the editor focused.
+  test("stops a run with Escape from inside the composer", async ({ page }) => {
+    await loginAs(page, SAME_USER);
+    await page.goto("/mock/slack");
+    await page.locator("#reset").click();
+
+    const send = await page.request.post("/mock/slack/send", {
+      data: {
+        text: "<@U0BOT> E2E_BUSY_HOLD please add a greet() helper and open a PR",
+      },
+    });
+    expect(send.ok()).toBeTruthy();
+    const { thread_id: threadId } = (await send.json()) as {
+      thread_id: string;
+    };
+
+    await page.goto(`/agents/${threadId}`);
+    const stopButton = page.getByRole("button", { name: "Stop run" });
+    await expect(stopButton).toBeVisible();
+
+    const cancelResponsePromise = page.waitForResponse((response) => {
+      const path = new URL(response.url()).pathname;
+      return (
+        response.request().method() === "POST" &&
+        path === `/dashboard/api/threads/${threadId}/cancel`
+      );
+    });
+    await page.getByTestId("composer-editor").click();
+    await page.keyboard.press("Escape");
 
     const cancelResponse = await cancelResponsePromise;
     expect(cancelResponse.ok()).toBeTruthy();

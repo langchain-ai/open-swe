@@ -157,6 +157,7 @@ declare global {
     openSweDesktop?: {
       isDesktop: true
       listProjects: () => Promise<Array<DesktopProject>>
+      getProjectBranch: (cwd: string) => Promise<string | null>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
       onProjectsChanged: (

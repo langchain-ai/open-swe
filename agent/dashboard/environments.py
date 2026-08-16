@@ -8,9 +8,10 @@ environment needs, so its contents are whatever was set up in that sandbox.
 
 Snapshots are captured (not built from a Dockerfile) so the setup steps are
 ordinary sandbox commands an admin can iterate on in an admin thread. Each
-capture is named ``<prefix>-environment-<slug>:latest`` (prefix from
-``ENVIRONMENT_SNAPSHOT_PREFIX``) and the previous snapshot is deleted once the
-new one is ready, so an environment resolves to exactly one live snapshot.
+capture is named ``<prefix>-environment-<slug>`` (prefix from
+``ENVIRONMENT_SNAPSHOT_PREFIX``); the platform appends its own ``:latest`` tag and
+rejects a name that carries one. The previous snapshot is deleted once the new one
+is ready, so an environment resolves to exactly one live snapshot.
 
 A run uses the environment it selected — from the dashboard picker, or an
 ``env:<name>`` tag on the Slack message that opened the thread — and otherwise
@@ -42,7 +43,6 @@ SnapshotStatus = Literal["none", "capturing", "ready", "failed"]
 NAME_MAX_CHARS = 80
 PROMPT_MAX_CHARS = 20_000
 MAX_REPOS = 50
-SNAPSHOT_TAG = "latest"
 CAPTURE_NAME_ATTEMPTS = 5
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -63,21 +63,32 @@ def slugify(name: str) -> str:
 
 
 def snapshot_name_prefix() -> str:
-    """Prefix for captured snapshot names, so one workspace can host several deployments."""
-    return os.environ.get("ENVIRONMENT_SNAPSHOT_PREFIX", "").strip() or "openswe"
+    """Prefix for captured snapshot names, so one workspace can host several deployments.
+
+    A configured prefix carrying a colon would produce a name the platform
+    rejects, so it is dropped rather than passed through.
+    """
+    prefix = os.environ.get("ENVIRONMENT_SNAPSHOT_PREFIX", "").strip()
+    if ":" in prefix:
+        logger.warning(
+            "ENVIRONMENT_SNAPSHOT_PREFIX %r contains a colon, which snapshot names "
+            "may not; falling back to the default prefix",
+            prefix,
+        )
+        prefix = ""
+    return prefix or "openswe"
 
 
 def snapshot_name_for(slug: str, attempt: int = 1) -> str:
-    """``<prefix>-environment-<slug>:latest``, with ``-2``, ``-3``, … past the first attempt.
+    """``<prefix>-environment-<slug>``, with ``-2``, ``-3``, … past the first attempt.
 
-    The suffix only exists because a capture can collide with a name the platform
-    still holds (a prior snapshot mid-delete, a concurrent capture); the record
-    stores whichever name won.
+    No tag: the platform rejects a colon in the name and appends ``:latest``
+    itself. The numeric suffix exists because a capture can collide with a name
+    the platform still holds (a prior snapshot mid-delete, a concurrent capture);
+    the record stores whichever name won.
     """
     stem = f"{snapshot_name_prefix()}-environment-{slug}"
-    if attempt > 1:
-        stem = f"{stem}-{attempt}"
-    return f"{stem}:{SNAPSHOT_TAG}"
+    return stem if attempt == 1 else f"{stem}-{attempt}"
 
 
 def _validate_name(value: str) -> str:

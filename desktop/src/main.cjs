@@ -25,6 +25,7 @@ const {
 const {
   captureCheckpoint,
   checkpointRef,
+  currentBranch,
   deleteRefs,
   readDiff,
   repoRoot,
@@ -41,13 +42,17 @@ const {
   readProjects,
   removeProject,
 } = require("./project-store.cjs");
+const { beginLogin } = require("./login-server.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
+  SESSION_COOKIE_NAME,
   appRedirectUrl,
   backendRequestUrl,
+  desktopExchangeUrl,
+  desktopLoginUrl,
+  isAppLoginUrl,
   isAppUrl,
-  isGithubOAuthUrl,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
@@ -87,7 +92,7 @@ protocol.registerSchemesAsPrivileged([
 let backendUrl = null;
 let mainWindow = null;
 let setupWindow = null;
-let authWindow = null;
+let loginFlow = null;
 let quitting = false;
 const acpSessions = new Map();
 const acpDrafts = new Map();
@@ -372,6 +377,12 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:projects", (event) => {
     requireTrustedDesktopIpc(event);
     return listProjects();
+  });
+
+  ipcMain.handle("desktop:project-branch", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    return project ? currentBranch(project) : null;
   });
 
   ipcMain.handle("desktop:add-project", async (event) => {
@@ -683,7 +694,7 @@ async function proxyBackendRequest(request) {
   const source = new URL(request.url);
   const headers = new Headers(request.headers);
   const pageUrl = mainWindow?.webContents.getURL() || "";
-  if (!isTrustedProxyRequest(request.method, pageUrl, request.url)) {
+  if (!isTrustedProxyRequest(pageUrl)) {
     return new Response("Forbidden", { status: 403 });
   }
   headers.delete("host");
@@ -898,81 +909,74 @@ function createMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-function handleAuthNavigation(window, event, url) {
-  const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null;
-  if (callback) {
-    event.preventDefault();
-    void window.loadURL(callback);
+async function startExternalLogin() {
+  if (!backendUrl) return;
+  loginFlow?.cancel();
+  loginFlow = null;
+
+  let flow;
+  try {
+    flow = await beginLogin();
+  } catch (error) {
+    dialog.showErrorBox(
+      `${appRuntime.name} sign-in failed`,
+      `Could not open a local sign-in listener: ${error.message}`,
+    );
     return;
   }
-  if (isAppUrl(url)) {
-    event.preventDefault();
-    window.close();
-    if (mainWindow && !mainWindow.isDestroyed()) void loadApp(mainWindow);
-    return;
-  }
-  const target = new URL(url);
-  if (target.protocol === "https:") return;
-  event.preventDefault();
-  if (["http:", "mailto:"].includes(target.protocol)) {
-    void shell.openExternal(url);
+  loginFlow = flow;
+  void shell.openExternal(desktopLoginUrl(backendUrl, flow));
+
+  const code = await flow.code;
+  if (loginFlow !== flow) return;
+  loginFlow = null;
+  if (!code) return;
+
+  try {
+    await completeExternalLogin(flow.verifier, code);
+  } catch (error) {
+    dialog.showErrorBox(`${appRuntime.name} sign-in failed`, error.message);
   }
 }
 
-function createAuthWindow(url) {
-  if (authWindow && !authWindow.isDestroyed()) {
-    authWindow.show();
-    authWindow.focus();
-    void authWindow.loadURL(url);
-    return;
+async function completeExternalLogin(verifier, code) {
+  const response = await fetch(desktopExchangeUrl(backendUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: APP_ORIGIN },
+    body: JSON.stringify({ code, verifier }),
+  });
+  if (!response.ok) {
+    throw new Error(`Backend rejected the sign-in (${response.status})`);
   }
-  const window = new BrowserWindow({
-    title: "Sign in to Open SWE",
-    parent: mainWindow,
-    width: 1000,
-    height: 800,
-    minWidth: 640,
-    minHeight: 480,
-    backgroundColor: "#ffffff",
-    icon: iconPath(),
-    show: false,
-    webPreferences: {
-      contextIsolation: true,
-      navigateOnDragDrop: false,
-      nodeIntegration: false,
-      sandbox: true,
-      session: session.defaultSession,
-    },
+  const payload = await response.json();
+  if (typeof payload?.session !== "string") {
+    throw new Error("Backend returned no session");
+  }
+  await session.defaultSession.cookies.set({
+    url: backendUrl,
+    name: SESSION_COOKIE_NAME,
+    value: payload.session,
+    path: "/",
+    httpOnly: true,
+    secure: new URL(backendUrl).protocol === "https:",
+    expirationDate: Date.now() / 1000 + Number(payload.expires_in),
   });
 
-  window.once("ready-to-show", () => window.show());
-  window.on("closed", () => {
-    if (authWindow === window) authWindow = null;
-  });
-  window.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
-    const target = new URL(popupUrl);
-    if (target.protocol === "https:") {
-      void window.loadURL(popupUrl);
-    } else if (["http:", "mailto:"].includes(target.protocol)) {
-      void shell.openExternal(popupUrl);
-    }
-    return { action: "deny" };
-  });
-  window.webContents.on("will-navigate", (event, navigationUrl) =>
-    handleAuthNavigation(window, event, navigationUrl),
-  );
-  window.webContents.on("will-redirect", (event, navigationUrl) =>
-    handleAuthNavigation(window, event, navigationUrl),
-  );
-  window.webContents.on("will-attach-webview", (event) =>
-    event.preventDefault(),
-  );
-
-  authWindow = window;
-  void window.loadURL(url);
+  const window =
+    mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+  app.focus({ steal: true });
+  await loadApp(window);
 }
 
 function handleNavigation(window, event, url) {
+  if (isAppLoginUrl(url)) {
+    event.preventDefault();
+    void startExternalLogin();
+    return;
+  }
   const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null;
   if (callback) {
     event.preventDefault();
@@ -980,11 +984,6 @@ function handleNavigation(window, event, url) {
     return;
   }
   if (isAppUrl(url)) return;
-  if (isGithubOAuthUrl(url)) {
-    event.preventDefault();
-    createAuthWindow(url);
-    return;
-  }
   event.preventDefault();
   const target = new URL(url);
   if (["http:", "https:", "mailto:"].includes(target.protocol)) {
@@ -1024,8 +1023,8 @@ function createWindow() {
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
     const protocol = new URL(url).protocol;
-    if (isGithubOAuthUrl(url)) {
-      createAuthWindow(url);
+    if (isAppLoginUrl(url)) {
+      void startExternalLogin();
     } else if (["http:", "https:", "mailto:"].includes(protocol)) {
       void shell.openExternal(url);
     }

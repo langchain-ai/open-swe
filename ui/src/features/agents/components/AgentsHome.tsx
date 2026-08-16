@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -35,6 +35,7 @@ import {
   setNotificationsPref,
 } from "@/lib/notifications"
 
+const LAST_LOCAL_PROJECT_KEY = "open-swe.desktop.last-project"
 const NEW_AGENT_PANEL_ID = "new-agent"
 
 function promptContent(text: string, images: Array<ImageChunk>) {
@@ -88,6 +89,11 @@ export function AgentsHome() {
     isDesktop ? "local" : "cloud"
   )
   const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
+  const localProjectPathRef = useRef(localProjectPath)
+  localProjectPathRef.current = localProjectPath
+  const [localProjectBranch, setLocalProjectBranch] = useState<string | null>(
+    null
+  )
   const [localError, setLocalError] = useState<string | null>(null)
   const [localDraftSessionId, setLocalDraftSessionId] = useState<string | null>(
     null
@@ -134,18 +140,31 @@ export function AgentsHome() {
   }, [stream.threadId, queryClient, navigate])
 
   useEffect(() => {
-    if (
-      localProjectPath &&
-      !localProjects.some((project) => project.cwd === localProjectPath)
-    ) {
-      setLocalProjectPath(null)
-    }
-  }, [localProjectPath, localProjects])
+    if (!isDesktop || localProjects.length === 0) return
+    const stored = window.localStorage.getItem(LAST_LOCAL_PROJECT_KEY)
+    const selected = localProjects.find(
+      (project) => project.cwd === localProjectPath || project.cwd === stored
+    )
+    setLocalProjectPath(selected?.cwd ?? localProjects[0]?.cwd ?? null)
+    if (!localProjectPath) setRunTarget("local")
+  }, [isDesktop, localProjectPath, localProjects])
+
+  const refreshLocalProjectBranch = useCallback(async () => {
+    const cwd = localProjectPathRef.current
+    const branch = cwd
+      ? ((await window.openSweDesktop?.getProjectBranch(cwd)) ?? null)
+      : null
+    if (localProjectPathRef.current === cwd) setLocalProjectBranch(branch)
+  }, [])
 
   useEffect(() => {
-    if (!isDesktop || localProjectPath || localProjects.length === 0) return
-    setLocalProjectPath(localProjects[0]!.cwd)
-  }, [isDesktop, localProjectPath, localProjects])
+    void refreshLocalProjectBranch()
+  }, [localProjectPath, refreshLocalProjectBranch])
+
+  useEffect(() => {
+    window.addEventListener("focus", refreshLocalProjectBranch)
+    return () => window.removeEventListener("focus", refreshLocalProjectBranch)
+  }, [refreshLocalProjectBranch])
 
   useEffect(() => {
     const desktop = window.openSweDesktop
@@ -212,6 +231,7 @@ export function AgentsHome() {
 
   const handleSelectLocalProject = (cwd: string) => {
     setLocalProjectPath(cwd)
+    window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
     setRunTarget("local")
     setLocalError(null)
   }
@@ -238,13 +258,15 @@ export function AgentsHome() {
       }
       setSubmitting(true)
       setLocalError(null)
+      window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, localProjectPath)
+      await refreshLocalProjectBranch()
       try {
         const draftRequest = localDraftRef.current
         const draftSessionId =
           draftRequest?.cwd === localProjectPath
             ? await draftRequest.promise
             : undefined
-        const session = await desktop.startAcpSession({
+        const localSession = await desktop.startAcpSession({
           cwd: localProjectPath,
           prompt,
           images,
@@ -254,7 +276,7 @@ export function AgentsHome() {
         })
         await navigate({
           to: "/agents/local/$sessionId",
-          params: { sessionId: session.id },
+          params: { sessionId: localSession.id },
         })
       } catch (error) {
         setSubmitting(false)
@@ -330,9 +352,13 @@ export function AgentsHome() {
               onRunTargetChange={isDesktop ? handleRunTargetChange : undefined}
               localProjects={localProjects}
               selectedLocalProjectPath={localProjectPath}
+              selectedLocalProjectBranch={localProjectBranch}
               onSelectLocalProject={handleSelectLocalProject}
               onAddLocalProject={() => void handleAddLocalProject()}
               onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
+              onRefreshLocalProjectBranch={() =>
+                void refreshLocalProjectBranch()
+              }
               planMode={planMode}
               onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
               environments={environments}
