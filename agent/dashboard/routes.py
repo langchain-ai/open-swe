@@ -1913,6 +1913,18 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
                     data = message["data"]
                     if len(data.encode()) <= 64 * 1024:
                         await handle.send_input(data)
+                elif message.get("type") == "resize":
+                    cols, rows = message.get("cols"), message.get("rows")
+                    if (
+                        isinstance(cols, int)
+                        and not isinstance(cols, bool)
+                        and 1 <= cols <= 500
+                        and isinstance(rows, int)
+                        and not isinstance(rows, bool)
+                        and 1 <= rows <= 500
+                        and handle.pid is not None
+                    ):
+                        await sandbox.run(f"stty cols {cols} rows {rows} < /proc/{handle.pid}/fd/0")
 
         output_task = asyncio.create_task(output())
         input_task = asyncio.create_task(input_())

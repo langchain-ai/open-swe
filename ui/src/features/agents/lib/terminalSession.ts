@@ -248,6 +248,7 @@ export function useAttachedTerminal(
     EMPTY_TERMINAL_SESSION
   )
   const socketRef = useRef<WebSocket | null>(null)
+  const pendingRef = useRef<Array<object>>([])
   const sessionId = target.kind === "local" ? target.sessionId : target.threadId
 
   useEffect(() => {
@@ -274,6 +275,9 @@ export function useAttachedTerminal(
             status: "running",
             error: null,
           }))
+          for (const message of pendingRef.current.splice(0)) {
+            socket.send(JSON.stringify(message))
+          }
         }
       }
       socket.onmessage = (event) => {
@@ -328,14 +332,22 @@ export function useAttachedTerminal(
           version: current.version + 1,
         }))
       }
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         const active = socketRef.current === socket
         if (active) socketRef.current = null
         if (active && !disposed) {
+          pendingRef.current = []
           setState((current) =>
-            current.status === "error"
-              ? current
-              : { ...current, status: "closed", version: current.version + 1 }
+            event.code !== 1000
+              ? {
+                  ...current,
+                  status: "error",
+                  error: event.reason || "Cloud terminal disconnected",
+                  version: current.version + 1,
+                }
+              : current.status === "error"
+                ? current
+                : { ...current, status: "closed", version: current.version + 1 }
           )
         }
       }
@@ -394,10 +406,18 @@ export function useAttachedTerminal(
     }))
   }, [clearRequest, target.kind])
 
-  const send = useCallback((message: object) => {
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify(message))
+  const send = useCallback((message: object): boolean => {
+    const socket = socketRef.current
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(message))
+      return true
     }
+    if (socket?.readyState === WebSocket.CONNECTING) {
+      if (pendingRef.current.length >= 100) return false
+      pendingRef.current.push(message)
+      return true
+    }
+    return false
   }, [])
 
   return {
@@ -409,7 +429,9 @@ export function useAttachedTerminal(
             terminalId,
             data,
           }) ?? Promise.reject(new Error("Local terminal unavailable")))
-        : Promise.resolve(send({ type: "input", data })),
+        : send({ type: "input", data })
+          ? Promise.resolve()
+          : Promise.reject(new Error("Cloud terminal is disconnected")),
     resize: (cols, rows) => {
       if (target.kind === "local") {
         void window.openSweDesktop?.terminal.resize({
@@ -419,6 +441,9 @@ export function useAttachedTerminal(
           rows,
         })
       } else {
+        pendingRef.current = pendingRef.current.filter(
+          (message) => (message as { type?: string }).type !== "resize"
+        )
         send({ type: "resize", cols, rows })
       }
     },
