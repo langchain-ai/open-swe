@@ -249,6 +249,7 @@ from .user_mappings import (
     list_mappings,
     upsert_mapping,
 )
+from .voice import transcribe_audio
 
 logger = logging.getLogger(__name__)
 
@@ -1926,6 +1927,13 @@ async def api_get_thread_pr_diff(
         session["sub"],
         email=session.get("email"),
     )
+
+
+@router.post("/voice/transcriptions")
+async def create_voice_transcription(
+    request: Request, session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, str]:
+    return {"text": await transcribe_audio(request)}
 
 
 @router.post("/threads/{thread_id}/messages")

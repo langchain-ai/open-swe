@@ -91,6 +91,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
+export async function transcribeAudio(audio: Blob): Promise<string> {
+  const response = await request<{ text: string }>("/voice/transcriptions", {
+    method: "POST",
+    body: audio,
+    headers: { "Content-Type": audio.type },
+  })
+  return response.text
+}
+
 export interface PRTraceResolutionResult {
   resolved: boolean
   detail: string

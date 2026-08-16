@@ -84,8 +84,14 @@ function desktopExchangeUrl(backendUrl) {
   return new URL(DESKTOP_EXCHANGE_PATH, backendUrl).toString()
 }
 
-function isTrustedPermissionRequest(permission, requestingUrl) {
-  return ALLOWED_PERMISSIONS.has(permission) && isAppUrl(requestingUrl)
+function isTrustedPermissionRequest(permission, requestingUrl, details = {}) {
+  if (!isAppUrl(requestingUrl)) return false
+  if (ALLOWED_PERMISSIONS.has(permission)) return true
+  return (
+    permission === "media" &&
+    details.mediaTypes?.includes("audio") &&
+    !details.mediaTypes.includes("video")
+  )
 }
 
 function isTrustedProxyRequest(pageUrl) {
