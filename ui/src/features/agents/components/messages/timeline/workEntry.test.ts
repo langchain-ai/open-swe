@@ -54,6 +54,7 @@ describe("describeWorkEntry", () => {
     expect(entry.heading).toBe("Edited")
     expect(entry.preview).toBe("app.tsx")
     expect(entry.previewTooltip).toBe(`${projectPath}/ui/src/app.tsx`)
+    expect(entry.diffStats).toEqual({ additions: 1, deletions: 1 })
     expect(entry.icon).toBe("square-pen")
     // The diff is rendered as the row body, so there is no text fallback.
     expect(entry.expandedText).toBeNull()

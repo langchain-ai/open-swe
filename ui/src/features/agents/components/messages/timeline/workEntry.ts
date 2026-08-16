@@ -6,6 +6,7 @@ import {
   formatPathDisplayParts,
   formatToolDisplayParts,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
+import { countLineChanges } from "@/features/agents/utils/diffStats"
 
 export type WorkEntryIconName =
   | "bot"
@@ -28,6 +29,7 @@ export interface WorkEntryView {
   /** Dimmed argument shown after the heading; null when it would just repeat it. */
   preview: string | null
   previewTooltip?: string
+  diffStats?: { additions: number; deletions: number }
   tone: WorkEntryTone
   status: AcpToolStatus
   /** Plain-text detail for rows that have no richer renderer of their own. */
@@ -148,6 +150,11 @@ export function describeWorkEntry(
     return {
       icon: "square-pen",
       ...pathDisplay,
+      diffStats: countLineChanges(
+        diff.originalContent,
+        diff.newContent,
+        diff.filePath
+      ),
       tone: toneForChunk(chunk),
       status: chunk.status,
       // The diff itself is the body; a text dump alongside it would be noise.

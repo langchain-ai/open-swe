@@ -203,6 +203,17 @@ export function WorkEntryRow({
                     {entry.preview}
                   </span>
                 ))}
+              {entry.diffStats && (
+                <span className="flex shrink-0 items-center gap-1 font-mono text-[11px] text-muted-foreground tabular-nums">
+                  <span className="transition-colors group-focus-within/entry:text-success-foreground group-hover/entry:text-success-foreground">
+                    +{entry.diffStats.additions}
+                  </span>
+                  <span aria-hidden>/</span>
+                  <span className="transition-colors group-focus-within/entry:text-destructive group-hover/entry:text-destructive">
+                    -{entry.diffStats.deletions}
+                  </span>
+                </span>
+              )}
             </p>
           </div>
 
