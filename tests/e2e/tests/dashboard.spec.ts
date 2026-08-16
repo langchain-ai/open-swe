@@ -231,6 +231,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(
       inlineDiff.locator('[data-line][data-line-type="change-addition"]'),
     ).toContainText('return f"Hello, {name}!"');
+    await expect(inlineDiff).toHaveAttribute("data-disable-line-numbers");
+    await expect(inlineDiff).not.toContainText("normalize");
+    await expect(inlineDiff).not.toContainText("farewell");
     await expect
       .poll(() => inlineDiff.locator("[data-line] span").count())
       .toBeGreaterThan(2);

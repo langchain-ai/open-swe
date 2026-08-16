@@ -63,7 +63,7 @@ function EditWorkEntry({
     <WorkEntryRow
       entry={describeWorkEntry(chunk, projectPath)}
       timestamp={chunk.timestamp}
-      body={diff ? <DiffView diffData={diff} /> : undefined}
+      body={diff ? <DiffView diffData={diff} snippet /> : undefined}
     />
   )
 }

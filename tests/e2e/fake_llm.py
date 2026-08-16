@@ -44,8 +44,14 @@ git config user.email "dev@example.com"
 git config user.name "Dev User"
 git checkout -b {FEATURE_BRANCH}
 cat > {FEATURE_FILE} <<'EOF'
+def normalize(name):
+    return name.strip()
+
 def greet(name):
     return "Hello!"
+
+def farewell(name):
+    return f"Goodbye, {{name}}!"
 EOF
 """.strip()
 
