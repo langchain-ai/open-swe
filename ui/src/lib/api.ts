@@ -807,15 +807,6 @@ export const api = {
   listEnvironments: () => request<EnvironmentList>("/environments"),
   listEnvironmentOptions: () =>
     request<EnvironmentOptionList>("/environments/options"),
-  createEnvironment: (body: {
-    name: string
-    prompt?: string
-    repos?: Array<string>
-  }) =>
-    request<Environment>("/environments", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
   saveEnvironment: (slug: string, body: EnvironmentUpdateBody) =>
     request<Environment>(`/environments/${encodeURIComponent(slug)}`, {
       method: "PUT",
