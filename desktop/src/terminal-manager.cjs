@@ -47,6 +47,18 @@ function ensurePtySpawnHelperExecutable(options = {}) {
   } catch {}
 }
 
+function shellEnvFromOutput(result, mark, baseEnv) {
+  const start = result.indexOf(mark)
+  const end = result.lastIndexOf(mark)
+  if (start === -1 || start === end) return null
+  const resolved = { ...baseEnv }
+  for (const line of result.slice(start + mark.length, end).split("\n")) {
+    const separator = line.indexOf("=")
+    if (separator > 0) resolved[line.slice(0, separator)] = line.slice(separator + 1)
+  }
+  return resolved
+}
+
 function getUserShellEnv() {
   if (shellEnv) return shellEnv
   const shell = process.env.SHELL || "/bin/zsh"
@@ -58,19 +70,59 @@ function getUserShellEnv() {
         timeout: 10_000,
         stdio: ["pipe", "pipe", "pipe"],
       })
-      const start = result.indexOf(mark)
-      const end = result.lastIndexOf(mark)
-      if (start === -1 || start === end) continue
-      shellEnv = { ...process.env }
-      for (const line of result.slice(start + mark.length, end).split("\n")) {
-        const separator = line.indexOf("=")
-        if (separator > 0) shellEnv[line.slice(0, separator)] = line.slice(separator + 1)
-      }
+      const resolved = shellEnvFromOutput(result, mark, process.env)
+      if (!resolved) continue
+      shellEnv = resolved
       return shellEnv
     } catch {}
   }
   shellEnv = { ...process.env }
   return shellEnv
+}
+
+function runShell(shell, args, options, input) {
+  return new Promise((resolve, reject) => {
+    const child = execFile(shell, args, options, (error, stdout) => {
+      if (error) reject(error)
+      else resolve(stdout)
+    })
+    if (input && child.stdin) {
+      child.stdin.on("error", () => {})
+      child.stdin.end(input)
+    }
+  })
+}
+
+async function getProjectShellEnv(options = {}) {
+  const baseEnv = options.env || process.env
+  const run = options.run || runShell
+  const shell = baseEnv.SHELL || "/bin/zsh"
+  const attempts = [
+    { args: ["-il"], stdin: true },
+    { args: ["-il", "-c"] },
+    { args: ["-l", "-c"] },
+    { args: ["-i", "-c"] },
+  ]
+  for (const attempt of attempts) {
+    try {
+      const mark = randomBytes(8).toString("hex")
+      const command = `echo '${mark}'; env; echo '${mark}'`
+      const result = await run(
+        shell,
+        attempt.stdin ? attempt.args : [...attempt.args, command],
+        {
+          encoding: "utf8",
+          timeout: 10_000,
+          env: baseEnv,
+          ...(options.cwd ? { cwd: options.cwd } : {}),
+        },
+        attempt.stdin ? `${command}\nexit\n` : undefined
+      )
+      const resolved = shellEnvFromOutput(result, mark, baseEnv)
+      if (resolved) return resolved
+    } catch {}
+  }
+  return { ...baseEnv }
 }
 
 function shellCandidates(env, platform = process.platform) {
@@ -836,6 +888,25 @@ function createTerminalManager(options) {
     emit(session, "closed")
   }
 
+  async function deleteSession(localSessionId) {
+    cleanId(localSessionId, "local session ID")
+    return locked(localSessionId, () => {
+      for (const session of [...sessions.values()]) {
+        if (session.localSessionId === localSessionId) {
+          closeOne(localSessionId, session.terminalId, true)
+        }
+      }
+      const prefix = `terminal_${safePart(localSessionId)}_`
+      try {
+        for (const name of fileSystem.readdirSync(logsDir)) {
+          if (name.startsWith(prefix) && name.endsWith(".log")) {
+            fileSystem.rmSync(path.join(logsDir, name), { force: true })
+          }
+        }
+      } catch {}
+    })
+  }
+
   function list(localSessionId) {
     cleanId(localSessionId, "local session ID")
     if (!getAcpSession(localSessionId)) throw new Error("Local Deep Agents Code session not found")
@@ -886,6 +957,7 @@ function createTerminalManager(options) {
     attach,
     clear,
     close,
+    deleteSession,
     list,
     open,
     resize,
@@ -972,11 +1044,17 @@ function closeAllTerminals() {
   return configuredManager?.shutdown() || Promise.resolve()
 }
 
+function deleteSessionTerminals(localSessionId) {
+  return configuredManager?.deleteSession(localSessionId) || Promise.resolve()
+}
+
 module.exports = {
   capHistory,
   closeAllTerminals,
   configureTerminalIpc,
+  deleteSessionTerminals,
   createTerminalManager,
   ensurePtySpawnHelperExecutable,
+  getProjectShellEnv,
   sanitizeHistoryChunk,
 }

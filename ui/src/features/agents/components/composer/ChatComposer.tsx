@@ -1,5 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ImagePlus, Map as MapIcon, X } from "lucide-react"
+import {
+  ImagePlus,
+  Map as MapIcon,
+  ServerCog as ServerCogIcon,
+  X,
+} from "lucide-react"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
 import { ComposerControl, ComposerControlIcon } from "./ComposerControl"
@@ -9,6 +14,7 @@ import {
   mentionReplacementText,
 } from "./ComposerPromptEditor"
 import { ContextWindowMeter } from "./ContextWindowMeter"
+import { EnvironmentSelector } from "./EnvironmentSelector"
 import { RunTargetSelector } from "./RunTargetSelector"
 import {
   COMPOSER_PATH_DRAG_MIME,
@@ -24,7 +30,7 @@ import type {
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger"
 import type { RunTarget } from "./RunTargetSelector"
 import type { DesktopProject } from "@/desktop"
-import type { ModelOption, Skill } from "@/lib/api"
+import type { EnvironmentOption, ModelOption, Skill } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
@@ -91,12 +97,21 @@ export interface ChatComposerProps {
   onRunTargetChange?: (next: RunTarget) => void
   localProjects?: Array<DesktopProject>
   selectedLocalProjectPath?: string | null
+  selectedLocalProjectBranch?: string | null
   onSelectLocalProject?: (cwd: string) => void
   onAddLocalProject?: () => void
   onRemoveLocalProject?: (cwd: string) => void
+  onRefreshLocalProjectBranch?: () => void
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
+  /** Admins only: when provided, an Admin toggle is shown. Admin threads can manage environments. */
+  adminThread?: boolean
+  onAdminThreadChange?: (next: boolean) => void
+  /** Environments a new thread can boot from. The picker appears only when there are several. */
+  environments?: Array<EnvironmentOption>
+  selectedEnvironment?: string | null
+  onEnvironmentChange?: (slug: string | null) => void
   /** Paths offered by `@` autocomplete — in a thread, the files the agent has touched. */
   mentionPaths?: Array<string>
   skills?: Array<Skill>
@@ -199,11 +214,18 @@ export const ChatComposer = memo(function ChatComposer({
   onRunTargetChange,
   localProjects = [],
   selectedLocalProjectPath = null,
+  selectedLocalProjectBranch = null,
   onSelectLocalProject,
   onAddLocalProject,
   onRemoveLocalProject,
+  onRefreshLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
+  adminThread = false,
+  onAdminThreadChange,
+  environments = [],
+  selectedEnvironment = null,
+  onEnvironmentChange,
   mentionPaths = [],
   skills = [],
   contextUsage,
@@ -494,7 +516,7 @@ export const ChatComposer = memo(function ChatComposer({
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
-      {(onRepoChange || onRunTargetChange) && (
+      {(onRepoChange || onRunTargetChange || onEnvironmentChange) && (
         <div className="mb-2 flex items-center gap-2 px-1 text-xs">
           {runTarget !== "local" && onRepoChange && (
             <RepoSelector
@@ -503,19 +525,29 @@ export const ChatComposer = memo(function ChatComposer({
               onRepoChange={onRepoChange}
             />
           )}
+          {runTarget !== "local" && onEnvironmentChange && (
+            <EnvironmentSelector
+              environments={environments}
+              selectedSlug={selectedEnvironment}
+              onChange={onEnvironmentChange}
+            />
+          )}
           {runTarget &&
             onRunTargetChange &&
             onSelectLocalProject &&
             onAddLocalProject &&
-            onRemoveLocalProject && (
+            onRemoveLocalProject &&
+            onRefreshLocalProjectBranch && (
               <RunTargetSelector
                 localEnabled={Boolean(window.openSweDesktop)}
                 onChange={onRunTargetChange}
                 onAddProject={onAddLocalProject}
                 onRemoveProject={onRemoveLocalProject}
+                onRefreshBranch={onRefreshLocalProjectBranch}
                 onSelectProject={onSelectLocalProject}
                 projects={localProjects}
                 selectedProjectPath={selectedLocalProjectPath}
+                selectedProjectBranch={selectedLocalProjectBranch}
                 value={runTarget}
               />
             )}
@@ -656,6 +688,33 @@ export const ChatComposer = memo(function ChatComposer({
             </Tooltip>
           )}
 
+          {onAdminThreadChange && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <ComposerControl
+                    aria-pressed={adminThread}
+                    className={cn(
+                      adminThread &&
+                        "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                    )}
+                    onClick={() => onAdminThreadChange(!adminThread)}
+                    type="button"
+                  />
+                }
+              >
+                <ComposerControlIcon icon={ServerCogIcon} />
+                <span>Admin</span>
+              </TooltipTrigger>
+              <TooltipPopup
+                className="max-w-[18rem] whitespace-normal"
+                side="top"
+              >
+                Provision this sandbox and capture it as an environment snapshot
+              </TooltipPopup>
+            </Tooltip>
+          )}
+
           <span className="ml-auto" />
 
           <ContextWindowMeter
@@ -686,6 +745,7 @@ export const ChatComposer = memo(function ChatComposer({
             canSubmit={canSubmit}
             onSubmit={() => void handleSubmit()}
             onStop={onStop}
+            stopOnEscape={!menuOpen && !modelPickerOpen}
             submitting={isSubmitting}
           />
         </div>

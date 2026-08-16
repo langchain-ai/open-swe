@@ -38,7 +38,7 @@ async def test_recreate_sandbox_returns_old_and_new_ids() -> None:
         "new_sandbox_id": "sandbox-new",
     }
     resolve_repo.assert_awaited_once_with(config["configurable"])
-    recreate.assert_awaited_once_with("thread-1", repo=repo)
+    recreate.assert_awaited_once_with("thread-1", repo=repo, environment_slug=None)
 
 
 @pytest.mark.asyncio

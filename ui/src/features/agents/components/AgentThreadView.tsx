@@ -352,10 +352,12 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             </div>
           </div>
         ) : isHydrating ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            <p className="text-xs text-muted-foreground/70">
-              Loading conversation…
-            </p>
+          <div className="flex flex-1 items-center justify-center px-6">
+            <img
+              src="/logo-mark.png"
+              alt="Loading conversation"
+              className="size-12 animate-pulse"
+            />
           </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">

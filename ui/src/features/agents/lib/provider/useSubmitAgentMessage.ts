@@ -76,14 +76,20 @@ export function useSubmitAgentMessage(threadId: string) {
 
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {
-      const queue = async () => {
+      // `optimistic` is only safe when a run is known to be in flight. Idle
+      // sends still probe `/messages` first (a run may have started elsewhere),
+      // and that probe answers 409 — showing the bubble up front would flash a
+      // "Queued next" card for the length of the round trip.
+      const queue = async (optimistic: boolean) => {
         const queuedAt = Date.now()
         const queuedId = `queued-${queuedAt}-${Math.random().toString(36).slice(2)}`
-        queryClient.setQueryData<AgentThread>(
-          agentThreadKeys.detail(threadId),
-          (prev) =>
-            prev ? appendQueuedMessage(prev, vars, queuedId, queuedAt) : prev
-        )
+        const showQueued = () =>
+          queryClient.setQueryData<AgentThread>(
+            agentThreadKeys.detail(threadId),
+            (prev) =>
+              prev ? appendQueuedMessage(prev, vars, queuedId, queuedAt) : prev
+          )
+        if (optimistic) showQueued()
         try {
           await agentsApi.queueMessage(threadId, {
             content: vars.content,
@@ -93,21 +99,24 @@ export function useSubmitAgentMessage(threadId: string) {
             plan_mode: vars.plan_mode,
           })
         } catch (error) {
-          queryClient.setQueryData<AgentThread>(
-            agentThreadKeys.detail(threadId),
-            (prev) => (prev ? removeQueuedMessage(prev, queuedId) : prev)
-          )
+          if (optimistic) {
+            queryClient.setQueryData<AgentThread>(
+              agentThreadKeys.detail(threadId),
+              (prev) => (prev ? removeQueuedMessage(prev, queuedId) : prev)
+            )
+          }
           throw error
         }
+        if (!optimistic) showQueued()
       }
 
       if (stream.isLoading) {
-        await queue()
+        await queue(true)
         return
       }
 
       try {
-        await queue()
+        await queue(false)
         return
       } catch (error) {
         if (!(error instanceof AgentsApiError) || error.status !== 409) {

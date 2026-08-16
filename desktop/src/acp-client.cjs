@@ -5,6 +5,7 @@ const readline = require("node:readline")
 const { randomUUID } = require("node:crypto")
 
 const ACP_PROTOCOL_VERSION = 1
+const DELETE_TIMEOUT_MS = 15_000
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -37,6 +38,47 @@ function dcodeTarget({
     return { command: installedCommand, args }
   }
   return { command: "dcode", args }
+}
+
+function deleteDcodeSession({ target, cwd, env, sessionId }) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(target.command, ["threads", "delete", sessionId], {
+      cwd,
+      env: { ...env, PWD: cwd, PYTHONUNBUFFERED: "1" },
+      stdio: ["ignore", "ignore", "pipe"],
+    })
+    let stderr = ""
+    let settled = false
+    const finish = (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL")
+      } catch {}
+      finish(new Error("Deep Agents Code session deletion timed out"))
+    }, 15_000)
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk.toString("utf8")}`.slice(-8_000)
+    })
+    child.once("error", finish)
+    child.once("exit", (code, signal) => {
+      if (code === 0) finish()
+      else {
+        const reason = signal ? `signal ${signal}` : `exit code ${code}`
+        const detail = stderr.trim()
+        finish(
+          new Error(
+            `Deep Agents Code could not delete the session (${reason})${detail ? `: ${detail}` : ""}`
+          )
+        )
+      }
+    })
+  })
 }
 
 function sessionTitle(text) {
@@ -142,14 +184,26 @@ class NdJsonRpcClient {
     })
   }
 
-  request(method, params) {
+  request(method, params, timeoutMs) {
     if (this.closed)
       return Promise.reject(new Error("Deep Agents Code is not running"))
     const id = this.nextId++
-    this.write({ jsonrpc: "2.0", id, method, params })
-    return new Promise((resolve, reject) =>
-      this.pending.set(id, { method, resolve, reject })
-    )
+    return new Promise((resolve, reject) => {
+      const timer = timeoutMs
+        ? setTimeout(() => {
+            if (!this.pending.delete(id)) return
+            reject(new Error(`[acp:${method}] Request timed out`))
+          }, timeoutMs)
+        : null
+      this.pending.set(id, { method, resolve, reject, timer })
+      try {
+        this.write({ jsonrpc: "2.0", id, method, params })
+      } catch (error) {
+        this.pending.delete(id)
+        clearTimeout(timer)
+        reject(error)
+      }
+    })
   }
 
   notify(method, params) {
@@ -183,6 +237,7 @@ class NdJsonRpcClient {
       const pending = this.pending.get(message.id)
       if (!pending) return
       this.pending.delete(message.id)
+      clearTimeout(pending.timer)
       if ("error" in message) {
         const rpcError = isRecord(message.error) ? message.error : {}
         const detail =
@@ -229,7 +284,10 @@ class NdJsonRpcClient {
   rejectPending(error) {
     const pending = [...this.pending.values()]
     this.pending.clear()
-    for (const request of pending) request.reject(error)
+    for (const request of pending) {
+      clearTimeout(request.timer)
+      request.reject(error)
+    }
   }
 
   close() {
@@ -251,6 +309,8 @@ class AcpSession {
     onChange,
     requestPermission,
     restored,
+    modelId,
+    effort,
   }) {
     this.id = restored?.id || randomUUID()
     this.cwd = cwd
@@ -258,14 +318,25 @@ class AcpSession {
     this.createdAt = restored?.createdAt || Date.now()
     this.updatedAt = restored?.updatedAt || this.createdAt
     this.acpSessionId = restored?.acpSessionId
+    this.modelId = modelId
+    this.effort = effort
     this.status = "starting"
+    this.closed = false
+    this.deleteSupported = false
     this.events = []
     this.onEvent = onEvent
     this.onChange = onChange
     this.requestPermission = requestPermission
     this.tools = new Map()
     this.replayUsers = new Map()
-    this.rpc = new NdJsonRpcClient(target.command, target.args, cwd, env)
+    this.suppressUpdates = false
+    this.connect(target, env)
+  }
+
+  connect(target, env) {
+    this.target = target
+    this.env = env
+    this.rpc = new NdJsonRpcClient(target.command, target.args, this.cwd, env)
     this.rpc.onNotification = (method, params) =>
       this.handleNotification(method, params)
     this.rpc.onRequest = (method, params) => this.handleRequest(method, params)
@@ -302,7 +373,7 @@ class AcpSession {
     }
   }
 
-  async initialize() {
+  async initialize(persist = true) {
     const initialized = await this.rpc.request("initialize", {
       protocolVersion: ACP_PROTOCOL_VERSION,
       clientCapabilities: {
@@ -315,6 +386,11 @@ class AcpSession {
         version: "0.1.0",
       },
     })
+    const sessionCapabilities = isRecord(initialized?.agentCapabilities)
+      ? initialized.agentCapabilities.sessionCapabilities
+      : null
+    this.deleteSupported =
+      isRecord(sessionCapabilities) && isRecord(sessionCapabilities.delete)
     if (this.acpSessionId) {
       if (
         !isRecord(initialized) ||
@@ -339,7 +415,46 @@ class AcpSession {
       this.acpSessionId = result.sessionId
     }
     this.status = "idle"
-    this.notifyChange()
+    if (persist) this.notifyChange()
+  }
+
+  async configure(modelId, effort, target, env) {
+    if (modelId === this.modelId && effort === this.effort) return
+    if (this.status === "running")
+      throw new Error("Deep Agents Code is already running")
+    const previousTarget = this.target
+    const previousEnv = this.env
+    this.rpc.close()
+    this.status = "starting"
+    this.replayUsers.clear()
+    this.connect(target, env)
+    this.suppressUpdates = true
+    try {
+      await this.initialize(false)
+      this.modelId = modelId
+      this.effort = effort
+      this.notifyChange()
+    } catch (error) {
+      this.rpc.close()
+      try {
+        this.status = "starting"
+        this.replayUsers.clear()
+        this.connect(previousTarget, previousEnv)
+        await this.initialize(false)
+      } catch (restoreError) {
+        this.rpc.close()
+        this.status = "error"
+        this.emit({
+          type: "error",
+          message: String(restoreError?.message || restoreError),
+        })
+        throw error
+      }
+      this.emit({ type: "error", message: String(error?.message || error) })
+      throw error
+    } finally {
+      this.suppressUpdates = false
+    }
   }
 
   async prompt(text, images) {
@@ -356,6 +471,7 @@ class AcpSession {
       this.status = "idle"
       this.emit({ type: "run-end" })
     } catch (error) {
+      if (this.closed) throw error
       if (this.status !== "error") {
         this.status = "idle"
         this.emit({ type: "error", message: String(error?.message || error) })
@@ -363,6 +479,16 @@ class AcpSession {
       }
       throw error
     }
+  }
+
+  async delete() {
+    if (!this.deleteSupported || !this.acpSessionId) return false
+    await this.rpc.request(
+      "session/delete",
+      { sessionId: this.acpSessionId },
+      DELETE_TIMEOUT_MS
+    )
+    return true
   }
 
   cancel() {
@@ -373,6 +499,7 @@ class AcpSession {
 
   handleNotification(method, params) {
     if (
+      this.suppressUpdates ||
       method !== "session/update" ||
       !isRecord(params) ||
       !isRecord(params.update)
@@ -467,10 +594,14 @@ class AcpSession {
       status: this.status,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
+      modelId: this.modelId,
+      effort: this.effort,
     }
   }
 
   close() {
+    this.closed = true
+    this.onChange = null
     this.rpc.close()
   }
 }
@@ -478,6 +609,7 @@ class AcpSession {
 module.exports = {
   AcpSession,
   dcodeTarget,
+  deleteDcodeSession,
   promptBlocks,
   sessionTitle,
 }
