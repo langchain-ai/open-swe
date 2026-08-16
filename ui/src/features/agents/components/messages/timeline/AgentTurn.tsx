@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
 import { MessageTimestamp } from "../MessageTimestamp"
 import { ReasoningBlock } from "../ReasoningBlock"
@@ -50,28 +51,19 @@ function splitWorkAndReply(items: Array<RenderItem>): {
   }
 }
 
-/**
- * One row per edit call, showing only what the call targeted. The diff lives in
- * the turn's changed-files card and the side panel, both of which read git —
- * rendering a per-call diff here made repeated edits of one file look duplicated.
- */
 function EditWorkEntry({
   chunk,
   projectPath,
-  onOpenFile,
 }: {
   chunk: ToolExecutionChunk
   projectPath?: string
-  onOpenFile?: (filePath: string) => void
 }) {
-  const filePath = latestDiff(chunk)?.filePath
+  const diff = latestDiff(chunk)
   return (
     <WorkEntryRow
       entry={describeWorkEntry(chunk, projectPath)}
       timestamp={chunk.timestamp}
-      onActivate={
-        filePath && onOpenFile ? () => onOpenFile(filePath) : undefined
-      }
+      body={diff ? <DiffView diffData={diff} /> : undefined}
     />
   )
 }
@@ -241,7 +233,6 @@ export function AgentTurn({
             key={item.key}
             chunk={item.chunk}
             projectPath={projectPath}
-            onOpenFile={callbacks.onOpenFile}
           />
         )
 
