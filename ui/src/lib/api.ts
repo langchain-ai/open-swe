@@ -377,6 +377,11 @@ export interface SkillsPage {
   next_offset: number | null
 }
 
+export interface OrganizationSkillsPage {
+  items: Array<Skill>
+  next_cursor: string | null
+}
+
 export interface SandboxSettings {
   base_snapshot_id: string | null
   env_base_snapshot_id: string | null
@@ -757,6 +762,24 @@ export const api = {
     }),
   deleteSkill: (name: string) =>
     request<void>(`/skills/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+  listOrganizationSkills: (cursor: string | null = null) =>
+    request<OrganizationSkillsPage>(
+      `/organization-skills?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
+    ),
+  createOrganizationSkill: (name: string, body: SkillInput) =>
+    request<Skill>("/organization-skills", {
+      method: "POST",
+      body: JSON.stringify({ name, ...body }),
+    }),
+  saveOrganizationSkill: (name: string, body: SkillInput) =>
+    request<Skill>(`/organization-skills/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteOrganizationSkill: (name: string) =>
+    request<void>(`/organization-skills/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
   listAgentInstructions: () =>
