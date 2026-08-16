@@ -1118,13 +1118,14 @@ function configurePermissions() {
         isTrustedPermissionRequest(
           permission,
           details.requestingUrl || webContents.getURL(),
+          details,
         ),
       );
     },
   );
   session.defaultSession.setPermissionCheckHandler(
-    (_webContents, permission, requestingOrigin) =>
-      isTrustedPermissionRequest(permission, requestingOrigin),
+    (_webContents, permission, requestingOrigin, details) =>
+      isTrustedPermissionRequest(permission, requestingOrigin, details),
   );
 }
 
