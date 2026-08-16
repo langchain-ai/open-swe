@@ -255,6 +255,7 @@ export function useAttachedTerminal(
     if (target.kind === "cloud") {
       let disposed = false
       let sequence = 0
+      pendingRef.current = []
       let socket: WebSocket
       try {
         socket = new WebSocket(cloudTerminalUrl(target.threadId))
@@ -353,6 +354,7 @@ export function useAttachedTerminal(
       }
       return () => {
         disposed = true
+        pendingRef.current = []
         socket.close()
         if (socketRef.current === socket) socketRef.current = null
       }
