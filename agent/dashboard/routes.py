@@ -190,10 +190,12 @@ from .team_credentials import (
 )
 from .team_settings import (
     TeamSettingsUpdate,
+    TranscriptionSettingsUpdate,
     get_team_default_model,
     get_team_default_subagent_model,
     get_team_fable_enabled,
     get_team_settings,
+    update_team_transcription_model,
     upsert_team_settings,
 )
 from .thread_api import (
@@ -835,6 +837,14 @@ async def api_get_team_settings(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_team_settings()
+
+
+@router.put("/team-settings/transcription")
+async def api_put_transcription_settings(
+    update: TranscriptionSettingsUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await update_team_transcription_model(update.transcription_model)
 
 
 @router.put("/team-settings")

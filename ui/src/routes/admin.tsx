@@ -764,8 +764,13 @@ function DictationSection() {
     queryFn: api.getTeamSettings,
   })
   const [error, setError] = useState<string | null>(null)
+  const [customModel, setCustomModel] = useState<string | null>(null)
+  const selectedModel = settings.data?.transcription_model ?? "gpt-transcribe"
+  const preset = TRANSCRIPTION_MODELS.some(
+    (model) => model.value === selectedModel
+  )
   const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    mutationFn: api.saveTranscriptionModel,
     onSuccess: (saved) => {
       qc.setQueryData(["teamSettings"], saved)
       setError(null)
@@ -783,11 +788,15 @@ function DictationSection() {
         description="GPT Transcribe is OpenAI's recommended model for recorded speech."
         control={
           <Select
-            value={settings.data?.transcription_model ?? "gpt-transcribe"}
-            onValueChange={(transcription_model) =>
-              settings.data &&
-              save.mutate({ ...settings.data, transcription_model })
-            }
+            value={preset && customModel === null ? selectedModel : "custom"}
+            onValueChange={(model) => {
+              if (model === "custom")
+                setCustomModel(preset ? "" : selectedModel)
+              else {
+                setCustomModel(null)
+                save.mutate(model)
+              }
+            }}
             disabled={!settings.data || save.isPending}
           >
             <SelectTrigger className="w-56">
@@ -799,10 +808,33 @@ function DictationSection() {
                   {model.label}
                 </SelectItem>
               ))}
+              <SelectItem value="custom">Custom model</SelectItem>
             </SelectContent>
           </Select>
         }
       />
+      {(!preset || customModel !== null) && (
+        <SettingsRow
+          label="Custom model ID"
+          control={
+            <div className="flex items-center gap-2">
+              <Input
+                className="w-56"
+                value={customModel ?? selectedModel}
+                onChange={(event) => setCustomModel(event.target.value)}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!customModel?.trim() || save.isPending}
+                onClick={() => customModel && save.mutate(customModel.trim())}
+              >
+                Save
+              </Button>
+            </div>
+          }
+        />
+      )}
       {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   )

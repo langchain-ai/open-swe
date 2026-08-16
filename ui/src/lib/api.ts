@@ -841,6 +841,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  saveTranscriptionModel: (transcription_model: string) =>
+    request<TeamSettings>("/team-settings/transcription", {
+      method: "PUT",
+      body: JSON.stringify({ transcription_model }),
+    }),
   getTeamCredentials: () => request<TeamCredentialsStatus>("/team-credentials"),
   connectDatadog: (body: DatadogConnectBody) =>
     request<TeamCredentialsStatus>("/team-credentials/datadog", {
