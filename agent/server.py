@@ -133,6 +133,7 @@ from .tools import (
     list_environments,
     notify_automation_channel,
     open_pull_request,
+    read_user_settings,
     recreate_sandbox,
     report_platform_issue,
     request_pr_review,
@@ -608,10 +609,13 @@ def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     )
 
 
-def _is_slack_tool(tool: Any) -> bool:
-    """Return whether a tool reaches Slack."""
+def _is_subagent_excluded_tool(tool: Any) -> bool:
+    """Return whether a tool depends on parent-only source context."""
     name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
-    return name.startswith("slack_") or name == "notify_automation_channel"
+    return name.startswith("slack_") or name in {
+        "notify_automation_channel",
+        "read_user_settings",
+    }
 
 
 def _general_purpose_subagent(
@@ -631,7 +635,7 @@ def _general_purpose_subagent(
         # tool-call cadence) that delegated work also needs.
         "system_prompt": OPEN_SWE_SHARED_BASE + "\n\n" + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
-        "tools": [tool for tool in tools if not _is_slack_tool(tool)],
+        "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
         "middleware": [
             *([dynamic_tools] if dynamic_tools else []),
             *_subagent_model_middleware(),
@@ -1270,6 +1274,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         linear_update_issue,
         notify_automation_channel,
         open_pull_request,
+        read_user_settings,
         request_pr_review,
         recreate_sandbox,
         report_platform_issue,
