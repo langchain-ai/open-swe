@@ -198,12 +198,12 @@ describe("useDesktopAcpSessions", () => {
     }) => void
     window.openSweDesktop = {
       listAcpSessions: () => listing.promise,
-      deleteAcpSession: async () => true,
-      onAcpEvent: (callback) => {
+      deleteAcpSession: () => Promise.resolve(true),
+      onAcpEvent: (callback: typeof emit) => {
         emit = callback
         return vi.fn()
       },
-    } as Window["openSweDesktop"]
+    } as unknown as Window["openSweDesktop"]
     const { result } = renderHook(() => useDesktopAcpSessions())
     const summary = session("local")
     const event: DesktopAcpEvent = {
