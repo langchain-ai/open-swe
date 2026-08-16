@@ -517,7 +517,7 @@ export const ChatComposer = memo(function ChatComposer({
       )}
     >
       {(onRepoChange || onRunTargetChange || onEnvironmentChange) && (
-        <div className="mb-2 flex items-center gap-2 px-1 text-xs">
+        <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 px-1 text-xs">
           {runTarget !== "local" && onRepoChange && (
             <RepoSelector
               repos={repos}
@@ -646,7 +646,7 @@ export const ChatComposer = memo(function ChatComposer({
           value={value}
         />
 
-        <div className="mt-auto flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 pt-2 text-xs text-muted-foreground">
+        <div className="mt-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-xs text-muted-foreground sm:flex sm:flex-wrap sm:items-center">
           {models.length > 0 && (
             <ModelPicker
               models={models}
@@ -655,7 +655,7 @@ export const ChatComposer = memo(function ChatComposer({
               open={modelPickerOpen}
               requireImageSupport={pendingImages.length > 0}
               selection={selection}
-              triggerClassName="h-7 rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
+              triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
             />
           )}
 
