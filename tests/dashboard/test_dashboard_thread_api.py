@@ -321,6 +321,20 @@ async def test_thread_summary_includes_pr_and_diff_stats() -> None:
     assert summary["diffStats"] == {"files": 3, "additions": 10, "deletions": 2}
 
 
+async def test_thread_summary_uses_working_repo_for_display_only() -> None:
+    metadata = {
+        "repo": {"owner": "trusted", "name": "default"},
+        "working_repo_full_name": "observed/checkout",
+    }
+
+    summary = await thread_api._thread_summary(_thread_with_metadata(metadata))
+
+    assert summary["repo"] == "default"
+    assert summary["repoFullName"] == "trusted/default"
+    assert summary["workingRepoFullName"] == "observed/checkout"
+    assert metadata["repo"] == {"owner": "trusted", "name": "default"}
+
+
 async def test_thread_summary_defaults_unknown_pr_state_to_open() -> None:
     summary = await thread_api._thread_summary(
         _thread_with_metadata(
