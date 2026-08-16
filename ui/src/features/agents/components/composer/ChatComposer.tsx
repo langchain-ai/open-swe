@@ -517,7 +517,7 @@ export const ChatComposer = memo(function ChatComposer({
       )}
     >
       {(onRepoChange || onRunTargetChange || onEnvironmentChange) && (
-        <div className="mb-2 flex items-center gap-2 px-1 text-xs">
+        <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 px-1 text-xs">
           {runTarget !== "local" && onRepoChange && (
             <RepoSelector
               repos={repos}
@@ -646,82 +646,83 @@ export const ChatComposer = memo(function ChatComposer({
           value={value}
         />
 
-        <div className="mt-auto flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 pt-2 text-xs text-muted-foreground">
-          {models.length > 0 && (
-            <ModelPicker
-              models={models}
-              onOpenChange={setModelPickerOpen}
-              onSelectionChange={onSelectionChange}
-              open={modelPickerOpen}
-              requireImageSupport={pendingImages.length > 0}
-              selection={selection}
-              triggerClassName="h-7 rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
+        <div className="mt-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-xs text-muted-foreground">
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
+            {models.length > 0 && (
+              <ModelPicker
+                models={models}
+                onOpenChange={setModelPickerOpen}
+                onSelectionChange={onSelectionChange}
+                open={modelPickerOpen}
+                requireImageSupport={pendingImages.length > 0}
+                selection={selection}
+                triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
+              />
+            )}
+
+            {onPlanModeChange && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <ComposerControl
+                      aria-pressed={planMode}
+                      className={cn(
+                        planMode &&
+                          "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                      )}
+                      onClick={() => onPlanModeChange(!planMode)}
+                      type="button"
+                    />
+                  }
+                >
+                  <ComposerControlIcon icon={MapIcon} />
+                  <span>Plan</span>
+                </TooltipTrigger>
+                <TooltipPopup
+                  className="max-w-[18rem] whitespace-normal"
+                  side="top"
+                >
+                  Research read-only and propose a plan before editing{" "}
+                  <Kbd>⇧</Kbd>
+                  <Kbd>Tab</Kbd>
+                </TooltipPopup>
+              </Tooltip>
+            )}
+
+            {onAdminThreadChange && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <ComposerControl
+                      aria-pressed={adminThread}
+                      className={cn(
+                        adminThread &&
+                          "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                      )}
+                      onClick={() => onAdminThreadChange(!adminThread)}
+                      type="button"
+                    />
+                  }
+                >
+                  <ComposerControlIcon icon={ServerCogIcon} />
+                  <span>Admin</span>
+                </TooltipTrigger>
+                <TooltipPopup
+                  className="max-w-[18rem] whitespace-normal"
+                  side="top"
+                >
+                  Provision this sandbox and capture it as an environment
+                  snapshot
+                </TooltipPopup>
+              </Tooltip>
+            )}
+
+            <ContextWindowMeter
+              contextWindow={contextUsage?.contextWindow}
+              hasMessages={contextUsage?.hasMessages}
+              usedTokens={contextUsage?.usedTokens}
             />
-          )}
-
-          {onPlanModeChange && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <ComposerControl
-                    aria-pressed={planMode}
-                    className={cn(
-                      planMode &&
-                        "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                    )}
-                    onClick={() => onPlanModeChange(!planMode)}
-                    type="button"
-                  />
-                }
-              >
-                <ComposerControlIcon icon={MapIcon} />
-                <span>Plan</span>
-              </TooltipTrigger>
-              <TooltipPopup
-                className="max-w-[18rem] whitespace-normal"
-                side="top"
-              >
-                Research read-only and propose a plan before editing{" "}
-                <Kbd>⇧</Kbd>
-                <Kbd>Tab</Kbd>
-              </TooltipPopup>
-            </Tooltip>
-          )}
-
-          {onAdminThreadChange && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <ComposerControl
-                    aria-pressed={adminThread}
-                    className={cn(
-                      adminThread &&
-                        "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                    )}
-                    onClick={() => onAdminThreadChange(!adminThread)}
-                    type="button"
-                  />
-                }
-              >
-                <ComposerControlIcon icon={ServerCogIcon} />
-                <span>Admin</span>
-              </TooltipTrigger>
-              <TooltipPopup
-                className="max-w-[18rem] whitespace-normal"
-                side="top"
-              >
-                Provision this sandbox and capture it as an environment snapshot
-              </TooltipPopup>
-            </Tooltip>
-          )}
-
-          <span className="ml-auto" />
-
-          <ContextWindowMeter
-            contextWindow={contextUsage?.contextWindow}
-            hasMessages={contextUsage?.hasMessages}
-            usedTokens={contextUsage?.usedTokens}
-          />
+          </div>
 
           <Tooltip>
             <TooltipTrigger
