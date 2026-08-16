@@ -214,7 +214,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   return (
     <div className="flex min-w-0 flex-1">
       <div
-        className="flex min-w-0 flex-1 flex-col"
+        className={cn(
+          "flex min-w-0 flex-1 flex-col",
+          thread.adminThread && "bg-destructive/4"
+        )}
         style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
       >
         <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
