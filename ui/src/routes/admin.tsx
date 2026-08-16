@@ -62,6 +62,8 @@ function AdminPage() {
 
       <LLMGatewaySection />
 
+      <DictationSection />
+
       <FableSection />
 
       <TriggerReviewSection />
@@ -744,6 +746,63 @@ function LLMGatewaySection() {
           }
         />
       </div>
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
+const TRANSCRIPTION_MODELS = [
+  { value: "gpt-transcribe", label: "GPT Transcribe (recommended)" },
+  { value: "gpt-4o-transcribe", label: "GPT-4o Transcribe (legacy)" },
+  { value: "gpt-4o-mini-transcribe", label: "GPT-4o Mini Transcribe (legacy)" },
+]
+
+function DictationSection() {
+  const qc = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
+  const [error, setError] = useState<string | null>(null)
+  const save = useMutation({
+    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  return (
+    <SettingsSection
+      title="Voice dictation"
+      description="Configure speech-to-text for the web and desktop message composer. Uses the same OpenAI API key and base URL as OpenAI LLMs."
+    >
+      <SettingsRow
+        label="Transcription model"
+        description="GPT Transcribe is OpenAI's recommended model for recorded speech."
+        control={
+          <Select
+            value={settings.data?.transcription_model ?? "gpt-transcribe"}
+            onValueChange={(transcription_model) =>
+              settings.data &&
+              save.mutate({ ...settings.data, transcription_model })
+            }
+            disabled={!settings.data || save.isPending}
+          >
+            <SelectTrigger className="w-56">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TRANSCRIPTION_MODELS.map((model) => (
+                <SelectItem key={model.value} value={model.value}>
+                  {model.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
       {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   )

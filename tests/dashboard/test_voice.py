@@ -53,10 +53,15 @@ async def test_transcribe_audio_validates_and_forwards(monkeypatch: pytest.Monke
     monkeypatch.setattr(voice, "MAX_AUDIO_BYTES", 100)
     monkeypatch.setenv("OPENAI_API_KEY", "secret")
 
+    async def model() -> str:
+        return "gpt-transcribe"
+
+    monkeypatch.setattr(voice, "get_team_transcription_model", model)
+
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url == "https://api.openai.com/v1/audio/transcriptions"
         assert request.headers["authorization"] == "Bearer secret"
-        assert b"gpt-4o-mini-transcribe" in request.content
+        assert b"gpt-transcribe" in request.content
         assert b"audio" in request.content
         return httpx.Response(200, json={"text": " dictated text "})
 

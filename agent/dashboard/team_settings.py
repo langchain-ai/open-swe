@@ -37,6 +37,12 @@ ORG_GUIDELINES_MAX_CHARS = 10_000
 REVIEW_TRACING_PROJECT_MAX_CHARS = 256
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-5.6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
+DEFAULT_TRANSCRIPTION_MODEL = "gpt-transcribe"
+SUPPORTED_TRANSCRIPTION_MODELS = {
+    DEFAULT_TRANSCRIPTION_MODEL,
+    "gpt-4o-transcribe",
+    "gpt-4o-mini-transcribe",
+}
 
 
 class TeamSettingsUpdate(BaseModel):
@@ -46,6 +52,7 @@ class TeamSettingsUpdate(BaseModel):
     # Tri-state LLM Gateway toggle: True/False is authoritative, None inherits the
     # LANGSMITH_GATEWAY_ENABLED deployment default.
     gateway_enabled: bool | None = None
+    transcription_model: str = DEFAULT_TRANSCRIPTION_MODEL
     fable_enabled: bool = False
     review_tracing_project: str | None = None
     org_guidelines: str | None = None
@@ -64,6 +71,13 @@ class TeamSettingsUpdate(BaseModel):
     default_chat_reasoning_effort: str | None = None
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
+
+    @field_validator("transcription_model")
+    @classmethod
+    def _validate_transcription_model(cls, value: str) -> str:
+        if value not in SUPPORTED_TRANSCRIPTION_MODELS:
+            raise ValueError("unsupported transcription model")
+        return value
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -264,6 +278,7 @@ def _default_settings() -> dict[str, Any]:
         "pr_summaries": True,
         "review_trace_links": True,
         "gateway_enabled": None,
+        "transcription_model": DEFAULT_TRANSCRIPTION_MODEL,
         "fable_enabled": False,
         "review_tracing_project": None,
         "org_guidelines": None,
@@ -322,6 +337,7 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
         "gateway_enabled": update.gateway_enabled,
+        "transcription_model": update.transcription_model,
         "fable_enabled": update.fable_enabled,
         "review_tracing_project": update.review_tracing_project,
         "org_guidelines": update.org_guidelines,
@@ -457,6 +473,12 @@ async def get_team_review_trace_links_enabled() -> bool:
     """Return whether GitHub review bodies should include a LangSmith trace link."""
     settings = await get_team_settings()
     return bool(settings.get("review_trace_links", True))
+
+
+async def get_team_transcription_model() -> str:
+    settings = await get_team_settings()
+    value = settings.get("transcription_model")
+    return value if value in SUPPORTED_TRANSCRIPTION_MODELS else DEFAULT_TRANSCRIPTION_MODEL
 
 
 async def get_team_gateway_enabled() -> bool | None:
