@@ -374,6 +374,15 @@ def get_async_sandbox_client() -> AsyncSandboxClient:
     )
 
 
+async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandboxClient, Any]:
+    client = get_async_sandbox_client()
+    try:
+        return client, await client.get_sandbox(name=sandbox_id)
+    except Exception:
+        await client.aclose()
+        raise
+
+
 async def create_langsmith_sandbox(
     sandbox_id: str | None = None,
     github_token: str | None = None,
