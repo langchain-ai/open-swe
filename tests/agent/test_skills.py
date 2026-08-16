@@ -9,6 +9,7 @@ from agent.dashboard.skills import (
     SkillCreate,
     create_organization_skill,
     create_skill,
+    list_organization_skills,
     list_skills,
 )
 from agent.tools.user_skills import save_user_skill
@@ -49,6 +50,7 @@ async def test_skill_validation_and_persistence() -> None:
 async def test_organization_skill_uses_singleton_namespace() -> None:
     client = AsyncMock()
     client.store.get_item.return_value = None
+    client.store.search_items.return_value = {"items": []}
 
     with patch("agent.dashboard.skills._client", return_value=client):
         await create_organization_skill(
@@ -60,6 +62,34 @@ async def test_organization_skill_uses_singleton_namespace() -> None:
         ["organization_skills"],
         "/security-review/SKILL.md",
     )
+
+
+async def test_organization_skill_listing_uses_opaque_cursor() -> None:
+    client = AsyncMock()
+    client.store.search_items.return_value = {
+        "items": [
+            {"value": {"name": "second"}},
+            {"value": {"name": "first"}},
+        ]
+    }
+
+    with patch("agent.dashboard.skills._client", return_value=client):
+        first_page = await list_organization_skills(limit=1, cursor=None)
+        second_page = await list_organization_skills(limit=1, cursor=first_page["next_cursor"])
+        for cursor in (
+            "",
+            "invalid",
+            "☃",
+            "eyJuYW1lIjogImZpcnN0In0!!!!",
+            "eyJuYW1lIjogIiJ9",
+            "eyJuYW1lIjogImZpcnN0IiwgImV4dHJhIjogdHJ1ZX0",
+        ):
+            with pytest.raises(Exception, match="invalid cursor"):
+                await list_organization_skills(limit=1, cursor=cursor)
+
+    assert first_page == {"items": [{"name": "first"}], "next_cursor": "eyJuYW1lIjogImZpcnN0In0"}
+    assert second_page == {"items": [{"name": "second"}], "next_cursor": None}
+    client.store.search_items.assert_awaited_with(["organization_skills"], limit=1001)
 
 
 async def test_save_user_skill_uses_triggering_user_namespace() -> None:

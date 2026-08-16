@@ -1716,10 +1716,10 @@ async def api_delete_skill(
 @router.get("/organization-skills")
 async def api_list_organization_skills(
     limit: int = Query(DEFAULT_SKILLS_PAGE_SIZE, ge=1, le=MAX_SKILLS_PAGE_SIZE),
-    offset: int = Query(0, ge=0),
+    cursor: str | None = Query(None, max_length=256),
     _session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await list_organization_skills(limit=limit, offset=offset)
+    return await list_organization_skills(limit=limit, cursor=cursor)
 
 
 @router.post("/organization-skills")

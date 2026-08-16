@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import re
 from datetime import UTC, datetime
@@ -18,6 +20,7 @@ MAX_SKILL_DESCRIPTION_CHARS = 1024
 MAX_SKILL_INSTRUCTIONS_CHARS = 20_000
 DEFAULT_SKILLS_PAGE_SIZE = 100
 MAX_SKILLS_PAGE_SIZE = 100
+MAX_ORGANIZATION_SKILLS = 1000
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
@@ -168,11 +171,70 @@ async def delete_skill(login: str, name: str) -> None:
     await _delete_skill(_namespace(login), name)
 
 
-async def list_organization_skills(*, limit: int, offset: int) -> dict[str, Any]:
-    return await _list_skills(_organization_namespace(), limit=limit, offset=offset)
+def _encode_cursor(name: str) -> str:
+    return base64.urlsafe_b64encode(json.dumps({"name": name}).encode()).decode().rstrip("=")
+
+
+def _decode_cursor(cursor: str | None) -> str:
+    if cursor is None:
+        return ""
+    if not cursor:
+        raise HTTPException(400, "invalid cursor")
+    try:
+        encoded = cursor.encode("ascii")
+        payload = json.loads(
+            base64.b64decode(encoded + b"=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
+        )
+    except (
+        binascii.Error,
+        UnicodeEncodeError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ValueError,
+    ):
+        raise HTTPException(400, "invalid cursor") from None
+    if not isinstance(payload, dict) or set(payload) != {"name"}:
+        raise HTTPException(400, "invalid cursor")
+    name = payload["name"]
+    if (
+        not isinstance(name, str)
+        or not 1 <= len(name) <= MAX_SKILL_NAME_CHARS
+        or not _SKILL_NAME_RE.fullmatch(name)
+    ):
+        raise HTTPException(400, "invalid cursor")
+    return name
+
+
+async def list_organization_skills(*, limit: int, cursor: str | None) -> dict[str, Any]:
+    after = _decode_cursor(cursor)
+    result = await _client().store.search_items(
+        _organization_namespace(), limit=MAX_ORGANIZATION_SKILLS + 1
+    )
+    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
+    if len(items or []) > MAX_ORGANIZATION_SKILLS:
+        raise HTTPException(409, "organization skill limit exceeded; delete a skill to continue")
+    skills = sorted(
+        (
+            value
+            for item in items or []
+            if (value := _value(item)) is not None and value.get("name", "") > after
+        ),
+        key=lambda skill: skill.get("name", ""),
+    )
+    page = skills[:limit]
+    return {
+        "items": page,
+        "next_cursor": _encode_cursor(page[-1]["name"]) if len(skills) > limit else None,
+    }
 
 
 async def create_organization_skill(body: SkillCreate) -> dict[str, Any]:
+    existing = await _client().store.search_items(
+        _organization_namespace(), limit=MAX_ORGANIZATION_SKILLS
+    )
+    items = existing.get("items") if isinstance(existing, dict) else getattr(existing, "items", [])
+    if len(items or []) >= MAX_ORGANIZATION_SKILLS:
+        raise HTTPException(409, "organization skill limit reached")
     return await _create_skill(_organization_namespace(), body)
 
 

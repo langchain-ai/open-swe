@@ -80,33 +80,39 @@ export function useEnvironmentOptions() {
   })
 }
 
-async function listAllSkills(
-  list: (offset: number) => Promise<{
-    items: Array<Skill>
-    next_offset: number | null
-  }>
-) {
+async function listPersonalSkills() {
   const items = []
   let offset = 0
   do {
-    const page = await list(offset)
+    const page = await api.listSkills(offset)
     items.push(...page.items)
     offset = page.next_offset ?? 0
   } while (offset)
   return items
 }
 
+async function listOrganizationSkills() {
+  const items: Array<Skill> = []
+  let cursor: string | null = null
+  do {
+    const page = await api.listOrganizationSkills(cursor)
+    items.push(...page.items)
+    cursor = page.next_cursor
+  } while (cursor)
+  return items
+}
+
 export function usePersonalAgentSkills() {
   return useQuery({
     queryKey: agentSkillKeys.personal,
-    queryFn: () => listAllSkills(api.listSkills),
+    queryFn: listPersonalSkills,
   })
 }
 
 export function useOrganizationAgentSkills() {
   return useQuery({
     queryKey: agentSkillKeys.organization,
-    queryFn: () => listAllSkills(api.listOrganizationSkills),
+    queryFn: listOrganizationSkills,
   })
 }
 
