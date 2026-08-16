@@ -28,6 +28,7 @@ _MIDDLEWARE_MODULES = {
     "TimeoutWrapupMiddleware": ".timeout_wrapup",
     "ToolErrorMiddleware": ".tool_error_handler",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
+    "WorkingRepoMiddleware": ".working_repo",
 }
 
 __all__ = [
@@ -48,6 +49,7 @@ __all__ = [
     "ToolErrorMiddleware",
     "TimeoutWrapupMiddleware",
     "WorkflowPushGuardMiddleware",
+    "WorkingRepoMiddleware",
     "SandboxCircuitBreakerMiddleware",
     "check_message_queue_before_model",
     "ensure_no_empty_msg",
@@ -82,6 +84,7 @@ if TYPE_CHECKING:
     from .timeout_wrapup import TimeoutWrapupMiddleware
     from .tool_error_handler import ToolErrorMiddleware
     from .workflow_push_guard import WorkflowPushGuardMiddleware
+    from .working_repo import WorkingRepoMiddleware
 
 
 def _load_export(name: str) -> Any:
