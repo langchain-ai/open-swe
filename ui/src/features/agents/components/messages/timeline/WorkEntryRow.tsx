@@ -184,11 +184,25 @@ export function WorkEntryRow({
               >
                 {entry.heading}
               </span>
-              {entry.preview && (
-                <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                  {entry.preview}
-                </span>
-              )}
+              {entry.preview &&
+                (entry.previewTooltip ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span className="min-w-0 flex-1 truncate text-muted-foreground" />
+                      }
+                    >
+                      {entry.preview}
+                    </TooltipTrigger>
+                    <TooltipPopup className="max-w-md break-all">
+                      {entry.previewTooltip}
+                    </TooltipPopup>
+                  </Tooltip>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {entry.preview}
+                  </span>
+                ))}
             </p>
           </div>
 
