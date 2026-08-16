@@ -110,6 +110,7 @@ test("only grants expected permissions to the bundled app", () => {
     isTrustedPermissionRequest("media", APP_URL, { mediaTypes: ["audio"] }),
     true
   )
+  assert.equal(isTrustedPermissionRequest("media", APP_URL, { mediaType: "audio" }), true)
   assert.equal(
     isTrustedPermissionRequest("media", APP_URL, { mediaTypes: ["audio", "video"] }),
     false

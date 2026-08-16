@@ -87,10 +87,11 @@ function desktopExchangeUrl(backendUrl) {
 function isTrustedPermissionRequest(permission, requestingUrl, details = {}) {
   if (!isAppUrl(requestingUrl)) return false
   if (ALLOWED_PERMISSIONS.has(permission)) return true
+  const mediaTypes = details.mediaTypes ?? [details.mediaType]
   return (
     permission === "media" &&
-    details.mediaTypes?.includes("audio") &&
-    !details.mediaTypes.includes("video")
+    mediaTypes.includes("audio") &&
+    !mediaTypes.includes("video")
   )
 }
 

@@ -256,6 +256,7 @@ export const ChatComposer = memo(function ChatComposer({
   const recorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Array<Blob>>([])
   const mountedRef = useRef(true)
+  const requestingMicrophoneRef = useRef(false)
 
   useEffect(() => {
     if (autoFocus) editorRef.current?.focus()
@@ -318,10 +319,15 @@ export const ChatComposer = memo(function ChatComposer({
       recorderRef.current?.stop()
       return
     }
-    if (dictationState !== "idle") return
+    if (dictationState !== "idle" || requestingMicrophoneRef.current) return
+    requestingMicrophoneRef.current = true
     setDictationError(null)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
       const mimeType = [
         "audio/webm;codecs=opus",
         "audio/webm",
@@ -375,6 +381,8 @@ export const ChatComposer = memo(function ChatComposer({
       setDictationError(
         error instanceof Error ? error.message : "Microphone access failed"
       )
+    } finally {
+      requestingMicrophoneRef.current = false
     }
   }, [applyPrompt, dictationState, value])
 
