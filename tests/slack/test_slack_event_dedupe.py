@@ -132,16 +132,23 @@ async def test_redelivered_event_without_retry_header_is_deduped() -> None:
 
 async def test_mention_and_message_deliveries_start_one_run(
     monkeypatch: pytest.MonkeyPatch,
+    _patch_slack_webhook: _FakeClient,
 ) -> None:
     background_tasks = _FakeBackgroundTasks()
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
 
     first = await _post(_mention_payload("Ev1"), background_tasks)
+    slack_events.reset_slack_event_claims()
     second = await _post(_channel_message_payload("Ev2"), background_tasks)
 
     assert first["status"] == "accepted"
     assert second["status"] == "ignored"
     assert len(background_tasks.tasks) == 1
+    assert _patch_slack_webhook.threads.ids == {
+        slack_events._claim_thread_id("Ev1"),
+        slack_events._claim_thread_id("Ev2"),
+        slack_events._claim_thread_id("C1:1786573369.551099"),
+    }
 
 
 async def test_distinct_messages_in_one_channel_both_run() -> None:

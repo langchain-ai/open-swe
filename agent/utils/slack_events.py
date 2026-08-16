@@ -26,14 +26,25 @@ def _claim_thread_id(claim_key: str) -> str:
 
 
 def slack_message_claim_key(event_id: str, channel_id: str = "", event_ts: str = "") -> str:
-    """Key a claim on the message itself, not the delivery.
-
-    Slack fans one tagged channel post out as both `app_mention` and `message`, each
-    with its own event id, so an event-id claim lets the same message start two runs.
-    """
+    """Key a claim on the message itself, not the delivery."""
     if channel_id and event_ts:
         return f"{channel_id}:{event_ts}"
     return event_id
+
+
+async def _claim_remotely(claim_key: str) -> bool | None:
+    client = get_client(url=LANGGRAPH_URL)
+    claim_thread_id = _claim_thread_id(claim_key)
+    try:
+        await client.threads.create(thread_id=claim_thread_id, if_exists="raise", ttl=10)
+    except Exception:  # noqa: BLE001
+        try:
+            await client.threads.get(claim_thread_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("Slack event claim failed for key=%s", claim_key)
+            return None
+        return False
+    return True
 
 
 def _claim_locally(claim_key: str) -> None:
@@ -64,20 +75,19 @@ async def claim_slack_event(event_id: str, channel_id: str = "", event_ts: str =
         if claim_key in _claimed_keys or (event_id and event_id in _claimed_keys):
             return False
 
-        claim_thread_id = _claim_thread_id(claim_key)
-        client = get_client(url=LANGGRAPH_URL)
-        try:
-            await client.threads.create(thread_id=claim_thread_id, if_exists="raise", ttl=10)
-        except Exception:  # noqa: BLE001
-            try:
-                await client.threads.get(claim_thread_id)
-            except Exception:  # noqa: BLE001
-                logger.warning("Slack event claim failed for key=%s", claim_key)
-                return True
-            _claim_locally(claim_key)
+        claimed = await _claim_remotely(event_id)
+        if claimed is False:
             _claim_locally(event_id)
             return False
+        if claim_key != event_id:
+            message_claimed = await _claim_remotely(claim_key)
+            if message_claimed is False:
+                _claim_locally(claim_key)
+                _claim_locally(event_id)
+                return False
+            claimed = claimed or message_claimed
 
-        _claim_locally(claim_key)
-        _claim_locally(event_id)
+        if claimed:
+            _claim_locally(claim_key)
+            _claim_locally(event_id)
         return True
