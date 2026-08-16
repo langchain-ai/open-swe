@@ -38,8 +38,9 @@ async function setRepoPrivate(page: Page, value: boolean) {
   expect(res.ok()).toBeTruthy();
 }
 
-// E2E_BUSY_HOLD:8 makes the fake LLM hold the run open for 8s, so the thread is
-// still running by the time the browser lands on it.
+// E2E_BUSY_HOLD:8 makes the fake LLM hold the run open for 8s. The window has to
+// outlast the click through to the thread plus one reload, which takes over 5s
+// on a CI runner; once the run finishes the retry loop below can never pass.
 async function openRunningThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
   await page.locator("#reset").click();
