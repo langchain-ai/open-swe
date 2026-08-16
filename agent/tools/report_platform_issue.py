@@ -13,7 +13,7 @@ def _uuid7() -> str:
 
 async def report_platform_issue(
     problem_description: str,
-    keywords: str,
+    keywords: list[str],
 ) -> dict[str, str]:
     """Report an issue with the sandbox or execution environment."""
     return {"report_id": _uuid7()}

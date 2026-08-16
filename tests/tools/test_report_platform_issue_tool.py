@@ -10,7 +10,7 @@ async def test_report_platform_issue_returns_uuid7_report_id() -> None:
 
     result = await report_platform_issue(
         problem_description="The sandbox command timed out",
-        keywords="sandbox,timeout",
+        keywords=["sandbox", "timeout"],
     )
 
     assert set(result) == {"report_id"}
@@ -29,7 +29,8 @@ def test_report_platform_issue_requires_description_and_keywords() -> None:
         parameter.default is inspect.Parameter.empty for parameter in signature.parameters.values()
     )
     type_hints = get_type_hints(report_platform_issue)
-    assert all(type_hints[name] is str for name in signature.parameters)
+    assert type_hints["problem_description"] is str
+    assert type_hints["keywords"] == list[str]
 
 
 def test_report_platform_issue_exported() -> None:
