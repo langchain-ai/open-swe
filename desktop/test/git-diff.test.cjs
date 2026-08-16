@@ -9,6 +9,7 @@ const {
   captureCheckpoint,
   checkpointRef,
   currentBranch,
+  parsePullRequest,
   readDiff,
   repoRoot,
 } = require("../src/git-diff.cjs")
@@ -16,6 +17,43 @@ const {
 function git(cwd, args) {
   execFileSync("git", args, { cwd, stdio: "ignore" })
 }
+
+test("normalizes validated pull request metadata", () => {
+  const pr = parsePullRequest(
+    JSON.stringify({
+      number: 12,
+      title: "Draft change",
+      state: "OPEN",
+      isDraft: true,
+      headRefName: "feature",
+      baseRefName: "main",
+      url: "https://github.com/example/repo/pull/12",
+    })
+  )
+  assert.deepEqual(pr, {
+    number: 12,
+    title: "Draft change",
+    state: "draft",
+    headRef: "feature",
+    baseRef: "main",
+    url: "https://github.com/example/repo/pull/12",
+  })
+  assert.equal(
+    parsePullRequest(
+      JSON.stringify({
+        number: 12,
+        title: "Closed draft",
+        state: "CLOSED",
+        isDraft: true,
+        headRefName: "feature",
+        baseRefName: "main",
+        url: "https://github.com/example/repo/pull/12",
+      })
+    ).state,
+    "closed"
+  )
+  assert.equal(parsePullRequest('{"url":"javascript:alert(1)"}'), null)
+})
 
 test("diffs the worktree against a session checkpoint", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-git-"))

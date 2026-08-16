@@ -203,7 +203,9 @@ describe("useDesktopAcpSessions", () => {
         emit = callback
         return vi.fn()
       },
-    } as Window["openSweDesktop"]
+    } as Partial<
+      NonNullable<Window["openSweDesktop"]>
+    > as Window["openSweDesktop"]
     const { result } = renderHook(() => useDesktopAcpSessions())
     const summary = session("local")
     const event: DesktopAcpEvent = {
