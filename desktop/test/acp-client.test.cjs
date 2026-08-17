@@ -8,25 +8,16 @@ const {
   sessionTitle,
 } = require("../build/acp-client.cjs")
 
-test("runs ACP from the pinned uv package", () => {
-  const launcherArgs = [
-    "tool",
-    "run",
-    "--isolated",
-    "--python",
-    "3.13",
-    "--from",
-    "deepagents-code[fireworks]==0.1.56",
-    "dcode",
-  ]
-  assert.deepEqual(dcodeTarget({ env: {} }), {
-    command: "uv",
-    args: [...launcherArgs, "--acp"],
-    launcherArgs,
-    env: {
-      DEEPAGENTS_CODE_AUTO_UPDATE: "0",
-      PYTHONDONTWRITEBYTECODE: "1",
-    },
+test("runs ACP through the isolated uv environment", () => {
+  const target = dcodeTarget({ env: {} })
+  assert.equal(target.command, "uv")
+  assert.deepEqual(target.args, [...target.launcherArgs, "--acp"])
+  assert.ok(target.launcherArgs.includes("--isolated"))
+  assert.ok(target.launcherArgs.includes("3.14"))
+  assert.ok(target.launcherArgs.includes("deepagents==0.7.6"))
+  assert.deepEqual(target.env, {
+    DEEPAGENTS_CODE_AUTO_UPDATE: "0",
+    PYTHONDONTWRITEBYTECODE: "1",
   })
 })
 

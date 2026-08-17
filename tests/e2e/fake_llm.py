@@ -76,15 +76,13 @@ _DESKTOP_PR_PAYLOAD = json.dumps(
 )
 _DESKTOP_IMPLEMENT_SCRIPT = f"""
 set -e
-git config user.email "dev@example.com"
-git config user.name "Dev User"
 git checkout -b {FEATURE_BRANCH}
 cat > {FEATURE_FILE} <<'EOF'
 def greet(name):
     return f"Hello, {{name}}!"
 EOF
 git add {FEATURE_FILE}
-git commit -m "{PR_TITLE}"
+git -c "user.email=dev@example.com" -c "user.name=Dev User" commit -m "{PR_TITLE}"
 git push origin {FEATURE_BRANCH}
 curl --fail --silent --show-error \
   --request POST \

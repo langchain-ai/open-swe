@@ -27,9 +27,11 @@ function dcodeTarget({
     "run",
     "--isolated",
     "--python",
-    "3.13",
+    "3.14",
     "--from",
     "deepagents-code[fireworks]==0.1.56",
+    "--with",
+    "deepagents==0.7.6",
     "dcode",
   ]
   return {
