@@ -26,6 +26,7 @@ _TOOL_MODULES = {
     "open_pull_request": ".open_pull_request",
     "publish_review": ".publish_review",
     "read_repo_file": ".read_repo_file",
+    "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": ".request_pr_review",
@@ -70,6 +71,7 @@ __all__ = [
     "open_pull_request",
     "publish_review",
     "read_repo_file",
+    "read_user_settings",
     "recreate_sandbox",
     "report_platform_issue",
     "request_pr_review",
@@ -117,6 +119,7 @@ if TYPE_CHECKING:
     from .open_pull_request import open_pull_request
     from .publish_review import publish_review
     from .read_repo_file import read_repo_file
+    from .read_user_settings import read_user_settings
     from .recreate_sandbox import recreate_sandbox
     from .reply_to_finding_thread import reply_to_finding_thread
     from .report_platform_issue import report_platform_issue
