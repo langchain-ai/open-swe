@@ -148,3 +148,11 @@ async def test_source_fetch_failure_does_not_fall_back_to_metadata_owner() -> No
     assert logins is None
     assert unresolved == 0
     assert error == "Could not verify Slack thread participants"
+
+
+@pytest.mark.asyncio
+async def test_rejects_acting_for_another_verified_participant() -> None:
+    config = {"configurable": {"github_login": "attacker"}}
+    with patch.object(participants, "get_config", return_value=config):
+        with pytest.raises(ValueError, match="must match the user"):
+            await participants.resolve_participant("victim")
