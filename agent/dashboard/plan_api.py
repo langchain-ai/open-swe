@@ -7,9 +7,9 @@ are read back here, formatted, and handed to the agent as the instruction for th
 follow-up run. The agent never sees comments during review — only this aggregated
 feedback at the decision point.
 
-Permissions: any authenticated org member can read a surfaced thread, comment, and
-request changes (reject); only the thread owner can approve. A comment can be
-deleted by its author or the thread owner.
+Permissions: any authenticated org member can read a surfaced thread, comment,
+approve, and request changes (reject). A comment can be deleted by its author or
+the thread owner.
 """
 
 import logging
@@ -33,6 +33,7 @@ from .plan_store import (
     delete_plan_comment,
     get_plan_content,
     list_plan_comments,
+    make_plan_approver,
     plan_file_path_for_thread,
     save_plan_content,
     set_plan_status,
@@ -83,11 +84,23 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
     login = session["sub"]
     email = session.get("email")
     content = await get_plan_content(thread_id) or {}
+    approved_by = content.get("approved_by") or metadata.get("plan_approved_by")
+    if isinstance(approved_by, dict):
+        approved_by = make_plan_approver(
+            actor_id=str(approved_by.get("id") or ""),
+            name=str(approved_by.get("name") or ""),
+            source=str(approved_by.get("source") or ""),
+        )
+    else:
+        approved_by = None
+    approved_at = content.get("approved_at") or metadata.get("plan_approved_at")
     return {
         "threadId": thread_id,
         "status": content.get("status") or metadata.get("plan_status") or "planning",
         "markdown": content.get("markdown", ""),
         "isOwner": _user_owns_thread(metadata, login, email),
+        "approvedBy": approved_by,
+        "approvedAt": approved_at if isinstance(approved_at, str) else None,
         "user": {
             "id": login,
             "login": login,
@@ -182,22 +195,39 @@ async def remove_plan_comment(
 @plan_router.post("/{thread_id}/approve")
 async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
     metadata = await _thread_metadata(thread_id)
-    if not _user_owns_thread(metadata, session["sub"], session.get("email")):
-        raise HTTPException(403, "only the plan owner can approve")
+    if not _thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
+    actor_id = str(session.get("sub") or "").strip()
     return await approve_plan_for_thread(
-        thread_id, metadata=metadata, actor=_approval_actor_name(session)
+        thread_id,
+        metadata=metadata,
+        approver=make_plan_approver(
+            actor_id=actor_id,
+            name=_approval_actor_name(session),
+            source="dashboard",
+        ),
     )
 
 
 async def approve_plan_for_thread(
-    thread_id: str, *, metadata: dict[str, Any], actor: str
+    thread_id: str, *, metadata: dict[str, Any], approver: dict[str, str]
 ) -> dict[str, Any]:
+    approver = make_plan_approver(
+        actor_id=str(approver.get("id") or ""),
+        name=str(approver.get("name") or ""),
+        source=str(approver.get("source") or ""),
+    )
     content = await get_plan_content(thread_id, raise_on_error=True) or {}
     _reject_shared_content(content)
     plan_markdown = str(content.get("markdown", "")).strip()
     comments = await list_plan_comments(thread_id, raise_on_error=True)
     feedback = _format_comments(comments)
-    await set_plan_status(thread_id, PLAN_STATUS_APPROVED, plan_mode=False)
+    await set_plan_status(
+        thread_id,
+        PLAN_STATUS_APPROVED,
+        plan_mode=False,
+        approved_by=approver,
+    )
     if plan_markdown:
         text = (
             "The plan has been approved. Use the reviewed plan below as the implementation "
@@ -213,7 +243,7 @@ async def approve_plan_for_thread(
         metadata,
         thread_id=thread_id,
         comment_count=len(comments),
-        actor=actor,
+        actor=approver["name"],
     )
     return {"status": PLAN_STATUS_APPROVED, "run_id": run["run_id"]}
 

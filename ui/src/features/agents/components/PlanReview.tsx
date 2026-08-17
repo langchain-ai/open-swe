@@ -81,11 +81,9 @@ export function PlanReview({
   }, [plan.markdown, editing])
 
   const isShared = plan.status === "shared"
-  const canEdit =
-    plan.isOwner &&
-    !isShared &&
-    plan.status !== "approved" &&
-    plan.status !== "cancelled"
+  const isTerminal = plan.status === "approved" || plan.status === "cancelled"
+  const canEdit = plan.isOwner && !isShared && !isTerminal
+  const canApprove = !isShared && !isTerminal
 
   const startEditing = useCallback(() => {
     setEditDraft(markdown)
@@ -237,6 +235,7 @@ export function PlanReview({
             {isShared ? "Viewing" : "Reviewing"} as {plan.user.name}
             {plan.isOwner ? " (owner)" : ""} · status:{" "}
             <span data-testid="plan-status">{plan.status}</span>
+            {plan.approvedBy ? ` · approved by ${plan.approvedBy.name}` : ""}
           </p>
         </div>
         <div
@@ -289,7 +288,7 @@ export function PlanReview({
               >
                 {copied ? "Copied!" : "Copy markdown"}
               </Button>
-              {!isShared && plan.isOwner && (
+              {canApprove && (
                 <Button
                   data-testid="approve-plan"
                   disabled={busy !== null || decision !== null}

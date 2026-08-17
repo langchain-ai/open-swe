@@ -31,7 +31,7 @@ class LinearNotifyState(AgentState):
     """Extended agent state for tracking Linear notifications."""
 
     linear_messages_sent_count: int
-    plan_approval_blocked: NotRequired[bool]
+    plan_approver: NotRequired[dict[str, str]]
     rendered_system_prompt: NotRequired[str | None]
 
 
@@ -90,15 +90,24 @@ def _is_dashboard_queued_message(content: object) -> bool:
     return isinstance(content, dict) and content.get("source") == "dashboard"
 
 
-def _dashboard_queued_message_from_owner(content: object) -> bool:
-    return isinstance(content, dict) and content.get("from_owner") is True
+def _dashboard_queued_message_approver(content: object) -> dict[str, str] | None:
+    if not isinstance(content, dict):
+        return None
+    approver = content.get("approver")
+    if not isinstance(approver, dict):
+        return None
+    return {
+        "id": str(approver.get("id") or ""),
+        "name": str(approver.get("name") or ""),
+        "source": str(approver.get("source") or "dashboard"),
+    }
 
 
 def _message_update(
     content_blocks: list[dict[str, Any]],
     thread_id: str,
     *,
-    plan_approval_blocked: bool | None = None,
+    plan_approver: dict[str, str] | None = None,
     rendered_system_prompt: str | None = None,
 ) -> dict[str, Any] | None:
     if not content_blocks:
@@ -109,8 +118,8 @@ def _message_update(
         thread_id,
     )
     update: dict[str, Any] = {"messages": [{"role": "user", "content": content_blocks}]}
-    if plan_approval_blocked is not None:
-        update["plan_approval_blocked"] = plan_approval_blocked
+    if plan_approver is not None:
+        update["plan_approver"] = plan_approver
     if rendered_system_prompt is not None:
         update["rendered_system_prompt"] = rendered_system_prompt
     return update
@@ -180,7 +189,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             return None
 
         content_blocks: list[dict[str, Any]] = []
-        plan_approval_blocked: bool | None = None
+        plan_approver: dict[str, str] | None = None
         dashboard_handoff = False
         pending_autofix = await _consume_pending_autofix_event(store, thread_id)
         if pending_autofix:
@@ -226,10 +235,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             if _is_dashboard_queued_message(content):
                 dashboard_handoff = True
                 content_blocks.append({"type": "text", "text": DASHBOARD_HANDOFF_INSTRUCTION})
-                if _dashboard_queued_message_from_owner(content):
-                    plan_approval_blocked = False
-                elif plan_approval_blocked is None:
-                    plan_approval_blocked = True
+                queued_approver = _dashboard_queued_message_approver(content)
+                if queued_approver is not None:
+                    plan_approver = queued_approver
             if isinstance(content, dict) and (
                 "text" in content or "image_urls" in content or "images" in content
             ):
@@ -253,7 +261,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         return _message_update(
             content_blocks,
             thread_id,
-            plan_approval_blocked=plan_approval_blocked,
+            plan_approver=plan_approver,
             rendered_system_prompt=rendered_prompt,
         )  # noqa: TRY300
     except Exception:
