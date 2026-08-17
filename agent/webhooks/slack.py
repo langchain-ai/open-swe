@@ -160,18 +160,6 @@ async def _slack_thread_allows_untagged_reply(
     )
 
 
-async def _slack_thread_is_busy(client: Any, thread_id: str) -> bool:
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception:  # noqa: BLE001
-        common.logger.debug(
-            "Could not read Slack thread status for %s; treating as idle", thread_id, exc_info=True
-        )
-        return False
-    status = thread.get("status") if isinstance(thread, dict) else None
-    return status == "busy"
-
-
 async def _dispatch_or_queue_slack_run(
     client: Any,
     thread_id: str,
@@ -181,21 +169,7 @@ async def _dispatch_or_queue_slack_run(
     is_first_mention: bool,
     explicitly_tagged: bool,
 ) -> dict[str, Any] | None:
-    """Start a run, or coalesce onto the thread queue if one is already in flight.
-
-    An explicit @-mention always interrupts immediately (the active run halts and
-    resumes with the new message). Only untagged follow-ups are debounced: while
-    the agent is busy they are parked on the store queue and picked up together at
-    its next model call (via ``check_message_queue_before_model``). Returns the run
-    dict, or ``None`` when the message was queued.
-    """
-    if (
-        not explicitly_tagged
-        and not is_first_mention
-        and await _slack_thread_is_busy(client, thread_id)
-    ):
-        await common.queue_message_for_thread(thread_id, content_blocks)
-        return None
+    """Start a run for the verified sender, interrupting one already in flight."""
     return as_json_object(
         await common.dispatch_agent_run(
             thread_id,
