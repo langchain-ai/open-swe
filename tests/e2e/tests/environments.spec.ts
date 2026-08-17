@@ -272,16 +272,14 @@ test.describe("Environments", () => {
     await page.request.post("/control/reset");
 
     await openNewAgentHome(page);
-    const adminToggle = page.getByRole("button", { name: "Admin" });
-    await expect(adminToggle).toBeVisible();
-    // Retry the click: a click landing before hydration attaches the handler is
-    // silently dropped, and the toggle stays unpressed.
-    await expect(async () => {
-      await adminToggle.click();
-      await expect(adminToggle).toHaveAttribute("aria-pressed", "true", {
-        timeout: 2000,
-      });
-    }).toPass({ timeout: 20_000 });
+    const extras = page.getByRole("button", { name: "More composer options" });
+    await extras.click();
+    await page.getByRole("menuitem", { name: "Enable admin mode" }).click();
+    await extras.click();
+    await expect(
+      page.getByRole("menuitem", { name: "Disable admin mode" }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
 
     await typeIntoComposer(
       page,
