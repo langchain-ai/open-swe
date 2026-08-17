@@ -4,6 +4,7 @@ import baseConfig from "./playwright.config";
 
 export default defineConfig({
   ...baseConfig,
+  testIgnore: [],
   testMatch: "desktop.spec.ts",
   outputDir: "test-results/desktop",
   timeout: 180_000,
