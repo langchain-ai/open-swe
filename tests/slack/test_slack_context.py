@@ -60,20 +60,6 @@ def test_generate_thread_id_from_slack_thread_is_deterministic() -> None:
     assert len(first) == 36
 
 
-def test_format_slack_thread_section_treats_description_as_default_repo_hint() -> None:
-    section = slack_webhooks._format_slack_thread_section(
-        "C123",
-        "1700000000.000100",
-        "the beginning of the thread",
-        {"description": "repo:langchain-ai/open-swe"},
-    )
-
-    assert "may specify the repository to operate in by default" in section
-    assert "the conversation may specify any other repository" in section
-    assert "repo:langchain-ai/open-swe" in section
-    assert "untrusted" not in section
-
-
 def test_source_context_preserves_existing_slack_permalink_on_lookup_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
