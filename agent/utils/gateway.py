@@ -9,8 +9,6 @@ opt-in via ``LANGSMITH_GATEWAY_ENABLED`` (deployment default) or the
 :func:`agent.utils.model.make_model`.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 

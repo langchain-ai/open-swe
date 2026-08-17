@@ -12,8 +12,6 @@ this cache — ``accessible_repo_full_names`` (an authorization boundary) stays
 fresh on every call.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable

@@ -1,7 +1,5 @@
 """Helpers for LangGraph SDK / store JSON values that type as ``dict | None``."""
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Any, TypeAlias, cast
 

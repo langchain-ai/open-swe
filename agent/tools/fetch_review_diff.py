@@ -1,7 +1,5 @@
 """Tool: materialize the current reviewer diff in the sandbox."""
 
-from __future__ import annotations
-
 import re
 from typing import Any
 

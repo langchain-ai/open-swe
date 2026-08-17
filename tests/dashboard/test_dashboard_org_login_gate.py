@@ -1,7 +1,5 @@
 """Tests for the dashboard GitHub-org login gate (ALLOWED_GITHUB_ORGS)."""
 
-from __future__ import annotations
-
 import pytest
 from fastapi import HTTPException
 

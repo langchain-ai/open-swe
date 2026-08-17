@@ -5,8 +5,6 @@ These stores are the single source of truth that both the real agent code
 sees in the UI is exactly what the agent produced.
 """
 
-from __future__ import annotations
-
 import shutil
 import subprocess
 import time

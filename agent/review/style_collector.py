@@ -1,7 +1,5 @@
 """Collect historical PR review samples from GitHub for style analysis."""
 
-from __future__ import annotations
-
 import logging
 import uuid
 from collections import Counter

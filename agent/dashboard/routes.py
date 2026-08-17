@@ -1,7 +1,5 @@
 """FastAPI router for the dashboard backend."""
 
-from __future__ import annotations
-
 import asyncio
 import hmac
 import json

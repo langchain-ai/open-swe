@@ -1,7 +1,5 @@
 """Tool: ``approve_plan``. Approve a reviewed plan and exit plan mode."""
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Mapping
 from typing import Annotated, Any

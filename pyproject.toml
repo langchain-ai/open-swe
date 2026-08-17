@@ -72,10 +72,14 @@ select = [
     "B",   # flake8-bugbear
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
+    "TID251",
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"__future__.annotations".msg = "Do not use postponed annotation evaluation."
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

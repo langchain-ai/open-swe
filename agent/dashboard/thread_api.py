@@ -1,7 +1,5 @@
 """Dashboard thread list/detail/run/stream endpoints backed by LangGraph."""
 
-from __future__ import annotations
-
 import asyncio
 import base64
 import binascii

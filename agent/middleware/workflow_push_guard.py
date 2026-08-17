@@ -1,7 +1,5 @@
 """Gate workflow-file pushes on human approval."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 import logging

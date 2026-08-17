@@ -9,8 +9,6 @@ and list projects so the agent can dig into e2e test failures including
 screenshots and DOM snapshots.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
