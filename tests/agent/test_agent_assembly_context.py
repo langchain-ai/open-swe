@@ -273,6 +273,12 @@ async def test_task_retry_wraps_inside_tool_error_middleware() -> None:
     assert names.index("ToolErrorMiddleware") < names.index("ToolRetryMiddleware")
 
 
+def test_shared_base_bans_future_annotations() -> None:
+    from agent.prompt import OPEN_SWE_SHARED_BASE
+
+    assert "Never use `from __future__ import annotations`" in OPEN_SWE_SHARED_BASE
+
+
 @pytest.mark.asyncio
 async def test_general_purpose_subagent_carries_open_swe_shared_base() -> None:
     from agent.prompt import OPEN_SWE_SHARED_BASE

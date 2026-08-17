@@ -74,6 +74,7 @@ OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on La
 ### Working with Code
 
 - Read files before modifying them. Fix root causes, not symptoms. Match existing code style. Ignore unrelated bugs or broken tests.
+- Never use `from __future__ import annotations`. Use annotation syntax compatible with the repository's supported Python versions instead.
 - Never add inline comments; keep any docstrings you add to ~1 line. Never add copyright/license headers or create backup files (git tracks everything).
 - Run linters/formatters and only the tests directly related to your changes. **Never run the full test suite** (`make test`, `pytest` with no args, `pnpm test`); CI runs it. Pass flags that disable color (`NO_COLOR=1`, `--no-colors`). If a command fails and you change code to fix it, re-run it to confirm.
 - Never modify `.github/workflows/` permissions unless explicitly asked.
