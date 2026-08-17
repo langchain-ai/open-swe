@@ -803,8 +803,12 @@ function ThreadRow({
             "flex items-center gap-2 rounded-lg px-2.5 transition-colors group-hover:pr-8 [@media(hover:none)]:pr-8",
             compact ? "h-7 gap-1.5" : "h-8",
             isActive
-              ? "bg-accent text-foreground"
-              : "text-muted-foreground group-hover:bg-sidebar-row-hover"
+              ? thread.adminThread
+                ? "bg-destructive/10 text-foreground"
+                : "bg-accent text-foreground"
+              : thread.adminThread
+                ? "bg-destructive/5 text-muted-foreground group-hover:bg-destructive/10"
+                : "text-muted-foreground group-hover:bg-sidebar-row-hover"
           )}
         >
           {thread.status === "running" ? (

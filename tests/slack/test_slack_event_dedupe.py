@@ -70,6 +70,12 @@ def _mention_payload(event_id: str = "Ev1") -> dict[str, Any]:
     }
 
 
+def _channel_message_payload(event_id: str = "Ev2") -> dict[str, Any]:
+    payload = _mention_payload(event_id)
+    payload["event"] = {**payload["event"], "type": "message", "channel_type": "channel"}
+    return payload
+
+
 async def _post(
     payload: dict[str, Any],
     background_tasks: _FakeBackgroundTasks,
@@ -122,6 +128,40 @@ async def test_redelivered_event_without_retry_header_is_deduped() -> None:
 
     assert second["status"] == "ignored"
     assert len(background_tasks.tasks) == 1
+
+
+async def test_mention_and_message_deliveries_start_one_run(
+    monkeypatch: pytest.MonkeyPatch,
+    _patch_slack_webhook: _FakeClient,
+) -> None:
+    background_tasks = _FakeBackgroundTasks()
+    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
+
+    first = await _post(_mention_payload("Ev1"), background_tasks)
+    slack_events.reset_slack_event_claims()
+    second = await _post(_channel_message_payload("Ev2"), background_tasks)
+
+    assert first["status"] == "accepted"
+    assert second["status"] == "ignored"
+    assert len(background_tasks.tasks) == 1
+    assert _patch_slack_webhook.threads.ids == {
+        slack_events._claim_thread_id("Ev1"),
+        slack_events._claim_thread_id("Ev2"),
+        slack_events._claim_thread_id("C1:1786573369.551099"),
+    }
+
+
+async def test_distinct_messages_in_one_channel_both_run() -> None:
+    background_tasks = _FakeBackgroundTasks()
+
+    second_message = _mention_payload("Ev2")
+    second_message["event"] = {**second_message["event"], "ts": "1786573999.111222"}
+
+    first = await _post(_mention_payload("Ev1"), background_tasks)
+    second = await _post(second_message, background_tasks)
+
+    assert [first["status"], second["status"]] == ["accepted", "accepted"]
+    assert len(background_tasks.tasks) == 2
 
 
 async def test_retry_header_alone_does_not_drop_an_unseen_event() -> None:

@@ -155,7 +155,7 @@ async def slack_webhook(
     channel_context = await common._get_slack_channel_context(channel_id)
 
     if await common._is_docs_plz_slack_channel(channel_id, channel_context):
-        if await common.claim_slack_event(event_id):
+        if await common.claim_slack_event(event_id, channel_id, event_ts):
             background_tasks.add_task(
                 common.post_slack_thread_reply,
                 channel_id,
@@ -179,7 +179,7 @@ async def slack_webhook(
         repo_config = await common.get_slack_repo_config(
             channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
         )
-        if await common.claim_slack_event(event_id):
+        if await common.claim_slack_event(event_id, channel_id, event_ts):
             background_tasks.add_task(service.process_slack_mention, event_data, repo_config)
             return {"status": "accepted", "message": "Slack mention queued"}
 

@@ -328,7 +328,7 @@ export function AgentsHome() {
 
   return (
     <>
-      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-8">
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
         <OnboardingDialog />
         <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center">
           <div className="flex w-full flex-col items-center gap-6">

@@ -265,7 +265,11 @@ def _slack_thread_from_metadata(metadata: dict[str, Any]) -> tuple[str, str] | N
 
 
 def _plan_approved_slack_text(comment_count: int, actor: str) -> str:
-    return f"Plan approved with {comment_count} comments by {actor}\nbeginning implementation"
+    return f"Plan approved with {comment_count} comments by {actor}"
+
+
+def _plan_approved_slack_blocks(text: str) -> list[dict[str, Any]]:
+    return [{"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{text}_"}]}]
 
 
 async def _maybe_post_plan_approved_to_slack(
@@ -275,11 +279,13 @@ async def _maybe_post_plan_approved_to_slack(
     if slack_thread is None:
         return
     channel_id, thread_ts = slack_thread
+    text = _plan_approved_slack_text(comment_count, actor)
     try:
         ok = await post_slack_thread_reply(
             channel_id,
             thread_ts,
-            _plan_approved_slack_text(comment_count, actor),
+            text,
+            blocks=_plan_approved_slack_blocks(text),
         )
     except Exception:
         logger.warning("Could not post plan approval Slack reply", exc_info=True)

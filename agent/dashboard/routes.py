@@ -2,14 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
+import json
 import logging
 import os
+import posixpath
+import shlex
 from typing import Any, Literal
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
@@ -166,9 +179,13 @@ from .skills import (
     MAX_SKILLS_PAGE_SIZE,
     SkillCreate,
     SkillUpdate,
+    create_organization_skill,
     create_skill,
+    delete_organization_skill,
     delete_skill,
+    list_organization_skills,
     list_skills,
+    update_organization_skill,
     update_skill,
 )
 from .slack_oauth import (
@@ -190,10 +207,12 @@ from .team_credentials import (
 )
 from .team_settings import (
     TeamSettingsUpdate,
+    TranscriptionSettingsUpdate,
     get_team_default_model,
     get_team_default_subagent_model,
     get_team_fable_enabled,
     get_team_settings,
+    update_team_transcription_model,
     upsert_team_settings,
 )
 from .thread_api import (
@@ -202,6 +221,7 @@ from .thread_api import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     delete_dashboard_thread,
+    get_dashboard_terminal_sandbox,
     get_dashboard_thread,
     get_dashboard_thread_pr_diff,
     get_dashboard_thread_recovery_patch,
@@ -249,6 +269,7 @@ from .user_mappings import (
     list_mappings,
     upsert_mapping,
 )
+from .voice import transcribe_audio
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +279,7 @@ router = APIRouter(
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
 _GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+_CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 # Module-level so a local harness can point the browser leg at a fake consent
 # page and still run the real login/callback code.
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
@@ -834,6 +856,14 @@ async def api_get_team_settings(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_team_settings()
+
+
+@router.put("/team-settings/transcription")
+async def api_put_transcription_settings(
+    update: TranscriptionSettingsUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await update_team_transcription_model(update.transcription_model)
 
 
 @router.put("/team-settings")
@@ -1749,6 +1779,41 @@ async def api_delete_skill(
     return Response(status_code=204)
 
 
+@router.get("/organization-skills")
+async def api_list_organization_skills(
+    limit: int = Query(DEFAULT_SKILLS_PAGE_SIZE, ge=1, le=MAX_SKILLS_PAGE_SIZE),
+    cursor: str | None = Query(None, max_length=256),
+    _session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await list_organization_skills(limit=limit, cursor=cursor)
+
+
+@router.post("/organization-skills")
+async def api_create_organization_skill(
+    body: SkillCreate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await create_organization_skill(body)
+
+
+@router.put("/organization-skills/{name}")
+async def api_update_organization_skill(
+    name: str,
+    body: SkillUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return await update_organization_skill(name, body)
+
+
+@router.delete("/organization-skills/{name}")
+async def api_delete_organization_skill(
+    name: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> Response:
+    await delete_organization_skill(name)
+    return Response(status_code=204)
+
+
 @router.get("/agent-usage-leaderboard")
 async def api_agent_usage_leaderboard(
     background_tasks: BackgroundTasks,
@@ -1885,6 +1950,109 @@ async def api_get_thread(
     )
 
 
+async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[str, Any]) -> None:
+    if os.environ.get("SANDBOX_TYPE", "langsmith") != "langsmith":
+        await websocket.close(code=1008, reason="Cloud terminal requires a LangSmith sandbox")
+        return
+    try:
+        sandbox_id, repo_name = await get_dashboard_terminal_sandbox(
+            thread_id, session["sub"], email=session.get("email")
+        )
+    except HTTPException as exc:
+        await websocket.close(code=1008, reason=str(exc.detail)[:123])
+        return
+
+    await websocket.accept()
+    client = handle = None
+    try:
+        await asyncio.wait_for(_CLOUD_TERMINAL_SLOTS.acquire(), timeout=0.01)
+    except TimeoutError:
+        await websocket.close(code=1013, reason="Cloud terminal capacity reached")
+        return
+    try:
+        from ..integrations.langsmith import connect_async_langsmith_sandbox
+
+        client, sandbox = await connect_async_langsmith_sandbox(sandbox_id)
+        cwd = posixpath.join("/workspace", repo_name) if repo_name else "/workspace"
+        if not (await sandbox.run(f"test -d {shlex.quote(cwd)}")).success:
+            cwd = "/workspace"
+        handle = await sandbox.run(
+            "exec ${SHELL:-/bin/bash} -l",
+            cwd=cwd,
+            timeout=0,
+            idle_timeout=300,
+            kill_on_disconnect=True,
+            pty=True,
+            wait=False,
+        )
+
+        async def output() -> None:
+            assert handle is not None
+            async for chunk in handle:
+                await websocket.send_text(json.dumps({"type": "output", "data": chunk.data}))
+            result = await handle.result
+            await websocket.send_text(json.dumps({"type": "exit", "exitCode": result.exit_code}))
+
+        async def input_() -> None:
+            assert handle is not None
+            while True:
+                message = await websocket.receive_json()
+                if not isinstance(message, dict):
+                    continue
+                if message.get("type") == "input" and isinstance(message.get("data"), str):
+                    data = message["data"]
+                    if len(data.encode()) <= 64 * 1024:
+                        await handle.send_input(data)
+                elif message.get("type") == "resize":
+                    cols, rows = message.get("cols"), message.get("rows")
+                    if (
+                        isinstance(cols, int)
+                        and not isinstance(cols, bool)
+                        and 1 <= cols <= 500
+                        and isinstance(rows, int)
+                        and not isinstance(rows, bool)
+                        and 1 <= rows <= 500
+                        and handle.pid is not None
+                    ):
+                        await sandbox.run(f"stty cols {cols} rows {rows} < /proc/{handle.pid}/fd/0")
+
+        output_task = asyncio.create_task(output())
+        input_task = asyncio.create_task(input_())
+        done, pending = await asyncio.wait(
+            {output_task, input_task}, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for task in done:
+            task.result()
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Cloud terminal failed for thread %s: %s", thread_id, type(exc).__name__)
+        try:
+            await websocket.send_text(
+                json.dumps({"type": "error", "message": "Cloud terminal disconnected"})
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        if handle is not None:
+            await handle.kill()
+        if client is not None:
+            await client.aclose()
+        _CLOUD_TERMINAL_SLOTS.release()
+
+
+@router.websocket("/threads/{thread_id}/terminal")
+async def api_thread_terminal(
+    websocket: WebSocket,
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> None:
+    await _cloud_terminal(websocket, thread_id, session)
+
+
 @router.get("/threads/{thread_id}/recovery.patch")
 async def api_get_thread_recovery_patch(
     thread_id: str,
@@ -1926,6 +2094,13 @@ async def api_get_thread_pr_diff(
         session["sub"],
         email=session.get("email"),
     )
+
+
+@router.post("/voice/transcriptions")
+async def create_voice_transcription(
+    request: Request, session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, str]:
+    return {"text": await transcribe_audio(request)}
 
 
 @router.post("/threads/{thread_id}/messages")
