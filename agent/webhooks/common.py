@@ -751,7 +751,10 @@ async def upsert_agent_thread_owner_metadata(
         metadata["repo_owner"] = repo_config["owner"]
         metadata["repo_name"] = repo_config["name"]
     if title:
-        metadata["title"] = title[:80]
+        initial_title = title[:80]
+        metadata["title"] = initial_title
+        if source == "slack":
+            metadata["title_seed"] = initial_title
     if environment:
         metadata["environment"] = environment
 
@@ -796,6 +799,7 @@ async def upsert_agent_thread_owner_metadata(
     if existing_meta.get("title") and "title" in metadata:
         # Preserve a title that was already chosen (first message wins).
         metadata.pop("title")
+        metadata.pop("title_seed", None)
 
     try:
         if existing is None:

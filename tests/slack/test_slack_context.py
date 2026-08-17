@@ -138,6 +138,32 @@ def test_upsert_preserves_partially_initialized_owner(monkeypatch: pytest.Monkey
     assert metadata["source_context"] == owner_context
 
 
+def test_slack_upsert_seeds_only_the_initial_thread_title(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = _FakeThreadsClient({"metadata": {}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    asyncio.run(
+        webhook_common.upsert_agent_thread_owner_metadata(
+            "thread-id",
+            source="slack",
+            title="Investigate the deployment failure",
+        )
+    )
+    asyncio.run(
+        webhook_common.upsert_agent_thread_owner_metadata(
+            "thread-id",
+            source="slack",
+            title="Ignore this later title",
+        )
+    )
+
+    metadata = cast(dict, threads.thread)["metadata"]
+    assert metadata["title"] == "Investigate the deployment failure"
+    assert metadata["title_seed"] == "Investigate the deployment failure"
+
+
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
     bot_user_id = "UBOT"
     messages = [

@@ -69,6 +69,18 @@ class _Threads:
             },
         ),
         (
+            {
+                "source": "slack",
+                "title": "please review title generation",
+                "title_seed": "please review title generation",
+            },
+            {
+                "source": "slack",
+                "title": "Review thread title generation",
+                "title_seed": None,
+            },
+        ),
+        (
             {"source": "github", "title": "PR #1947", "title_seed": "PR #1947"},
             {"source": "github", "title": "PR #1947", "title_seed": "PR #1947"},
         ),
