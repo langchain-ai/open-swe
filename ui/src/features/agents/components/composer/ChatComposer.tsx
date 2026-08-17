@@ -4,6 +4,7 @@ import {
   LoaderCircle,
   Map as MapIcon,
   Mic,
+  Plus,
   ServerCog as ServerCogIcon,
   Square,
   X,
@@ -39,6 +40,7 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Kbd } from "@/components/ui/kbd"
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { transcribeAudio } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -245,6 +247,7 @@ export const ChatComposer = memo(function ChatComposer({
     null
   )
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  const [extrasMenuOpen, setExtrasMenuOpen] = useState(false)
   const [dictationState, setDictationState] = useState<
     "idle" | "recording" | "transcribing"
   >("idle")
@@ -745,7 +748,49 @@ export const ChatComposer = memo(function ChatComposer({
           value={value}
         />
 
-        <div className="mt-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-xs text-muted-foreground">
+        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-1 pt-2 text-xs text-muted-foreground">
+          <Menu onOpenChange={setExtrasMenuOpen}>
+            <MenuTrigger
+              render={
+                <ComposerControl
+                  aria-label="More composer options"
+                  className="size-7 px-0"
+                  type="button"
+                />
+              }
+            >
+              <Plus className="size-4" />
+            </MenuTrigger>
+            <MenuPopup align="start" className="w-44" side="top" sideOffset={7}>
+              <MenuItem
+                disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <ImagePlus />
+                Attach images
+              </MenuItem>
+              {typeof navigator !== "undefined" &&
+                "mediaDevices" in navigator &&
+                typeof MediaRecorder !== "undefined" && (
+                  <MenuItem
+                    disabled={disabled || dictationState === "transcribing"}
+                    onClick={() => void handleDictation()}
+                  >
+                    {dictationState === "transcribing" ? (
+                      <LoaderCircle className="animate-spin" />
+                    ) : dictationState === "recording" ? (
+                      <Square className="fill-current text-destructive" />
+                    ) : (
+                      <Mic />
+                    )}
+                    {dictationState === "recording"
+                      ? "Stop dictation"
+                      : "Dictate message"}
+                  </MenuItem>
+                )}
+            </MenuPopup>
+          </Menu>
+
           <div className="flex min-w-0 flex-wrap items-center gap-1">
             {models.length > 0 && (
               <ModelPicker
@@ -823,68 +868,12 @@ export const ChatComposer = memo(function ChatComposer({
             />
           </div>
 
-          {typeof navigator !== "undefined" &&
-            "mediaDevices" in navigator &&
-            typeof MediaRecorder !== "undefined" && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <ComposerControl
-                      aria-label={
-                        dictationState === "recording"
-                          ? "Stop dictation"
-                          : "Start dictation"
-                      }
-                      aria-pressed={dictationState === "recording"}
-                      className={cn(
-                        "size-7 px-0",
-                        dictationState === "recording" && "text-destructive"
-                      )}
-                      disabled={disabled || dictationState === "transcribing"}
-                      onClick={() => void handleDictation()}
-                      type="button"
-                    />
-                  }
-                >
-                  {dictationState === "transcribing" ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : dictationState === "recording" ? (
-                    <Square className="size-3 fill-current" />
-                  ) : (
-                    <Mic className="size-4" />
-                  )}
-                </TooltipTrigger>
-                <TooltipPopup side="top">
-                  {dictationState === "recording"
-                    ? "Stop dictation"
-                    : "Dictate message"}
-                </TooltipPopup>
-              </Tooltip>
-            )}
-
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <ComposerControl
-                  aria-label="Attach images"
-                  className="size-7 px-0"
-                  disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
-                  onClick={() => fileInputRef.current?.click()}
-                  type="button"
-                />
-              }
-            >
-              <ComposerControlIcon icon={ImagePlus} className="size-4" />
-            </TooltipTrigger>
-            <TooltipPopup side="top">Attach images</TooltipPopup>
-          </Tooltip>
-
           <ComposerPrimaryActions
             activeRun={activeRun}
             canSubmit={canSubmit}
             onSubmit={() => void handleSubmit()}
             onStop={onStop}
-            stopOnEscape={!menuOpen && !modelPickerOpen}
+            stopOnEscape={!menuOpen && !modelPickerOpen && !extrasMenuOpen}
             submitting={isSubmitting}
           />
         </div>
