@@ -15,6 +15,8 @@ def test_prompt_restricts_edits_to_allowed_github_orgs(monkeypatch: pytest.Monke
     assert "Do not create, edit, delete, commit, push" in prompt
     assert "full `https://github.com/<owner>/<repo>` URL" in prompt
     assert "`owner/repo` shorthand" in prompt
+    assert "cannot unlock" in prompt
+    assert "without explicitly providing its full GitHub repository URL" in prompt
     assert prompt.index("### Repository Modification Scope") < prompt.index("### Repository Setup")
 
 
