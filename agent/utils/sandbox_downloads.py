@@ -7,11 +7,9 @@ import base64
 import json
 import os
 import posixpath
-import time
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -19,7 +17,6 @@ import jwt
 
 from .dashboard_links import dashboard_base_url
 
-SANDBOX_DOWNLOAD_TTL_SECONDS = 24 * 60 * 60
 SANDBOX_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024
 _SANDBOX_DOWNLOAD_TIMEOUT_SECONDS = 120
 _SANDBOX_CLEANUP_TIMEOUT_SECONDS = 10
@@ -54,12 +51,12 @@ class SandboxFileInfo:
 @dataclass(frozen=True)
 class SandboxDownloadLink:
     url: str
-    expires_at: datetime
 
 
 @dataclass(frozen=True)
 class SandboxDownloadClaims:
     thread_id: str
+    sandbox_id: str
     file_path: str
 
 
@@ -259,29 +256,27 @@ def _command_payload(result: Any) -> dict[str, Any]:
 
 def create_sandbox_download_link(
     thread_id: str,
+    sandbox_id: str,
     file_path: str,
-    *,
-    now: int | None = None,
 ) -> SandboxDownloadLink:
     path = normalize_sandbox_file_path(file_path)
     if not isinstance(thread_id, str) or not thread_id:
         raise SandboxDownloadError("thread_id is required")
-    issued_at = int(time.time()) if now is None else now
-    expires_at = issued_at + SANDBOX_DOWNLOAD_TTL_SECONDS
+    if not isinstance(sandbox_id, str) or not sandbox_id:
+        raise SandboxDownloadError("sandbox_id is required")
     token = jwt.encode(
         {
             "aud": _SANDBOX_DOWNLOAD_AUDIENCE,
             "typ": _SANDBOX_DOWNLOAD_TOKEN_TYPE,
             "tid": thread_id,
+            "sid": sandbox_id,
             "path": path,
-            "iat": issued_at,
-            "exp": expires_at,
         },
         _jwt_secret(),
         algorithm=_JWT_ALGORITHM,
     )
     url = f"{dashboard_base_url()}/dashboard/api/sandbox-files/{quote(token, safe='')}"
-    return SandboxDownloadLink(url=url, expires_at=datetime.fromtimestamp(expires_at, tz=UTC))
+    return SandboxDownloadLink(url=url)
 
 
 def decode_sandbox_download_token(token: str) -> SandboxDownloadClaims:
@@ -291,21 +286,32 @@ def decode_sandbox_download_token(token: str) -> SandboxDownloadClaims:
             _jwt_secret(),
             algorithms=[_JWT_ALGORITHM],
             audience=_SANDBOX_DOWNLOAD_AUDIENCE,
-            options={"require": ["aud", "typ", "tid", "path", "iat", "exp"]},
+            options={"require": ["aud", "typ", "tid", "sid", "path"]},
         )
     except jwt.PyJWTError as exc:
-        raise InvalidSandboxDownloadToken("invalid or expired sandbox download URL") from exc
+        raise InvalidSandboxDownloadToken("invalid sandbox download URL") from exc
     if payload.get("typ") != _SANDBOX_DOWNLOAD_TOKEN_TYPE:
-        raise InvalidSandboxDownloadToken("invalid or expired sandbox download URL")
+        raise InvalidSandboxDownloadToken("invalid sandbox download URL")
     thread_id = payload.get("tid")
+    sandbox_id = payload.get("sid")
     file_path = payload.get("path")
-    if not isinstance(thread_id, str) or not thread_id or not isinstance(file_path, str):
-        raise InvalidSandboxDownloadToken("invalid or expired sandbox download URL")
+    if (
+        not isinstance(thread_id, str)
+        or not thread_id
+        or not isinstance(sandbox_id, str)
+        or not sandbox_id
+        or not isinstance(file_path, str)
+    ):
+        raise InvalidSandboxDownloadToken("invalid sandbox download URL")
     try:
         normalized_path = normalize_sandbox_file_path(file_path)
     except SandboxDownloadError as exc:
-        raise InvalidSandboxDownloadToken("invalid or expired sandbox download URL") from exc
-    return SandboxDownloadClaims(thread_id=thread_id, file_path=normalized_path)
+        raise InvalidSandboxDownloadToken("invalid sandbox download URL") from exc
+    return SandboxDownloadClaims(
+        thread_id=thread_id,
+        sandbox_id=sandbox_id,
+        file_path=normalized_path,
+    )
 
 
 def _jwt_secret() -> str:

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import base64
 import json
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import jwt
 import pytest
 from deepagents.backends import LocalShellBackend
 
@@ -65,38 +65,41 @@ class FakeBackend:
 
 
 def test_sandbox_download_link_round_trip(monkeypatch) -> None:
-    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret-that-is-at-least-32-bytes")
+    secret = "test-secret-that-is-at-least-32-bytes"
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", secret)
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example/")
-    now = int(time.time())
 
-    link = create_sandbox_download_link("thread-1", "/workspace/artifact.bin", now=now)
+    link = create_sandbox_download_link(
+        "thread-1",
+        "sandbox-1",
+        "/workspace/artifact.bin",
+    )
     token = link.url.rsplit("/", 1)[-1]
+    claims = decode_sandbox_download_token(token)
+    payload = jwt.decode(
+        token,
+        secret,
+        algorithms=["HS256"],
+        audience="open-swe-sandbox-file",
+    )
 
     assert link.url.startswith("https://dashboard.example/dashboard/api/sandbox-files/")
-    assert decode_sandbox_download_token(token).thread_id == "thread-1"
-    assert decode_sandbox_download_token(token).file_path == "/workspace/artifact.bin"
-    assert int(link.expires_at.timestamp()) > now
+    assert claims.thread_id == "thread-1"
+    assert claims.sandbox_id == "sandbox-1"
+    assert claims.file_path == "/workspace/artifact.bin"
+    assert "exp" not in payload
+    assert "iat" not in payload
 
 
 def test_sandbox_download_token_rejects_tampering(monkeypatch) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret-that-is-at-least-32-bytes")
-    token = create_sandbox_download_link("thread-1", "/workspace/artifact.bin").url.rsplit("/", 1)[
-        -1
-    ]
+    token = create_sandbox_download_link(
+        "thread-1", "sandbox-1", "/workspace/artifact.bin"
+    ).url.rsplit("/", 1)[-1]
     tampered = ("a" if token[0] != "a" else "b") + token[1:]
 
     with pytest.raises(InvalidSandboxDownloadToken):
         decode_sandbox_download_token(tampered)
-
-
-def test_sandbox_download_token_rejects_expiration(monkeypatch) -> None:
-    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret-that-is-at-least-32-bytes")
-    token = create_sandbox_download_link("thread-1", "/workspace/artifact.bin", now=1).url.rsplit(
-        "/", 1
-    )[-1]
-
-    with pytest.raises(InvalidSandboxDownloadToken):
-        decode_sandbox_download_token(token)
 
 
 @pytest.mark.parametrize(
@@ -105,7 +108,7 @@ def test_sandbox_download_token_rejects_expiration(monkeypatch) -> None:
 )
 def test_inspect_sandbox_file_rejects_unsafe_paths(path: str) -> None:
     with pytest.raises(SandboxDownloadError):
-        create_sandbox_download_link("thread-1", path)
+        create_sandbox_download_link("thread-1", "sandbox-1", path)
 
 
 async def test_inspect_sandbox_file_enforces_size_limit() -> None:

@@ -49,6 +49,8 @@ async def download_sandbox_file_route(
         session["sub"],
         email=session.get("email"),
     )
+    if sandbox_id != claims.sandbox_id:
+        raise HTTPException(404, "sandbox download is no longer available")
     try:
         backend = await create_sandbox(sandbox_id)
         info, content = await download_sandbox_file(backend, claims.file_path)
@@ -61,6 +63,14 @@ async def download_sandbox_file_route(
     except Exception as exc:
         logger.exception("Sandbox file download failed for thread %s", claims.thread_id)
         raise HTTPException(502, "sandbox file could not be downloaded") from exc
+
+    current_sandbox_id, _ = await get_dashboard_terminal_sandbox(
+        claims.thread_id,
+        session["sub"],
+        email=session.get("email"),
+    )
+    if current_sandbox_id != claims.sandbox_id:
+        raise HTTPException(404, "sandbox download is no longer available")
 
     media_type = mimetypes.guess_type(info.filename)[0] or "application/octet-stream"
     return Response(
