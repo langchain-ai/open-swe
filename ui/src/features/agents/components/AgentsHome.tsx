@@ -65,9 +65,6 @@ export function AgentsHome() {
     setSelection(next)
     persistModelSelection(next, session.data?.login ?? "")
   }
-  const activeModel = models.find(
-    (model) => model.id === activeSelection?.modelId
-  )
   const [planMode, setPlanMode] = useState(false)
   const [adminThread, setAdminThread] = useState(false)
   const environmentOptions = useEnvironmentOptions()
@@ -373,12 +370,6 @@ export function AgentsHome() {
                   : undefined
               }
               skills={skills.data}
-              contextUsage={{
-                contextWindow:
-                  runTarget === "cloud"
-                    ? (activeModel?.context_window ?? null)
-                    : null,
-              }}
             />
           </div>
         </div>
