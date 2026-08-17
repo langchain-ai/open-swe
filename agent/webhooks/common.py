@@ -128,6 +128,7 @@ from ..utils.slack_feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
+from ..utils.slack_stop import process_slack_stop_reaction
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
 from ..utils.thread_ops import queue_message_for_thread  # noqa: F401
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
@@ -248,6 +249,7 @@ __all__ = [
     "post_slack_trace_reply",
     "process_slack_reaction_added",
     "process_slack_reaction_removed",
+    "process_slack_stop_reaction",
     "queue_message_for_thread",
     "react_to_github_comment",
     "react_to_linear_comment",
