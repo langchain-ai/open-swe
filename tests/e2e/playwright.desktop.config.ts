@@ -4,6 +4,7 @@ import baseConfig from "./playwright.config";
 
 export default defineConfig({
   ...baseConfig,
+  globalSetup: "./global-setup.desktop.ts",
   testIgnore: [],
   testMatch: "desktop.spec.ts",
   outputDir: "test-results/desktop",
