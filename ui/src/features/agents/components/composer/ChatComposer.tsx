@@ -39,7 +39,6 @@ import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import { Kbd } from "@/components/ui/kbd"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { transcribeAudio } from "@/lib/api"
@@ -748,7 +747,7 @@ export const ChatComposer = memo(function ChatComposer({
           value={value}
         />
 
-        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-1 pt-2 text-xs text-muted-foreground">
+        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-xs text-muted-foreground">
           <Menu onOpenChange={setExtrasMenuOpen}>
             <MenuTrigger
               render={
@@ -788,6 +787,12 @@ export const ChatComposer = memo(function ChatComposer({
                       : "Dictate message"}
                   </MenuItem>
                 )}
+              {onAdminThreadChange && (
+                <MenuItem onClick={() => onAdminThreadChange(!adminThread)}>
+                  <ServerCogIcon />
+                  {adminThread ? "Disable admin mode" : "Enable admin mode"}
+                </MenuItem>
+              )}
             </MenuPopup>
           </Menu>
 
@@ -804,69 +809,36 @@ export const ChatComposer = memo(function ChatComposer({
               />
             )}
 
-            {onPlanModeChange && (
+            {planMode && onPlanModeChange && (
               <Tooltip>
                 <TooltipTrigger
                   render={
                     <ComposerControl
-                      aria-pressed={planMode}
-                      className={cn(
-                        planMode &&
-                          "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                      )}
-                      onClick={() => onPlanModeChange(!planMode)}
+                      aria-label="Exit plan mode"
+                      aria-pressed
+                      className="group bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                      onClick={() => onPlanModeChange(false)}
                       type="button"
                     />
                   }
                 >
-                  <ComposerControlIcon icon={MapIcon} />
+                  <ComposerControlIcon
+                    className="group-hover:hidden"
+                    icon={MapIcon}
+                  />
+                  <X className="hidden size-3.5 shrink-0 group-hover:block" />
                   <span>Plan</span>
                 </TooltipTrigger>
-                <TooltipPopup
-                  className="max-w-[18rem] whitespace-normal"
-                  side="top"
-                >
-                  Research read-only and propose a plan before editing{" "}
-                  <Kbd>⇧</Kbd>
-                  <Kbd>Tab</Kbd>
-                </TooltipPopup>
+                <TooltipPopup side="top">Exit plan mode</TooltipPopup>
               </Tooltip>
             )}
-
-            {onAdminThreadChange && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <ComposerControl
-                      aria-pressed={adminThread}
-                      className={cn(
-                        adminThread &&
-                          "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                      )}
-                      onClick={() => onAdminThreadChange(!adminThread)}
-                      type="button"
-                    />
-                  }
-                >
-                  <ComposerControlIcon icon={ServerCogIcon} />
-                  <span>Admin</span>
-                </TooltipTrigger>
-                <TooltipPopup
-                  className="max-w-[18rem] whitespace-normal"
-                  side="top"
-                >
-                  Provision this sandbox and capture it as an environment
-                  snapshot
-                </TooltipPopup>
-              </Tooltip>
-            )}
-
-            <ContextWindowMeter
-              contextWindow={contextUsage?.contextWindow}
-              hasMessages={contextUsage?.hasMessages}
-              usedTokens={contextUsage?.usedTokens}
-            />
           </div>
+
+          <ContextWindowMeter
+            contextWindow={contextUsage?.contextWindow}
+            hasMessages={contextUsage?.hasMessages}
+            usedTokens={contextUsage?.usedTokens}
+          />
 
           <ComposerPrimaryActions
             activeRun={activeRun}
