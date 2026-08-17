@@ -599,9 +599,10 @@ async def post_slack_thread_reply(
     agent_thread_id: str | None = None,
 ) -> bool:
     """Post a reply in a Slack thread."""
-    message_ts, _ = await post_slack_thread_reply_with_ts(
-        channel_id, thread_ts, text, blocks=blocks, agent_thread_id=agent_thread_id
-    )
+    kwargs: dict[str, Any] = {"blocks": blocks}
+    if agent_thread_id is not None:
+        kwargs["agent_thread_id"] = agent_thread_id
+    message_ts, _ = await post_slack_thread_reply_with_ts(channel_id, thread_ts, text, **kwargs)
     return message_ts is not None
 
 
