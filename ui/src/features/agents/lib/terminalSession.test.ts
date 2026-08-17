@@ -4,6 +4,8 @@ import {
   EMPTY_TERMINAL_SESSION,
   applyTerminalEvent,
   applyTerminalSnapshot,
+  cloudTerminalCloseError,
+  cloudTerminalProtocols,
 } from "./terminalSession"
 
 const snapshot = {
@@ -82,5 +84,29 @@ describe("terminal session replay", () => {
     expect(active.summary?.label).toBe("node")
     expect(restarted.buffer).toBe("new")
     expect(restarted.summary?.pid).toBe(2)
+  })
+})
+
+describe("cloud terminal connection", () => {
+  it("passes the short-lived ticket as a WebSocket subprotocol", () => {
+    expect(
+      cloudTerminalProtocols({
+        url: "wss://agent.example/terminal",
+        protocol: "open-swe-terminal",
+        ticket: "signed-ticket",
+      })
+    ).toEqual(["open-swe-terminal", "signed-ticket"])
+  })
+
+  it("keeps the actionable handshake error when close has no reason", () => {
+    expect(
+      cloudTerminalCloseError("", "Unable to connect to cloud terminal")
+    ).toBe("Unable to connect to cloud terminal")
+    expect(cloudTerminalCloseError("capacity reached", "prior error")).toBe(
+      "capacity reached"
+    )
+    expect(cloudTerminalCloseError("", null)).toBe(
+      "Cloud terminal disconnected"
+    )
   })
 })

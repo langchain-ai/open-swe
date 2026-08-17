@@ -10,7 +10,7 @@ import os
 import posixpath
 import shlex
 from typing import Any, Literal
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
 import httpx
 from fastapi import (
@@ -26,6 +26,7 @@ from fastapi import (
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
+from ..utils.thread_ops import langgraph_url
 from .admin import is_admin
 from .agent_instructions import (
     AgentInstructionsCreate,
@@ -75,6 +76,7 @@ from .oauth import (
     STATE_COOKIE_NAME,
     STATE_TTL_SECONDS,
     decode_state,
+    decode_terminal_ticket,
     desktop_callback_url,
     enforce_org_login_gate,
     exchange_code,
@@ -83,6 +85,7 @@ from .oauth import (
     issue_desktop_handoff,
     issue_session,
     issue_state,
+    issue_terminal_ticket,
     new_state_nonce,
     redeem_desktop_handoff,
     require_same_origin_for_mutations,
@@ -280,6 +283,7 @@ router = APIRouter(
 )
 _GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
+_CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
 # Module-level so a local harness can point the browser leg at a fake consent
 # page and still run the real login/callback code.
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
@@ -1950,6 +1954,50 @@ async def api_get_thread(
     )
 
 
+def _cloud_terminal_websocket_url(thread_id: str) -> str:
+    parsed = urlsplit(langgraph_url())
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise HTTPException(500, "invalid LangGraph URL for cloud terminal")
+    path = f"{parsed.path.rstrip('/')}/dashboard/api/threads/{quote(thread_id, safe='')}/terminal"
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    return urlunsplit((scheme, parsed.netloc, path, "", ""))
+
+
+def _cloud_terminal_session(websocket: WebSocket, thread_id: str) -> dict[str, Any]:
+    offered = [
+        value.strip()
+        for value in websocket.headers.get("sec-websocket-protocol", "").split(",")
+        if value.strip()
+    ]
+    if len(offered) != 2 or offered[0] != _CLOUD_TERMINAL_SUBPROTOCOL:
+        raise HTTPException(401, "invalid terminal ticket")
+    return decode_terminal_ticket(offered[1], thread_id=thread_id)
+
+
+@router.post("/threads/{thread_id}/terminal/connect")
+async def api_thread_terminal_connection(
+    thread_id: str,
+    response: Response,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, str]:
+    await get_dashboard_terminal_sandbox(thread_id, session["sub"], email=session.get("email"))
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "url": _cloud_terminal_websocket_url(thread_id),
+        "protocol": _CLOUD_TERMINAL_SUBPROTOCOL,
+        "ticket": issue_terminal_ticket(
+            login=session["sub"], email=session.get("email"), thread_id=thread_id
+        ),
+    }
+
+
 async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[str, Any]) -> None:
     if os.environ.get("SANDBOX_TYPE", "langsmith") != "langsmith":
         await websocket.close(code=1008, reason="Cloud terminal requires a LangSmith sandbox")
@@ -1962,7 +2010,7 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
         await websocket.close(code=1008, reason=str(exc.detail)[:123])
         return
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=_CLOUD_TERMINAL_SUBPROTOCOL)
     client = handle = None
     try:
         await asyncio.wait_for(_CLOUD_TERMINAL_SLOTS.acquire(), timeout=0.01)
@@ -2045,11 +2093,12 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
 
 
 @router.websocket("/threads/{thread_id}/terminal")
-async def api_thread_terminal(
-    websocket: WebSocket,
-    thread_id: str,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> None:
+async def api_thread_terminal(websocket: WebSocket, thread_id: str) -> None:
+    try:
+        session = _cloud_terminal_session(websocket, thread_id)
+    except HTTPException as exc:
+        await websocket.close(code=1008, reason=str(exc.detail)[:123])
+        return
     await _cloud_terminal(websocket, thread_id, session)
 
 
