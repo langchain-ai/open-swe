@@ -184,9 +184,34 @@ export function WorkEntryRow({
               >
                 {entry.heading}
               </span>
-              {entry.preview && (
-                <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                  {entry.preview}
+              {entry.preview &&
+                (entry.previewTooltip ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span className="min-w-0 flex-1 truncate text-muted-foreground" />
+                      }
+                    >
+                      {entry.preview}
+                    </TooltipTrigger>
+                    <TooltipPopup className="max-w-md break-all">
+                      {entry.previewTooltip}
+                    </TooltipPopup>
+                  </Tooltip>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {entry.preview}
+                  </span>
+                ))}
+              {entry.diffStats && (
+                <span className="flex shrink-0 items-center gap-1 font-mono text-[11px] text-muted-foreground tabular-nums">
+                  <span className="transition-colors group-focus-within/entry:text-success-foreground group-hover/entry:text-success-foreground">
+                    +{entry.diffStats.additions}
+                  </span>
+                  <span aria-hidden>/</span>
+                  <span className="transition-colors group-focus-within/entry:text-destructive group-hover/entry:text-destructive">
+                    -{entry.diffStats.deletions}
+                  </span>
                 </span>
               )}
             </p>

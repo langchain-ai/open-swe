@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { CircleAlert, FolderOpen, X } from "lucide-react"
+import {
+  CircleAlert,
+  FolderOpen,
+  GitPullRequestIcon,
+  RefreshCwIcon,
+  X,
+} from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
 import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
@@ -62,7 +68,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     readStoredPanelCollapsed(sessionId)
   )
   const panel = usePanelTabs(sessionId)
-  const terminals = useTerminalGroups(sessionId, session?.cwd ?? "")
+  const terminals = useTerminalGroups(
+    { kind: "local", sessionId },
+    session?.cwd ?? ""
+  )
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
   const handlePanelCollapsedChange = useCallback(
@@ -132,6 +141,32 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const files = useMemo(
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
+  )
+  const repository = diff.data?.repository
+  const pr = repository?.pr
+  const diffActions = (
+    <>
+      <button
+        type="button"
+        aria-label="Refresh changes"
+        title="Refresh changes"
+        onClick={() => void diff.refetch()}
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <RefreshCwIcon className="size-3.5" />
+      </button>
+      {pr && (
+        <a
+          href={pr.url}
+          target="_blank"
+          rel="noreferrer"
+          className="flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+        >
+          <GitPullRequestIcon className="size-3.5" />
+          View PR
+        </a>
+      )}
+    </>
   )
 
   if (!session) {
@@ -288,6 +323,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   diff.isPending
                 )}
                 truncated={diff.data?.truncated}
+                leading={
+                  <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                    Branch{repository?.branch ? ` · ${repository.branch}` : ""}
+                  </span>
+                }
+                actions={diffActions}
               />
             )}
             {(panel.activeTab?.kind === "browser" ||
@@ -304,7 +345,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   )}
                 >
                   <TerminalPanel
-                    localSessionId={session.id}
+                    target={{ kind: "local", sessionId: session.id }}
                     cwd={session.cwd}
                     groupId={tab.id}
                     terminals={terminals}

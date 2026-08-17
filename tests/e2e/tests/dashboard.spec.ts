@@ -38,8 +38,9 @@ async function setRepoPrivate(page: Page, value: boolean) {
   expect(res.ok()).toBeTruthy();
 }
 
-// E2E_BUSY_HOLD:8 makes the fake LLM hold the run open for 8s, so the thread is
-// still running by the time the browser lands on it.
+// E2E_BUSY_HOLD:8 makes the fake LLM hold the run open for 8s. The window has to
+// outlast the click through to the thread plus one reload, which takes over 5s
+// on a CI runner; once the run finishes the retry loop below can never pass.
 async function openRunningThreadViaSlackLink(page: Page) {
   await page.goto("/mock/slack");
   await page.locator("#reset").click();
@@ -204,6 +205,38 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(
       page.getByText("This thread has no messages yet."),
     ).toHaveCount(0);
+  });
+
+  test("expands an Edit call into a highlighted inline diff", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    await expectTranscriptVisible(page);
+
+    const worked = page.getByRole("button", { name: /^Worked(?: for .+)?$/ });
+    await expect(worked).toBeVisible();
+    await worked.click();
+
+    const edit = page.getByRole("button", { name: "Edited greet.py" });
+    await expect(edit).toHaveAttribute("aria-expanded", "false");
+    await edit.click();
+    await expect(edit).toHaveAttribute("aria-expanded", "true");
+
+    const inlineDiff = edit.locator("[data-diff]");
+    await expect(inlineDiff).toBeVisible();
+    await expect(
+      inlineDiff.locator('[data-line][data-line-type="change-deletion"]'),
+    ).toContainText('return "Hello!"');
+    await expect(
+      inlineDiff.locator('[data-line][data-line-type="change-addition"]'),
+    ).toContainText('return f"Hello, {name}!"');
+    await expect(inlineDiff).toHaveAttribute("data-disable-line-numbers");
+    await expect(inlineDiff).not.toContainText("normalize");
+    await expect(inlineDiff).not.toContainText("farewell");
+    await expect
+      .poll(() => inlineDiff.locator("[data-line] span").count())
+      .toBeGreaterThan(2);
   });
 
   test("streams after thread navigation and foreground recovery", async ({

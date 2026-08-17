@@ -64,7 +64,7 @@ from .dashboard.options import (
 )
 from .dashboard.repo_snapshots import resolve_repo_snapshot_id
 from .dashboard.sandbox_settings import get_admin_base_snapshot_id
-from .dashboard.skills import SKILLS_NAMESPACE
+from .dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model_pair,
@@ -94,6 +94,7 @@ from .middleware import (
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
+    WorkingRepoMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
     refresh_github_proxy_before_model,
@@ -132,6 +133,7 @@ from .tools import (
     list_environments,
     notify_automation_channel,
     open_pull_request,
+    read_user_settings,
     recreate_sandbox,
     report_platform_issue,
     request_pr_review,
@@ -185,6 +187,7 @@ client = get_client()
 
 DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
+ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
     "edit_file",
@@ -607,10 +610,13 @@ def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     )
 
 
-def _is_slack_tool(tool: Any) -> bool:
-    """Return whether a tool reaches Slack."""
+def _is_subagent_excluded_tool(tool: Any) -> bool:
+    """Return whether a tool depends on parent-only source context."""
     name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
-    return name.startswith("slack_") or name == "notify_automation_channel"
+    return name.startswith("slack_") or name in {
+        "notify_automation_channel",
+        "read_user_settings",
+    }
 
 
 def _general_purpose_subagent(
@@ -630,7 +636,7 @@ def _general_purpose_subagent(
         # tool-call cadence) that delegated work also needs.
         "system_prompt": OPEN_SWE_SHARED_BASE + "\n\n" + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
-        "tools": [tool for tool in tools if not _is_slack_tool(tool)],
+        "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
         "middleware": [
             *([dynamic_tools] if dynamic_tools else []),
             *_subagent_model_middleware(),
@@ -1269,6 +1275,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         linear_update_issue,
         notify_automation_channel,
         open_pull_request,
+        read_user_settings,
         request_pr_review,
         recreate_sandbox,
         report_platform_issue,
@@ -1297,19 +1304,18 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
-    skill_sources: list[str] | None = None
-    if profile_login:
-        agent_backend = CompositeBackend(
-            default=backend,
-            routes={
-                USER_SKILLS_ROUTE: ReadOnlyBackend(
-                    StoreBackend(
-                        namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login)
-                    )
-                )
-            },
+    skill_routes: dict[str, BackendProtocol] = {
+        ORGANIZATION_SKILLS_ROUTE: ReadOnlyBackend(
+            StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
         )
-        skill_sources = [USER_SKILLS_ROUTE]
+    }
+    skill_sources = [ORGANIZATION_SKILLS_ROUTE]
+    if profile_login:
+        skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
+            StoreBackend(namespace=lambda _runtime: (SKILLS_NAMESPACE, profile_login))
+        )
+        skill_sources.insert(0, USER_SKILLS_ROUTE)
+    agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     subagent_model = _make_model_or_defer(
         subagent_model_id,
@@ -1360,6 +1366,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
+                WorkingRepoMiddleware(thread_id=thread_id, backend=backend, thread_client=client),
                 SubdirAgentsReadMiddleware(),
                 ToolRetryMiddleware(
                     max_retries=2,

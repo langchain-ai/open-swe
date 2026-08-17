@@ -7,6 +7,7 @@ const MAX_FILES = 200
 const MAX_FILE_BYTES = 400_000
 const MAX_CONTENT_BYTES = 16 * 1024 * 1024
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
+const MAX_GH_OUTPUT_BYTES = 1024 * 1024
 const CHECKPOINT_NAMESPACE = "refs/open-swe/local"
 
 // The project is whatever directory the user picked, so never let its git config
@@ -36,6 +37,70 @@ async function currentBranch(cwd) {
   } catch {
     return null
   }
+}
+
+function parsePullRequest(raw) {
+  try {
+    const value = JSON.parse(raw)
+    const url = new URL(value.url)
+    if (
+      !Number.isInteger(value.number) ||
+      value.number < 1 ||
+      typeof value.title !== "string" ||
+      !["OPEN", "CLOSED", "MERGED"].includes(value.state) ||
+      typeof value.isDraft !== "boolean" ||
+      typeof value.headRefName !== "string" ||
+      typeof value.baseRefName !== "string" ||
+      !["http:", "https:"].includes(url.protocol)
+    ) {
+      return null
+    }
+    return {
+      number: value.number,
+      title: value.title,
+      state:
+        value.state === "OPEN" && value.isDraft
+          ? "draft"
+          : value.state.toLowerCase(),
+      headRef: value.headRefName,
+      baseRef: value.baseRefName,
+      url: url.href,
+    }
+  } catch {
+    return null
+  }
+}
+
+async function pullRequest(repo, env) {
+  try {
+    const output = await new Promise((resolve, reject) => {
+      execFile(
+        "gh",
+        [
+          "pr",
+          "view",
+          "--json",
+          "number,title,state,isDraft,headRefName,baseRefName,url",
+        ],
+        {
+          cwd: repo,
+          env: { ...(env || process.env), GH_PROMPT_DISABLED: "1" },
+          encoding: "utf8",
+          maxBuffer: MAX_GH_OUTPUT_BYTES,
+          timeout: 5_000,
+        },
+        (error, stdout) => (error ? reject(error) : resolve(stdout))
+      )
+    })
+    return parsePullRequest(output)
+  } catch {
+    return null
+  }
+}
+
+async function repositoryMetadata(repo, env) {
+  const branch = await currentBranch(repo)
+  return { branch, pr: branch ? await pullRequest(repo, env) : null }
 }
 
 function gitStdin(cwd, args, input) {
@@ -261,7 +326,9 @@ module.exports = {
   checkpointRef,
   currentBranch,
   deleteRefs,
+  parsePullRequest,
   readDiff,
   repoRoot,
+  repositoryMetadata,
   staleRefs,
 }

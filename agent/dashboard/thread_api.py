@@ -8,6 +8,7 @@ import binascii
 import json
 import logging
 import os
+import posixpath
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -37,6 +38,7 @@ from ..utils.thread_ops import (
     langgraph_url,
     queue_message_for_thread,
 )
+from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
 from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
 from .environments import get_environment, slugify
@@ -80,6 +82,7 @@ _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", 
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
 _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
+_SANDBOX_CREATING_SENTINEL = "__creating__"
 
 
 async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
@@ -406,6 +409,9 @@ async def _thread_summary(
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
+    working_repo = metadata.get("working_repo_full_name")
+    if not isinstance(working_repo, str) or working_repo.count("/") != 1:
+        working_repo = None
     created_at = metadata.get("created_at_ms")
     updated_at = metadata.get("updated_at_ms")
     title = metadata.get("title") if isinstance(metadata.get("title"), str) else "Untitled agent"
@@ -427,10 +433,11 @@ async def _thread_summary(
     trace_url = await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
 
     raw_sandbox_id = metadata.get("sandbox_id")
-    # "__creating__" is the in-flight sentinel written before the real id lands.
     sandbox_id = (
         raw_sandbox_id
-        if isinstance(raw_sandbox_id, str) and raw_sandbox_id and raw_sandbox_id != "__creating__"
+        if isinstance(raw_sandbox_id, str)
+        and raw_sandbox_id
+        and raw_sandbox_id != _SANDBOX_CREATING_SENTINEL
         else None
     )
 
@@ -439,6 +446,7 @@ async def _thread_summary(
         "title": title,
         "repo": name,
         "repoFullName": full_name,
+        "workingRepoFullName": working_repo,
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
@@ -1017,6 +1025,29 @@ async def _mark_thread_viewed(
     return {**metadata, **metadata_update}
 
 
+async def get_dashboard_terminal_sandbox(
+    thread_id: str, login: str, *, email: str | None = None
+) -> tuple[str, str | None]:
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+    metadata = thread_metadata(thread)
+    _assert_thread_owner(metadata, login, email)
+    sandbox_id = metadata.get("sandbox_id")
+    if (
+        not isinstance(sandbox_id, str)
+        or not sandbox_id
+        or sandbox_id == _SANDBOX_CREATING_SENTINEL
+    ):
+        raise HTTPException(404, "thread sandbox is not ready")
+    repo_name = metadata.get("repo_name")
+    if not isinstance(repo_name, str) or posixpath.basename(repo_name) != repo_name:
+        repo_name = None
+    return sandbox_id, repo_name
+
+
 async def get_dashboard_thread(
     thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
 ) -> dict[str, Any]:
@@ -1120,6 +1151,7 @@ async def _create_dashboard_thread_record(
     metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "github_login": login,
+        PARTICIPANT_LOGINS_KEY: [login],
         "title": initial_title,
         "base_branch": profile.get("base_branch") or "main",
         "branch_prefix": profile.get("branch_prefix"),
@@ -1400,6 +1432,9 @@ async def _enrich_run_start_command(
         metadata_update: dict[str, Any] = {
             "source": _DASHBOARD_SOURCE,
             "plan_mode": plan_mode_requested,
+            PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+                metadata.get(PARTICIPANT_LOGINS_KEY), login
+            ),
         }
         if command_images and run_model and run_effort:
             overrides["agent_model_id"] = run_model
@@ -1501,6 +1536,9 @@ async def send_dashboard_message(
         "source": _DASHBOARD_SOURCE,
         "updated_at_ms": now_ms,
         "plan_mode": body.plan_mode,
+        PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+            metadata.get(PARTICIPANT_LOGINS_KEY), login
+        ),
     }
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model

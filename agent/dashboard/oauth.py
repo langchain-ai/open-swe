@@ -17,6 +17,7 @@ from urllib.parse import quote, urlparse
 import httpx
 import jwt
 from fastapi import HTTPException, Request
+from starlette.requests import HTTPConnection
 
 from agent.utils.github_org_membership import is_user_active_org_member
 
@@ -303,14 +304,14 @@ def build_settings_url() -> str | None:
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
 
 
-def require_session(request: Request) -> dict[str, Any]:
+def require_session(request: HTTPConnection) -> dict[str, Any]:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(401, "not authenticated")
     return decode_session(token)
 
 
-def request_origin(request: Request) -> str | None:
+def request_origin(request: HTTPConnection) -> str | None:
     """Return the request's origin (scheme + host + port), if present and valid."""
     raw_origin = request.headers.get("origin")
     if raw_origin is not None:
@@ -325,7 +326,7 @@ def request_origin(request: Request) -> str | None:
     return None
 
 
-def require_same_origin(request: Request) -> None:
+def require_same_origin(request: HTTPConnection) -> None:
     """Reject cross-site cookie-authenticated mutations (CSRF defense).
 
     No-op when no dashboard origins are configured (local setups without
@@ -342,19 +343,24 @@ def require_same_origin(request: Request) -> None:
     if not origin or origin not in allowed:
         logger.warning(
             "Rejected %s %s — origin %r not in allowlist",
-            request.method,
+            request.scope.get("method", "WEBSOCKET"),
             request.url.path,
             origin,
         )
         raise HTTPException(403, "CSRF check failed")
 
 
-def require_same_origin_for_mutations(request: Request) -> None:
-    if request.method in {"GET", "HEAD", "OPTIONS"}:
+def require_same_origin_for_mutations(request: HTTPConnection) -> None:
+    if request.scope["type"] == "websocket":
+        require_same_origin(request)
+        return
+    if request.scope.get("method") in {"GET", "HEAD", "OPTIONS"}:
         return
     # The origin allowlist defends the ambient session cookie. A request whose
     # only credential is an explicit bearer header can't be forged by a browser,
     # so it has nothing to defend.
+    if not isinstance(request, Request):
+        raise HTTPException(400, "invalid request")
     if bearer_github_token(request) and not request.cookies.get(COOKIE_NAME):
         return
     require_same_origin(request)

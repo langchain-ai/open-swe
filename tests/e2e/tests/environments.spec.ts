@@ -1,9 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// Environments end-to-end: the admin dashboard CRUD, the admin gate, and an
-// admin thread that provisions its own sandbox and captures it. The agent, the
-// tools, the store writes and the prompt injection are all real — only the LLM
-// and the snapshot service are faked (see patches.py).
+// Environments end-to-end: dashboard management, the admin gate, and an admin
+// thread that creates, provisions, and captures its own sandbox. The agent, the
+// tools, store writes, and prompt injection are real; only the LLM and snapshot
+// service are faked (see patches.py).
 const ADMIN = { login: "alice", email: "alice@example.com" };
 const MEMBER = { login: "bob", email: "bob@example.com" };
 
@@ -131,21 +131,23 @@ async function typeIntoComposer(page: Page, text: string) {
 }
 
 test.describe("Environments", () => {
-  test("an admin creates, edits and deletes an environment in the dashboard", async ({
+  test("an admin edits and deletes an environment in the dashboard", async ({
     page,
   }) => {
     await loginAs(page, ADMIN);
     await deleteEnvironment(page, DRAFT_SLUG);
+    await createEnvironment(page, DRAFT_NAME, "");
 
     await page.goto("/agents/environments");
     await expect(
       page.getByRole("heading", { name: "Environments" }),
     ).toBeVisible();
+    await expect(page.getByLabel("Add environment")).toHaveCount(0);
+    await expect(
+      page.getByText(/Create environments from an admin thread/),
+    ).toBeVisible();
 
-    await page.getByLabel("Add environment").fill(DRAFT_NAME);
-    await page.getByRole("button", { name: "Add" }).click();
-
-    // Selected on create: any name other than `default` is a draft no run boots from.
+    await page.getByRole("button", { name: new RegExp(DRAFT_NAME) }).click();
     await expect(
       page.getByText("draft — no run boots from this"),
     ).toBeVisible();
@@ -154,7 +156,6 @@ test.describe("Environments", () => {
     await page.getByLabel("Repositories").fill("fakeorg/demo, fakeorg/demo");
     await page.getByRole("button", { name: "Save" }).click();
 
-    // Deduped and normalized server-side, which is why the spec asserts on the record.
     await expect
       .poll(async () => (await findEnvironment(page, DRAFT_SLUG))?.repos)
       .toEqual(["fakeorg/demo"]);

@@ -205,3 +205,14 @@ async def test_post_slack_thread_reply_preserves_bool_return_on_error(
         ok = await slack_utils.post_slack_thread_reply("C1", "1.0", "hello")
 
     assert ok is False
+
+
+async def test_post_slack_thread_reply_forwards_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    post_with_ts = AsyncMock(return_value=("1.1", None))
+    monkeypatch.setattr(slack_utils, "post_slack_thread_reply_with_ts", post_with_ts)
+    blocks = [{"type": "context", "elements": [{"type": "mrkdwn", "text": "_Status_"}]}]
+
+    ok = await slack_utils.post_slack_thread_reply("C1", "1.0", "Status", blocks=blocks)
+
+    assert ok is True
+    post_with_ts.assert_awaited_once_with("C1", "1.0", "Status", blocks=blocks)

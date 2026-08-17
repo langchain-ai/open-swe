@@ -368,7 +368,7 @@ export function AgentPanelShell({
                     <Icon className="size-3.5 shrink-0" />
                     <span className="max-w-28 truncate">{title}</span>
                   </button>
-                  {active && onCloseTab && (
+                  {active && onCloseTab && tab.closable !== false && (
                     <button
                       type="button"
                       aria-label={`Close ${title}`}

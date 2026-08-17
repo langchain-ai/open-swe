@@ -39,13 +39,18 @@ def test_format_comments_empty() -> None:
     assert _format_comments([]) == ""
 
 
-def test_plan_approved_slack_text_mentions_comments_actor_and_start() -> None:
-    from agent.dashboard.plan_api import _plan_approved_slack_text
+def test_plan_approved_slack_text_mentions_comments_and_actor() -> None:
+    from agent.dashboard.plan_api import _plan_approved_slack_blocks, _plan_approved_slack_text
 
-    assert (
-        _plan_approved_slack_text(2, "Alice")
-        == "Plan approved with 2 comments by Alice\nbeginning implementation"
-    )
+    text = _plan_approved_slack_text(2, "Alice")
+
+    assert text == "Plan approved with 2 comments by Alice"
+    assert _plan_approved_slack_blocks(text) == [
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": "_Plan approved with 2 comments by Alice_"}],
+        }
+    ]
 
 
 def test_plan_comment_helpers_exported() -> None:
@@ -744,8 +749,14 @@ async def test_approve_plan_posts_slack_approval_notice(
     async def fake_set_status(thread_id: str, status: str, *, plan_mode: Any = None) -> None:
         return None
 
-    async def fake_post(channel_id: str, thread_ts: str, text: str) -> bool:
-        posted.update(channel_id=channel_id, thread_ts=thread_ts, text=text)
+    async def fake_post(
+        channel_id: str,
+        thread_ts: str,
+        text: str,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
+    ) -> bool:
+        posted.update(channel_id=channel_id, thread_ts=thread_ts, text=text, blocks=blocks)
         return True
 
     async def fake_dispatch(
@@ -770,7 +781,18 @@ async def test_approve_plan_posts_slack_approval_notice(
     assert posted == {
         "channel_id": "C1",
         "thread_ts": "123.45",
-        "text": "Plan approved with 2 comments by Alice Example\nbeginning implementation",
+        "text": "Plan approved with 2 comments by Alice Example",
+        "blocks": [
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": "_Plan approved with 2 comments by Alice Example_",
+                    }
+                ],
+            }
+        ],
     }
     assert dispatched["plan_mode"] is False
 
