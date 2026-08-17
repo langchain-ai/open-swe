@@ -9,7 +9,7 @@ const {
   dcodeTarget,
   promptBlocks,
   sessionTitle,
-} = require("../src/acp-client.cjs")
+} = require("../build/acp-client.cjs")
 
 test("uses the standard installed Python dcode command", (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-dcode-"))

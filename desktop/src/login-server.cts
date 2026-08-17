@@ -45,8 +45,8 @@ async function beginLogin() {
   const verifier = randomBytes(32).toString("base64url")
   const challenge = createHash("sha256").update(verifier).digest("base64url")
 
-  let resolveCode = () => {}
-  const code = new Promise((resolve) => {
+  let resolveCode: (value: string | null) => void = () => {}
+  const code = new Promise<string | null>((resolve) => {
     resolveCode = resolve
   })
 
@@ -71,7 +71,7 @@ async function beginLogin() {
     resolveCode(value)
   }
 
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     server.once("error", reject)
     server.listen(0, "127.0.0.1", () => {
       server.removeListener("error", reject)

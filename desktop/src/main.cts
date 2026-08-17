@@ -210,7 +210,7 @@ function localSessionContext(localSessionId) {
   return acpSessions.get(localSessionId) || acpDrafts.get(localSessionId);
 }
 
-async function deleteAcpDrafts(ownerId, sessionId) {
+async function deleteAcpDrafts(ownerId, sessionId = null) {
   for (const draft of acpDrafts.values()) {
     if (draft.ownerId !== ownerId || (sessionId && draft.id !== sessionId)) {
       continue;
@@ -749,7 +749,7 @@ async function storeResponseCookies(targetUrl, response) {
     if (separator <= 0) continue;
     const name = pair.slice(0, separator).trim();
     const cookieValue = pair.slice(separator + 1).trim();
-    const details = {
+    const details: Electron.CookiesSetDetails = {
       url: targetUrl,
       name,
       value: cookieValue,
@@ -1107,7 +1107,7 @@ function createSetupWindow() {
   });
 
   setupWindow = window;
-  void window.loadFile(path.join(__dirname, "setup.html"));
+  void window.loadFile(path.join(__dirname, "../src/setup.html"));
   return window;
 }
 
