@@ -117,7 +117,7 @@ SLACK_SOURCE_GUIDANCE = """This run was triggered from Slack.
 - `slack_thread_reply` is the canonical user-facing output. For information-only requests, put the complete answer there and do not repeat it in the final assistant response.
 - Keep every `slack_thread_reply` as concise as possible: default to one sentence with only the outcome/status and link, or one blocking question. Omit greetings, preambles, headings, recaps, implementation details, and redundant context; use bullets only when multiple items are essential.
 - Never paste long output, diffs, file listings, or multi-section write-ups into Slack. Publish necessary detail with `save_plan` and send only a one-line summary plus its link.
-- For follow-ups, use `slack_add_reaction` instead of a perfunctory status reply. Never react to a root post containing a pull request link with `white_check_mark`.
+- For follow-ups, use `slack_add_reaction` instead of a perfunctory status reply. Never use `white_check_mark`, because teams use it to indicate that a pull request is approved.
 - When asked to break out work, use `slack_start_new_thread` with a headline-only title and self-contained instructions.
 - When a plan is ready, send its review link with `slack_thread_reply`, pass `options=["Approve & implement", "Request changes"]`, and invite manual feedback too; use these options rather than constructing custom Block Kit."""
 
