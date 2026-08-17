@@ -2,7 +2,7 @@ const assert = require("node:assert/strict")
 const { createHash } = require("node:crypto")
 const test = require("node:test")
 
-const { beginLogin } = require("../src/login-server.cjs")
+const { beginLogin } = require("../build/login-server.cjs")
 
 test("receives the handoff code on the loopback listener", async () => {
   const flow = await beginLogin()

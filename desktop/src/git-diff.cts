@@ -14,8 +14,13 @@ const CHECKPOINT_NAMESPACE = "refs/open-swe/local"
 // start helper processes of its own on our behalf.
 const HARDENED = ["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"]
 
-function git(cwd, args, env, timeout) {
-  return new Promise((resolve, reject) => {
+function git(
+  cwd: string,
+  args: string[],
+  env: NodeJS.ProcessEnv | null = null,
+  timeout?: number
+) {
+  return new Promise<Buffer>((resolve, reject) => {
     execFile(
       "git",
       [...HARDENED, ...args],
@@ -73,7 +78,7 @@ function parsePullRequest(raw) {
 
 async function pullRequest(repo, env) {
   try {
-    const output = await new Promise((resolve, reject) => {
+    const output = await new Promise<string>((resolve, reject) => {
       execFile(
         "gh",
         [
@@ -104,7 +109,7 @@ async function repositoryMetadata(repo, env) {
 }
 
 function gitStdin(cwd, args, input) {
-  return new Promise((resolve, reject) => {
+  return new Promise<Buffer>((resolve, reject) => {
     const child = spawn("git", [...HARDENED, ...args], {
       cwd,
       stdio: ["pipe", "pipe", "ignore"],
@@ -117,7 +122,7 @@ function gitStdin(cwd, args, input) {
   })
 }
 
-function text(buffer) {
+function text(buffer: Buffer) {
   return buffer.toString("utf8").trim()
 }
 
@@ -280,7 +285,7 @@ async function readBlobs(repo, base, head, paths) {
   return new Map(paths.map((file, i) => [file, { base: blobs[i * 2], head: blobs[i * 2 + 1] }]))
 }
 
-function decode(blob) {
+function decode(blob: Buffer | false | null) {
   if (blob === false) return [null, true]
   if (!Buffer.isBuffer(blob)) return [null, false]
   const content = blob.toString("utf8")
