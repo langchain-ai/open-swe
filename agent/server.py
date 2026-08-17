@@ -1351,13 +1351,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if admin_environments:
         logger.info("Admin thread %s: adding environment management tools", thread_id)
 
-    observability_authorized = await _observability_authorized(config, settings_login)
+    observability_authorized = await _observability_authorized(config, profile_login)
     if observability_authorized:
-        observability_tools = await _load_observability_tools(True, settings_login)
-    elif await _allowed_org_member(config, settings_login):
-        observability_tools = await load_langsmith_tools(settings_login)
+        observability_tools = await _load_observability_tools(True, profile_login)
+    elif await _allowed_org_member(config, profile_login):
+        observability_tools = await load_langsmith_tools(profile_login)
     else:
-        observability_tools = await load_langsmith_tools(settings_login, allow_team=False)
+        observability_tools = await load_langsmith_tools(profile_login, allow_team=False)
     corridor_tools = await _load_corridor_mcp_tools()
     browser_tools = load_browser_tools()
 
