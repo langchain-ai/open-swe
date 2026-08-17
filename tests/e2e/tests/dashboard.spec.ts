@@ -207,6 +207,26 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toHaveCount(0);
   });
 
+  test("keeps sent Slack messages visible while work is folded", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    await expectTranscriptVisible(page);
+
+    const worked = page.getByRole("button", { name: /^Worked(?: for .+)?$/ });
+    const acknowledgement = page.getByText("On it!", { exact: true });
+    const edit = page.getByRole("button", { name: "Edited greet.py" });
+
+    await expect(worked).toBeVisible();
+    await expect(acknowledgement).toBeVisible();
+    await expect(edit).toHaveCount(0);
+
+    await worked.click();
+    await expect(edit).toBeVisible();
+    await expect(acknowledgement).toBeVisible();
+  });
+
   test("expands an Edit call into a highlighted inline diff", async ({
     page,
   }) => {
