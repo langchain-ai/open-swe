@@ -9,6 +9,7 @@ the preceding tool result, exactly as a real model would.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -25,7 +26,7 @@ from e2e_env import (
     REPO,
 )
 from langchain_core.callbacks import CallbackManagerForLLMRun
-from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models import BaseChatModel, ModelProfile
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -53,6 +54,34 @@ git add -A
 git commit -m "{PR_TITLE}"
 git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
+""".strip()
+
+_DESKTOP_PR_PAYLOAD = json.dumps(
+    {
+        "head": FEATURE_BRANCH,
+        "base": BASE_BRANCH,
+        "title": PR_TITLE,
+        "body": "Adds a `greet()` helper as requested.",
+        "draft": True,
+    }
+)
+_DESKTOP_IMPLEMENT_SCRIPT = f"""
+set -e
+git config user.email "dev@example.com"
+git config user.name "Dev User"
+git checkout -b {FEATURE_BRANCH}
+cat > {FEATURE_FILE} <<'EOF'
+def greet(name):
+    return f"Hello, {{name}}!"
+EOF
+git add {FEATURE_FILE}
+git commit -m "{PR_TITLE}"
+git push origin {FEATURE_BRANCH}
+curl --fail --silent --show-error \
+  --request POST \
+  --header 'content-type: application/json' \
+  --data '{_DESKTOP_PR_PAYLOAD}' \
+  "$E2E_FAKE_GITHUB_API/repos/{OWNER}/{REPO}/pulls"
 """.strip()
 
 # The system prompt of the most recent model call, so specs can assert what the
@@ -181,6 +210,15 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+def _desktop_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    return AIMessage(
+        content=(
+            f"Done! I added `{FEATURE_FILE}` and opened [{PR_TITLE}]({url}) on the fake GitHub."
+        )
+    )
+
+
 PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.md"
 
 PLAN_MARKDOWN = """## Plan: Add greet() helper
@@ -299,6 +337,15 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
 
 
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    "desktop": (
+        _tool_step(
+            "Implementing the change in the selected local project.",
+            "execute",
+            {"command": _DESKTOP_IMPLEMENT_SCRIPT},
+            "call-desktop-impl",
+        ),
+        _dynamic_step(_desktop_reply_step),
+    ),
     "implement": (
         _tool_step(
             "Acknowledging the Slack request before starting work.",
@@ -413,6 +460,10 @@ def _is_revision(text: str) -> bool:
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
+        "desktop",
+        lambda ctx: ctx.human_count <= 1 and "E2E_DESKTOP_LOCAL" in ctx.first_text,
+    ),
+    ScriptRule(
         "environment", lambda ctx: ctx.human_count <= 1 and _is_environment_request(ctx.first_text)
     ),
     ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
@@ -440,6 +491,11 @@ def build_script() -> list[StepSpec]:
 class FakeScriptedChatModel(BaseChatModel):
     """Returns the next scripted AIMessage based on how far the loop has run."""
 
+    model: str = "fake"
+    profile: ModelProfile | None = {
+        "tool_calling": True,
+        "max_input_tokens": 8_000,
+    }
     script: list[Any] = []
 
     @property

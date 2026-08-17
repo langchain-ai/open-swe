@@ -153,7 +153,6 @@ function sessionRecord(localSession) {
     title: localSession.title,
     createdAt: localSession.createdAt,
     updatedAt: localSession.updatedAt,
-    dcodeCommand: localSession.target.command,
     ...(localSession.modelId ? { modelId: localSession.modelId } : {}),
     ...(localSession.effort ? { effort: localSession.effort } : {}),
     ...(acpCheckpoints.get(localSession.id)
@@ -344,12 +343,8 @@ async function deleteAcpSession(sessionId) {
     }
 
     if (!deletedThroughAcp) {
-      const env = localSession?.env || process.env;
-      const target =
-        localSession?.target ||
-        (stored.dcodeCommand
-          ? { command: stored.dcodeCommand, args: [] }
-          : dcodeTarget({ env }));
+      const env = localSession?.env || (await getProjectShellEnv({ cwd: stored.cwd }));
+      const target = localSession?.target || dcodeTarget({ env });
       await deleteDcodeSession({
         target,
         cwd: stored.cwd,

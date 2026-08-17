@@ -63,7 +63,7 @@ _DEFAULTS = {
     # 127.0.0.1 (not localhost) so the local-dev LLM-key check stays skipped.
     "DASHBOARD_BASE_URL": BASE_URL,
     "DASHBOARD_API_BASE_URL": BASE_URL,
-    "DASHBOARD_ALLOWED_ORIGINS": BASE_URL,
+    "DASHBOARD_ALLOWED_ORIGINS": f"{BASE_URL},open-swe://app",
     "DASHBOARD_JWT_SECRET": "test-dashboard-jwt-secret",
 }
 
