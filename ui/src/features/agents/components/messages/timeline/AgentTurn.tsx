@@ -294,15 +294,16 @@ export function AgentTurn({
             expanded={workFoldExpanded}
             onToggle={toggleWorkFold}
           />
-          {workFoldExpanded && (
+          {workFoldExpanded ? (
             <div className="space-y-0.5">
-              {workItems.map((item, index) =>
-                renderItem(item, index, workItems.length)
+              {renderItems.map((item, index) =>
+                renderItem(item, index, renderItems.length)
               )}
             </div>
-          )}
-          {replyItems.map((item, index) =>
-            renderItem(item, workItems.length + index, renderItems.length)
+          ) : (
+            replyItems.map((item, index) =>
+              renderItem(item, workItems.length + index, renderItems.length)
+            )
           )}
         </>
       ) : (

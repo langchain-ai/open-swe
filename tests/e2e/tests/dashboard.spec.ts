@@ -209,6 +209,16 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await worked.click();
     await expect(edit).toBeVisible();
     await expect(acknowledgement).toBeVisible();
+    expect(
+      await acknowledgement.evaluate(
+        (message, entry) =>
+          Boolean(
+            message.compareDocumentPosition(entry) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        await edit.elementHandle(),
+      ),
+    ).toBe(true);
   });
 
   test("expands an Edit call into a highlighted inline diff", async ({
