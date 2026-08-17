@@ -32,14 +32,16 @@ function diff(overrides: Partial<DiffData> = {}): DiffData {
 }
 
 describe("describeWorkEntry", () => {
-  it("splits a read into a verb heading and a project-relative preview", () => {
+  it("splits a read into a verb, file name, and full-path tooltip", () => {
+    const fullPath = `${projectPath}/ui/src/AGENTS.md`
     const entry = describeWorkEntry(
-      chunk({ input: { file_path: `${projectPath}/AGENTS.md` } }),
+      chunk({ input: { file_path: fullPath } }),
       projectPath
     )
 
     expect(entry.heading).toBe("Read")
     expect(entry.preview).toBe("AGENTS.md")
+    expect(entry.previewTooltip).toBe(fullPath)
     expect(entry.icon).toBe("eye")
   })
 
@@ -50,7 +52,9 @@ describe("describeWorkEntry", () => {
     )
 
     expect(entry.heading).toBe("Edited")
-    expect(entry.preview).toBe("ui/src/app.tsx")
+    expect(entry.preview).toBe("app.tsx")
+    expect(entry.previewTooltip).toBe(`${projectPath}/ui/src/app.tsx`)
+    expect(entry.diffStats).toEqual({ additions: 1, deletions: 1 })
     expect(entry.icon).toBe("square-pen")
     // The diff is rendered as the row body, so there is no text fallback.
     expect(entry.expandedText).toBeNull()

@@ -17,6 +17,7 @@
 
 # production
 /build
+/desktop/build
 /dist
 **/dist
 .turbo/

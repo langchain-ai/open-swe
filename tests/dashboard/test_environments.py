@@ -55,15 +55,23 @@ def test_slugify_rejects_names_without_alphanumerics() -> None:
         slugify("---")
 
 
-def test_snapshot_name_is_prefixed_and_tagged_latest(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_snapshot_name_carries_no_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The platform rejects a colon and appends its own `:latest`."""
     monkeypatch.delenv("ENVIRONMENT_SNAPSHOT_PREFIX", raising=False)
-    assert snapshot_name_for("monorepo") == "openswe-environment-monorepo:latest"
-    assert snapshot_name_for("monorepo", 3) == "openswe-environment-monorepo-3:latest"
+    assert snapshot_name_for("monorepo") == "openswe-environment-monorepo"
+    assert snapshot_name_for("monorepo", 3) == "openswe-environment-monorepo-3"
 
 
 def test_snapshot_name_prefix_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ENVIRONMENT_SNAPSHOT_PREFIX", "acme")
-    assert snapshot_name_for("default") == "acme-environment-default:latest"
+    assert snapshot_name_for("default") == "acme-environment-default"
+
+
+def test_no_generated_snapshot_name_contains_a_colon(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A colon anywhere in the name is rejected by the platform, so never emit one."""
+    monkeypatch.setenv("ENVIRONMENT_SNAPSHOT_PREFIX", "acme:v2")
+    for attempt in range(1, env_store.CAPTURE_NAME_ATTEMPTS + 1):
+        assert ":" not in snapshot_name_for("default", attempt)
 
 
 def test_create_validates_repo_full_names() -> None:
@@ -191,10 +199,10 @@ async def test_capture_tags_latest_and_replaces_previous_snapshot() -> None:
         record = await env_store.capture_environment_snapshot("base", "sb-123")
 
     assert capture.await_args is not None
-    assert capture.await_args.args == ("sb-123", "openswe-environment-base:latest")
+    assert capture.await_args.args == ("sb-123", "openswe-environment-base")
     assert record["snapshot_status"] == "ready"
     assert record["snapshot_id"] == "snap-2"
-    assert record["snapshot_name"] == "openswe-environment-base:latest"
+    assert record["snapshot_name"] == "openswe-environment-base"
     assert record["source_sandbox_id"] == "sb-123"
     delete_snapshot.assert_awaited_once_with("snap-1")
 
@@ -222,11 +230,11 @@ async def test_capture_walks_the_name_suffix_past_a_conflict() -> None:
         record = await env_store.capture_environment_snapshot("default", "sb-123")
 
     assert [call.args[1] for call in capture.await_args_list] == [
-        "openswe-environment-default:latest",
-        "openswe-environment-default-2:latest",
+        "openswe-environment-default",
+        "openswe-environment-default-2",
     ]
     assert record["snapshot_status"] == "ready"
-    assert record["snapshot_name"] == "openswe-environment-default-2:latest"
+    assert record["snapshot_name"] == "openswe-environment-default-2"
 
 
 @pytest.mark.asyncio

@@ -1,8 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ImagePlus,
+  LoaderCircle,
   Map as MapIcon,
+  Mic,
+  Plus,
   ServerCog as ServerCogIcon,
+  Square,
   X,
 } from "lucide-react"
 
@@ -35,14 +39,16 @@ import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import { Kbd } from "@/components/ui/kbd"
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { transcribeAudio } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 export type { ActiveRun }
 
 const MAX_IMAGE_COUNT = 5
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const MAX_AUDIO_BYTES = 10 * 1024 * 1024
 const MAX_MENTION_SUGGESTIONS = 8
 const SUPPORTED_IMAGE_TYPES = new Set([
   "image/png",
@@ -97,9 +103,11 @@ export interface ChatComposerProps {
   onRunTargetChange?: (next: RunTarget) => void
   localProjects?: Array<DesktopProject>
   selectedLocalProjectPath?: string | null
+  selectedLocalProjectBranch?: string | null
   onSelectLocalProject?: (cwd: string) => void
   onAddLocalProject?: () => void
   onRemoveLocalProject?: (cwd: string) => void
+  onRefreshLocalProjectBranch?: () => void
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
@@ -116,7 +124,6 @@ export interface ChatComposerProps {
   contextUsage?: {
     usedTokens?: number | null
     contextWindow?: number | null
-    hasMessages?: boolean
   }
 }
 
@@ -212,9 +219,11 @@ export const ChatComposer = memo(function ChatComposer({
   onRunTargetChange,
   localProjects = [],
   selectedLocalProjectPath = null,
+  selectedLocalProjectBranch = null,
   onSelectLocalProject,
   onAddLocalProject,
   onRemoveLocalProject,
+  onRefreshLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
   adminThread = false,
@@ -236,10 +245,19 @@ export const ChatComposer = memo(function ChatComposer({
     null
   )
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  const [extrasMenuOpen, setExtrasMenuOpen] = useState(false)
+  const [dictationState, setDictationState] = useState<
+    "idle" | "recording" | "transcribing"
+  >("idle")
+  const [dictationError, setDictationError] = useState<string | null>(null)
 
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Array<Blob>>([])
+  const mountedRef = useRef(true)
+  const requestingMicrophoneRef = useRef(false)
 
   useEffect(() => {
     if (autoFocus) editorRef.current?.focus()
@@ -249,6 +267,14 @@ export const ChatComposer = memo(function ChatComposer({
   // click, or two rapid Enters) before React re-renders. Scoped to the send
   // request only — never the run lifecycle.
   const submittingRef = useRef(false)
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false
+      recorderRef.current?.stream.getTracks().forEach((track) => track.stop())
+    },
+    []
+  )
 
   const trigger = useMemo(
     () => detectComposerTrigger(value, cursor),
@@ -288,6 +314,78 @@ export const ChatComposer = memo(function ChatComposer({
     setDismissedTriggerKey(null)
     setActiveItemId(null)
   }, [])
+
+  const handleDictation = useCallback(async () => {
+    if (dictationState === "recording") {
+      recorderRef.current?.stop()
+      return
+    }
+    if (dictationState !== "idle" || requestingMicrophoneRef.current) return
+    requestingMicrophoneRef.current = true
+    setDictationError(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
+      const mimeType = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4",
+      ].find((type) => MediaRecorder.isTypeSupported(type))
+      if (!mimeType) {
+        stream.getTracks().forEach((track) => track.stop())
+        throw new Error("Audio recording is not supported")
+      }
+      const recorder = new MediaRecorder(stream, { mimeType })
+      recorderRef.current = recorder
+      audioChunksRef.current = []
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) audioChunksRef.current.push(event.data)
+      }
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop())
+        if (!mountedRef.current) return
+        setDictationState("transcribing")
+        try {
+          const audio = new Blob(audioChunksRef.current, {
+            type: recorder.mimeType,
+          })
+          if (!audio.size) throw new Error("No audio was recorded")
+          if (audio.size > MAX_AUDIO_BYTES)
+            throw new Error("Recording is too long")
+          const transcript = await transcribeAudio(audio)
+          const snapshot = editorRef.current?.readSnapshot() ?? {
+            value,
+            cursor: value.length,
+          }
+          const separator =
+            snapshot.value && !/\s$/.test(snapshot.value) ? " " : ""
+          const next = `${snapshot.value}${separator}${transcript}`
+          applyPrompt(next, next.length)
+          queueMicrotask(() => editorRef.current?.focusAtEnd())
+        } catch (error) {
+          setDictationError(
+            error instanceof Error
+              ? error.message
+              : "Voice transcription failed"
+          )
+        } finally {
+          recorderRef.current = null
+          setDictationState("idle")
+        }
+      }
+      recorder.start()
+      setDictationState("recording")
+    } catch (error) {
+      setDictationError(
+        error instanceof Error ? error.message : "Microphone access failed"
+      )
+    } finally {
+      requestingMicrophoneRef.current = false
+    }
+  }, [applyPrompt, dictationState, value])
 
   const handleSubmit = useCallback(async () => {
     if (submittingRef.current || disabled) return
@@ -513,7 +611,7 @@ export const ChatComposer = memo(function ChatComposer({
       )}
     >
       {(onRepoChange || onRunTargetChange || onEnvironmentChange) && (
-        <div className="mb-2 flex items-center gap-2 px-1 text-xs">
+        <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 px-1 text-xs">
           {runTarget !== "local" && onRepoChange && (
             <RepoSelector
               repos={repos}
@@ -532,18 +630,27 @@ export const ChatComposer = memo(function ChatComposer({
             onRunTargetChange &&
             onSelectLocalProject &&
             onAddLocalProject &&
-            onRemoveLocalProject && (
+            onRemoveLocalProject &&
+            onRefreshLocalProjectBranch && (
               <RunTargetSelector
                 localEnabled={Boolean(window.openSweDesktop)}
                 onChange={onRunTargetChange}
                 onAddProject={onAddLocalProject}
                 onRemoveProject={onRemoveLocalProject}
+                onRefreshBranch={onRefreshLocalProjectBranch}
                 onSelectProject={onSelectLocalProject}
                 projects={localProjects}
                 selectedProjectPath={selectedLocalProjectPath}
+                selectedProjectBranch={selectedLocalProjectBranch}
                 value={runTarget}
               />
             )}
+        </div>
+      )}
+
+      {dictationError && (
+        <div className="mb-2 px-1 text-xs text-destructive" role="alert">
+          {dictationError}
         </div>
       )}
 
@@ -639,105 +746,128 @@ export const ChatComposer = memo(function ChatComposer({
           value={value}
         />
 
-        <div className="mt-auto flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 pt-2 text-xs text-muted-foreground">
-          {models.length > 0 && (
-            <ModelPicker
-              models={models}
-              onOpenChange={setModelPickerOpen}
-              onSelectionChange={onSelectionChange}
-              open={modelPickerOpen}
-              requireImageSupport={pendingImages.length > 0}
-              selection={selection}
-              triggerClassName="h-7 rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
-            />
-          )}
-
-          {onPlanModeChange && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <ComposerControl
-                    aria-pressed={planMode}
-                    className={cn(
-                      planMode &&
-                        "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                    )}
-                    onClick={() => onPlanModeChange(!planMode)}
-                    type="button"
-                  />
-                }
-              >
-                <ComposerControlIcon icon={MapIcon} />
-                <span>Plan</span>
-              </TooltipTrigger>
-              <TooltipPopup
-                className="max-w-[18rem] whitespace-normal"
-                side="top"
-              >
-                Research read-only and propose a plan before editing{" "}
-                <Kbd>⇧</Kbd>
-                <Kbd>Tab</Kbd>
-              </TooltipPopup>
-            </Tooltip>
-          )}
-
-          {onAdminThreadChange && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <ComposerControl
-                    aria-pressed={adminThread}
-                    className={cn(
-                      adminThread &&
-                        "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                    )}
-                    onClick={() => onAdminThreadChange(!adminThread)}
-                    type="button"
-                  />
-                }
-              >
-                <ComposerControlIcon icon={ServerCogIcon} />
-                <span>Admin</span>
-              </TooltipTrigger>
-              <TooltipPopup
-                className="max-w-[18rem] whitespace-normal"
-                side="top"
-              >
-                Provision this sandbox and capture it as an environment snapshot
-              </TooltipPopup>
-            </Tooltip>
-          )}
-
-          <span className="ml-auto" />
-
-          <ContextWindowMeter
-            contextWindow={contextUsage?.contextWindow}
-            hasMessages={contextUsage?.hasMessages}
-            usedTokens={contextUsage?.usedTokens}
-          />
-
-          <Tooltip>
-            <TooltipTrigger
+        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-xs text-muted-foreground">
+          <Menu onOpenChange={setExtrasMenuOpen}>
+            <MenuTrigger
               render={
                 <ComposerControl
-                  aria-label="Attach images"
+                  aria-label="More composer options"
                   className="size-7 px-0"
-                  disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
-                  onClick={() => fileInputRef.current?.click()}
                   type="button"
                 />
               }
             >
-              <ComposerControlIcon icon={ImagePlus} className="size-4" />
-            </TooltipTrigger>
-            <TooltipPopup side="top">Attach images</TooltipPopup>
-          </Tooltip>
+              <Plus className="size-4" />
+            </MenuTrigger>
+            <MenuPopup align="start" className="w-44" side="top" sideOffset={7}>
+              <MenuItem
+                disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <ImagePlus />
+                Attach images
+              </MenuItem>
+              {onPlanModeChange && (
+                <MenuItem onClick={() => onPlanModeChange(!planMode)}>
+                  <MapIcon />
+                  {planMode ? "Disable plan mode" : "Enable plan mode"}
+                </MenuItem>
+              )}
+              {onAdminThreadChange && (
+                <MenuItem onClick={() => onAdminThreadChange(!adminThread)}>
+                  <ServerCogIcon />
+                  {adminThread ? "Disable admin mode" : "Enable admin mode"}
+                </MenuItem>
+              )}
+            </MenuPopup>
+          </Menu>
+
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
+            {models.length > 0 && (
+              <ModelPicker
+                models={models}
+                onOpenChange={setModelPickerOpen}
+                onSelectionChange={onSelectionChange}
+                open={modelPickerOpen}
+                requireImageSupport={pendingImages.length > 0}
+                selection={selection}
+                triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
+              />
+            )}
+
+            {planMode && onPlanModeChange && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <ComposerControl
+                      aria-label="Exit plan mode"
+                      aria-pressed
+                      className="bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                      onClick={() => onPlanModeChange(false)}
+                      type="button"
+                    />
+                  }
+                >
+                  <ComposerControlIcon icon={MapIcon} />
+                  <span>Plan</span>
+                </TooltipTrigger>
+                <TooltipPopup side="top">Exit plan mode</TooltipPopup>
+              </Tooltip>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1">
+            <ContextWindowMeter
+              contextWindow={contextUsage?.contextWindow}
+              usedTokens={contextUsage?.usedTokens}
+            />
+
+            {typeof navigator !== "undefined" &&
+              "mediaDevices" in navigator &&
+              typeof MediaRecorder !== "undefined" && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <ComposerControl
+                        aria-label={
+                          dictationState === "recording"
+                            ? "Stop dictation"
+                            : "Start dictation"
+                        }
+                        aria-pressed={dictationState === "recording"}
+                        className={cn(
+                          "size-7 px-0",
+                          dictationState === "recording" && "text-destructive"
+                        )}
+                        disabled={disabled || dictationState === "transcribing"}
+                        onClick={() => void handleDictation()}
+                        type="button"
+                      />
+                    }
+                  >
+                    {dictationState === "transcribing" ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : dictationState === "recording" ? (
+                      <Square className="size-3 fill-current" />
+                    ) : (
+                      <Mic className="size-4" />
+                    )}
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">
+                    {dictationState === "recording"
+                      ? "Stop dictation"
+                      : "Dictate message"}
+                  </TooltipPopup>
+                </Tooltip>
+              )}
+          </div>
 
           <ComposerPrimaryActions
             activeRun={activeRun}
             canSubmit={canSubmit}
             onSubmit={() => void handleSubmit()}
             onStop={onStop}
+            stopOnEscape={!menuOpen && !modelPickerOpen && !extrasMenuOpen}
             submitting={isSubmitting}
           />
         </div>

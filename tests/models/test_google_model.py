@@ -5,7 +5,7 @@ from agent.utils.model import (
     provider_model_kwargs,
 )
 
-GEMINI_ID = "google_genai:gemini-3.6-flash"
+GEMINI_ID = "google_genai:gemini-3.7-flash"
 
 
 def test_gemini_3_family_detection() -> None:
@@ -21,9 +21,9 @@ def test_google_thinking_level_maps_effort() -> None:
     assert google_thinking_level_for("unknown") is None
 
 
-def test_gemini_36_flash_is_supported_with_documented_efforts() -> None:
+def test_gemini_37_flash_is_supported_with_documented_efforts() -> None:
     gemini = next(m for m in SUPPORTED_MODELS if m["id"] == GEMINI_ID)
-    assert gemini["label"] == "Gemini 3.6 Flash"
+    assert gemini["label"] == "Gemini 3.7 Flash"
     assert gemini["efforts"] == ["minimal", "low", "medium", "high"]
     assert gemini["default_effort"] == "medium"
 
@@ -32,14 +32,14 @@ def test_gemini_35_flash_is_no_longer_offered() -> None:
     assert all(m["id"] != "google_genai:gemini-3.5-flash" for m in SUPPORTED_MODELS)
 
 
-def test_renamed_gemini_35_flash_migrates_to_gemini_36_flash() -> None:
+def test_renamed_gemini_35_flash_migrates_to_gemini_37_flash() -> None:
     assert provider_fallback_pair("google_genai:gemini-3.5-flash", "low") == (
         GEMINI_ID,
         "low",
     )
 
 
-def test_google_provider_fallback_uses_gemini_36_flash() -> None:
+def test_google_provider_fallback_uses_gemini_37_flash() -> None:
     assert provider_fallback_pair("google_genai:gemini-3-flash-preview", "high") == (
         GEMINI_ID,
         "high",

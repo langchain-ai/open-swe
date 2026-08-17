@@ -93,8 +93,8 @@ def test_supported_models_do_not_hardcode_context_windows() -> None:
     assert all("context_window" not in model for model in SUPPORTED_MODELS)
 
 
-def test_model_profile_context_window_uses_langchain_profile() -> None:
-    assert model_profile_context_window(SUPPORTED_OPENAI) == 1_050_000
+def test_model_profile_context_window_uses_codex_override() -> None:
+    assert model_profile_context_window(SUPPORTED_OPENAI) == 272_000
 
 
 def test_model_profile_context_window_uses_fireworks_profile_for_kimi_k3() -> None:
@@ -110,9 +110,9 @@ def test_models_with_profile_context_windows_enriches_copies() -> None:
     enriched = models_with_profile_context_windows(models)
     assert all("context_window" not in model for model in models)
     assert {model["id"]: model.get("context_window") for model in enriched} == {
-        "openai:gpt-5.6-sol": 1_050_000,
-        "openai:gpt-5.6-terra": 1_050_000,
-        "openai:gpt-5.6-luna": 1_050_000,
+        "openai:gpt-5.6-sol": 272_000,
+        "openai:gpt-5.6-terra": 272_000,
+        "openai:gpt-5.6-luna": 272_000,
         SUPPORTED_KIMI: 1_048_576,
     }
 

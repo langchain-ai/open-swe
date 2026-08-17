@@ -9,6 +9,7 @@ the preceding tool result, exactly as a real model would.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -25,7 +26,7 @@ from e2e_env import (
     REPO,
 )
 from langchain_core.callbacks import CallbackManagerForLLMRun
-from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models import BaseChatModel, ModelProfile
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -35,11 +36,8 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-# One shell command that does the whole git workflow. Each execute() runs in a
-# fresh shell rooted at the sandbox dir, so the clone+commit+push is bundled.
-_IMPLEMENT_SCRIPT = f"""
+_SETUP_SCRIPT = f"""
 set -e
-sleep 8
 rm -rf repo
 git clone "$E2E_REMOTE" repo
 cd repo
@@ -47,9 +45,20 @@ git config user.email "dev@example.com"
 git config user.name "Dev User"
 git checkout -b {FEATURE_BRANCH}
 cat > {FEATURE_FILE} <<'EOF'
+def normalize(name):
+    return name.strip()
+
 def greet(name):
-    return f"Hello, {{name}}!"
+    return "Hello!"
+
+def farewell(name):
+    return f"Goodbye, {{name}}!"
 EOF
+""".strip()
+
+_COMMIT_SCRIPT = f"""
+set -e
+cd repo
 git add -A
 git commit -m "{PR_TITLE}"
 git push origin {FEATURE_BRANCH}
@@ -77,10 +86,37 @@ _IFRAME_HTML = """<!doctype html>
 _IFRAME_DATA = '{"label":"Bundled data loaded"}'
 _IFRAME_CSS = "body { min-height: 420px; margin: 0; color: rebeccapurple; }"
 
+_DESKTOP_PR_PAYLOAD = json.dumps(
+    {
+        "head": FEATURE_BRANCH,
+        "base": BASE_BRANCH,
+        "title": PR_TITLE,
+        "body": "Adds a `greet()` helper as requested.",
+        "draft": True,
+    }
+)
+_DESKTOP_IMPLEMENT_SCRIPT = f"""
+set -e
+git checkout -b {FEATURE_BRANCH}
+cat > {FEATURE_FILE} <<'EOF'
+def greet(name):
+    return f"Hello, {{name}}!"
+EOF
+git add {FEATURE_FILE}
+git -c "user.email=dev@example.com" -c "user.name=Dev User" commit -m "{PR_TITLE}"
+git push origin {FEATURE_BRANCH}
+curl --fail --silent --show-error \
+  --request POST \
+  --header 'content-type: application/json' \
+  --data '{_DESKTOP_PR_PAYLOAD}' \
+  "$E2E_FAKE_GITHUB_API/repos/{OWNER}/{REPO}/pulls"
+""".strip()
+
 # The system prompt of the most recent model call, so specs can assert what the
 # agent was actually told (e.g. the environment section) rather than infer it.
 LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
 
+_BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
 
@@ -199,6 +235,15 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
             "output_tokens": 345,
             "total_tokens": 12_345,
         },
+    )
+
+
+def _desktop_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    return AIMessage(
+        content=(
+            f"Done! I added `{FEATURE_FILE}` and opened [{PR_TITLE}]({url}) on the fake GitHub."
+        )
     )
 
 
@@ -357,6 +402,15 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content="Rendered the iframe preview."),
     ),
+    "desktop": (
+        _tool_step(
+            "Implementing the change in the selected local project.",
+            "execute",
+            {"command": _DESKTOP_IMPLEMENT_SCRIPT},
+            "call-desktop-impl",
+        ),
+        _dynamic_step(_desktop_reply_step),
+    ),
     "implement": (
         _tool_step(
             "Acknowledging the Slack request before starting work.",
@@ -365,10 +419,26 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-ack",
         ),
         _tool_step(
-            "Setting up the repo and implementing the change.",
+            "Setting up the repository.",
             "execute",
-            {"command": _IMPLEMENT_SCRIPT},
-            "call-impl",
+            {"command": _SETUP_SCRIPT},
+            "call-setup",
+        ),
+        _tool_step(
+            "Implementing the greeting.",
+            "edit_file",
+            {
+                "file_path": f"/repo/{FEATURE_FILE}",
+                "old_string": 'def greet(name):\n    return "Hello!"',
+                "new_string": 'def greet(name):\n    return f"Hello, {name}!"',
+            },
+            "call-edit",
+        ),
+        _tool_step(
+            "Committing and pushing the change.",
+            "execute",
+            {"command": _COMMIT_SCRIPT},
+            "call-commit",
         ),
         _tool_step(
             "Opening a pull request.",
@@ -476,6 +546,10 @@ def _is_revision(text: str) -> bool:
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(
+        "desktop",
+        lambda ctx: ctx.human_count <= 1 and "E2E_DESKTOP_LOCAL" in ctx.first_text,
+    ),
+    ScriptRule(
         "environment", lambda ctx: ctx.human_count <= 1 and _is_environment_request(ctx.first_text)
     ),
     ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
@@ -503,6 +577,11 @@ def build_script() -> list[StepSpec]:
 class FakeScriptedChatModel(BaseChatModel):
     """Returns the next scripted AIMessage based on how far the loop has run."""
 
+    model: str = "fake"
+    profile: ModelProfile | None = {
+        "tool_calling": True,
+        "max_input_tokens": 8_000,
+    }
     script: list[Any] = []
 
     @property
@@ -538,8 +617,13 @@ class FakeScriptedChatModel(BaseChatModel):
 
         # Keep a run busy on demand so E2E can land follow-ups mid-run (exercising
         # the interrupt-debounce path). Only the triggering message carries the
-        # marker, and only the first model call of that run blocks.
-        if step_index == 0 and "E2E_BUSY_HOLD" in context.last_text:
-            time.sleep(float(os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
+        # marker. The block lands on the second model call so the Slack
+        # acknowledgement — and the web link a spec may need to click — is already
+        # out by the time the run stalls. `E2E_BUSY_HOLD:<n>` overrides the window
+        # so a spec needing a short hold does not leave a run in flight for the
+        # specs that follow it.
+        hold = _BUSY_HOLD_RE.search(context.last_text) if step_index == 1 else None
+        if hold:
+            time.sleep(float(hold.group(1) or os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
         step = script[step_index] if step_index < len(script) else SCRIPT_LIBRARY["followup"][0]
         return ChatResult(generations=[ChatGeneration(message=_render_step(step, messages))])

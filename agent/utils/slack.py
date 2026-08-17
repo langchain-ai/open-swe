@@ -585,9 +585,17 @@ async def update_slack_message(
             return False, f"http_error: {type(exc).__name__}"
 
 
-async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+async def post_slack_thread_reply(
+    channel_id: str,
+    thread_ts: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+) -> bool:
     """Post a reply in a Slack thread."""
-    message_ts, _ = await post_slack_thread_reply_with_ts(channel_id, thread_ts, text)
+    message_ts, _ = await post_slack_thread_reply_with_ts(
+        channel_id, thread_ts, text, blocks=blocks
+    )
     return message_ts is not None
 
 

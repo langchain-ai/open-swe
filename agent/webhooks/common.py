@@ -99,6 +99,7 @@ from ..utils.multimodal import (
 from ..utils.repo import extract_repo_from_text
 from ..utils.slack import (
     GitHubPrRef,
+    _parse_ts,  # noqa: F401
     fetch_slack_thread_messages,  # noqa: F401
     format_slack_messages_for_prompt,  # noqa: F401
     get_slack_channel_context,
@@ -129,6 +130,7 @@ from ..utils.slack_feedback import (
 )
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
 from ..utils.thread_ops import queue_message_for_thread  # noqa: F401
+from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
 
 __all__ = [
     "Any",
@@ -767,6 +769,10 @@ async def upsert_agent_thread_owner_metadata(
         existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
     existing_context = existing_meta.get("source_context")
+    if github_login:
+        metadata[PARTICIPANT_LOGINS_KEY] = merge_participant_logins(
+            existing_meta.get(PARTICIPANT_LOGINS_KEY), github_login
+        )
     same_slack_owner = bool(
         isinstance(existing_context, dict)
         and isinstance(source_context, dict)
@@ -795,6 +801,8 @@ async def upsert_agent_thread_owner_metadata(
     if existing_meta.get("title") and "title" in metadata:
         # Preserve a title that was already chosen (first message wins).
         metadata.pop("title")
+    elif source == "slack" and "title" in metadata:
+        metadata["title_seed"] = metadata["title"]
 
     try:
         if existing is None:

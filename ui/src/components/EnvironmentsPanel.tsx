@@ -35,7 +35,6 @@ function parseRepos(value: string): Array<string> {
 export function EnvironmentsPanel() {
   const qc = useQueryClient()
   const [error, setError] = useState<string | null>(null)
-  const [newName, setNewName] = useState("")
   const [selected, setSelected] = useState<string | null>(null)
   const [promptDraft, setPromptDraft] = useState("")
   const [reposDraft, setReposDraft] = useState("")
@@ -65,17 +64,6 @@ export function EnvironmentsPanel() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["environments"] })
   const onError = (e: Error) => setError(e.message)
-
-  const create = useMutation({
-    mutationFn: (name: string) => api.createEnvironment({ name }),
-    onSuccess: (record) => {
-      void invalidate()
-      setSelected(record.slug)
-      setNewName("")
-      setError(null)
-    },
-    onError,
-  })
 
   const save = useMutation({
     mutationFn: ({
@@ -114,33 +102,11 @@ export function EnvironmentsPanel() {
   return (
     <div className="flex flex-col gap-6 p-4">
       <section className="space-y-2">
-        <Label htmlFor="new-environment">Add environment</Label>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <Input
-            id="new-environment"
-            placeholder="monorepo-full"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter") return
-              e.preventDefault()
-              if (newName.trim()) void create.mutateAsync(newName.trim())
-            }}
-            className="sm:flex-1"
-          />
-          <Button
-            size="sm"
-            className="shrink-0 sm:w-auto"
-            disabled={!newName.trim() || create.isPending}
-            onClick={() => void create.mutateAsync(newName.trim())}
-          >
-            Add
-          </Button>
-        </div>
         <p className="text-xs text-muted-foreground">
-          Runs boot from the environment named <code>default</code>; any other
-          name is a draft. Build the snapshot from an admin thread: provision
-          its sandbox, then have the agent capture it.
+          Create environments from an admin thread: enable Admin in the
+          new-agent composer, provision its sandbox, then ask the agent to save
+          and capture it. Runs without an explicit selection use the environment
+          named <code>default</code>.
         </p>
       </section>
 

@@ -35,9 +35,7 @@ const HEIGHT_REPORTER = `<script>
 <\/script>`
 
 function withHeightReporter(html: string): string {
-  const bodyClose = html.search(/<\/body\s*>/i)
-  if (bodyClose === -1) return `${html}${HEIGHT_REPORTER}`
-  return `${html.slice(0, bodyClose)}${HEIGHT_REPORTER}${html.slice(bodyClose)}`
+  return `${html}${HEIGHT_REPORTER}`
 }
 
 function escapeHtmlAttribute(value: string): string {

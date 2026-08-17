@@ -104,6 +104,40 @@ async def list_teams() -> dict[str, Any]:
     return {"teams": result.get("teams", {}).get("nodes", [])}
 
 
+async def fetch_linear_issue_participant_emails(issue_id: str) -> set[str] | None:
+    """Return verified participant emails for a Linear issue."""
+    query = """
+    query GetIssueParticipants($id: String!) {
+        issue(id: $id) {
+            creator { email }
+            assignee { email }
+            comments {
+                nodes { user { email } }
+            }
+        }
+    }
+    """
+    result = await _graphql_request(query, {"id": issue_id})
+    if "error" in result:
+        return None
+    issue = result.get("issue")
+    if not isinstance(issue, dict):
+        return None
+    identities = [issue.get("creator"), issue.get("assignee")]
+    comments = issue.get("comments")
+    if isinstance(comments, dict):
+        for comment in comments.get("nodes") or []:
+            if isinstance(comment, dict):
+                identities.append(comment.get("user"))
+    return {
+        email.strip().lower()
+        for identity in identities
+        if isinstance(identity, dict)
+        and isinstance(email := identity.get("email"), str)
+        and email.strip()
+    }
+
+
 async def get_issue(issue_id: str) -> dict[str, Any]:
     """Get a Linear issue by ID."""
     query = """

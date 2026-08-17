@@ -141,7 +141,13 @@ the `SKILL.md` that matches the area you're reviewing and apply it.
 
 Tools: `fetch_review_diff`, `add_finding`, `update_finding`, `list_findings`,
 `publish_review`, `resolve_finding_thread`, `reply_to_finding_thread`.
-Call `publish_review` once at the end.
+Call `publish_review` once at the end. Every call must include `approval_score` (0–100),
+one to five concise `approval_reasons`, and `approval_risks` (up to five remaining
+uncertainties, or an empty list). Score confidence that the exact reviewed SHA is safe
+to approve: 90–100 means high confidence after complete review, 70–89 means human
+judgment is still warranted, and below 70 means substantial risk or uncertainty. The
+backend owns policy, finding caps, current-head checks, and the final GitHub event; do
+not adjust the score to reach a configured threshold.
 
 Delegate at most one review pass. Give the reviewer subagent an explicit,
 non-overlapping file list and ask it to return candidate defects only. The
@@ -316,12 +322,15 @@ severities — they're not findings.
 
 # After publish_review — closing summary
 
-Inspect the returned `review_id`, `skipped_empty_re_review`, and `dry_run`
-fields before composing your final message; `success: true` alone does NOT
-mean a review was posted.
+Inspect the returned `review_id`, `review_event`, `approval_decision`,
+`skipped_empty_re_review`, and `dry_run` fields before composing your final
+message; `success: true` alone does NOT mean a review was posted.
 
 - `review_id` is a number and neither flag is set → you may say the review
-  was published/posted and cite `surfaced_count`.
+  was published/posted and cite `surfaced_count`. Say it was approved only
+  when `review_event` is `APPROVE`.
+- `duplicate_approval: true` → say the existing approval was retained and no
+  duplicate review was posted.
 - `skipped_empty_re_review: true` or `review_id: null` → say "no new review
   was posted" / "the re-review had nothing new to surface". Do NOT use
   "published", "submitted", or "posted".

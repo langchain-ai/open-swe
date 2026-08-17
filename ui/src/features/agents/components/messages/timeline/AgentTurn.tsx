@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
 import { MessageTimestamp } from "../MessageTimestamp"
 import { ReasoningBlock } from "../ReasoningBlock"
@@ -34,20 +35,16 @@ const MAX_VISIBLE_WORK_LOG_ENTRIES = 1
 function EditWorkEntry({
   chunk,
   projectPath,
-  onOpenFile,
 }: {
   chunk: ToolExecutionChunk
   projectPath?: string
-  onOpenFile?: (filePath: string) => void
 }) {
-  const filePath = latestDiff(chunk)?.filePath
+  const diff = latestDiff(chunk)
   return (
     <WorkEntryRow
       entry={describeWorkEntry(chunk, projectPath)}
       timestamp={chunk.timestamp}
-      onActivate={
-        filePath && onOpenFile ? () => onOpenFile(filePath) : undefined
-      }
+      body={diff ? <DiffView diffData={diff} snippet /> : undefined}
     />
   )
 }
@@ -217,7 +214,6 @@ export function AgentTurn({
             key={item.key}
             chunk={item.chunk}
             projectPath={projectPath}
-            onOpenFile={callbacks.onOpenFile}
           />
         )
 

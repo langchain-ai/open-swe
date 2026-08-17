@@ -7,25 +7,109 @@ const MAX_FILES = 200
 const MAX_FILE_BYTES = 400_000
 const MAX_CONTENT_BYTES = 16 * 1024 * 1024
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
+const MAX_GH_OUTPUT_BYTES = 1024 * 1024
 const CHECKPOINT_NAMESPACE = "refs/open-swe/local"
 
 // The project is whatever directory the user picked, so never let its git config
 // start helper processes of its own on our behalf.
 const HARDENED = ["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"]
 
-function git(cwd, args, env) {
-  return new Promise((resolve, reject) => {
+function git(
+  cwd: string,
+  args: string[],
+  env: NodeJS.ProcessEnv | null = null,
+  timeout?: number
+) {
+  return new Promise<Buffer>((resolve, reject) => {
     execFile(
       "git",
       [...HARDENED, ...args],
-      { cwd, env: env || process.env, encoding: "buffer", maxBuffer: MAX_OUTPUT_BYTES },
+      {
+        cwd,
+        env: env || process.env,
+        encoding: "buffer",
+        maxBuffer: MAX_OUTPUT_BYTES,
+        timeout,
+      },
       (error, stdout) => (error ? reject(error) : resolve(stdout))
     )
   })
 }
 
+async function currentBranch(cwd) {
+  try {
+    return text(await git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], null, 5_000)) || null
+  } catch {
+    return null
+  }
+}
+
+function parsePullRequest(raw) {
+  try {
+    const value = JSON.parse(raw)
+    const url = new URL(value.url)
+    if (
+      !Number.isInteger(value.number) ||
+      value.number < 1 ||
+      typeof value.title !== "string" ||
+      !["OPEN", "CLOSED", "MERGED"].includes(value.state) ||
+      typeof value.isDraft !== "boolean" ||
+      typeof value.headRefName !== "string" ||
+      typeof value.baseRefName !== "string" ||
+      !["http:", "https:"].includes(url.protocol)
+    ) {
+      return null
+    }
+    return {
+      number: value.number,
+      title: value.title,
+      state:
+        value.state === "OPEN" && value.isDraft
+          ? "draft"
+          : value.state.toLowerCase(),
+      headRef: value.headRefName,
+      baseRef: value.baseRefName,
+      url: url.href,
+    }
+  } catch {
+    return null
+  }
+}
+
+async function pullRequest(repo, env) {
+  try {
+    const output = await new Promise<string>((resolve, reject) => {
+      execFile(
+        "gh",
+        [
+          "pr",
+          "view",
+          "--json",
+          "number,title,state,isDraft,headRefName,baseRefName,url",
+        ],
+        {
+          cwd: repo,
+          env: { ...(env || process.env), GH_PROMPT_DISABLED: "1" },
+          encoding: "utf8",
+          maxBuffer: MAX_GH_OUTPUT_BYTES,
+          timeout: 5_000,
+        },
+        (error, stdout) => (error ? reject(error) : resolve(stdout))
+      )
+    })
+    return parsePullRequest(output)
+  } catch {
+    return null
+  }
+}
+
+async function repositoryMetadata(repo, env) {
+  const branch = await currentBranch(repo)
+  return { branch, pr: branch ? await pullRequest(repo, env) : null }
+}
+
 function gitStdin(cwd, args, input) {
-  return new Promise((resolve, reject) => {
+  return new Promise<Buffer>((resolve, reject) => {
     const child = spawn("git", [...HARDENED, ...args], {
       cwd,
       stdio: ["pipe", "pipe", "ignore"],
@@ -38,7 +122,7 @@ function gitStdin(cwd, args, input) {
   })
 }
 
-function text(buffer) {
+function text(buffer: Buffer) {
   return buffer.toString("utf8").trim()
 }
 
@@ -201,7 +285,7 @@ async function readBlobs(repo, base, head, paths) {
   return new Map(paths.map((file, i) => [file, { base: blobs[i * 2], head: blobs[i * 2 + 1] }]))
 }
 
-function decode(blob) {
+function decode(blob: Buffer | false | null) {
   if (blob === false) return [null, true]
   if (!Buffer.isBuffer(blob)) return [null, false]
   const content = blob.toString("utf8")
@@ -245,8 +329,11 @@ async function readDiff(repo, base) {
 module.exports = {
   captureCheckpoint,
   checkpointRef,
+  currentBranch,
   deleteRefs,
+  parsePullRequest,
   readDiff,
   repoRoot,
+  repositoryMetadata,
   staleRefs,
 }

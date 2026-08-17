@@ -228,11 +228,13 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
+  workingRepoFullName?: string | null
   branch: string
   model: string
   effort?: string | null
   planMode?: boolean
   planStatus?: string | null
+  adminThread?: boolean
   source?: AgentSource
   status: AgentStatus
   viewed: boolean

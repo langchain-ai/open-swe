@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -8,6 +8,7 @@ import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import { NewAgentTerminalPanel } from "@/features/agents/components/NewAgentTerminalPanel"
 import { OnboardingDialog } from "@/features/agents/components/OnboardingDialog"
 import { Logo } from "@/features/agents/components/chat/Logo"
 import {
@@ -23,12 +24,19 @@ import {
   useModelOptions,
 } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
+import {
+  readStoredPanelCollapsed,
+  writeStoredPanelCollapsed,
+} from "@/features/agents/lib/gitPanelPreferences"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
   requestNotificationPermission,
   setNotificationsPref,
 } from "@/lib/notifications"
+
+const LAST_LOCAL_PROJECT_KEY = "open-swe.desktop.last-project"
+const NEW_AGENT_PANEL_ID = "new-agent"
 
 function promptContent(text: string, images: Array<ImageChunk>) {
   const trimmed = text.trim()
@@ -57,9 +65,6 @@ export function AgentsHome() {
     setSelection(next)
     persistModelSelection(next, session.data?.login ?? "")
   }
-  const activeModel = models.find(
-    (model) => model.id === activeSelection?.modelId
-  )
   const [planMode, setPlanMode] = useState(false)
   const [adminThread, setAdminThread] = useState(false)
   const environmentOptions = useEnvironmentOptions()
@@ -77,9 +82,26 @@ export function AgentsHome() {
   const [submitting, setSubmitting] = useState(false)
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const [runTarget, setRunTarget] = useState<RunTarget>("cloud")
+  const [runTarget, setRunTarget] = useState<RunTarget>(() =>
+    isDesktop ? "local" : "cloud"
+  )
   const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
+  const localProjectPathRef = useRef(localProjectPath)
+  localProjectPathRef.current = localProjectPath
+  const [localProjectBranch, setLocalProjectBranch] = useState<string | null>(
+    null
+  )
   const [localError, setLocalError] = useState<string | null>(null)
+  const [localDraftSessionId, setLocalDraftSessionId] = useState<string | null>(
+    null
+  )
+  const localDraftRef = useRef<{
+    cwd: string
+    promise: Promise<string>
+  } | null>(null)
+  const [panelCollapsed, setPanelCollapsed] = useState(() =>
+    readStoredPanelCollapsed(NEW_AGENT_PANEL_ID)
+  )
   const {
     projects: localProjects,
     addProject,
@@ -115,13 +137,89 @@ export function AgentsHome() {
   }, [stream.threadId, queryClient, navigate])
 
   useEffect(() => {
+    if (!isDesktop || localProjects.length === 0) return
+    const stored = window.localStorage.getItem(LAST_LOCAL_PROJECT_KEY)
+    const selected = localProjects.find(
+      (project) => project.cwd === localProjectPath || project.cwd === stored
+    )
+    setLocalProjectPath(selected?.cwd ?? localProjects[0]?.cwd ?? null)
+    if (!localProjectPath) setRunTarget("local")
+  }, [isDesktop, localProjectPath, localProjects])
+
+  const refreshLocalProjectBranch = useCallback(async () => {
+    const cwd = localProjectPathRef.current
+    const branch = cwd
+      ? ((await window.openSweDesktop?.getProjectBranch(cwd)) ?? null)
+      : null
+    if (localProjectPathRef.current === cwd) setLocalProjectBranch(branch)
+  }, [])
+
+  useEffect(() => {
+    void refreshLocalProjectBranch()
+  }, [localProjectPath, refreshLocalProjectBranch])
+
+  useEffect(() => {
+    window.addEventListener("focus", refreshLocalProjectBranch)
+    return () => window.removeEventListener("focus", refreshLocalProjectBranch)
+  }, [refreshLocalProjectBranch])
+
+  useEffect(() => {
+    const desktop = window.openSweDesktop
+    const createDraft = desktop?.createAcpDraftSession
+    const deleteDraft = desktop?.deleteAcpDraftSession
+    setLocalDraftSessionId(null)
     if (
-      localProjectPath &&
-      !localProjects.some((project) => project.cwd === localProjectPath)
+      !createDraft ||
+      !deleteDraft ||
+      runTarget !== "local" ||
+      !localProjectPath
     ) {
-      setLocalProjectPath(null)
+      localDraftRef.current = null
+      return
     }
-  }, [localProjectPath, localProjects])
+
+    let active = true
+    const request = {
+      cwd: localProjectPath,
+      promise: createDraft(localProjectPath).then((draft) => draft.id),
+    }
+    localDraftRef.current = request
+    void request.promise
+      .then((sessionId) => {
+        if (active) setLocalDraftSessionId(sessionId)
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setLocalError(
+            error instanceof Error
+              ? error.message
+              : "Could not prepare the local terminal"
+          )
+        }
+      })
+
+    return () => {
+      active = false
+      if (localDraftRef.current === request) localDraftRef.current = null
+      void request.promise
+        .then((sessionId) => deleteDraft(sessionId))
+        .catch(() => {})
+    }
+  }, [localProjectPath, runTarget])
+
+  useEffect(() => {
+    if (localDraftSessionId) {
+      writeStoredPanelCollapsed(localDraftSessionId, panelCollapsed)
+    }
+  }, [localDraftSessionId, panelCollapsed])
+
+  const handlePanelCollapsedChange = (next: boolean) => {
+    setPanelCollapsed(next)
+    writeStoredPanelCollapsed(NEW_AGENT_PANEL_ID, next)
+    if (localDraftSessionId) {
+      writeStoredPanelCollapsed(localDraftSessionId, next)
+    }
+  }
 
   const handleRunTargetChange = (next: RunTarget) => {
     setRunTarget(next)
@@ -130,6 +228,7 @@ export function AgentsHome() {
 
   const handleSelectLocalProject = (cwd: string) => {
     setLocalProjectPath(cwd)
+    window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
     setRunTarget("local")
     setLocalError(null)
   }
@@ -156,17 +255,25 @@ export function AgentsHome() {
       }
       setSubmitting(true)
       setLocalError(null)
+      window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, localProjectPath)
+      await refreshLocalProjectBranch()
       try {
-        const session = await desktop.startAcpSession({
+        const draftRequest = localDraftRef.current
+        const draftSessionId =
+          draftRequest?.cwd === localProjectPath
+            ? await draftRequest.promise
+            : undefined
+        const localSession = await desktop.startAcpSession({
           cwd: localProjectPath,
           prompt,
           images,
+          draftSessionId,
           modelId: activeSelection?.modelId,
           effort: activeSelection?.effort,
         })
         await navigate({
           to: "/agents/local/$sessionId",
-          params: { sessionId: session.id },
+          params: { sessionId: localSession.id },
         })
       } catch (error) {
         setSubmitting(false)
@@ -217,56 +324,64 @@ export function AgentsHome() {
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-8">
-      <OnboardingDialog />
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center">
-        <div className="flex w-full flex-col items-center gap-6">
-          <Logo />
-          {localError && (
-            <div className="w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              {localError}
-            </div>
-          )}
-          <AgentPromptBar
-            autoFocus
-            onSubmit={handleSubmit}
-            disabled={submitting}
-            models={models}
-            selection={activeSelection}
-            onSelectionChange={handleSelectionChange}
-            repos={reposQuery.data?.repositories}
-            selectedRepo={repo}
-            onRepoChange={setRepoOverride}
-            runTarget={isDesktop ? runTarget : undefined}
-            onRunTargetChange={isDesktop ? handleRunTargetChange : undefined}
-            localProjects={localProjects}
-            selectedLocalProjectPath={localProjectPath}
-            onSelectLocalProject={handleSelectLocalProject}
-            onAddLocalProject={() => void handleAddLocalProject()}
-            onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
-            planMode={planMode}
-            onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
-            environments={environments}
-            selectedEnvironment={selectedEnvironment}
-            onEnvironmentChange={
-              runTarget === "cloud" ? setEnvironmentOverride : undefined
-            }
-            adminThread={adminThread}
-            onAdminThreadChange={
-              runTarget === "cloud" && session.data?.is_admin
-                ? setAdminThread
-                : undefined
-            }
-            skills={skills.data}
-            contextUsage={{
-              contextWindow:
-                runTarget === "cloud"
-                  ? (activeModel?.context_window ?? null)
-                  : null,
-            }}
-          />
+    <>
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
+        <OnboardingDialog />
+        <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center">
+          <div className="flex w-full flex-col items-center gap-6">
+            <Logo />
+            {localError && (
+              <div className="w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                {localError}
+              </div>
+            )}
+            <AgentPromptBar
+              autoFocus
+              onSubmit={handleSubmit}
+              disabled={submitting}
+              models={models}
+              selection={activeSelection}
+              onSelectionChange={handleSelectionChange}
+              repos={reposQuery.data?.repositories}
+              selectedRepo={repo}
+              onRepoChange={setRepoOverride}
+              runTarget={isDesktop ? runTarget : undefined}
+              onRunTargetChange={isDesktop ? handleRunTargetChange : undefined}
+              localProjects={localProjects}
+              selectedLocalProjectPath={localProjectPath}
+              selectedLocalProjectBranch={localProjectBranch}
+              onSelectLocalProject={handleSelectLocalProject}
+              onAddLocalProject={() => void handleAddLocalProject()}
+              onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
+              onRefreshLocalProjectBranch={() =>
+                void refreshLocalProjectBranch()
+              }
+              planMode={planMode}
+              onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
+              environments={environments}
+              selectedEnvironment={selectedEnvironment}
+              onEnvironmentChange={
+                runTarget === "cloud" ? setEnvironmentOverride : undefined
+              }
+              adminThread={adminThread}
+              onAdminThreadChange={
+                runTarget === "cloud" && session.data?.is_admin
+                  ? setAdminThread
+                  : undefined
+              }
+              skills={skills.data}
+            />
+          </div>
         </div>
       </div>
-    </div>
+      {runTarget === "local" && localProjectPath && localDraftSessionId && (
+        <NewAgentTerminalPanel
+          sessionId={localDraftSessionId}
+          cwd={localProjectPath}
+          collapsed={panelCollapsed}
+          onCollapsedChange={handlePanelCollapsedChange}
+        />
+      )}
+    </>
   )
 }

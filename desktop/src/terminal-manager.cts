@@ -24,7 +24,7 @@ const MISSING_EXECUTABLE = ["posix_spawnp failed", "enoent", "not found", "file 
 let configuredManager = null
 let shellEnv = null
 
-function ensurePtySpawnHelperExecutable(options = {}) {
+function ensurePtySpawnHelperExecutable(options: any = {}) {
   const platform = options.platform || process.platform
   if (platform === "win32") return
   try {
@@ -93,7 +93,7 @@ function runShell(shell, args, options, input) {
   })
 }
 
-async function getProjectShellEnv(options = {}) {
+async function getProjectShellEnv(options: any = {}) {
   const baseEnv = options.env || process.env
   const run = options.run || runShell
   const shell = baseEnv.SHELL || "/bin/zsh"
@@ -220,7 +220,7 @@ function shouldExcludeEnv(key) {
 }
 
 function spawnEnv(baseEnv, runtimeEnv, cwd, shell) {
-  const result = {}
+  const result: Record<string, string> = {}
   for (const [key, value] of Object.entries(baseEnv)) {
     if (typeof value === "string" && !shouldExcludeEnv(key)) result[key] = value
   }
@@ -365,8 +365,8 @@ function createTerminalManager(options) {
   const killGraceMs = options.killGraceMs ?? KILL_GRACE_MS
   const maxSessions = options.maxSessions || MAX_SESSIONS
   const sessions = new Map()
-  const listeners = new Set()
-  const metadataListeners = new Set()
+  const listeners = new Set<(event: any) => void>()
+  const metadataListeners = new Set<(event: any) => void>()
   const locks = new Map()
   let shuttingDown = false
 
@@ -468,7 +468,7 @@ function createTerminalManager(options) {
     return value
   }
 
-  function emit(session, type, detail = {}) {
+  function emit(session, type, detail: any = {}) {
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
     const event = {
@@ -888,6 +888,25 @@ function createTerminalManager(options) {
     emit(session, "closed")
   }
 
+  async function deleteSession(localSessionId) {
+    cleanId(localSessionId, "local session ID")
+    return locked(localSessionId, () => {
+      for (const session of [...sessions.values()]) {
+        if (session.localSessionId === localSessionId) {
+          closeOne(localSessionId, session.terminalId, true)
+        }
+      }
+      const prefix = `terminal_${safePart(localSessionId)}_`
+      try {
+        for (const name of fileSystem.readdirSync(logsDir)) {
+          if (name.startsWith(prefix) && name.endsWith(".log")) {
+            fileSystem.rmSync(path.join(logsDir, name), { force: true })
+          }
+        }
+      } catch {}
+    })
+  }
+
   function list(localSessionId) {
     cleanId(localSessionId, "local session ID")
     if (!getAcpSession(localSessionId)) throw new Error("Local Deep Agents Code session not found")
@@ -938,6 +957,7 @@ function createTerminalManager(options) {
     attach,
     clear,
     close,
+    deleteSession,
     list,
     open,
     resize,
@@ -1024,10 +1044,15 @@ function closeAllTerminals() {
   return configuredManager?.shutdown() || Promise.resolve()
 }
 
+function deleteSessionTerminals(localSessionId) {
+  return configuredManager?.deleteSession(localSessionId) || Promise.resolve()
+}
+
 module.exports = {
   capHistory,
   closeAllTerminals,
   configureTerminalIpc,
+  deleteSessionTerminals,
   createTerminalManager,
   ensurePtySpawnHelperExecutable,
   getProjectShellEnv,

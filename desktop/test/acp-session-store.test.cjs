@@ -7,7 +7,7 @@ const path = require("node:path")
 const {
   readAcpSessions,
   writeAcpSessions,
-} = require("../src/acp-session-store.cjs")
+} = require("../build/acp-session-store.cjs")
 
 test("persists valid ACP session metadata and ignores malformed records", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-acp-sessions-"))
@@ -22,6 +22,7 @@ test("persists valid ACP session metadata and ignores malformed records", (t) =>
     updatedAt: 456,
     modelId: "provider:model",
     effort: "high",
+    dcodeCommand: "/opt/bin/dcode",
     checkpoint: { repo: root, ref: "refs/open-swe/local/desktop-id" },
   }
 
