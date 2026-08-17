@@ -162,7 +162,10 @@ test("Desktop runs the pinned uv dcode ACP loop against the shared fakes", async
 
     await expect(page).toHaveURL(/open-swe:\/\/app\/agents\/local\//);
     await expect(page.getByText(/Done! I added/)).toBeVisible();
-    const prLink = page.getByRole("link", { name: "Add greet() helper" });
+    const prLink = page.getByRole("link", {
+      name: "Add greet() helper",
+      exact: true,
+    });
     await expect(prLink).toHaveAttribute(
       "href",
       `${baseURL}/mock/github/fakeorg/demo/pull/1`,
