@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict, cast
+from weakref import WeakValueDictionary
 
 from langgraph_sdk import get_client
 
@@ -20,6 +22,8 @@ from .utils.github_ci import (
     list_check_runs,
     list_commit_statuses,
 )
+from .utils.github_comments import post_github_comment
+from .utils.linear import comment_on_linear_issue
 from .utils.slack import GitHubPrRef, post_slack_thread_reply
 
 logger = logging.getLogger(__name__)
@@ -32,6 +36,8 @@ MAX_DISPATCH_KEYS = 30
 MAX_DELIVERY_IDS = 50
 MAX_ALERT_KEYS = 30
 MAX_EVALUATION_ERRORS = 3
+CHECK_SET_SETTLE_MINUTES = 10
+_watch_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
 
 class BabySitWatch(TypedDict):
@@ -44,9 +50,12 @@ class BabySitWatch(TypedDict):
     pr_url: str
     head_sha: str
     head_ref: str
+    installation_id: int | None
     run_config: dict[str, Any]
     source_context: dict[str, Any]
     retry_count: int
+    settled_check_key: str
+    settled_check_at: str | None
     dispatch_keys: list[str]
     delivery_ids: list[str]
     alert_keys: list[str]
@@ -60,12 +69,24 @@ def _client():
     return get_client()
 
 
+def _watch_lock(key: str) -> asyncio.Lock:
+    lock = _watch_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _watch_locks[key] = lock
+    return lock
+
+
 def watch_key(owner: str, repo: str, pr_number: int) -> str:
     return f"{owner.strip().lower()}/{repo.strip().lower()}#{pr_number}"
 
 
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
 def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return _now().isoformat()
 
 
 def _value(item: object) -> BabySitWatch | None:
@@ -157,6 +178,7 @@ async def start_watch(
     pr_ref: GitHubPrRef,
     head_sha: str,
     head_ref: str,
+    installation_id: int | None,
     thread_id: str,
     run_config: dict[str, Any],
     source_context: dict[str, Any],
@@ -178,9 +200,14 @@ async def start_watch(
         "pr_url": pr_ref.url,
         "head_sha": head_sha,
         "head_ref": head_ref,
+        "installation_id": installation_id,
         "run_config": run_config,
         "source_context": source_context,
         "retry_count": existing.get("retry_count", 0) if same_head and existing else 0,
+        "settled_check_key": existing.get("settled_check_key", "")
+        if same_head and existing
+        else "",
+        "settled_check_at": existing.get("settled_check_at") if same_head and existing else None,
         "dispatch_keys": existing.get("dispatch_keys", []) if same_head and existing else [],
         "delivery_ids": existing.get("delivery_ids", []) if same_head and existing else [],
         "alert_keys": existing.get("alert_keys", []) if same_head and existing else [],
@@ -222,6 +249,13 @@ async def stop_watch(key: str) -> bool:
     return True
 
 
+async def _watch_token(watch: BabySitWatch) -> str | None:
+    installation_id = watch.get("installation_id")
+    if not isinstance(installation_id, int):
+        return None
+    return await get_github_app_installation_token(installation_id=installation_id)
+
+
 def _slack_thread(watch: BabySitWatch) -> tuple[str, str] | None:
     source_context = watch.get("source_context")
     slack_thread = source_context.get("slack_thread") if isinstance(source_context, dict) else None
@@ -235,20 +269,50 @@ def _slack_thread(watch: BabySitWatch) -> tuple[str, str] | None:
 
 
 async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
+    source_context = watch.get("source_context")
+    source_context = source_context if isinstance(source_context, dict) else {}
     destination = _slack_thread(watch)
-    if destination is None:
-        return False
     try:
-        return await post_slack_thread_reply(destination[0], destination[1], message)
+        if destination is not None:
+            return await post_slack_thread_reply(destination[0], destination[1], message)
+        linear_issue = source_context.get("linear_issue")
+        issue_id = linear_issue.get("id") if isinstance(linear_issue, dict) else None
+        if isinstance(issue_id, str) and issue_id:
+            return await comment_on_linear_issue(issue_id, message)
+        github_issue = source_context.get("github_issue")
+        issue_number = github_issue.get("number") if isinstance(github_issue, dict) else None
+        if not isinstance(issue_number, int):
+            configured_number = (watch.get("run_config") or {}).get("pr_number")
+            issue_number = configured_number if isinstance(configured_number, int) else None
+        token = await _watch_token(watch)
+        if isinstance(issue_number, int) and token:
+            return await post_github_comment(
+                {"owner": watch["owner"], "name": watch["repo"]},
+                issue_number,
+                message,
+                token=token,
+            )
     except Exception:
-        logger.warning(
-            "Failed to notify source Slack thread for %s", watch.get("key"), exc_info=True
-        )
+        logger.warning("Failed to notify source for %s", watch.get("key"), exc_info=True)
         return False
+    return False
 
 
 async def _finish_watch(watch: BabySitWatch, message: str) -> str:
-    await _notify_watch(watch, message)
+    notified = await _notify_watch(watch, message)
+    if not notified:
+        try:
+            configurable = _dispatch_config(watch)
+            await dispatch_agent_run(
+                watch["thread_id"],
+                f"/baby-sit --terminal {watch['pr_url']}\n\n{message}",
+                configurable,
+                source=str(configurable.get("source") or "dashboard"),
+                metadata={},
+                multitask_strategy="enqueue",
+            )
+        except Exception:
+            logger.warning("Failed to dispatch terminal baby-sit update for %s", watch["key"])
     await stop_watch(watch["key"])
     return "stopped"
 
@@ -285,6 +349,37 @@ def _failure_signals(
 
 def _failure_key(head_sha: str, retry_count: int) -> str:
     return hashlib.sha256(f"{head_sha}|retry:{retry_count}".encode()).hexdigest()
+
+
+def _check_set_key(check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]) -> str:
+    checks = sorted(
+        f"check:{run.get('id')}:{run.get('name')}:{run.get('status')}:{run.get('conclusion')}"
+        for run in check_runs
+    )
+    checks.extend(
+        sorted(
+            f"status:{status.get('id')}:{status.get('context')}:{status.get('state')}"
+            for status in statuses
+        )
+    )
+    return hashlib.sha256("|".join(checks).encode()).hexdigest()
+
+
+def _check_set_settled(watch: BabySitWatch, key: str) -> bool:
+    if watch.get("settled_check_key") != key:
+        watch["settled_check_key"] = key
+        watch["settled_check_at"] = _now_iso()
+        return False
+    raw = watch.get("settled_check_at")
+    if not isinstance(raw, str) or not raw:
+        watch["settled_check_at"] = _now_iso()
+        return False
+    try:
+        first_seen = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        watch["settled_check_at"] = _now_iso()
+        return False
+    return _now() - first_seen >= timedelta(minutes=CHECK_SET_SETTLE_MINUTES)
 
 
 def _aggregate_state(
@@ -365,13 +460,18 @@ async def _record_evaluation_error(watch: BabySitWatch, detail: str) -> str:
 
 
 async def evaluate_watch(key: str, *, token: str | None = None) -> str:
+    async with _watch_lock(key):
+        return await _evaluate_watch(key, token=token)
+
+
+async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
     watch = await get_watch(key)
     if not watch:
         return "missing"
     if not watch.get("active"):
         await stop_watch(key)
         return "stopped"
-    token = token or await get_github_app_installation_token()
+    token = token or await _watch_token(watch)
     if not token:
         return await _record_evaluation_error(watch, "GitHub token unavailable")
 
@@ -402,6 +502,8 @@ async def evaluate_watch(key: str, *, token: str | None = None) -> str:
             {
                 "head_sha": head_sha,
                 "retry_count": 0,
+                "settled_check_key": "",
+                "settled_check_at": None,
                 "dispatch_keys": [],
                 "alert_keys": [],
             }
@@ -419,9 +521,14 @@ async def evaluate_watch(key: str, *, token: str | None = None) -> str:
     watch["evaluation_errors"] = 0
     state, failures = _aggregate_state(check_runs, statuses)
     if state == "pending":
+        watch["settled_check_key"] = ""
+        watch["settled_check_at"] = None
         await _put_watch(watch)
         return state
     if state == "success":
+        if not _check_set_settled(watch, _check_set_key(check_runs, statuses)):
+            await _put_watch(watch)
+            return "settling"
         return await _finish_watch(
             watch,
             f"*`/baby-sit` complete:* {watch['pr_url']} has no pending or failing checks.",
@@ -495,17 +602,27 @@ async def handle_ci_webhook(
     ]
     if not watches:
         return {"matched": 0, "dispatched": 0}
-    token = await get_github_app_installation_token()
+    installation = payload.get("installation")
+    installation_id = installation.get("id") if isinstance(installation, dict) else None
     dispatched = 0
     for watch in watches:
-        if delivery_id:
-            delivery_ids = list(watch.get("delivery_ids") or [])
-            if delivery_id in delivery_ids:
+        async with _watch_lock(watch["key"]):
+            current = await get_watch(watch["key"])
+            if not current or not current.get("active"):
                 continue
-            watch["delivery_ids"] = [*delivery_ids, delivery_id][-MAX_DELIVERY_IDS:]
-            await _put_watch(watch)
-        if await evaluate_watch(watch["key"], token=token) == "dispatched":
-            dispatched += 1
+            if isinstance(installation_id, int) and installation_id != current.get(
+                "installation_id"
+            ):
+                current["installation_id"] = installation_id
+            if delivery_id:
+                delivery_ids = list(current.get("delivery_ids") or [])
+                if delivery_id in delivery_ids:
+                    continue
+                current["delivery_ids"] = [*delivery_ids, delivery_id][-MAX_DELIVERY_IDS:]
+            await _put_watch(current)
+            token = await _watch_token(current)
+            if await _evaluate_watch(current["key"], token=token) == "dispatched":
+                dispatched += 1
     return {"matched": len(watches), "dispatched": dispatched}
 
 
@@ -518,6 +635,26 @@ def _safe_check_link(value: str) -> str:
 
 
 async def record_retry(
+    key: str,
+    *,
+    thread_id: str,
+    head_sha: str,
+    check_name: str,
+    evidence: str,
+    details_url: str = "",
+) -> dict[str, Any]:
+    async with _watch_lock(key):
+        return await _record_retry(
+            key,
+            thread_id=thread_id,
+            head_sha=head_sha,
+            check_name=check_name,
+            evidence=evidence,
+            details_url=details_url,
+        )
+
+
+async def _record_retry(
     key: str,
     *,
     thread_id: str,

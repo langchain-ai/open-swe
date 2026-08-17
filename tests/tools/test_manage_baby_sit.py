@@ -27,6 +27,11 @@ async def test_manage_baby_sit_starts_watch_from_current_thread(
     )
     monkeypatch.setattr(
         manage_tool,
+        "get_github_app_installation_id_for_repo",
+        AsyncMock(return_value=42),
+    )
+    monkeypatch.setattr(
+        manage_tool,
         "fetch_pr",
         AsyncMock(return_value={"state": "open", "head": {"sha": "head-1", "ref": "feature"}}),
     )
@@ -48,6 +53,7 @@ async def test_manage_baby_sit_starts_watch_from_current_thread(
     assert result["poll_schedule"] == "every 10 minutes"
     assert start.await_args is not None
     assert start.await_args.kwargs["thread_id"] == "thread-1"
+    assert start.await_args.kwargs["installation_id"] == 42
     assert start.await_args.kwargs["source_context"] == {
         "slack_thread": {"channel_id": "C1", "thread_ts": "1.2"}
     }

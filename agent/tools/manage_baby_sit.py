@@ -9,6 +9,7 @@ from langgraph.config import get_config
 
 from ..baby_sit import record_retry, start_watch, stop_watch, watch_key
 from ..utils.auth import resolve_github_token
+from ..utils.github_app import get_github_app_installation_id_for_repo
 from ..utils.github_ci import fetch_pr
 from ..utils.slack import parse_github_pr_url
 
@@ -34,6 +35,9 @@ def _run_config(configurable: dict[str, Any], thread_id: str) -> dict[str, Any]:
     allowed = (
         "source",
         "slack_thread",
+        "linear_issue",
+        "github_issue",
+        "pr_number",
         "github_login",
         "user_email",
         "environment",
@@ -43,6 +47,15 @@ def _run_config(configurable: dict[str, Any], thread_id: str) -> dict[str, Any]:
     result = {key: configurable[key] for key in allowed if configurable.get(key) is not None}
     result["thread_id"] = thread_id
     return result
+
+
+def _source_context(configurable: dict[str, Any]) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    for key in ("slack_thread", "linear_issue", "github_issue"):
+        value = configurable.get(key)
+        if isinstance(value, Mapping):
+            context[key] = dict(value)
+    return context
 
 
 async def manage_baby_sit(
@@ -112,18 +125,21 @@ async def manage_baby_sit(
     if not isinstance(pr_head_ref, str) or not pr_head_ref:
         return {"success": False, "error": "Pull request head branch is unavailable"}
 
-    slack_thread = configurable.get("slack_thread")
-    source_context = (
-        {"slack_thread": dict(slack_thread)} if isinstance(slack_thread, Mapping) else {}
-    )
+    installation_id = await get_github_app_installation_id_for_repo(pr_ref.owner, pr_ref.repo)
+    if installation_id is None:
+        return {
+            "success": False,
+            "error": "GitHub App installation is unavailable for this repository",
+        }
     try:
         watch = await start_watch(
             pr_ref=pr_ref,
             head_sha=pr_head_sha,
             head_ref=pr_head_ref,
+            installation_id=installation_id,
             thread_id=thread_id,
             run_config=_run_config(configurable, thread_id),
-            source_context=source_context,
+            source_context=_source_context(configurable),
         )
     except Exception as exc:
         return {"success": False, "error": f"Could not start baby-sit watch: {exc}"}
