@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ..dashboard import router as dashboard_router
 from ..dashboard.plan_api import plan_router
+from ..dashboard.sandbox_download_api import sandbox_download_router
 from ..dashboard.workflow_approval_api import workflow_approval_router
 from ..webhooks.github_routes import router as github_webhook_router
 from ..webhooks.linear_routes import router as linear_webhook_router
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
         )
     app.include_router(dashboard_router)
     app.include_router(plan_router)
+    app.include_router(sandbox_download_router)
     app.include_router(workflow_approval_router)
     app.include_router(linear_webhook_router)
     app.include_router(slack_webhook_router)

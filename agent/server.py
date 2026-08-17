@@ -117,6 +117,7 @@ from .thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_gen
 from .tools import (
     approve_plan,
     capture_environment_snapshot,
+    create_sandbox_file_download,
     delete_environment,
     delete_user_skill,
     enter_plan_mode,
@@ -1260,6 +1261,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         fetch_url,
         web_search,
         approve_plan,
+        create_sandbox_file_download,
         enter_plan_mode,
         save_plan,
         save_user_instructions,

@@ -6,6 +6,7 @@ _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "approve_plan": ".approve_plan",
     "capture_environment_snapshot": ".environments",
+    "create_sandbox_file_download": ".create_sandbox_file_download",
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
@@ -51,6 +52,7 @@ __all__ = [
     "add_finding",
     "approve_plan",
     "capture_environment_snapshot",
+    "create_sandbox_file_download",
     "delete_environment",
     "enter_plan_mode",
     "fetch_review_diff",
@@ -95,6 +97,7 @@ __all__ = [
 if TYPE_CHECKING:
     from .add_finding import add_finding
     from .approve_plan import approve_plan
+    from .create_sandbox_file_download import create_sandbox_file_download
     from .enter_plan_mode import enter_plan_mode
     from .environments import (
         capture_environment_snapshot,

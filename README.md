@@ -68,6 +68,7 @@ Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE 
 | Tool | Purpose |
 |---|---|
 | `execute` | Shell commands in the sandbox |
+| `create_sandbox_file_download` | Create an authenticated download URL for a sandbox file |
 | `fetch_url` | Fetch web pages as markdown |
 | `http_request` | API calls (GET, POST, etc.) |
 | `linear_comment` | Post updates to Linear tickets |
