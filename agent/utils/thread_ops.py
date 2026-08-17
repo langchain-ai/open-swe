@@ -7,8 +7,6 @@ below is retained for the dashboard's deliberate "inject a follow-up into a
 run that's already in flight" path (``thread_api.send_dashboard_message``).
 """
 
-from __future__ import annotations
-
 import logging
 import os
 from typing import Any

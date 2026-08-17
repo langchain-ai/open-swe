@@ -1,7 +1,5 @@
 """Open a GitHub pull request attributed to the triggering user."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 from urllib.parse import quote

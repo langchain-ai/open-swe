@@ -25,8 +25,6 @@ ends with a visible message in Slack/GitHub instead of an abrupt crash. The
 turn's progress is checkpointed, so the user can retrigger to continue.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import random

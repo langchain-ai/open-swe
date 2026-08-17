@@ -83,6 +83,7 @@ from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
+    ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
@@ -200,6 +201,7 @@ DEEP_AGENT_TOOL_NAMES = {
     "task",
     "write_file",
 }
+STOP_SUMMARY_EXCLUDED_TOOLS = frozenset({"delete", "edit_file", "execute", "task", "write_file"})
 
 
 def _registered_tool_name(value: Any) -> str:
@@ -1231,31 +1233,36 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if admin_environments:
         logger.info("Admin thread %s: adding environment management tools", thread_id)
 
-    observability_authorized = await _observability_authorized(config, profile_login)
-    if observability_authorized:
-        observability_tools = await _load_observability_tools(True, profile_login)
-    elif await _allowed_org_member(config, profile_login):
-        observability_tools = await load_langsmith_tools(profile_login)
-    else:
-        observability_tools = await load_langsmith_tools(profile_login, allow_team=False)
-    corridor_tools = await _load_corridor_mcp_tools()
-    browser_tools = load_browser_tools()
-
+    stop_summary_mode = configurable.get("stop_summary") is True
+    observability_tools: list[Any] = []
+    corridor_tools: list[Any] = []
+    browser_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
-    if profile_login:
-        currents_tools, notion_tools = await asyncio.gather(
-            _cached_tool_loader(
-                f"tools:currents:{profile_login}",
-                300,
-                lambda: load_currents_tools(profile_login),
-            ),
-            _cached_tool_loader(
-                f"tools:notion:{profile_login}",
-                300,
-                lambda: load_notion_tools(profile_login),
-            ),
-        )
+    if not stop_summary_mode:
+        observability_authorized = await _observability_authorized(config, profile_login)
+        if observability_authorized:
+            observability_tools = await _load_observability_tools(True, profile_login)
+        elif await _allowed_org_member(config, profile_login):
+            observability_tools = await load_langsmith_tools(profile_login)
+        else:
+            observability_tools = await load_langsmith_tools(profile_login, allow_team=False)
+        corridor_tools = await _load_corridor_mcp_tools()
+        browser_tools = load_browser_tools()
+
+        if profile_login:
+            currents_tools, notion_tools = await asyncio.gather(
+                _cached_tool_loader(
+                    f"tools:currents:{profile_login}",
+                    300,
+                    lambda: load_currents_tools(profile_login),
+                ),
+                _cached_tool_loader(
+                    f"tools:notion:{profile_login}",
+                    300,
+                    lambda: load_notion_tools(profile_login),
+                ),
+            )
 
     slack_tools = [
         slack_add_reaction,
@@ -1295,6 +1302,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
         *(ENVIRONMENT_TOOLS if admin_environments else ()),
     ]
+    if stop_summary_mode:
+        static_tools = [slack_read_thread_messages, slack_thread_reply]
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     if not _slack_tools_enabled(configurable):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
@@ -1375,6 +1384,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
+                *(
+                    [ExcludeToolsMiddleware(excluded=STOP_SUMMARY_EXCLUDED_TOOLS)]
+                    if stop_summary_mode
+                    else []
+                ),
                 WorkingRepoMiddleware(thread_id=thread_id, backend=backend, thread_client=client),
                 SubdirAgentsReadMiddleware(),
                 ToolRetryMiddleware(
@@ -1387,7 +1401,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ),
                 PullRequestCreationGuardMiddleware(),
                 refresh_github_proxy_before_model,
-                check_message_queue_before_model,
+                *([] if stop_summary_mode else [check_message_queue_before_model]),
                 TimeoutWrapupMiddleware(),
                 notify_step_limit_reached,
                 *fallback_middleware,

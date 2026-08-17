@@ -216,6 +216,7 @@ function buildSidebarThreadsQuery(params: {
   activeLimit?: number
   resolvedLimit?: number
   activeThreadId?: string
+  includeAutomations?: boolean
 }): string {
   const search = new URLSearchParams()
   if (params.activeLimit != null) {
@@ -227,6 +228,9 @@ function buildSidebarThreadsQuery(params: {
   if (params.activeThreadId) {
     search.set("active_thread_id", params.activeThreadId)
   }
+  if (params.includeAutomations != null) {
+    search.set("include_automations", String(params.includeAutomations))
+  }
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -237,6 +241,7 @@ export const agentsApi = {
     activeLimit?: number
     resolvedLimit?: number
     activeThreadId?: string
+    includeAutomations?: boolean
   }) =>
     agentsRequest<SidebarThreads>(
       `/threads/sidebar${buildSidebarThreadsQuery(params)}`

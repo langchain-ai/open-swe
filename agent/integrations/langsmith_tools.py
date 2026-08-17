@@ -6,8 +6,6 @@ The surface is intentionally read-only: fetch a single run/trace and list recent
 runs in a project.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from typing import Any

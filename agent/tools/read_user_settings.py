@@ -1,7 +1,5 @@
 """Read safe settings for verified participants in the active thread."""
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import Mapping
 from typing import Any

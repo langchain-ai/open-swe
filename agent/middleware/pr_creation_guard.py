@@ -1,7 +1,5 @@
 """Block shell fallbacks that create pull requests outside open_pull_request."""
 
-from __future__ import annotations
-
 import json
 import os
 import re

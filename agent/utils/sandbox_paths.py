@@ -1,7 +1,5 @@
 """Helpers for resolving portable writable paths inside sandboxes."""
 
-from __future__ import annotations
-
 import logging
 import posixpath
 import shlex

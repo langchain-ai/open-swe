@@ -6,8 +6,6 @@ endpoints surface that state plus live PR details/diff fetched from GitHub
 with the App installation token.
 """
 
-from __future__ import annotations
-
 import ipaddress
 import logging
 import re

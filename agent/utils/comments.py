@@ -1,7 +1,5 @@
 """Helpers for Linear comment processing."""
 
-from __future__ import annotations
-
 from collections.abc import Sequence
 from typing import Any
 

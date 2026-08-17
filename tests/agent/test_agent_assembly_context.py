@@ -7,8 +7,6 @@ is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction a
 `PatchToolCallsMiddleware` that `create_deep_agent` adds covers it.
 """
 
-from __future__ import annotations
-
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,7 +20,7 @@ from agent.utils.sandbox_state import SandboxBackendProxy, clear_sandbox_backend
 
 
 class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> _DummyAgent:
+    def with_config(self, config: RunnableConfig) -> "_DummyAgent":
         self.config = config
         return self
 
@@ -261,6 +259,32 @@ async def test_slack_source_context_includes_slack_tools(source: str) -> None:
         "slack_start_new_thread",
         "slack_thread_reply",
     } <= tool_names
+
+
+@pytest.mark.asyncio
+async def test_stop_summary_agent_is_read_only_and_slack_only() -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(
+        {
+            "source": "slack",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+            "stop_summary": True,
+        }
+    )
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    middleware = captured["middleware"]
+    assert isinstance(tools, list)
+    assert isinstance(middleware, list)
+
+    tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
+    assert tool_names == {"slack_read_thread_messages", "slack_thread_reply"}
+    middleware_names = {type(item).__name__ for item in middleware}
+    assert "ExcludeToolsMiddleware" in middleware_names
+    assert "check_message_queue_before_model" not in middleware_names
 
 
 @pytest.mark.asyncio

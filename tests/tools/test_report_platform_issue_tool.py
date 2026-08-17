@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import inspect
 import uuid
 from typing import get_type_hints

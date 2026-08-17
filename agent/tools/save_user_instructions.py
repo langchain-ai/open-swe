@@ -1,7 +1,5 @@
 """Tool: persist the triggering user's user-level custom instructions."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

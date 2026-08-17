@@ -6,8 +6,6 @@ both the thread PR diff endpoint (user token) and the review diff endpoint
 (App installation token).
 """
 
-from __future__ import annotations
-
 import asyncio
 from typing import Any
 from urllib.parse import quote

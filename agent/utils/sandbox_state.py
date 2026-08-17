@@ -1,7 +1,5 @@
 """Shared sandbox state used by server and middleware."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
@@ -34,7 +32,7 @@ class _CaptureRequestModel(BaseChatModel):
     def _get_ls_params(self, stop: list[str] | None = None, **kwargs: Any) -> LangSmithParams:
         return LangSmithParams(ls_provider="openai")
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> _CaptureRequestModel:
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "_CaptureRequestModel":
         self.captured_tools = tools
         return self
 

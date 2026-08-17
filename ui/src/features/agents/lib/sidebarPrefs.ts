@@ -22,7 +22,7 @@ export interface SidebarPrefs {
 }
 
 export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
-  group: "date",
+  group: "repo",
   compact: false,
   collapsed: { local: false, cloud: false },
   filters: DEFAULT_SIDEBAR_FILTERS,
@@ -48,6 +48,10 @@ function sanitizeFilters(value: unknown): SidebarFilters {
     pr: asStringArray(raw.pr) as SidebarFilters["pr"],
     models: asStringArray(raw.models),
     repos: asStringArray(raw.repos),
+    includeAutomations:
+      typeof raw.includeAutomations === "boolean"
+        ? raw.includeAutomations
+        : DEFAULT_SIDEBAR_FILTERS.includeAutomations,
     includeResolved:
       typeof raw.includeResolved === "boolean"
         ? raw.includeResolved

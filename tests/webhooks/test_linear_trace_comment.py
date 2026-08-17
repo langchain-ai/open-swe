@@ -1,7 +1,5 @@
 """Tests for the Linear trace-URL comment."""
 
-from __future__ import annotations
-
 from unittest.mock import AsyncMock, patch
 
 from agent.utils import linear as linear_utils

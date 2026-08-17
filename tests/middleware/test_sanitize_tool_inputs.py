@@ -5,8 +5,6 @@ integer field in read_file (e.g. offset='1, 80'), causing a Pydantic
 ValidationError and an unnecessary retry.
 """
 
-from __future__ import annotations
-
 from agent.middleware.sanitize_tool_inputs import _coerce_int, _sanitize_read_file_args
 
 

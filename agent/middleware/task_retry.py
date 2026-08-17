@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 
 _RETURN_TO_MODEL_CODES = frozenset({"invalid_prompt", "context_length_exceeded"})
