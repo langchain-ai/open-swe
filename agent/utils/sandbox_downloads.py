@@ -8,7 +8,7 @@ import json
 import os
 import posixpath
 import uuid
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -17,12 +17,13 @@ import jwt
 
 from .dashboard_links import dashboard_base_url
 
-SANDBOX_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024
+SANDBOX_DOWNLOAD_CHUNK_BYTES = 8 * 1024 * 1024
 _SANDBOX_DOWNLOAD_TIMEOUT_SECONDS = 120
 _SANDBOX_CLEANUP_TIMEOUT_SECONDS = 10
 _SANDBOX_DOWNLOAD_AUDIENCE = "open-swe-sandbox-file"
 _SANDBOX_DOWNLOAD_TOKEN_TYPE = "sandbox-file-download"
 _JWT_ALGORITHM = "HS256"
+_BACKGROUND_CLEANUPS: set[asyncio.Task[None]] = set()
 
 
 class SandboxDownloadError(ValueError):
@@ -30,10 +31,6 @@ class SandboxDownloadError(ValueError):
 
 
 class SandboxDownloadFileNotFound(SandboxDownloadError):
-    pass
-
-
-class SandboxDownloadFileTooLarge(SandboxDownloadError):
     pass
 
 
@@ -46,6 +43,7 @@ class SandboxFileInfo:
     path: str
     filename: str
     size: int
+    signature: str = ""
 
 
 @dataclass(frozen=True)
@@ -87,69 +85,86 @@ async def inspect_sandbox_file(backend: Any, file_path: str) -> SandboxFileInfo:
             raise SandboxDownloadFileNotFound("sandbox file not found")
         raise SandboxDownloadError("sandbox file could not be inspected")
     size = payload.get("size")
+    signature = payload.get("signature")
     if not isinstance(size, int) or isinstance(size, bool) or size < 0:
         raise SandboxDownloadError("sandbox file size is unavailable")
-    if size > SANDBOX_DOWNLOAD_MAX_BYTES:
-        raise SandboxDownloadFileTooLarge("sandbox file exceeds the 100 MiB download limit")
-    return SandboxFileInfo(path=path, filename=posixpath.basename(path), size=size)
+    if not isinstance(signature, str) or not signature:
+        raise SandboxDownloadError("sandbox file signature is unavailable")
+    return SandboxFileInfo(
+        path=path,
+        filename=posixpath.basename(path),
+        size=size,
+        signature=signature,
+    )
 
 
-async def download_sandbox_file(backend: Any, file_path: str) -> tuple[SandboxFileInfo, bytes]:
-    info = await inspect_sandbox_file(backend, file_path)
-    staged_path, staged_size = await _stage_sandbox_file(backend, info.path)
-    try:
-        async with asyncio.timeout(_SANDBOX_DOWNLOAD_TIMEOUT_SECONDS):
-            downloads = await backend.adownload_files([staged_path])
-        if not downloads:
-            raise SandboxDownloadFileNotFound("sandbox file could not be downloaded")
-        error = _value(downloads[0], "error")
-        if error:
-            if "not_found" in str(error).lower() or "path_not_found" in str(error).lower():
-                raise SandboxDownloadFileNotFound("sandbox file could not be downloaded")
-            raise SandboxDownloadError("sandbox file could not be downloaded")
-        content = _download_content(downloads[0])
-        if content is None:
-            raise SandboxDownloadError("sandbox file content is unavailable")
-        if len(content) > SANDBOX_DOWNLOAD_MAX_BYTES:
-            raise SandboxDownloadFileTooLarge("sandbox file exceeds the 100 MiB download limit")
-        current_info = SandboxFileInfo(path=info.path, filename=info.filename, size=staged_size)
-        return current_info, content
-    finally:
-        await _delete_staged_file(backend, staged_path)
+async def stream_sandbox_file_chunks(
+    backend: Any,
+    info: SandboxFileInfo,
+) -> AsyncIterator[bytes]:
+    if info.size == 0:
+        await _download_sandbox_file_chunk(backend, info, 0, 0)
+        return
+    for offset in range(0, info.size, SANDBOX_DOWNLOAD_CHUNK_BYTES):
+        length = min(SANDBOX_DOWNLOAD_CHUNK_BYTES, info.size - offset)
+        yield await _download_sandbox_file_chunk(backend, info, offset, length)
 
 
-async def _stage_sandbox_file(backend: Any, file_path: str) -> tuple[str, int]:
+async def _download_sandbox_file_chunk(
+    backend: Any,
+    info: SandboxFileInfo,
+    offset: int,
+    length: int,
+) -> bytes:
     staged_path = f"/tmp/open-swe-download-{uuid.uuid4().hex}"
-    command_file_path = _backend_command_path(backend, file_path)
+    command_file_path = _backend_command_path(backend, info.path)
     command_staged_path = _backend_command_path(backend, staged_path)
-    try:
-        result = await backend.aexecute(
-            _stage_command(command_file_path, command_staged_path, staged_path),
+    command_task = asyncio.create_task(
+        backend.aexecute(
+            _chunk_command(
+                command_file_path,
+                command_staged_path,
+                staged_path,
+                info.signature,
+                offset,
+                length,
+            ),
             timeout=_SANDBOX_DOWNLOAD_TIMEOUT_SECONDS,
         )
+    )
+    cleanup_deferred = False
+    try:
+        result = await asyncio.shield(command_task)
         payload = _command_payload(result)
         if payload.get("ok") is not True:
             error = payload.get("error")
-            if error == "too_large":
-                raise SandboxDownloadFileTooLarge("sandbox file exceeds the 100 MiB download limit")
             if error == "not_found":
-                raise SandboxDownloadFileNotFound("sandbox file could not be staged")
-            raise SandboxDownloadError("sandbox file could not be staged")
-        returned_path = payload.get("path")
-        size = payload.get("size")
-        if (
-            returned_path != staged_path
-            or not isinstance(size, int)
-            or isinstance(size, bool)
-            or size < 0
-        ):
-            raise SandboxDownloadError("sandbox file staging returned an invalid response")
-        if size > SANDBOX_DOWNLOAD_MAX_BYTES:
-            raise SandboxDownloadFileTooLarge("sandbox file exceeds the 100 MiB download limit")
-        return staged_path, size
-    except Exception:
-        await _delete_staged_file(backend, staged_path)
+                raise SandboxDownloadFileNotFound("sandbox file could not be streamed")
+            if error == "changed":
+                raise SandboxDownloadError("sandbox file changed during download")
+            raise SandboxDownloadError("sandbox file chunk could not be staged")
+        if payload.get("path") != staged_path or payload.get("size") != length:
+            raise SandboxDownloadError("sandbox file chunk returned an invalid response")
+        async with asyncio.timeout(_SANDBOX_DOWNLOAD_TIMEOUT_SECONDS):
+            downloads = await backend.adownload_files([staged_path])
+        if not downloads:
+            raise SandboxDownloadFileNotFound("sandbox file chunk could not be downloaded")
+        error = _value(downloads[0], "error")
+        if error:
+            if "not_found" in str(error).lower():
+                raise SandboxDownloadFileNotFound("sandbox file chunk could not be downloaded")
+            raise SandboxDownloadError("sandbox file chunk could not be downloaded")
+        content = _download_content(downloads[0])
+        if content is None or len(content) != length:
+            raise SandboxDownloadError("sandbox file chunk content is invalid")
+        return content
+    except asyncio.CancelledError:
+        cleanup_deferred = True
+        _defer_staged_file_cleanup(command_task, backend, staged_path)
         raise
+    finally:
+        if not cleanup_deferred:
+            await _run_staged_file_cleanup(backend, staged_path)
 
 
 async def _delete_staged_file(backend: Any, staged_path: str) -> None:
@@ -158,6 +173,35 @@ async def _delete_staged_file(backend: Any, staged_path: str) -> None:
             await backend.adelete(staged_path)
     except Exception:
         pass
+
+
+async def _run_staged_file_cleanup(backend: Any, staged_path: str) -> None:
+    cleanup_task = asyncio.create_task(_delete_staged_file(backend, staged_path))
+    try:
+        await asyncio.shield(cleanup_task)
+    except asyncio.CancelledError:
+        _track_background_cleanup(cleanup_task)
+        raise
+
+
+def _defer_staged_file_cleanup(
+    command_task: asyncio.Task[Any],
+    backend: Any,
+    staged_path: str,
+) -> None:
+    async def cleanup() -> None:
+        try:
+            await command_task
+        except BaseException:
+            pass
+        await _delete_staged_file(backend, staged_path)
+
+    _track_background_cleanup(asyncio.create_task(cleanup()))
+
+
+def _track_background_cleanup(cleanup_task: asyncio.Task[None]) -> None:
+    _BACKGROUND_CLEANUPS.add(cleanup_task)
+    cleanup_task.add_done_callback(_BACKGROUND_CLEANUPS.discard)
 
 
 def _backend_command_path(backend: Any, file_path: str) -> str:
@@ -183,7 +227,9 @@ path = Path(payload['path'])
 try:
     if not path.is_file():
         raise FileNotFoundError
-    print(json.dumps({'ok': True, 'size': path.stat().st_size}))
+    stat = path.stat()
+    signature = f'{stat.st_dev}:{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ctime_ns}'
+    print(json.dumps({'ok': True, 'size': stat.st_size, 'signature': signature}))
 except FileNotFoundError:
     print(json.dumps({'ok': False, 'error': 'not_found'}))
 except OSError:
@@ -192,40 +238,59 @@ PY"""
     return script.replace("__PAYLOAD__", encoded)
 
 
-def _stage_command(file_path: str, staged_path: str, returned_path: str) -> str:
+def _chunk_command(
+    file_path: str,
+    staged_path: str,
+    returned_path: str,
+    signature: str,
+    offset: int,
+    length: int,
+) -> str:
     encoded = _encoded_payload(
         {
             "path": file_path,
             "staged_path": staged_path,
             "returned_path": returned_path,
-            "max_bytes": SANDBOX_DOWNLOAD_MAX_BYTES,
+            "signature": signature,
+            "offset": offset,
+            "length": length,
         }
     )
     script = r"""python - <<'PY'
 import base64
 import json
+import os
 from pathlib import Path
 
 payload = json.loads(base64.b64decode('__PAYLOAD__').decode())
 source = Path(payload['path'])
 destination = Path(payload['staged_path'])
 returned_path = payload['returned_path']
-limit = payload['max_bytes']
-total = 0
+expected_signature = payload['signature']
+offset = payload['offset']
+length = payload['length']
+
+def signature(stat):
+    return f'{stat.st_dev}:{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ctime_ns}'
+
 try:
     if not source.is_file():
         raise FileNotFoundError
+    with source.open('rb') as input_file:
+        if signature(os.fstat(input_file.fileno())) != expected_signature:
+            raise RuntimeError
+        input_file.seek(offset)
+        content = input_file.read(length)
+        if signature(os.fstat(input_file.fileno())) != expected_signature:
+            raise RuntimeError
+    if len(content) != length:
+        raise RuntimeError
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with source.open('rb') as input_file, destination.open('xb') as output_file:
-        while chunk := input_file.read(1024 * 1024):
-            total += len(chunk)
-            if total > limit:
-                raise OverflowError
-            output_file.write(chunk)
-    print(json.dumps({'ok': True, 'path': returned_path, 'size': total}))
-except OverflowError:
+    destination.write_bytes(content)
+    print(json.dumps({'ok': True, 'path': returned_path, 'size': len(content)}))
+except RuntimeError:
     destination.unlink(missing_ok=True)
-    print(json.dumps({'ok': False, 'error': 'too_large'}))
+    print(json.dumps({'ok': False, 'error': 'changed'}))
 except FileNotFoundError:
     destination.unlink(missing_ok=True)
     print(json.dumps({'ok': False, 'error': 'not_found'}))

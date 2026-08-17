@@ -4,20 +4,21 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import StreamingResponse
 
 from ..utils.sandbox import create_sandbox
 from ..utils.sandbox_downloads import (
     InvalidSandboxDownloadToken,
     SandboxDownloadError,
     SandboxDownloadFileNotFound,
-    SandboxDownloadFileTooLarge,
     decode_sandbox_download_token,
-    download_sandbox_file,
+    inspect_sandbox_file,
+    stream_sandbox_file_chunks,
 )
 from .oauth import require_session
 from .thread_api import get_dashboard_terminal_sandbox
@@ -35,7 +36,7 @@ _SESSION_DEP = Depends(require_session)
 async def download_sandbox_file_route(
     token: str,
     session: dict[str, Any] = _SESSION_DEP,
-) -> Response:
+) -> StreamingResponse:
     try:
         claims = decode_sandbox_download_token(token)
     except InvalidSandboxDownloadToken as exc:
@@ -53,11 +54,9 @@ async def download_sandbox_file_route(
         raise HTTPException(404, "sandbox download is no longer available")
     try:
         backend = await create_sandbox(sandbox_id)
-        info, content = await download_sandbox_file(backend, claims.file_path)
+        info = await inspect_sandbox_file(backend, claims.file_path)
     except SandboxDownloadFileNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
-    except SandboxDownloadFileTooLarge as exc:
-        raise HTTPException(413, str(exc)) from exc
     except SandboxDownloadError as exc:
         raise HTTPException(502, str(exc)) from exc
     except Exception as exc:
@@ -72,12 +71,34 @@ async def download_sandbox_file_route(
     if current_sandbox_id != claims.sandbox_id:
         raise HTTPException(404, "sandbox download is no longer available")
 
+    async def guarded_stream() -> AsyncIterator[bytes]:
+        yielded = False
+        async for chunk in stream_sandbox_file_chunks(backend, info):
+            current_sandbox_id, _ = await get_dashboard_terminal_sandbox(
+                claims.thread_id,
+                session["sub"],
+                email=session.get("email"),
+            )
+            if current_sandbox_id != claims.sandbox_id:
+                raise SandboxDownloadError("sandbox download is no longer available")
+            yielded = True
+            yield chunk
+        if not yielded:
+            current_sandbox_id, _ = await get_dashboard_terminal_sandbox(
+                claims.thread_id,
+                session["sub"],
+                email=session.get("email"),
+            )
+            if current_sandbox_id != claims.sandbox_id:
+                raise SandboxDownloadError("sandbox download is no longer available")
+
     media_type = mimetypes.guess_type(info.filename)[0] or "application/octet-stream"
-    return Response(
-        content=content,
+    return StreamingResponse(
+        content=guarded_stream(),
         media_type=media_type,
         headers={
             "Content-Disposition": _content_disposition(info.filename),
+            "Content-Length": str(info.size),
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
         },
