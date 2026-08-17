@@ -52,7 +52,7 @@ async function queuedCount(
 }
 
 test.describe("Slack busy-thread interrupt debounce", () => {
-  test("untagged follow-ups on a busy thread coalesce onto the queue", async ({
+  test("untagged follow-ups on a busy thread interrupt with their own run", async ({
     request,
   }) => {
     await request.post("/control/reset");
@@ -84,29 +84,15 @@ test.describe("Slack busy-thread interrupt debounce", () => {
       .poll(() => threadStatus(request, threadId), { timeout: 30_000 })
       .toBe("busy");
 
-    // 3. First UNTAGGED follow-up while busy → parked on the queue, no interrupt.
-    const b = await send(request, {
+    const followUp = await send(request, {
       text: "also rename it to hello()",
       mention_bot: false,
       thread_ts: threadTs,
     });
-    expect(b.webhook.status).toBe("accepted");
+    expect(followUp.webhook.status).toBe("accepted");
     await expect
-      .poll(() => queuedCount(request, threadId), { timeout: 30_000 })
-      .toBe(1);
-
-    // 4. Second UNTAGGED follow-up while still busy → coalesced onto the queue.
-    const c = await send(request, {
-      text: "and add a type hint",
-      mention_bot: false,
-      thread_ts: threadTs,
-    });
-    expect(c.webhook.status).toBe("accepted");
-    await expect
-      .poll(() => queuedCount(request, threadId), { timeout: 30_000 })
-      .toBe(2);
-
-    // The run is still busy — the untagged follow-ups did not interrupt it.
-    expect(await threadStatus(request, threadId)).toBe("busy");
+      .poll(() => threadStatus(request, threadId), { timeout: 30_000 })
+      .not.toBe("busy");
+    expect(await queuedCount(request, threadId)).toBe(0);
   });
 });

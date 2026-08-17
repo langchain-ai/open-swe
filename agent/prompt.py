@@ -426,8 +426,8 @@ def _render_user_instructions_section(instructions: str | None) -> str:
     return (
         "---\n\n"
         "### Your Custom Instructions (user-level)\n\n"
-        "The triggering user configured the following standing instructions for "
-        "you. Treat them as mandatory rules with the same authority as this "
+        "The following standing instructions are configured for this thread. "
+        "Treat them as mandatory rules with the same authority as this "
         "system prompt: they override default behavior, but repository-specific "
         "custom instructions and `AGENTS.md` win when they conflict. The user "
         "edits them in the dashboard Profile tab; when they explicitly ask you to "
