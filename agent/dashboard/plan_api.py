@@ -249,7 +249,11 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
             text = "The plan has been approved. Implement it now as described in the plan."
         if feedback:
             text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
-        run = await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
+        try:
+            run = await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
+        except Exception:
+            await set_plan_status(thread_id, PLAN_STATUS_READY, plan_mode=True)
+            raise
         await _maybe_post_plan_approved_to_slack(
             metadata,
             thread_id=thread_id,

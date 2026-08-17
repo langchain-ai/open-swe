@@ -879,6 +879,60 @@ async def test_concurrent_plan_approvals_dispatch_once(monkeypatch: pytest.Monke
     assert results[1] == {"status": "approved", "already_approved": True}
 
 
+async def test_failed_approval_dispatch_rolls_back_and_can_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.dashboard import plan_api
+
+    state = {"source": "dashboard", "plan_mode": True, "plan_status": "ready"}
+    status_updates: list[tuple[str, Any]] = []
+    dispatch_attempts = 0
+
+    async def fake_meta(thread_id: str) -> dict[str, Any]:
+        return dict(state)
+
+    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
+        return {"markdown": "# Plan", "status": state["plan_status"]}
+
+    async def fake_list(thread_id: str, *, raise_on_error: bool = False) -> list[dict[str, Any]]:
+        return []
+
+    async def fake_set_status(
+        thread_id: str,
+        status: str,
+        *,
+        plan_mode: Any = None,
+        approved_by: Any = None,
+    ) -> None:
+        status_updates.append((status, plan_mode))
+        state.update(plan_mode=plan_mode, plan_status=status)
+
+    async def fake_dispatch(
+        thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
+    ) -> dict[str, Any]:
+        nonlocal dispatch_attempts
+        dispatch_attempts += 1
+        if dispatch_attempts == 1:
+            raise RuntimeError("dispatch unavailable")
+        return {"run_id": "run-2"}
+
+    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
+    monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
+    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
+    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+    monkeypatch.setattr(plan_api, "_maybe_post_plan_approved_to_slack", AsyncMock())
+
+    approver = {"id": "reviewer", "name": "Reviewer", "source": "dashboard"}
+    with pytest.raises(RuntimeError, match="dispatch unavailable"):
+        await plan_api.approve_plan_for_thread("t1", approver=approver)
+
+    assert status_updates == [("approved", False), ("ready", True)]
+    result = await plan_api.approve_plan_for_thread("t1", approver=approver)
+    assert result == {"status": "approved", "run_id": "run-2"}
+    assert dispatch_attempts == 2
+
+
 async def test_approve_plan_posts_slack_approval_notice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
