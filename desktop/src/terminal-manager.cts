@@ -24,7 +24,7 @@ const MISSING_EXECUTABLE = ["posix_spawnp failed", "enoent", "not found", "file 
 let configuredManager = null
 let shellEnv = null
 
-function ensurePtySpawnHelperExecutable(options = {}) {
+function ensurePtySpawnHelperExecutable(options: any = {}) {
   const platform = options.platform || process.platform
   if (platform === "win32") return
   try {
@@ -93,7 +93,7 @@ function runShell(shell, args, options, input) {
   })
 }
 
-async function getProjectShellEnv(options = {}) {
+async function getProjectShellEnv(options: any = {}) {
   const baseEnv = options.env || process.env
   const run = options.run || runShell
   const shell = baseEnv.SHELL || "/bin/zsh"
@@ -220,7 +220,7 @@ function shouldExcludeEnv(key) {
 }
 
 function spawnEnv(baseEnv, runtimeEnv, cwd, shell) {
-  const result = {}
+  const result: Record<string, string> = {}
   for (const [key, value] of Object.entries(baseEnv)) {
     if (typeof value === "string" && !shouldExcludeEnv(key)) result[key] = value
   }
@@ -365,8 +365,8 @@ function createTerminalManager(options) {
   const killGraceMs = options.killGraceMs ?? KILL_GRACE_MS
   const maxSessions = options.maxSessions || MAX_SESSIONS
   const sessions = new Map()
-  const listeners = new Set()
-  const metadataListeners = new Set()
+  const listeners = new Set<(event: any) => void>()
+  const metadataListeners = new Set<(event: any) => void>()
   const locks = new Map()
   let shuttingDown = false
 
@@ -468,7 +468,7 @@ function createTerminalManager(options) {
     return value
   }
 
-  function emit(session, type, detail = {}) {
+  function emit(session, type, detail: any = {}) {
     session.sequence += 1
     session.updatedAt = new Date().toISOString()
     const event = {

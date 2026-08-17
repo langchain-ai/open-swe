@@ -6,10 +6,16 @@ import { countLineChanges } from "@/features/agents/utils/diffStats"
 
 interface DiffViewProps {
   diffData: DiffData
+  snippet?: boolean
 }
 
-export function DiffView({ diffData }: DiffViewProps) {
+export function DiffView({ diffData, snippet = false }: DiffViewProps) {
   const diffOptions = useDiffOptions()
+  const options = useMemo(
+    () =>
+      snippet ? { ...diffOptions, disableLineNumbers: true } : diffOptions,
+    [diffOptions, snippet]
+  )
   const { originalContent, newContent, filePath, isBinary } = diffData
   const displayPath = filePath.split("/").pop() || filePath
   const stats = useMemo(
@@ -35,7 +41,7 @@ export function DiffView({ diffData }: DiffViewProps) {
     <div className="mt-2 font-mono text-xs">
       <div className="mb-1 flex items-center gap-2 text-gray-500">
         <span className="text-gray-400">{displayPath}</span>
-        {diffData.isNewFile && <span>(new)</span>}
+        {diffData.isNewFile && !snippet && <span>(new)</span>}
         <span className="text-green-400">+{stats.additions}</span>
         <span className="text-red-400">-{stats.deletions}</span>
       </div>
@@ -43,7 +49,7 @@ export function DiffView({ diffData }: DiffViewProps) {
         <MultiFileDiff
           oldFile={{ name: displayPath, contents: originalContent ?? "" }}
           newFile={{ name: displayPath, contents: newContent }}
-          options={diffOptions}
+          options={options}
         />
       </div>
     </div>
