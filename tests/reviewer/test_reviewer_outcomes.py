@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any, cast
 
 from agent.review.findings import Finding
@@ -66,7 +64,7 @@ class _FakeClient:
         self.updated: list[dict[str, Any]] = []
         self.conflict_once = False
 
-    async def __aenter__(self) -> _FakeClient:
+    async def __aenter__(self) -> "_FakeClient":
         return self
 
     async def __aexit__(self, *exc: Any) -> None:

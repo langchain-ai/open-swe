@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import shlex
 from typing import cast
 

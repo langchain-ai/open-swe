@@ -7,8 +7,6 @@ is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction a
 `PatchToolCallsMiddleware` that `create_deep_agent` adds covers it.
 """
 
-from __future__ import annotations
-
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,7 +20,7 @@ from agent.utils.sandbox_state import SandboxBackendProxy, clear_sandbox_backend
 
 
 class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> _DummyAgent:
+    def with_config(self, config: RunnableConfig) -> "_DummyAgent":
         self.config = config
         return self
 

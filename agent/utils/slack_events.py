@@ -1,7 +1,5 @@
 """Deduplication of Slack Event API deliveries."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os

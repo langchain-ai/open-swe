@@ -1,7 +1,5 @@
 """Tools for managing the triggering user's skills."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from langgraph.config import get_config

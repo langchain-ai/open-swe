@@ -11,8 +11,6 @@ which uploads the Dockerfile context to a throwaway LangSmith builder sandbox,
 runs BuildKit there, and captures the result. Nothing is executed on the host.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 import tempfile

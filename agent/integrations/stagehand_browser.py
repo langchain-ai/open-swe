@@ -28,8 +28,6 @@ run config) and reused across tool calls, so ``navigate`` → ``act`` → ``extr
 operate on the same live page. Always finish with ``browser_close``.
 """
 
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import inspect

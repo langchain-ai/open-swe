@@ -1,7 +1,5 @@
 """Dashboard-managed recurring agent schedules."""
 
-from __future__ import annotations
-
 import logging
 import re
 import uuid

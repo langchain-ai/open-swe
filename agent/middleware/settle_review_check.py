@@ -7,8 +7,6 @@ would hang "in progress" on the PR forever. This hook closes it as neutral —
 the review not completing is reviewer infrastructure failing, not the PR.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

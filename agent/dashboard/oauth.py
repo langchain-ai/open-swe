@@ -1,7 +1,5 @@
 """GitHub App OAuth code-exchange and signed-JWT session cookie."""
 
-from __future__ import annotations
-
 import base64
 import hashlib
 import hmac

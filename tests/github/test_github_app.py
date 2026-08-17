@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -29,7 +27,7 @@ class _FakeAsyncClient:
     def __init__(self, **kwargs: Any) -> None:
         pass
 
-    async def __aenter__(self) -> _FakeAsyncClient:
+    async def __aenter__(self) -> "_FakeAsyncClient":
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
@@ -87,7 +85,7 @@ class _CountingClient:
     def __init__(self, **kwargs: Any) -> None:
         pass
 
-    async def __aenter__(self) -> _CountingClient:
+    async def __aenter__(self) -> "_CountingClient":
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:

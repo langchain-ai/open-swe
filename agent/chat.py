@@ -14,8 +14,6 @@ GitHub-backed tools never receive a user credential.
 """
 # ruff: noqa: E402
 
-from __future__ import annotations
-
 import logging
 import warnings
 from typing import Any, cast

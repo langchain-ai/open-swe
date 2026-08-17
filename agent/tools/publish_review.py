@@ -1,7 +1,5 @@
 """Tool: ``publish_review``. Post the findings list to GitHub as a PR Review."""
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Annotated, Any
 

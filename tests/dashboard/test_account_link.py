@@ -1,7 +1,5 @@
 """Tests for the Slack account-link prompt."""
 
-from __future__ import annotations
-
 from typing import TypedDict
 
 import pytest

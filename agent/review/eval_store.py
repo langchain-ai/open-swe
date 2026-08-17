@@ -6,8 +6,6 @@ dashboard. Both ``agent.dashboard.eval_jobs`` (reader) and
 ``evals.reviewer.store_reporter`` (writer) import from here.
 """
 
-from __future__ import annotations
-
 import re
 
 EVALS_NAMESPACE: list[str] = ["evals"]
