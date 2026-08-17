@@ -1441,9 +1441,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
     }
     skill_sources = [ORGANIZATION_SKILLS_ROUTE]
-    if settings_login:
+    if profile_login:
         skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
-            StoreBackend(namespace=lambda _runtime, login=settings_login: (SKILLS_NAMESPACE, login))
+            StoreBackend(namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login))
         )
         skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
