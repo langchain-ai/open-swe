@@ -145,6 +145,7 @@ from .tools import (
     save_user_skill,
     schedule_thread_wakeup,
     slack_add_reaction,
+    slack_move_thread,
     slack_read_thread_messages,
     slack_start_new_thread,
     slack_thread_reply,
@@ -617,6 +618,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
+        "slack_move_thread",
         "slack_start_new_thread",
         "linear_create_issue",
         "linear_update_issue",
@@ -1386,6 +1388,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     slack_tools = [
         slack_add_reaction,
+        slack_move_thread,
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,
@@ -1416,6 +1419,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         report_platform_issue,
         schedule_thread_wakeup,
         slack_add_reaction,
+        slack_move_thread,
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,

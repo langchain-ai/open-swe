@@ -34,7 +34,7 @@ async def test_slack_processing_error_posts_dashboard_link(
 
     monkeypatch.setattr(slack_webhook, "_process_slack_mention_impl", fail_processing)
     monkeypatch.setattr(
-        slack_webhook.common, "generate_thread_id_from_slack_thread", lambda *_: "t1"
+        slack_webhook.common, "lookup_slack_thread_id", AsyncMock(return_value="t1")
     )
     monkeypatch.setattr(
         slack_webhook.common, "strip_bot_mention", lambda text, *_args, **_kwargs: text

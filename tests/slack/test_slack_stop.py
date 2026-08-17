@@ -5,7 +5,6 @@ import pytest
 
 from agent.utils import slack_stop
 from agent.utils.slack_stop import process_slack_stop_reaction
-from agent.utils.thread_ids import generate_thread_id_from_slack_thread
 
 
 class FakeStore:
@@ -80,7 +79,10 @@ def _event(message_ts: str, *, user_id: str = "UOTHER") -> dict[str, Any]:
 
 
 def _add_thread(client: FakeClient, thread_ts: str = "1.000") -> str:
-    thread_id = generate_thread_id_from_slack_thread("C123", thread_ts)
+    thread_id = f"thread-{thread_ts}"
+    client.store.items[(("slack_thread_map", "C123"), thread_ts)] = {
+        "value": {"thread_id": thread_id, "channel_id": "C123", "thread_ts": thread_ts}
+    }
     client.threads.values[thread_id] = {
         "thread_id": thread_id,
         "metadata": {

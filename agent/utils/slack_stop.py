@@ -11,9 +11,8 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.dispatch import dispatch_agent_run
 
-from .slack import lookup_slack_run_mapping, store_slack_run_mapping
+from .slack import lookup_slack_run_mapping, lookup_slack_thread_id, store_slack_run_mapping
 from .slack_events import claim_slack_event
-from .thread_ids import generate_thread_id_from_slack_thread
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +62,9 @@ async def _resolve_stop_target(
             return None
         thread_ts = mapped_thread_ts
 
-    thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
+    thread_id = await lookup_slack_thread_id(client, channel_id, thread_ts)
+    if not thread_id:
+        return None
     try:
         thread = await client.threads.get(thread_id)
     except Exception:  # noqa: BLE001

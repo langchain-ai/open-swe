@@ -189,7 +189,14 @@ async def _slack_user_can_reply_to_ready_plan(
         return False
     from agent.dashboard.plan_api import _thread_metadata
 
-    thread_id = common.generate_thread_id_from_slack_thread(channel_id, thread_ts)
+    try:
+        thread_id = await common.lookup_slack_thread_id(
+            common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+        )
+    except Exception:  # noqa: BLE001
+        return False
+    if not thread_id:
+        return False
     try:
         metadata = await _thread_metadata(thread_id)
     except Exception:  # noqa: BLE001
@@ -296,7 +303,16 @@ async def _notify_slack_processing_error(
     if not channel_id or not thread_ts:
         return
 
-    thread_id = common.generate_thread_id_from_slack_thread(channel_id, thread_ts)
+    thread_id = event_data.get("thread_id")
+    if not isinstance(thread_id, str) or not thread_id:
+        try:
+            thread_id = await common.lookup_slack_thread_id(
+                common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+            )
+        except Exception:  # noqa: BLE001
+            thread_id = None
+    if not thread_id:
+        return
     try:
         clean_text = (
             common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
@@ -340,7 +356,9 @@ async def _notify_slack_processing_error(
     if dashboard_url:
         message += f" You can view the error in <{dashboard_url}|Open SWE Web>."
     try:
-        await common.post_slack_thread_reply(channel_id, thread_ts, message)
+        await common.post_slack_thread_reply(
+            channel_id, thread_ts, message, agent_thread_id=thread_id
+        )
     except Exception:  # noqa: BLE001
         common.logger.warning(
             "Could not post Slack error notification for thread %s", thread_id, exc_info=True
@@ -373,7 +391,10 @@ async def _process_slack_mention_impl(
         )
         return
 
-    thread_id = common.generate_thread_id_from_slack_thread(channel_id, thread_ts)
+    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    thread_id = event_data.get("thread_id")
+    if not isinstance(thread_id, str) or not thread_id:
+        thread_id = await common.resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
 
     # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
     try:
@@ -576,7 +597,12 @@ async def _process_slack_mention_impl(
         )
         if user_id:
             await common._post_account_link_prompt(
-                channel_id, thread_ts, user_id, user_email, reason=reason
+                channel_id,
+                thread_ts,
+                user_id,
+                user_email,
+                reason=reason,
+                agent_thread_id=thread_id,
             )
         return
 
@@ -619,6 +645,7 @@ async def _process_slack_mention_impl(
     if thread_plan_mode is not None:
         configurable["plan_mode"] = thread_plan_mode
 
+    is_first_mention = not await common._thread_exists(thread_id)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     await common._upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
     # Pass the login resolved above (from the stable Slack user id) so the thread is
