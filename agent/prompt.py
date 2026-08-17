@@ -50,7 +50,7 @@ def _load_default_prompt() -> str:
 # Static, run-invariant guidance for the main agent. The per-thread,
 # main-agent-specific prompt (working dir, repo setup, PR workflow,
 # source-channel reply) is layered in front of this via `construct_system_prompt`.
-OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on LangGraph and Deep Agents, operating in a remote, git-backed Linux sandbox invoked from the dashboard or an external integration.
+OPEN_SWE_SHARED_BASE = """You are **Jarvis**, an open-source agent built on LangGraph and Deep Agents, operating in a remote, git-backed Linux sandbox invoked from Slack, Linear, or GitHub.
 
 ### Core Behavior
 
@@ -222,7 +222,7 @@ SELF_AWARENESS_SECTION = """---
 
 ### About You
 
-Your own source code lives at `langchain-ai/open-swe` on GitHub. Only when the user is clearly talking about *yourself* — modifying "yourself", "your code", "your prompt", "your behavior", "the open-swe repo", or "open-swe" — should you target `langchain-ai/open-swe`. For every other request (one naming a different repo, or naming none and not about you), defer to the default-repository guidance in the Custom Instructions below."""
+Your own source code lives at `aeteq/open-swe` on GitHub. Only when the user is clearly talking about *yourself* — modifying "yourself", "your code", "your prompt", "your behavior", "the open-swe repo", or "open-swe" — should you target `aeteq/open-swe`. For every other request (one naming a different repo, or naming none and not about you), defer to the default-repository guidance in the Custom Instructions below."""
 
 
 REPO_SETUP_SECTION = """---
@@ -339,7 +339,7 @@ This run was triggered by **{display_name}**. You author the work **as them** �
   {bot_coauthor_trailer}
   ```
 
-- **PR body**: append this line at the bottom of the PR description (blank line before it) when you open/update the draft PR; don't duplicate it if present. If the body already has a `Made by [Open SWE]` footer pointing at a different link, or a legacy footer like `_Opened collaboratively by {display_name} and open-swe._`, replace that existing footer with this line instead of appending a second footer:
+- **PR body**: append this line at the bottom of the PR description (blank line before it) when you open/update the draft PR; don't duplicate it if present. If the body already has a `Made by [Jarvis]` footer pointing at a different link, or a legacy footer like `_Opened collaboratively by {display_name} and jarvis-aeteq._`, replace that existing footer with this line instead of appending a second footer:
 
   ```
   {pr_attribution_footer}

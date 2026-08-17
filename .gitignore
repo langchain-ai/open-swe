@@ -23,7 +23,6 @@
 
 # misc
 .DS_Store
-.vscode/
 *.pem
 *.key
 *.crt

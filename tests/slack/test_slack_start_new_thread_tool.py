@@ -166,9 +166,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         "dashboard_url": f"https://dashboard.example/agents/{expected_thread_id}",
     }
     assert captured["top_level_post"]["channel_id"] == "C1"
-    assert captured["top_level_post"]["text"] == (
-        "*Open SWE breakout thread:* Investigate follow-up"
-    )
+    assert captured["top_level_post"]["text"] == ("*Jarvis breakout thread:* Investigate follow-up")
     assert captured["top_level_post"]["unfurl_links"] is False
     assert captured["thread_reply"] == {
         "channel_id": "C1",
@@ -205,7 +203,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     assert dispatch["configurable"]["github_login"] == "alice"
     assert dispatch["configurable"]["agent_model_id"] == "anthropic:claude-sonnet-4-5"
     assert "Breakout Instructions" in dispatch["content"]
-    assert "## Open SWE Links" in dispatch["content"]
+    assert "## Jarvis Links" in dispatch["content"]
     assert f"- Web: https://dashboard.example/agents/{expected_thread_id}" in dispatch["content"]
     assert "- Trace: https://smith/x" in dispatch["content"]
     assert "do not duplicate it manually" in dispatch["content"]

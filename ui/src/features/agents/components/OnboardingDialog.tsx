@@ -104,7 +104,7 @@ export function OnboardingDialog() {
                 Choose your default model
               </Dialog.Title>
               <Dialog.Description className="text-xs text-muted-foreground">
-                Pick the model Open SWE uses when you don't specify one. You can
+                Pick the model Jarvis uses when you don't specify one. You can
                 change this anytime in your settings.
               </Dialog.Description>
               <div className="flex flex-col gap-3">
@@ -176,7 +176,7 @@ export function OnboardingDialog() {
                 </Dialog.Title>
               </div>
               <Dialog.Description className="text-xs text-muted-foreground">
-                Connect Slack so that when you tag Open SWE, it can resolve your
+                Connect Slack so that when you tag Jarvis, it can resolve your
                 GitHub account. We use the email Slack verifies, which also lets
                 Linear mentions resolve to you.
               </Dialog.Description>
