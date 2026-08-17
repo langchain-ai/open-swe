@@ -12,7 +12,7 @@ const {
   parsePullRequest,
   readDiff,
   repoRoot,
-} = require("../src/git-diff.cjs")
+} = require("../build/git-diff.cjs")
 
 function git(cwd, args) {
   execFileSync("git", args, { cwd, stdio: "ignore" })

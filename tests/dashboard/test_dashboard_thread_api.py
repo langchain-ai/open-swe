@@ -576,9 +576,12 @@ async def test_proxy_commands_lazily_creates_missing_thread_only_for_run_start(
 
 
 async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch) -> None:
+    updates: list[dict[str, object]] = []
+
     class FakeThreads:
         async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
-            pass
+            assert thread_id == "tid"
+            updates.append(metadata)
 
     class FakeClient:
         threads = FakeThreads()
@@ -606,13 +609,18 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
         "tid",
         "teammate",
         command,
-        metadata={"source": "dashboard", "github_login": "owner"},
+        metadata={
+            "source": "dashboard",
+            "github_login": "owner",
+            "participant_logins": ["owner"],
+        },
         email="teammate@example.com",
     )
 
     # A non-owner's message is forwarded but tagged with their login.
     last = enriched["params"]["input"]["messages"][-1]
     assert last["content"] == "@teammate: fix the bug"
+    assert updates[-1]["participant_logins"] == ["owner", "teammate"]
 
 
 async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkeypatch) -> None:

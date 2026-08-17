@@ -16,6 +16,7 @@ from ..dispatch import create_durable_run
 from ..utils.slack import post_slack_top_level_message_with_ts, store_slack_run_mapping
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
 from ..utils.thread_ops import langgraph_client
+from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
 from .options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -496,6 +497,7 @@ def _agent_run_metadata(
         "schedule_name": record.get("name"),
         "schedule_test": test_run,
         "github_login": record.get("created_by"),
+        PARTICIPANT_LOGINS_KEY: [record["created_by"]] if record.get("created_by") else [],
         "triggering_user_email": record.get("user_email"),
         "title": f"{title_prefix}: {record.get('name') or 'Agent'}",
         "base_branch": record.get("base_branch") or "main",

@@ -16,7 +16,7 @@ const {
   resolveAppRuntime,
   staticFilePath,
   validateBackendUrl,
-} = require("../src/config.cjs")
+} = require("../build/config.cjs")
 
 test("uses the local backend for development", () => {
   assert.equal(
