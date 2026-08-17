@@ -1,7 +1,5 @@
 """Tests for subdirectory AGENTS.md auto-loading on read_file."""
 
-from __future__ import annotations
-
 from types import SimpleNamespace
 from typing import Any
 

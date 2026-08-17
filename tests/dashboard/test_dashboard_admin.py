@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pytest
 
 from agent.dashboard.admin import is_admin, is_observability_authorized

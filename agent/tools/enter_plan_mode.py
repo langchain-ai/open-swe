@@ -1,7 +1,5 @@
 """Tool: ``enter_plan_mode``. Switch the run into read-only planning."""
 
-from __future__ import annotations
-
 import logging
 from typing import Annotated, Any
 

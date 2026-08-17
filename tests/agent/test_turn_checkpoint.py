@@ -1,7 +1,5 @@
 """Turn checkpoints: git plumbing output parsing and checkpoint bookkeeping."""
 
-from __future__ import annotations
-
 import base64
 import subprocess
 from types import SimpleNamespace

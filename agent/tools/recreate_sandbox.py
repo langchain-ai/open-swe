@@ -1,7 +1,5 @@
 """Tool for explicitly rebinding the current thread to a fresh sandbox."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

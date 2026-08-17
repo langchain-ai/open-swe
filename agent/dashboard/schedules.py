@@ -1,7 +1,5 @@
 """Dashboard-managed recurring agent schedules."""
 
-from __future__ import annotations
-
 import logging
 import re
 import uuid
@@ -496,6 +494,9 @@ def _agent_run_metadata(
     title_prefix = "Test" if test_run else "Scheduled"
     metadata: dict[str, Any] = {
         "source": "schedule",
+        "origin": "schedule",
+        "thread_category": "automation",
+        "trigger_kind": "schedule_test" if test_run else "schedule",
         "schedule_id": record["id"],
         "schedule_name": record.get("name"),
         "schedule_test": test_run,

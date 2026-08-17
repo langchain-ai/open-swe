@@ -10,8 +10,6 @@ Best-effort: any failure leaves the sandbox usable (the review still works off
 the fetched diff) and returns ``False`` so callers can skip skill wiring.
 """
 
-from __future__ import annotations
-
 import logging
 import posixpath
 import shlex

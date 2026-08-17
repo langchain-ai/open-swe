@@ -10,8 +10,6 @@ Nothing here touches agent logic — it only stands in for the SaaS boundaries
 and renders their state back as a user-facing UI.
 """
 
-from __future__ import annotations
-
 import hashlib
 import hmac
 import json

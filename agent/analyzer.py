@@ -10,8 +10,6 @@ on public repos even when the GitHub App is not installed on them.
 """
 # ruff: noqa: E402
 
-from __future__ import annotations
-
 import logging
 import os
 import warnings

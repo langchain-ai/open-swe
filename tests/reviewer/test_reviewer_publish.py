@@ -1,7 +1,5 @@
 """Unit tests for the publish_review rendering and orchestration helpers."""
 
-from __future__ import annotations
-
 from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch

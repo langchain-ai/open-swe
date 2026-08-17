@@ -1,7 +1,5 @@
 """Per-user third-party service credentials."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from dataclasses import dataclass

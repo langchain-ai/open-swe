@@ -8,8 +8,6 @@ Stored in its own namespace rather than on the ``["profiles"]`` record so
 agent-written updates and dashboard profile saves can't clobber each other.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime
 from typing import Any

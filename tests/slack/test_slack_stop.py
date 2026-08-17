@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -55,7 +54,7 @@ class FakeRuns:
         del thread_id
         return self.by_status[status][offset : offset + limit]
 
-    async def cancel_many(self, *, thread_id: str, run_ids: list[str], action: str) -> None:
+    async def cancel_many(self, *, thread_id: str, run_ids: Sequence[str], action: str) -> None:
         if self.fail_cancel:
             raise RuntimeError("cancel failed")
         self.cancelled.append({"thread_id": thread_id, "run_ids": run_ids, "action": action})

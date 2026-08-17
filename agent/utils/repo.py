@@ -1,7 +1,5 @@
 """Utilities for extracting repository configuration from text."""
 
-from __future__ import annotations
-
 import os
 import re
 

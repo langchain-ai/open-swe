@@ -1,7 +1,5 @@
 """FastAPI router for the dashboard backend."""
 
-from __future__ import annotations
-
 import asyncio
 import hmac
 import json
@@ -1936,6 +1934,7 @@ async def api_list_threads_sidebar(
     active_limit: int = 50,
     resolved_limit: int = 20,
     active_thread_id: str | None = None,
+    include_automations: bool = False,
     all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
@@ -1947,6 +1946,7 @@ async def api_list_threads_sidebar(
         active_limit=active_limit,
         resolved_limit=resolved_limit,
         active_thread_id=active_thread_id,
+        include_automations=include_automations,
         include_all=all,
     )
 

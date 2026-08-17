@@ -12,8 +12,6 @@ Resolves the deployment URL from ``--url`` or ``LANGGRAPH_URL`` / ``LANGGRAPH_UR
 and the API key from ``LANGGRAPH_API_KEY`` / ``LANGSMITH_API_KEY`` / ``LANGSMITH_API_KEY_PROD``.
 """
 
-from __future__ import annotations
-
 import argparse
 import asyncio
 import logging

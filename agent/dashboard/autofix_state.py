@@ -7,8 +7,6 @@ re-enabled with ``@open-swe autofix on``), mirroring Cursor's
 agent thread so a disable command is honored even before any fix run exists.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime
 

@@ -12,8 +12,6 @@ and the UI falls back to the folder/flat view. The grouping never blocks or
 breaks the review itself.
 """
 
-from __future__ import annotations
-
 import hashlib
 import logging
 from datetime import UTC, datetime

@@ -1,7 +1,5 @@
 """After-agent middleware that notifies users when the step limit is reached."""
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Mapping
 from typing import Any

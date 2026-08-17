@@ -5,8 +5,6 @@ the GitHub contents API. Repo coordinates and a read-only token come from the
 run config (seeded by the dashboard chat proxy).
 """
 
-from __future__ import annotations
-
 import base64
 from typing import Any
 

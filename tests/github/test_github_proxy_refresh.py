@@ -1,7 +1,5 @@
 """Tests for mid-run GitHub proxy token refresh."""
 
-from __future__ import annotations
-
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from typing import cast

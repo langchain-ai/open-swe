@@ -1,7 +1,5 @@
 """Auto-load applicable ``AGENTS.md`` files after file reads."""
 
-from __future__ import annotations
-
 import logging
 import posixpath
 from collections import defaultdict
