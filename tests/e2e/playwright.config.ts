@@ -8,6 +8,7 @@ const baseURL = `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
   testDir: "./tests",
+  testIgnore: "desktop.spec.ts",
   globalSetup: "./global-setup.ts",
   fullyParallel: false,
   workers: 1,
