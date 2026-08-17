@@ -43,6 +43,11 @@ async def slack_webhook(
 
     if event.get("type") == "reaction_added":
         reaction = event.get("reaction")
+        if reaction == "x":
+            background_tasks.add_task(
+                common.process_slack_stop_reaction, event, payload.get("event_id", "")
+            )
+            return {"status": "accepted", "message": "Stop reaction queued"}
         if reaction in common.FEEDBACK_REACTIONS:
             background_tasks.add_task(
                 common.process_slack_reaction_added, event, payload.get("event_id", "")
