@@ -22,6 +22,7 @@ async def test_omitted_draft_preference_preserves_existing_value() -> None:
         profile = await upsert_profile("octocat", "octocat@example.com", update)
 
     assert profile["draft_prs"] is False
+    assert put_item.await_args is not None
     assert put_item.await_args.args[2]["draft_prs"] is False
 
 
@@ -42,4 +43,5 @@ async def test_explicit_draft_preference_is_persisted() -> None:
         profile = await upsert_profile("octocat", "octocat@example.com", update)
 
     assert profile["draft_prs"] is True
+    assert put_item.await_args is not None
     assert put_item.await_args.args[2]["draft_prs"] is True

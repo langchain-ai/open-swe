@@ -1,4 +1,4 @@
-import { execSync, spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -17,12 +17,16 @@ export default async function globalSetup() {
 
   if (!existsSync(server) || process.env.E2E_FORCE_UI_BUILD) {
     if (!existsSync(resolve(ui, "node_modules"))) {
-      execSync("corepack pnpm install --frozen-lockfile --filter open-swe-dashboard...", {
-        cwd: repoRoot,
-        stdio: "inherit",
-      });
+      execFileSync(
+        "pnpm",
+        ["install", "--frozen-lockfile", "--filter", "open-swe-dashboard..."],
+        {
+          cwd: repoRoot,
+          stdio: "inherit",
+        },
+      );
     }
-    execSync("corepack pnpm --filter open-swe-dashboard run build", {
+    execFileSync("pnpm", ["--filter", "open-swe-dashboard", "run", "build"], {
       cwd: repoRoot,
       stdio: "inherit",
       env: {

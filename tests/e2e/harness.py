@@ -22,7 +22,7 @@ import uuid
 from html import escape
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -102,6 +102,20 @@ async def control_state() -> JSONResponse:
     )
 
 
+@app.get("/control/snapshots")
+async def control_snapshots() -> JSONResponse:
+    """Snapshot captures/deletes the environment tools asked the platform for."""
+    return JSONResponse({"captured": fakes.SNAPSHOTS, "deleted": fakes.DELETED_SNAPSHOTS})
+
+
+@app.get("/control/last-system-prompt")
+async def control_last_system_prompt() -> JSONResponse:
+    """The system prompt of the most recent model call (what the agent was told)."""
+    from fake_llm import LAST_SYSTEM_PROMPT
+
+    return JSONResponse({"text": LAST_SYSTEM_PROMPT["text"]})
+
+
 @app.post("/control/repo-private")
 async def control_repo_private(request: Request) -> JSONResponse:
     body = await request.json()
@@ -148,6 +162,21 @@ async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://harness") as client:
         return await client.post("/webhooks/slack", content=raw, headers=headers)
+
+
+async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx.Response:
+    raw = urlencode({"payload": json.dumps(payload)}).encode()
+    req_ts = str(int(time.time()))
+    base = f"v0:{req_ts}:{raw.decode()}".encode()
+    sig = "v0=" + hmac.new(SLACK_SIGNING_SECRET.encode(), base, hashlib.sha256).hexdigest()
+    headers = {
+        "X-Slack-Signature": sig,
+        "X-Slack-Request-Timestamp": req_ts,
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://harness") as client:
+        return await client.post("/webhooks/slack/interactivity", content=raw, headers=headers)
 
 
 def _slack_send_result(payload: dict[str, Any], resp: httpx.Response) -> JSONResponse:
@@ -235,6 +264,33 @@ async def slack_send(request: Request) -> JSONResponse:
     }
     LAST_SLACK_EVENT["payload"] = payload
     return _slack_send_result(payload, await _deliver_slack_event(payload))
+
+
+@app.post("/mock/slack/action")
+async def slack_action(request: Request) -> JSONResponse:
+    body = await request.json()
+    action = body.get("action")
+    channel_id = str(CURRENT_THREAD.get("channel") or "")
+    thread_ts = str(body.get("thread_ts") or CURRENT_THREAD.get("thread_ts") or "")
+    message_ts = str(body.get("message_ts") or "")
+    user_id = str(body.get("user") or TEST_USERS[0]["slack_id"])
+    if not isinstance(action, dict) or not channel_id or not thread_ts or not message_ts:
+        raise HTTPException(status_code=400, detail="Missing Slack action context")
+
+    payload = {
+        "type": "block_actions",
+        "user": {"id": user_id},
+        "channel": {"id": channel_id},
+        "container": {
+            "channel_id": channel_id,
+            "message_ts": message_ts,
+            "thread_ts": thread_ts,
+        },
+        "message": {"ts": message_ts, "thread_ts": thread_ts},
+        "actions": [{**action, "action_ts": fakes.next_slack_ts()}],
+    }
+    response = await _deliver_slack_interaction(payload)
+    return JSONResponse(response.json(), status_code=response.status_code)
 
 
 @app.post("/control/login")
@@ -480,6 +536,7 @@ async def slack_messages() -> JSONResponse:
                 "is_bot": m["is_bot"],
                 "ts": m["ts"],
                 "thread_ts": m["thread_ts"],
+                "blocks": m["blocks"],
             }
             for m in msgs
         ]

@@ -11,6 +11,7 @@ from agent.middleware.check_message_queue import (
     _build_blocks_from_payload,
     check_message_queue_before_model,
 )
+from agent.prompt import construct_system_prompt
 
 
 class _QueuedItem:
@@ -43,6 +44,9 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
         }
     )
 
+    slack_prompt = construct_system_prompt(
+        working_dir="/workspace", source="slack", slack_context=True
+    )
     with (
         patch(
             "agent.middleware.check_message_queue.get_config",
@@ -51,7 +55,11 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
         patch("agent.middleware.check_message_queue.get_store", return_value=store),
     ):
         result = await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, {"messages": []}), MagicMock()
+            cast(
+                LinearNotifyState,
+                {"messages": [], "rendered_system_prompt": slack_prompt},
+            ),
+            MagicMock(),
         )
 
     assert result is not None
@@ -60,6 +68,8 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
     assert DASHBOARD_HANDOFF_MARKER in message["content"][0]["text"]
     assert message["content"][1] == {"type": "text", "text": "continue in web"}
     assert result["plan_approval_blocked"] is True
+    assert "dashboard/Web UI" in result["rendered_system_prompt"]
+    assert "Make `slack_thread_reply` your first tool call" not in result["rendered_system_prompt"]
     assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
 
 

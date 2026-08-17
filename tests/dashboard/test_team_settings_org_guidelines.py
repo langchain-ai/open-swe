@@ -15,7 +15,7 @@ from agent.dashboard.team_settings import (
 )
 
 _AGENT_PAIR = ("anthropic:claude-opus-5", "high")
-_CHAT_PAIR = ("google_genai:gemini-3.6-flash", "low")
+_CHAT_PAIR = ("google_genai:gemini-3.7-flash", "low")
 
 
 def test_org_guidelines_blank_normalizes_to_none() -> None:

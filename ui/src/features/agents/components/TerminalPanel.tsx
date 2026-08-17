@@ -10,30 +10,33 @@ import {
 } from "lucide-react"
 
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
-import { cn } from "@/lib/utils"
+import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
 import { MAX_TERMINALS_PER_GROUP } from "@/features/agents/lib/terminalState"
+import { cn } from "@/lib/utils"
 import { useAttachedTerminal } from "@/features/agents/lib/terminalSession"
 import { GhosttyTerminalSurface } from "@/features/agents/terminal/ghostty/surface"
 
 interface TerminalPanelProps {
-  localSessionId: string
+  target: TerminalTarget
   cwd: string
   /** The terminal group this tab renders; splits live inside it. */
   groupId: string
   terminals: TerminalGroupsController
-  onOpenFile: (path: string) => void
-  onAddToChat: (text: string) => void
+  onOpenFile?: (path: string) => void
+  onAddToChat?: (text: string) => void
 }
 
 interface TerminalViewportProps {
-  localSessionId: string
+  target: TerminalTarget
   terminalId: string
   cwd: string
   active: boolean
   focusRequest: number
   onFocus: () => void
-  onOpenFile: (path: string) => void
-  onAddToChat: (text: string) => void
+  onOpenFile?: (path: string) => void
+  onAddToChat?: (text: string) => void
+  clearRequest: number
+  restartRequest: number
 }
 
 function terminalTheme() {
@@ -54,7 +57,7 @@ function terminalTheme() {
 }
 
 function TerminalViewport({
-  localSessionId,
+  target,
   terminalId,
   cwd,
   active,
@@ -62,20 +65,28 @@ function TerminalViewport({
   onFocus,
   onOpenFile,
   onAddToChat,
+  clearRequest,
+  restartRequest,
 }: TerminalViewportProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const surfaceRef = useRef<GhosttyTerminalSurface | null>(null)
   const previousRef = useRef({ buffer: "", version: 0 })
   const [error, setError] = useState<string | null>(null)
   const [selection, setSelection] = useState<string | null>(null)
-  const state = useAttachedTerminal(localSessionId, terminalId, cwd)
+  const targetId = target.kind === "local" ? target.sessionId : target.threadId
+  const state = useAttachedTerminal(
+    target,
+    terminalId,
+    cwd,
+    clearRequest,
+    restartRequest
+  )
   const latestStateRef = useRef(state)
   latestStateRef.current = state
 
   useEffect(() => {
     const mount = mountRef.current
-    const bridge = window.openSweDesktop?.terminal
-    if (!mount || !bridge) return
+    if (!mount) return
     let disposed = false
     let surface: GhosttyTerminalSurface | null = null
 
@@ -87,17 +98,15 @@ function TerminalViewport({
         size: 13,
       },
       onData: (data) => {
-        void bridge
-          .write({ localSessionId, terminalId, data })
+        void latestStateRef.current
+          .write(data)
           .catch((cause) =>
             setError(
               cause instanceof Error ? cause.message : "Terminal write failed"
             )
           )
       },
-      onResize: (cols, rows) => {
-        void bridge.resize({ localSessionId, terminalId, cols, rows })
-      },
+      onResize: (cols, rows) => latestStateRef.current.resize(cols, rows),
       onSelectionChange: () => {
         const text = surfaceRef.current?.getSelection().trim() ?? ""
         setSelection(text || null)
@@ -106,15 +115,16 @@ function TerminalViewport({
       beforeKey: () => true,
       onLinkActivate: (text, event) => {
         if (!(event.metaKey || event.ctrlKey)) return
-        const desktop = window.openSweDesktop
-        if (!desktop) return
         if (/^https?:\/\//i.test(text)) {
-          void desktop.openExternal(text)
+          if (target.kind === "local")
+            void window.openSweDesktop?.openExternal(text)
+          else window.open(text, "_blank", "noopener,noreferrer")
           return
         }
+        if (target.kind !== "local" || !onOpenFile) return
         const path = text.replace(/:\d+(?::\d+)?$/, "")
-        void desktop
-          .resolveAcpProjectPath({ localSessionId, path })
+        void window.openSweDesktop
+          ?.resolveAcpProjectPath({ localSessionId: target.sessionId, path })
           .then((relativePath) => {
             if (relativePath) onOpenFile(relativePath)
           })
@@ -160,7 +170,7 @@ function TerminalViewport({
       if (surfaceRef.current === surface) surfaceRef.current = null
       surface?.dispose()
     }
-  }, [cwd, localSessionId, terminalId])
+  }, [cwd, target.kind, targetId, terminalId])
 
   useEffect(() => {
     const surface = surfaceRef.current
@@ -188,20 +198,25 @@ function TerminalViewport({
       <div ref={mountRef} className="h-full w-full overflow-hidden" />
       {selection && (
         <div className="absolute right-2 bottom-2 z-10 flex overflow-hidden rounded-md border border-border bg-background shadow-sm">
-          <button
-            type="button"
-            className="flex items-center gap-1 px-2 py-1 text-[11px] hover:bg-accent"
-            onClick={() => {
-              onAddToChat(selection)
-              surfaceRef.current?.clearSelection()
-            }}
-          >
-            <Plus className="size-3" /> Add to chat
-          </button>
+          {onAddToChat && (
+            <button
+              type="button"
+              className="flex items-center gap-1 px-2 py-1 text-[11px] hover:bg-accent"
+              onClick={() => {
+                onAddToChat(selection)
+                surfaceRef.current?.clearSelection()
+              }}
+            >
+              <Plus className="size-3" /> Add to chat
+            </button>
+          )}
           <button
             type="button"
             aria-label="Copy selection"
-            className="border-l border-border p-1.5 hover:bg-accent"
+            className={cn(
+              "p-1.5 hover:bg-accent",
+              onAddToChat && "border-l border-border"
+            )}
             onClick={() => {
               void navigator.clipboard.writeText(selection)
               surfaceRef.current?.clearSelection()
@@ -246,7 +261,7 @@ function ActionButton({
 }
 
 export function TerminalPanel({
-  localSessionId,
+  target,
   cwd,
   groupId,
   terminals,
@@ -334,7 +349,7 @@ export function TerminalPanel({
             )}
           >
             <TerminalViewport
-              localSessionId={localSessionId}
+              target={target}
               terminalId={terminalId}
               cwd={terminals.metadataById.get(terminalId)?.cwd ?? cwd}
               active={activeTerminalId === terminalId}
@@ -345,6 +360,8 @@ export function TerminalPanel({
               }}
               onOpenFile={onOpenFile}
               onAddToChat={onAddToChat}
+              clearRequest={terminals.clearRequests.get(terminalId) ?? 0}
+              restartRequest={terminals.restartRequests.get(terminalId) ?? 0}
             />
           </div>
         ))}

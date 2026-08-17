@@ -103,6 +103,12 @@ export interface ThreadRecoveryPatch {
   filename: string
 }
 
+export interface CloudTerminalConnection {
+  url: string
+  protocol: string
+  ticket: string
+}
+
 export interface ThreadsPageParams {
   limit?: number
   offset?: number
@@ -349,6 +355,11 @@ export const agentsApi = {
   downloadThreadRecoveryPatch: (threadId: string) =>
     agentsBlobRequest(
       `/threads/${encodeURIComponent(threadId)}/recovery.patch`
+    ),
+  connectCloudTerminal: (threadId: string) =>
+    agentsRequest<CloudTerminalConnection>(
+      `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
+      { method: "POST" }
     ),
   streamUrl: (threadId: string) =>
     `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,

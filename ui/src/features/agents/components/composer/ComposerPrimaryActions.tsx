@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { LoaderCircle } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
@@ -25,6 +25,37 @@ export interface ComposerPrimaryActionsProps {
   activeRun?: ActiveRun
   /** Direct stop handler for non-LangGraph runtimes such as desktop ACP. */
   onStop?: () => void | Promise<void>
+  /** Set false while the composer owns Escape (an open command menu or model picker). */
+  stopOnEscape?: boolean
+}
+
+function useEscapeToStop(enabled: boolean, onStop: () => void) {
+  const onStopRef = useRef(onStop)
+  useEffect(() => {
+    onStopRef.current = onStop
+  })
+
+  useEffect(() => {
+    if (!enabled) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing)
+        return
+      // Escape belongs to whatever overlay is open and focused; only a bare
+      // Escape on the page reaches the run.
+      const target = event.target
+      if (
+        target instanceof Element &&
+        target.closest(
+          '[role="dialog"],[role="alertdialog"],[role="menu"],[role="listbox"]'
+        )
+      )
+        return
+      event.preventDefault()
+      onStopRef.current()
+    }
+    document.addEventListener("keydown", handleKeyDown)
+    return () => document.removeEventListener("keydown", handleKeyDown)
+  }, [enabled])
 }
 
 function SendIcon() {
@@ -75,11 +106,15 @@ function SendButton({
 
 function StopButton({
   disabled,
+  stopOnEscape = true,
   onStop,
 }: {
   disabled: boolean
+  stopOnEscape?: boolean
   onStop: () => void
 }) {
+  useEscapeToStop(stopOnEscape && !disabled, onStop)
+
   return (
     <button
       aria-label="Stop run"
@@ -90,7 +125,7 @@ function StopButton({
       )}
       disabled={disabled}
       onClick={onStop}
-      title="Stop run"
+      title="Stop run (Esc)"
       type="button"
     >
       {disabled ? (
@@ -152,7 +187,13 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
   if (!stream.isLoading && !props.activeRun?.running)
     return <SendButton {...props} />
 
-  return <StopButton disabled={stopping} onStop={() => void handleStop()} />
+  return (
+    <StopButton
+      disabled={stopping}
+      onStop={() => void handleStop()}
+      stopOnEscape={props.stopOnEscape}
+    />
+  )
 }
 
 function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
@@ -167,7 +208,13 @@ function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
       setStopping(false)
     }
   }
-  return <StopButton disabled={stopping} onStop={() => void stop()} />
+  return (
+    <StopButton
+      disabled={stopping}
+      onStop={() => void stop()}
+      stopOnEscape={props.stopOnEscape}
+    />
+  )
 }
 
 /** The composer's send button, which becomes a stop button while a run is live. */

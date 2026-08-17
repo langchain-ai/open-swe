@@ -91,6 +91,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
+export async function transcribeAudio(audio: Blob): Promise<string> {
+  const response = await request<{ text: string }>("/voice/transcriptions", {
+    method: "POST",
+    body: audio,
+    headers: { "Content-Type": audio.type },
+  })
+  return response.text
+}
+
 export interface PRTraceResolutionResult {
   resolved: boolean
   detail: string
@@ -164,8 +173,11 @@ export interface TeamSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
+  auto_approve_enabled: boolean
+  auto_approve_default_threshold: number
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
+  transcription_model?: string
   fable_enabled?: boolean
   review_tracing_project?: string | null
   org_guidelines?: string | null
@@ -182,6 +194,8 @@ export interface TeamSettings {
   default_grouping_reasoning_effort?: string | null
   default_chat_model?: string | null
   default_chat_reasoning_effort?: string | null
+  default_thread_title_model?: string | null
+  default_thread_title_reasoning_effort?: string | null
   updated_at?: string | null
 }
 
@@ -365,6 +379,11 @@ export interface SkillsPage {
   next_offset: number | null
 }
 
+export interface OrganizationSkillsPage {
+  items: Array<Skill>
+  next_cursor: string | null
+}
+
 export interface SandboxSettings {
   base_snapshot_id: string | null
   env_base_snapshot_id: string | null
@@ -396,6 +415,49 @@ export interface RepoSnapshot {
   created_by?: string
   created_at?: string
   updated_at?: string
+}
+
+export type EnvironmentSnapshotStatus =
+  "none" | "capturing" | "ready" | "failed"
+
+export interface Environment {
+  slug: string
+  name: string
+  prompt: string
+  repos: Array<string>
+  snapshot_id: string | null
+  snapshot_name: string | null
+  snapshot_status: EnvironmentSnapshotStatus
+  status_message: string | null
+  source_sandbox_id: string | null
+  last_captured_at: string | null
+  created_by?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EnvironmentList {
+  environments: Array<Environment>
+  /** Slug of the environment runs boot from — the one literally named "default". */
+  default_slug: string
+}
+
+export interface EnvironmentUpdateBody {
+  name?: string
+  prompt?: string
+  repos?: Array<string>
+}
+
+/** What a non-admin needs to pick an environment for a new thread. */
+export interface EnvironmentOption {
+  slug: string
+  name: string
+  has_snapshot: boolean
+}
+
+export interface EnvironmentOptionList {
+  environments: Array<EnvironmentOption>
+  default_slug: string
 }
 
 export interface RepoSnapshotUpdateBody {
@@ -483,6 +545,37 @@ export interface ReviewCounts {
   flags: number
 }
 
+export interface ReviewApprovalPolicy {
+  full_name: string
+  enabled: boolean
+  threshold: number | null
+  updated_at: string | null
+}
+
+export interface ReviewApprovalAssessment {
+  rubric_version: string
+  assessed_sha: string
+  raw_score: number | null
+  score: number | null
+  reasons: Array<string>
+  risks: Array<string>
+  valid: boolean
+  policy: {
+    team_enabled?: boolean
+    team_threshold?: number
+    repo_enabled?: boolean
+    repo_threshold?: number | null
+    effective_enabled?: boolean
+    effective_threshold?: number
+  }
+  decision: string
+  blockers: Array<string>
+  github_review_id: number | null
+  github_review_event: "COMMENT" | "APPROVE"
+  recorded_at: string
+  stale: boolean
+}
+
 export interface ReviewSummary {
   thread_id: string
   owner: string
@@ -497,6 +590,10 @@ export interface ReviewSummary {
   watch: boolean
   status: "running" | "error" | "idle"
   counts: ReviewCounts
+  approval_score: number | null
+  approval_decision: string | null
+  approval_event: "COMMENT" | "APPROVE" | null
+  approval_stale: boolean
   updated_at: string | null
   full_name?: string
 }
@@ -547,6 +644,7 @@ export interface ReviewDetail extends ReviewSummary {
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
+  approval_assessment: ReviewApprovalAssessment | null
   diff_groups: Array<ReviewDiffGroup>
   diff_groups_stale: boolean
 }
@@ -704,6 +802,24 @@ export const api = {
     request<void>(`/skills/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
+  listOrganizationSkills: (cursor: string | null = null) =>
+    request<OrganizationSkillsPage>(
+      `/organization-skills?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
+    ),
+  createOrganizationSkill: (name: string, body: SkillInput) =>
+    request<Skill>("/organization-skills", {
+      method: "POST",
+      body: JSON.stringify({ name, ...body }),
+    }),
+  saveOrganizationSkill: (name: string, body: SkillInput) =>
+    request<Skill>(`/organization-skills/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteOrganizationSkill: (name: string) =>
+    request<void>(`/organization-skills/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
   listAgentInstructions: () =>
     request<Array<AgentInstructions>>("/agent-instructions"),
   createAgentInstructions: (full_name: string) =>
@@ -759,11 +875,28 @@ export const api = {
     request<void>(`/repo-snapshots/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
+  listEnvironments: () => request<EnvironmentList>("/environments"),
+  listEnvironmentOptions: () =>
+    request<EnvironmentOptionList>("/environments/options"),
+  saveEnvironment: (slug: string, body: EnvironmentUpdateBody) =>
+    request<Environment>(`/environments/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteEnvironment: (slug: string) =>
+    request<void>(`/environments/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+    }),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   saveTeamSettings: (body: TeamSettings) =>
     request<TeamSettings>("/team-settings", {
       method: "PUT",
       body: JSON.stringify(body),
+    }),
+  saveTranscriptionModel: (transcription_model: string) =>
+    request<TeamSettings>("/team-settings/transcription", {
+      method: "PUT",
+      body: JSON.stringify({ transcription_model }),
     }),
   getTeamCredentials: () => request<TeamCredentialsStatus>("/team-credentials"),
   connectDatadog: (body: DatadogConnectBody) =>
@@ -818,6 +951,19 @@ export const api = {
     request<{ repos: Array<string> }>("/enabled-review-repos", {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
+    }),
+  listReviewApprovalPolicies: () =>
+    request<{ policies: Array<ReviewApprovalPolicy> }>(
+      "/review-approval-policies"
+    ),
+  setReviewApprovalPolicy: (
+    full_name: string,
+    enabled: boolean,
+    threshold: number | null
+  ) =>
+    request<{ policy: ReviewApprovalPolicy }>("/review-approval-policies", {
+      method: "PUT",
+      body: JSON.stringify({ full_name, enabled, threshold }),
     }),
   usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
     request<UsageLeaderboardPayload>(

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import { desktopAcpMessages } from "./desktopAcpMessages"
@@ -139,18 +139,39 @@ function mergeSummaries(
 
 export function useDesktopAcpSessions() {
   const [sessions, setSessions] = useState<Array<DesktopAcpSessionSummary>>([])
+  const deletedSessionIds = useRef(new Set<string>())
 
   useEffect(() => {
     const desktop = window.openSweDesktop
     if (!desktop) return
     const unsubscribe = desktop.onAcpEvent(({ session }) => {
+      if (deletedSessionIds.current.has(session.id)) return
       setSessions((current) => mergeSummaries(current, [session]))
     })
     void desktop.listAcpSessions().then((incoming) => {
-      setSessions((current) => mergeSummaries(current, incoming))
+      setSessions((current) =>
+        mergeSummaries(
+          current,
+          incoming.filter(
+            (session) => !deletedSessionIds.current.has(session.id)
+          )
+        )
+      )
     })
     return unsubscribe
   }, [])
 
-  return sessions
+  const deleteSession = useCallback(async (sessionId: string) => {
+    const deleted =
+      (await window.openSweDesktop?.deleteAcpSession(sessionId)) ?? false
+    if (deleted) {
+      deletedSessionIds.current.add(sessionId)
+      setSessions((current) =>
+        current.filter((session) => session.id !== sessionId)
+      )
+    }
+    return deleted
+  }, [])
+
+  return { sessions, deleteSession }
 }

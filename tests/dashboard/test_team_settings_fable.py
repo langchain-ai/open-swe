@@ -90,6 +90,8 @@ def test_disable_transition_coerces_all_fable_defaults() -> None:
         default_grouping_reasoning_effort="high",
         default_chat_model=_FABLE,
         default_chat_reasoning_effort="high",
+        default_thread_title_model=_FABLE,
+        default_thread_title_reasoning_effort="high",
     )
     for field in (
         "default_agent_model",
@@ -98,6 +100,7 @@ def test_disable_transition_coerces_all_fable_defaults() -> None:
         "default_reviewer_subagent_model",
         "default_grouping_model",
         "default_chat_model",
+        "default_thread_title_model",
     ):
         assert getattr(update, field) not in FABLE_MODEL_IDS, field
 

@@ -191,6 +191,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   // this thread. Those are also the paths a follow-up is most likely about.
   const mentionPaths = useMemo(() => editedPaths(baseMessages), [baseMessages])
   const isThinking = stream.isLoading
+  const displayRepo = thread.workingRepoFullName || thread.repoFullName
   const settingUpSandbox = isThinking && baseMessages.length === 0
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
   // Show a loading state during that one-time fetch instead of the empty state.
@@ -214,7 +215,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   return (
     <div className="flex min-w-0 flex-1">
       <div
-        className="flex min-w-0 flex-1 flex-col"
+        className={cn(
+          "flex min-w-0 flex-1 flex-col",
+          thread.adminThread && "bg-destructive/4"
+        )}
         style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
       >
         <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
@@ -225,11 +229,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               panelCollapsed && "pr-14"
             )}
           >
-            {thread.repoFullName && (
+            {displayRepo && (
               <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
                 <FolderOpen className="size-3.5 shrink-0" />
-                <span className="truncate" title={thread.repoFullName}>
-                  {thread.repoFullName}
+                <span className="truncate" title={displayRepo}>
+                  {displayRepo}
                 </span>
               </span>
             )}
@@ -345,17 +349,18 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   contextUsage={{
                     usedTokens,
                     contextWindow: activeModel?.context_window ?? null,
-                    hasMessages,
                   }}
                 />
               </div>
             </div>
           </div>
         ) : isHydrating ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            <p className="text-xs text-muted-foreground/70">
-              Loading conversation…
-            </p>
+          <div className="flex flex-1 items-center justify-center px-6">
+            <img
+              src="/logo-mark.png"
+              alt="Loading conversation"
+              className="size-12 animate-pulse"
+            />
           </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
@@ -395,7 +400,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 contextUsage={{
                   usedTokens,
                   contextWindow: activeModel?.context_window ?? null,
-                  hasMessages,
                 }}
               />
             </div>

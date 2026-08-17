@@ -99,6 +99,7 @@ from ..utils.multimodal import (
 from ..utils.repo import extract_repo_from_text
 from ..utils.slack import (
     GitHubPrRef,
+    _parse_ts,  # noqa: F401
     fetch_slack_thread_messages,  # noqa: F401
     format_slack_messages_for_prompt,  # noqa: F401
     get_slack_channel_context,
@@ -129,6 +130,7 @@ from ..utils.slack_feedback import (
 )
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
 from ..utils.thread_ops import queue_message_for_thread  # noqa: F401
+from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
 
 __all__ = [
     "Any",
@@ -168,6 +170,7 @@ __all__ = [
     "_get_or_resolve_thread_github_token",
     "_get_slack_channel_context",
     "_get_thread_metadata_safe",
+    "_get_thread_environment",
     "_get_thread_plan_mode",
     "_is_docs_plz_slack_channel",
     "_is_not_found_error",
@@ -734,6 +737,7 @@ async def upsert_agent_thread_owner_metadata(
     user_email: str = "",
     title: str = "",
     source_context: dict[str, Any] | None = None,
+    environment: str | None = None,
 ) -> None:
     """Persist owner/source metadata so the dashboard can surface non-dashboard threads.
 
@@ -749,6 +753,8 @@ async def upsert_agent_thread_owner_metadata(
         metadata["repo_name"] = repo_config["name"]
     if title:
         metadata["title"] = title[:80]
+    if environment:
+        metadata["environment"] = environment
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
@@ -763,6 +769,10 @@ async def upsert_agent_thread_owner_metadata(
         existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
     existing_context = existing_meta.get("source_context")
+    if github_login:
+        metadata[PARTICIPANT_LOGINS_KEY] = merge_participant_logins(
+            existing_meta.get(PARTICIPANT_LOGINS_KEY), github_login
+        )
     same_slack_owner = bool(
         isinstance(existing_context, dict)
         and isinstance(source_context, dict)
@@ -791,6 +801,8 @@ async def upsert_agent_thread_owner_metadata(
     if existing_meta.get("title") and "title" in metadata:
         # Preserve a title that was already chosen (first message wins).
         metadata.pop("title")
+    elif source == "slack" and "title" in metadata:
+        metadata["title_seed"] = metadata["title"]
 
     try:
         if existing is None:
@@ -956,6 +968,22 @@ async def _get_thread_plan_mode(thread_id: str) -> bool | None:
         return None
     value = metadata.get("plan_mode")
     return value if isinstance(value, bool) else None
+
+
+async def _get_thread_environment(thread_id: str) -> str | None:
+    """Return the environment slug persisted for a thread, or ``None`` if unset."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if not _is_not_found_error(exc):
+            logger.warning("Failed to fetch environment metadata for thread %s", thread_id)
+        return None
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get("environment")
+    return value.strip() or None if isinstance(value, str) else None
 
 
 async def _set_thread_plan_mode(thread_id: str, enabled: bool) -> None:

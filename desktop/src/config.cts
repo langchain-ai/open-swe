@@ -9,6 +9,9 @@ const DEVELOPMENT_APP_USER_MODEL_ID = "com.langchain.openswe.dev"
 const DEVELOPMENT_USER_DATA_DIRECTORY = "Open SWE Development"
 const DEFAULT_DEVELOPMENT_BACKEND_URL = "http://localhost:2024"
 const ALLOWED_PERMISSIONS = new Set(["clipboard-sanitized-write", "notifications"])
+const SESSION_COOKIE_NAME = "osw_session"
+const LOGIN_PATH = "/dashboard/api/auth/login"
+const DESKTOP_EXCHANGE_PATH = "/dashboard/api/auth/desktop/exchange"
 
 function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
   const isDevelopment = !isPackaged || argv.includes("--dev")
@@ -62,33 +65,38 @@ function isAppUrl(value) {
   }
 }
 
-function isTrustedPermissionRequest(permission, requestingUrl) {
-  return ALLOWED_PERMISSIONS.has(permission) && isAppUrl(requestingUrl)
-}
-
-function isTrustedProxyRequest(method, pageUrl, requestUrl) {
-  if (isAppUrl(pageUrl)) return true
-  if (method !== "GET" || !isGithubOAuthUrl(pageUrl)) return false
+function isAppLoginUrl(value) {
   try {
-    return new URL(requestUrl).pathname === "/dashboard/api/auth/callback"
+    return isAppUrl(value) && new URL(value).pathname === LOGIN_PATH
   } catch {
     return false
   }
 }
 
-function isGithubOAuthUrl(value) {
-  try {
-    const url = new URL(value)
-    return (
-      url.protocol === "https:" &&
-      url.hostname === "github.com" &&
-      ["/login", "/session", "/sessions"].some(
-        (path) => url.pathname === path || url.pathname.startsWith(`${path}/`)
-      )
-    )
-  } catch {
-    return false
-  }
+function desktopLoginUrl(backendUrl, { challenge, port }) {
+  const target = new URL(LOGIN_PATH, backendUrl)
+  target.searchParams.set("desktop_handoff", challenge)
+  target.searchParams.set("desktop_port", String(port))
+  return target.toString()
+}
+
+function desktopExchangeUrl(backendUrl) {
+  return new URL(DESKTOP_EXCHANGE_PATH, backendUrl).toString()
+}
+
+function isTrustedPermissionRequest(permission, requestingUrl, details: any = {}) {
+  if (!isAppUrl(requestingUrl)) return false
+  if (ALLOWED_PERMISSIONS.has(permission)) return true
+  const mediaTypes = details.mediaTypes ?? [details.mediaType]
+  return (
+    permission === "media" &&
+    mediaTypes.includes("audio") &&
+    !mediaTypes.includes("video")
+  )
+}
+
+function isTrustedProxyRequest(pageUrl) {
+  return isAppUrl(pageUrl)
 }
 
 function backendRequestUrl(backendUrl, appRequestUrl) {
@@ -137,11 +145,14 @@ module.exports = {
   APP_ORIGIN,
   APP_URL,
   DEFAULT_DEVELOPMENT_BACKEND_URL,
+  SESSION_COOKIE_NAME,
   appRedirectUrl,
+  desktopExchangeUrl,
+  desktopLoginUrl,
   resolveAppRuntime,
   backendRequestUrl,
+  isAppLoginUrl,
   isAppUrl,
-  isGithubOAuthUrl,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,

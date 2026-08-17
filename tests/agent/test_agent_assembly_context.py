@@ -38,14 +38,18 @@ def _base_config() -> RunnableConfig:
     }
 
 
-async def _capture_create_deep_agent_kwargs() -> dict[str, object]:
+async def _capture_create_deep_agent_kwargs(
+    config: RunnableConfig | None = None,
+) -> dict[str, object]:
     captured: dict[str, object] = {}
+    config = config or _base_config()
+    thread_id = "thread-ctx"
 
     def fake_create_deep_agent(**kwargs: object) -> _DummyAgent:
         captured.update(kwargs)
         return _DummyAgent()
 
-    clear_sandbox_backend("thread-ctx")
+    clear_sandbox_backend(thread_id)
     with (
         patch(
             "agent.server.resolve_github_token",
@@ -74,9 +78,9 @@ async def _capture_create_deep_agent_kwargs() -> dict[str, object]:
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
-        await get_agent(_base_config())
+        await get_agent(config)
 
-    clear_sandbox_backend("thread-ctx")
+    clear_sandbox_backend(thread_id)
     return captured
 
 
@@ -133,18 +137,20 @@ async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() ->
 
 
 @pytest.mark.asyncio
-async def test_agent_wires_user_skills_into_main_and_general_purpose_agents() -> None:
+async def test_agent_wires_user_and_organization_skills_into_agents() -> None:
     captured = await _capture_create_deep_agent_kwargs()
-    assert captured["skills"] == ["/skills/"]
+    sources = ["/skills/", "/organization-skills/"]
+    assert captured["skills"] == sources
     backend = captured["backend"]
     assert isinstance(backend, CompositeBackend)
-    assert isinstance(backend.routes["/skills/"], ReadOnlyBackend)
-    with pytest.raises(NotImplementedError):
-        backend.write("/skills/poison/SKILL.md", "malicious")
+    for route in sources:
+        assert isinstance(backend.routes[route], ReadOnlyBackend)
+        with pytest.raises(NotImplementedError):
+            backend.write(f"{route}poison/SKILL.md", "malicious")
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
-    assert gp["skills"] == ["/skills/"]
+    assert gp["skills"] == sources
 
 
 @pytest.mark.asyncio
@@ -181,6 +187,20 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_includes_read_user_settings_only_on_parent() -> None:
+    from agent.tools import read_user_settings
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    subagents = captured["subagents"]
+    assert isinstance(tools, list)
+    assert isinstance(subagents, list)
+    assert read_user_settings in tools
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    assert read_user_settings not in general_purpose["tools"]
+
+
+@pytest.mark.asyncio
 async def test_agent_includes_recreate_sandbox_tool() -> None:
     from agent.tools import recreate_sandbox
 
@@ -188,6 +208,59 @@ async def test_agent_includes_recreate_sandbox_tool() -> None:
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert recreate_sandbox in tools
+
+
+@pytest.mark.asyncio
+async def test_dashboard_agent_excludes_slack_tools() -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(
+        {
+            "source": "dashboard",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+        }
+    )
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+
+    tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
+    assert tool_names.isdisjoint(
+        {
+            "slack_add_reaction",
+            "slack_read_thread_messages",
+            "slack_start_new_thread",
+            "slack_thread_reply",
+        }
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["slack", "schedule"])
+async def test_slack_source_context_includes_slack_tools(source: str) -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(
+        {
+            "source": source,
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+        }
+    )
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+
+    tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
+    assert {
+        "slack_add_reaction",
+        "slack_read_thread_messages",
+        "slack_start_new_thread",
+        "slack_thread_reply",
+    } <= tool_names
 
 
 @pytest.mark.asyncio
@@ -212,3 +285,38 @@ async def test_general_purpose_subagent_carries_open_swe_shared_base() -> None:
     assert prompt.startswith(OPEN_SWE_SHARED_BASE)
     # GP task-mechanics guidance still trails the shared base.
     assert "calling agent only sees your final" in prompt
+
+
+@pytest.mark.asyncio
+async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(
+        {
+            "source": "slack",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+        }
+    )
+    captured = await _capture_create_deep_agent_kwargs(config)
+    parent_tools = captured["tools"]
+    subagents = captured["subagents"]
+    assert isinstance(parent_tools, list)
+    assert isinstance(subagents, list)
+
+    gp = next(s for s in subagents if s["name"] == "general-purpose")
+    assert "cannot access Slack tools" in gp["description"]
+    parent_names = {tool.__name__ for tool in parent_tools}
+    subagent_names = {tool.__name__ for tool in gp["tools"]}
+    slack_names = {
+        "notify_automation_channel",
+        "slack_add_reaction",
+        "slack_read_thread_messages",
+        "slack_start_new_thread",
+        "slack_thread_reply",
+    }
+
+    parent_only_names = {*slack_names, "read_user_settings"}
+    assert parent_only_names <= parent_names
+    assert parent_only_names.isdisjoint(subagent_names)
+    assert subagent_names == parent_names - parent_only_names

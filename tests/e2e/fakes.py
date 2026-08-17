@@ -179,9 +179,31 @@ def repo_private() -> bool:
     return REPO_PRIVATE[0]
 
 
+# --- LangSmith snapshots ---------------------------------------------------
+# Captures the environment tools asked for: {"snapshot_id", "name", "sandbox_id"}.
+# The E2E sandbox is the local provider, so there is no real snapshot service —
+# this store stands in for it and is what the specs assert on.
+SNAPSHOTS: list[dict[str, Any]] = []
+DELETED_SNAPSHOTS: list[str] = []
+_snapshot_seq = [0]
+
+
+def record_snapshot_capture(sandbox_id: str, name: str) -> str:
+    _snapshot_seq[0] += 1
+    snapshot_id = f"snap-{_snapshot_seq[0]}"
+    SNAPSHOTS.append({"snapshot_id": snapshot_id, "name": name, "sandbox_id": sandbox_id})
+    return snapshot_id
+
+
+def record_snapshot_delete(snapshot_id: str) -> None:
+    DELETED_SNAPSHOTS.append(snapshot_id)
+
+
 def reset() -> None:
     SLACK_MESSAGES.clear()
     PULLS.clear()
+    SNAPSHOTS.clear()
+    DELETED_SNAPSHOTS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0
     seed_bare_remote()

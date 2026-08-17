@@ -3,15 +3,18 @@
   "version": "0.2.3",
   "private": true,
   "description": "Experimental Open SWE desktop client",
-  "main": "src/main.cjs",
+  "main": "build/main.cjs",
   "scripts": {
+    "build": "tsc -p tsconfig.json",
     "build:ui": "pnpm --filter open-swe-dashboard run build",
-    "dev": "pnpm run build:ui && electron . --dev",
-    "start": "pnpm run build:ui && electron .",
-    "test": "node --test test/*.test.cjs",
-    "check": "node --check src/config.cjs && node --check src/acp-client.cjs && node --check src/git-diff.cjs && node --check src/project-store.cjs && node --check src/terminal-manager.cjs && node --check src/main.cjs && node --check src/preload.cjs && pnpm run test && pnpm run build:ui",
-    "pack": "pnpm run build:ui && electron-builder --dir",
-    "dist": "pnpm run build:ui && electron-builder"
+    "dev": "pnpm run build:ui && pnpm run build && electron . --dev",
+    "start": "pnpm run build:ui && pnpm run build && electron .",
+    "test:run": "node --test test/*.test.cjs",
+    "test": "pnpm run build && pnpm run test:run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run build:ui",
+    "pack": "pnpm run build:ui && pnpm run build && electron-builder --dir",
+    "dist": "pnpm run build:ui && pnpm run build && electron-builder"
   },
   "build": {
     "appId": "com.langchain.openswe",
@@ -20,14 +23,15 @@
     "asarUnpack": [
       "node_modules/node-pty/**/*"
     ],
-    "afterSign": "notarize.cjs",
+    "afterSign": "build/notarize.cjs",
     "npmRebuild": true,
     "icon": "resources/icon.png",
     "directories": {
       "output": "dist"
     },
     "files": [
-      "src/**/*",
+      "build/**/*",
+      "src/setup.html",
       "package.json"
     ],
     "extraResources": [
@@ -57,6 +61,9 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Open SWE uses the microphone for message dictation."
+      },
       "icon": "resources/icon.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
@@ -84,8 +91,10 @@
   "homepage": "https://github.com/langchain-ai/open-swe",
   "devDependencies": {
     "@electron/notarize": "3.1.1",
+    "@types/node": "22.20.1",
     "electron": "41.10.3",
-    "electron-builder": "26.15.3"
+    "electron-builder": "26.15.3",
+    "typescript": "5.9.3"
   },
   "dependencies": {
     "node-pty": "1.1.0"

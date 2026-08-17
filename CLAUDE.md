@@ -119,6 +119,7 @@ Webhooks compute deterministic thread ids so the same Linear issue / Slack threa
 - New dashboard endpoints: add to `agent/dashboard/routes.py`. The router is auto-mounted on the FastAPI app.
 - New graphs: register the entrypoint in `langgraph.json` under `graphs`.
 - Minimal-to-no code comments — only when the *why* isn't obvious from the code.
+- Do not add feature documentation to this file. Shipping a feature earns it **no** line here — not a section, not a pointer, not a resolution order or a list of which module wins. Anyone can read that from the code. Feature detail belongs in the code, its docstrings, and the PR description. Only edit this file when asked to, or when something it already claims has become wrong.
 
 <!-- OPENWIKI:START -->
 

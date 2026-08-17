@@ -31,10 +31,17 @@ def test_openai_gets_a_default_request_timeout() -> None:
     assert captured["max_retries"] == model.DEFAULT_MAX_RETRIES
 
 
+def test_openai_gets_codex_context_window_profile_override() -> None:
+    captured = _make_model("openai:gpt-5.6-sol")
+    profile = captured["profile"]
+    assert profile["max_input_tokens"] == 272_000
+    assert profile["tool_calling"] is True
+
+
 def test_anthropic_gets_a_default_request_timeout() -> None:
-    assert _make_model("anthropic:claude-opus-5")["timeout"] == (
-        model.DEFAULT_REQUEST_TIMEOUT_SECONDS
-    )
+    captured = _make_model("anthropic:claude-opus-5")
+    assert captured["timeout"] == model.DEFAULT_REQUEST_TIMEOUT_SECONDS
+    assert "profile" not in captured
 
 
 def test_explicit_timeout_wins() -> None:

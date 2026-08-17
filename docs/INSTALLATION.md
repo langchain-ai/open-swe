@@ -74,7 +74,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
 3. Set permissions:
    - **Repository permissions**:
      - Contents: Read & write
-     - Pull requests: Read & write
+     - Pull requests: Read & write — required to publish review comments and, when an admin explicitly enables the disabled-by-default policy, submit approvals. Bot approvals may not satisfy CODEOWNERS or repository rules that exclude the App identity.
      - Issues: Read & write
      - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs, and reads third-party CI conclusions for the auto-fix flow (it watches failing checks on agent-authored PRs and pushes fixes). Without it, check-run creation fails (logged, best-effort) but reviews still work, and CI auto-fix is disabled.
      - Commit statuses: Read-only — only needed if you enable the `Status` event below; the CI auto-fix flow reads the legacy combined commit-status API for integrations that report via statuses instead of check runs. Without it, status-based CI is silently ignored (logged as "Failed to read combined status").
@@ -221,6 +221,14 @@ REPO_SNAPSHOT_BASE_IMAGE="<your-docker-hub>/<name-of-your-image>"
 ```
 
 A base snapshot is required when `SANDBOX_TYPE=langsmith` — either `DEFAULT_SANDBOX_SNAPSHOT_ID` or the runtime setting described below. The server logs a warning at startup when neither the env var nor a stored setting is present, and sandbox creation fails until one is. The snapshot should include the GitHub CLI from `Dockerfile.sandbox`; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
+
+### Environments
+
+An **environment** pairs a prompt with a snapshot every run boots from, and can span several repos. Admins build one from an **admin thread** (the **Admin** toggle in the composer, available when their login or email is in `CONFIGURED_ADMINS`): the agent provisions its own sandbox — cloning repos, installing toolchains, warming caches — and then captures it. The environment named `default` is the one runs use; any other name is a draft. Records are managed on the admin **Environments** page.
+
+With more than one environment configured, a picker appears in the dashboard composer (any signed-in user, names only), and a Slack thread can pick one with an `env:<name>` tag on the message that opens it — `@Open SWE env:staging fix the flaky test`. Only the opening message can: the sandbox is created once, so a later tag would change the prompt but not the image. A run with no selection uses `default`.
+
+Captures are named `openswe-environment-<name>` (the platform appends its own `:latest` tag, and rejects a name that carries one); set `ENVIRONMENT_SNAPSHOT_PREFIX` to replace the `openswe` prefix when several deployments share one LangSmith workspace. Snapshot resolution for a new sandbox is: the run's environment, then the repo's snapshot, then the base snapshot below.
 
 ### Changing the base snapshot without a redeploy
 
@@ -453,9 +461,12 @@ LANGSMITH_URL_PROD="https://smith.langchain.com"
 
 # === LLM ===
 ANTHROPIC_API_KEY=""                   # Anthropic API key
-OPENAI_API_KEY=""                      # OpenAI API key (when using openai: models)
+OPENAI_API_KEY=""                      # OpenAI models and dashboard voice dictation
+# OPENAI_BASE_URL="https://api.openai.com/v1"  # Optional OpenAI-compatible API base URL
 GOOGLE_API_KEY=""                      # Google AI API key (when using google_genai: models)
 FIREWORKS_API_KEY=""                   # Fireworks API key (when using fireworks: models)
+# Voice dictation uses this OpenAI configuration.
+# Admins choose its transcription model in the dashboard Admin page.
 
 # === GitHub App (required) ===
 GITHUB_APP_ID=""                       # From step 3c
@@ -570,6 +581,7 @@ DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
 DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 16 GiB)
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS=""    # Auto-stop after N seconds idle (default: 7200; 0 disables)
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS=""  # Delete N seconds after stop (default: 2592000; 0 disables)
+ENVIRONMENT_SNAPSHOT_PREFIX=""         # Prefix for environment snapshot names (default: openswe)
 
 # === Token Encryption ===
 TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32

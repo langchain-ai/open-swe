@@ -89,6 +89,33 @@ describe("ChatComposer stop button", () => {
     expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
   })
 
+  it("stops the run on Escape", async () => {
+    renderComposer(true)
+
+    fireEvent.keyDown(document.body, { key: "Escape" })
+
+    await waitFor(() => expect(cancelThread).toHaveBeenCalledWith("thread-1"))
+  })
+
+  it("leaves Escape to an open overlay", () => {
+    renderComposer(true)
+    const dialog = document.createElement("div")
+    dialog.setAttribute("role", "dialog")
+    document.body.appendChild(dialog)
+
+    fireEvent.keyDown(dialog, { key: "Escape" })
+
+    expect(cancelThread).not.toHaveBeenCalled()
+  })
+
+  it("ignores Escape when no run is live", () => {
+    renderComposer(false)
+
+    fireEvent.keyDown(document.body, { key: "Escape" })
+
+    expect(cancelThread).not.toHaveBeenCalled()
+  })
+
   it("shows the send button when no run is live", () => {
     renderComposer(false)
 

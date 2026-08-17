@@ -17,51 +17,77 @@ LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
 )
 
 _LOCAL_CLAIM_LIMIT = 2048
-_claimed_event_ids: OrderedDict[str, None] = OrderedDict()
+_claimed_keys: OrderedDict[str, None] = OrderedDict()
 _claim_lock = asyncio.Lock()
 
 
-def _claim_thread_id(event_id: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-event:{event_id}"))
+def _claim_thread_id(claim_key: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-event:{claim_key}"))
 
 
-def _claim_locally(event_id: str) -> None:
-    _claimed_event_ids[event_id] = None
-    _claimed_event_ids.move_to_end(event_id)
-    while len(_claimed_event_ids) > _LOCAL_CLAIM_LIMIT:
-        _claimed_event_ids.popitem(last=False)
+def slack_message_claim_key(event_id: str, channel_id: str = "", event_ts: str = "") -> str:
+    """Key a claim on the message itself, not the delivery."""
+    if channel_id and event_ts:
+        return f"{channel_id}:{event_ts}"
+    return event_id
+
+
+async def _claim_remotely(claim_key: str) -> bool | None:
+    client = get_client(url=LANGGRAPH_URL)
+    claim_thread_id = _claim_thread_id(claim_key)
+    try:
+        await client.threads.create(thread_id=claim_thread_id, if_exists="raise", ttl=10)
+    except Exception:  # noqa: BLE001
+        try:
+            await client.threads.get(claim_thread_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("Slack event claim failed for key=%s", claim_key)
+            return None
+        return False
+    return True
+
+
+def _claim_locally(claim_key: str) -> None:
+    if not claim_key:
+        return
+    _claimed_keys[claim_key] = None
+    _claimed_keys.move_to_end(claim_key)
+    while len(_claimed_keys) > _LOCAL_CLAIM_LIMIT:
+        _claimed_keys.popitem(last=False)
 
 
 def reset_slack_event_claims() -> None:
-    _claimed_event_ids.clear()
+    _claimed_keys.clear()
 
 
 async def slack_event_already_seen(event_id: str) -> bool:
     """Check whether this process has already claimed the event."""
-    return bool(event_id and event_id in _claimed_event_ids)
+    return bool(event_id and event_id in _claimed_keys)
 
 
-async def claim_slack_event(event_id: str) -> bool:
-    """Atomically claim an event id; fail open when the platform is unavailable."""
-    if not event_id:
+async def claim_slack_event(event_id: str, channel_id: str = "", event_ts: str = "") -> bool:
+    """Atomically claim a Slack message; fail open when the platform is unavailable."""
+    claim_key = slack_message_claim_key(event_id, channel_id, event_ts)
+    if not claim_key:
         return True
 
     async with _claim_lock:
-        if event_id in _claimed_event_ids:
+        if claim_key in _claimed_keys or (event_id and event_id in _claimed_keys):
             return False
 
-        claim_thread_id = _claim_thread_id(event_id)
-        client = get_client(url=LANGGRAPH_URL)
-        try:
-            await client.threads.create(thread_id=claim_thread_id, if_exists="raise", ttl=10)
-        except Exception:  # noqa: BLE001
-            try:
-                await client.threads.get(claim_thread_id)
-            except Exception:  # noqa: BLE001
-                logger.warning("Slack event claim failed for event_id=%s", event_id)
-                return True
+        claimed = await _claim_remotely(event_id)
+        if claimed is False:
             _claim_locally(event_id)
             return False
+        if claim_key != event_id:
+            message_claimed = await _claim_remotely(claim_key)
+            if message_claimed is False:
+                _claim_locally(claim_key)
+                _claim_locally(event_id)
+                return False
+            claimed = claimed or message_claimed
 
-        _claim_locally(event_id)
+        if claimed:
+            _claim_locally(claim_key)
+            _claim_locally(event_id)
         return True

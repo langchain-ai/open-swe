@@ -4,7 +4,7 @@ from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
 
-from ..dashboard.options import DEFAULT_MODEL_ID
+from ..dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
 from .gateway import gateway_env_default, gateway_overrides
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
@@ -148,6 +148,10 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     if model_id.startswith("openai:"):
         _configure_openai_responses_kwargs(model_kwargs)
         _coerce_openai_chat_completions_kwargs(model_kwargs)
+
+    profile_override = model_profile_with_context_override(model_id)
+    if profile_override is not None:
+        model_kwargs["profile"] = profile_override
 
     max_tokens = model_kwargs.get("max_tokens")
     max_tokens_key = max_tokens if type(max_tokens) is int else None
