@@ -111,6 +111,23 @@ async def test_list_failing_check_runs_returns_none_on_error(
 
 
 @pytest.mark.asyncio
+async def test_list_commit_statuses_keeps_latest_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch(
+        monkeypatch,
+        {
+            "statuses": [
+                {"id": 2, "context": "ci", "state": "success"},
+                {"id": 1, "context": "ci", "state": "failure"},
+            ]
+        },
+    )
+
+    statuses = await github_ci.list_commit_statuses(owner="o", repo="r", ref="s", token="t")
+
+    assert statuses == [{"id": 2, "context": "ci", "state": "success"}]
+
+
+@pytest.mark.asyncio
 async def test_names_failing_on_base(monkeypatch: pytest.MonkeyPatch) -> None:
     # Both check-runs and statuses calls return the same fake payload here;
     # only the check_runs shape is populated, statuses empty.

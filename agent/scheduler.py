@@ -8,6 +8,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import RunnableConfig
 
+from .baby_sit import evaluate_watch
 from .dashboard.schedules import launch_scheduled_agent_run
 from .reconcile import reconcile_stale_runs
 
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 class SchedulerState(TypedDict, total=False):
     schedule_id: str
     task: str
+    watch_key: str
     result: dict[str, Any]
 
 
@@ -25,6 +27,11 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
     task = state.get("task") or configurable.get("task")
     if task == "reconcile":
         return {"result": await reconcile_stale_runs()}
+    if task == "baby_sit":
+        key = state.get("watch_key") or configurable.get("watch_key")
+        if not isinstance(key, str) or not key:
+            return {"result": {"status": "missing_watch_key"}}
+        return {"result": {"status": await evaluate_watch(key)}}
     schedule_id = state.get("schedule_id") or configurable.get("schedule_id")
     if not isinstance(schedule_id, str) or not schedule_id:
         logger.warning("Scheduled agent tick missing schedule_id")

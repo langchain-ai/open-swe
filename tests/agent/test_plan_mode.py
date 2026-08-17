@@ -31,6 +31,7 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     excluded = server.PLAN_MODE_EXCLUDED_TOOLS
     for tool in (
         "task",
+        "manage_baby_sit",
         "open_pull_request",
         "recreate_sandbox",
         "request_pr_review",

@@ -31,11 +31,11 @@ make typecheck          # basedpyright agent tests
 | `agent` | `agent.server:get_agent` | Main coding agent (Slack/Linear/GitHub-triggered). |
 | `reviewer` | `agent.reviewer:get_reviewer_agent` | Read-only PR reviewer. Findings model + `publish_review`. |
 | `analyzer` | `agent.analyzer:get_analyzer` | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
-| `ci_monitor` | `agent.ci_monitor:get_ci_monitor` | Polling fallback for CI auto-fix: each tick sweeps open agent-authored PRs for failing checks / merge conflicts via `agent.ci_autofix.sweep_open_prs`. |
+| `scheduler` | `agent.scheduler:get_scheduler` | Fans deterministic cron tasks into scheduled agent runs, reconciliation, and `/baby-sit` PR checks. |
 
 The FastAPI app is `agent.webapp:app`.
 
-CI auto-fix ("PR babysitting") lives in `agent/ci_autofix.py`: when a CI check fails (webhook `check_run` / `check_suite` / `workflow_run` / `status`) or a reviewer leaves actionable feedback on a PR Open SWE opened, it locates the originating agent thread (by `pr_url` metadata) and dispatches a confidence-gated fix run on the `agent` graph. Gated by the per-user `auto_fix_ci` profile flag, the enabled-repos opt-in, and a per-PR `@open-swe autofix on|off` toggle (`agent/dashboard/autofix_state.py`). Skip-rules (base-branch failures, human commits, same-head dedupe, batching while runs are active, loop cap) all live in `ci_autofix.py`.
+Opt-in PR CI monitoring lives in `agent/baby_sit.py` and the bundled `/baby-sit` skill. Signed GitHub CI webhooks trigger immediate evaluation of active watches, while per-watch scheduler crons provide a deterministic 10-minute fallback without invoking a model for unchanged state. New failures resume the originating agent thread for confidence-gated diagnosis; flake reruns are capped and deduplicated, and terminal outcomes are posted directly to the originating Slack thread.
 
 ## Architecture
 
@@ -92,7 +92,7 @@ There is intentionally no after-agent safety net that opens a PR for the agent. 
 All tools live in `agent/tools/` and are flat-imported via `agent/tools/__init__.py`. The set is intentionally small and curated — see README "Tools — Curated, Not Accumulated".
 
 Wired into `get_agent`:
-`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
+`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `manage_baby_sit`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
 
 Reviewer-only tools (in `agent/reviewer.py`): `add_finding`, `update_finding`, `list_findings`, `publish_review`. The review-style analyzer uses `save_review_style` (exported as `save_review_style_prompt`).
 

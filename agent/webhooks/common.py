@@ -1065,6 +1065,7 @@ def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
+_GITHUB_CI_EVENTS = frozenset(["check_run", "check_suite", "workflow_run", "status"])
 _SUPPORTED_GH_EVENTS = frozenset(
     [
         "issue_comment",
@@ -1073,6 +1074,7 @@ _SUPPORTED_GH_EVENTS = frozenset(
         "pull_request_review_comment",
         "pull_request_review",
         "push",
+        *_GITHUB_CI_EVENTS,
     ]
 )
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
