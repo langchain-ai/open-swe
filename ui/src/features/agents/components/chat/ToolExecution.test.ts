@@ -1,30 +1,47 @@
 import { describe, expect, it } from "vitest"
 
-import { formatToolDisplay } from "./toolExecutionDisplay"
+import {
+  formatToolDisplay,
+  formatToolDisplayParts,
+} from "./toolExecutionDisplay"
 
 describe("formatToolDisplay", () => {
   const projectPath = "/workspace/open-swe"
 
-  it("renders read_file with the file_path alias consistently", () => {
+  it("renders only the read file name and retains its full path", () => {
+    const fullPath = "/workspace/open-swe/ui/src/AGENTS.md"
+
     expect(
       formatToolDisplay(
-        "read_file /workspace/open-swe/AGENTS.md",
+        `read_file ${fullPath}`,
         "read",
-        { file_path: "/workspace/open-swe/AGENTS.md" },
+        { file_path: fullPath },
         projectPath
       )
     ).toBe("Read AGENTS.md")
-  })
-
-  it("renders ls as a list operation with a relative path", () => {
     expect(
-      formatToolDisplay(
-        "ls /workspace/open-swe/ui",
+      formatToolDisplayParts(
+        `read_file ${fullPath}`,
         "read",
-        { path: "/workspace/open-swe/ui" },
+        { file_path: fullPath },
         projectPath
       )
-    ).toBe("List ui")
+    ).toEqual({
+      heading: "Read",
+      preview: "AGENTS.md",
+      previewTooltip: fullPath,
+    })
+  })
+
+  it("renders ls with only the target directory name", () => {
+    expect(
+      formatToolDisplay(
+        "ls /workspace/open-swe/ui/src",
+        "read",
+        { path: "/workspace/open-swe/ui/src" },
+        projectPath
+      )
+    ).toBe("List src")
   })
 
   it("renders search tools with their pattern", () => {

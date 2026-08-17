@@ -62,8 +62,8 @@ const DRAG_REGION_ID = "open-swe-desktop-drag-region"
 window.addEventListener("DOMContentLoaded", () => {
   if (process.platform !== "darwin") return
 
-  // Keep a draggable strip beside the native controls without forcing sidebar
-  // content into the titlebar row.
+  // Keep draggable space beside the native controls and above the sidebar
+  // content without forcing that content into the titlebar row.
   const style = document.createElement("style")
   style.textContent = `
     #${DRAG_REGION_ID} {
@@ -75,6 +75,14 @@ window.addEventListener("DOMContentLoaded", () => {
       height: 12px;
       z-index: 2147483647;
       user-select: none;
+    }
+
+    [data-sidebar-frame] > div:first-child {
+      -webkit-app-region: drag;
+    }
+
+    [data-sidebar-frame] > div:first-child :is(a, button, input, textarea, select, [role="button"]) {
+      -webkit-app-region: no-drag;
     }
 
     [data-sidebar-expand] {

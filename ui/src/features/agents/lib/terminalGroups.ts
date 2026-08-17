@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { DesktopTerminalBridge, DesktopTerminalSummary } from "@/desktop"
+import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
 import type {
   TerminalSplitDirection,
   TerminalUiState,
@@ -28,17 +29,30 @@ export interface TerminalGroupsController {
   split: (direction: TerminalSplitDirection) => void
   clear: (terminalId: string) => void
   restart: (terminalId: string) => void
+  clearRequests: ReadonlyMap<string, number>
+  restartRequests: ReadonlyMap<string, number>
 }
 
 export function useTerminalGroups(
-  localSessionId: string,
+  target: TerminalTarget,
   cwd: string
 ): TerminalGroupsController {
+  const localSessionId =
+    target.kind === "local" ? target.sessionId : target.threadId
   const [state, setState] = useState<TerminalUiState>(() =>
     readTerminalState(localSessionId)
   )
   const [error, setError] = useState<string | null>(null)
-  const metadata = useDesktopTerminalMetadata(localSessionId)
+  const [clearRequests, setClearRequests] = useState<
+    ReadonlyMap<string, number>
+  >(new Map())
+  const [restartRequests, setRestartRequests] = useState<
+    ReadonlyMap<string, number>
+  >(new Map())
+  const metadata = useDesktopTerminalMetadata(
+    localSessionId,
+    target.kind === "local"
+  )
   const stateRef = useRef(state)
   stateRef.current = state
 
@@ -93,6 +107,10 @@ export function useTerminalGroups(
 
   const closeTerminals = useCallback(
     (terminalIds: ReadonlyArray<string>) => {
+      if (target.kind === "cloud") {
+        commit(terminalIds.reduce(closeTerminal, stateRef.current))
+        return Promise.resolve(true)
+      }
       return run("Unable to close terminal", async (bridge) => {
         for (const terminalId of terminalIds) {
           await bridge.close({
@@ -104,7 +122,7 @@ export function useTerminalGroups(
         commit(terminalIds.reduce(closeTerminal, stateRef.current))
       })
     },
-    [commit, localSessionId, run]
+    [commit, localSessionId, run, target.kind]
   )
 
   return useMemo(
@@ -124,28 +142,51 @@ export function useTerminalGroups(
         commit(focusTerminal(stateRef.current, terminalId)),
       split: (direction: TerminalSplitDirection) =>
         commit(splitTerminal(stateRef.current, direction)),
-      clear: (terminalId: string) =>
-        run("Unable to clear terminal", (bridge) =>
+      clear: (terminalId: string) => {
+        if (target.kind === "cloud") {
+          setClearRequests((current) => {
+            const next = new Map(current)
+            next.set(terminalId, (next.get(terminalId) ?? 0) + 1)
+            return next
+          })
+          return
+        }
+        void run("Unable to clear terminal", (bridge) =>
           bridge.clear({ localSessionId, terminalId })
-        ),
-      restart: (terminalId: string) =>
-        run("Unable to restart terminal", async (bridge) => {
+        )
+      },
+      restart: (terminalId: string) => {
+        if (target.kind === "cloud") {
+          setRestartRequests((current) => {
+            const next = new Map(current)
+            next.set(terminalId, (next.get(terminalId) ?? 0) + 1)
+            return next
+          })
+          return
+        }
+        void run("Unable to restart terminal", async (bridge) => {
           await bridge.restart({
             localSessionId,
             terminalId,
             cwd: metadataById.get(terminalId)?.cwd ?? cwd,
           })
-        }),
+        })
+      },
+      clearRequests,
+      restartRequests,
     }),
     [
+      clearRequests,
       closeTerminals,
       commit,
       cwd,
       error,
       localSessionId,
       metadataById,
+      restartRequests,
       run,
       state,
+      target.kind,
     ]
   )
 }

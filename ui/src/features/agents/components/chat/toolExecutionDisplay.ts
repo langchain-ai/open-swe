@@ -1,10 +1,21 @@
 import type { AcpToolKind } from "@/features/agents/lib/types"
 import { humanizeToolName } from "@/features/agents/lib/toolNames"
 
-function stripProjectPath(path: string, projectPath?: string): string {
-  if (!projectPath || !path.startsWith(projectPath)) return path
-  const relative = path.slice(projectPath.length)
-  return relative.replace(/^\/+/, "") || "."
+function pathName(path: string): string {
+  const withoutTrailingSeparators = path.replace(/[\\/]+$/, "")
+  if (!withoutTrailingSeparators) return path
+  return withoutTrailingSeparators.split(/[\\/]/).at(-1) || path
+}
+
+export function formatPathDisplayParts(
+  heading: string,
+  path: string
+): ToolDisplayParts {
+  return {
+    heading,
+    preview: pathName(path),
+    previewTooltip: path,
+  }
 }
 
 function firstStringArg(
@@ -48,13 +59,14 @@ function humanizeToolTitle(title: string): string {
 export interface ToolDisplayParts {
   heading: string
   preview: string | null
+  previewTooltip?: string
 }
 
 export function formatToolDisplayParts(
   title: string,
   toolKind: AcpToolKind,
   input: Record<string, unknown> | undefined,
-  projectPath?: string
+  _projectPath?: string
 ): ToolDisplayParts {
   const toolName = normalizedToolName(title)
   const path = firstStringArg(input, ["path", "file_path", "target_file"])
@@ -70,11 +82,7 @@ export function formatToolDisplayParts(
   switch (toolKind) {
     case "read": {
       if (path) {
-        const displayPath = stripProjectPath(path, projectPath)
-        return {
-          heading: toolName === "ls" ? "List" : "Read",
-          preview: displayPath,
-        }
+        return formatPathDisplayParts(toolName === "ls" ? "List" : "Read", path)
       }
       return plain(humanizeToolTitle(title))
     }
@@ -86,11 +94,7 @@ export function formatToolDisplayParts(
         }
       if (query)
         return { heading: "Search", preview: `"${truncateMiddle(query, 40)}"` }
-      if (path)
-        return {
-          heading: "Search",
-          preview: stripProjectPath(path, projectPath),
-        }
+      if (path) return formatPathDisplayParts("Search", path)
       return plain(humanizeToolTitle(title))
     }
     case "fetch": {
@@ -103,8 +107,13 @@ export function formatToolDisplayParts(
       return plain(humanizeToolTitle(title))
     }
     case "edit":
+      if (path) return formatPathDisplayParts("Edit", path)
+      return plain(humanizeToolTitle(title))
     case "delete":
+      if (path) return formatPathDisplayParts("Delete", path)
+      return plain(humanizeToolTitle(title))
     case "move":
+      if (path) return formatPathDisplayParts("Move", path)
       return plain(humanizeToolTitle(title))
     case "think":
       return plain("Thinking...")
@@ -116,7 +125,7 @@ export function formatToolDisplayParts(
         return plain("Update todos")
       }
       if (toolName === "ls" && path) {
-        return { heading: "List", preview: stripProjectPath(path, projectPath) }
+        return formatPathDisplayParts("List", path)
       }
       return plain(humanizeToolTitle(title))
     }

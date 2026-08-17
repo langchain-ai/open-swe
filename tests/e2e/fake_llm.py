@@ -36,9 +36,7 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-# One shell command that does the whole git workflow. Each execute() runs in a
-# fresh shell rooted at the sandbox dir, so the clone+commit+push is bundled.
-_IMPLEMENT_SCRIPT = f"""
+_SETUP_SCRIPT = f"""
 set -e
 rm -rf repo
 git clone "$E2E_REMOTE" repo
@@ -47,9 +45,20 @@ git config user.email "dev@example.com"
 git config user.name "Dev User"
 git checkout -b {FEATURE_BRANCH}
 cat > {FEATURE_FILE} <<'EOF'
+def normalize(name):
+    return name.strip()
+
 def greet(name):
-    return f"Hello, {{name}}!"
+    return "Hello!"
+
+def farewell(name):
+    return f"Goodbye, {{name}}!"
 EOF
+""".strip()
+
+_COMMIT_SCRIPT = f"""
+set -e
+cd repo
 git add -A
 git commit -m "{PR_TITLE}"
 git push origin {FEATURE_BRANCH}
@@ -354,10 +363,26 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-ack",
         ),
         _tool_step(
-            "Setting up the repo and implementing the change.",
+            "Setting up the repository.",
             "execute",
-            {"command": _IMPLEMENT_SCRIPT},
-            "call-impl",
+            {"command": _SETUP_SCRIPT},
+            "call-setup",
+        ),
+        _tool_step(
+            "Implementing the greeting.",
+            "edit_file",
+            {
+                "file_path": f"/repo/{FEATURE_FILE}",
+                "old_string": 'def greet(name):\n    return "Hello!"',
+                "new_string": 'def greet(name):\n    return f"Hello, {name}!"',
+            },
+            "call-edit",
+        ),
+        _tool_step(
+            "Committing and pushing the change.",
+            "execute",
+            {"command": _COMMIT_SCRIPT},
+            "call-commit",
         ),
         _tool_step(
             "Opening a pull request.",
