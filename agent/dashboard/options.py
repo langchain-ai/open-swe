@@ -118,13 +118,17 @@ DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = {
 ProfileLoader = Callable[[str], Mapping[str, object]]
 
 # LangChain partner packages expose ``_get_default_model_profile`` — the same
-# accessor that populates ``ChatModel.profile`` from bundled models.dev data —
-# so context windows come from LangChain profiles instead of hardcoded numbers.
+# accessor that populates ``ChatModel.profile`` from bundled models.dev data.
 _PROFILE_LOADER_MODULES: dict[str, str] = {
     "anthropic": "langchain_anthropic.chat_models",
     "fireworks": "langchain_fireworks.chat_models",
     "google_genai": "langchain_google_genai.chat_models",
     "openai": "langchain_openai.chat_models.base",
+}
+CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
+    "openai:gpt-5.6-sol": 272_000,
+    "openai:gpt-5.6-terra": 272_000,
+    "openai:gpt-5.6-luna": 272_000,
 }
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
     "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
@@ -146,8 +150,22 @@ def _profile_loader(provider: str) -> ProfileLoader | None:
     return cast(ProfileLoader, loader)
 
 
+def model_profile_with_context_override(model_id: str) -> dict[str, object] | None:
+    context_window = CODEX_CONTEXT_WINDOW_OVERRIDES.get(model_id)
+    if context_window is None:
+        return None
+    provider, _, model_name = model_id.partition(":")
+    loader = _profile_loader(provider)
+    profile = dict(loader(model_name)) if loader is not None else {}
+    profile["max_input_tokens"] = context_window
+    return profile
+
+
 @lru_cache(maxsize=512)
 def model_profile_context_window(model_id: str) -> int | None:
+    context_window = CODEX_CONTEXT_WINDOW_OVERRIDES.get(model_id)
+    if context_window is not None:
+        return context_window
     provider, _, model_name = model_id.partition(":")
     if not provider or not model_name:
         return None
