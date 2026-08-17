@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
+  ArrowSquareOutIcon,
   ClockIcon,
   LightningIcon,
   PauseIcon,
@@ -221,6 +222,16 @@ function AutomationRow({ schedule }: { schedule: AgentSchedule }) {
           )}
         </div>
       </Link>
+      {schedule.lastThreadId && (
+        <Link
+          to="/agents/$threadId"
+          params={{ threadId: schedule.lastThreadId }}
+          aria-label="Open latest automation run"
+          className="shrink-0 rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <ArrowSquareOutIcon className="size-4" />
+        </Link>
+      )}
       <button
         type="button"
         onClick={onTest}
