@@ -26,9 +26,9 @@ describe("ContextWindowMeter", () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it("reports the context window before usage is available", () => {
-    render(<ContextWindowMeter contextWindow={200_000} />)
-    expect(meterLabel()).toBe("Context window 200.0K tokens")
+  it("stays hidden until usage is reported, even with a known limit", () => {
+    const { container } = render(<ContextWindowMeter contextWindow={200_000} />)
+    expect(container.firstChild).toBeNull()
   })
 
   it("reports a percentage once usage and limit are both known", () => {
