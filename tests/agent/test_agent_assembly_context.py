@@ -187,6 +187,20 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_includes_read_user_settings_only_on_parent() -> None:
+    from agent.tools import read_user_settings
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    subagents = captured["subagents"]
+    assert isinstance(tools, list)
+    assert isinstance(subagents, list)
+    assert read_user_settings in tools
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    assert read_user_settings not in general_purpose["tools"]
+
+
+@pytest.mark.asyncio
 async def test_agent_includes_recreate_sandbox_tool() -> None:
     from agent.tools import recreate_sandbox
 
@@ -302,6 +316,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_thread_reply",
     }
 
-    assert slack_names <= parent_names
-    assert slack_names.isdisjoint(subagent_names)
-    assert subagent_names == parent_names - slack_names
+    parent_only_names = {*slack_names, "read_user_settings"}
+    assert parent_only_names <= parent_names
+    assert parent_only_names.isdisjoint(subagent_names)
+    assert subagent_names == parent_names - parent_only_names
