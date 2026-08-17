@@ -321,6 +321,20 @@ async def test_thread_summary_includes_pr_and_diff_stats() -> None:
     assert summary["diffStats"] == {"files": 3, "additions": 10, "deletions": 2}
 
 
+async def test_thread_summary_uses_working_repo_for_display_only() -> None:
+    metadata = {
+        "repo": {"owner": "trusted", "name": "default"},
+        "working_repo_full_name": "observed/checkout",
+    }
+
+    summary = await thread_api._thread_summary(_thread_with_metadata(metadata))
+
+    assert summary["repo"] == "default"
+    assert summary["repoFullName"] == "trusted/default"
+    assert summary["workingRepoFullName"] == "observed/checkout"
+    assert metadata["repo"] == {"owner": "trusted", "name": "default"}
+
+
 async def test_thread_summary_defaults_unknown_pr_state_to_open() -> None:
     summary = await thread_api._thread_summary(
         _thread_with_metadata(
@@ -354,6 +368,37 @@ async def test_thread_summary_hides_creating_sandbox_sentinel() -> None:
     )
 
     assert summary["sandboxId"] is None
+
+
+async def test_terminal_sandbox_requires_owner_and_existing_sandbox(monkeypatch) -> None:
+    metadata = {
+        "source": "dashboard",
+        "github_login": "owner",
+        "sandbox_id": "sandbox-123",
+        "repo_name": "repo",
+    }
+
+    class FakeThreads:
+        async def get(self, thread_id: str):
+            return {"thread_id": thread_id, "metadata": metadata}
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    assert await thread_api.get_dashboard_terminal_sandbox("tid", "owner") == (
+        "sandbox-123",
+        "repo",
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.get_dashboard_terminal_sandbox("tid", "intruder")
+    assert exc_info.value.status_code == 404
+
+    metadata["sandbox_id"] = "__creating__"
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.get_dashboard_terminal_sandbox("tid", "owner")
+    assert exc_info.value.status_code == 404
 
 
 async def test_thread_summary_includes_slack_source_url_for_private_repo() -> None:

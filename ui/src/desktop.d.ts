@@ -1,5 +1,5 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
 
 export interface DesktopProject {
   cwd: string
@@ -38,6 +38,10 @@ export interface DesktopAcpDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
   files: Array<ThreadPrDiffFile>
+  repository?: {
+    branch: string | null
+    pr: AgentThread["pr"] | null
+  }
 }
 
 export interface DesktopAcpPromptInput {

@@ -137,18 +137,20 @@ async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() ->
 
 
 @pytest.mark.asyncio
-async def test_agent_wires_user_skills_into_main_and_general_purpose_agents() -> None:
+async def test_agent_wires_user_and_organization_skills_into_agents() -> None:
     captured = await _capture_create_deep_agent_kwargs()
-    assert captured["skills"] == ["/skills/"]
+    sources = ["/skills/", "/organization-skills/"]
+    assert captured["skills"] == sources
     backend = captured["backend"]
     assert isinstance(backend, CompositeBackend)
-    assert isinstance(backend.routes["/skills/"], ReadOnlyBackend)
-    with pytest.raises(NotImplementedError):
-        backend.write("/skills/poison/SKILL.md", "malicious")
+    for route in sources:
+        assert isinstance(backend.routes[route], ReadOnlyBackend)
+        with pytest.raises(NotImplementedError):
+            backend.write(f"{route}poison/SKILL.md", "malicious")
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
-    assert gp["skills"] == ["/skills/"]
+    assert gp["skills"] == sources
 
 
 @pytest.mark.asyncio
