@@ -77,6 +77,11 @@ TEST_USERS = [
     {"name": "Bob", "slack_id": "U_BOB", "login": "bob", "email": "bob@example.com"},
 ]
 
+# Alice is the workspace admin (so admin threads + the environments dashboard are
+# reachable); Bob is a plain member, which is what the deny-side assertions use.
+ADMIN_USER = TEST_USERS[0]
+_DEFAULTS["CONFIGURED_ADMINS"] = ADMIN_USER["email"]
+
 # The default Slack sender / thread owner; a session with this email may continue
 # the thread on the web. Any other logged-in user is read-only.
 SAME_USER = {"login": TEST_USERS[0]["login"], "email": TEST_USERS[0]["email"]}

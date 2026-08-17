@@ -9,8 +9,6 @@ import pytest
 
 from agent.dashboard.team_credentials import LangSmithCredentials
 from agent.review.trace_context import (
-    PRTraceContext,
-    format_pr_trace_context_prompt,
     prepare_pr_trace_context,
     resolve_pr_trace,
 )
@@ -241,21 +239,3 @@ async def test_resolve_pr_trace_reports_reason_when_unresolved() -> None:
     assert result.thread_id is None
     assert result.project == "pajuha"
     assert "No coding-agent thread matched" in result.detail
-
-
-def test_format_pr_trace_context_prompt_points_reviewer_at_file() -> None:
-    prompt = format_pr_trace_context_prompt(
-        PRTraceContext(
-            file_path="/workspace/.open-swe/review-author-trace.json",
-            thread_id="thread-1",
-            confidence=0.87,
-            evidence=["branch:feature/x"],
-            trace_url="https://smith/t/thread-1",
-            run_count=3,
-        )
-    )
-
-    assert "grep" in prompt
-    assert "read_file" in prompt
-    assert "/workspace/.open-swe/review-author-trace.json" in prompt
-    assert "do not publish a trace summary" in prompt

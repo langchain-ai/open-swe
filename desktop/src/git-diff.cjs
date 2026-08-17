@@ -13,15 +13,29 @@ const CHECKPOINT_NAMESPACE = "refs/open-swe/local"
 // start helper processes of its own on our behalf.
 const HARDENED = ["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"]
 
-function git(cwd, args, env) {
+function git(cwd, args, env, timeout) {
   return new Promise((resolve, reject) => {
     execFile(
       "git",
       [...HARDENED, ...args],
-      { cwd, env: env || process.env, encoding: "buffer", maxBuffer: MAX_OUTPUT_BYTES },
+      {
+        cwd,
+        env: env || process.env,
+        encoding: "buffer",
+        maxBuffer: MAX_OUTPUT_BYTES,
+        timeout,
+      },
       (error, stdout) => (error ? reject(error) : resolve(stdout))
     )
   })
+}
+
+async function currentBranch(cwd) {
+  try {
+    return text(await git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], null, 5_000)) || null
+  } catch {
+    return null
+  }
 }
 
 function gitStdin(cwd, args, input) {
@@ -245,6 +259,7 @@ async function readDiff(repo, base) {
 module.exports = {
   captureCheckpoint,
   checkpointRef,
+  currentBranch,
   deleteRefs,
   readDiff,
   repoRoot,

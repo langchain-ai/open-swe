@@ -86,6 +86,7 @@ async def slack_webhook(
         and event.get("channel_type") == "im"
         and bool(event.get("user"))
     )
+    is_untagged_two_party_reply = False
     if event.get("type") != "app_mention":
         message_text = event.get("text", "")
         has_username_mention = bool(
@@ -111,11 +112,18 @@ async def slack_webhook(
             event.get("type") == "message"
             and not event.get("subtype")
             and not is_direct_message
+            # An explicit tag is never an untagged reply: the gate below admits
+            # messages mentioning only Open SWE, so without this an explicitly
+            # tagged request would tell the agent it was not tagged.
+            and not has_username_mention
+            and not has_id_mention
             and await service._slack_thread_allows_untagged_reply(
                 str(event.get("channel") or ""),
                 str(event.get("thread_ts") or ""),
                 message_text,
                 bot_user_id,
+                str(event.get("user") or ""),
+                str(event.get("ts") or ""),
             )
         )
         should_handle_message = any(
@@ -166,6 +174,7 @@ async def slack_webhook(
             "attachments": event.get("attachments", []),
             "bot_user_id": bot_user_id,
             "treat_all_messages_as_mentions": is_direct_message,
+            "untagged_reply": is_untagged_two_party_reply,
         }
         repo_config = await common.get_slack_repo_config(
             channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
@@ -383,7 +392,10 @@ def _first_open_swe_option_action(actions: common.Any) -> dict[str, common.Any] 
     if not isinstance(actions, list):
         return None
     for action in actions:
-        if isinstance(action, dict) and action.get("action_id") == "open_swe_option_select":
+        action_id = action.get("action_id") if isinstance(action, dict) else None
+        if isinstance(action_id, str) and (
+            action_id == "open_swe_option_select" or action_id.startswith("open_swe_option_select_")
+        ):
             return action
     return None
 

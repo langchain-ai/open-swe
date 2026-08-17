@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron")
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
+  getProjectBranch: (cwd) => ipcRenderer.invoke("desktop:project-branch", cwd),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
@@ -13,9 +14,14 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.on("desktop:projects-changed", listener)
     return () => ipcRenderer.removeListener("desktop:projects-changed", listener)
   },
+  createAcpDraftSession: (cwd) =>
+    ipcRenderer.invoke("desktop:acp-draft-create", cwd),
+  deleteAcpDraftSession: (sessionId) =>
+    ipcRenderer.invoke("desktop:acp-draft-delete", sessionId),
   startAcpSession: (input) => ipcRenderer.invoke("desktop:acp-start", input),
   promptAcpSession: (input) => ipcRenderer.invoke("desktop:acp-prompt", input),
   cancelAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-cancel", sessionId),
+  deleteAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-delete", sessionId),
   getAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-session", sessionId),
   listAcpSessions: () => ipcRenderer.invoke("desktop:acp-sessions"),
   getAcpDiff: (sessionId) => ipcRenderer.invoke("desktop:acp-diff", sessionId),

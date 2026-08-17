@@ -6,7 +6,9 @@ const {
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,
   backendRequestUrl,
-  isGithubOAuthUrl,
+  desktopExchangeUrl,
+  desktopLoginUrl,
+  isAppLoginUrl,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
@@ -112,37 +114,27 @@ test("only grants expected permissions to the bundled app", () => {
 })
 
 test("only proxies requests from the bundled app window", () => {
-  const requestUrl = `${APP_URL}dashboard/api/threads/thread-id/commands`
-  assert.equal(isTrustedProxyRequest("POST", APP_URL, requestUrl), true)
-  assert.equal(
-    isTrustedProxyRequest("POST", "https://evil.example", requestUrl),
-    false
-  )
-  assert.equal(
-    isTrustedProxyRequest(
-      "GET",
-      "https://github.com/login/oauth/authorize",
-      `${APP_URL}dashboard/api/auth/callback?code=123`
-    ),
-    true
-  )
-  assert.equal(
-    isTrustedProxyRequest(
-      "GET",
-      "https://github.com/login/oauth/authorize",
-      `${APP_URL}dashboard/api/me`
-    ),
-    false
-  )
+  assert.equal(isTrustedProxyRequest(APP_URL), true)
+  assert.equal(isTrustedProxyRequest("https://evil.example"), false)
+  assert.equal(isTrustedProxyRequest("https://github.com/login/oauth/authorize"), false)
 })
 
-test("only keeps GitHub login pages in the app window", () => {
-  assert.equal(isGithubOAuthUrl("https://github.com/login/oauth/authorize?client_id=1"), true)
-  assert.equal(isGithubOAuthUrl("https://github.com/login?return_to=%2Flogin%2Foauth"), true)
-  assert.equal(isGithubOAuthUrl("https://github.com/session"), true)
-  assert.equal(isGithubOAuthUrl("https://github.com/sessions/two-factor"), true)
-  assert.equal(isGithubOAuthUrl("https://github.com/langchain-ai/open-swe"), false)
-  assert.equal(isGithubOAuthUrl("https://evil.example/login/oauth/authorize"), false)
+test("sends login to the user's browser instead of the app window", () => {
+  assert.equal(isAppLoginUrl(`${APP_URL}dashboard/api/auth/login`), true)
+  assert.equal(isAppLoginUrl(`${APP_URL}dashboard/api/auth/login?redirect_to=%2F`), true)
+  assert.equal(isAppLoginUrl(`${APP_URL}dashboard/api/auth/callback`), false)
+  assert.equal(isAppLoginUrl("https://backend.example/dashboard/api/auth/login"), false)
+})
+
+test("carries the loopback port and PKCE challenge into the browser login", () => {
+  assert.equal(
+    desktopLoginUrl("https://backend.example", { challenge: "abc", port: 51234 }),
+    "https://backend.example/dashboard/api/auth/login?desktop_handoff=abc&desktop_port=51234"
+  )
+  assert.equal(
+    desktopExchangeUrl("https://backend.example/base/"),
+    "https://backend.example/dashboard/api/auth/desktop/exchange"
+  )
 })
 
 test("maps desktop API requests to the selected backend", () => {

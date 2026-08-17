@@ -35,6 +35,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# local sandbox git identity (never the developer's ~/.gitconfig)
+.gitconfig-sandbox
+
 # local env files
 .env*.local
 .env

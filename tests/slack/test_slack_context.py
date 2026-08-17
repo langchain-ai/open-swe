@@ -1345,3 +1345,40 @@ def test_get_slack_permalink_without_token_returns_none(monkeypatch: pytest.Monk
     result = asyncio.run(get_slack_permalink("C123", "1700000000.000100"))
 
     assert result is None
+
+
+def test_thread_environment_round_trips_through_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tagged opening message persists the environment; follow-ups read it back.
+
+    Without this, a follow-up (which carries no `env:` tag) would resolve the
+    default environment while reusing the sandbox built from the tagged one.
+    """
+    threads = _FakeThreadsClient({"metadata": {}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    asyncio.run(
+        webhook_common.upsert_agent_thread_owner_metadata(
+            "thread-id",
+            source="slack",
+            environment="staging",
+        )
+    )
+    assert threads.thread is not None
+    assert threads.thread["metadata"]["environment"] == "staging"
+    assert asyncio.run(webhook_common._get_thread_environment("thread-id")) == "staging"
+
+
+def test_thread_environment_is_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    threads = _FakeThreadsClient({"metadata": {}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    assert asyncio.run(webhook_common._get_thread_environment("thread-id")) is None
+
+
+def test_thread_environment_is_none_for_a_missing_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = _FakeThreadsClient(raise_not_found=True)
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    assert asyncio.run(webhook_common._get_thread_environment("thread-id")) is None

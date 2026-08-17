@@ -60,7 +60,7 @@ class TestModelCallTimeoutMiddleware:
 
         model = MagicMock()
         specs = [
-            _general_purpose_subagent(model),
+            _general_purpose_subagent(model, tools=[]),
             _browser_subagent(model, []),
             _reviewer_subagent(model),
         ]

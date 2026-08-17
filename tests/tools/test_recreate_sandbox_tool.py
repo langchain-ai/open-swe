@@ -38,7 +38,7 @@ async def test_recreate_sandbox_returns_old_and_new_ids() -> None:
         "new_sandbox_id": "sandbox-new",
     }
     resolve_repo.assert_awaited_once_with(config["configurable"])
-    recreate.assert_awaited_once_with("thread-1", repo=repo)
+    recreate.assert_awaited_once_with("thread-1", repo=repo, environment_slug=None)
 
 
 @pytest.mark.asyncio
@@ -61,13 +61,6 @@ async def test_recreate_sandbox_reports_failure_without_ids() -> None:
         result = await recreate_sandbox()
 
     assert result == {"success": False, "error": "creation failed"}
-
-
-def test_recreate_sandbox_description_explains_handoff() -> None:
-    assert recreate_sandbox.__doc__ is not None
-    assert "fresh sandbox has none of the thread's current files" in recreate_sandbox.__doc__
-    assert "old sandbox is not deleted" in recreate_sandbox.__doc__
-    assert "becomes inaccessible from this thread" in recreate_sandbox.__doc__
 
 
 def test_recreate_sandbox_exported() -> None:

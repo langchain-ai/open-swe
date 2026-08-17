@@ -33,6 +33,18 @@ from .enabled_repos import (
     list_enabled_review_repos,
     set_review_repo_enabled,
 )
+from .environments import (
+    DEFAULT_ENVIRONMENT_SLUG,
+    EnvironmentCreate,
+    EnvironmentUpdate,
+    create_environment,
+    delete_environment,
+    get_environment,
+    list_environment_options,
+    list_environments,
+    slugify,
+    update_environment,
+)
 from .eval_jobs import (
     get_reviewer_eval_status,
 )
@@ -50,16 +62,20 @@ from .oauth import (
     STATE_COOKIE_NAME,
     STATE_TTL_SECONDS,
     decode_state,
+    desktop_callback_url,
     enforce_org_login_gate,
     exchange_code,
     fetch_github_user,
     hash_state_nonce,
+    issue_desktop_handoff,
     issue_session,
     issue_state,
     new_state_nonce,
+    redeem_desktop_handoff,
     require_same_origin_for_mutations,
     require_session,
     sanitize_redirect_to,
+    valid_handoff_challenge,
 )
 from .oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
 from .options import (
@@ -242,6 +258,9 @@ router = APIRouter(
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
 _GITHUB_API_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+# Module-level so a local harness can point the browser leg at a fake consent
+# page and still run the real login/callback code.
+GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
 
 
@@ -407,6 +426,8 @@ async def auth_login(
     request: Request,
     redirect_to: str | None = None,
     desktop: bool = False,
+    desktop_handoff: str | None = None,
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
 ) -> RedirectResponse:
     client_id = os.environ.get("GITHUB_APP_CLIENT_ID", "")
     if not client_id:
@@ -417,8 +438,14 @@ async def auth_login(
     state = issue_state(
         redirect_to=safe_redirect,
         nonce_hash=hash_state_nonce(nonce),
+        handoff_challenge=valid_handoff_challenge(desktop_handoff),
+        handoff_port=desktop_port,
     )
-    api_base_url = str(request.base_url).rstrip("/") if desktop else _api_base_url()
+    api_base_url = _api_base_url()
+    if desktop:
+        forwarded_proto = request.headers.get("x-forwarded-proto", "").partition(",")[0].strip()
+        scheme = forwarded_proto if forwarded_proto in {"http", "https"} else request.url.scheme
+        api_base_url = str(request.base_url.replace(scheme=scheme)).rstrip("/")
     redirect_uri = f"{api_base_url}/dashboard/api/auth/callback"
     query = urlencode(
         {
@@ -427,14 +454,14 @@ async def auth_login(
             "state": state,
         }
     )
-    url = f"https://github.com/login/oauth/authorize?{query}"
+    url = f"{GITHUB_AUTHORIZE_URL}?{query}"
     response = RedirectResponse(url, status_code=302)
     _set_state_cookie(response, nonce)
     return response
 
 
 @router.get("/auth/callback")
-async def auth_callback(request: Request, code: str, state: str) -> RedirectResponse:
+async def auth_callback(request: Request, code: str, state: str) -> Response:
     state_payload = decode_state(state)
     state_nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)
@@ -462,11 +489,40 @@ async def auth_callback(request: Request, code: str, state: str) -> RedirectResp
 
     await upsert_access_token_from_github_response(login, email or "", token_data)
 
+    challenge = state_payload.get("handoff_challenge")
+    port = state_payload.get("handoff_port")
+    if isinstance(challenge, str) and isinstance(port, int):
+        # Desktop login runs in the user's own browser, so the session belongs to
+        # the app rather than to this browser: hand back a PKCE-bound code the
+        # app redeems for one, and leave no session cookie behind here.
+        handoff = issue_desktop_handoff(
+            login=login,
+            email=email,
+            avatar_url=user.get("avatar_url"),
+            challenge=challenge,
+        )
+        response = RedirectResponse(desktop_callback_url(port, handoff), status_code=302)
+        _clear_state_cookie(response)
+        return response
+
     session_jwt = issue_session(login=login, email=email, avatar_url=user.get("avatar_url"))
     response = RedirectResponse(redirect_to, status_code=302)
     _set_session_cookie(response, session_jwt)
     _clear_state_cookie(response)
     return response
+
+
+class DesktopHandoffExchange(BaseModel):
+    code: str
+    verifier: str
+
+
+@router.post("/auth/desktop/exchange")
+async def auth_desktop_exchange(body: DesktopHandoffExchange) -> dict[str, Any]:
+    return {
+        "session": redeem_desktop_handoff(code=body.code, verifier=body.verifier),
+        "expires_in": SESSION_TTL_SECONDS,
+    }
 
 
 @router.post("/auth/logout")
@@ -939,6 +995,78 @@ async def api_delete_repo_snapshot(
     if not record:
         raise HTTPException(404, "repo snapshot not found")
     await delete_repo_snapshot(full_name)
+    return Response(status_code=204)
+
+
+def _normalized_slug(raw: str) -> str:
+    try:
+        return slugify(raw)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.get("/environments")
+async def api_list_environments(
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    return {
+        "environments": await list_environments(),
+        "default_slug": DEFAULT_ENVIRONMENT_SLUG,
+    }
+
+
+@router.post("/environments")
+async def api_create_environment(
+    body: EnvironmentCreate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    try:
+        return await create_environment(body, _admin["sub"])
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@router.get("/environments/options")
+async def api_environment_options(
+    _session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    """Pickable environments for any signed-in user: names only, no prompts."""
+    return {
+        "environments": await list_environment_options(),
+        "default_slug": DEFAULT_ENVIRONMENT_SLUG,
+    }
+
+
+@router.get("/environments/{slug}")
+async def api_get_environment(
+    slug: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    record = await get_environment(_normalized_slug(slug))
+    if not record:
+        raise HTTPException(404, "environment not found")
+    return record
+
+
+@router.put("/environments/{slug}")
+async def api_update_environment(
+    slug: str,
+    body: EnvironmentUpdate,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> dict[str, Any]:
+    try:
+        return await update_environment(_normalized_slug(slug), body)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.delete("/environments/{slug}")
+async def api_delete_environment(
+    slug: str,
+    _admin: dict[str, Any] = _ADMIN_DEP,
+) -> Response:
+    if not await delete_environment(_normalized_slug(slug)):
+        raise HTTPException(404, "environment not found")
     return Response(status_code=204)
 
 

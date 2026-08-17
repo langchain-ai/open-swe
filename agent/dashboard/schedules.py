@@ -6,7 +6,7 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 from langgraph_sdk.schema import Config
@@ -36,6 +36,8 @@ _AGENT_ASSISTANT_ID = "agent"
 _SCHEDULER_ASSISTANT_ID = "scheduler"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 _SLACK_CHANNEL_ID_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
+SlackNotificationMode = Literal["always", "on_action"]
+_DEFAULT_SLACK_NOTIFICATION_MODE: SlackNotificationMode = "always"
 
 
 def _normalize_slack_channel_id(value: str | None) -> str | None:
@@ -47,6 +49,10 @@ def _normalize_slack_channel_id(value: str | None) -> str | None:
     return channel_id
 
 
+def _slack_notification_mode(record: dict[str, Any]) -> SlackNotificationMode:
+    return "on_action" if record.get("slack_notification_mode") == "on_action" else "always"
+
+
 class ScheduleCreateBody(BaseModel):
     prompt: str = Field(min_length=1, max_length=20_000)
     schedule: str = Field(min_length=1, max_length=120)
@@ -55,6 +61,7 @@ class ScheduleCreateBody(BaseModel):
     model_id: str | None = None
     effort: str | None = None
     slack_channel_id: str | None = None
+    slack_notification_mode: SlackNotificationMode = _DEFAULT_SLACK_NOTIFICATION_MODE
 
     @field_validator("schedule")
     @classmethod
@@ -76,6 +83,7 @@ class ScheduleUpdateBody(BaseModel):
     effort: str | None = None
     enabled: bool | None = None
     slack_channel_id: str | None = None
+    slack_notification_mode: SlackNotificationMode | None = None
 
     @field_validator("schedule")
     @classmethod
@@ -171,6 +179,7 @@ def _schedule_summary(
         "schedule": record.get("schedule"),
         "repo": _repo_full_name(repo),
         "slackChannelId": record.get("slack_channel_id"),
+        "slackNotificationMode": _slack_notification_mode(record),
         "model": record.get("model"),
         "effort": record.get("effort"),
         "enabled": bool(record.get("enabled")),
@@ -349,6 +358,7 @@ async def create_agent_schedule(
         "schedule": body.schedule,
         "repo": repo,
         "slack_channel_id": body.slack_channel_id,
+        "slack_notification_mode": body.slack_notification_mode,
         "model": chosen_model or profile.get("default_model") or "Default",
         "effort": chosen_effort or profile.get("reasoning_effort"),
         "base_branch": profile.get("base_branch") or "main",
@@ -401,6 +411,10 @@ async def update_agent_schedule(
         patch["enabled"] = body.enabled
     if "slack_channel_id" in body.model_fields_set:
         patch["slack_channel_id"] = body.slack_channel_id
+    if "slack_notification_mode" in body.model_fields_set:
+        patch["slack_notification_mode"] = (
+            body.slack_notification_mode or _DEFAULT_SLACK_NOTIFICATION_MODE
+        )
 
     updated = {**existing, **patch}
     schedule_changed = updated.get("schedule") != existing.get("schedule")
@@ -444,13 +458,26 @@ def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> st
 
 def _scheduled_prompt(record: dict[str, Any], slack_thread: dict[str, Any] | None) -> str:
     prompt = str(record["prompt"])
-    if not slack_thread:
-        return prompt
-    return (
-        f"{prompt}\n\n"
-        "Use `slack_thread_reply` for clarifying questions, essential progress updates, "
-        "the pull request link, and the final outcome in the connected Slack thread."
-    )
+    if slack_thread:
+        return (
+            f"{prompt}\n\n"
+            "Use `slack_thread_reply` for clarifying questions, essential progress updates, "
+            "the pull request link, and the final outcome in the connected Slack thread."
+        )
+    slack_channel_id = record.get("slack_channel_id")
+    if (
+        _slack_notification_mode(record) == "on_action"
+        and isinstance(slack_channel_id, str)
+        and slack_channel_id
+    ):
+        return (
+            f"{prompt}\n\n"
+            "This automation uses conditional Slack notifications. If and only if you perform "
+            "a concrete requested action, such as changing code or updating an external system, "
+            "call `notify_automation_channel` exactly once with a concise final outcome. Do not "
+            "call it for read-only checks or when no action was needed."
+        )
+    return prompt
 
 
 def _agent_run_metadata(
@@ -507,6 +534,18 @@ async def _agent_run_config(
         configurable["repo"] = repo
     if slack_thread:
         configurable["slack_thread"] = slack_thread
+    slack_channel_id = record.get("slack_channel_id")
+    if (
+        _slack_notification_mode(record) == "on_action"
+        and isinstance(slack_channel_id, str)
+        and slack_channel_id
+    ):
+        configurable["automation_slack_notification"] = {
+            "channel_id": slack_channel_id,
+            "mode": "on_action",
+            "schedule_id": record["id"],
+            "schedule_name": record.get("name"),
+        }
     model, effort = _normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
         model, effort = gate_fable_model(
@@ -560,7 +599,11 @@ async def _launch_agent_schedule_record(
 
     slack_thread: dict[str, Any] | None = None
     slack_channel_id = record.get("slack_channel_id")
-    if isinstance(slack_channel_id, str) and slack_channel_id:
+    if (
+        _slack_notification_mode(record) == "always"
+        and isinstance(slack_channel_id, str)
+        and slack_channel_id
+    ):
         message_ts, slack_error = await post_slack_top_level_message_with_ts(
             slack_channel_id,
             _slack_root_message(record, test_run=test_run),

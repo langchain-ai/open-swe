@@ -853,6 +853,22 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
           }
           disabled={!settings.data || save.isPending}
         />
+        <RolePicker
+          label="Thread title generation"
+          description="Model used to name new agent threads in the background."
+          models={models}
+          model={settings.data?.default_thread_title_model ?? null}
+          effort={settings.data?.default_thread_title_reasoning_effort ?? null}
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_thread_title_model: model,
+              default_thread_title_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
         <SettingsRow
           label="Default Repository"
           description="Global fallback used when a run has no explicit repo and the user has no profile default. Use owner/repo."

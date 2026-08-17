@@ -776,7 +776,7 @@ async def open_pull_request(
     your branch with `git push origin <branch>` BEFORE calling this.
 
     For everything else — updating an existing PR, marking it ready for review,
-    commenting, reading status — keep using `GH_TOKEN=dummy gh`. If a PR already
+    commenting, reading status — keep using `gh`. If a PR already
     exists for the branch, this returns that PR's URL without creating a
     duplicate; switch to `gh pr edit` for updates.
 

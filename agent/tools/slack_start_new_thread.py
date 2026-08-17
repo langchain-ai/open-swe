@@ -244,6 +244,8 @@ async def slack_start_new_thread(
             "hint": _failure_hint(slack_error),
         }
 
+    details_ts: str | None = None
+    details_error: str | None = None
     for attempt in range(2):
         details_ts, details_error = await post_slack_thread_reply_with_ts(
             clean_channel_id,

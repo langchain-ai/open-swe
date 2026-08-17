@@ -5,6 +5,7 @@ const os = require("node:os")
 const path = require("node:path")
 
 const {
+  AcpSession,
   dcodeTarget,
   promptBlocks,
   sessionTitle,
@@ -80,4 +81,73 @@ test("builds ACP text and image prompt blocks", () => {
       { type: "image", data: "cG5n", mimeType: "image/png" },
     ]
   )
+})
+
+test("switches model before continuing an ACP session", async () => {
+  let closed = false
+  let emitted
+  const session = Object.assign(Object.create(AcpSession.prototype), {
+    status: "idle",
+    modelId: "old:model",
+    effort: "low",
+    target: { command: "old" },
+    env: { MODEL: "old" },
+    replayUsers: new Map(),
+    rpc: { close: () => (closed = true) },
+    connect(target, env) {
+      this.target = target
+      this.env = env
+      this.rpc = { close() {} }
+    },
+    initialize: async function () {
+      this.status = "idle"
+    },
+    notifyChange() {},
+    emit: (event) => (emitted = event),
+  })
+  const workingTarget = { command: "new" }
+  const workingEnv = { MODEL: "new" }
+
+  await session.configure("new:model", "high", workingTarget, workingEnv)
+
+  assert.equal(closed, true)
+  assert.equal(session.modelId, "new:model")
+  assert.equal(session.effort, "high")
+
+  let attempts = 0
+  session.initialize = async function () {
+    if (attempts++ === 0) throw new Error("load failed")
+    this.status = "idle"
+  }
+  await assert.rejects(session.configure("other:model", "low", {}, {}))
+  assert.equal(session.status, "idle")
+  assert.equal(session.target, workingTarget)
+  assert.equal(session.env, workingEnv)
+  assert.equal(session.modelId, "new:model")
+  assert.equal(session.effort, "high")
+  assert.deepEqual(emitted, { type: "error", message: "load failed" })
+})
+
+test("combines chunked user messages when replaying an ACP session", () => {
+  const session = Object.assign(Object.create(AcpSession.prototype), {
+    id: "session",
+    title: "Restored session",
+    events: [],
+    replayUsers: new Map(),
+    onEvent() {},
+    onChange() {},
+  })
+  const replay = (text) =>
+    session.handleNotification("session/update", {
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "message",
+        content: { type: "text", text },
+      },
+    })
+
+  replay("first ")
+  replay("second")
+
+  assert.equal(session.events[0].text, "first second")
 })

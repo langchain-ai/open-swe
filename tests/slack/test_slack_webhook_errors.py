@@ -277,6 +277,13 @@ async def test_dispatch_or_queue_dispatches_when_idle(
 ) -> None:
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     queue = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_webhook.common, "is_bot_token_only_mode", lambda: True)
+    monkeypatch.setattr(slack_webhook.common, "login_for_slack_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_webhook.common, "login_for_email", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_webhook.common, "_thread_exists", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_owner_metadata", AsyncMock())
+    monkeypatch.setattr(slack_webhook.common, "get_client", lambda *, url: _FakeClient())
+    monkeypatch.setattr(slack_webhook, "_slack_thread_is_busy", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_webhook.common, "dispatch_agent_run", dispatch)
     monkeypatch.setattr(slack_webhook.common, "queue_message_for_thread", queue)
 
@@ -368,3 +375,119 @@ async def test_dispatch_or_queue_tagged_message_interrupts_even_when_busy(
     assert run == {"run_id": "run-1"}
     queue.assert_not_awaited()
     dispatch.assert_awaited_once()
+
+
+def _msg(ts: float, user: str, **extra: Any) -> dict[str, Any]:
+    return {"ts": f"{ts:.6f}", "user": user, **extra}
+
+
+@pytest.mark.asyncio
+async def test_untagged_reply_ignores_a_third_party_who_went_quiet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mukil's drive-by emoji must not disable untagged replies forever."""
+    base = 1786723299.0
+    messages = [
+        _msg(base, "URAMON"),
+        _msg(base + 6, "BOT"),
+        _msg(base + 90, "UMUKIL"),  # went quiet, before the bot's latest reply
+        _msg(base + 1331, "BOT"),
+    ]
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+
+    assert await slack_webhook._slack_thread_allows_untagged_reply(
+        "C1", "123.45", "why do you not see this message", "BOT", "URAMON", f"{base + 1423:.6f}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_untagged_reply_blocked_while_a_third_party_is_still_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = 1786723299.0
+    messages = [
+        _msg(base, "URAMON"),
+        _msg(base + 6, "BOT"),
+        _msg(base + 1400, "UMUKIL"),  # spoke 23s ago — still in the conversation
+    ]
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+
+    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+        "C1", "123.45", "how about now", "BOT", "URAMON", f"{base + 1423:.6f}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_untagged_reply_blocked_when_third_party_spoke_after_the_bot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stale needs both conditions: older than the bot's last reply AND >15 min."""
+    base = 1786723299.0
+    messages = [
+        _msg(base, "URAMON"),
+        _msg(base + 6, "BOT"),
+        _msg(base + 60, "UMUKIL"),  # after the bot, so never stale however old
+    ]
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+
+    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+        "C1", "123.45", "ping", "BOT", "URAMON", f"{base + 9999:.6f}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_untagged_reply_ignores_joins_and_leaves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = 1786723299.0
+    messages = [
+        _msg(base, "URAMON"),
+        _msg(base + 6, "BOT"),
+        _msg(base + 10, "ULURKER", subtype="channel_join"),
+    ]
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+
+    assert await slack_webhook._slack_thread_allows_untagged_reply(
+        "C1", "123.45", "keep going", "BOT", "URAMON", f"{base + 20:.6f}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_untagged_reply_blocked_when_bot_never_posted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = 1786723299.0
+    monkeypatch.setattr(
+        slack_webhook.common,
+        "fetch_slack_thread_messages",
+        AsyncMock(return_value=[_msg(base, "URAMON")]),
+    )
+
+    assert not await slack_webhook._slack_thread_allows_untagged_reply(
+        "C1", "123.45", "hello", "BOT", "URAMON", f"{base + 5:.6f}"
+    )
+
+
+def test_untagged_prompt_tells_the_agent_it_was_not_tagged() -> None:
+    preamble = slack_webhook._slack_prompt_preamble(untagged_reply=True)
+
+    assert "You were NOT tagged" in preamble
+    assert "call `no_op` and post nothing" in preamble
+    assert "Staying silent is the right" in preamble
+    assert slack_webhook._slack_request_heading(untagged_reply=True) == "## Untagged Message"
+
+
+def test_tagged_prompt_keeps_the_mention_wording() -> None:
+    preamble = slack_webhook._slack_prompt_preamble(untagged_reply=False)
+
+    assert preamble == "You were mentioned in Slack.\n\n"
+    assert "NOT tagged" not in preamble
+    assert slack_webhook._slack_request_heading(untagged_reply=False) == "## Latest Mention Request"

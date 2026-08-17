@@ -47,7 +47,7 @@ def build_github_issue_prompt(
         "this issue and follows this repository's PR conventions for the title, body, "
         "release note, and/or changelog. Inspect AGENTS.md, PR templates, "
         ".changelog/README.md, and nearby docs before choosing the PR title/body format. "
-        "When you need to communicate on GitHub, use `GH_TOKEN=dummy gh issue comment` "
+        "When you need to communicate on GitHub, use `gh issue comment` "
         "with the issue number."
     )
 
