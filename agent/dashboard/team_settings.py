@@ -5,8 +5,6 @@ configuration in one place. Per-repo style prompts live in
 :mod:`agent.dashboard.review_styles`.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 import re
@@ -124,7 +122,7 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
         return text
 
     @model_validator(mode="after")
-    def _validate_model_pairs(self) -> TeamSettingsUpdate:
+    def _validate_model_pairs(self) -> "TeamSettingsUpdate":
         self.default_agent_model, self.default_agent_reasoning_effort = _normalize_stale_model_pair(
             self.default_agent_model,
             self.default_agent_reasoning_effort,

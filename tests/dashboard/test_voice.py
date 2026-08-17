@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import httpx
 import pytest
 from fastapi import FastAPI, HTTPException

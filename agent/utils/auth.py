@@ -1,7 +1,5 @@
 """GitHub OAuth and LangSmith authentication utilities."""
 
-from __future__ import annotations
-
 import logging
 import os
 from collections.abc import Mapping

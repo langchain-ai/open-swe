@@ -1,7 +1,5 @@
 """GitHub token lookup utilities."""
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta

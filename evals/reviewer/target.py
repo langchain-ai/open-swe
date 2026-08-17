@@ -7,8 +7,6 @@ structured output for the eval. Findings are normalized into the legacy
 verbatim form martian published.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 import threading

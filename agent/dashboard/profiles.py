@@ -10,8 +10,6 @@ Each upsert only touches its own namespace, so the two flows can't clobber
 each other's fields even when they interleave.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
@@ -49,7 +47,7 @@ class ProfileUpdate(BaseModel):
     review_draft_prs: bool | None = None
 
     @model_validator(mode="after")
-    def _normalize_stale_model_pairs(self) -> ProfileUpdate:
+    def _normalize_stale_model_pairs(self) -> "ProfileUpdate":
         model, effort = _normalize_stale_model_pair(
             self.default_model,
             self.reasoning_effort,

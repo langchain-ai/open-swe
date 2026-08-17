@@ -1,7 +1,5 @@
 """Check merge status counts for PR URLs exported from LangGraph threads."""
 
-from __future__ import annotations
-
 import argparse
 import asyncio
 import json

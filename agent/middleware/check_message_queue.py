@@ -5,8 +5,6 @@ comments that arrived while the agent was busy) and injects them as new
 human messages before the next model call.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any, NotRequired, cast
 

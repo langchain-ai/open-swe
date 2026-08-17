@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Literal, cast
 from unittest.mock import AsyncMock, call, patch
 

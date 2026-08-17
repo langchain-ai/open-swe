@@ -1,7 +1,5 @@
 """Load optional integration tool schemas only when requested."""
 
-from __future__ import annotations
-
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from typing import Annotated, Any, NotRequired
 

@@ -10,8 +10,6 @@ Both the snapshot and the read-back are best effort: on any failure the caller
 gets ``None`` / ``status="error"`` and the UI degrades to "diff unavailable".
 """
 
-from __future__ import annotations
-
 import base64
 import binascii
 import json

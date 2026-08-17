@@ -12,8 +12,6 @@ manual payloads without a run id fall back to legacy thread-level idempotence so
 missing ids degrade dedupe instead of silencing failure replies.
 """
 
-from __future__ import annotations
-
 import hmac
 import logging
 import os

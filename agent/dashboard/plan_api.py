@@ -12,8 +12,6 @@ request changes (reject); only the thread owner can approve. A comment can be
 deleted by its author or the thread owner.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

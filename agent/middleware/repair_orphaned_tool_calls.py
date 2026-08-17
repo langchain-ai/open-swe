@@ -13,8 +13,6 @@ This middleware scans the outgoing message list and inserts a synthetic error
 and can retry instead of dying.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 from collections.abc import Awaitable, Callable

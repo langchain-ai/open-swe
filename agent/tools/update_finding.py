@@ -1,7 +1,5 @@
 """Tool: ``update_finding``. Mutate an existing finding by id."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from langgraph.config import get_config

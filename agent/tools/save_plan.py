@@ -5,8 +5,6 @@ plan-review page. In plan mode it is an approvable implementation plan; outside
 plan mode it is read-only shared content.
 """
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Mapping
 from typing import Annotated, Any

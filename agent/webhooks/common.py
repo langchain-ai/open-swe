@@ -128,6 +128,7 @@ from ..utils.slack_feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
+from ..utils.slack_stop import process_slack_stop_reaction
 from ..utils.thread_ids import generate_thread_id_from_slack_thread
 from ..utils.thread_ops import queue_message_for_thread  # noqa: F401
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
@@ -248,6 +249,7 @@ __all__ = [
     "post_slack_trace_reply",
     "process_slack_reaction_added",
     "process_slack_reaction_removed",
+    "process_slack_stop_reaction",
     "queue_message_for_thread",
     "react_to_github_comment",
     "react_to_linear_comment",
@@ -746,7 +748,19 @@ async def upsert_agent_thread_owner_metadata(
     mirror the owner-identifying fields onto the thread here.
     """
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
-    metadata: dict[str, Any] = {"source": source, "updated_at_ms": now_ms}
+    category = "interactive"
+    if isinstance(source_context, dict):
+        if source_context.get("github_issue") or source_context.get("linear_issue"):
+            category = "issue"
+        elif source_context.get("pr_number"):
+            category = "pull_request"
+    metadata: dict[str, Any] = {
+        "source": source,
+        "origin": source,
+        "thread_category": category,
+        "trigger_kind": "user",
+        "updated_at_ms": now_ms,
+    }
     if isinstance(repo_config, dict) and repo_config.get("owner") and repo_config.get("name"):
         metadata["repo"] = repo_config
         metadata["repo_owner"] = repo_config["owner"]
