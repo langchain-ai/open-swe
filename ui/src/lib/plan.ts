@@ -6,14 +6,18 @@
  * hands them to the agent as the instruction for the follow-up run.
  */
 
-const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
-  /\/$/,
-  ""
-)
+import { dashboardApiBase } from "./api-base"
+import {
+  dashboardForwardedHeaders,
+  dashboardRequestOrigin,
+} from "./dashboard-fetch"
+
+const API_BASE = dashboardApiBase()
 
 function apiBase(): string {
   if (API_BASE) return API_BASE
-  return typeof window !== "undefined" ? window.location.origin : ""
+  if (typeof window !== "undefined") return window.location.origin
+  return dashboardRequestOrigin()
 }
 
 export interface PlanUser {
@@ -56,7 +60,11 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${apiBase()}/dashboard/api${path}`, {
     ...init,
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...dashboardForwardedHeaders(),
+      ...(init.headers ?? {}),
+    },
   })
   if (!res.ok) {
     let message = res.statusText
@@ -119,7 +127,9 @@ export function updatePlan(
   })
 }
 
-export function approvePlan(threadId: string): Promise<{ status: string }> {
+export function approvePlan(
+  threadId: string
+): Promise<{ status: string; run_id: string }> {
   return req(`/plan/${encodeURIComponent(threadId)}/approve`, {
     method: "POST",
   })

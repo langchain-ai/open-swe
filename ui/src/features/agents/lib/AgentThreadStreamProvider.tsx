@@ -1,36 +1,27 @@
-import { useCallback, useRef } from "react";
-import { StreamProvider } from "@langchain/react";
-import { overrideFetchImplementation } from "@langchain/langgraph-sdk";
-import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef } from "react"
+import {
+  STREAM_CONTROLLER,
+  StreamProvider,
+  useStreamContext,
+} from "@langchain/react"
+import { Client, overrideFetchImplementation } from "@langchain/langgraph-sdk"
+import { useQueryClient } from "@tanstack/react-query"
 
-import { agentsApi } from "./api";
-import { agentThreadKeys, invalidateAgentThreadLists } from "./queries";
-import type { ReactNode } from "react";
+import { agentsApi } from "./api"
+import { agentThreadKeys, invalidateAgentThreadLists } from "./queries"
+import type { ReactNode } from "react"
 
-const AGENT_ASSISTANT_ID = "agent";
+const AGENT_ASSISTANT_ID = "agent"
 
 const dashboardFetch: typeof fetch = (input, init) =>
-  fetch(input, { ...init, credentials: "include" });
+  fetch(input, { ...init, credentials: "include" })
 
-/**
- * We use the SDK's built-in `sse` transport (via {@link StreamProvider}'s
- * `apiUrl` + `fetch`), so commands, the event stream, and `getState`
- * hydration all flow through {@link dashboardFetch}. But subagent/subgraph
- * discovery on hydrate (`POST /threads/:id/history`) and `getState` itself
- * are issued by the SDK's internal `Client` rather than the transport's
- * `fetch`. Without this, the `Client` falls back to a bare `fetch` that
- * omits the dashboard session cookie cross-origin, so the proxy rejects the
- * read with `401 "not authenticated"`. Override the SDK's global fetch so
- * every `Client` read carries the same credentials as the transport.
- *
- * Passing `fetch` to the transport is also what makes the SDK's SSE stream give
- * up on reconnect (`maxReconnectAttempts = options.fetch != null ? 0 : 5`), and
- * we cannot drop it — the transport's own requests would lose the session
- * cookie. So a dropped event stream stays dropped for the life of the page, and
- * run state must not be inferred from the stream alone: `useAgentThread` polls
- * the thread while a run is live so the UI (and its stop button) keeps working.
- */
-overrideFetchImplementation(dashboardFetch);
+overrideFetchImplementation(dashboardFetch)
+
+const dashboardRequest = (_url: URL, init: RequestInit): RequestInit => ({
+  ...init,
+  credentials: "include",
+})
 
 /**
  * The SDK transport builds request URLs as `new URL(apiUrl + path)`, so
@@ -40,22 +31,51 @@ overrideFetchImplementation(dashboardFetch);
  * same-origin base to an absolute URL using the current origin.
  */
 function toAbsoluteApiUrl(url: string): string {
-  if (/^https?:\/\//.test(url)) return url;
+  if (/^https?:\/\//.test(url)) return url
   if (typeof window !== "undefined") {
-    return `${window.location.origin}${url.startsWith("/") ? "" : "/"}${url}`;
+    return `${window.location.origin}${url.startsWith("/") ? "" : "/"}${url}`
   }
-  return url;
+  return url
 }
 
-const agentStreamApiUrl = toAbsoluteApiUrl(agentsApi.langGraphApiUrl);
+const agentStreamApiUrl = toAbsoluteApiUrl(agentsApi.langGraphApiUrl)
+
+function ActiveThreadRecovery({ threadId }: { threadId: string | null }) {
+  const stream = useStreamContext()
+  const controller = stream[STREAM_CONTROLLER]
+  const threadIdRef = useRef(threadId)
+  const recoveringRef = useRef(false)
+  threadIdRef.current = threadId
+
+  useEffect(() => {
+    if (!threadId) return
+    const recover = async () => {
+      if (
+        document.visibilityState !== "visible" ||
+        recoveringRef.current ||
+        threadIdRef.current !== threadId
+      ) {
+        return
+      }
+      recoveringRef.current = true
+      try {
+        await controller.hydrate(null)
+        if (threadIdRef.current === threadId) await controller.hydrate(threadId)
+      } finally {
+        recoveringRef.current = false
+      }
+    }
+    document.addEventListener("visibilitychange", recover)
+    return () => document.removeEventListener("visibilitychange", recover)
+  }, [controller, threadId])
+
+  return null
+}
 
 /**
- * One persistent stream for the whole `/agents` subtree, mounted by the
- * layout so it survives the home → thread navigation. The built-in `sse`
- * transport (default `apiUrl` branch) is reused across thread switches —
- * changing `threadId` re-hydrates the same controller instead of tearing
- * down a per-thread transport — which is what lets a home-page
- * `stream.submit` keep streaming after we navigate to the minted thread.
+ * One persistent stream controller for the whole `/agents` subtree. The SDK
+ * owns each thread's transport so switching threads or recovering a suspended
+ * tab closes the old transport and creates a fresh one.
  */
 export function AgentThreadStreamProvider({
   threadId,
@@ -68,39 +88,51 @@ export function AgentThreadStreamProvider({
    * the `getState` hydrate — so a fresh thread needs no client-minted id and
    * no `getState` 404 round-trip.
    */
-  threadId: string | null;
-  children: ReactNode;
+  threadId: string | null
+  children: ReactNode
 }) {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
+  const client = useMemo(
+    () =>
+      new Client({
+        apiUrl: agentStreamApiUrl,
+        apiKey: null,
+        onRequest: dashboardRequest,
+      }),
+    []
+  )
 
   // The SDK captures the lifecycle callbacks once at controller creation, so
   // they must be stable. Read the live thread id from a ref instead of
   // closing over the (changing) prop.
-  const threadIdRef = useRef<string | null>(threadId);
-  threadIdRef.current = threadId;
+  const threadIdRef = useRef<string | null>(threadId)
+  threadIdRef.current = threadId
 
   const onCreated = useCallback(() => {
-    invalidateAgentThreadLists(queryClient);
-  }, [queryClient]);
+    invalidateAgentThreadLists(queryClient)
+  }, [queryClient])
 
   const onCompleted = useCallback(() => {
-    const id = threadIdRef.current;
+    const id = threadIdRef.current
     if (id) {
-      void queryClient.invalidateQueries({ queryKey: agentThreadKeys.detail(id) });
+      void queryClient.invalidateQueries({
+        queryKey: agentThreadKeys.detail(id),
+      })
     }
-    invalidateAgentThreadLists(queryClient);
-  }, [queryClient]);
+    invalidateAgentThreadLists(queryClient)
+  }, [queryClient])
 
   return (
     <StreamProvider
       apiUrl={agentStreamApiUrl}
       assistantId={AGENT_ASSISTANT_ID}
-      fetch={dashboardFetch}
+      client={client}
       threadId={threadId ?? undefined}
       onCreated={onCreated}
       onCompleted={onCompleted}
     >
+      <ActiveThreadRecovery threadId={threadId} />
       {children}
     </StreamProvider>
-  );
+  )
 }

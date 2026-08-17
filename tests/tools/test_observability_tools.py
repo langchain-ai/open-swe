@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal, cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 import pytest
 from langchain_core.runnables import RunnableConfig
@@ -138,16 +138,30 @@ async def test_notion_wrapper_fails_when_token_missing_at_call_time() -> None:
 
 @pytest.mark.asyncio
 async def test_load_langsmith_tools_empty_when_not_connected() -> None:
-    with patch.object(langsmith_tools, "get_langsmith_credentials", AsyncMock(return_value=None)):
-        assert await langsmith_tools.load_langsmith_tools() == []
+    with (
+        patch.object(
+            langsmith_tools, "get_user_langsmith_credentials", AsyncMock(return_value=None)
+        ),
+        patch.object(
+            langsmith_tools, "get_team_langsmith_credentials", AsyncMock(return_value=None)
+        ),
+    ):
+        assert await langsmith_tools.load_langsmith_tools("alice") == []
 
 
 @pytest.mark.asyncio
 async def test_load_langsmith_tools_names() -> None:
     creds = LangSmithCredentials(api_key="k", endpoint="https://api.smith.langchain.com")
-    with patch.object(langsmith_tools, "get_langsmith_credentials", AsyncMock(return_value=creds)):
-        tools = await langsmith_tools.load_langsmith_tools()
+    team_credentials = AsyncMock()
+    with (
+        patch.object(
+            langsmith_tools, "get_user_langsmith_credentials", AsyncMock(return_value=creds)
+        ),
+        patch.object(langsmith_tools, "get_team_langsmith_credentials", team_credentials),
+    ):
+        tools = await langsmith_tools.load_langsmith_tools("alice")
     assert {t.name for t in tools} == {"langsmith_get_trace", "langsmith_list_runs"}
+    team_credentials.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -167,7 +181,13 @@ async def test_langsmith_get_trace_serializes() -> None:
         outputs = {"b": 2}
 
     class _FakeClient:
-        def read_run(self, run_id: str, load_child_runs: bool = False):
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def read_run(self, run_id: str):
             assert run_id == "run-1"
             return _Run()
 
@@ -186,10 +206,17 @@ async def test_langsmith_list_runs_caps_limit() -> None:
     captured: dict[str, object] = {}
 
     class _FakeClient:
-        def list_runs(self, *, project_name: str, filter, limit: int):
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def list_runs(self, *, project_name: str, filter, limit: int):
             captured["limit"] = limit
             captured["project_name"] = project_name
-            return []
+            return
+            yield
 
     tools = langsmith_tools._make_tools(creds)
     list_runs = next(t for t in tools if t.name == "langsmith_list_runs")
@@ -205,7 +232,7 @@ async def test_load_observability_tools_skipped_when_unauthorized() -> None:
         patch.object(server, "load_datadog_tools", AsyncMock(return_value=["dd"])),
         patch.object(server, "load_langsmith_tools", AsyncMock(return_value=["ls"])),
     ):
-        assert await server._load_observability_tools(authorized=False) == []
+        assert await server._load_observability_tools(authorized=False, profile_login=None) == []
 
 
 @pytest.mark.asyncio
@@ -214,7 +241,10 @@ async def test_load_observability_tools_loaded_when_authorized() -> None:
         patch.object(server, "load_datadog_tools", AsyncMock(return_value=["dd"])),
         patch.object(server, "load_langsmith_tools", AsyncMock(return_value=["ls"])),
     ):
-        assert await server._load_observability_tools(authorized=True) == ["dd", "ls"]
+        assert await server._load_observability_tools(authorized=True, profile_login="alice") == [
+            "dd",
+            "ls",
+        ]
 
 
 @pytest.mark.asyncio
@@ -238,6 +268,17 @@ async def test_observability_authorized_allowlist(monkeypatch: pytest.MonkeyPatc
 
     config = cast(RunnableConfig, {"configurable": {"user_email": "trusted@example.com"}})
     assert await server._observability_authorized(config, None) is True
+
+
+@pytest.mark.asyncio
+async def test_allowed_org_member(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary,secondary")
+    membership = AsyncMock(side_effect=[False, True])
+    monkeypatch.setattr(server, "is_user_active_org_member", membership)
+
+    config = cast(RunnableConfig, {"configurable": {"github_login": "dev"}})
+    assert await server._allowed_org_member(config, "dev") is True
+    assert membership.await_args_list == [call("dev", "primary"), call("dev", "secondary")]
 
 
 @pytest.mark.asyncio

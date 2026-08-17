@@ -63,7 +63,7 @@ _DEFAULTS = {
     # 127.0.0.1 (not localhost) so the local-dev LLM-key check stays skipped.
     "DASHBOARD_BASE_URL": BASE_URL,
     "DASHBOARD_API_BASE_URL": BASE_URL,
-    "DASHBOARD_ALLOWED_ORIGINS": BASE_URL,
+    "DASHBOARD_ALLOWED_ORIGINS": f"{BASE_URL},open-swe://app",
     "DASHBOARD_JWT_SECRET": "test-dashboard-jwt-secret",
 }
 
@@ -76,6 +76,11 @@ TEST_USERS = [
     {"name": "Alice", "slack_id": "U_ALICE", "login": "alice", "email": "alice@example.com"},
     {"name": "Bob", "slack_id": "U_BOB", "login": "bob", "email": "bob@example.com"},
 ]
+
+# Alice is the workspace admin (so admin threads + the environments dashboard are
+# reachable); Bob is a plain member, which is what the deny-side assertions use.
+ADMIN_USER = TEST_USERS[0]
+_DEFAULTS["CONFIGURED_ADMINS"] = ADMIN_USER["email"]
 
 # The default Slack sender / thread owner; a session with this email may continue
 # the thread on the web. Any other logged-in user is read-only.

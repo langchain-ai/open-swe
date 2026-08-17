@@ -6,7 +6,7 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 from langgraph_sdk.schema import Config
@@ -19,6 +19,7 @@ from ..utils.slack import (
     store_slack_run_mapping,
 )
 from ..utils.thread_ops import langgraph_client
+from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
 from .options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -34,10 +35,13 @@ from .user_mappings import slack_id_for_login
 logger = logging.getLogger(__name__)
 
 SCHEDULES_NAMESPACE: list[str] = ["agent_schedules"]
+SCHEDULE_RUN_STATE_NAMESPACE: list[str] = ["agent_schedule_run_state"]
 _AGENT_ASSISTANT_ID = "agent"
 _SCHEDULER_ASSISTANT_ID = "scheduler"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 _SLACK_CHANNEL_ID_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
+SlackNotificationMode = Literal["always", "on_action"]
+_DEFAULT_SLACK_NOTIFICATION_MODE: SlackNotificationMode = "always"
 
 
 def _normalize_slack_channel_id(value: str | None) -> str | None:
@@ -49,6 +53,10 @@ def _normalize_slack_channel_id(value: str | None) -> str | None:
     return channel_id
 
 
+def _slack_notification_mode(record: dict[str, Any]) -> SlackNotificationMode:
+    return "on_action" if record.get("slack_notification_mode") == "on_action" else "always"
+
+
 class ScheduleCreateBody(BaseModel):
     prompt: str = Field(min_length=1, max_length=20_000)
     schedule: str = Field(min_length=1, max_length=120)
@@ -57,6 +65,7 @@ class ScheduleCreateBody(BaseModel):
     model_id: str | None = None
     effort: str | None = None
     slack_channel_id: str | None = None
+    slack_notification_mode: SlackNotificationMode = _DEFAULT_SLACK_NOTIFICATION_MODE
 
     @field_validator("schedule")
     @classmethod
@@ -78,6 +87,7 @@ class ScheduleUpdateBody(BaseModel):
     effort: str | None = None
     enabled: bool | None = None
     slack_channel_id: str | None = None
+    slack_notification_mode: SlackNotificationMode | None = None
 
     @field_validator("schedule")
     @classmethod
@@ -161,8 +171,11 @@ def _repo_full_name(repo: dict[str, str] | None) -> str | None:
     return f"{owner}/{name}" if owner and name else None
 
 
-def _schedule_summary(record: dict[str, Any]) -> dict[str, Any]:
+def _schedule_summary(
+    record: dict[str, Any], run_state: dict[str, Any] | None = None
+) -> dict[str, Any]:
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
+    state = run_state or record
     return {
         "id": record.get("id"),
         "name": record.get("name"),
@@ -170,15 +183,16 @@ def _schedule_summary(record: dict[str, Any]) -> dict[str, Any]:
         "schedule": record.get("schedule"),
         "repo": _repo_full_name(repo),
         "slackChannelId": record.get("slack_channel_id"),
+        "slackNotificationMode": _slack_notification_mode(record),
         "model": record.get("model"),
         "effort": record.get("effort"),
         "enabled": bool(record.get("enabled")),
         "cronId": record.get("cron_id"),
-        "lastThreadId": record.get("last_thread_id"),
-        "lastRunId": record.get("last_run_id"),
-        "lastTriggeredAt": record.get("last_triggered_at"),
-        "lastError": record.get("last_error"),
-        "lastErrorAt": record.get("last_error_at"),
+        "lastThreadId": state.get("last_thread_id"),
+        "lastRunId": state.get("last_run_id"),
+        "lastTriggeredAt": state.get("last_triggered_at"),
+        "lastError": state.get("last_error"),
+        "lastErrorAt": state.get("last_error_at"),
         "createdAt": record.get("created_at"),
         "updatedAt": record.get("updated_at"),
     }
@@ -196,6 +210,35 @@ async def _put_value(record: dict[str, Any]) -> dict[str, Any]:
     record = {**record, "updated_at": _now_iso()}
     await _client().store.put_item(SCHEDULES_NAMESPACE, record["id"], record)
     return record
+
+
+async def _get_run_state(schedule_id: str) -> dict[str, Any] | None:
+    item = await _client().store.get_item(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
+    if item is None:
+        return None
+    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
+    return value if isinstance(value, dict) else None
+
+
+async def _put_run_state(record: dict[str, Any], patch: dict[str, Any]) -> None:
+    schedule_id = record["id"]
+    existing = await _get_run_state(schedule_id)
+    fallback = {
+        "last_thread_id": record.get("last_thread_id"),
+        "last_run_id": record.get("last_run_id"),
+        "last_triggered_at": record.get("last_triggered_at"),
+        "last_error": record.get("last_error"),
+        "last_error_at": record.get("last_error_at"),
+    }
+    value = {
+        **fallback,
+        **(existing or {}),
+        **patch,
+        "schedule_id": schedule_id,
+        "created_by": record.get("created_by"),
+        "user_email": record.get("user_email"),
+    }
+    await _client().store.put_item(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id, value)
 
 
 async def get_agent_schedule(schedule_id: str) -> dict[str, Any] | None:
@@ -216,13 +259,13 @@ def _assert_schedule_owner(
         raise HTTPException(404, "schedule not found")
 
 
-async def _search_schedule_values(filter: dict[str, Any]) -> list[dict[str, Any]]:
+async def _search_values(namespace: list[str], filter: dict[str, Any]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     limit = 100
     offset = 0
     while True:
         result = await _client().store.search_items(
-            SCHEDULES_NAMESPACE,
+            namespace,
             filter=filter,
             limit=limit,
             offset=offset,
@@ -246,14 +289,19 @@ async def list_agent_schedules(login: str, *, email: str | None = None) -> list[
         searches.append({"user_email": email.strip().lower()})
 
     seen: dict[str, dict[str, Any]] = {}
+    run_states: dict[str, dict[str, Any]] = {}
     for filter in searches:
-        for record in await _search_schedule_values(filter):
+        for record in await _search_values(SCHEDULES_NAMESPACE, filter):
             schedule_id = record.get("id")
             if isinstance(schedule_id, str) and _user_owns_schedule(record, login, email):
                 seen[schedule_id] = record
+        for state in await _search_values(SCHEDULE_RUN_STATE_NAMESPACE, filter):
+            schedule_id = state.get("schedule_id")
+            if isinstance(schedule_id, str):
+                run_states[schedule_id] = state
     records = list(seen.values())
     records.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
-    return [_schedule_summary(record) for record in records]
+    return [_schedule_summary(record, run_states.get(record["id"])) for record in records]
 
 
 async def _ensure_dashboard_github_token(login: str) -> None:
@@ -314,6 +362,7 @@ async def create_agent_schedule(
         "schedule": body.schedule,
         "repo": repo,
         "slack_channel_id": body.slack_channel_id,
+        "slack_notification_mode": body.slack_notification_mode,
         "model": chosen_model or profile.get("default_model") or "Default",
         "effort": chosen_effort or profile.get("reasoning_effort"),
         "base_branch": profile.get("base_branch") or "main",
@@ -366,6 +415,10 @@ async def update_agent_schedule(
         patch["enabled"] = body.enabled
     if "slack_channel_id" in body.model_fields_set:
         patch["slack_channel_id"] = body.slack_channel_id
+    if "slack_notification_mode" in body.model_fields_set:
+        patch["slack_notification_mode"] = (
+            body.slack_notification_mode or _DEFAULT_SLACK_NOTIFICATION_MODE
+        )
 
     updated = {**existing, **patch}
     schedule_changed = updated.get("schedule") != existing.get("schedule")
@@ -385,7 +438,7 @@ async def update_agent_schedule(
         updated["cron_id"] = None
 
     updated = await _put_value(updated)
-    return _schedule_summary(updated)
+    return _schedule_summary(updated, await _get_run_state(schedule_id))
 
 
 async def delete_agent_schedule(schedule_id: str, login: str, *, email: str | None = None) -> None:
@@ -394,40 +447,62 @@ async def delete_agent_schedule(schedule_id: str, login: str, *, email: str | No
     assert existing is not None
     await _delete_cron(existing.get("cron_id"))
     await _client().store.delete_item(SCHEDULES_NAMESPACE, schedule_id)
+    await _client().store.delete_item(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
 
 
-def _slack_root_message(record: dict[str, Any]) -> str:
+def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> str:
     repo = _repo_full_name(record.get("repo") if isinstance(record.get("repo"), dict) else None)
     repo_line = f"\n*Repository:* `{repo}`" if repo else ""
+    run_kind = "test" if test_run else "scheduled"
     return (
         f"*Open SWE automation:* {record.get('name') or 'Scheduled agent'}{repo_line}\n\n"
-        "A scheduled run started. Reply in this thread to follow up with the agent."
+        f"A {run_kind} run started. Reply in this thread to follow up with the agent."
     )
 
 
 def _scheduled_prompt(record: dict[str, Any], slack_thread: dict[str, Any] | None) -> str:
     prompt = str(record["prompt"])
-    if not slack_thread:
-        return prompt
-    return (
-        f"{prompt}\n\n"
-        "Use `slack_thread_reply` for clarifying questions, essential progress updates, "
-        "the pull request link, and the final outcome in the connected Slack thread."
-    )
+    if slack_thread:
+        return (
+            f"{prompt}\n\n"
+            "Use `slack_thread_reply` for clarifying questions, essential progress updates, "
+            "the pull request link, and the final outcome in the connected Slack thread."
+        )
+    slack_channel_id = record.get("slack_channel_id")
+    if (
+        _slack_notification_mode(record) == "on_action"
+        and isinstance(slack_channel_id, str)
+        and slack_channel_id
+    ):
+        return (
+            f"{prompt}\n\n"
+            "This automation uses conditional Slack notifications. If and only if you perform "
+            "a concrete requested action, such as changing code or updating an external system, "
+            "call `notify_automation_channel` exactly once with a concise final outcome. Do not "
+            "call it for read-only checks or when no action was needed."
+        )
+    return prompt
 
 
 def _agent_run_metadata(
-    record: dict[str, Any], thread_id: str, slack_thread: dict[str, Any] | None = None
+    record: dict[str, Any],
+    thread_id: str,
+    slack_thread: dict[str, Any] | None = None,
+    *,
+    test_run: bool = False,
 ) -> dict[str, Any]:
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     now_ms = _now_ms()
+    title_prefix = "Test" if test_run else "Scheduled"
     metadata: dict[str, Any] = {
         "source": "schedule",
         "schedule_id": record["id"],
         "schedule_name": record.get("name"),
+        "schedule_test": test_run,
         "github_login": record.get("created_by"),
+        PARTICIPANT_LOGINS_KEY: [record["created_by"]] if record.get("created_by") else [],
         "triggering_user_email": record.get("user_email"),
-        "title": f"Scheduled: {record.get('name') or 'Agent'}",
+        "title": f"{title_prefix}: {record.get('name') or 'Agent'}",
         "base_branch": record.get("base_branch") or "main",
         "branch_prefix": record.get("branch_prefix"),
         "model": record.get("model") or "Default",
@@ -444,7 +519,11 @@ def _agent_run_metadata(
 
 
 async def _agent_run_config(
-    record: dict[str, Any], thread_id: str, slack_thread: dict[str, Any] | None = None
+    record: dict[str, Any],
+    thread_id: str,
+    slack_thread: dict[str, Any] | None = None,
+    *,
+    test_run: bool = False,
 ) -> dict[str, Any]:
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
@@ -452,6 +531,7 @@ async def _agent_run_config(
         "github_login": record.get("created_by"),
         "user_email": record.get("user_email"),
         "schedule_id": record["id"],
+        "schedule_test": test_run,
         "prepare_run_id": str(uuid.uuid4()),
     }
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
@@ -459,6 +539,18 @@ async def _agent_run_config(
         configurable["repo"] = repo
     if slack_thread:
         configurable["slack_thread"] = slack_thread
+    slack_channel_id = record.get("slack_channel_id")
+    if (
+        _slack_notification_mode(record) == "on_action"
+        and isinstance(slack_channel_id, str)
+        and slack_channel_id
+    ):
+        configurable["automation_slack_notification"] = {
+            "channel_id": slack_channel_id,
+            "mode": "on_action",
+            "schedule_id": record["id"],
+            "schedule_name": record.get("name"),
+        }
     model, effort = _normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
         model, effort = gate_fable_model(
@@ -469,11 +561,11 @@ async def _agent_run_config(
     return {"configurable": configurable, "metadata": _agent_version_metadata()}
 
 
-async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
-    record = await get_agent_schedule(schedule_id)
-    if not record:
-        return {"status": "missing", "schedule_id": schedule_id}
-    if not record.get("enabled"):
+async def _launch_agent_schedule_record(
+    record: dict[str, Any], *, test_run: bool = False
+) -> dict[str, Any]:
+    schedule_id = record["id"]
+    if not test_run and not record.get("enabled"):
         return {"status": "disabled", "schedule_id": schedule_id}
 
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
@@ -481,12 +573,12 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
     login = record.get("created_by")
     if full_name:
         if not (isinstance(login, str) and login):
-            await _put_value(
+            await _put_run_state(
+                record,
                 {
-                    **record,
                     "last_error": "schedule owner unavailable",
                     "last_error_at": _now_iso(),
-                }
+                },
             )
             return {
                 "status": "unauthorized",
@@ -496,29 +588,41 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
         try:
             await require_repo_access_for_user(login, full_name)
         except HTTPException as exc:
-            await _put_value(
+            await _put_run_state(
+                record,
                 {
-                    **record,
                     "last_error": str(exc.detail),
                     "last_error_at": _now_iso(),
-                }
+                },
             )
-            return {"status": "unauthorized", "schedule_id": schedule_id, "error": exc.detail}
+            return {
+                "status": "unauthorized",
+                "schedule_id": schedule_id,
+                "error": exc.detail,
+                "status_code": exc.status_code,
+            }
 
     client = _client()
     thread_id = str(uuid.uuid4())
     slack_thread: dict[str, Any] | None = None
     slack_channel_id = record.get("slack_channel_id")
-    if isinstance(slack_channel_id, str) and slack_channel_id:
+    if (
+        _slack_notification_mode(record) == "always"
+        and isinstance(slack_channel_id, str)
+        and slack_channel_id
+    ):
         message_ts, slack_error = await post_slack_top_level_message_with_ts(
             slack_channel_id,
-            _slack_root_message(record),
+            _slack_root_message(record, test_run=test_run),
             unfurl_links=False,
             unfurl_media=False,
         )
         if not message_ts:
             error = f"Slack post failed: {slack_error or 'unknown error'}"
-            await _put_value({**record, "last_error": error, "last_error_at": _now_iso()})
+            await _put_run_state(
+                record,
+                {"last_error": error, "last_error_at": _now_iso()},
+            )
             return {"status": "error", "schedule_id": schedule_id, "error": error}
         slack_thread = {
             "channel_id": slack_channel_id,
@@ -532,7 +636,7 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
         }
         await bind_slack_thread_id(client, slack_channel_id, message_ts, thread_id)
 
-    metadata = _agent_run_metadata(record, thread_id, slack_thread)
+    metadata = _agent_run_metadata(record, thread_id, slack_thread, test_run=test_run)
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     run = await create_durable_run(
@@ -540,7 +644,7 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
         _AGENT_ASSISTANT_ID,
         input={"messages": [{"role": "user", "content": _scheduled_prompt(record, slack_thread)}]},
         source="schedule",
-        config=await _agent_run_config(record, thread_id, slack_thread),
+        config=await _agent_run_config(record, thread_id, slack_thread, test_run=test_run),
         client=client,
         stream_mode=["values", "updates", "messages-tuple"],
         stream_resumable=True,
@@ -559,15 +663,15 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
         thread_id=thread_id,
         metadata={"latest_run_id": run_id, "latest_run_status": "pending", "updated_at_ms": now_ms},
     )
-    await _put_value(
+    await _put_run_state(
+        record,
         {
-            **record,
             "last_thread_id": thread_id,
             "last_run_id": run_id,
             "last_triggered_at": _now_iso(),
             "last_error": None,
             "last_error_at": None,
-        }
+        },
     )
     return {
         "status": "started",
@@ -575,3 +679,30 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
         "thread_id": thread_id,
         "run_id": run_id,
     }
+
+
+async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
+    record = await get_agent_schedule(schedule_id)
+    if not record:
+        return {"status": "missing", "schedule_id": schedule_id}
+    return await _launch_agent_schedule_record(record)
+
+
+async def trigger_agent_schedule(
+    schedule_id: str, login: str, *, email: str | None = None
+) -> dict[str, Any]:
+    record = await get_agent_schedule(schedule_id)
+    _assert_schedule_owner(record, login, email)
+    assert record is not None
+
+    result = await _launch_agent_schedule_record(record, test_run=True)
+    status = result.get("status")
+    if status == "started":
+        return result
+    if status == "unauthorized":
+        status_code = result.get("status_code")
+        raise HTTPException(
+            status_code if isinstance(status_code, int) else 403,
+            result.get("error") or "automation repository unavailable",
+        )
+    raise HTTPException(502, result.get("error") or "failed to start automation test")

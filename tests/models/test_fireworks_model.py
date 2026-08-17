@@ -7,7 +7,7 @@ from agent.utils.model import (
     provider_model_kwargs,
 )
 
-KIMI_K3_ID = "fireworks:accounts/fireworks/models/kimi-k3-code"
+KIMI_K3_ID = "fireworks:accounts/fireworks/models/kimi-k3"
 
 
 def test_fireworks_reasoning_effort_maps_effort() -> None:
@@ -31,18 +31,34 @@ def test_kimi_k3_is_supported() -> None:
     kimi_k3 = next((m for m in SUPPORTED_MODELS if m["id"] == KIMI_K3_ID), None)
     assert kimi_k3 is not None
     assert kimi_k3.get("label") == "Kimi K3"
-    assert kimi_k3.get("efforts") == ["low", "medium", "high"]
+    # K3 always reasons, and `reasoning_effort` only accepts low/high/max.
+    assert kimi_k3.get("efforts") == ["low", "high", "max"]
     assert "none" not in kimi_k3.get("efforts", [])
+    assert "medium" not in kimi_k3.get("efforts", [])
     assert kimi_k3.get("default_effort") == "high"
     kwargs = provider_model_kwargs(KIMI_K3_ID, "high", max_tokens=16_000)
     assert kwargs.get("model_kwargs") == {"reasoning_effort": "high"}
 
 
 def test_renamed_kimi_k2p7_migrates_to_kimi_k3() -> None:
+    """K2.7's `medium` is not a K3 effort, so migration lands on K3's default."""
     assert all(not m["id"].endswith("kimi-k2p7-code") for m in SUPPORTED_MODELS)
     assert provider_fallback_pair(
         "fireworks:accounts/fireworks/models/kimi-k2p7-code", "medium"
-    ) == (KIMI_K3_ID, "medium")
+    ) == (KIMI_K3_ID, "high")
+    assert provider_fallback_pair("fireworks:accounts/fireworks/models/kimi-k2p7-code", "low") == (
+        KIMI_K3_ID,
+        "low",
+    )
+
+
+def test_kimi_k3_code_is_not_offered_and_migrates_to_the_deployed_id() -> None:
+    """`kimi-k3-code` was never deployed on Fireworks and 404s at request time."""
+    assert all(not m["id"].endswith("kimi-k3-code") for m in SUPPORTED_MODELS)
+    assert provider_fallback_pair("fireworks:accounts/fireworks/models/kimi-k3-code", "high") == (
+        KIMI_K3_ID,
+        "high",
+    )
 
 
 def test_provider_model_kwargs_for_fireworks_none_disables_reasoning() -> None:

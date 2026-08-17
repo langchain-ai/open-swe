@@ -151,6 +151,24 @@ def test_slack_channel_validation_normalizes_ids() -> None:
         ScheduleCreateBody(prompt="hello", schedule="0 9 * * *", slack_channel_id="#general")
 
 
+def test_slack_notification_mode_defaults_and_validates() -> None:
+    default_body = ScheduleCreateBody(prompt="hello", schedule="0 9 * * *")
+    conditional_body = ScheduleCreateBody(
+        prompt="hello", schedule="0 9 * * *", slack_notification_mode="on_action"
+    )
+
+    assert default_body.slack_notification_mode == "always"
+    assert conditional_body.slack_notification_mode == "on_action"
+    with pytest.raises(ValidationError):
+        ScheduleCreateBody.model_validate(
+            {
+                "prompt": "hello",
+                "schedule": "0 9 * * *",
+                "slack_notification_mode": "sometimes",
+            }
+        )
+
+
 async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
         name="Daily report",
@@ -165,6 +183,7 @@ async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth)
     assert result["name"] == "Daily report"
     assert result["enabled"] is True
     assert result["slackChannelId"] == "C0123456789"
+    assert result["slackNotificationMode"] == "always"
     assert result["cronId"] == "cron_1"
     created = fake_client.crons.created[0]
     assert created["assistant_id"] == "scheduler"
@@ -229,6 +248,16 @@ async def test_list_agent_schedules_uses_owner_filters_and_paginates(fake_client
             },
         )
     await fake_client.store.put_item(
+        schedules.SCHEDULE_RUN_STATE_NAMESPACE,
+        "alice_0",
+        {
+            "schedule_id": "alice_0",
+            "created_by": "alice",
+            "user_email": "alice@example.com",
+            "last_triggered_at": "2026-01-02T00:00:00+00:00",
+        },
+    )
+    await fake_client.store.put_item(
         schedules.SCHEDULES_NAMESPACE,
         "bob_1",
         {
@@ -250,6 +279,9 @@ async def test_list_agent_schedules_uses_owner_filters_and_paginates(fake_client
 
     assert len(result) == 125
     assert {item["id"] for item in result} == {f"alice_{i}" for i in range(125)}
+    assert all(item["slackNotificationMode"] == "always" for item in result)
+    alice_zero = next(item for item in result if item["id"] == "alice_0")
+    assert alice_zero["lastTriggeredAt"] == "2026-01-02T00:00:00+00:00"
 
 
 async def test_update_agent_schedule_rechecks_repo_access(fake_client, auth, monkeypatch) -> None:  # noqa: ANN001, ARG001
@@ -315,6 +347,37 @@ async def test_update_agent_schedule_clears_slack_channel(fake_client) -> None: 
     assert result["slackChannelId"] is None
 
 
+async def test_update_agent_schedule_changes_slack_notification_mode(fake_client) -> None:  # noqa: ANN001
+    record = {
+        "id": "sched_1",
+        "name": "Daily",
+        "prompt": "Run daily",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "slack_channel_id": "C0123456789",
+        "model": "Default",
+        "effort": None,
+        "enabled": True,
+        "cron_id": "cron_old",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    result = await schedules.update_agent_schedule(
+        "sched_1",
+        "alice",
+        ScheduleUpdateBody(slack_notification_mode="on_action"),
+        email="alice@example.com",
+    )
+
+    assert result["slackNotificationMode"] == "on_action"
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert stored["slack_notification_mode"] == "on_action"
+
+
 async def test_update_agent_schedule_pause_deletes_cron(fake_client) -> None:  # noqa: ANN001
     record = {
         "id": "sched_1",
@@ -340,6 +403,102 @@ async def test_update_agent_schedule_pause_deletes_cron(fake_client) -> None:  #
     assert result["enabled"] is False
     assert result["cronId"] is None
     assert fake_client.crons.deleted == ["cron_old"]
+
+
+async def test_trigger_agent_schedule_runs_paused_automation_as_test(
+    fake_client, monkeypatch
+) -> None:  # noqa: ANN001
+    record = {
+        "id": "sched_1",
+        "name": "Weekly dependencies",
+        "prompt": "Check dependencies",
+        "schedule": "0 9 * * 1",
+        "repo": None,
+        "model": "Default",
+        "effort": None,
+        "base_branch": "main",
+        "branch_prefix": "open-swe",
+        "enabled": False,
+        "cron_id": None,
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    async def create_run(thread_id: str, assistant_id: str, **kwargs: Any) -> dict[str, str]:
+        fake_client.runs.created.append(
+            {"thread_id": thread_id, "assistant_id": assistant_id, **kwargs}
+        )
+        await fake_client.store.put_item(
+            schedules.SCHEDULES_NAMESPACE,
+            "sched_1",
+            {**record, "enabled": True, "cron_id": "cron_new"},
+        )
+        return {"run_id": "run_123"}
+
+    monkeypatch.setattr(schedules, "create_durable_run", create_run)
+
+    result = await schedules.trigger_agent_schedule("sched_1", "alice", email="alice@example.com")
+
+    assert result["status"] == "started"
+    metadata = fake_client.threads.created[0]["metadata"]
+    assert metadata["title"] == "Test: Weekly dependencies"
+    assert metadata["schedule_test"] is True
+    run = fake_client.runs.created[0]
+    assert run["config"]["configurable"]["schedule_test"] is True
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert stored["enabled"] is True
+    assert stored["cron_id"] == "cron_new"
+
+
+async def test_trigger_agent_schedule_hides_unowned_automation(fake_client) -> None:  # noqa: ANN001
+    record = {
+        "id": "sched_1",
+        "name": "Daily report",
+        "prompt": "Summarize updates",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "model": "Default",
+        "enabled": True,
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    with pytest.raises(HTTPException) as exc:
+        await schedules.trigger_agent_schedule("sched_1", "bob", email="bob@example.com")
+
+    assert exc.value.status_code == 404
+    assert fake_client.runs.created == []
+
+
+async def test_trigger_agent_schedule_preserves_repo_auth_error(fake_client, monkeypatch) -> None:  # noqa: ANN001
+    record = {
+        "id": "sched_1",
+        "name": "Daily report",
+        "prompt": "Summarize updates",
+        "schedule": "0 9 * * *",
+        "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "model": "Default",
+        "enabled": True,
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    async def expired_token(login: str, full_name: str) -> str:
+        raise HTTPException(401, "github token unavailable, re-login required")
+
+    monkeypatch.setattr(schedules, "require_repo_access_for_user", expired_token)
+
+    with pytest.raises(HTTPException) as exc:
+        await schedules.trigger_agent_schedule("sched_1", "alice", email="alice@example.com")
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "github token unavailable, re-login required"
+    assert fake_client.runs.created == []
 
 
 async def test_launch_scheduled_agent_run_skips_when_repo_access_revoked(
@@ -375,9 +534,10 @@ async def test_launch_scheduled_agent_run_skips_when_repo_access_revoked(
         "status": "unauthorized",
         "schedule_id": "sched_1",
         "error": "no access to this private repository",
+        "status_code": 403,
     }
     assert fake_client.runs.created == []
-    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
     assert stored["last_error"] == "no access to this private repository"
 
 
@@ -420,7 +580,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client,
     assert run["config"]["configurable"]["source"] == "schedule"
     assert run["config"]["configurable"]["repo"] == record["repo"]
 
-    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
     assert stored["last_thread_id"] == thread_id
     assert stored["last_run_id"] == "run_123"
 
@@ -479,6 +639,54 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
     assert mapping["run_id"] == "run_123"
 
 
+async def test_launch_conditional_slack_schedule_starts_silently(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    record = {
+        "id": "sched_1",
+        "name": "Dependency check",
+        "prompt": "Open a PR if dependencies need updates",
+        "schedule": "0 9 * * 1",
+        "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "slack_channel_id": "C0123456789",
+        "slack_notification_mode": "on_action",
+        "model": "Default",
+        "effort": None,
+        "base_branch": "main",
+        "branch_prefix": "open-swe",
+        "enabled": True,
+        "cron_id": "cron_1",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    async def fail_if_posted(*args: Any, **kwargs: Any) -> tuple[None, None]:
+        raise AssertionError("conditional schedule should not post at launch")
+
+    monkeypatch.setattr(schedules, "post_slack_top_level_message_with_ts", fail_if_posted)
+
+    result = await schedules.launch_scheduled_agent_run("sched_1")
+
+    assert result["status"] == "started"
+    run = fake_client.runs.created[0]
+    configurable = run["config"]["configurable"]
+    assert "slack_thread" not in configurable
+    assert configurable["automation_slack_notification"] == {
+        "channel_id": "C0123456789",
+        "mode": "on_action",
+        "schedule_id": "sched_1",
+        "schedule_name": "Dependency check",
+    }
+    prompt = run["input"]["messages"][0]["content"]
+    assert "notify_automation_channel" in prompt
+    assert "read-only checks" in prompt
+    metadata = fake_client.threads.created[0]["metadata"]
+    assert "source_context" not in metadata
+
+
 async def test_launch_scheduled_agent_run_stops_when_slack_post_fails(
     fake_client, auth, monkeypatch
 ) -> None:  # noqa: ANN001, ARG001
@@ -514,5 +722,5 @@ async def test_launch_scheduled_agent_run_stops_when_slack_post_fails(
     }
     assert fake_client.threads.created == []
     assert fake_client.runs.created == []
-    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
     assert stored["last_error"] == "Slack post failed: not_in_channel"

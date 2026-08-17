@@ -4,7 +4,7 @@ from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
 
-from ..dashboard.options import DEFAULT_MODEL_ID
+from ..dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
 from .gateway import gateway_env_default, gateway_overrides
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
@@ -54,7 +54,7 @@ async def close_cached_models() -> None:
                 await result
 
 
-OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
+OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 # OpenAI's Responses API only returns human-readable reasoning text when a
 # summary is requested; without it, reasoning happens silently (billed in
 # output tokens) and the reasoning content block arrives empty.
@@ -149,6 +149,10 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
         _configure_openai_responses_kwargs(model_kwargs)
         _coerce_openai_chat_completions_kwargs(model_kwargs)
 
+    profile_override = model_profile_with_context_override(model_id)
+    if profile_override is not None:
+        model_kwargs["profile"] = profile_override
+
     max_tokens = model_kwargs.get("max_tokens")
     max_tokens_key = max_tokens if type(max_tokens) is int else None
     key = (
@@ -207,6 +211,8 @@ def openai_reasoning_for(
         return {"effort": "high", "summary": "auto"}
     if effort == "xhigh":
         return {"effort": "xhigh", "summary": "auto"}
+    if effort == "max":
+        return {"effort": "max", "summary": "auto"}
     return None
 
 

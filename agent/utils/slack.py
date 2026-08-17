@@ -21,6 +21,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.run_usage import RunUsageSummary
 
 from .http import DEFAULT_HTTP_TIMEOUT
 from .user_messages import WARNING_ICON
@@ -31,25 +32,10 @@ SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
-DEFAULT_ASSISTANT_STATUS = "is thinking…"
 
 SlackChannelContext = dict[str, str]
 _SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
-# Curated rotating loading strings shown by Slack while the indicator is active.
-# Capped at 10 by Slack's API.
-DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
-    "Pondering…",
-    "Cogitating…",
-    "Ruminating…",
-    "Noodling…",
-    "Percolating…",
-    "Marinating…",
-    "Simmering…",
-    "Conjuring…",
-    "Tinkering…",
-    "Schlepping…",
-)
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
@@ -57,6 +43,10 @@ LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
 )
 _SLACK_CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 _SLACK_MESSAGE_TS_RE = re.compile(r"^[0-9]{1,20}(?:\.[0-9]{1,12})?$")
+SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10
+SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH = 4
+SLACK_FORWARDED_ATTACHMENT_MAX_NODES = 50
+SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
 
 
 @dataclass(frozen=True)
@@ -236,26 +226,83 @@ def select_slack_context_messages(
     return up_to_current, "thread_start"
 
 
+def _format_forwarded_slack_attachments(attachments: Any) -> str:
+    forwarded: list[str] = []
+    rendered_count = 0
+    visited_count = 0
+
+    def visit(values: Any, depth: int) -> None:
+        nonlocal rendered_count, visited_count
+        if depth > SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH or not isinstance(values, list):
+            return
+
+        for attachment in values:
+            if (
+                rendered_count >= SLACK_FORWARDED_ATTACHMENT_MAX_COUNT
+                or visited_count >= SLACK_FORWARDED_ATTACHMENT_MAX_NODES
+            ):
+                return
+            visited_count += 1
+            if not isinstance(attachment, dict):
+                continue
+
+            is_forwarded = any(
+                attachment.get(flag) is True
+                for flag in ("is_share", "is_msg_unfurl", "is_reply_unfurl")
+            )
+            if is_forwarded:
+                author = attachment.get("author_name")
+                author = author.strip() if isinstance(author, str) else ""
+                content = attachment.get("text")
+                if not isinstance(content, str) or not content.strip():
+                    content = attachment.get("fallback")
+                content = content.strip() if isinstance(content, str) else ""
+                if len(content) > SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS:
+                    content = (
+                        content[:SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS].rstrip()
+                        + "… [truncated]"
+                    )
+                source = attachment.get("from_url")
+                source = source.strip() if isinstance(source, str) else ""
+
+                label = "[Forwarded Slack message"
+                if author:
+                    label += f" from {author}"
+                label += "]"
+                parts = [label]
+                if content:
+                    parts.append(content)
+                if source:
+                    parts.append(f"Source: {source}")
+                if len(parts) > 1:
+                    indentation = "  " * depth
+                    forwarded.append("\n".join(f"{indentation}{part}" for part in parts))
+                    rendered_count += 1
+
+            visit(attachment.get("attachments"), depth + 1)
+
+    visit(attachments, 0)
+    return "\n".join(forwarded)
+
+
 def format_slack_messages_for_prompt(
     messages: list[dict[str, Any]],
     user_names_by_id: dict[str, str] | None = None,
     bot_user_id: str = "",
     bot_username: str = "",
 ) -> str:
-    """Format Slack messages into readable prompt text."""
+    """Format Slack messages, including forwarded context, as readable prompt text."""
     if not messages:
         return "(no thread messages available)"
 
     lines: list[str] = []
     for message in messages:
-        text = (
-            replace_bot_mention_with_username(
-                str(message.get("text", "")),
-                bot_user_id=bot_user_id,
-                bot_username=bot_username,
-            ).strip()
-            or "[non-text message]"
-        )
+        forwarded = _format_forwarded_slack_attachments(message.get("attachments"))
+        text = replace_bot_mention_with_username(
+            str(message.get("text", "")),
+            bot_user_id=bot_user_id,
+            bot_username=bot_username,
+        ).strip() or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
         if isinstance(user_id, str) and user_id:
             author_name = (user_names_by_id or {}).get(user_id) or user_id
@@ -267,57 +314,11 @@ def format_slack_messages_for_prompt(
             else:
                 bot_name = message.get("username") or "Bot"
             author = f"@{bot_name}(bot)"
-        lines.append(f"{author}: {text}")
+        line = f"{author}: {text}"
+        if forwarded:
+            line += f"\n{forwarded}"
+        lines.append(line)
     return "\n".join(lines)
-
-
-async def set_slack_assistant_status(
-    channel_id: str,
-    thread_ts: str,
-    status: str = DEFAULT_ASSISTANT_STATUS,
-    loading_messages: list[str] | tuple[str, ...] | None = None,
-) -> bool:
-    """Set the assistant typing/status indicator on a Slack thread.
-
-    Wraps Slack's `assistant.threads.setStatus` API. The `chat:write` scope
-    on the bot token is sufficient. Status auto-clears when the bot posts to
-    the thread, and Slack itself expires it after ~2 minutes — callers that
-    want it visible across longer runs must refresh it periodically.
-
-    `loading_messages` is an optional list (max 10) of strings Slack rotates
-    through while the indicator is visible.
-
-    No-op (returning False) when the bot token is missing or the
-    channel/thread is not provided. Failures are logged but never raised —
-    the indicator is a UX nicety, not a correctness requirement.
-    """
-    if not SLACK_BOT_TOKEN or not channel_id or not thread_ts:
-        return False
-
-    payload: dict[str, Any] = {
-        "channel_id": channel_id,
-        "thread_ts": thread_ts,
-        "status": status,
-    }
-    if loading_messages:
-        payload["loading_messages"] = list(loading_messages)[:10]
-
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-        try:
-            response = await http_client.post(
-                f"{SLACK_API_BASE_URL}/assistant.threads.setStatus",
-                headers=_slack_headers(),
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-            if not data.get("ok"):
-                logger.warning("Slack assistant.threads.setStatus failed: %s", data.get("error"))
-                return False
-            return True
-        except httpx.HTTPError:
-            logger.exception("Slack assistant.threads.setStatus request failed")
-            return False
 
 
 def _log_automated_warning_sent_to_slack(
@@ -398,16 +399,47 @@ async def _slack_thread_dashboard_url(
     return dashboard_thread_url(agent_thread_id) if agent_thread_id else None
 
 
-def format_slack_web_link_footer(dashboard_url: str | None) -> str:
+def _format_token_count(count: int) -> str:
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}K"
+    return str(count)
+
+
+def _safe_model_label(model: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)[:48].strip("-")
+
+
+def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
+    if usage is None:
+        return ""
+    labels = sorted({label for model in usage.models if (label := _safe_model_label(model))})
+    model_text = " + ".join(labels[:3])
+    if len(labels) > 3:
+        model_text = f"{model_text} +{len(labels) - 3}"
+    parts = [model_text] if model_text else []
+    if usage.main_agent_tokens is not None:
+        parts.append(f"{_format_token_count(usage.main_agent_tokens)} main-agent tokens")
+    return " • ".join(parts)
+
+
+def format_slack_web_link_footer(
+    dashboard_url: str | None, usage: RunUsageSummary | None = None
+) -> str:
     """Format the compact Slack Web footer link."""
     if not dashboard_url:
         return ""
-    return f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"
+    footer = f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"
+    usage_text = format_slack_run_usage(usage)
+    return f"{footer} • {usage_text}" if usage_text else footer
 
 
-def append_slack_web_link_footer(text: str, dashboard_url: str | None) -> str:
+def append_slack_web_link_footer(
+    text: str, dashboard_url: str | None, usage: RunUsageSummary | None = None
+) -> str:
     """Append the compact Slack Web footer link to fallback text."""
-    footer = format_slack_web_link_footer(dashboard_url)
+    footer = format_slack_web_link_footer(dashboard_url, usage)
     if not footer or footer in text:
         return text
     stripped = text.rstrip()
@@ -416,8 +448,10 @@ def append_slack_web_link_footer(text: str, dashboard_url: str | None) -> str:
     return f"{stripped} {footer}"
 
 
-def _slack_web_link_context_block(dashboard_url: str | None) -> dict[str, Any] | None:
-    footer = format_slack_web_link_footer(dashboard_url)
+def _slack_web_link_context_block(
+    dashboard_url: str | None, usage: RunUsageSummary | None = None
+) -> dict[str, Any] | None:
+    footer = format_slack_web_link_footer(dashboard_url, usage)
     if not footer:
         return None
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}
@@ -436,9 +470,12 @@ def _block_contains_text(block: dict[str, Any], needle: str) -> bool:
 
 
 def _with_slack_web_link_context_block(
-    text: str, blocks: list[dict[str, Any]] | None, dashboard_url: str | None
+    text: str,
+    blocks: list[dict[str, Any]] | None,
+    dashboard_url: str | None,
+    usage: RunUsageSummary | None = None,
 ) -> list[dict[str, Any]] | None:
-    context_block = _slack_web_link_context_block(dashboard_url)
+    context_block = _slack_web_link_context_block(dashboard_url, usage)
     if context_block is None:
         return blocks
     if not blocks:
@@ -452,7 +489,12 @@ def _with_slack_web_link_context_block(
     if dashboard_url and any(
         _block_contains_text(block, dashboard_url) for block in updated_blocks
     ):
-        return updated_blocks
+        usage_text = format_slack_run_usage(usage)
+        if not usage_text or any(
+            _block_contains_text(block, usage_text) for block in updated_blocks
+        ):
+            return updated_blocks
+        context_block["elements"][0]["text"] = usage_text
     updated_blocks.append(context_block)
     return updated_blocks
 
@@ -465,12 +507,13 @@ async def post_slack_thread_reply_with_ts(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
+    usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
     dashboard_url = await _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url)
-    text = append_slack_web_link_footer(text, dashboard_url)
+    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    text = append_slack_web_link_footer(text, dashboard_url, usage)
     return await _post_slack_message_with_ts(
         channel_id,
         text,
@@ -550,11 +593,16 @@ async def update_slack_message(
 
 
 async def post_slack_thread_reply(
-    channel_id: str, thread_ts: str, text: str, *, agent_thread_id: str | None = None
+    channel_id: str,
+    thread_ts: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+    agent_thread_id: str | None = None,
 ) -> bool:
     """Post a reply in a Slack thread."""
     message_ts, _ = await post_slack_thread_reply_with_ts(
-        channel_id, thread_ts, text, agent_thread_id=agent_thread_id
+        channel_id, thread_ts, text, blocks=blocks, agent_thread_id=agent_thread_id
     )
     return message_ts is not None
 
@@ -1095,7 +1143,7 @@ async def post_slack_trace_reply(
     channel_id: str, thread_ts: str, thread_id: str, *, include_dashboard_link: bool = True
 ) -> str | None:
     """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
-    trace_url = get_langsmith_trace_url(thread_id)
+    trace_url = await get_langsmith_trace_url(thread_id)
     dashboard_url = dashboard_thread_url(thread_id) if include_dashboard_link else None
     message_ts, _ = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -1112,7 +1160,7 @@ async def update_slack_trace_reply_for_web_handoff(
     channel_id: str, message_ts: str, thread_id: str
 ) -> bool:
     """Update the initial Slack trace reply after a dashboard handoff."""
-    trace_url = get_langsmith_trace_url(thread_id)
+    trace_url = await get_langsmith_trace_url(thread_id)
     dashboard_url = dashboard_thread_url(thread_id)
     ok, error = await update_slack_message(
         channel_id,

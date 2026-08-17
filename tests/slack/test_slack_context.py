@@ -4,6 +4,7 @@ from typing import cast
 import pytest
 
 from agent.utils import slack as slack_utils
+from agent.utils.run_usage import RunUsageSummary
 from agent.utils.slack import (
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
@@ -16,6 +17,10 @@ from agent.utils.slack import (
 )
 from agent.webhooks import common as webhook_common
 from agent.webhooks import slack as slack_webhooks
+
+
+async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
+    return "https://smith/x"
 
 
 class _FakeNotFoundError(Exception):
@@ -35,6 +40,9 @@ class _FakeThreadsClient:
         if self.thread is None:
             raise AssertionError("thread must be provided when raise_not_found is False")
         return self.thread
+
+    async def update(self, *, thread_id: str, metadata: dict) -> None:
+        cast(dict, self.thread)["metadata"].update(metadata)
 
 
 class _FakeClient:
@@ -96,6 +104,30 @@ def test_source_context_does_not_reuse_permalink_for_different_slack_thread(
 
     slack_thread = cast(dict[str, object], enriched["slack_thread"])
     assert "permalink" not in slack_thread
+
+
+def test_upsert_preserves_partially_initialized_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    owner_context = {"slack_thread": {"triggering_user_id": "UOWNER"}}
+    threads = _FakeThreadsClient({"metadata": {"source_context": owner_context}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    async def upsert(github_login: str, user_email: str, slack_user_id: str) -> None:
+        await webhook_common.upsert_agent_thread_owner_metadata(
+            "thread-id",
+            source="slack",
+            github_login=github_login,
+            user_email=user_email,
+            title=github_login,
+            source_context={"slack_thread": {"triggering_user_id": slack_user_id}},
+        )
+
+    asyncio.run(upsert("owner-gh", "owner@example.com", "UOWNER"))
+    asyncio.run(upsert("commenter-gh", "commenter@example.com", "UCOMMENTER"))
+    metadata = cast(dict, threads.thread)["metadata"]
+    assert metadata["github_login"] == "owner-gh"
+    assert metadata["triggering_user_email"] == "owner@example.com"
+    assert metadata["source_context"] == owner_context
+    assert metadata["title"] == metadata["title_seed"] == "owner-gh"
 
 
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:
@@ -242,6 +274,143 @@ def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> N
     assert formatted == "@alice(U123): @open-swe status update?"
 
 
+def test_format_slack_messages_for_prompt_includes_forwarded_attachment() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "please handle this",
+                "user": "U123",
+                "attachments": [
+                    {
+                        "is_share": True,
+                        "author_name": "Bob",
+                        "text": "The forwarded request",
+                        "from_url": "https://example.slack.com/archives/C123/p123",
+                    }
+                ],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == (
+        "@alice(U123): please handle this\n"
+        "[Forwarded Slack message from Bob]\n"
+        "The forwarded request\n"
+        "Source: https://example.slack.com/archives/C123/p123"
+    )
+
+
+def test_format_slack_messages_for_prompt_uses_forwarded_fallback() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "",
+                "user": "U123",
+                "attachments": [
+                    {
+                        "is_reply_unfurl": True,
+                        "author_name": "Bob",
+                        "fallback": "Fallback forwarded text",
+                    }
+                ],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == (
+        "@alice(U123): [forwarded message]\n"
+        "[Forwarded Slack message from Bob]\n"
+        "Fallback forwarded text"
+    )
+
+
+def test_format_slack_messages_for_prompt_includes_nested_forwarded_attachments() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "nested context",
+                "user": "U123",
+                "attachments": [
+                    {
+                        "is_share": True,
+                        "author_name": "Bob",
+                        "text": "First level",
+                        "attachments": [
+                            {
+                                "is_share": True,
+                                "author_name": "Carol",
+                                "text": "Second level",
+                                "attachments": [
+                                    {
+                                        "is_reply_unfurl": True,
+                                        "author_name": "Dave",
+                                        "text": "Third level",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == (
+        "@alice(U123): nested context\n"
+        "[Forwarded Slack message from Bob]\n"
+        "First level\n"
+        "  [Forwarded Slack message from Carol]\n"
+        "  Second level\n"
+        "    [Forwarded Slack message from Dave]\n"
+        "    Third level"
+    )
+
+
+def test_format_slack_messages_for_prompt_caps_forwarded_attachment_depth() -> None:
+    root: dict[str, object] = {
+        "is_share": True,
+        "text": "level 0",
+    }
+    current = root
+    for depth in range(1, slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH + 2):
+        nested: dict[str, object] = {
+            "is_share": True,
+            "text": f"level {depth}",
+        }
+        current["attachments"] = [nested]
+        current = nested
+
+    formatted = format_slack_messages_for_prompt(
+        [{"ts": "1.0", "text": "context", "user": "U123", "attachments": [root]}],
+        {"U123": "alice"},
+    )
+
+    assert f"level {slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH}" in formatted
+    assert f"level {slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH + 1}" not in formatted
+
+
+def test_format_slack_messages_for_prompt_ignores_regular_unfurl_attachment() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "look at this link",
+                "user": "U123",
+                "attachments": [{"title": "Example", "text": "Unfurl preview"}],
+            }
+        ],
+        {"U123": "alice"},
+    )
+
+    assert formatted == "@alice(U123): look at this link"
+
+
 def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
@@ -366,6 +535,49 @@ def test_post_slack_thread_reply_appends_web_context_block_to_blocks(
     assert blocks[0]["text"]["text"] == "Pick one"
 
 
+def test_post_slack_thread_reply_keeps_usage_with_existing_web_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    usage = RunUsageSummary(models=("model-a",), main_agent_tokens=110)
+
+    async def fake_post_message_with_ts(
+        channel_id: str,
+        text: str,
+        **kwargs: object,
+    ) -> tuple[str | None, str | None]:
+        captured.update(kwargs)
+        return "1.1", None
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
+    monkeypatch.setattr(slack_utils, "_post_slack_message_with_ts", fake_post_message_with_ts)
+    dashboard_url = slack_utils._slack_thread_dashboard_url("C123", "1.0")
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": dashboard_url}}]
+
+    asyncio.run(
+        slack_utils.post_slack_thread_reply_with_ts(
+            "C123", "1.0", "Done", blocks=blocks, usage=usage
+        )
+    )
+
+    posted_blocks = cast(list[dict[str, object]], captured["blocks"])
+    assert str(posted_blocks).count(str(dashboard_url)) == 1
+    assert posted_blocks[-1] == {
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": "model-a • 110 main-agent tokens"}],
+    }
+
+
+def test_format_slack_web_link_footer_includes_run_usage() -> None:
+    usage = RunUsageSummary(models=("model-a", "model-b"), main_agent_tokens=12_345)
+
+    footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
+
+    assert footer == (
+        "<https://app.example/agents/t1|Open in Web> • model-a + model-b • 12.3K main-agent tokens"
+    )
+
+
 def test_post_slack_trace_reply_has_no_tip(monkeypatch: pytest.MonkeyPatch) -> None:
     posted: list[dict] = []
 
@@ -385,7 +597,7 @@ def test_post_slack_trace_reply_has_no_tip(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         slack_utils, "post_slack_thread_reply_with_ts", fake_post_slack_thread_reply_with_ts
     )
-    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", lambda thread_id: "https://smith/x")
+    monkeypatch.setattr(slack_utils, "get_langsmith_trace_url", _fake_trace_url)
 
     asyncio.run(post_slack_trace_reply("C123", "1.0", "thread-id"))
 
@@ -555,7 +767,8 @@ def _setup_slack_mention_fakes(
             "profile": {
                 "email": "mason@example.com",
                 "display_name": "Mason",
-            }
+            },
+            "tz": "America/New_York",
         }
 
     async def fake_fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict]:
@@ -606,9 +819,7 @@ def _setup_slack_mention_fakes(
         threads = _FakeThreadsClientForProcess()
 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
-    monkeypatch.setattr(
-        slack_webhooks, "get_langsmith_trace_url", lambda thread_id: "https://smith/x"
-    )
+    monkeypatch.setattr(slack_webhooks, "get_langsmith_trace_url", _fake_trace_url)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(webhook_common, "get_slack_user_info", fake_get_slack_user_info)
     monkeypatch.setattr(
@@ -645,6 +856,59 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(webhook_common, "refresh_user_mapping_cache", fake_refresh_cache)
     monkeypatch.setattr(webhook_common, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(webhook_common, "_post_account_link_prompt", fake_post_prompt)
+
+
+def test_process_slack_mention_preserves_forwarded_attachment_from_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict]:
+        return [
+            {"ts": thread_ts, "text": "thread root", "user": "U123"},
+            {
+                "ts": "1700000000.000200",
+                "text": "<@UBOT> handle this",
+                "user": "U123",
+            },
+        ]
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        webhook_common, "fetch_slack_thread_messages", fake_fetch_slack_thread_messages
+    )
+    monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
+
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "event_ts": "1700000000.000200",
+                "user_id": "U123",
+                "text": "<@UBOT> handle this",
+                "attachments": [
+                    {
+                        "is_share": True,
+                        "author_name": "Teammate",
+                        "text": "Forwarded requirements",
+                    }
+                ],
+                "bot_user_id": "UBOT",
+            },
+            {"owner": "langchain-ai", "name": "open-swe"},
+        )
+    )
+
+    run_create = captured["run_create"]
+    assert isinstance(run_create, dict)
+    kwargs = run_create["kwargs"]
+    prompt_block = kwargs["input"]["messages"][0]["content"][0]
+    assert "[Forwarded Slack message from Teammate]" in prompt_block["text"]
+    assert "Forwarded requirements" in prompt_block["text"]
 
 
 def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
@@ -693,9 +957,12 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert kwargs["if_not_exists"] == "create"
     assert kwargs["multitask_strategy"] == "interrupt"
     assert kwargs["durability"] == "sync"
-    assert kwargs["config"]["configurable"]["slack_thread"]["thread_ts"] == thread_ts
+    slack_thread_context = kwargs["config"]["configurable"]["slack_thread"]
+    assert slack_thread_context["thread_ts"] == thread_ts
+    assert slack_thread_context["triggering_user_timezone"] == "America/New_York"
     prompt_block = kwargs["input"]["messages"][0]["content"][0]
     assert "## Default Repository Hint\nlangchain-ai/open-swe" in prompt_block["text"]
+    assert "## Triggering User Time Zone\nAmerica/New_York" in prompt_block["text"]
     assert (
         "Use this only if the Slack conversation does not identify a different repository."
         in (prompt_block["text"])
@@ -706,9 +973,10 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt_block["text"]
     assert "- Trace: https://smith/x" in prompt_block["text"]
     assert "do not duplicate it manually" in prompt_block["text"]
-    assert "post a very short acknowledgement like `On it!`" in prompt_block["text"]
-    assert "before cloning/checking out repositories" in prompt_block["text"]
-    assert "## Latest Mention Request\ncontinue on the branch" in prompt_block["text"]
+    assert "slack_thread_reply" not in prompt_block["text"]
+    assert "slack_add_reaction" not in prompt_block["text"]
+    assert "slack_read_thread_messages" not in prompt_block["text"]
+    assert prompt_block["text"].endswith("## Latest Mention Request\ncontinue on the branch")
 
 
 def test_process_slack_mention_treats_direct_message_as_implicit_mention(
@@ -1102,3 +1370,40 @@ def test_get_slack_permalink_without_token_returns_none(monkeypatch: pytest.Monk
     result = asyncio.run(get_slack_permalink("C123", "1700000000.000100"))
 
     assert result is None
+
+
+def test_thread_environment_round_trips_through_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tagged opening message persists the environment; follow-ups read it back.
+
+    Without this, a follow-up (which carries no `env:` tag) would resolve the
+    default environment while reusing the sandbox built from the tagged one.
+    """
+    threads = _FakeThreadsClient({"metadata": {}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    asyncio.run(
+        webhook_common.upsert_agent_thread_owner_metadata(
+            "thread-id",
+            source="slack",
+            environment="staging",
+        )
+    )
+    assert threads.thread is not None
+    assert threads.thread["metadata"]["environment"] == "staging"
+    assert asyncio.run(webhook_common._get_thread_environment("thread-id")) == "staging"
+
+
+def test_thread_environment_is_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    threads = _FakeThreadsClient({"metadata": {}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    assert asyncio.run(webhook_common._get_thread_environment("thread-id")) is None
+
+
+def test_thread_environment_is_none_for_a_missing_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = _FakeThreadsClient(raise_not_found=True)
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    assert asyncio.run(webhook_common._get_thread_environment("thread-id")) is None

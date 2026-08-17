@@ -1,6 +1,6 @@
 import { Menu } from "@base-ui/react/menu"
 import { Dialog } from "@base-ui/react/dialog"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import {
   ArrowCounterClockwiseIcon,
   CalendarBlankIcon,
@@ -12,19 +12,23 @@ import {
   CircleNotchIcon,
   CopyIcon,
   DotsThreeVerticalIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
   GitMergeIcon,
   GitPullRequestIcon,
   LightningIcon,
   PlusIcon,
+  SparkleIcon,
   TrashIcon,
   TreeStructureIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
 import { useState } from "react"
-import type { ComponentType, SVGProps } from "react"
+import type { ComponentType, ReactNode, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
+import type { DesktopAcpSessionSummary, DesktopProject } from "@/desktop"
 import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
@@ -50,6 +54,8 @@ import {
   useSidebarThreads,
 } from "@/features/agents/lib/queries"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
+import { useDesktopAcpSessions } from "@/features/agents/lib/desktopAcp"
+import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { cn } from "@/lib/utils"
 
 const RESOLVED_SIDEBAR_LIMIT = 20
@@ -73,32 +79,34 @@ const PR_STATE_META: Record<
   draft: {
     icon: GitPullRequestIcon,
     label: "Draft pull request",
-    className: "text-[var(--ui-text-dim)]",
+    className: "text-muted-foreground/70",
   },
   open: {
     icon: GitPullRequestIcon,
     label: "Open pull request",
-    className: "text-[var(--ui-success)]",
+    className: "text-success-foreground",
   },
   merged: {
     icon: GitMergeIcon,
     label: "Merged pull request",
-    className: "text-[var(--ui-accent)]",
+    className: "text-primary",
   },
   closed: {
     icon: GitPullRequestIcon,
     label: "Closed pull request",
-    className: "text-[var(--ui-danger)]",
+    className: "text-destructive",
   },
 }
 
 interface AgentsSidebarProps {
   user: SessionUser
   activeThreadId?: string
+  activeLocalSessionId?: string
   layout: SidebarLayout
 }
 
 const NAV = [
+  { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/my-settings", label: "Dashboard", icon: ChartLineUpIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
@@ -107,11 +115,28 @@ const NAV = [
 export function AgentsSidebar({
   user,
   activeThreadId,
+  activeLocalSessionId,
   layout,
 }: AgentsSidebarProps) {
-  const { prefs, setGroup, setCompact, setFilters, resetFilters } =
-    useSidebarPrefs()
+  const {
+    prefs,
+    setGroup,
+    setCompact,
+    toggleSection,
+    setFilters,
+    resetFilters,
+  } = useSidebarPrefs()
   const sidebar = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT, activeThreadId)
+  const { sessions: localSessions, deleteSession: deleteLocalSession } =
+    useDesktopAcpSessions()
+  const {
+    projects: localProjects,
+    addProject: addLocalProject,
+    removeProject: removeLocalProject,
+  } = useDesktopProjects()
+  const localGroups = groupLocalProjects(localProjects, localSessions)
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const activeThreads = sidebar.data?.active.items ?? []
   const resolvedThreads = sidebar.data?.resolved.items ?? []
   const resolvedHasMore = sidebar.data?.resolved.hasMore ?? false
@@ -125,22 +150,30 @@ export function AgentsSidebar({
   const sections = groupThreadsByMode(filteredActive, prefs.group)
   const showResolved = prefs.filters.includeResolved
   const isEmpty =
+    localGroups.length === 0 &&
     sections.length === 0 &&
     (!showResolved || filteredResolved.length === 0) &&
     hasActiveFilters(prefs.filters)
+  const localSessionCount = localGroups.reduce(
+    (total, group) => total + group.sessions.length,
+    0
+  )
+  const cloudCollapsed = isDesktop && prefs.collapsed.cloud
 
   return (
-    <SidebarFrame
-      {...layout}
-      className="border-r border-[var(--ui-border)] bg-[var(--ui-sidebar)]"
-    >
-      <div className="flex items-center justify-between px-4 pt-5 pb-4">
+    <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
+      <div
+        className={cn(
+          "flex items-center justify-between px-4 pb-4",
+          isDesktop ? "pt-13" : "pt-5"
+        )}
+      >
         <Link
           to="/my-settings"
-          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-[var(--ui-text)]"
+          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
           <img src="/logo-mark.png" alt="" className="size-5" />
-          open-swe
+          Open SWE
         </Link>
         <SidebarCollapseButton onToggle={layout.toggle} />
       </div>
@@ -149,7 +182,7 @@ export function AgentsSidebar({
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--ui-text)] transition-colors hover:bg-[var(--ui-sidebar-hover)]"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
         >
           <PlusIcon className="size-4" />
           New Agent
@@ -164,10 +197,9 @@ export function AgentsSidebar({
               key={item.to}
               to={item.to}
               onClick={layout.closeOnMobile}
-              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text)]"
+              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
               activeProps={{
-                className:
-                  "bg-[var(--ui-sidebar-hover)] !text-[var(--ui-text)] font-medium",
+                className: "bg-sidebar-row-hover !text-foreground font-medium",
               }}
             >
               <Icon className="size-4" />
@@ -177,41 +209,106 @@ export function AgentsSidebar({
         })}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        {prefs.group === "none"
-          ? sections[0]?.threads.map((thread) => (
-              <ThreadRow
-                key={thread.id}
-                thread={thread}
-                isActive={thread.id === activeThreadId}
-                onNavigate={layout.closeOnMobile}
-                compact={prefs.compact}
-              />
-            ))
-          : sections.map((section) => (
-              <ThreadGroup
-                key={`${prefs.group}:${section.key}`}
-                label={section.label}
-                threads={section.threads}
-                activeThreadId={activeThreadId}
-                onNavigate={layout.closeOnMobile}
-                defaultCollapsed={section.defaultCollapsed}
-                compact={prefs.compact}
-              />
-            ))}
-        {showResolved && (
-          <ResolvedThreadGroup
-            threads={filteredResolved}
-            hasMore={resolvedHasMore}
-            activeThreadId={activeThreadId}
-            onNavigate={layout.closeOnMobile}
-            compact={prefs.compact}
+      <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
+        {isDesktop && (
+          <div
+            className={cn(
+              "mb-3 flex min-h-0 flex-col",
+              prefs.collapsed.local
+                ? "shrink-0"
+                : cloudCollapsed
+                  ? "flex-1"
+                  : "max-h-1/2 shrink-0"
+            )}
+          >
+            <SectionHeader
+              label="Local"
+              count={localSessionCount}
+              collapsed={prefs.collapsed.local}
+              onToggle={() => toggleSection("local")}
+            >
+              <button
+                aria-label="Add project"
+                className="mr-1 flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+                onClick={() => void addLocalProject()}
+                title="Add project"
+                type="button"
+              >
+                <FolderPlusIcon className="size-3.5" />
+              </button>
+            </SectionHeader>
+            {!prefs.collapsed.local && (
+              <div className="min-h-0 overflow-y-auto">
+                {localGroups.map((group) => (
+                  <LocalThreadGroup
+                    key={group.project.cwd}
+                    project={group.project}
+                    sessions={group.sessions}
+                    activeSessionId={activeLocalSessionId}
+                    onNavigate={layout.closeOnMobile}
+                    onDelete={deleteLocalSession}
+                    onRemove={() => void removeLocalProject(group.project.cwd)}
+                    compact={prefs.compact}
+                  />
+                ))}
+                {localGroups.length === 0 && (
+                  <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
+                    No projects yet
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {isDesktop && (
+          <SectionHeader
+            label="Cloud"
+            count={
+              filteredActive.length +
+              (showResolved ? filteredResolved.length : 0)
+            }
+            collapsed={prefs.collapsed.cloud}
+            onToggle={() => toggleSection("cloud")}
           />
         )}
-        {isEmpty && (
-          <p className="px-2.5 py-6 text-center text-xs text-[var(--ui-text-dim)]">
-            No threads match these filters.
-          </p>
+        {!cloudCollapsed && (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {prefs.group === "none"
+              ? sections[0]?.threads.map((thread) => (
+                  <ThreadRow
+                    key={thread.id}
+                    thread={thread}
+                    isActive={thread.id === activeThreadId}
+                    onNavigate={layout.closeOnMobile}
+                    compact={prefs.compact}
+                  />
+                ))
+              : sections.map((section) => (
+                  <ThreadGroup
+                    key={`${prefs.group}:${section.key}`}
+                    label={section.label}
+                    threads={section.threads}
+                    activeThreadId={activeThreadId}
+                    onNavigate={layout.closeOnMobile}
+                    defaultCollapsed={section.defaultCollapsed}
+                    compact={prefs.compact}
+                  />
+                ))}
+            {showResolved && (
+              <ResolvedThreadGroup
+                threads={filteredResolved}
+                hasMore={resolvedHasMore}
+                activeThreadId={activeThreadId}
+                onNavigate={layout.closeOnMobile}
+                compact={prefs.compact}
+              />
+            )}
+            {isEmpty && (
+              <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
+                No threads match these filters.
+              </p>
+            )}
+          </div>
         )}
       </div>
 
@@ -229,6 +326,294 @@ export function AgentsSidebar({
         />
       </div>
     </SidebarFrame>
+  )
+}
+
+function SectionHeader({
+  label,
+  count,
+  collapsed,
+  onToggle,
+  children,
+}: {
+  label: string
+  count: number
+  collapsed: boolean
+  onToggle: () => void
+  children?: ReactNode
+}) {
+  return (
+    <div className="flex items-center">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left font-heading text-xs font-semibold tracking-wide text-foreground uppercase transition-colors hover:text-foreground/80"
+        aria-expanded={!collapsed}
+      >
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <span className="text-[10px] font-medium text-muted-foreground/70">
+          {count}
+        </span>
+      </button>
+      {children}
+    </div>
+  )
+}
+
+function DeleteThreadDialog({
+  open,
+  onOpenChange,
+  threadTitle,
+  isDeleting,
+  onConfirm,
+  detail = "This cannot be undone.",
+  error,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  threadTitle: string
+  isDeleting: boolean
+  onConfirm: () => void
+  detail?: string
+  error?: string | null
+}) {
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-6 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+          <div className="flex flex-col gap-4">
+            <Dialog.Title className="text-sm font-medium">
+              Delete thread
+            </Dialog.Title>
+            <Dialog.Description className="text-xs text-muted-foreground">
+              Delete "{threadTitle}"? {detail}
+            </Dialog.Description>
+            {error && <p className="text-xs text-destructive">{error}</p>}
+            <div className="mt-2 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onOpenChange(false)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={onConfirm}
+                disabled={isDeleting}
+              >
+                {isDeleting ? "Deleting..." : "Delete"}
+              </Button>
+            </div>
+          </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
+function groupLocalProjects(
+  projects: Array<DesktopProject>,
+  sessions: Array<DesktopAcpSessionSummary>
+) {
+  const sessionsByProject = new Map<string, Array<DesktopAcpSessionSummary>>()
+  for (const session of sessions) {
+    const group = sessionsByProject.get(session.cwd) ?? []
+    group.push(session)
+    sessionsByProject.set(session.cwd, group)
+  }
+  return projects
+    .map((project) => ({
+      project,
+      sessions: (sessionsByProject.get(project.cwd) ?? []).sort(
+        (left, right) => right.updatedAt - left.updatedAt
+      ),
+      updatedAt: Math.max(
+        project.addedAt,
+        ...(sessionsByProject.get(project.cwd) ?? []).map(
+          (session) => session.updatedAt
+        )
+      ),
+    }))
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+}
+
+function LocalThreadGroup({
+  project,
+  sessions,
+  activeSessionId,
+  onNavigate,
+  onDelete,
+  onRemove,
+  compact = false,
+}: {
+  project: DesktopProject
+  sessions: Array<DesktopAcpSessionSummary>
+  activeSessionId?: string
+  onNavigate?: () => void
+  onDelete: (sessionId: string) => Promise<boolean>
+  onRemove: () => void
+  compact?: boolean
+}) {
+  const [collapsed, setCollapsed] = useState(false)
+  const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
+
+  return (
+    <div className={cn("group/project", compact ? "mb-2" : "mb-3")}>
+      <div className="flex items-center">
+        <button
+          type="button"
+          onClick={() => setCollapsed((value) => !value)}
+          className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
+          aria-expanded={!collapsed}
+          title={project.cwd}
+        >
+          <ToggleIcon className="size-3" />
+          <FolderOpenIcon className="size-3.5" />
+          <span className="min-w-0 flex-1 truncate">{project.name}</span>
+          <span>{sessions.length}</span>
+        </button>
+        <button
+          aria-label={`Remove ${project.name}`}
+          className="mr-1 flex size-5 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity group-hover/project:opacity-100 hover:bg-sidebar-row-hover hover:text-destructive focus:opacity-100 [@media(hover:none)]:opacity-100"
+          onClick={onRemove}
+          title="Remove project"
+          type="button"
+        >
+          <TrashIcon className="size-3.5" />
+        </button>
+      </div>
+      {!collapsed &&
+        sessions.map((session) => (
+          <LocalThreadRow
+            key={session.id}
+            session={session}
+            isActive={session.id === activeSessionId}
+            onNavigate={onNavigate}
+            onDelete={onDelete}
+            compact={compact}
+          />
+        ))}
+    </div>
+  )
+}
+
+function LocalThreadRow({
+  session,
+  isActive,
+  onNavigate,
+  onDelete,
+  compact = false,
+}: {
+  session: DesktopAcpSessionSummary
+  isActive: boolean
+  onNavigate?: () => void
+  onDelete: (sessionId: string) => Promise<boolean>
+  compact?: boolean
+}) {
+  const navigate = useNavigate()
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const running = session.status === "running" || session.status === "starting"
+
+  const confirmDelete = async () => {
+    if (isDeleting) return
+    setIsDeleting(true)
+    setDeleteError(null)
+    try {
+      if (!(await onDelete(session.id))) {
+        throw new Error("Local Deep Agents Code session not found")
+      }
+      setDeleteOpen(false)
+      if (isActive) {
+        onNavigate?.()
+        void navigate({ to: "/agents" })
+      }
+    } catch (error) {
+      setDeleteError(
+        error instanceof Error ? error.message : "Could not delete local thread"
+      )
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  return (
+    <>
+      <div className={cn("group relative mb-0.5", isDeleting && "opacity-50")}>
+        <Link
+          to="/agents/local/$sessionId"
+          params={{ sessionId: session.id }}
+          onClick={onNavigate}
+          className={cn(
+            "flex items-center gap-2 rounded-lg px-2.5 transition-colors group-hover:pr-8 [@media(hover:none)]:pr-8",
+            compact ? "h-7 gap-1.5" : "h-8",
+            isActive
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground group-hover:bg-sidebar-row-hover"
+          )}
+        >
+          {running ? (
+            <CircleNotchIcon
+              className="size-3 shrink-0 animate-spin text-primary"
+              aria-label="Local thread running"
+            />
+          ) : (
+            <span className="size-2 shrink-0 rounded-full bg-border" />
+          )}
+          <span className="min-w-0 flex-1 truncate text-[13px]">
+            {session.title}
+          </span>
+        </Link>
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <button
+                type="button"
+                aria-label="Local thread actions"
+                className="absolute top-1/2 right-1 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 group-hover:flex hover:bg-accent hover:text-foreground data-popup-open:flex [@media(hover:none)]:flex"
+              >
+                <DotsThreeVerticalIcon className="size-4" weight="bold" />
+              </button>
+            }
+          />
+          <Menu.Portal>
+            <Menu.Positioner
+              align="end"
+              sideOffset={4}
+              className="z-50 outline-none"
+            >
+              <Menu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+                <Menu.Item
+                  onClick={() => setDeleteOpen(true)}
+                  disabled={isDeleting}
+                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
+                >
+                  <TrashIcon className="size-3.5" />
+                  Delete thread
+                </Menu.Item>
+              </Menu.Popup>
+            </Menu.Positioner>
+          </Menu.Portal>
+        </Menu.Root>
+      </div>
+      <DeleteThreadDialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open)
+          if (!open) setDeleteError(null)
+        }}
+        threadTitle={session.title}
+        isDeleting={isDeleting}
+        onConfirm={() => void confirmDelete()}
+        detail="This removes its dcode history but does not revert changes made to your project."
+        error={deleteError}
+      />
+    </>
   )
 }
 
@@ -257,7 +642,7 @@ function ThreadGroup({
       <button
         type="button"
         onClick={() => setCollapsed((value) => !value)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-[var(--ui-text-dim)] uppercase transition-colors hover:text-[var(--ui-text-muted)]"
+        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
         aria-expanded={!collapsed}
       >
         <ToggleIcon className="size-3" />
@@ -302,7 +687,7 @@ function ResolvedThreadGroup({
       <button
         type="button"
         onClick={() => setCollapsed((value) => !value)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-[var(--ui-text-dim)] uppercase transition-colors hover:text-[var(--ui-text-muted)]"
+        className="flex w-full items-center gap-1 px-2 py-1 text-left text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase transition-colors hover:text-muted-foreground"
         aria-expanded={!collapsed}
       >
         <ToggleIcon className="size-3" />
@@ -328,7 +713,7 @@ function ResolvedThreadGroup({
               to="/agents/threads"
               search={{ resolved: true, page: 1 }}
               onClick={onNavigate}
-              className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs text-[var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text)]"
+              className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
             >
               Show all
             </Link>
@@ -418,22 +803,24 @@ function ThreadRow({
             "flex items-center gap-2 rounded-lg px-2.5 transition-colors group-hover:pr-8 [@media(hover:none)]:pr-8",
             compact ? "h-7 gap-1.5" : "h-8",
             isActive
-              ? "bg-[var(--ui-accent-bubble)] text-[var(--ui-text)]"
-              : "text-[var(--ui-text-muted)] group-hover:bg-[var(--ui-sidebar-hover)]"
+              ? thread.adminThread
+                ? "bg-destructive/10 text-foreground"
+                : "bg-accent text-foreground"
+              : thread.adminThread
+                ? "bg-destructive/5 text-muted-foreground group-hover:bg-destructive/10"
+                : "text-muted-foreground group-hover:bg-sidebar-row-hover"
           )}
         >
           {thread.status === "running" ? (
             <CircleNotchIcon
-              className="size-3 shrink-0 animate-spin text-[var(--ui-accent)]"
+              className="size-3 shrink-0 animate-spin text-primary"
               aria-label="Thread running"
             />
           ) : (
             <span
               className={cn(
                 "size-2 shrink-0 rounded-full",
-                showFinishedIndicator
-                  ? "bg-[var(--ui-accent)]"
-                  : "bg-[var(--ui-border)]"
+                showFinishedIndicator ? "bg-primary" : "bg-border"
               )}
               aria-label={
                 showFinishedIndicator ? "Thread finished" : "Thread viewed"
@@ -442,13 +829,13 @@ function ThreadRow({
           )}
           {source && SourceIcon && (
             <SourceIcon
-              className="size-3.5 shrink-0 text-[var(--ui-text-dim)]"
+              className="size-3.5 shrink-0 text-muted-foreground/70"
               aria-label={source.label}
             >
               <title>{source.label}</title>
             </SourceIcon>
           )}
-          <span className="min-w-0 flex-1 truncate text-xs">
+          <span className="min-w-0 flex-1 truncate text-[13px]">
             {thread.title}
           </span>
           {!compact && prMeta && PrIcon && (
@@ -463,7 +850,7 @@ function ThreadRow({
             </PrIcon>
           )}
           {!compact && badge && (
-            <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-success)] group-hover:hidden">
+            <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-success-foreground group-hover:hidden">
               {badge}
             </span>
           )}
@@ -477,7 +864,7 @@ function ThreadRow({
               <button
                 type="button"
                 aria-label="Thread actions"
-                className="absolute top-1/2 right-1 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)] data-popup-open:flex [@media(hover:none)]:flex"
+                className="absolute top-1/2 right-1 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 group-hover:flex hover:bg-accent hover:text-foreground data-popup-open:flex [@media(hover:none)]:flex"
               >
                 <DotsThreeVerticalIcon className="size-4" weight="bold" />
               </button>
@@ -545,39 +932,13 @@ function ThreadRow({
           </Menu.Portal>
         </Menu.Root>
       </div>
-      <Dialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <Dialog.Portal>
-          <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-          <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-6 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-            <div className="flex flex-col gap-4">
-              <Dialog.Title className="text-sm font-medium">
-                Delete thread
-              </Dialog.Title>
-              <Dialog.Description className="text-xs text-muted-foreground">
-                Delete "{thread.title}"? This cannot be undone.
-              </Dialog.Description>
-              <div className="mt-2 flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setDeleteOpen(false)}
-                  disabled={isDeleting}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={onConfirmDelete}
-                  disabled={isDeleting}
-                >
-                  {isDeleting ? "Deleting..." : "Delete"}
-                </Button>
-              </div>
-            </div>
-          </Dialog.Popup>
-        </Dialog.Portal>
-      </Dialog.Root>
+      <DeleteThreadDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        threadTitle={thread.title}
+        isDeleting={isDeleting}
+        onConfirm={onConfirmDelete}
+      />
     </>
   )
 }
@@ -585,22 +946,27 @@ function ThreadRow({
 export function AgentsShell({
   user,
   activeThreadId,
+  activeLocalSessionId,
   children,
 }: {
   user: SessionUser
   activeThreadId?: string
+  activeLocalSessionId?: string
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
   return (
     <SidebarLayoutProvider value={layout}>
-      <div className="agents-ui flex h-svh overflow-hidden bg-[var(--ui-bg)]">
+      <div className="agents-ui flex h-svh overflow-hidden bg-background">
         <AgentsSidebar
           user={user}
           activeThreadId={activeThreadId}
+          activeLocalSessionId={activeLocalSessionId}
           layout={layout}
         />
-        <div className="flex min-w-0 flex-1">{children}</div>
+        <main className="surface-grain relative flex min-w-0 flex-1 overflow-hidden bg-background">
+          {children}
+        </main>
       </div>
     </SidebarLayoutProvider>
   )

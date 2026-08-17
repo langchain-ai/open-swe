@@ -27,6 +27,7 @@ from agent.dashboard.team_settings import (
 STALE_ANTHROPIC = "anthropic:claude-opus-4-7"
 SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5"
 SUPPORTED_OPENAI = "openai:gpt-5.6-sol"
+SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
 DEPRECATED_ANTHROPIC = "anthropic:claude-opus-4-8"
 DEPRECATED_OPENAI = "openai:gpt-5.5"
 
@@ -92,18 +93,27 @@ def test_supported_models_do_not_hardcode_context_windows() -> None:
     assert all("context_window" not in model for model in SUPPORTED_MODELS)
 
 
-def test_model_profile_context_window_uses_langchain_profile() -> None:
-    assert model_profile_context_window(SUPPORTED_OPENAI) == 1_050_000
+def test_model_profile_context_window_uses_codex_override() -> None:
+    assert model_profile_context_window(SUPPORTED_OPENAI) == 272_000
+
+
+def test_model_profile_context_window_uses_fireworks_profile_for_kimi_k3() -> None:
+    assert model_profile_context_window(SUPPORTED_KIMI) == 1_048_576
 
 
 def test_models_with_profile_context_windows_enriches_copies() -> None:
-    openai_models = [model for model in SUPPORTED_MODELS if model["id"].startswith("openai:")]
-    enriched = models_with_profile_context_windows(openai_models)
-    assert all("context_window" not in model for model in openai_models)
+    models = [
+        model
+        for model in SUPPORTED_MODELS
+        if model["id"].startswith("openai:") or model["id"] == SUPPORTED_KIMI
+    ]
+    enriched = models_with_profile_context_windows(models)
+    assert all("context_window" not in model for model in models)
     assert {model["id"]: model.get("context_window") for model in enriched} == {
-        "openai:gpt-5.6-sol": 1_050_000,
-        "openai:gpt-5.6-terra": 1_050_000,
-        "openai:gpt-5.6-luna": 1_050_000,
+        "openai:gpt-5.6-sol": 272_000,
+        "openai:gpt-5.6-terra": 272_000,
+        "openai:gpt-5.6-luna": 272_000,
+        SUPPORTED_KIMI: 1_048_576,
     }
 
 
@@ -143,6 +153,12 @@ async def test_team_default_unknown_provider_falls_back_to_global() -> None:
 def test_profile_stale_anthropic_upgrades_to_supported() -> None:
     profile = {"default_model": STALE_ANTHROPIC, "reasoning_effort": "high"}
     assert normalize_profile_overrides(profile) == (SUPPORTED_ANTHROPIC, "high")
+
+
+def test_profile_update_defaults_draft_prs_to_none_for_legacy_clients() -> None:
+    update = ProfileUpdate(default_model=SUPPORTED_OPENAI, reasoning_effort="medium")
+
+    assert update.draft_prs is None
 
 
 def test_profile_update_migrates_deprecated_gpt_5_5_model() -> None:

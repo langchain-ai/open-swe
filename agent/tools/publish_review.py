@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from ..dashboard.review_approval_policies import get_effective_review_approval_policy
 from ..dashboard.team_settings import get_team_review_trace_links_enabled
+from ..review.approval import (
+    approval_is_preliminarily_eligible,
+    build_approval_assessment,
+    persist_approval_assessment,
+)
 from ..review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from ..review.findings import (
     REVIEW_FINDING_CAP,
@@ -24,7 +31,6 @@ from ..review.findings import (
     get_thread_metadata,
     get_thread_slack_ref,
     replace_findings,
-    resolve_review_head_sha,
     set_reviewer_thread_metadata,
     thread_missing_tool_result,
 )
@@ -33,6 +39,7 @@ from ..review.findings import (
 )
 from ..review.publish import (
     clear_review_started_comment,
+    fetch_approval_preflight,
     fetch_pr_review_threads,
     fetch_review_comments,
     fetch_review_thread_id_for_comment,
@@ -58,9 +65,14 @@ from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack import post_slack_thread_reply
 from ..utils.tracing import REVIEW_TRACING_PROJECT
 
+logger = logging.getLogger(__name__)
+
 
 async def publish_review(
     severity_threshold: str = "medium",
+    approval_score: int | None = None,
+    approval_reasons: list[str] | None = None,
+    approval_risks: list[str] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Post all current findings to the PR as a GitHub Review.
@@ -80,6 +92,9 @@ async def publish_review(
             (default ``medium``). Lower-severity findings stay in state and are
             mentioned in the review summary with a link to the web app, but are
             not posted as inline PR comments.
+        approval_score: Confidence from 0 to 100 that this reviewed SHA is safe to approve.
+        approval_reasons: One to five concise reasons supporting the score.
+        approval_risks: Up to five remaining uncertainties or risk signals.
     Returns:
         Dictionary with ``success``, ``review_id``, ``surfaced_count``,
         ``hidden_count``, ``resolved_thread_count``, and sometimes
@@ -158,6 +173,9 @@ async def publish_review(
             is_re_review=is_re_review,
             langgraph_run_id=_current_run_id(config),
             trace_link_config_override=configurable.get("review_trace_link_enabled"),
+            approval_score=approval_score,
+            approval_reasons=approval_reasons,
+            approval_risks=approval_risks,
             state=state,
         )
     except ReviewerThreadMissingError as exc:
@@ -187,7 +205,7 @@ async def _resolve_review_trace_url(thread_id: str, config_override: object) -> 
         return None
     if not thread_id:
         return None
-    return get_langsmith_trace_url(thread_id, project_name=REVIEW_TRACING_PROJECT)
+    return await get_langsmith_trace_url(thread_id, project_name=REVIEW_TRACING_PROJECT)
 
 
 def _is_reviewer_eval_mode(configurable: dict[str, Any]) -> bool:
@@ -256,14 +274,12 @@ async def _publish_review_async(
     is_re_review: bool,
     langgraph_run_id: str | None = None,
     trace_link_config_override: object = None,
+    approval_score: object = None,
+    approval_reasons: object = None,
+    approval_risks: object = None,
     state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
-    # The run config's head_sha is frozen at run creation; a push that arrived
-    # mid-run updated the live head in thread metadata. Prefer that so the
-    # review anchors to (and last_reviewed_sha advances to) the commit actually
-    # reviewed, not the stale one this run was created for.
-    head_sha = await resolve_review_head_sha(thread_id, {"head_sha": head_sha})
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     review_ui_url = dashboard_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(
@@ -273,6 +289,42 @@ async def _publish_review_async(
         pr_number=pr_number,
         token=token,
     )
+    policy = await get_effective_review_approval_policy(owner, repo)
+    assessment = build_approval_assessment(
+        assessed_sha=head_sha,
+        raw_score=approval_score,
+        reasons=approval_reasons,
+        risks=approval_risks,
+        findings=findings,
+        policy=policy,
+    )
+    await persist_approval_assessment(thread_id, assessment)
+    review_event: Literal["COMMENT", "APPROVE"] = "COMMENT"
+    duplicate_approval_review_id: int | None = None
+    if approval_is_preliminarily_eligible(assessment):
+        preflight = await fetch_approval_preflight(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            assessed_sha=head_sha,
+            token=token,
+        )
+        if preflight is None:
+            assessment["blockers"].append("github_preflight_unknown")
+        else:
+            if preflight["live_head_sha"] != head_sha:
+                assessment["blockers"].append("stale_head")
+            if not preflight["pr_open"]:
+                assessment["blockers"].append("pr_not_open")
+            if preflight["pr_draft"]:
+                assessment["blockers"].append("pr_is_draft")
+            if preflight["pr_author"].casefold() == preflight["app_login"].casefold():
+                assessment["blockers"].append("app_authored_pr")
+            if preflight["active_human_change_requests"]:
+                assessment["blockers"].append("human_changes_requested")
+            duplicate_approval_review_id = preflight["duplicate_approval_review_id"]
+        if not assessment["blockers"]:
+            review_event = "APPROVE"
 
     # Re-reviews only post NEW findings. Anything with a github_review_comment_id
     # already lives on GitHub from a prior publish — reposting would create
@@ -313,6 +365,48 @@ async def _publish_review_async(
         inline_comments.append(payload)
         eligible_with_payload.append((finding, payload))
 
+    if review_event == "APPROVE" and duplicate_approval_review_id is not None:
+        assessment["decision"] = "skipped_duplicate"
+        assessment["github_review_event"] = "APPROVE"
+        assessment["github_review_id"] = duplicate_approval_review_id
+        await persist_approval_assessment(thread_id, assessment)
+        logger.info(
+            "Auto-approval decision repo=%s/%s pr=%s sha=%s score=%s threshold=%s "
+            "event=APPROVE decision=skipped_duplicate review_id=%s",
+            owner,
+            repo,
+            pr_number,
+            head_sha,
+            assessment["score"],
+            assessment["policy"]["effective_threshold"],
+            duplicate_approval_review_id,
+        )
+        await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+        await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
+        conclusion, check_title, check_summary = review_check_conclusion(0)
+        await settle_review_check_run(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            token=token,
+            conclusion=conclusion,
+            title=check_title,
+            summary=check_summary,
+        )
+        return {
+            "success": True,
+            "review_id": duplicate_approval_review_id,
+            "review_event": "APPROVE",
+            "approval_score": assessment["score"],
+            "approval_decision": assessment["decision"],
+            "approval_blockers": [],
+            "assessed_sha": head_sha,
+            "duplicate_approval": True,
+            "surfaced_count": 0,
+            "hidden_count": max(len(open_unpublished), 0),
+            "resolved_thread_count": 0,
+        }
+
     # With nothing new to surface, skip the "no issues found" summary if Open
     # SWE has already reviewed this PR — the user already saw the previous
     # result, and posting another summary on every push is noise. We can't rely
@@ -323,13 +417,17 @@ async def _publish_review_async(
     # SWE review summary) instead. Still resolve threads for findings that just
     # moved to resolved, and advance last_reviewed_sha so subsequent pushes
     # don't redo the same diff.
-    if not inline_comments and await _open_swe_already_reviewed(
-        thread_id=thread_id,
-        owner=owner,
-        repo=repo,
-        pr_number=pr_number,
-        token=token,
-        is_re_review=is_re_review,
+    if (
+        review_event == "COMMENT"
+        and not inline_comments
+        and await _open_swe_already_reviewed(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+            is_re_review=is_re_review,
+        )
     ):
         resolved_thread_count = await _resolve_threads_for_resolved_findings(
             owner=owner,
@@ -337,6 +435,19 @@ async def _publish_review_async(
             pr_number=pr_number,
             token=token,
             findings=findings,
+        )
+        assessment["decision"] = "skipped_empty_re_review"
+        await persist_approval_assessment(thread_id, assessment)
+        logger.info(
+            "Auto-approval decision repo=%s/%s pr=%s sha=%s score=%s threshold=%s "
+            "event=COMMENT decision=skipped_empty_re_review blockers=%s",
+            owner,
+            repo,
+            pr_number,
+            head_sha,
+            assessment["score"],
+            assessment["policy"]["effective_threshold"],
+            assessment["blockers"],
         )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
@@ -357,14 +468,23 @@ async def _publish_review_async(
             "hidden_count": max(len(open_unpublished), 0),
             "resolved_thread_count": resolved_thread_count,
             "skipped_empty_re_review": True,
+            "review_event": "COMMENT",
+            "approval_score": assessment["score"],
+            "approval_decision": assessment["decision"],
+            "approval_blockers": assessment["blockers"],
+            "assessed_sha": head_sha,
         }
 
+    assessment["decision"] = "approved" if review_event == "APPROVE" else "commented"
     review_body = render_review_body(
         pr_number=pr_number,
         surfaced_count=len(inline_comments),
         trace_url=review_trace_url,
         ui_url=review_ui_url,
         additional_findings_count=additional_findings_count,
+        approval_score=assessment["score"],
+        approval_decision=assessment["decision"],
+        approval_blockers=assessment["blockers"],
     )
 
     review_response = await post_pull_request_review(
@@ -375,6 +495,7 @@ async def _publish_review_async(
         body=review_body,
         inline_comments=inline_comments,
         token=token,
+        event=review_event,
     )
     # If GitHub rejected the batch because one or more inline comments anchor
     # to a file/line that's not in the PR diff, drop just those findings and
@@ -401,6 +522,9 @@ async def _publish_review_async(
                 trace_url=review_trace_url,
                 ui_url=review_ui_url,
                 additional_findings_count=additional_findings_count,
+                approval_score=assessment["score"],
+                approval_decision=assessment["decision"],
+                approval_blockers=assessment["blockers"],
             )
             retry_response = await post_pull_request_review(
                 owner=owner,
@@ -410,6 +534,7 @@ async def _publish_review_async(
                 body=retry_body,
                 inline_comments=retry_inline,
                 token=token,
+                event=review_event,
             )
             if isinstance(retry_response, dict) and "_error" not in retry_response:
                 review_response = retry_response
@@ -524,6 +649,23 @@ async def _publish_review_async(
             surfaced_count=len(inline_comments),
         )
 
+    assessment["github_review_id"] = review_id if isinstance(review_id, int) else None
+    assessment["github_review_event"] = review_event
+    await persist_approval_assessment(thread_id, assessment)
+    logger.info(
+        "Auto-approval decision repo=%s/%s pr=%s sha=%s score=%s threshold=%s "
+        "event=%s decision=%s blockers=%s review_id=%s",
+        owner,
+        repo,
+        pr_number,
+        head_sha,
+        assessment["score"],
+        assessment["policy"]["effective_threshold"],
+        review_event,
+        assessment["decision"],
+        assessment["blockers"],
+        assessment["github_review_id"],
+    )
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
     conclusion, check_title, check_summary = review_check_conclusion(len(inline_comments))
@@ -543,6 +685,12 @@ async def _publish_review_async(
         "surfaced_count": len(inline_comments),
         "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
         "resolved_thread_count": resolved_thread_count,
+        "review_event": review_event,
+        "approval_score": assessment["score"],
+        "approval_decision": assessment["decision"],
+        "approval_blockers": assessment["blockers"],
+        "assessed_sha": head_sha,
+        "duplicate_approval": False,
     }
     if unresolvable_findings:
         result["unresolvable_findings"] = unresolvable_findings

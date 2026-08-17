@@ -19,6 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
+from langgraph_sdk.schema import Run
 from pydantic import BaseModel
 
 from ..dispatch import dispatch_agent_run
@@ -201,22 +202,22 @@ async def approve_plan_for_thread(
     await set_plan_status(thread_id, PLAN_STATUS_APPROVED, plan_mode=False)
     if plan_markdown:
         text = (
-            "The plan has been approved. Implement it now exactly as written "
-            "below (it may have been edited by the reviewer, so treat this as "
-            f"the source of truth):\n\n{plan_markdown}"
+            "The plan has been approved. Use the reviewed plan below as the implementation "
+            "guide. Apply reasonable engineering judgment where details need adjustment while "
+            f"preserving its goals and reviewer edits:\n\n{plan_markdown}"
         )
     else:
         text = "The plan has been approved. Implement it now as described in the plan."
     if feedback:
         text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
-    await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
+    run = await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
     await _maybe_post_plan_approved_to_slack(
         metadata,
         thread_id=thread_id,
         comment_count=len(comments),
         actor=actor,
     )
-    return {"status": PLAN_STATUS_APPROVED}
+    return {"status": PLAN_STATUS_APPROVED, "run_id": run["run_id"]}
 
 
 @plan_router.post("/{thread_id}/reject")
@@ -265,7 +266,11 @@ def _slack_thread_from_metadata(metadata: dict[str, Any]) -> tuple[str, str] | N
 
 
 def _plan_approved_slack_text(comment_count: int, actor: str) -> str:
-    return f"Plan approved with {comment_count} comments by {actor}\nbeginning implementation"
+    return f"Plan approved with {comment_count} comments by {actor}"
+
+
+def _plan_approved_slack_blocks(text: str) -> list[dict[str, Any]]:
+    return [{"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{text}_"}]}]
 
 
 async def _maybe_post_plan_approved_to_slack(
@@ -275,11 +280,13 @@ async def _maybe_post_plan_approved_to_slack(
     if slack_thread is None:
         return
     channel_id, thread_ts = slack_thread
+    text = _plan_approved_slack_text(comment_count, actor)
     try:
         ok = await post_slack_thread_reply(
             channel_id,
             thread_ts,
-            _plan_approved_slack_text(comment_count, actor),
+            text,
+            blocks=_plan_approved_slack_blocks(text),
             agent_thread_id=thread_id,
         )
     except Exception:
@@ -304,7 +311,7 @@ def _format_comments(comments: list[dict[str, Any]]) -> str:
 
 async def _dispatch_followup(
     thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
-) -> None:
+) -> Run:
     """Continue the existing thread with a new instruction run.
 
     Runs on the same LangGraph thread, so the agent resumes from the checkpoint
@@ -334,7 +341,7 @@ async def _dispatch_followup(
     # mode (implement), reject stays in plan mode (revise the plan).
     configurable["plan_mode"] = plan_mode
 
-    await dispatch_agent_run(
+    return await dispatch_agent_run(
         thread_id,
         text,
         configurable,

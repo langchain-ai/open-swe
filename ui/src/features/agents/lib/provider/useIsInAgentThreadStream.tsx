@@ -1,5 +1,5 @@
-import { createContext, useContext } from "react";
-import type { ReactNode } from "react";
+import { createContext, useContext } from "react"
+import type { ReactNode } from "react"
 
 /**
  * Lightweight marker for whether the current subtree is rendering inside an
@@ -13,16 +13,20 @@ import type { ReactNode } from "react";
  * boundary is wrapped only around the thread view, so this stays `false` on
  * the home page where there is no thread to act on.
  */
-const AgentThreadStreamBoundaryContext = createContext(false);
+const AgentThreadStreamBoundaryContext = createContext(false)
 
 export function useIsInAgentThreadStream(): boolean {
-  return useContext(AgentThreadStreamBoundaryContext);
+  return useContext(AgentThreadStreamBoundaryContext)
 }
 
-export function AgentThreadStreamBoundary({ children }: { children: ReactNode }) {
+export function AgentThreadStreamBoundary({
+  children,
+}: {
+  children: ReactNode
+}) {
   return (
     <AgentThreadStreamBoundaryContext.Provider value={true}>
       {children}
     </AgentThreadStreamBoundaryContext.Provider>
-  );
+  )
 }

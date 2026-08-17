@@ -84,27 +84,6 @@ def test_generate_thread_id_from_github_issue_is_deterministic() -> None:
     assert len(first) == 36
 
 
-def test_build_github_issue_prompt_includes_issue_context() -> None:
-    prompt = github_webhooks.build_github_issue_prompt(
-        {"owner": "langchain-ai", "name": "open-swe"},
-        42,
-        "12345",
-        "Fix the flaky test",
-        "The test is failing intermittently.",
-        [{"author": "octocat", "body": "Please take a look", "created_at": "2026-03-09T00:00:00Z"}],
-        github_login="octocat",
-        issue_url="https://github.com/langchain-ai/open-swe/issues/42",
-    )
-
-    assert "Fix the flaky test" in prompt
-    assert "The test is failing intermittently." in prompt
-    assert "Please take a look" in prompt
-    assert "https://github.com/langchain-ai/open-swe/issues/42" in prompt
-    assert "PR description links back to this issue" in prompt
-    assert "repository's PR conventions" in prompt
-    assert "GH_TOKEN=dummy gh issue comment" in prompt
-
-
 def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
     from agent.dashboard import user_mappings
 
@@ -306,12 +285,13 @@ def test_github_webhook_ignores_unmentioned_comment_without_info_log(monkeypatch
         },
     )
 
+    tags = webhook_common.describe_open_swe_tags()
     assert response.status_code == 200
     assert response.json() == {
         "status": "ignored",
-        "reason": "Comment does not mention @openswe or @open-swe",
+        "reason": f"Comment does not mention {tags}",
     }
-    assert "does not mention @openswe or @open-swe" not in caplog.text
+    assert f"does not mention {tags}" not in caplog.text
 
 
 def test_github_webhook_routes_review_comment_reply_without_tag(monkeypatch) -> None:

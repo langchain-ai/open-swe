@@ -34,7 +34,7 @@ By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.
 Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and point Open SWE at its UUID:
 
 ```bash
-DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Required
+DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Required unless an admin sets the base snapshot at runtime
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="137438953472"          # Optional, default 128 GiB
 DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
 DEFAULT_SANDBOX_MEM_BYTES="17179869184"                            # Optional, default 16 GiB
@@ -43,7 +43,9 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"                # Optional, d
 REPO_SNAPSHOT_BASE_IMAGE="<registry>/<open-swe-sandbox-image>"      # Optional; required for admin-generated repo snapshot templates
 ```
 
-This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `GH_TOKEN=dummy gh <command>` and rely on the LangSmith proxy for the real credentials.
+This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `gh <command>` and rely on the LangSmith proxy for the real credentials.
+
+`DEFAULT_SANDBOX_SNAPSHOT_ID` is only the deployment default. Admins can override it at runtime — from the **Repository Snapshots** page or via `PUT /dashboard/api/sandbox-settings` — so a rebuilt image can be rolled out without a redeploy. See [INSTALLATION.md](./INSTALLATION.md) and `examples/github-actions/set-base-snapshot.yml` for the CI flow.
 
 `REPO_SNAPSHOT_BASE_IMAGE` should point to the published Docker image used to create your default Open SWE sandbox snapshot (typically the image built from this repository's `Dockerfile.sandbox`). The admin **Repository Snapshots** page uses it as the base image when generating per-repo Dockerfile templates. If it is not configured, template generation fails closed instead of suggesting a bare image that would be missing Open SWE's required sandbox tools.
 
@@ -114,6 +116,7 @@ The easiest approach is to extend `BaseSandbox` from `deepagents.backends.sandbo
 from deepagents.backends.sandbox import BaseSandbox
 from deepagents.backends.protocol import ExecuteResponse
 
+
 class MySandbox(BaseSandbox):
     def __init__(self, connection):
         self._conn = connection
@@ -154,13 +157,13 @@ Use the `provider:model` format:
 
 ```python
 # Anthropic
-model=make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
+model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
-model=make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
+model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
 
 # Google
-model=make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
+model = make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
 ```
 
 The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
@@ -217,7 +220,7 @@ Routing is applied centrally in `make_model` (`agent/utils/model.py`), which res
 
 ## 3. Tools
 
-Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents). GitHub operations are handled by `GH_TOKEN=dummy gh` inside the sandbox.
+Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents). GitHub operations are handled by `gh` inside the sandbox.
 
 | Tool | File | Purpose |
 |---|---|---|
@@ -236,6 +239,7 @@ Create a new file in `agent/tools/`, define a function, and add it to the tools 
 # agent/tools/datadog_search.py
 import requests
 from typing import Any
+
 
 def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
     """Search Datadog logs for debugging context.
@@ -406,16 +410,18 @@ async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks
 async def process_my_trigger(task_description: str, repo_config: dict):
     thread_id = generate_deterministic_id(task_description)
     langgraph_client = get_client(url=LANGGRAPH_URL)
-    
+
     await langgraph_client.runs.create(
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": task_description}]},
-        config={"configurable": {
-            "repo": repo_config,
-            "source": "my-trigger",
-            "user_email": "user@example.com",
-        }},
+        config={
+            "configurable": {
+                "repo": repo_config,
+                "source": "my-trigger",
+                "user_email": "user@example.com",
+            }
+        },
         if_not_exists="create",
     )
 ```
@@ -516,6 +522,7 @@ Add custom middleware by appending to the middleware list in `get_agent()`. See 
 from langchain.agents.middleware import AgentState, after_agent
 from langgraph.runtime import Runtime
 
+
 @after_agent
 async def run_ci_check(state: AgentState, runtime: Runtime):
     """Run CI checks after the agent finishes."""
@@ -526,11 +533,11 @@ async def run_ci_check(state: AgentState, runtime: Runtime):
 Then add it to the middleware list:
 
 ```python
-middleware=[
+middleware = [
     ToolErrorMiddleware(),
     check_message_queue_before_model,
     ensure_no_empty_msg,
     notify_step_limit_reached,
     run_ci_check,  # new middleware
-],
+]
 ```

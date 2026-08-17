@@ -1,26 +1,26 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router"
 
-import { AgentInstructionsPanel } from "@/components/AgentInstructionsPanel";
-import { AppShell } from "@/components/AppShell";
-import { Skeleton } from "@/components/ui/skeleton";
-import { RequireLogin } from "@/lib/auth-redirect";
-import { useSession } from "@/lib/session";
+import { AgentInstructionsPanel } from "@/components/AgentInstructionsPanel"
+import { AppShell } from "@/components/AppShell"
+import { Skeleton } from "@/components/ui/skeleton"
+import { RequireLogin } from "@/lib/auth-redirect"
+import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/agents_/instructions")({
   component: AgentInstructionsPage,
-});
+})
 
 function AgentInstructionsPage() {
-  const session = useSession();
+  const session = useSession()
 
   if (session.isLoading) {
     return (
       <main className="p-6">
         <Skeleton className="h-64 w-full" />
       </main>
-    );
+    )
   }
-  if (!session.data) return <RequireLogin />;
+  if (!session.data) return <RequireLogin />
 
   return (
     <AppShell
@@ -33,5 +33,5 @@ function AgentInstructionsPage() {
         <AgentInstructionsPanel />
       </div>
     </AppShell>
-  );
+  )
 }

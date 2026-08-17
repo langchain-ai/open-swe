@@ -59,6 +59,14 @@ async def slack_webhook(
             return {"status": "accepted", "message": "Reaction removal queued"}
         return {"status": "ignored", "reason": "Reaction not tracked for feedback"}
 
+    event_id = str(payload.get("event_id") or "")
+    retry_num = request.headers.get("X-Slack-Retry-Num", "")
+    if retry_num and await common.slack_event_already_seen(event_id):
+        common.logger.info(
+            "Ignoring Slack retry %s of already-handled event %s", retry_num, event_id
+        )
+        return {"status": "ignored", "reason": "Duplicate Slack event delivery"}
+
     bot_user_id = common.SLACK_BOT_USER_ID
     if not bot_user_id:
         authorizations = payload.get("authorizations", [])
@@ -78,6 +86,7 @@ async def slack_webhook(
         and event.get("channel_type") == "im"
         and bool(event.get("user"))
     )
+    is_untagged_two_party_reply = False
     if event.get("type") != "app_mention":
         message_text = event.get("text", "")
         has_username_mention = bool(
@@ -103,11 +112,18 @@ async def slack_webhook(
             event.get("type") == "message"
             and not event.get("subtype")
             and not is_direct_message
+            # An explicit tag is never an untagged reply: the gate below admits
+            # messages mentioning only Open SWE, so without this an explicitly
+            # tagged request would tell the agent it was not tagged.
+            and not has_username_mention
+            and not has_id_mention
             and await service._slack_thread_allows_untagged_reply(
                 str(event.get("channel") or ""),
                 str(event.get("thread_ts") or ""),
                 message_text,
                 bot_user_id,
+                str(event.get("user") or ""),
+                str(event.get("ts") or ""),
             )
         )
         should_handle_message = any(
@@ -139,47 +155,52 @@ async def slack_webhook(
     channel_context = await common._get_slack_channel_context(channel_id)
 
     if await common._is_docs_plz_slack_channel(channel_id, channel_context):
-        background_tasks.add_task(
-            common.post_slack_thread_reply,
+        if await common.claim_slack_event(event_id, channel_id, event_ts):
+            background_tasks.add_task(
+                common.post_slack_thread_reply,
+                channel_id,
+                thread_ts,
+                common.DOCS_PLZ_SLACK_GATE_REPLY,
+            )
+            return {"status": "accepted", "message": "Slack mention gated for docs-plz"}
+    else:
+        langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+        try:
+            thread_id = await common.resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
+        except common.SlackThreadMappingError:
+            common.logger.exception("Could not resolve explicit Slack thread mapping")
+            await common.post_slack_thread_reply(
+                channel_id,
+                thread_ts,
+                "Open SWE found conflicting state for this Slack thread and will not guess which agent thread to use.",
+            )
+            return {"status": "error", "message": "Conflicting Slack thread mapping"}
+        event_data = {
+            "channel_id": channel_id,
+            "channel_context": channel_context,
+            "thread_ts": thread_ts,
+            "event_ts": event_ts,
+            "user_id": user_id,
+            "text": text,
+            "attachments": event.get("attachments", []),
+            "bot_user_id": bot_user_id,
+            "thread_id": thread_id,
+            "treat_all_messages_as_mentions": is_direct_message,
+            "untagged_reply": is_untagged_two_party_reply,
+        }
+        repo_config = await common.get_slack_repo_config(
             channel_id,
             thread_ts,
-            common.DOCS_PLZ_SLACK_GATE_REPLY,
+            slack_user_id=user_id,
+            channel_context=channel_context,
+            thread_id=thread_id,
         )
-        return {"status": "accepted", "message": "Slack mention gated for docs-plz"}
+        if await common.claim_slack_event(event_id, channel_id, event_ts):
+            background_tasks.add_task(service.process_slack_mention, event_data, repo_config)
+            return {"status": "accepted", "message": "Slack mention queued"}
 
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    try:
-        thread_id = await common.resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
-    except common.SlackThreadMappingError:
-        common.logger.exception("Could not resolve explicit Slack thread mapping")
-        await common.post_slack_thread_reply(
-            channel_id,
-            thread_ts,
-            "Open SWE found conflicting state for this Slack thread and will not guess which agent thread to use.",
-        )
-        return {"status": "error", "message": "Conflicting Slack thread mapping"}
-    event_data = {
-        "channel_id": channel_id,
-        "channel_context": channel_context,
-        "thread_ts": thread_ts,
-        "event_ts": event_ts,
-        "user_id": user_id,
-        "text": text,
-        "bot_user_id": bot_user_id,
-        "thread_id": thread_id,
-        "treat_all_messages_as_mentions": is_direct_message,
-    }
-    repo_config = await common.get_slack_repo_config(
-        channel_id,
-        thread_ts,
-        slack_user_id=user_id,
-        channel_context=channel_context,
-        thread_id=thread_id,
-    )
-
-    background_tasks.add_task(service.process_slack_mention, event_data, repo_config)
-
-    return {"status": "accepted", "message": "Slack mention queued"}
+    common.logger.info("Ignoring duplicate delivery of Slack event %s", event_id)
+    return {"status": "ignored", "reason": "Duplicate Slack event delivery"}
 
 
 @router.post("/webhooks/slack/interactivity")
@@ -421,7 +442,10 @@ def _first_open_swe_option_action(actions: common.Any) -> dict[str, common.Any] 
     if not isinstance(actions, list):
         return None
     for action in actions:
-        if isinstance(action, dict) and action.get("action_id") == "open_swe_option_select":
+        action_id = action.get("action_id") if isinstance(action, dict) else None
+        if isinstance(action_id, str) and (
+            action_id == "open_swe_option_select" or action_id.startswith("open_swe_option_select_")
+        ):
             return action
     return None
 

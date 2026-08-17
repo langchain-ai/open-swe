@@ -13,18 +13,10 @@ export type ChunkKind =
 export type TodoStatus = "pending" | "in_progress" | "completed"
 
 export type AgentStatus =
-  | "idle"
-  | "running"
-  | "finished"
-  | "interrupted"
-  | "error"
+  "idle" | "running" | "finished" | "interrupted" | "error"
 
 export type AgentSource =
-  | "dashboard"
-  | "github"
-  | "slack"
-  | "linear"
-  | "schedule"
+  "dashboard" | "github" | "slack" | "linear" | "schedule"
 
 export interface TodoItem {
   content: string
@@ -140,6 +132,12 @@ export interface Message {
   id: string
   author: Author
   timestamp: string
+  /**
+   * Id of the user message that opened this agent turn. Matches the key the
+   * agent stamps on its git checkpoint, so the turn's changed files can be read
+   * back from the sandbox.
+   */
+  turnKey?: string
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
   startedAt?: string
   timestampIsFallback?: boolean
@@ -156,6 +154,8 @@ export interface Project {
   gitBranch?: string
 }
 
+export type SlackNotificationMode = "always" | "on_action"
+
 export interface AgentSchedule {
   id: string
   name: string
@@ -163,6 +163,7 @@ export interface AgentSchedule {
   schedule: string
   repo: string | null
   slackChannelId?: string | null
+  slackNotificationMode: SlackNotificationMode
   model: string
   effort?: string | null
   enabled: boolean
@@ -219,11 +220,13 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
+  workingRepoFullName?: string | null
   branch: string
   model: string
   effort?: string | null
   planMode?: boolean
   planStatus?: string | null
+  adminThread?: boolean
   source?: AgentSource
   status: AgentStatus
   viewed: boolean

@@ -52,9 +52,9 @@ from .middleware import (
     ModelCallTimeoutMiddleware,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
-    SlackAssistantStatusMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
@@ -128,7 +128,7 @@ HISTORICAL_REVIEW_GUIDANCE = """- **Anything that overlaps an existing PR review
 REVIEWER_PROMPT_TEMPLATE = """You are a specialized code reviewer agent. Your job is to review one GitHub PR and publish a single review.
 
 Sandbox: `{working_dir}`. Review target: `{repo_owner}/{repo_name}#{pr_number}`.
-Invoke `gh` as `GH_TOKEN=dummy gh <command>`.
+`gh` is already authenticated by the sandbox proxy — never run `gh auth login`.
 
 Call `fetch_review_diff` to materialize the current review range in the sandbox.
 It returns only the file path and bounded metadata. Inspect that file with `grep`
@@ -141,7 +141,13 @@ the `SKILL.md` that matches the area you're reviewing and apply it.
 
 Tools: `fetch_review_diff`, `add_finding`, `update_finding`, `list_findings`,
 `publish_review`, `resolve_finding_thread`, `reply_to_finding_thread`.
-Call `publish_review` once at the end.
+Call `publish_review` once at the end. Every call must include `approval_score` (0–100),
+one to five concise `approval_reasons`, and `approval_risks` (up to five remaining
+uncertainties, or an empty list). Score confidence that the exact reviewed SHA is safe
+to approve: 90–100 means high confidence after complete review, 70–89 means human
+judgment is still warranted, and below 70 means substantial risk or uncertainty. The
+backend owns policy, finding caps, current-head checks, and the final GitHub event; do
+not adjust the score to reach a configured threshold.
 
 Delegate at most one review pass. Give the reviewer subagent an explicit,
 non-overlapping file list and ask it to return candidate defects only. The
@@ -316,12 +322,15 @@ severities — they're not findings.
 
 # After publish_review — closing summary
 
-Inspect the returned `review_id`, `skipped_empty_re_review`, and `dry_run`
-fields before composing your final message; `success: true` alone does NOT
-mean a review was posted.
+Inspect the returned `review_id`, `review_event`, `approval_decision`,
+`skipped_empty_re_review`, and `dry_run` fields before composing your final
+message; `success: true` alone does NOT mean a review was posted.
 
 - `review_id` is a number and neither flag is set → you may say the review
-  was published/posted and cite `surfaced_count`.
+  was published/posted and cite `surfaced_count`. Say it was approved only
+  when `review_event` is `APPROVE`.
+- `duplicate_approval: true` → say the existing approval was retained and no
+  duplicate review was posted.
 - `skipped_empty_re_review: true` or `review_id: null` → say "no new review
   was posted" / "the re-review had nothing new to surface". Do NOT use
   "published", "submitted", or "posted".
@@ -360,7 +369,10 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
         "model": model,
         # Subagents compile into their own graphs, so the reviewer's own
         # middleware never wraps their model calls.
-        "middleware": cast(list[AgentMiddleware[Any, Any, Any]], [ModelCallTimeoutMiddleware()]),
+        "middleware": cast(
+            list[AgentMiddleware[Any, Any, Any]],
+            [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
+        ),
     }
 
 
@@ -372,15 +384,15 @@ present but stale (at an old commit). Do NOT trust local files until you have
 re-prepped the tree yourself. Run:
 
 ```
-cd {working_dir} || {{ cd {parent_dir} && GH_TOKEN=dummy gh repo clone {repo_owner}/{repo_name} && cd {repo_name}; }}
-GH_TOKEN=dummy git fetch origin {head_sha_or_placeholder} --quiet || GH_TOKEN=dummy git fetch origin refs/pull/{pr_number}/head --quiet
+cd {working_dir} || {{ cd {parent_dir} && gh repo clone {repo_owner}/{repo_name} && cd {repo_name}; }}
+git fetch origin {head_sha_or_placeholder} --quiet || git fetch origin refs/pull/{pr_number}/head --quiet
 git checkout --force {head_sha_or_placeholder} --quiet
 ```
 
 and verify `git rev-parse HEAD` matches the PR head before reading local
 files. If you cannot get the tree onto the PR head, rely exclusively on the
-diff and `gh api` file contents (`GH_TOKEN=dummy gh api
-repos/{repo_owner}/{repo_name}/contents/<path>?ref=<head_sha>`) — never on
+diff and file contents from
+`gh api repos/{repo_owner}/{repo_name}/contents/<path>?ref=<head_sha>` — never on
 the local checkout."""
 
 
@@ -891,7 +903,7 @@ async def _resolve_grouping_model(
 
 async def _cached_reviewer_team_defaults():
     return await ttl_cache.cached(
-        f"team-default-model-pair:reviewer:{id(get_team_default_model_pair)}",
+        "team-default-model-pair:reviewer",
         60,
         lambda: get_team_default_model_pair("reviewer"),
     )
@@ -899,7 +911,7 @@ async def _cached_reviewer_team_defaults():
 
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )
@@ -907,7 +919,7 @@ async def _cached_gateway_enabled() -> bool:
 
 async def _cached_org_review_guidelines() -> str | None:
     return await ttl_cache.cached(
-        f"reviewer:org-guidelines:{id(get_org_review_guidelines)}",
+        "reviewer:org-guidelines",
         300,
         get_org_review_guidelines,
     )
@@ -915,7 +927,7 @@ async def _cached_org_review_guidelines() -> str | None:
 
 async def _cached_api_standards_skill() -> str | None:
     return await ttl_cache.cached(
-        f"reviewer:api-standards-skill:{id(fetch_api_standards_skill)}",
+        "reviewer:api-standards-skill",
         300,
         fetch_api_standards_skill,
     )
@@ -1429,9 +1441,9 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 ToolErrorMiddleware(),
                 refresh_github_proxy_before_model,
                 check_message_queue_before_model,
-                SlackAssistantStatusMiddleware(),
                 TimeoutWrapupMiddleware(),
                 SanitizeFireworksMessagesMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
                 ModelCallTimeoutMiddleware(),

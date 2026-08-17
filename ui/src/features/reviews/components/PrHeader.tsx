@@ -24,6 +24,7 @@ export interface PrHeaderProps {
   } | null
   className?: string
   titleClassName?: string
+  compact?: boolean
 }
 
 export function PrHeader({
@@ -37,49 +38,80 @@ export function PrHeader({
   stats,
   className,
   titleClassName,
+  compact = false,
 }: PrHeaderProps) {
   return (
     <div className={className}>
-      <span
+      <div className={cn(compact && "flex min-w-0 items-center gap-2")}>
+        <span
+          className={cn(
+            "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] capitalize",
+            STATE_STYLES[state] ?? STATE_STYLES.open
+          )}
+        >
+          <GitPullRequestIcon className="size-3" />
+          {state}
+        </span>
+        <h1
+          className={cn(
+            compact
+              ? "min-w-0 flex-1 truncate text-sm font-medium"
+              : "mt-2 text-base font-medium",
+            titleClassName
+          )}
+        >
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className={cn("hover:underline", compact && "block truncate")}
+          >
+            {title}
+            {number != null && (
+              <span className="text-muted-foreground"> #{number}</span>
+            )}
+          </a>
+        </h1>
+      </div>
+      <div
         className={cn(
-          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] capitalize",
-          STATE_STYLES[state] ?? STATE_STYLES.open
+          "flex items-center gap-2 text-xs text-muted-foreground",
+          compact ? "mt-1.5 min-w-0 overflow-hidden" : "mt-2 flex-wrap"
         )}
       >
-        <GitPullRequestIcon className="size-3" />
-        {state}
-      </span>
-      <h1 className={cn("mt-2 text-base font-medium", titleClassName)}>
-        <a
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-          className="hover:underline"
-        >
-          {title}
-          {number != null && (
-            <span className="text-muted-foreground"> #{number}</span>
-          )}
-        </a>
-      </h1>
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         {author && (
-          <span className="font-medium text-foreground">{author}</span>
+          <span className="shrink-0 font-medium text-foreground">{author}</span>
         )}
-        <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
-          {baseRef}
-        </span>
-        <span>←</span>
-        <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
-          {headRef}
-        </span>
+        {compact ? (
+          <>
+            <span className="min-w-0 truncate font-mono" title={headRef}>
+              {headRef}
+            </span>
+            <span className="shrink-0">→</span>
+            <span className="min-w-0 truncate font-mono" title={baseRef}>
+              {baseRef}
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
+              {baseRef}
+            </span>
+            <span>←</span>
+            <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
+              {headRef}
+            </span>
+          </>
+        )}
         {stats && (
           <>
-            <span>
+            <span className="shrink-0">
               {stats.changedFiles} file{stats.changedFiles === 1 ? "" : "s"}
             </span>
-            <span className="text-emerald-500">+{stats.additions}</span>
-            <span className="text-red-500">-{stats.deletions}</span>
+            <span className="shrink-0 text-emerald-500">
+              +{stats.additions}
+            </span>
+            <span className="shrink-0 text-red-500">-{stats.deletions}</span>
           </>
         )}
       </div>

@@ -39,13 +39,18 @@ def test_format_comments_empty() -> None:
     assert _format_comments([]) == ""
 
 
-def test_plan_approved_slack_text_mentions_comments_actor_and_start() -> None:
-    from agent.dashboard.plan_api import _plan_approved_slack_text
+def test_plan_approved_slack_text_mentions_comments_and_actor() -> None:
+    from agent.dashboard.plan_api import _plan_approved_slack_blocks, _plan_approved_slack_text
 
-    assert (
-        _plan_approved_slack_text(2, "Alice")
-        == "Plan approved with 2 comments by Alice\nbeginning implementation"
-    )
+    text = _plan_approved_slack_text(2, "Alice")
+
+    assert text == "Plan approved with 2 comments by Alice"
+    assert _plan_approved_slack_blocks(text) == [
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": "_Plan approved with 2 comments by Alice_"}],
+        }
+    ]
 
 
 def test_plan_comment_helpers_exported() -> None:
@@ -367,14 +372,6 @@ def test_save_plan_exported_and_wired() -> None:
     from agent.tools import save_plan
 
     assert callable(save_plan)
-
-
-def test_save_plan_description_warns_about_slack_images() -> None:
-    from agent.tools import save_plan
-
-    description = save_plan.__doc__ or ""
-    assert "persist Markdown text only" in description
-    assert "post them directly in Slack" in description
 
 
 def test_plan_status_constants() -> None:
@@ -706,8 +703,9 @@ async def test_approve_plan_dispatches_published_markdown(
 
     async def fake_dispatch(
         thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
-    ) -> None:
+    ) -> dict[str, Any]:
         dispatched.update(text=text, plan_mode=plan_mode)
+        return {"run_id": "run-1"}
 
     monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "_user_owns_thread", lambda *a, **k: True)
@@ -717,10 +715,11 @@ async def test_approve_plan_dispatches_published_markdown(
     monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
 
     result = await plan_api.approve_plan("t1", session={"sub": "a", "email": None})
-    assert result["status"] == "approved"
-    # The (possibly edited) published plan is the source of truth, plus feedback.
+    assert result == {"status": "approved", "run_id": "run-1"}
     assert "# Edited plan" in dispatched["text"]
     assert "use snake_case" in dispatched["text"]
+    assert "reasonable engineering judgment" in dispatched["text"]
+    assert "exactly as written" not in dispatched["text"]
     assert dispatched["plan_mode"] is False
 
 
@@ -750,14 +749,28 @@ async def test_approve_plan_posts_slack_approval_notice(
     async def fake_set_status(thread_id: str, status: str, *, plan_mode: Any = None) -> None:
         return None
 
-    async def fake_post(channel_id: str, thread_ts: str, text: str, **kwargs: Any) -> bool:
-        posted.update(channel_id=channel_id, thread_ts=thread_ts, text=text)
+    async def fake_post(
+        channel_id: str,
+        thread_ts: str,
+        text: str,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> bool:
+        posted.update(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            text=text,
+            blocks=blocks,
+            **kwargs,
+        )
         return True
 
     async def fake_dispatch(
         thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
-    ) -> None:
+    ) -> dict[str, Any]:
         dispatched.update(text=text, plan_mode=plan_mode)
+        return {"run_id": "run-1"}
 
     monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
     monkeypatch.setattr(plan_api, "_user_owns_thread", lambda *a, **k: True)
@@ -775,7 +788,18 @@ async def test_approve_plan_posts_slack_approval_notice(
     assert posted == {
         "channel_id": "C1",
         "thread_ts": "123.45",
-        "text": "Plan approved with 2 comments by Alice Example\nbeginning implementation",
+        "text": "Plan approved with 2 comments by Alice Example",
+        "blocks": [
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": "_Plan approved with 2 comments by Alice Example_",
+                    }
+                ],
+            }
+        ],
     }
     assert dispatched["plan_mode"] is False
 

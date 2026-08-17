@@ -61,7 +61,7 @@ async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() ->
     SANDBOX_BACKENDS.clear()
     dead = MagicMock()
     dead.id = "sandbox-cached-dead"
-    dead.execute.side_effect = SandboxClientError("sandbox is gone")
+    dead.aexecute.side_effect = SandboxClientError("sandbox is gone")
     proxy = set_sandbox_backend(thread_id, dead)
     replacement = MagicMock()
     replacement.id = "sandbox-replacement"

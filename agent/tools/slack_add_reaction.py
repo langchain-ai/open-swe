@@ -7,15 +7,16 @@ from ..utils.slack import LANGGRAPH_URL, add_slack_reaction, get_active_slack_th
 
 
 async def slack_add_reaction(
-    emoji: str = "eyes",
+    emoji: str,
     message_ts: str | None = None,
 ) -> dict[str, Any]:
-    """Add a reaction to a Slack message in the current Slack thread.
+    """Add a context-appropriate reaction to a Slack message in the current thread.
 
-    Use this with the default `eyes` reaction to acknowledge Slack user follow-up
-    requests while you continue working, instead of posting a perfunctory
-    confirmation reply. If `message_ts` is omitted, this reacts to the latest
-    message that triggered the run. Pass emoji names without surrounding colons.
+    Prefer `saluting_face` for taking ownership, `eyes` for active review,
+    `thinking_face` for investigation, and `tada` for genuine wins. Never use
+    `white_check_mark`, because teams use it to indicate that a pull request is approved.
+    If `message_ts` is omitted, this reacts to the latest message that triggered the run.
+    Pass emoji names without surrounding colons.
     """
     config = get_config()
     configurable = config.get("configurable", {})
@@ -42,6 +43,11 @@ async def slack_add_reaction(
     reaction = emoji.strip().strip(":")
     if not reaction:
         return {"success": False, "error": "emoji is required"}
+    if reaction == "white_check_mark":
+        return {
+            "success": False,
+            "error": "white_check_mark is not allowed because it can imply PR approval",
+        }
     if any(char.isspace() for char in reaction):
         return {
             "success": False,

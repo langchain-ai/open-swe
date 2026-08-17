@@ -117,5 +117,8 @@ def clear() -> None:
     _CACHE.clear()
     _LOCKS.clear()
     for task in _REFRESH_TASKS.values():
-        task.cancel()
+        try:
+            task.cancel()
+        except RuntimeError:
+            pass
     _REFRESH_TASKS.clear()

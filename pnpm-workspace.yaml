@@ -1,0 +1,24 @@
+packages:
+  - ui
+  - desktop
+
+allowBuilds:
+  electron: true
+  electron-winstaller: false
+  esbuild: true
+  node-pty: true
+  unrs-resolver: true
+
+overrides:
+  '@hono/node-server': 2.0.10
+  brace-expansion@2.1.1: 2.1.2
+  'brace-expansion@>=5.0.0': 5.0.9
+  dompurify: 3.4.13
+  fast-uri: 3.1.5
+  hono: 4.12.34
+  ip-address: 10.3.1
+  js-yaml: 4.3.1
+  mermaid: 11.16.1
+  'nanoid@>=3.0.0 <4.0.0': 3.3.17
+  postcss: 8.5.23
+  undici: 7.29.0

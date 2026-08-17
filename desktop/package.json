@@ -1,0 +1,102 @@
+{
+  "name": "open-swe-desktop",
+  "version": "0.2.3",
+  "private": true,
+  "description": "Experimental Open SWE desktop client",
+  "main": "build/main.cjs",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:ui": "pnpm --filter open-swe-dashboard run build",
+    "dev": "pnpm run build:ui && pnpm run build && electron . --dev",
+    "start": "pnpm run build:ui && pnpm run build && electron .",
+    "test:run": "node --test test/*.test.cjs",
+    "test": "pnpm run build && pnpm run test:run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run build:ui",
+    "pack": "pnpm run build:ui && pnpm run build && electron-builder --dir",
+    "dist": "pnpm run build:ui && pnpm run build && electron-builder"
+  },
+  "build": {
+    "appId": "com.langchain.openswe",
+    "productName": "Open SWE",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ],
+    "afterSign": "build/notarize.cjs",
+    "npmRebuild": true,
+    "icon": "resources/icon.png",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "build/**/*",
+      "src/setup.html",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "../ui/.output/public",
+        "to": "ui",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../ui/src/features/agents/terminal/ghostty",
+        "to": "ui/licenses/ghostty",
+        "filter": [
+          "T3-LICENSE",
+          "fonts/LICENSE"
+        ]
+      },
+      {
+        "from": "../ui/native/libghostty-vt/LICENSE",
+        "to": "ui/licenses/libghostty-vt.LICENSE"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Open SWE uses the microphone for message dictation."
+      },
+      "icon": "resources/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "category": "Development",
+      "target": [
+        "AppImage"
+      ]
+    }
+  },
+  "author": "LangChain",
+  "license": "MIT",
+  "homepage": "https://github.com/langchain-ai/open-swe",
+  "devDependencies": {
+    "@electron/notarize": "3.1.1",
+    "@types/node": "22.20.1",
+    "electron": "41.10.3",
+    "electron-builder": "26.15.3",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "node-pty": "1.1.0"
+  }
+}

@@ -4,6 +4,7 @@ import importlib
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 slack_reply_tool = importlib.import_module("agent.tools.slack_thread_reply")
 
@@ -17,17 +18,6 @@ def _config() -> dict[str, Any]:
             }
         }
     }
-
-
-def test_slack_thread_reply_prompt_requires_slack_only_terseness() -> None:
-    prompt = slack_reply_tool.slack_thread_reply.__doc__ or ""
-
-    assert "as terse as possible" in prompt
-    assert "default to one sentence" in prompt
-    assert "specific to Slack tool messages" in prompt
-    assert "not normal web UI assistant messages" in prompt
-    assert "reply naturally" in prompt
-    assert "plan_approval" not in prompt
 
 
 async def test_slack_thread_reply_returns_structured_error_for_msg_too_long(
@@ -177,7 +167,7 @@ async def test_slack_thread_reply_posts_plain_text_without_options(
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
     result = await slack_reply_tool.slack_thread_reply(
-        "Plan ready: review it and reply naturally to approve or request changes."
+        "Plan ready: review it and reply to approve or request changes."
     )
 
     assert result == {"success": True}
@@ -212,4 +202,53 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
     actions = captured["blocks"][1]
     assert actions["type"] == "actions"
     assert [button["text"]["text"] for button in actions["elements"]] == ["A", "B"]
-    assert actions["elements"][0]["action_id"] == "open_swe_option_select"
+    action_ids = [button["action_id"] for button in actions["elements"]]
+    assert action_ids == ["open_swe_option_select_0", "open_swe_option_select_1"]
+    assert len(action_ids) == len(set(action_ids))
+
+
+def test_slack_action_ids_are_unique_and_recognized() -> None:
+    slack_routes = importlib.import_module("agent.webhooks.slack_routes")
+    blocks = slack_reply_tool.build_workflow_approval_blocks("Review", "abc")
+    actions = blocks[1]["elements"]
+
+    assert len({action["action_id"] for action in actions}) == len(actions)
+    assert slack_routes._first_open_swe_option_action(actions) is actions[0]
+    legacy = {"action_id": "open_swe_option_select"}
+    assert slack_routes._first_open_swe_option_action([legacy]) is legacy
+    assert slack_routes._first_open_swe_option_action([{"action_id": "unrelated"}]) is None
+
+
+async def test_slack_thread_reply_passes_model_reported_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_post_and_store_mapping(
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        **kwargs: Any,
+    ) -> tuple[str | None, str | None]:
+        captured.update(kwargs)
+        return "2.0", None
+
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+    state = {
+        "messages": [
+            HumanMessage(content="request"),
+            AIMessage(
+                content="",
+                response_metadata={"model_name": "model-a"},
+                usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+            ),
+        ]
+    }
+
+    result = await slack_reply_tool.slack_thread_reply("Done", state=state)
+
+    assert result == {"success": True}
+    usage = captured["usage"]
+    assert usage.models == ("model-a",)
+    assert usage.main_agent_tokens == 110

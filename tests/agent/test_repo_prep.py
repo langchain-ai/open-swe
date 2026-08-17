@@ -26,7 +26,7 @@ class _FakeSandboxBackend:
     def id(self) -> str:
         return "fake-sandbox"
 
-    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         del timeout
         if self._raise:
             raise RuntimeError("sandbox unreachable")

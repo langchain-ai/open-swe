@@ -1,20 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
-import { getSingletonHighlighter } from "shiki";
-import type { ThemedToken } from "shiki";
-import { useResolvedTheme } from "@/lib/theme";
+import { useEffect, useMemo, useState } from "react"
+import { getSingletonHighlighter } from "shiki"
+import type { ThemedToken } from "shiki"
+import { useResolvedTheme } from "@/lib/theme"
 
 interface CodeBlockProps {
-  text: string;
-  language?: string;
+  text: string
+  language?: string
 }
 
-const SHIKI_THEME = { light: "github-light", dark: "github-dark" } as const;
+const SHIKI_THEME = { light: "github-light", dark: "github-dark" } as const
 
-const TOKEN_CACHE = new Map<string, Array<Array<ThemedToken>>>();
+const TOKEN_CACHE = new Map<string, Array<Array<ThemedToken>>>()
 
 function normalizeLanguage(language?: string): string {
-  const raw = (language || "").toLowerCase().trim();
-  if (!raw) return "text";
+  const raw = (language || "").toLowerCase().trim()
+  if (!raw) return "text"
 
   const aliases: Record<string, string> = {
     ts: "typescript",
@@ -33,37 +33,43 @@ function normalizeLanguage(language?: string): string {
     "c#": "csharp",
     plaintext: "text",
     txt: "text",
-  };
+  }
 
-  return aliases[raw] || raw;
+  return aliases[raw] || raw
 }
 
 function languageLabel(language: string): string {
-  if (language === "text") return "text";
-  if (language === "typescript") return "ts";
-  if (language === "javascript") return "js";
-  return language;
+  if (language === "text") return "text"
+  if (language === "typescript") return "ts"
+  if (language === "javascript") return "js"
+  return language
 }
 
 export function CodeBlock({ text, language }: CodeBlockProps) {
-  const [tokens, setTokens] = useState<Array<Array<ThemedToken>> | null>(null);
-  const [copied, setCopied] = useState(false);
-  const resolvedTheme = useResolvedTheme();
-  const shikiTheme = SHIKI_THEME[resolvedTheme];
-  const normalizedLanguage = useMemo(() => normalizeLanguage(language), [language]);
-  const displayLanguage = useMemo(() => languageLabel(normalizedLanguage), [normalizedLanguage]);
+  const [tokens, setTokens] = useState<Array<Array<ThemedToken>> | null>(null)
+  const [copied, setCopied] = useState(false)
+  const resolvedTheme = useResolvedTheme()
+  const shikiTheme = SHIKI_THEME[resolvedTheme]
+  const normalizedLanguage = useMemo(
+    () => normalizeLanguage(language),
+    [language]
+  )
+  const displayLanguage = useMemo(
+    () => languageLabel(normalizedLanguage),
+    [normalizedLanguage]
+  )
 
   useEffect(() => {
-    let cancelled = false;
-    setTokens(null);
+    let cancelled = false
+    setTokens(null)
 
-    if (normalizedLanguage === "text") return;
+    if (normalizedLanguage === "text") return
 
-    const cacheKey = `${shikiTheme}::${normalizedLanguage}::${text}`;
-    const cached = TOKEN_CACHE.get(cacheKey);
+    const cacheKey = `${shikiTheme}::${normalizedLanguage}::${text}`
+    const cached = TOKEN_CACHE.get(cacheKey)
     if (cached) {
-      setTokens(cached);
-      return;
+      setTokens(cached)
+      return
     }
 
     getSingletonHighlighter({
@@ -71,55 +77,60 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
       langs: [normalizedLanguage as any],
     })
       .then((highlighter) => {
-        if (cancelled) return;
+        if (cancelled) return
         const result = highlighter.codeToTokens(text, {
           lang: normalizedLanguage as any,
           theme: shikiTheme,
-        });
-        if (TOKEN_CACHE.size >= 500) TOKEN_CACHE.clear();
-        TOKEN_CACHE.set(cacheKey, result.tokens);
-        setTokens(result.tokens);
+        })
+        if (TOKEN_CACHE.size >= 500) TOKEN_CACHE.clear()
+        TOKEN_CACHE.set(cacheKey, result.tokens)
+        setTokens(result.tokens)
       })
       .catch((err: unknown) => {
-        console.warn('[code-block] Tokenization failed:', err);
+        console.warn("[code-block] Tokenization failed:", err)
         if (!cancelled) {
-          setTokens(null);
+          setTokens(null)
         }
-      });
+      })
 
     return () => {
-      cancelled = true;
-    };
-  }, [text, normalizedLanguage, shikiTheme]);
+      cancelled = true
+    }
+  }, [text, normalizedLanguage, shikiTheme])
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1200)
     } catch {
-      setCopied(false);
+      setCopied(false)
     }
-  };
+  }
 
   return (
-    <div className="my-2 max-w-full overflow-hidden rounded-xl border border-[var(--ui-border-subtle)] bg-[var(--ui-code-bubble)]">
+    <div className="my-2 max-w-full overflow-hidden rounded-xl border border-border/60 bg-muted">
       <div className="flex items-center justify-between px-3 py-2 text-xs">
-        <span className="font-mono text-[color:var(--ui-accent-2)]">{displayLanguage}</span>
+        <span className="font-mono text-muted-foreground">
+          {displayLanguage}
+        </span>
         <button
           type="button"
           onClick={handleCopy}
-          className="text-[color:var(--ui-text-muted)] hover:text-[color:var(--ui-text)] transition-colors"
+          className="text-muted-foreground transition-colors hover:text-foreground"
           title="Copy code"
         >
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <pre className="max-w-full px-3 pb-3 text-[12px] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+      <pre className="max-w-full px-3 pb-3 text-[12px] [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
         {tokens ? (
           <code className="block max-w-full">
             {tokens.map((lineTokens, lineIndex) => (
-              <div key={lineIndex} className="max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+              <div
+                key={lineIndex}
+                className="max-w-full [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
+              >
                 {lineTokens.map((token, tokenIndex) => (
                   <span key={tokenIndex} style={{ color: token.color }}>
                     {token.content}
@@ -129,9 +140,11 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
             ))}
           </code>
         ) : (
-          <code className="block max-w-full text-[color:var(--ui-text)] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{text}</code>
+          <code className="block max-w-full [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-foreground">
+            {text}
+          </code>
         )}
       </pre>
     </div>
-  );
+  )
 }

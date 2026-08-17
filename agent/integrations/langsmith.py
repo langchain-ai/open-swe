@@ -9,8 +9,6 @@ import logging
 import os
 import uuid
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Any
 
 import httpx
@@ -40,15 +38,11 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 30 * 24 * 60 * 60  # 30 days
 SANDBOX_CREATE_MAX_ATTEMPTS = 3
 SANDBOX_CREATE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 SANDBOX_CREATE_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
-SANDBOX_READY_STATUSES = frozenset({"ready", "running"})
-SANDBOX_RECONNECT_STARTABLE_STATUSES = frozenset({"stopped", "paused", "idle"})
-SANDBOX_RECONNECT_PENDING_STATUSES = frozenset({"creating", "pending", "starting", "resuming"})
-SANDBOX_RECONNECT_READY_TIMEOUT_SECONDS = 30.0
-SANDBOX_RECONNECT_READY_POLL_SECONDS = 2.0
 PROXY_CONFIG_MAX_ATTEMPTS = 3
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -216,6 +210,9 @@ def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
                     "value": f"Bearer {github_token}",
                 }
             ],
+            # `gh` refuses to run without a token in its environment even though the
+            # proxy injects the real one on the wire.
+            "env_vars": {"GH_TOKEN": PROXY_GH_TOKEN_PLACEHOLDER},
         },
         {
             "name": "github",
@@ -250,12 +247,6 @@ def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
     return isinstance(exc, httpx.TransportError)
 
 
-def _status_text(sandbox_or_status: Any) -> str:
-    status = getattr(sandbox_or_status, "status", sandbox_or_status)
-    status = getattr(status, "value", status)
-    return str(status or "").lower()
-
-
 def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
     response = getattr(exc, "response", None)
     status_code = getattr(response, "status_code", None) or getattr(exc, "status_code", None)
@@ -269,25 +260,16 @@ def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
     }
 
 
-async def _wait_for_reconnected_sandbox(
-    client: AsyncSandboxClient,
-    sandbox_id: str,
-    *,
-    timeout_seconds: float = SANDBOX_RECONNECT_READY_TIMEOUT_SECONDS,
-    poll_seconds: float = SANDBOX_RECONNECT_READY_POLL_SECONDS,
-) -> Any:
-    deadline = asyncio.get_running_loop().time() + timeout_seconds
-    last_sandbox = await client.get_sandbox(name=sandbox_id)
-    while True:
-        status = _status_text(last_sandbox)
-        if status in SANDBOX_READY_STATUSES or status not in SANDBOX_RECONNECT_PENDING_STATUSES:
-            return last_sandbox
-        if asyncio.get_running_loop().time() >= deadline:
-            return last_sandbox
-        await asyncio.sleep(
-            min(poll_seconds, max(deadline - asyncio.get_running_loop().time(), 0.0))
-        )
-        last_sandbox = await client.get_sandbox(name=sandbox_id)
+def _is_sandbox_name_taken_error(exc: BaseException) -> bool:
+    return "already exists" in str(exc).lower()
+
+
+async def _reuse_existing_sandbox(client: AsyncSandboxClient, sandbox_id: str) -> Any:
+    try:
+        return await client.get_sandbox(name=sandbox_id)
+    except Exception as e:
+        msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
+        raise RuntimeError(msg) from e
 
 
 async def _create_sandbox_with_retry(
@@ -392,6 +374,15 @@ def get_async_sandbox_client() -> AsyncSandboxClient:
     )
 
 
+async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandboxClient, Any]:
+    client = get_async_sandbox_client()
+    try:
+        return client, await client.get_sandbox(name=sandbox_id)
+    except Exception:
+        await client.aclose()
+        raise
+
+
 async def create_langsmith_sandbox(
     sandbox_id: str | None = None,
     github_token: str | None = None,
@@ -478,6 +469,10 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     its own request deadline.
     """
 
+    @property
+    def sandbox(self) -> Any:
+        return self._sandbox
+
     _WS_FALLBACK_ERRORS = (
         SandboxConnectionError,
         SandboxServerReloadError,
@@ -506,44 +501,17 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         )
 
     @staticmethod
-    def _safe_kill(handle: Any) -> None:
+    async def _asafe_kill(handle: Any) -> None:
         try:
-            handle.kill()
+            await handle.kill()
         except Exception:  # noqa: BLE001 - best-effort cleanup of a wedged command
             logger.warning("Failed to kill timed-out sandbox command", exc_info=True)
 
-    def _base_execute(self, command: str, timeout: int | None) -> ExecuteResponse:
-        # WS path unavailable; the base wait=True path falls back to HTTP,
-        # which carries its own request deadline.
-        return LangSmithSandbox.execute(self, command, timeout=timeout)
+    async def _abase_execute(self, command: str, timeout: int | None) -> ExecuteResponse:
+        return await LangSmithSandbox.aexecute(self, command, timeout=timeout)
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        effective = timeout if timeout is not None else self._default_timeout
-        if not effective:  # 0 / None: caller opted out of any deadline
-            return super().execute(command, timeout=timeout)
-        # run(wait=False) eagerly opens the WS and reads the "started" frame, so
-        # connect/setup failures raise here — fall back to the base path.
-        try:
-            handle = self._sandbox.run(command, timeout=effective, wait=False)
-        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
-            return self._base_execute(command, timeout)
-        deadline = self._deadline(effective)
-        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sbx-exec")
-        try:
-            future = pool.submit(lambda: handle.result)
-            try:
-                result = future.result(timeout=deadline)
-            except FuturesTimeout:
-                self._safe_kill(handle)
-                return self._timeout_response(deadline, server_side=False)
-            except CommandTimeoutError:
-                return self._timeout_response(effective, server_side=True)
-            except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS):
-                return self._base_execute(command, timeout)
-            return self._result_to_response(result)
-        finally:
-            # Never join: a still-wedged worker must not block the caller.
-            pool.shutdown(wait=False)
+        raise NotImplementedError("TimeoutLangSmithSandbox is async-only; use aexecute.")
 
     async def aexecute(
         self,
@@ -554,27 +522,22 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         effective = timeout if timeout is not None else self._default_timeout
         if not effective:
             return await super().aexecute(command, timeout=timeout)
-        # run(wait=False) eagerly opens the WS and reads the "started" frame
-        # (blocking, bounded by the SDK connect timeout); connect/setup failures
-        # raise here — fall back to the base path.
+        # run(wait=False) opens the WS and reads the "started" frame, so
+        # connect/setup failures raise here — fall back to the base path.
         try:
-            handle = await asyncio.to_thread(
-                self._sandbox.run, command, timeout=effective, wait=False
-            )
+            handle = await self._aget_sandbox().run(command, timeout=effective, wait=False)
         except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
-            return await asyncio.to_thread(self._base_execute, command, timeout)
+            return await self._abase_execute(command, timeout)
         deadline = self._deadline(effective)
         try:
-            result = await asyncio.wait_for(
-                asyncio.to_thread(lambda: handle.result), timeout=deadline
-            )
+            result = await asyncio.wait_for(handle.result, timeout=deadline)
         except TimeoutError:
-            await asyncio.to_thread(self._safe_kill, handle)
+            await self._asafe_kill(handle)
             return self._timeout_response(deadline, server_side=False)
         except CommandTimeoutError:
             return self._timeout_response(effective, server_side=True)
         except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS):
-            return await asyncio.to_thread(self._base_execute, command, timeout)
+            return await self._abase_execute(command, timeout)
         return self._result_to_response(result)
 
 
@@ -613,8 +576,12 @@ class LangSmithProvider(SandboxProvider):
     def validate_startup_config(cls) -> None:
         """Validate env-var configuration at server startup. Raises ValueError if invalid."""
         if not os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID"):
-            msg = "DEFAULT_SANDBOX_SNAPSHOT_ID must be set when SANDBOX_TYPE=langsmith"
-            raise ValueError(msg)
+            # Not fatal: an admin can set the base snapshot at runtime from the
+            # dashboard, which is stored outside the environment.
+            logger.warning(
+                "DEFAULT_SANDBOX_SNAPSHOT_ID is not set; sandbox creation will fail until a "
+                "base snapshot is configured in admin settings"
+            )
         for name in (
             "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES",
             "DEFAULT_SANDBOX_VCPUS",
@@ -670,33 +637,14 @@ class LangSmithProvider(SandboxProvider):
             api_key=self._api_key, api_endpoint=self._api_endpoint
         ) as client:
             if sandbox_id:
-                try:
-                    sandbox = await client.get_sandbox(name=sandbox_id)
-                except Exception as e:
-                    msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
-                    raise RuntimeError(msg) from e
-                status = _status_text(sandbox)
-                if status and status not in SANDBOX_READY_STATUSES:
-                    if status in SANDBOX_RECONNECT_STARTABLE_STATUSES:
-                        try:
-                            logger.info(
-                                "Starting LangSmith sandbox %s before reconnect (status=%s)",
-                                sandbox_id,
-                                status,
-                            )
-                            await client.start_sandbox(sandbox_id)
-                            sandbox = await _wait_for_reconnected_sandbox(client, sandbox_id)
-                            status = _status_text(sandbox)
-                        except Exception as e:
-                            msg = f"Failed to start existing sandbox '{sandbox_id}' ({status})"
-                            raise RuntimeError(msg) from e
-                    if status not in SANDBOX_READY_STATUSES:
-                        msg = f"Existing sandbox '{sandbox_id}' is {status or 'unknown'}, not reusable"
-                        raise RuntimeError(msg)
+                sandbox = await _reuse_existing_sandbox(client, sandbox_id)
                 return TimeoutLangSmithSandbox(sandbox.to_sync())
 
             if not snapshot_id:
-                msg = "DEFAULT_SANDBOX_SNAPSHOT_ID must be set when SANDBOX_TYPE=langsmith"
+                msg = (
+                    "No base snapshot configured: set it in admin settings or via "
+                    "DEFAULT_SANDBOX_SNAPSHOT_ID"
+                )
                 raise ValueError(msg)
 
             _install_create_extra_fields(client, _get_sandbox_create_extra_fields())
@@ -714,7 +662,13 @@ class LangSmithProvider(SandboxProvider):
                     timeout=timeout,
                 )
             except Exception as e:
-                msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
-                raise RuntimeError(msg) from e
+                if not (name and _is_sandbox_name_taken_error(e)):
+                    msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
+                    raise RuntimeError(msg) from e
+                # Sandbox names are deterministic per thread, so the holder is this
+                # thread's own sandbox from a run that died before persisting its id.
+                # Creating is impossible and failing strands the thread forever.
+                logger.warning("Sandbox %s already exists; adopting it instead of creating", name)
+                sandbox = await _reuse_existing_sandbox(client, name)
 
             return TimeoutLangSmithSandbox(sandbox.to_sync())
