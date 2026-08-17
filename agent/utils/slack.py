@@ -393,7 +393,7 @@ async def _post_slack_message_with_ts(
             return None, f"http_error: {type(exc).__name__}"
 
 
-async def _slack_thread_dashboard_url(
+def _slack_thread_dashboard_url(
     channel_id: str, thread_ts: str, agent_thread_id: str | None = None
 ) -> str | None:
     return dashboard_thread_url(agent_thread_id) if agent_thread_id else None
@@ -511,7 +511,7 @@ async def post_slack_thread_reply_with_ts(
     agent_thread_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
-    dashboard_url = await _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
+    dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
     blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
     text = append_slack_web_link_footer(text, dashboard_url, usage)
     return await _post_slack_message_with_ts(
@@ -601,9 +601,10 @@ async def post_slack_thread_reply(
     agent_thread_id: str | None = None,
 ) -> bool:
     """Post a reply in a Slack thread."""
-    message_ts, _ = await post_slack_thread_reply_with_ts(
-        channel_id, thread_ts, text, blocks=blocks, agent_thread_id=agent_thread_id
-    )
+    kwargs: dict[str, Any] = {"blocks": blocks}
+    if agent_thread_id is not None:
+        kwargs["agent_thread_id"] = agent_thread_id
+    message_ts, _ = await post_slack_thread_reply_with_ts(channel_id, thread_ts, text, **kwargs)
     return message_ts is not None
 
 

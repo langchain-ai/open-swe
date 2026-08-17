@@ -551,12 +551,19 @@ def test_post_slack_thread_reply_keeps_usage_with_existing_web_link(
 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
     monkeypatch.setattr(slack_utils, "_post_slack_message_with_ts", fake_post_message_with_ts)
-    dashboard_url = slack_utils._slack_thread_dashboard_url("C123", "1.0")
+    dashboard_url = slack_utils._slack_thread_dashboard_url(
+        "C123", "1.0", agent_thread_id="mapped-thread"
+    )
     blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": dashboard_url}}]
 
     asyncio.run(
         slack_utils.post_slack_thread_reply_with_ts(
-            "C123", "1.0", "Done", blocks=blocks, usage=usage
+            "C123",
+            "1.0",
+            "Done",
+            blocks=blocks,
+            usage=usage,
+            agent_thread_id="mapped-thread",
         )
     )
 

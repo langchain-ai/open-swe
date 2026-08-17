@@ -166,7 +166,9 @@ async def slack_webhook(
     else:
         langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
         try:
-            thread_id = await common.resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
+            thread_id = await common.resolve_slack_thread_id(
+                langgraph_client, channel_id, thread_ts
+            )
         except common.SlackThreadMappingError:
             common.logger.exception("Could not resolve explicit Slack thread mapping")
             await common.post_slack_thread_reply(

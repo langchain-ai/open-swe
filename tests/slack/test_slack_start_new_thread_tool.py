@@ -83,6 +83,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         unfurl_media: bool = True,
         blocks: list[dict[str, Any]] | None = None,
         usage: Any = None,
+        **kwargs: Any,
     ) -> tuple[str | None, str | None]:
         captured["thread_reply"] = {
             "channel_id": channel_id,

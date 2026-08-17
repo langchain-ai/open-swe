@@ -1,6 +1,7 @@
 import asyncio
 import json
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import BackgroundTasks
@@ -103,6 +104,7 @@ def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
 
     monkeypatch.setattr(slack_events, "get_client", lambda url: client)
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
     monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)

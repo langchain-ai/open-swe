@@ -284,7 +284,7 @@ async def leave_failure_comment(
                 channel_id,
                 thread_ts,
             )
-            kwargs = {"agent_thread_id": thread_id} if isinstance(thread_id, str) else {}
+            agent_thread_id = thread_id if isinstance(thread_id, str) else None
             await post_slack_thread_reply(
                 channel_id,
                 thread_ts,
@@ -293,7 +293,7 @@ async def leave_failure_comment(
                     f"with GitHub and connect your Slack account in {link}, then mention "
                     "it again."
                 ),
-                **kwargs,
+                agent_thread_id=agent_thread_id,
             )
         return
     if source in ("github", "github_push"):

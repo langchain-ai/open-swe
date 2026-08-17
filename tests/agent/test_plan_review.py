@@ -800,6 +800,7 @@ async def test_approve_plan_posts_slack_approval_notice(
                 ],
             }
         ],
+        "agent_thread_id": "t1",
     }
     assert dispatched["plan_mode"] is False
 

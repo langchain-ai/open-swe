@@ -290,7 +290,6 @@ async def slack_action(request: Request) -> JSONResponse:
     }
     response = await _deliver_slack_interaction(payload)
     return JSONResponse(response.json(), status_code=response.status_code)
->>>>>>> origin/main
 
 
 @app.post("/control/login")

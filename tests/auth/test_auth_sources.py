@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 
@@ -14,7 +15,9 @@ def test_leave_failure_comment_posts_generic_token_free_slack_notice(
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
     thread_called: dict[str, str] = {}
 
-    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, message: str) -> bool:
+    async def fake_post_slack_thread_reply(
+        channel_id: str, thread_ts: str, message: str, **kwargs: Any
+    ) -> bool:
         thread_called["channel_id"] = channel_id
         thread_called["thread_ts"] = thread_ts
         thread_called["message"] = message

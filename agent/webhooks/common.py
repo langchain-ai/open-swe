@@ -839,18 +839,20 @@ async def get_slack_repo_config(
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
     langgraph_client = get_client(url=LANGGRAPH_URL)
-    thread_id = thread_id or await resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
 
     repo_config: dict[str, str] | None = None
 
     try:
-        thread = await langgraph_client.threads.get(thread_id)
+        resolved_thread_id = thread_id or await resolve_slack_thread_id(
+            langgraph_client, channel_id, thread_ts
+        )
+        thread = await langgraph_client.threads.get(resolved_thread_id)
         thread_repo_config = _extract_repo_config_from_thread(thread)
         if thread_repo_config:
             repo_config = thread_repo_config
     except Exception as exc:  # noqa: BLE001
         if not _is_not_found_error(exc):
-            logger.exception(
+            logger.debug(
                 "Failed to fetch Slack thread %s for repo resolution",
                 thread_id,
             )
