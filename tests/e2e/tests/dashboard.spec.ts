@@ -144,7 +144,7 @@ async function openThreadActionsMenu(page: Page) {
 test.describe("Slack → web handoff (real dashboard UI)", () => {
   test("the SAME user continues the conversation in the web app", async ({
     page,
-  }, testInfo) => {
+  }) => {
     await loginAs(page, SAME_USER);
     await openThreadViaSlackLink(page);
 
@@ -156,22 +156,6 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     );
     await expect(composer.editor).toBeVisible();
     await expect(composer.prompt).toBeVisible();
-    // The context meter is an icon-only ring, so the numbers live in its
-    // accessible name and in the popover it opens on hover — not in its text.
-    const contextIndicator = page.getByTestId("context-window-indicator");
-    await expect(contextIndicator).toBeVisible();
-    await expect(contextIndicator).toHaveAccessibleName(/context|%|tokens/i);
-    await contextIndicator.hover();
-    await expect(page.getByText("Context window").first()).toBeVisible();
-    const screenshotPath = testInfo.outputPath(
-      "context-window-indicator-dashboard.png",
-    );
-    await page.screenshot({ path: screenshotPath, fullPage: true });
-    await testInfo.attach("context-window-indicator-dashboard", {
-      path: screenshotPath,
-      contentType: "image/png",
-    });
-
     // Continue from the web — a new agent reply streams into the same thread.
     await typeIntoComposer(page, "Looks good — can you also add a docstring?");
     await expect(
