@@ -124,7 +124,6 @@ export interface ChatComposerProps {
   contextUsage?: {
     usedTokens?: number | null
     contextWindow?: number | null
-    hasMessages?: boolean
   }
 }
 
@@ -768,25 +767,12 @@ export const ChatComposer = memo(function ChatComposer({
                 <ImagePlus />
                 Attach images
               </MenuItem>
-              {typeof navigator !== "undefined" &&
-                "mediaDevices" in navigator &&
-                typeof MediaRecorder !== "undefined" && (
-                  <MenuItem
-                    disabled={disabled || dictationState === "transcribing"}
-                    onClick={() => void handleDictation()}
-                  >
-                    {dictationState === "transcribing" ? (
-                      <LoaderCircle className="animate-spin" />
-                    ) : dictationState === "recording" ? (
-                      <Square className="fill-current text-destructive" />
-                    ) : (
-                      <Mic />
-                    )}
-                    {dictationState === "recording"
-                      ? "Stop dictation"
-                      : "Dictate message"}
-                  </MenuItem>
-                )}
+              {onPlanModeChange && (
+                <MenuItem onClick={() => onPlanModeChange(!planMode)}>
+                  <MapIcon />
+                  {planMode ? "Disable plan mode" : "Enable plan mode"}
+                </MenuItem>
+              )}
               {onAdminThreadChange && (
                 <MenuItem onClick={() => onAdminThreadChange(!adminThread)}>
                   <ServerCogIcon />
@@ -834,11 +820,51 @@ export const ChatComposer = memo(function ChatComposer({
             )}
           </div>
 
-          <ContextWindowMeter
-            contextWindow={contextUsage?.contextWindow}
-            hasMessages={contextUsage?.hasMessages}
-            usedTokens={contextUsage?.usedTokens}
-          />
+          <div className="flex items-center gap-1">
+            <ContextWindowMeter
+              contextWindow={contextUsage?.contextWindow}
+              usedTokens={contextUsage?.usedTokens}
+            />
+
+            {typeof navigator !== "undefined" &&
+              "mediaDevices" in navigator &&
+              typeof MediaRecorder !== "undefined" && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <ComposerControl
+                        aria-label={
+                          dictationState === "recording"
+                            ? "Stop dictation"
+                            : "Start dictation"
+                        }
+                        aria-pressed={dictationState === "recording"}
+                        className={cn(
+                          "size-7 px-0",
+                          dictationState === "recording" && "text-destructive"
+                        )}
+                        disabled={disabled || dictationState === "transcribing"}
+                        onClick={() => void handleDictation()}
+                        type="button"
+                      />
+                    }
+                  >
+                    {dictationState === "transcribing" ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : dictationState === "recording" ? (
+                      <Square className="size-3 fill-current" />
+                    ) : (
+                      <Mic className="size-4" />
+                    )}
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">
+                    {dictationState === "recording"
+                      ? "Stop dictation"
+                      : "Dictate message"}
+                  </TooltipPopup>
+                </Tooltip>
+              )}
+          </div>
 
           <ComposerPrimaryActions
             activeRun={activeRun}
