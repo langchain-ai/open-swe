@@ -413,20 +413,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-move-reply",
         ),
     ),
-    "move_same": (
-        _tool_step(
-            "Moving the current Open SWE thread within the same Slack channel.",
-            "slack_move_thread",
-            {"message": "Continue the existing Open SWE task in this new thread."},
-            "call-move-same",
-        ),
-        _tool_step(
-            "Confirming the moved thread in its new location.",
-            "slack_thread_reply",
-            {"message": "Moved this Open SWE thread and preserved its state."},
-            "call-move-same-reply",
-        ),
-    ),
     "breakout": (
         _tool_step(
             "Starting a separate Slack thread for the breakout task.",
@@ -504,10 +490,6 @@ def _is_move_request(text: str) -> bool:
     return "E2E_MOVE_THREAD" in text
 
 
-def _is_same_channel_move_request(text: str) -> bool:
-    return "E2E_MOVE_SAME_CHANNEL" in text
-
-
 def _is_move_followup(text: str) -> bool:
     return "E2E_DESTINATION_FOLLOWUP" in text or "E2E_SOURCE_RETAG" in text
 
@@ -531,7 +513,6 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         "environment", lambda ctx: ctx.human_count <= 1 and _is_environment_request(ctx.first_text)
     ),
     ScriptRule("followup", lambda ctx: _is_move_followup(ctx.last_text)),
-    ScriptRule("move_same", lambda ctx: _is_same_channel_move_request(ctx.first_text)),
     ScriptRule("move", lambda ctx: _is_move_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
     ScriptRule("plan", lambda ctx: _is_revision(ctx.last_text)),

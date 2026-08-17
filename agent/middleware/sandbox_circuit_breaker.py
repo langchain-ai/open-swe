@@ -219,10 +219,12 @@ async def post_sandbox_unreachable_notification(
     if slack_target is not None:
         channel_id, thread_ts = slack_target
         thread_id = configurable.get("thread_id")
-        if isinstance(thread_id, str) and thread_id:
-            await post_slack_thread_reply(channel_id, thread_ts, message, agent_thread_id=thread_id)
-        else:
-            await post_slack_thread_reply(channel_id, thread_ts, message)
+        await post_slack_thread_reply(
+            channel_id,
+            thread_ts,
+            message,
+            agent_thread_id=thread_id if isinstance(thread_id, str) else None,
+        )
         logger.info("Sent sandbox circuit breaker notification to Slack thread %s", thread_ts)
         return
 

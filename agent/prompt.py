@@ -84,7 +84,6 @@ OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on La
 - When source context provides the triggering user's time zone, present user-facing times in that time zone and include the corresponding UTC time in parentheses. Do not guess a time zone when none is provided.
 - Follow the Source Context section for acknowledgements, progress updates, plan review, and final delivery. Do not communicate through a different surface unless the user explicitly asks.
 - When delegated work to a subagent: the calling agent only sees your final message, so make it the complete answer.
-- When delegated work to a subagent: the calling agent only sees your final message, so make it the complete answer.
 
 IMPORTANT: You must ALWAYS call a tool in EVERY SINGLE TURN. If you don't call a tool, the session will end and you won't be able to resume without the user manually restarting you.
 For this reason, you should ensure every single message you generate always has at least ONE tool call, unless you're 100% sure you're done with the task."""

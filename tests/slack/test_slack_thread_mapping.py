@@ -1,4 +1,3 @@
-import uuid
 from typing import Any
 
 import pytest
@@ -73,14 +72,15 @@ def _legacy_thread(
 
 
 @pytest.mark.asyncio
-async def test_resolver_creates_and_reuses_explicit_random_mapping() -> None:
+async def test_resolver_creates_a_concurrency_safe_mapping() -> None:
     client: Any = _Client()
 
     first = await resolve_slack_thread_id(client, "C1", "1.0")
     second = await resolve_slack_thread_id(client, "C1", "1.0")
 
-    assert uuid.UUID(first).version == 4
     assert second == first
+    concurrent_client: Any = _Client()
+    assert await resolve_slack_thread_id(concurrent_client, "C1", "1.0") == first
     assert await lookup_slack_thread_id(client, "C1", "1.0") == first
 
 
@@ -138,6 +138,11 @@ async def test_delete_removes_only_exact_slack_location_associations() -> None:
 
     assert await lookup_slack_thread_id(client, "C1", "1.0") is None
     assert await lookup_slack_thread_id(client, "C1", "2.0") == "thread-two"
+    fresh: Any = _Client()
+    fresh.store.items = dict(client.store.items)
+    replacement = await resolve_slack_thread_id(client, "C1", "1.0")
+    assert replacement != "thread-one"
+    assert await resolve_slack_thread_id(fresh, "C1", "1.0") == replacement
     remaining = [item["value"] for item in client.store.items.values()]
-    assert all(item.get("thread_ts") != "1.0" for item in remaining)
+    assert all(item.get("run_id") != "run-one" for item in remaining)
     assert any(item.get("run_id") == "run-two" for item in remaining)

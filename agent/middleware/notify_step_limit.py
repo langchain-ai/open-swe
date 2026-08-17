@@ -85,21 +85,13 @@ async def notify_step_limit_reached(
         "or ask it to continue from where it left off."
     )
 
-    thread_id = configurable.get("thread_id")
     try:
-        if isinstance(thread_id, str) and thread_id:
-            await post_slack_thread_reply(
-                channel_id,
-                thread_ts,
-                message,
-                agent_thread_id=thread_id,
-            )
-        else:
-            await post_slack_thread_reply(
-                channel_id,
-                thread_ts,
-                message,
-            )
+        await post_slack_thread_reply(
+            channel_id,
+            thread_ts,
+            message,
+            agent_thread_id=thread_id if isinstance(thread_id, str) else None,
+        )
         logger.info("Sent step-limit notification to Slack thread %s", thread_ts)
     except Exception:
         logger.exception("Failed to send step-limit notification")

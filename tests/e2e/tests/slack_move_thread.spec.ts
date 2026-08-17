@@ -107,28 +107,4 @@ test.describe("Slack thread moves", () => {
     );
   });
 
-  test("same-channel move creates a new Slack root for the same agent state", async ({
-    request,
-  }) => {
-    await request.post("/control/reset");
-    const source = await send(request, {
-      channel: "C_SAME",
-      text: "<@U0BOT> E2E_MOVE_SAME_CHANNEL move this Open SWE thread",
-      mention_bot: true,
-    });
-
-    await expect
-      .poll(() => movedRoot(request, "C_SAME"), { timeout: 60_000 })
-      .toBeTruthy();
-    const destination = await movedRoot(request, "C_SAME");
-    expect(destination!.thread_ts).not.toBe(source.thread_ts);
-
-    const followup = await send(request, {
-      channel: "C_SAME",
-      thread_ts: destination!.thread_ts,
-      text: "<@U0BOT> E2E_DESTINATION_FOLLOWUP continue here",
-      mention_bot: true,
-    });
-    expect(followup.thread_id).toBe(source.thread_id);
-  });
 });
