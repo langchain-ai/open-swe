@@ -364,7 +364,7 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     assert "source of truth" not in messages[0].content
 
 
-async def test_approve_plan_tool_records_dashboard_followup_approver(
+async def test_approve_plan_tool_ignores_stale_state_approver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import importlib
@@ -380,7 +380,8 @@ async def test_approve_plan_tool_records_dashboard_followup_approver(
         lambda: {
             "configurable": {
                 "thread_id": "t1",
-                "github_login": "owner",
+                "github_login": "current-user",
+                "source": "dashboard",
                 "plan_mode": True,
             }
         },
@@ -428,8 +429,8 @@ async def test_approve_plan_tool_records_dashboard_followup_approver(
         "status": "approved",
         "plan_mode": False,
         "approved_by": {
-            "id": "teammate",
-            "name": "Teammate",
+            "id": "current-user",
+            "name": "current-user",
             "source": "dashboard",
         },
     }

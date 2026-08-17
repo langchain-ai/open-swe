@@ -1613,7 +1613,6 @@ async def send_dashboard_message(
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
-        "approver": {"id": login, "name": login, "source": _DASHBOARD_SOURCE},
     }
     if isinstance(content, list):
         queue_payload["images"] = [

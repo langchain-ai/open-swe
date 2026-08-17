@@ -359,14 +359,24 @@ async def slack_interactivity(
 
         if plan_action == "approve":
             user_name = str(user.get("name") or user.get("username") or user_id)
+            channel_context = await common._get_slack_channel_context(channel_id)
+            repo_config = await common.get_slack_repo_config(
+                channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
+            )
             background_tasks.add_task(
-                service._maybe_approve_ready_plan_reply,
-                thread_id,
-                channel_id,
-                thread_ts,
-                user_id,
-                user_name,
-                "approve",
+                service.process_slack_plan_approval,
+                {
+                    "thread_id": thread_id,
+                    "channel_id": channel_id,
+                    "channel_context": channel_context,
+                    "thread_ts": thread_ts,
+                    "event_ts": str(message.get("ts") or ""),
+                    "user_id": user_id,
+                    "user_name": user_name,
+                    "text": "approve",
+                    "bot_user_id": common.SLACK_BOT_USER_ID,
+                },
+                repo_config,
             )
             return {"status": "accepted", "message": "Plan approval queued"}
 

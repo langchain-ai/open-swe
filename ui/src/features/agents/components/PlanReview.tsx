@@ -83,7 +83,7 @@ export function PlanReview({
   const isShared = plan.status === "shared"
   const isTerminal = plan.status === "approved" || plan.status === "cancelled"
   const canEdit = plan.isOwner && !isShared && !isTerminal
-  const canApprove = !isShared && !isTerminal
+  const canApprove = plan.status === "ready"
 
   const startEditing = useCallback(() => {
     setEditDraft(markdown)

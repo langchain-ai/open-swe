@@ -12,6 +12,7 @@ approve, and request changes (reject). A comment can be deleted by its author or
 the thread owner.
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -47,6 +48,7 @@ from .thread_api import (
 )
 
 logger = logging.getLogger(__name__)
+_plan_approval_locks: dict[str, asyncio.Lock] = {}
 
 plan_router = APIRouter(
     prefix="/dashboard/api/plan",
@@ -200,7 +202,6 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     actor_id = str(session.get("sub") or "").strip()
     return await approve_plan_for_thread(
         thread_id,
-        metadata=metadata,
         approver=make_plan_approver(
             actor_id=actor_id,
             name=_approval_actor_name(session),
@@ -209,43 +210,53 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     )
 
 
-async def approve_plan_for_thread(
-    thread_id: str, *, metadata: dict[str, Any], approver: dict[str, str]
-) -> dict[str, Any]:
+async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -> dict[str, Any]:
     approver = make_plan_approver(
         actor_id=str(approver.get("id") or ""),
         name=str(approver.get("name") or ""),
         source=str(approver.get("source") or ""),
     )
-    content = await get_plan_content(thread_id, raise_on_error=True) or {}
-    _reject_shared_content(content)
-    plan_markdown = str(content.get("markdown", "")).strip()
-    comments = await list_plan_comments(thread_id, raise_on_error=True)
-    feedback = _format_comments(comments)
-    await set_plan_status(
-        thread_id,
-        PLAN_STATUS_APPROVED,
-        plan_mode=False,
-        approved_by=approver,
-    )
-    if plan_markdown:
-        text = (
-            "The plan has been approved. Use the reviewed plan below as the implementation "
-            "guide. Apply reasonable engineering judgment where details need adjustment while "
-            f"preserving its goals and reviewer edits:\n\n{plan_markdown}"
+    lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
+    async with lock:
+        metadata = await _thread_metadata(thread_id)
+        content = await get_plan_content(thread_id, raise_on_error=True) or {}
+        _reject_shared_content(content)
+        if (
+            metadata.get("plan_mode") is not True
+            or metadata.get("plan_status") != PLAN_STATUS_READY
+            or content.get("status") != PLAN_STATUS_READY
+        ):
+            return {
+                "status": str(content.get("status") or metadata.get("plan_status") or "planning"),
+                "already_approved": True,
+            }
+        plan_markdown = str(content.get("markdown", "")).strip()
+        comments = await list_plan_comments(thread_id, raise_on_error=True)
+        feedback = _format_comments(comments)
+        await set_plan_status(
+            thread_id,
+            PLAN_STATUS_APPROVED,
+            plan_mode=False,
+            approved_by=approver,
         )
-    else:
-        text = "The plan has been approved. Implement it now as described in the plan."
-    if feedback:
-        text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
-    run = await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
-    await _maybe_post_plan_approved_to_slack(
-        metadata,
-        thread_id=thread_id,
-        comment_count=len(comments),
-        actor=approver["name"],
-    )
-    return {"status": PLAN_STATUS_APPROVED, "run_id": run["run_id"]}
+        if plan_markdown:
+            text = (
+                "The plan has been approved. Use the reviewed plan below as the implementation "
+                "guide. Apply reasonable engineering judgment where details need adjustment while "
+                f"preserving its goals and reviewer edits:\n\n{plan_markdown}"
+            )
+        else:
+            text = "The plan has been approved. Implement it now as described in the plan."
+        if feedback:
+            text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
+        run = await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
+        await _maybe_post_plan_approved_to_slack(
+            metadata,
+            thread_id=thread_id,
+            comment_count=len(comments),
+            actor=approver["name"],
+        )
+        return {"status": PLAN_STATUS_APPROVED, "run_id": run["run_id"]}
 
 
 @plan_router.post("/{thread_id}/reject")

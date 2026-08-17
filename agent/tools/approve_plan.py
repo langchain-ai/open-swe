@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 class ApprovePlanState(TypedDict, total=False):
     plan_mode: bool
-    plan_approver: dict[str, str]
 
 
 async def approve_plan(
@@ -61,7 +60,7 @@ async def approve_plan(
             str(thread_id),
             PLAN_STATUS_APPROVED,
             plan_mode=False,
-            approved_by=_current_approver(state, configurable),
+            approved_by=_current_approver(configurable),
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("approve_plan failed for thread %s", thread_id)
@@ -98,15 +97,7 @@ def _active_plan_mode(
     return metadata.get("plan_mode") is True
 
 
-def _current_approver(state: Mapping[str, Any] | None, configurable: Any) -> dict[str, str]:
-    if isinstance(state, dict):
-        state_approver = state.get("plan_approver")
-        if isinstance(state_approver, dict):
-            return make_plan_approver(
-                actor_id=str(state_approver.get("id") or ""),
-                name=str(state_approver.get("name") or ""),
-                source=str(state_approver.get("source") or ""),
-            )
+def _current_approver(configurable: Any) -> dict[str, str]:
     configurable = configurable if isinstance(configurable, dict) else {}
     source = str(configurable.get("source") or "agent")
     slack_thread = configurable.get("slack_thread")
