@@ -17,6 +17,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { parseApprovalThreshold } from "@/lib/reviewApproval"
 import { useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
@@ -50,12 +51,16 @@ function ReviewPage() {
   })
   const [local, setLocal] = useState<TeamSettings>(DEFAULT_SETTINGS)
   const [guidelinesDraft, setGuidelinesDraft] = useState("")
+  const [approvalThresholdDraft, setApprovalThresholdDraft] = useState("90")
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (settings.data) {
       setLocal(settings.data)
       setGuidelinesDraft(settings.data.org_guidelines ?? "")
+      setApprovalThresholdDraft(
+        String(settings.data.auto_approve_default_threshold)
+      )
     }
   }, [settings.data])
 
@@ -164,11 +169,20 @@ function ReviewPage() {
                 type="number"
                 min={0}
                 max={100}
-                value={current.auto_approve_default_threshold}
-                onChange={(event) => {
-                  const value = Number(event.target.value)
-                  if (Number.isInteger(value) && value >= 0 && value <= 100) {
-                    persist({ auto_approve_default_threshold: value })
+                value={approvalThresholdDraft}
+                onChange={(event) =>
+                  setApprovalThresholdDraft(event.target.value)
+                }
+                onBlur={() => {
+                  const value = parseApprovalThreshold(approvalThresholdDraft)
+                  if (value !== null) {
+                    if (value !== current.auto_approve_default_threshold) {
+                      persist({ auto_approve_default_threshold: value })
+                    }
+                  } else {
+                    setApprovalThresholdDraft(
+                      String(current.auto_approve_default_threshold)
+                    )
                   }
                 }}
                 disabled={!canEdit}

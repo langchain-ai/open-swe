@@ -938,7 +938,7 @@ async def test_publish_review_skips_duplicate_empty_summary_when_open_swe_alread
 
 @pytest.mark.asyncio
 async def test_publish_review_stays_bound_to_reviewed_head_sha() -> None:
-    """A push during review cannot rebind publication to an unseen head."""
+    """The interrupted follow-up run, not stale metadata, owns a pushed head."""
     from agent.tools.publish_review import _publish_review_async
 
     finding = _f(id="f_new", file="b.py", start_line=2, end_line=2)
