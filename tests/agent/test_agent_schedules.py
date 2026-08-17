@@ -567,6 +567,9 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client,
     assert fake_client.threads.created[0]["thread_id"] == thread_id
     metadata = fake_client.threads.created[0]["metadata"]
     assert metadata["source"] == "schedule"
+    assert metadata["origin"] == "schedule"
+    assert metadata["thread_category"] == "automation"
+    assert metadata["trigger_kind"] == "schedule"
     assert metadata["repo_owner"] == "langchain-ai"
     assert metadata["repo_name"] == "open-swe"
     run = fake_client.runs.created[0]

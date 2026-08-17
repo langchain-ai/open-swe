@@ -221,6 +221,9 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     stamped = created["metadata"]
     assert isinstance(stamped, dict)
     assert stamped["source"] == "dashboard"
+    assert stamped["origin"] == "dashboard"
+    assert stamped["thread_category"] == "interactive"
+    assert stamped["trigger_kind"] == "user"
     assert stamped["github_login"] == "octocat"
     assert stamped["title"] == "Fix the flaky test"
     assert stamped["repo_owner"] == "octo"

@@ -14,6 +14,7 @@ export interface SidebarFilters {
   pr: Array<PrFilter>
   models: Array<string>
   repos: Array<string>
+  includeAutomations: boolean
   includeResolved: boolean
 }
 
@@ -24,7 +25,8 @@ export const DEFAULT_SIDEBAR_FILTERS: SidebarFilters = {
   pr: [],
   models: [],
   repos: [],
-  includeResolved: true,
+  includeAutomations: false,
+  includeResolved: false,
 }
 
 export const GROUP_MODE_OPTIONS: Array<{
@@ -84,12 +86,26 @@ function threadPr(thread: AgentThread): PrFilter {
   return thread.pr ? thread.pr.state : "none"
 }
 
+function isAutomationThread(thread: AgentThread): boolean {
+  return (
+    thread.threadCategory === "automation" ||
+    threadSource(thread) === "schedule"
+  )
+}
+
 /** Apply the active filter dimensions to a list of threads. */
 export function filterThreads(
   threads: Array<AgentThread>,
   filters: SidebarFilters
 ): Array<AgentThread> {
   return threads.filter((thread) => {
+    if (
+      !filters.includeAutomations &&
+      isAutomationThread(thread) &&
+      !filters.sources.includes("schedule")
+    ) {
+      return false
+    }
     if (filters.ownership === "mine" && thread.isOwner === false) return false
     if (filters.ownership === "shared" && thread.isOwner !== false) return false
     if (
@@ -266,6 +282,7 @@ export function hasActiveFilters(filters: SidebarFilters): boolean {
     filters.pr.length > 0 ||
     filters.models.length > 0 ||
     filters.repos.length > 0 ||
+    filters.includeAutomations !== DEFAULT_SIDEBAR_FILTERS.includeAutomations ||
     filters.includeResolved !== DEFAULT_SIDEBAR_FILTERS.includeResolved
   )
 }

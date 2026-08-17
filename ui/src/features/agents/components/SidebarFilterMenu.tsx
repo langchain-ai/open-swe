@@ -266,6 +266,23 @@ export function SidebarFilterMenu({
                     <Menu.Separator className={SEPARATOR_CLASS} />
 
                     <Menu.CheckboxItem
+                      checked={filters.includeAutomations}
+                      onCheckedChange={(checked) =>
+                        patch({ includeAutomations: checked })
+                      }
+                      closeOnClick={false}
+                      className={ITEM_CLASS}
+                    >
+                      <span className="truncate">Include automations</span>
+                      <Menu.CheckboxItemIndicator className="ml-auto flex">
+                        <CheckIcon
+                          className="size-3.5 shrink-0"
+                          weight="bold"
+                        />
+                      </Menu.CheckboxItemIndicator>
+                    </Menu.CheckboxItem>
+
+                    <Menu.CheckboxItem
                       checked={filters.includeResolved}
                       onCheckedChange={(checked) =>
                         patch({ includeResolved: checked })

@@ -775,6 +775,8 @@ function ThreadRow({
   const SourceIcon = source?.icon
   const prMeta = thread.pr ? PR_STATE_META[thread.pr.state] : null
   const PrIcon = prMeta?.icon
+  const isAutomation =
+    thread.threadCategory === "automation" || thread.source === "schedule"
   const showFinishedIndicator = thread.status === "finished" && !thread.viewed
 
   const openTrace = () => {
@@ -838,6 +840,11 @@ function ThreadRow({
           <span className="min-w-0 flex-1 truncate text-[13px]">
             {thread.title}
           </span>
+          {!compact && isAutomation && (
+            <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground group-hover:hidden">
+              Automation
+            </span>
+          )}
           {!compact && prMeta && PrIcon && (
             <PrIcon
               className={cn(

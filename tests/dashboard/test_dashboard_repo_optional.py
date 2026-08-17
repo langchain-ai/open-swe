@@ -46,6 +46,39 @@ async def test_thread_summary_keeps_repo_when_present() -> None:
     assert summary["repoFullName"] == "octo/repo"
 
 
+async def test_thread_summary_classifies_legacy_schedule_metadata() -> None:
+    summary = await thread_api._thread_summary(
+        {
+            "thread_id": "scheduled",
+            "metadata": {
+                "source": "schedule",
+                "schedule_id": "schedule-1",
+                "schedule_name": "Daily triage",
+            },
+        }
+    )
+    assert summary["origin"] == "schedule"
+    assert summary["threadCategory"] == "automation"
+    assert summary["triggerKind"] == "schedule"
+    assert summary["automationId"] == "schedule-1"
+    assert summary["automationName"] == "Daily triage"
+
+
+async def test_thread_summary_derives_issue_category_from_source_context() -> None:
+    summary = await thread_api._thread_summary(
+        {
+            "thread_id": "linear",
+            "metadata": {
+                "source": "linear",
+                "source_context": {"linear_issue": {"id": "issue-1"}},
+            },
+        }
+    )
+    assert summary["origin"] == "linear"
+    assert summary["threadCategory"] == "issue"
+    assert summary["triggerKind"] == "user"
+
+
 async def test_thread_summary_includes_trace_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         thread_api,

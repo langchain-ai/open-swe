@@ -399,6 +399,39 @@ def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
     return permalink.strip() if isinstance(permalink, str) and permalink.strip() else None
 
 
+def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
+    value = metadata.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
+    source = _thread_source(metadata)
+    origin = _metadata_string(metadata, "origin") or source
+    trigger_kind = _metadata_string(metadata, "trigger_kind") or (
+        "schedule_test"
+        if metadata.get("schedule_test") is True
+        else "schedule"
+        if source == "schedule" or _metadata_string(metadata, "schedule_id")
+        else "user"
+    )
+    category = _metadata_string(metadata, "thread_category")
+    if not category:
+        source_context = metadata.get("source_context")
+        if source == "schedule" or _metadata_string(metadata, "schedule_id"):
+            category = "automation"
+        elif isinstance(metadata.get("pr_number"), int) or (
+            isinstance(source_context, dict) and source_context.get("pr_number")
+        ):
+            category = "pull_request"
+        elif isinstance(source_context, dict) and (
+            source_context.get("github_issue") or source_context.get("linear_issue")
+        ):
+            category = "issue"
+        else:
+            category = "interactive"
+    return category, origin, trigger_kind
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -428,6 +461,7 @@ async def _thread_summary(
     pr_url = metadata.get("pr_url")
     pr_title = metadata.get("pr_title")
     pr_state = metadata.get("pr_state")
+    thread_category, origin, trigger_kind = _thread_classification(metadata)
 
     thread_id = thread.get("thread_id") or thread.get("id")
     trace_url = await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
@@ -455,6 +489,11 @@ async def _thread_summary(
         "environment": metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
         "source": _thread_source(metadata),
+        "origin": origin,
+        "threadCategory": thread_category,
+        "triggerKind": trigger_kind,
+        "automationId": _metadata_string(metadata, "schedule_id"),
+        "automationName": _metadata_string(metadata, "schedule_name"),
         "status": status,
         "viewed": _is_thread_viewed(metadata, latest_run_id),
         "viewedAt": (
@@ -1150,6 +1189,9 @@ async def _create_dashboard_thread_record(
     initial_title = title or prompt[:80] or "New agent"
     metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
+        "origin": _DASHBOARD_SOURCE,
+        "thread_category": "interactive",
+        "trigger_kind": "user",
         "github_login": login,
         PARTICIPANT_LOGINS_KEY: [login],
         "title": initial_title,
