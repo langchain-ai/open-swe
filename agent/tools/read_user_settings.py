@@ -17,6 +17,24 @@ from ..dashboard.user_credentials import (
 from ..dashboard.user_instructions import get_user_instructions
 from ..utils.thread_participants import resolve_thread_participant_logins
 
+_PROFILE_SETTING_KEYS = (
+    "default_model",
+    "reasoning_effort",
+    "default_subagent_model",
+    "subagent_reasoning_effort",
+    "auto_fix_ci",
+    "create_prs",
+    "draft_prs",
+    "review_draft_prs",
+)
+
+
+def _safe_profile_settings(profile: dict[str, Any] | None) -> dict[str, Any]:
+    if not profile:
+        return {}
+    normalized = normalize_profile_for_response(profile)
+    return {key: normalized[key] for key in _PROFILE_SETTING_KEYS if key in normalized}
+
 
 async def _settings_for_login(login: str) -> dict[str, Any]:
     profile, instruction_record, notion, langsmith, currents = await asyncio.gather(
@@ -29,7 +47,7 @@ async def _settings_for_login(login: str) -> dict[str, Any]:
     instructions = instruction_record.get("instructions") if instruction_record else ""
     return {
         "login": login,
-        "profile": normalize_profile_for_response(profile) if profile else {},
+        "profile": _safe_profile_settings(profile),
         "instructions": instructions if isinstance(instructions, str) else "",
         "connections": {
             "notion": notion.get("notion", {"connected": False}),

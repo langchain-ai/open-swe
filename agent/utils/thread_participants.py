@@ -16,6 +16,23 @@ from .linear import fetch_linear_issue_participant_emails
 from .slack import fetch_slack_thread_messages
 
 PARTICIPANT_LOGINS_KEY = "participant_logins"
+_SLACK_SYSTEM_MESSAGE_SUBTYPES = {
+    "bot_message",
+    "channel_archive",
+    "channel_join",
+    "channel_leave",
+    "channel_name",
+    "channel_purpose",
+    "channel_topic",
+    "channel_unarchive",
+    "group_join",
+    "group_leave",
+    "message_changed",
+    "message_deleted",
+    "pinned_item",
+    "slackbot_response",
+    "unpinned_item",
+}
 
 
 def merge_participant_logins(existing: Any, *logins: Any) -> list[str]:
@@ -46,7 +63,7 @@ async def _mapped_slack_logins(messages: list[dict[str, Any]]) -> tuple[set[str]
         for message in messages
         if not message.get("bot_id")
         and not message.get("bot_profile")
-        and not message.get("subtype")
+        and message.get("subtype") not in _SLACK_SYSTEM_MESSAGE_SUBTYPES
         and isinstance(user_id := message.get("user"), str)
         and user_id
     }

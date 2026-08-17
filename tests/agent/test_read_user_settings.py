@@ -28,7 +28,14 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
         patch(
             "agent.tools.read_user_settings.get_profile",
             new_callable=AsyncMock,
-            return_value={"default_model": "openai:gpt-5.6-sol", "reasoning_effort": "high"},
+            return_value={
+                "default_model": "openai:gpt-5.6-sol",
+                "reasoning_effort": "high",
+                "email": "private@example.com",
+                "default_repo": "private/internal",
+                "branch_prefix": "secret-prefix",
+                "updated_at": "2026-08-16T00:00:00Z",
+            },
         ),
         patch(
             "agent.tools.read_user_settings.get_user_instructions",
@@ -72,7 +79,12 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
         ],
         "unresolved_participant_count": 1,
     }
-    assert "token" not in repr(result).lower()
+    rendered = repr(result).lower()
+    assert "token" not in rendered
+    assert "private@example.com" not in rendered
+    assert "private/internal" not in rendered
+    assert "secret-prefix" not in rendered
+    assert "updated_at" not in rendered
 
 
 @pytest.mark.asyncio
@@ -97,29 +109,32 @@ async def test_read_user_settings_fails_before_settings_reads() -> None:
 
 
 @pytest.mark.asyncio
-async def test_slack_participants_exclude_bots_subtypes_and_unmapped_users() -> None:
+async def test_slack_participants_include_broadcasts_and_exclude_system_messages() -> None:
     messages = [
         {"user": "U1"},
+        {"user": "UBROADCAST", "subtype": "thread_broadcast"},
         {"user": "UBOT", "bot_id": "B1"},
         {"user": "UEDIT", "subtype": "message_changed"},
         {"user": "U2"},
     ]
 
     async def login_for_slack_id(user_id: str) -> str | None:
-        return {"U1": "octocat", "U2": None}.get(user_id)
+        return {
+            "U1": "octocat",
+            "UBROADCAST": "broadcaster",
+            "U2": None,
+        }.get(user_id)
+
+    async def get_mapping(login: str) -> dict[str, str]:
+        return {"github_login": login, "status": "active"}
 
     with (
         patch.object(participants, "login_for_slack_id", side_effect=login_for_slack_id),
-        patch.object(
-            participants,
-            "get_mapping",
-            new_callable=AsyncMock,
-            return_value={"github_login": "octocat", "status": "active"},
-        ),
+        patch.object(participants, "get_mapping", side_effect=get_mapping),
     ):
         logins, unresolved = await participants._mapped_slack_logins(messages)
 
-    assert logins == {"octocat"}
+    assert logins == {"octocat", "broadcaster"}
     assert unresolved == 1
 
 
