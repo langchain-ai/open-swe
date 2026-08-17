@@ -86,6 +86,7 @@ def test_construct_system_prompt_includes_operational_safeguards() -> None:
     assert "### Committing Changes and Opening Pull Requests" in prompt
     assert "Never run `git push --force`" in prompt
     assert "do not retry via `gh pr create`" in prompt
+    assert "do not call `schedule_thread_wakeup` again" in prompt
 
 
 def test_slack_information_only_response_uses_single_output_path() -> None:
