@@ -236,6 +236,25 @@ async def test_slack_webhook_queues_reaction_added(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
+async def test_slack_webhook_queues_stop_reaction(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = _reaction_event("x")
+    payload = {"type": "event_callback", "event_id": "EvStop", "event": event}
+    background_tasks = _FakeBackgroundTasks()
+
+    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "accepted", "message": "Stop reaction queued"}
+    assert background_tasks.tasks == [
+        (webhook_common.process_slack_stop_reaction, (event, "EvStop"))
+    ]
+
+
+@pytest.mark.asyncio
 async def test_slack_webhook_queues_reaction_removed(monkeypatch: pytest.MonkeyPatch) -> None:
     event = {**_reaction_event("-1"), "type": "reaction_removed"}
     payload = {"type": "event_callback", "event_id": "Ev2", "event": event}
