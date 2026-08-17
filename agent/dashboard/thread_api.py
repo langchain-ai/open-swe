@@ -38,6 +38,7 @@ from ..utils.thread_ops import (
     langgraph_url,
     queue_message_for_thread,
 )
+from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
 from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
 from .environments import get_environment, slugify
@@ -1150,6 +1151,7 @@ async def _create_dashboard_thread_record(
     metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "github_login": login,
+        PARTICIPANT_LOGINS_KEY: [login],
         "title": initial_title,
         "base_branch": profile.get("base_branch") or "main",
         "branch_prefix": profile.get("branch_prefix"),
@@ -1430,6 +1432,9 @@ async def _enrich_run_start_command(
         metadata_update: dict[str, Any] = {
             "source": _DASHBOARD_SOURCE,
             "plan_mode": plan_mode_requested,
+            PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+                metadata.get(PARTICIPANT_LOGINS_KEY), login
+            ),
         }
         if command_images and run_model and run_effort:
             overrides["agent_model_id"] = run_model
@@ -1531,6 +1536,9 @@ async def send_dashboard_message(
         "source": _DASHBOARD_SOURCE,
         "updated_at_ms": now_ms,
         "plan_mode": body.plan_mode,
+        PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+            metadata.get(PARTICIPANT_LOGINS_KEY), login
+        ),
     }
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model

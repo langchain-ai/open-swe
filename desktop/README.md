@@ -8,14 +8,13 @@ compatible Open SWE backend; they do not need a separately hosted dashboard.
 
 Desktop users can choose **This Mac** in the new-task composer to run the Python
 `deepagents-code` agent over ACP in a selected local project. The web dashboard does not expose
-this option. The desktop app passes the selected model and reasoning effort to the user's installed
-`dcode --acp`, inheriting its authentication and configuration. Missing local provider credentials
-or packages fail during startup and surface in the composer. The app finds the standard
-`~/.local/bin/dcode` installation even when a packaged app does not inherit the terminal's `PATH`;
-`OPEN_SWE_DCODE_COMMAND` overrides the executable path. Added projects are persisted in the desktop
-app's local data and can be selected from the **This Mac** submenu or managed from the sidebar. Local
-dcode runs are ephemeral: their sessions remain available only for the lifetime of the desktop
-process and cannot be resumed after it exits.
+this option. The desktop app runs `deepagents-code[fireworks]==0.1.56` through `uv tool run --isolated`, passes the
+selected model and reasoning effort, and inherits the user's authentication and configuration. `uv`
+caches the pinned tool environment outside the app, so a `dcode` executable elsewhere on `PATH` is
+never used. Missing `uv`, local provider credentials, or packages fail during startup and surface in
+the composer. Added projects are persisted in the desktop app's local data and can be selected from
+the **This Mac** submenu or managed from the sidebar. Local dcode runs are ephemeral: their sessions
+remain available only for the lifetime of the desktop process and cannot be resumed after it exits.
 
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
 started, so it shows what the agent changed and not the working tree's prior state. It also shows
@@ -38,7 +37,7 @@ creating dashboard sessions.
 
 ## Install on macOS
 
-Install Git and Node.js 22, clone this repository, then run this from its root:
+Install Git, Node.js 22, and `uv`, clone this repository, then run this from its root:
 
 ```bash
 make install-desktop
@@ -50,7 +49,7 @@ backend settings, login sessions, and projects are preserved.
 
 ## Local development
 
-Install both packages, run the backend at `http://localhost:2024`, then start Electron:
+Install the workspace dependencies, run the backend at `http://localhost:2024`, then start Electron:
 
 ```bash
 pnpm install                  # from the repo root
@@ -62,8 +61,8 @@ beside an installed `Open SWE` app without sharing its login session, backend co
 projects, or single-instance lock. The dev window is labeled **Open SWE Development**; its first
 launch may require signing in and adding projects again.
 
-The Python dcode CLI must also be installed and configured. Confirm it is available with
-`dcode --version` before starting the desktop app.
+A separate dcode installation is not required. Confirm `uv --version` succeeds before starting the
+desktop app; the first local-agent launch may take longer while `uv` installs the pinned release.
 
 Development defaults to `http://localhost:2024`. Point to another backend with:
 

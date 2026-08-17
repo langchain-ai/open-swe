@@ -207,6 +207,38 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toHaveCount(0);
   });
 
+  test("expands an Edit call into a highlighted inline diff", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    await expectTranscriptVisible(page);
+
+    const worked = page.getByRole("button", { name: /^Worked(?: for .+)?$/ });
+    await expect(worked).toBeVisible();
+    await worked.click();
+
+    const edit = page.getByRole("button", { name: "Edited greet.py" });
+    await expect(edit).toHaveAttribute("aria-expanded", "false");
+    await edit.click();
+    await expect(edit).toHaveAttribute("aria-expanded", "true");
+
+    const inlineDiff = edit.locator("[data-diff]");
+    await expect(inlineDiff).toBeVisible();
+    await expect(
+      inlineDiff.locator('[data-line][data-line-type="change-deletion"]'),
+    ).toContainText('return "Hello!"');
+    await expect(
+      inlineDiff.locator('[data-line][data-line-type="change-addition"]'),
+    ).toContainText('return f"Hello, {name}!"');
+    await expect(inlineDiff).toHaveAttribute("data-disable-line-numbers");
+    await expect(inlineDiff).not.toContainText("normalize");
+    await expect(inlineDiff).not.toContainText("farewell");
+    await expect
+      .poll(() => inlineDiff.locator("[data-line] span").count())
+      .toBeGreaterThan(2);
+  });
+
   test("streams after thread navigation and foreground recovery", async ({
     page,
   }) => {
