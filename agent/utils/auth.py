@@ -284,17 +284,28 @@ async def leave_failure_comment(
                 channel_id,
                 thread_ts,
             )
-            agent_thread_id = thread_id if isinstance(thread_id, str) else None
-            await post_slack_thread_reply(
-                channel_id,
-                thread_ts,
-                warning(
-                    "Open SWE couldn't resolve your GitHub account for this run. Sign in "
-                    f"with GitHub and connect your Slack account in {link}, then mention "
-                    "it again."
-                ),
-                agent_thread_id=agent_thread_id,
-            )
+            thread_id = configurable.get("thread_id")
+            if isinstance(thread_id, str) and thread_id:
+                await post_slack_thread_reply(
+                    channel_id,
+                    thread_ts,
+                    warning(
+                        "Open SWE couldn't resolve your GitHub account for this run. Sign in "
+                        f"with GitHub and connect your Slack account in {link}, then mention "
+                        "it again."
+                    ),
+                    agent_thread_id=thread_id,
+                )
+            else:
+                await post_slack_thread_reply(
+                    channel_id,
+                    thread_ts,
+                    warning(
+                        "Open SWE couldn't resolve your GitHub account for this run. Sign in "
+                        f"with GitHub and connect your Slack account in {link}, then mention "
+                        "it again."
+                    ),
+                )
         return
     if source in ("github", "github_push"):
         logger.warning(
