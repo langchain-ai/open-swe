@@ -5,7 +5,8 @@ import type {
   DesktopTerminalSessionSnapshot,
   DesktopTerminalSummary,
 } from "@/desktop"
-import { dashboardApiUrl } from "@/lib/dashboard-fetch"
+import { agentsApi } from "@/features/agents/lib/api"
+import type { CloudTerminalConnection } from "@/features/agents/lib/api"
 
 export type TerminalTarget =
   { kind: "local"; sessionId: string } | { kind: "cloud"; threadId: string }
@@ -225,16 +226,17 @@ export interface AttachedTerminal extends TerminalSessionState {
   resize: (cols: number, rows: number) => void
 }
 
-function cloudTerminalUrl(threadId: string): string {
-  const base = dashboardApiUrl(
-    `/threads/${encodeURIComponent(threadId)}/terminal`
-  )
-  const url = new URL(base, window.location.href)
-  if (!/^https?:$/.test(url.protocol)) {
-    throw new Error("Cloud terminal requires an HTTP dashboard API")
-  }
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  return url.toString()
+export function cloudTerminalProtocols(
+  connection: CloudTerminalConnection
+): string[] {
+  return [connection.protocol, connection.ticket]
+}
+
+export function cloudTerminalCloseError(
+  reason: string,
+  currentError: string | null
+): string {
+  return reason || currentError || "Cloud terminal disconnected"
 }
 
 export function useAttachedTerminal(
@@ -248,6 +250,7 @@ export function useAttachedTerminal(
     EMPTY_TERMINAL_SESSION
   )
   const socketRef = useRef<WebSocket | null>(null)
+  const cloudConnectingRef = useRef(false)
   const pendingRef = useRef<Array<object>>([])
   const sessionId = target.kind === "local" ? target.sessionId : target.threadId
 
@@ -255,107 +258,136 @@ export function useAttachedTerminal(
     if (target.kind === "cloud") {
       let disposed = false
       let sequence = 0
+      let socket: WebSocket | null = null
       pendingRef.current = []
-      let socket: WebSocket
-      try {
-        socket = new WebSocket(cloudTerminalUrl(target.threadId))
-      } catch (error) {
-        setState({
-          ...EMPTY_TERMINAL_SESSION,
-          status: "error",
-          error: error instanceof Error ? error.message : "Unable to connect",
-        })
-        return
-      }
-      socketRef.current = socket
+      cloudConnectingRef.current = true
       setState({ ...EMPTY_TERMINAL_SESSION, status: "starting" })
-      socket.onopen = () => {
-        if (socketRef.current === socket && !disposed) {
-          setState((current) => ({
-            ...current,
-            status: "running",
-            error: null,
-          }))
-          for (const message of pendingRef.current.splice(0)) {
-            socket.send(JSON.stringify(message))
-          }
-        }
-      }
-      socket.onmessage = (event) => {
-        if (
-          disposed ||
-          socketRef.current !== socket ||
-          typeof event.data !== "string"
-        )
-          return
-        let message: {
-          type: string
-          data?: string
-          exitCode?: number
-          message?: string
-        }
-        try {
-          message = JSON.parse(event.data)
-        } catch {
-          return
-        }
-        if (message.type === "output" && typeof message.data === "string") {
-          setState((current) => ({
-            ...current,
-            buffer: trimBuffer(`${current.buffer}${message.data}`),
-            status: "running",
-            error: null,
-            version: current.version + 1,
-            sequence: ++sequence,
-          }))
-        } else if (message.type === "exit") {
-          setState((current) => ({
-            ...current,
-            status: "exited",
-            version: current.version + 1,
-            sequence: ++sequence,
-          }))
-        } else if (message.type === "error") {
-          setState((current) => ({
-            ...current,
-            status: "error",
-            error: message.message ?? "Cloud terminal disconnected",
-            version: current.version + 1,
-          }))
-        }
-      }
-      socket.onerror = () => {
-        if (socketRef.current !== socket || disposed) return
-        setState((current) => ({
-          ...current,
-          status: "error",
-          error: "Unable to connect to cloud terminal",
-          version: current.version + 1,
-        }))
-      }
-      socket.onclose = (event) => {
-        const active = socketRef.current === socket
-        if (active) socketRef.current = null
-        if (active && !disposed) {
-          pendingRef.current = []
-          setState((current) =>
-            event.code !== 1000
-              ? {
-                  ...current,
-                  status: "error",
-                  error: event.reason || "Cloud terminal disconnected",
-                  version: current.version + 1,
-                }
-              : current.status === "error"
-                ? current
-                : { ...current, status: "closed", version: current.version + 1 }
+
+      void agentsApi
+        .connectCloudTerminal(target.threadId)
+        .then((connection) => {
+          if (disposed) return
+          const createdSocket = new WebSocket(
+            connection.url,
+            cloudTerminalProtocols(connection)
           )
-        }
-      }
+          socket = createdSocket
+          socketRef.current = createdSocket
+          createdSocket.onopen = () => {
+            if (socketRef.current === createdSocket && !disposed) {
+              cloudConnectingRef.current = false
+              setState((current) => ({
+                ...current,
+                status: "running",
+                error: null,
+              }))
+              for (const message of pendingRef.current.splice(0)) {
+                createdSocket.send(JSON.stringify(message))
+              }
+            }
+          }
+          createdSocket.onmessage = (event) => {
+            if (
+              disposed ||
+              socketRef.current !== createdSocket ||
+              typeof event.data !== "string"
+            )
+              return
+            let message: {
+              type: string
+              data?: string
+              exitCode?: number
+              message?: string
+            }
+            try {
+              message = JSON.parse(event.data)
+            } catch {
+              return
+            }
+            if (message.type === "output" && typeof message.data === "string") {
+              setState((current) => ({
+                ...current,
+                buffer: trimBuffer(`${current.buffer}${message.data}`),
+                status: "running",
+                error: null,
+                version: current.version + 1,
+                sequence: ++sequence,
+              }))
+            } else if (message.type === "exit") {
+              setState((current) => ({
+                ...current,
+                status: "exited",
+                version: current.version + 1,
+                sequence: ++sequence,
+              }))
+            } else if (message.type === "error") {
+              setState((current) => ({
+                ...current,
+                status: "error",
+                error: message.message ?? "Cloud terminal disconnected",
+                version: current.version + 1,
+              }))
+            }
+          }
+          createdSocket.onerror = () => {
+            if (socketRef.current !== createdSocket || disposed) return
+            cloudConnectingRef.current = false
+            setState((current) => ({
+              ...current,
+              status: "error",
+              error: "Unable to connect to cloud terminal",
+              version: current.version + 1,
+            }))
+          }
+          createdSocket.onclose = (event) => {
+            const active = socketRef.current === createdSocket
+            if (active) {
+              socketRef.current = null
+              cloudConnectingRef.current = false
+            }
+            if (active && !disposed) {
+              pendingRef.current = []
+              setState((current) =>
+                event.code !== 1000
+                  ? {
+                      ...current,
+                      status: "error",
+                      error: cloudTerminalCloseError(
+                        event.reason,
+                        current.error
+                      ),
+                      version: current.version + 1,
+                    }
+                  : current.status === "error"
+                    ? current
+                    : {
+                        ...current,
+                        status: "closed",
+                        version: current.version + 1,
+                      }
+              )
+            }
+          }
+        })
+        .catch((error: unknown) => {
+          if (disposed) return
+          cloudConnectingRef.current = false
+          pendingRef.current = []
+          setState({
+            ...EMPTY_TERMINAL_SESSION,
+            status: "error",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unable to connect to cloud terminal",
+          })
+        })
+
       return () => {
         disposed = true
+        cloudConnectingRef.current = false
         pendingRef.current = []
-        socket.close()
+        socket?.close()
         if (socketRef.current === socket) socketRef.current = null
       }
     }
@@ -414,7 +446,10 @@ export function useAttachedTerminal(
       socket.send(JSON.stringify(message))
       return true
     }
-    if (socket?.readyState === WebSocket.CONNECTING) {
+    if (
+      socket?.readyState === WebSocket.CONNECTING ||
+      cloudConnectingRef.current
+    ) {
       if (pendingRef.current.length >= 100) return false
       pendingRef.current.push(message)
       return true

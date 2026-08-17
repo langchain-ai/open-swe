@@ -801,6 +801,8 @@ async def upsert_agent_thread_owner_metadata(
     if existing_meta.get("title") and "title" in metadata:
         # Preserve a title that was already chosen (first message wins).
         metadata.pop("title")
+    elif source == "slack" and "title" in metadata:
+        metadata["title_seed"] = metadata["title"]
 
     try:
         if existing is None:

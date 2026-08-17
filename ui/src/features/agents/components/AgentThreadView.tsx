@@ -349,7 +349,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   contextUsage={{
                     usedTokens,
                     contextWindow: activeModel?.context_window ?? null,
-                    hasMessages,
                   }}
                 />
               </div>
@@ -401,7 +400,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 contextUsage={{
                   usedTokens,
                   contextWindow: activeModel?.context_window ?? null,
-                  hasMessages,
                 }}
               />
             </div>

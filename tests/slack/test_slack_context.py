@@ -127,6 +127,7 @@ def test_upsert_preserves_partially_initialized_owner(monkeypatch: pytest.Monkey
             source="slack",
             github_login=github_login,
             user_email=user_email,
+            title=github_login,
             source_context={"slack_thread": {"triggering_user_id": slack_user_id}},
         )
 
@@ -136,6 +137,7 @@ def test_upsert_preserves_partially_initialized_owner(monkeypatch: pytest.Monkey
     assert metadata["github_login"] == "owner-gh"
     assert metadata["triggering_user_email"] == "owner@example.com"
     assert metadata["source_context"] == owner_context
+    assert metadata["title"] == metadata["title_seed"] == "owner-gh"
 
 
 def test_select_slack_context_messages_uses_thread_start_when_no_prior_mention() -> None:

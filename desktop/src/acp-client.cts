@@ -1,11 +1,10 @@
 const { spawn } = require("node:child_process")
-const fs = require("node:fs")
-const path = require("node:path")
 const readline = require("node:readline")
 const { randomUUID } = require("node:crypto")
 
 const ACP_PROTOCOL_VERSION = 1
 const DELETE_TIMEOUT_MS = 15_000
+const DELETE_PROCESS_TIMEOUT_MS = 180_000
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -13,40 +12,55 @@ function isRecord(value) {
 
 function dcodeTarget({
   env = process.env,
-  platform = process.platform,
   modelId,
   effort,
+  uvCommand = "uv",
 }: any = {}) {
-  const args = ["--acp"]
-  if (modelId) args.push("--model", modelId)
+  const dcodeArgs = ["--acp"]
+  const selectedModelId = env.OPEN_SWE_DCODE_MODEL || modelId
+  if (selectedModelId) dcodeArgs.push("--model", selectedModelId)
   if (effort) {
-    args.push("--model-params", JSON.stringify({ reasoning_effort: effort }))
+    dcodeArgs.push("--model-params", JSON.stringify({ reasoning_effort: effort }))
   }
-  if (env.OPEN_SWE_DCODE_COMMAND) {
-    return { command: env.OPEN_SWE_DCODE_COMMAND, args }
+  const launcherArgs = [
+    "tool",
+    "run",
+    "--isolated",
+    "--python",
+    "3.14",
+    "--from",
+    "deepagents-code[fireworks]==0.1.56",
+    "--with",
+    "deepagents==0.7.6",
+    "dcode",
+  ]
+  return {
+    command: uvCommand,
+    args: [...launcherArgs, ...dcodeArgs],
+    launcherArgs,
+    env: {
+      DEEPAGENTS_CODE_AUTO_UPDATE: "0",
+      PYTHONDONTWRITEBYTECODE: "1",
+    },
   }
-  const home = env.HOME || env.USERPROFILE
-  const installedCommand = home
-    ? path.join(
-        home,
-        ".local",
-        "bin",
-        platform === "win32" ? "dcode.exe" : "dcode"
-      )
-    : null
-  if (installedCommand && fs.existsSync(installedCommand)) {
-    return { command: installedCommand, args }
-  }
-  return { command: "dcode", args }
 }
 
 function deleteDcodeSession({ target, cwd, env, sessionId }) {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(target.command, ["threads", "delete", sessionId], {
-      cwd,
-      env: { ...env, PWD: cwd, PYTHONUNBUFFERED: "1" },
-      stdio: ["ignore", "ignore", "pipe"],
-    })
+    const child = spawn(
+      target.command,
+      [...(target.launcherArgs || []), "threads", "delete", sessionId],
+      {
+        cwd,
+        env: {
+          ...env,
+          ...target.env,
+          PWD: cwd,
+          PYTHONUNBUFFERED: "1",
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      }
+    )
     let stderr = ""
     let settled = false
     const finish = (error = null) => {
@@ -61,7 +75,7 @@ function deleteDcodeSession({ target, cwd, env, sessionId }) {
         child.kill("SIGKILL")
       } catch {}
       finish(new Error("Deep Agents Code session deletion timed out"))
-    }, 15_000)
+    }, DELETE_PROCESS_TIMEOUT_MS)
     child.stderr.on("data", (chunk) => {
       stderr = `${stderr}${chunk.toString("utf8")}`.slice(-8_000)
     })
@@ -340,7 +354,10 @@ class AcpSession {
   connect(target, env) {
     this.target = target
     this.env = env
-    this.rpc = new NdJsonRpcClient(target.command, target.args, this.cwd, env)
+    this.rpc = new NdJsonRpcClient(target.command, target.args, this.cwd, {
+      ...env,
+      ...target.env,
+    })
     this.rpc.onNotification = (method, params) =>
       this.handleNotification(method, params)
     this.rpc.onRequest = (method, params) => this.handleRequest(method, params)

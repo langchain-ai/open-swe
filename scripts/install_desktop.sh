@@ -13,6 +13,11 @@ for command in node ditto; do
   }
 done
 
+command -v uv >/dev/null || {
+  echo "Missing uv. Install it from https://docs.astral.sh/uv/, then try again." >&2
+  exit 1
+}
+
 # Node 25 dropped the bundled corepack shim, so neither launcher is guaranteed.
 if command -v pnpm >/dev/null; then
   pnpm=(pnpm)

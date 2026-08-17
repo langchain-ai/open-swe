@@ -61,10 +61,12 @@ export function useDesktopAcpSession(sessionId: string) {
     const pendingEvents: Array<DesktopAcpEvent> = []
     const unsubscribe = desktop.onAcpEvent((payload) => {
       if (payload.sessionId !== sessionId) return
-      pendingEvents.push(payload.event)
+      if (payload.event) pendingEvents.push(payload.event)
       setSession((current) => {
         if (!current || current.id !== sessionId) return current
-        return mergeEvent(current, payload.event)
+        return payload.event
+          ? mergeEvent(current, payload.event)
+          : { ...current, ...payload.session }
       })
     })
     void desktop.getAcpSession(sessionId).then((next) => {

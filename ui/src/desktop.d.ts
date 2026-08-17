@@ -197,7 +197,7 @@ declare global {
       onAcpEvent: (
         callback: (payload: {
           sessionId: string
-          event: DesktopAcpEvent
+          event?: DesktopAcpEvent
           session: DesktopAcpSessionSummary
         }) => void
       ) => () => void

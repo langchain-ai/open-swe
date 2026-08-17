@@ -24,8 +24,8 @@ const MODELS: Array<ModelOption> = [
     context_window: 272_000,
   },
   {
-    id: "google_genai:gemini-3.6-flash",
-    label: "Gemini 3.6 Flash",
+    id: "google_genai:gemini-3.7-flash",
+    label: "Gemini 3.7 Flash",
     efforts: ["minimal", "low", "medium", "high"],
     default_effort: "medium",
     supports_images: true,
@@ -90,7 +90,7 @@ describe("ModelPicker", () => {
 
   it("omits the context section for models without a context window", () => {
     openPicker({
-      selection: { modelId: "google_genai:gemini-3.6-flash", effort: "medium" },
+      selection: { modelId: "google_genai:gemini-3.7-flash", effort: "medium" },
     })
 
     expect(screen.getByTestId("model-picker-panel").textContent).not.toContain(
@@ -123,7 +123,7 @@ describe("ModelPicker", () => {
       within(models)
         .getAllByRole("option")
         .map((option) => option.textContent)
-    ).toEqual(["GPT-5.6 Sol High", "Gemini 3.6 Flash Medium", "Kimi K3 High"])
+    ).toEqual(["GPT-5.6 Sol High", "Gemini 3.7 Flash Medium", "Kimi K3 High"])
 
     fireEvent.change(screen.getByLabelText("Search models"), {
       target: { value: "kimi" },
