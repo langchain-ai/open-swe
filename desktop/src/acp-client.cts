@@ -15,7 +15,7 @@ function dcodeTarget({
   modelId,
   effort,
   uvCommand = "uv",
-} = {}) {
+}: any = {}) {
   const dcodeArgs = ["--acp"]
   const selectedModelId = env.OPEN_SWE_DCODE_MODEL || modelId
   if (selectedModelId) dcodeArgs.push("--model", selectedModelId)
@@ -44,7 +44,7 @@ function dcodeTarget({
 }
 
 function deleteDcodeSession({ target, cwd, env, sessionId }) {
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const child = spawn(
       target.command,
       [...(target.launcherArgs || []), "threads", "delete", sessionId],
@@ -61,7 +61,7 @@ function deleteDcodeSession({ target, cwd, env, sessionId }) {
     )
     let stderr = ""
     let settled = false
-    const finish = (error) => {
+    const finish = (error = null) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
@@ -129,7 +129,7 @@ function contentText(content) {
     .join("\n")
 }
 
-function normalizeTool(update, previous = {}) {
+function normalizeTool(update, previous: any = {}) {
   const rawInput = isRecord(update.rawInput)
     ? update.rawInput
     : previous.input || {}
@@ -163,6 +163,8 @@ function normalizeTool(update, previous = {}) {
 }
 
 class NdJsonRpcClient {
+  [key: string]: any
+
   constructor(command, args, cwd, env) {
     this.process = spawn(command, args, {
       cwd,
@@ -313,6 +315,8 @@ class NdJsonRpcClient {
 }
 
 class AcpSession {
+  [key: string]: any
+
   constructor({
     cwd,
     target,

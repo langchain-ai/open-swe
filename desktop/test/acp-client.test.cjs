@@ -6,7 +6,7 @@ const {
   dcodeTarget,
   promptBlocks,
   sessionTitle,
-} = require("../src/acp-client.cjs")
+} = require("../build/acp-client.cjs")
 
 test("runs ACP from the pinned uv package", () => {
   const launcherArgs = [

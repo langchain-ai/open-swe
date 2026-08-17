@@ -35,12 +35,18 @@ importers:
       '@electron/notarize':
         specifier: 3.1.1
         version: 3.1.1(supports-color@7.2.0)
+      '@types/node':
+        specifier: 22.20.1
+        version: 22.20.1
       electron:
         specifier: 41.10.3
         version: 41.10.3(supports-color@7.2.0)
       electron-builder:
         specifier: 26.15.3
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)(supports-color@7.2.0)
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
 
   ui:
     dependencies:
