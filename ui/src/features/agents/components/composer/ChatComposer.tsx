@@ -802,17 +802,13 @@ export const ChatComposer = memo(function ChatComposer({
                     <ComposerControl
                       aria-label="Exit plan mode"
                       aria-pressed
-                      className="group bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                      className="bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
                       onClick={() => onPlanModeChange(false)}
                       type="button"
                     />
                   }
                 >
-                  <ComposerControlIcon
-                    className="group-hover:hidden"
-                    icon={MapIcon}
-                  />
-                  <X className="hidden size-3.5 shrink-0 group-hover:block" />
+                  <ComposerControlIcon icon={MapIcon} />
                   <span>Plan</span>
                 </TooltipTrigger>
                 <TooltipPopup side="top">Exit plan mode</TooltipPopup>

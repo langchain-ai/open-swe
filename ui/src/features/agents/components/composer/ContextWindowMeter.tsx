@@ -23,11 +23,7 @@ function formatPercentage(value: number): string {
     : `${Math.round(value)}%`
 }
 
-/**
- * Ring gauge for context usage; the detail panel opens on hover. Stays hidden
- * until usage is actually reported — a model's advertised context window alone
- * says nothing about this thread.
- */
+/** Ring gauge for context usage; the detail panel opens on hover. */
 export function ContextWindowMeter({
   usedTokens,
   contextWindow,
