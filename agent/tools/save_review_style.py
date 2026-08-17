@@ -1,7 +1,5 @@
 """Tool: persist synthesized per-repo review style prompt."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

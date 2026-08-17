@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,

@@ -1,7 +1,5 @@
 """Profile lookup + override helpers consumed by ``agent.server.get_agent``."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

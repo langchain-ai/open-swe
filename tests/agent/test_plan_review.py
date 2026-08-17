@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any, cast
 
 import pytest
@@ -410,7 +408,7 @@ class _FakeReq:
         self.tools = tools
         self.state = state
 
-    def override(self, **kw: Any) -> _FakeReq:
+    def override(self, **kw: Any) -> "_FakeReq":
         return _FakeReq(kw.get("tools", self.tools), self.state)
 
 

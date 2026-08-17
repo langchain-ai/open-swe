@@ -1,7 +1,5 @@
 """Supported models and reasoning efforts surfaced in the profile editor."""
 
-from __future__ import annotations
-
 from collections.abc import Callable, Mapping, Sequence
 from functools import cache, lru_cache
 from importlib import import_module

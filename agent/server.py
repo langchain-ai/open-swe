@@ -1384,7 +1384,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 ),
             )
 
-
     slack_tools = [
         slack_add_reaction,
         slack_read_thread_messages,

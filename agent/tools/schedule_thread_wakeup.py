@@ -1,7 +1,5 @@
 """Tool that schedules a one-shot re-trigger of the current agent thread."""
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any

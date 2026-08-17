@@ -9,8 +9,6 @@ Best-effort: any failure (missing handle, no API key, SDK error) returns
 ``None`` and the reviewer runs without the supplement.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os

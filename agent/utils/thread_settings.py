@@ -10,8 +10,6 @@ Later changes reach a thread only when something explicitly rewrites the
 snapshot, which today means a per-run model override.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any, TypedDict
 

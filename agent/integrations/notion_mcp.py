@@ -1,7 +1,5 @@
 """Server-side Notion tools backed by Notion's hosted MCP server."""
 
-from __future__ import annotations
-
 import logging
 from datetime import timedelta
 from typing import Any, cast

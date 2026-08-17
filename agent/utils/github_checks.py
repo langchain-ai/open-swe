@@ -9,8 +9,6 @@ All calls are best-effort: check runs require the GitHub App's
 break review dispatch or publish.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime
 from typing import Literal

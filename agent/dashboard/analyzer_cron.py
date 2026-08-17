@@ -6,8 +6,6 @@ thread + sandbox each night) and authenticate via the GitHub App installation
 token resolved inside ``get_analyzer`` (the cron carries no fresh user token).
 """
 
-from __future__ import annotations
-
 import hashlib
 import logging
 

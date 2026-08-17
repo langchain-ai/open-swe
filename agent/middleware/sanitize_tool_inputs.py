@@ -6,8 +6,6 @@ validation.  The LLM occasionally generates strings like ``'1, 80'`` or
 sequence so the call succeeds instead of burning an LLM turn on a retry.
 """
 
-from __future__ import annotations
-
 import logging
 import re
 from collections.abc import Awaitable, Callable

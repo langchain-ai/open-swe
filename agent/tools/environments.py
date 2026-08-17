@@ -5,8 +5,6 @@ re-checks the triggering user against ``CONFIGURED_ADMINS`` so a thread whose
 metadata says "admin" cannot act on behalf of someone who is not one.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

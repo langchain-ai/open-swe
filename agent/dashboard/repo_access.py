@@ -1,7 +1,5 @@
 """GitHub repository access checks for dashboard actions."""
 
-from __future__ import annotations
-
 import httpx
 from fastapi import HTTPException
 
