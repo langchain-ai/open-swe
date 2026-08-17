@@ -61,8 +61,8 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "google_genai:gemini-3.6-flash",
-        "label": "Gemini 3.6 Flash",
+        "id": "google_genai:gemini-3.7-flash",
+        "label": "Gemini 3.7 Flash",
         "efforts": ["minimal", "low", "medium", "high"],
         "default_effort": "medium",
         "supports_images": True,
@@ -104,7 +104,8 @@ FABLE_MODEL_IDS: frozenset[str] = frozenset(
 DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = {
     "anthropic:claude-opus-4-8": "anthropic:claude-opus-5",
     "openai:gpt-5.5": "openai:gpt-5.6-sol",
-    "google_genai:gemini-3.5-flash": "google_genai:gemini-3.6-flash",
+    "google_genai:gemini-3.5-flash": "google_genai:gemini-3.7-flash",
+    "google_genai:gemini-3.6-flash": "google_genai:gemini-3.7-flash",
     "fireworks:accounts/fireworks/models/kimi-k2p7-code": (
         "fireworks:accounts/fireworks/models/kimi-k3"
     ),
