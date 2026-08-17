@@ -404,6 +404,14 @@ def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
+    return (
+        _metadata_string(metadata, "thread_category") == "automation"
+        or _thread_source(metadata) == "schedule"
+        or _metadata_string(metadata, "schedule_id") is not None
+    )
+
+
 def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     source = _thread_source(metadata)
     origin = _metadata_string(metadata, "origin") or source
@@ -417,7 +425,7 @@ def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     category = _metadata_string(metadata, "thread_category")
     if not category:
         source_context = metadata.get("source_context")
-        if source == "schedule" or _metadata_string(metadata, "schedule_id"):
+        if _is_automation_thread(metadata):
             category = "automation"
         elif isinstance(metadata.get("pr_number"), int) or (
             isinstance(source_context, dict) and source_context.get("pr_number")
@@ -866,6 +874,7 @@ async def list_dashboard_threads_sidebar(
     active_limit: int = 50,
     resolved_limit: int = 20,
     active_thread_id: str | None = None,
+    include_automations: bool = False,
     include_all: bool = False,
 ) -> dict[str, Any]:
     client = langgraph_client()
@@ -895,6 +904,8 @@ async def list_dashboard_threads_sidebar(
             for thread in batch:
                 metadata = _thread_metadata(thread)
                 if not include_all and not _user_owns_thread(metadata, login, email):
+                    continue
+                if not include_automations and _is_automation_thread(metadata):
                     continue
                 thread_id = _thread_id(thread)
                 if not thread_id or thread_id in active or thread_id in resolved_threads:

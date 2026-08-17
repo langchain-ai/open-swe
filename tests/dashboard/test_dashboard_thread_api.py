@@ -1509,6 +1509,45 @@ async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(mo
     assert {call["offset"] for call in searches} == {0, page_size}
 
 
+async def test_list_dashboard_threads_sidebar_excludes_automations_before_limiting(
+    monkeypatch,
+) -> None:
+    page_size = thread_api._THREADS_SEARCH_PAGE
+    threads = _make_threads(page_size + 5, resolved_before=0)
+    for thread in threads[:page_size]:
+        metadata = cast(dict[str, object], thread["metadata"])
+        metadata["source"] = "schedule"
+        metadata["schedule_id"] = f"schedule-{thread['thread_id']}"
+    offsets: list[int] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            offsets.append(offset)
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", email=None, active_limit=5, resolved_limit=5
+    )
+
+    assert [item["id"] for item in result["active"]["items"]] == [
+        f"t{index}" for index in range(page_size, page_size + 5)
+    ]
+    assert set(offsets) == {0, page_size}
+
+
 async def test_list_dashboard_threads_sidebar_includes_readable_active_thread(
     monkeypatch,
 ) -> None:

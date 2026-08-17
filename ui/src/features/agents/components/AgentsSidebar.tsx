@@ -126,7 +126,12 @@ export function AgentsSidebar({
     setFilters,
     resetFilters,
   } = useSidebarPrefs()
-  const sidebar = useSidebarThreads(RESOLVED_SIDEBAR_LIMIT, activeThreadId)
+  const sidebar = useSidebarThreads(
+    RESOLVED_SIDEBAR_LIMIT,
+    activeThreadId,
+    prefs.filters.includeAutomations ||
+      prefs.filters.sources.includes("schedule")
+  )
   const { sessions: localSessions, deleteSession: deleteLocalSession } =
     useDesktopAcpSessions()
   const {
