@@ -80,8 +80,7 @@ async def _mapped_email_logins(emails: set[str]) -> tuple[set[str], int]:
 
 
 async def _mapped_github_logins(logins: set[str]) -> tuple[set[str], int]:
-    mapped = await asyncio.gather(*(_active_mapping_login(login) for login in logins))
-    return {login for login in mapped if login}, sum(login is None for login in mapped)
+    return {login.strip() for login in logins if login.strip()}, 0
 
 
 def _context_value(configurable: dict[str, Any], metadata: dict[str, Any], key: str) -> Any:
