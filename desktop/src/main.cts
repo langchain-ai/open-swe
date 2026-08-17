@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { randomUUID } = require("node:crypto");
 const { pathToFileURL } = require("node:url");
 const {
   app,
@@ -12,7 +13,11 @@ const {
   session,
   shell,
 } = require("electron");
-const { AcpSession, dcodeTarget } = require("./acp-client.cjs");
+const {
+  AcpSession,
+  dcodeTarget,
+  deleteDcodeSession,
+} = require("./acp-client.cjs");
 const {
   readAcpSessions,
   writeAcpSessions,
@@ -20,27 +25,35 @@ const {
 const {
   captureCheckpoint,
   checkpointRef,
+  currentBranch,
   deleteRefs,
   readDiff,
   repoRoot,
+  repositoryMetadata,
   staleRefs,
 } = require("./git-diff.cjs");
 const {
   closeAllTerminals,
   configureTerminalIpc,
+  deleteSessionTerminals,
+  getProjectShellEnv,
 } = require("./terminal-manager.cjs");
 const {
   addProject,
   readProjects,
   removeProject,
 } = require("./project-store.cjs");
+const { beginLogin } = require("./login-server.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
+  SESSION_COOKIE_NAME,
   appRedirectUrl,
   backendRequestUrl,
+  desktopExchangeUrl,
+  desktopLoginUrl,
+  isAppLoginUrl,
   isAppUrl,
-  isGithubOAuthUrl,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
@@ -80,10 +93,12 @@ protocol.registerSchemesAsPrivileged([
 let backendUrl = null;
 let mainWindow = null;
 let setupWindow = null;
-let authWindow = null;
+let loginFlow = null;
 let quitting = false;
 const acpSessions = new Map();
+const acpDrafts = new Map();
 const acpRestores = new Map();
+const deletingAcpSessions = new Set();
 const persistedAcpSessions = new Map();
 // sessionId -> { repo, ref }: the worktree snapshot a local session started from, so
 // the diff panel can show what the agent changed rather than the repo's prior state.
@@ -132,7 +147,6 @@ function acpSessionsPath() {
 }
 
 function sessionRecord(localSession) {
-  const previous = persistedAcpSessions.get(localSession.id) || {};
   return {
     id: localSession.id,
     acpSessionId: localSession.acpSessionId,
@@ -140,8 +154,8 @@ function sessionRecord(localSession) {
     title: localSession.title,
     createdAt: localSession.createdAt,
     updatedAt: localSession.updatedAt,
-    ...(previous.modelId ? { modelId: previous.modelId } : {}),
-    ...(previous.effort ? { effort: previous.effort } : {}),
+    ...(localSession.modelId ? { modelId: localSession.modelId } : {}),
+    ...(localSession.effort ? { effort: localSession.effort } : {}),
     ...(acpCheckpoints.get(localSession.id)
       ? { checkpoint: acpCheckpoints.get(localSession.id) }
       : {}),
@@ -149,7 +163,11 @@ function sessionRecord(localSession) {
 }
 
 function persistAcpSession(localSession) {
-  if (!localSession.acpSessionId) return;
+  if (
+    !localSession.acpSessionId ||
+    deletingAcpSessions.has(localSession.id)
+  )
+    return;
   persistedAcpSessions.set(localSession.id, sessionRecord(localSession));
   writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
 }
@@ -162,6 +180,8 @@ function sessionSummary(record) {
     status: "idle",
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+    modelId: record.modelId,
+    effort: record.effort,
   };
 }
 
@@ -185,8 +205,26 @@ function pathIsInside(root, candidate) {
   );
 }
 
+function localSessionContext(localSessionId) {
+  return acpSessions.get(localSessionId) || acpDrafts.get(localSessionId);
+}
+
+async function deleteAcpDrafts(ownerId, sessionId = null) {
+  for (const draft of acpDrafts.values()) {
+    if (draft.ownerId !== ownerId || (sessionId && draft.id !== sessionId)) {
+      continue;
+    }
+    if (draft.starting) {
+      draft.deleteRequested = true;
+      continue;
+    }
+    acpDrafts.delete(draft.id);
+    await deleteSessionTerminals(draft.id);
+  }
+}
+
 function resolveAcpProjectPath(localSessionId, value) {
-  const localSession = acpSessions.get(localSessionId);
+  const localSession = localSessionContext(localSessionId);
   if (!localSession || typeof value !== "string" || value.length === 0) {
     return null;
   }
@@ -229,19 +267,23 @@ function registeredProject(cwd) {
   }
 }
 
-function createAcpSession({ cwd, modelId, effort, restored }) {
+async function createAcpSession({ cwd, modelId, effort, restored }) {
+  const env = await getProjectShellEnv({ cwd });
   return new AcpSession({
     cwd,
-    target: dcodeTarget({ modelId, effort }),
-    env: process.env,
+    target: dcodeTarget({ env, modelId, effort }),
+    env,
     onEvent: sendAcpEvent,
     onChange: persistAcpSession,
     requestPermission: async () => true,
     restored,
+    modelId,
+    effort,
   });
 }
 
 async function restoreAcpSession(sessionId) {
+  if (deletingAcpSessions.has(sessionId)) return null;
   if (acpSessions.has(sessionId)) return acpSessions.get(sessionId);
   if (acpRestores.has(sessionId)) return acpRestores.get(sessionId);
   const stored = persistedAcpSessions.get(sessionId);
@@ -254,7 +296,7 @@ async function restoreAcpSession(sessionId) {
       ((await repoRoot(cwd)) === stored.checkpoint.repo &&
         stored.checkpoint.ref === checkpointRef(stored.id));
     if (!checkpointValid) acpCheckpoints.delete(sessionId);
-    const localSession = createAcpSession({
+    const localSession = await createAcpSession({
       cwd,
       modelId: stored.modelId,
       effort: stored.effort,
@@ -281,10 +323,62 @@ async function restoreAcpSession(sessionId) {
   }
 }
 
+async function deleteAcpSession(sessionId) {
+  if (typeof sessionId !== "string") return false;
+  const stored = persistedAcpSessions.get(sessionId);
+  if (!stored || deletingAcpSessions.has(sessionId)) return false;
+
+  deletingAcpSessions.add(sessionId);
+  try {
+    await acpRestores.get(sessionId)?.catch(() => null);
+    const localSession = acpSessions.get(sessionId);
+    localSession?.cancel();
+
+    let deletedThroughAcp = false;
+    if (localSession) {
+      try {
+        deletedThroughAcp = await localSession.delete();
+      } catch {}
+      localSession.close();
+      acpSessions.delete(sessionId);
+    }
+
+    if (!deletedThroughAcp) {
+      const env = localSession?.env || (await getProjectShellEnv({ cwd: stored.cwd }));
+      const target = localSession?.target || dcodeTarget({ env });
+      await deleteDcodeSession({
+        target,
+        cwd: stored.cwd,
+        env,
+        sessionId: stored.acpSessionId,
+      });
+    }
+
+    await deleteSessionTerminals(sessionId);
+    const checkpoint = acpCheckpoints.get(sessionId) || stored.checkpoint;
+    if (checkpoint?.ref === checkpointRef(sessionId)) {
+      deleteRefs(checkpoint.repo, [checkpoint.ref]);
+    }
+    acpSessions.delete(sessionId);
+    acpCheckpoints.delete(sessionId);
+    persistedAcpSessions.delete(sessionId);
+    writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
+    return true;
+  } finally {
+    deletingAcpSessions.delete(sessionId);
+  }
+}
+
 function configureDesktopIpc() {
   ipcMain.handle("desktop:projects", (event) => {
     requireTrustedDesktopIpc(event);
     return listProjects();
+  });
+
+  ipcMain.handle("desktop:project-branch", async (event, cwd) => {
+    requireTrustedDesktopIpc(event);
+    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
+    return project ? currentBranch(project) : null;
   });
 
   ipcMain.handle("desktop:add-project", async (event) => {
@@ -343,6 +437,30 @@ function configureDesktopIpc() {
     return resolveAcpProjectPath(input?.localSessionId, input?.path);
   });
 
+  ipcMain.handle("desktop:acp-draft-create", (event, value) => {
+    requireTrustedDesktopIpc(event);
+    const cwd = typeof value === "string" ? registeredProject(value) : null;
+    if (!cwd) throw new Error("Choose a valid local project directory");
+    const draft = {
+      id: randomUUID(),
+      cwd,
+      ownerId: event.sender.id,
+      starting: false,
+      deleteRequested: false,
+    };
+    acpDrafts.set(draft.id, draft);
+    return { id: draft.id, cwd: draft.cwd };
+  });
+
+  ipcMain.handle("desktop:acp-draft-delete", async (event, sessionId) => {
+    requireTrustedDesktopIpc(event);
+    const draft =
+      typeof sessionId === "string" ? acpDrafts.get(sessionId) : null;
+    if (!draft || draft.ownerId !== event.sender.id) return false;
+    await deleteAcpDrafts(event.sender.id, sessionId);
+    return true;
+  });
+
   ipcMain.handle("desktop:acp-start", async (event, input) => {
     requireTrustedDesktopIpc(event);
     if (
@@ -363,20 +481,53 @@ function configureDesktopIpc() {
     const modelId =
       typeof input.modelId === "string" ? input.modelId : undefined;
     const effort = typeof input.effort === "string" ? input.effort : undefined;
-    const localSession = createAcpSession({ cwd, modelId, effort });
-    persistedAcpSessions.set(localSession.id, {
-      ...sessionRecord(localSession),
-      ...(modelId ? { modelId } : {}),
-      ...(effort ? { effort } : {}),
-    });
-    acpSessions.set(localSession.id, localSession);
+    const draftSessionId =
+      typeof input.draftSessionId === "string"
+        ? input.draftSessionId
+        : undefined;
+    const draft = draftSessionId ? acpDrafts.get(draftSessionId) : null;
+    if (
+      draftSessionId &&
+      (!draft ||
+        draft.ownerId !== event.sender.id ||
+        draft.cwd !== cwd ||
+        draft.starting)
+    ) {
+      throw new Error("Local agent draft is no longer available");
+    }
+    if (draft) draft.starting = true;
+
+    let localSession;
     try {
+      localSession = await createAcpSession({
+        cwd,
+        modelId,
+        effort,
+        restored: draft ? { id: draft.id } : undefined,
+      });
+      acpSessions.set(localSession.id, localSession);
       await localSession.initialize();
-    } catch (error) {
-      acpSessions.delete(localSession.id);
-      persistedAcpSessions.delete(localSession.id);
+      persistedAcpSessions.set(localSession.id, {
+        ...sessionRecord(localSession),
+        ...(modelId ? { modelId } : {}),
+        ...(effort ? { effort } : {}),
+      });
       writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
-      localSession.close();
+      if (draft) acpDrafts.delete(draft.id);
+    } catch (error) {
+      if (localSession) {
+        acpSessions.delete(localSession.id);
+        persistedAcpSessions.delete(localSession.id);
+        writeAcpSessions(acpSessionsPath(), [...persistedAcpSessions.values()]);
+        localSession.close();
+      }
+      if (draft) {
+        draft.starting = false;
+        if (draft.deleteRequested) {
+          acpDrafts.delete(draft.id);
+          await deleteSessionTerminals(draft.id);
+        }
+      }
       throw error;
     }
     await recordAcpCheckpoint(localSession);
@@ -391,6 +542,18 @@ function configureDesktopIpc() {
     const localSession = await restoreAcpSession(input?.sessionId);
     if (!localSession)
       throw new Error("Local Deep Agents Code session not found");
+    const modelId =
+      typeof input.modelId === "string" ? input.modelId : undefined;
+    const effort = typeof input.effort === "string" ? input.effort : undefined;
+    if (modelId !== localSession.modelId || effort !== localSession.effort) {
+      const env = await getProjectShellEnv({ cwd: localSession.cwd });
+      await localSession.configure(
+        modelId,
+        effort,
+        dcodeTarget({ env, modelId, effort }),
+        env,
+      );
+    }
     await localSession.prompt(input.prompt || "", input.images || []);
     return localSession.snapshot();
   });
@@ -398,6 +561,11 @@ function configureDesktopIpc() {
   ipcMain.handle("desktop:acp-cancel", (event, sessionId) => {
     requireTrustedDesktopIpc(event);
     acpSessions.get(sessionId)?.cancel();
+  });
+
+  ipcMain.handle("desktop:acp-delete", async (event, sessionId) => {
+    requireTrustedDesktopIpc(event);
+    return deleteAcpSession(sessionId);
   });
 
   ipcMain.handle("desktop:acp-session", async (event, sessionId) => {
@@ -425,7 +593,11 @@ function configureDesktopIpc() {
       return { status: "missing", files: [], truncated: false };
     }
     try {
-      return await readDiff(checkpoint.repo, checkpoint.ref);
+      const [diff, repository] = await Promise.all([
+        readDiff(checkpoint.repo, checkpoint.ref),
+        repositoryMetadata(checkpoint.repo, localSession?.env),
+      ]);
+      return { ...diff, repository };
     } catch {
       return { status: "error", files: [], truncated: false };
     }
@@ -522,7 +694,7 @@ async function proxyBackendRequest(request) {
   const source = new URL(request.url);
   const headers = new Headers(request.headers);
   const pageUrl = mainWindow?.webContents.getURL() || "";
-  if (!isTrustedProxyRequest(request.method, pageUrl, request.url)) {
+  if (!isTrustedProxyRequest(pageUrl)) {
     return new Response("Forbidden", { status: 403 });
   }
   headers.delete("host");
@@ -572,7 +744,7 @@ async function storeResponseCookies(targetUrl, response) {
     if (separator <= 0) continue;
     const name = pair.slice(0, separator).trim();
     const cookieValue = pair.slice(separator + 1).trim();
-    const details = {
+    const details: Electron.CookiesSetDetails = {
       url: targetUrl,
       name,
       value: cookieValue,
@@ -737,81 +909,74 @@ function createMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-function handleAuthNavigation(window, event, url) {
-  const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null;
-  if (callback) {
-    event.preventDefault();
-    void window.loadURL(callback);
+async function startExternalLogin() {
+  if (!backendUrl) return;
+  loginFlow?.cancel();
+  loginFlow = null;
+
+  let flow;
+  try {
+    flow = await beginLogin();
+  } catch (error) {
+    dialog.showErrorBox(
+      `${appRuntime.name} sign-in failed`,
+      `Could not open a local sign-in listener: ${error.message}`,
+    );
     return;
   }
-  if (isAppUrl(url)) {
-    event.preventDefault();
-    window.close();
-    if (mainWindow && !mainWindow.isDestroyed()) void loadApp(mainWindow);
-    return;
-  }
-  const target = new URL(url);
-  if (target.protocol === "https:") return;
-  event.preventDefault();
-  if (["http:", "mailto:"].includes(target.protocol)) {
-    void shell.openExternal(url);
+  loginFlow = flow;
+  void shell.openExternal(desktopLoginUrl(backendUrl, flow));
+
+  const code = await flow.code;
+  if (loginFlow !== flow) return;
+  loginFlow = null;
+  if (!code) return;
+
+  try {
+    await completeExternalLogin(flow.verifier, code);
+  } catch (error) {
+    dialog.showErrorBox(`${appRuntime.name} sign-in failed`, error.message);
   }
 }
 
-function createAuthWindow(url) {
-  if (authWindow && !authWindow.isDestroyed()) {
-    authWindow.show();
-    authWindow.focus();
-    void authWindow.loadURL(url);
-    return;
+async function completeExternalLogin(verifier, code) {
+  const response = await fetch(desktopExchangeUrl(backendUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: APP_ORIGIN },
+    body: JSON.stringify({ code, verifier }),
+  });
+  if (!response.ok) {
+    throw new Error(`Backend rejected the sign-in (${response.status})`);
   }
-  const window = new BrowserWindow({
-    title: "Sign in to Open SWE",
-    parent: mainWindow,
-    width: 1000,
-    height: 800,
-    minWidth: 640,
-    minHeight: 480,
-    backgroundColor: "#ffffff",
-    icon: iconPath(),
-    show: false,
-    webPreferences: {
-      contextIsolation: true,
-      navigateOnDragDrop: false,
-      nodeIntegration: false,
-      sandbox: true,
-      session: session.defaultSession,
-    },
+  const payload = await response.json();
+  if (typeof payload?.session !== "string") {
+    throw new Error("Backend returned no session");
+  }
+  await session.defaultSession.cookies.set({
+    url: backendUrl,
+    name: SESSION_COOKIE_NAME,
+    value: payload.session,
+    path: "/",
+    httpOnly: true,
+    secure: new URL(backendUrl).protocol === "https:",
+    expirationDate: Date.now() / 1000 + Number(payload.expires_in),
   });
 
-  window.once("ready-to-show", () => window.show());
-  window.on("closed", () => {
-    if (authWindow === window) authWindow = null;
-  });
-  window.webContents.setWindowOpenHandler(({ url: popupUrl }) => {
-    const target = new URL(popupUrl);
-    if (target.protocol === "https:") {
-      void window.loadURL(popupUrl);
-    } else if (["http:", "mailto:"].includes(target.protocol)) {
-      void shell.openExternal(popupUrl);
-    }
-    return { action: "deny" };
-  });
-  window.webContents.on("will-navigate", (event, navigationUrl) =>
-    handleAuthNavigation(window, event, navigationUrl),
-  );
-  window.webContents.on("will-redirect", (event, navigationUrl) =>
-    handleAuthNavigation(window, event, navigationUrl),
-  );
-  window.webContents.on("will-attach-webview", (event) =>
-    event.preventDefault(),
-  );
-
-  authWindow = window;
-  void window.loadURL(url);
+  const window =
+    mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+  app.focus({ steal: true });
+  await loadApp(window);
 }
 
 function handleNavigation(window, event, url) {
+  if (isAppLoginUrl(url)) {
+    event.preventDefault();
+    void startExternalLogin();
+    return;
+  }
   const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null;
   if (callback) {
     event.preventDefault();
@@ -819,11 +984,6 @@ function handleNavigation(window, event, url) {
     return;
   }
   if (isAppUrl(url)) return;
-  if (isGithubOAuthUrl(url)) {
-    event.preventDefault();
-    createAuthWindow(url);
-    return;
-  }
   event.preventDefault();
   const target = new URL(url);
   if (["http:", "https:", "mailto:"].includes(target.protocol)) {
@@ -863,8 +1023,8 @@ function createWindow() {
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
     const protocol = new URL(url).protocol;
-    if (isGithubOAuthUrl(url)) {
-      createAuthWindow(url);
+    if (isAppLoginUrl(url)) {
+      void startExternalLogin();
     } else if (["http:", "https:", "mailto:"].includes(protocol)) {
       void shell.openExternal(url);
     }
@@ -879,6 +1039,11 @@ function createWindow() {
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
   );
+  const ownerId = window.webContents.id;
+  const deleteDrafts = () => void deleteAcpDrafts(ownerId);
+  window.webContents.on("did-start-navigation", deleteDrafts);
+  window.webContents.on("render-process-gone", deleteDrafts);
+  window.webContents.on("destroyed", deleteDrafts);
 
   mainWindow = window;
   void loadApp(window);
@@ -937,7 +1102,7 @@ function createSetupWindow() {
   });
 
   setupWindow = window;
-  void window.loadFile(path.join(__dirname, "setup.html"));
+  void window.loadFile(path.join(__dirname, "../src/setup.html"));
   return window;
 }
 
@@ -948,13 +1113,14 @@ function configurePermissions() {
         isTrustedPermissionRequest(
           permission,
           details.requestingUrl || webContents.getURL(),
+          details,
         ),
       );
     },
   );
   session.defaultSession.setPermissionCheckHandler(
-    (_webContents, permission, requestingOrigin) =>
-      isTrustedPermissionRequest(permission, requestingOrigin),
+    (_webContents, permission, requestingOrigin, details) =>
+      isTrustedPermissionRequest(permission, requestingOrigin, details),
   );
 }
 
@@ -962,7 +1128,12 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, commandLine) => {
+    if (isDevelopment) {
+      app.relaunch({ args: commandLine.slice(1) });
+      app.quit();
+      return;
+    }
     const window = mainWindow || setupWindow || createWindow();
     if (window.isMinimized()) window.restore();
     window.show();
@@ -1001,7 +1172,7 @@ if (!hasSingleInstanceLock) {
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
       listProjects,
-      getAcpSession: (sessionId) => acpSessions.get(sessionId),
+      getAcpSession: localSessionContext,
       userDataPath: app.getPath("userData"),
     });
 

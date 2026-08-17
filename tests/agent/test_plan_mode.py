@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -15,6 +16,14 @@ def test_construct_system_prompt_gates_active_plan_mode(enabled: bool) -> None:
     prompt = construct_system_prompt(working_dir="/work", plan_mode=enabled)
 
     assert ("### Plan Mode (ACTIVE)" in prompt) is enabled
+
+
+def test_dashboard_only_enters_plan_mode_on_explicit_request() -> None:
+    dashboard_prompt = construct_system_prompt(working_dir="/work", source="dashboard")
+    slack_prompt = construct_system_prompt(working_dir="/work", source="slack", slack_context=True)
+
+    assert "call `enter_plan_mode` only when the user explicitly asks" in dashboard_prompt
+    assert "If a task would genuinely benefit from a structured plan" in slack_prompt
 
 
 def test_plan_mode_prompt_requests_slack_approval_options() -> None:
@@ -185,6 +194,79 @@ async def test_enter_plan_mode_tool_returns_command() -> None:
     assert len(messages) == 1
     assert isinstance(messages[0], ToolMessage)
     assert messages[0].tool_call_id == "call-1"
+
+
+async def test_mark_turn_checkpoint_records_the_plan_transition(monkeypatch) -> None:
+    import importlib
+
+    enter_plan_mode_module = importlib.import_module("agent.tools.enter_plan_mode")
+    metadata = {
+        "turn_checkpoints": [
+            {
+                "key": "msg-1",
+                "ref": "refs/open-swe/turns/msg-1",
+                "started_at": "t0",
+                "repo_path": "/workspace/repo",
+            }
+        ]
+    }
+
+    class Threads:
+        def __init__(self) -> None:
+            self.get = AsyncMock(return_value={"metadata": metadata})
+            self.update = AsyncMock()
+
+    threads = Threads()
+    client = type("Client", (), {"threads": threads})()
+    backend = object()
+    monkeypatch.setattr(enter_plan_mode_module, "get_client", lambda: client)
+    monkeypatch.setattr(
+        enter_plan_mode_module, "get_sandbox_backend", AsyncMock(return_value=backend)
+    )
+    record_plan = AsyncMock(return_value="refs/open-swe/turns/msg-1-plan")
+    monkeypatch.setattr(enter_plan_mode_module, "record_plan_checkpoint", record_plan)
+
+    await enter_plan_mode_module._mark_turn_checkpoint("thread-1", "msg-1")
+
+    record_plan.assert_awaited_once_with(
+        backend,
+        None,
+        "msg-1",
+        repo_path="/workspace/repo",
+    )
+    threads.update.assert_awaited_once_with(
+        thread_id="thread-1",
+        metadata={
+            "turn_checkpoints": [
+                {
+                    **metadata["turn_checkpoints"][0],
+                    "plan_mode": True,
+                    "plan_ref": "refs/open-swe/turns/msg-1-plan",
+                }
+            ]
+        },
+    )
+
+
+async def test_enter_plan_mode_marks_the_current_turn_checkpoint(monkeypatch) -> None:
+    import importlib
+
+    from langchain_core.messages import HumanMessage
+
+    enter_plan_mode_module = importlib.import_module("agent.tools.enter_plan_mode")
+    set_plan_status = AsyncMock()
+    mark_checkpoint = AsyncMock()
+    monkeypatch.setattr(enter_plan_mode_module, "_thread_id_from_config", lambda: "thread-1")
+    monkeypatch.setattr(enter_plan_mode_module, "set_plan_status", set_plan_status)
+    monkeypatch.setattr(enter_plan_mode_module, "_mark_turn_checkpoint", mark_checkpoint)
+
+    await enter_plan_mode_module.enter_plan_mode(
+        tool_call_id="call-1",
+        state={"messages": [HumanMessage(content="plan it", id="msg-1")]},
+    )
+
+    set_plan_status.assert_awaited_once_with("thread-1", "planning", plan_mode=True)
+    mark_checkpoint.assert_awaited_once_with("thread-1", "msg-1")
 
 
 def test_enter_plan_mode_exported() -> None:

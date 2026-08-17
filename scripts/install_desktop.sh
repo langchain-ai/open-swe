@@ -6,19 +6,34 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-for command in node corepack ditto; do
+for command in node ditto; do
   command -v "$command" >/dev/null || {
-    echo "Missing $command. Install Node.js 22, then try again." >&2
+    echo "Missing $command. Install Node.js, then try again." >&2
     exit 1
   }
 done
 
+command -v uv >/dev/null || {
+  echo "Missing uv. Install it from https://docs.astral.sh/uv/, then try again." >&2
+  exit 1
+}
+
+# Node 25 dropped the bundled corepack shim, so neither launcher is guaranteed.
+if command -v pnpm >/dev/null; then
+  pnpm=(pnpm)
+elif command -v corepack >/dev/null; then
+  pnpm=(corepack pnpm)
+else
+  echo "Missing pnpm. Install it with 'npm install -g pnpm', then try again." >&2
+  exit 1
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-corepack pnpm install --frozen-lockfile
+"${pnpm[@]}" install --frozen-lockfile
 rm -rf desktop/dist
-corepack pnpm --dir desktop run pack
+"${pnpm[@]}" --dir desktop run pack
 
 apps=(desktop/dist/mac*/"Open SWE.app")
 if [[ ${#apps[@]} -ne 1 || ! -d "${apps[0]}" ]]; then

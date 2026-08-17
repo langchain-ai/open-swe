@@ -137,18 +137,20 @@ async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() ->
 
 
 @pytest.mark.asyncio
-async def test_agent_wires_user_skills_into_main_and_general_purpose_agents() -> None:
+async def test_agent_wires_user_and_organization_skills_into_agents() -> None:
     captured = await _capture_create_deep_agent_kwargs()
-    assert captured["skills"] == ["/skills/"]
+    sources = ["/skills/", "/organization-skills/"]
+    assert captured["skills"] == sources
     backend = captured["backend"]
     assert isinstance(backend, CompositeBackend)
-    assert isinstance(backend.routes["/skills/"], ReadOnlyBackend)
-    with pytest.raises(NotImplementedError):
-        backend.write("/skills/poison/SKILL.md", "malicious")
+    for route in sources:
+        assert isinstance(backend.routes[route], ReadOnlyBackend)
+        with pytest.raises(NotImplementedError):
+            backend.write(f"{route}poison/SKILL.md", "malicious")
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
-    assert gp["skills"] == ["/skills/"]
+    assert gp["skills"] == sources
 
 
 @pytest.mark.asyncio
@@ -182,6 +184,20 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert report_platform_issue in tools
+
+
+@pytest.mark.asyncio
+async def test_agent_includes_read_user_settings_only_on_parent() -> None:
+    from agent.tools import read_user_settings
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    subagents = captured["subagents"]
+    assert isinstance(tools, list)
+    assert isinstance(subagents, list)
+    assert read_user_settings in tools
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    assert read_user_settings not in general_purpose["tools"]
 
 
 @pytest.mark.asyncio
@@ -273,7 +289,16 @@ async def test_general_purpose_subagent_carries_open_swe_shared_base() -> None:
 
 @pytest.mark.asyncio
 async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
-    captured = await _capture_create_deep_agent_kwargs()
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(
+        {
+            "source": "slack",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+        }
+    )
+    captured = await _capture_create_deep_agent_kwargs(config)
     parent_tools = captured["tools"]
     subagents = captured["subagents"]
     assert isinstance(parent_tools, list)
@@ -291,6 +316,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_thread_reply",
     }
 
-    assert slack_names <= parent_names
-    assert slack_names.isdisjoint(subagent_names)
-    assert subagent_names == parent_names - slack_names
+    parent_only_names = {*slack_names, "read_user_settings"}
+    assert parent_only_names <= parent_names
+    assert parent_only_names.isdisjoint(subagent_names)
+    assert subagent_names == parent_names - parent_only_names

@@ -82,4 +82,50 @@ def apply() -> None:
     profiles.get_valid_access_token = _dummy_user_token
     thread_api.get_valid_access_token = _dummy_user_token
 
+    # Snapshot service: another external boundary. The E2E runs the local sandbox
+    # provider, so there is nothing to capture from — record the request in the
+    # fake store instead. The environment tools, store writes, name/tag scheme
+    # and status transitions all still run for real.
+    from agent.dashboard import environments as environments_store
+    from agent.integrations import langsmith as langsmith_integration
+
+    langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
+    # The capture path refuses to run off the langsmith provider; with that
+    # provider's snapshot API faked above, the E2E's local sandbox is capturable.
+    environments_store._require_capture_support = lambda: None
+
     _applied = True
+
+
+class _FakeSnapshot:
+    def __init__(self, snapshot_id: str, name: str) -> None:
+        self.id = snapshot_id
+        self.name = name
+        self.status = "ready"
+
+
+class _FakeSandboxClient:
+    """Stands in for ``AsyncSandboxClient`` for snapshot calls only."""
+
+    async def __aenter__(self) -> _FakeSandboxClient:
+        return self
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        return False
+
+    async def capture_snapshot(
+        self,
+        sandbox_name: str,
+        name: str,
+        *,
+        timeout: int = 60,  # noqa: ARG002
+        **_kwargs: object,
+    ) -> _FakeSnapshot:
+        import fakes
+
+        return _FakeSnapshot(fakes.record_snapshot_capture(sandbox_name, name), name)
+
+    async def delete_snapshot(self, snapshot_id: str) -> None:
+        import fakes
+
+        fakes.record_snapshot_delete(snapshot_id)

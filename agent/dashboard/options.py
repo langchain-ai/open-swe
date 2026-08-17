@@ -61,8 +61,8 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "google_genai:gemini-3.6-flash",
-        "label": "Gemini 3.6 Flash",
+        "id": "google_genai:gemini-3.7-flash",
+        "label": "Gemini 3.7 Flash",
         "efforts": ["minimal", "low", "medium", "high"],
         "default_effort": "medium",
         "supports_images": True,
@@ -104,7 +104,8 @@ FABLE_MODEL_IDS: frozenset[str] = frozenset(
 DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = {
     "anthropic:claude-opus-4-8": "anthropic:claude-opus-5",
     "openai:gpt-5.5": "openai:gpt-5.6-sol",
-    "google_genai:gemini-3.5-flash": "google_genai:gemini-3.6-flash",
+    "google_genai:gemini-3.5-flash": "google_genai:gemini-3.7-flash",
+    "google_genai:gemini-3.6-flash": "google_genai:gemini-3.7-flash",
     "fireworks:accounts/fireworks/models/kimi-k2p7-code": (
         "fireworks:accounts/fireworks/models/kimi-k3"
     ),
@@ -118,13 +119,17 @@ DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = {
 ProfileLoader = Callable[[str], Mapping[str, object]]
 
 # LangChain partner packages expose ``_get_default_model_profile`` — the same
-# accessor that populates ``ChatModel.profile`` from bundled models.dev data —
-# so context windows come from LangChain profiles instead of hardcoded numbers.
+# accessor that populates ``ChatModel.profile`` from bundled models.dev data.
 _PROFILE_LOADER_MODULES: dict[str, str] = {
     "anthropic": "langchain_anthropic.chat_models",
     "fireworks": "langchain_fireworks.chat_models",
     "google_genai": "langchain_google_genai.chat_models",
     "openai": "langchain_openai.chat_models.base",
+}
+CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
+    "openai:gpt-5.6-sol": 272_000,
+    "openai:gpt-5.6-terra": 272_000,
+    "openai:gpt-5.6-luna": 272_000,
 }
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
     "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
@@ -146,8 +151,22 @@ def _profile_loader(provider: str) -> ProfileLoader | None:
     return cast(ProfileLoader, loader)
 
 
+def model_profile_with_context_override(model_id: str) -> dict[str, object] | None:
+    context_window = CODEX_CONTEXT_WINDOW_OVERRIDES.get(model_id)
+    if context_window is None:
+        return None
+    provider, _, model_name = model_id.partition(":")
+    loader = _profile_loader(provider)
+    profile = dict(loader(model_name)) if loader is not None else {}
+    profile["max_input_tokens"] = context_window
+    return profile
+
+
 @lru_cache(maxsize=512)
 def model_profile_context_window(model_id: str) -> int | None:
+    context_window = CODEX_CONTEXT_WINDOW_OVERRIDES.get(model_id)
+    if context_window is not None:
+        return context_window
     provider, _, model_name = model_id.partition(":")
     if not provider or not model_name:
         return None

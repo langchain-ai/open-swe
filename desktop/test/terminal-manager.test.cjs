@@ -6,7 +6,8 @@ const test = require("node:test")
 const {
   createTerminalManager,
   ensurePtySpawnHelperExecutable,
-} = require("../src/terminal-manager.cjs")
+  getProjectShellEnv,
+} = require("../build/terminal-manager.cjs")
 
 class FakeProcess {
   constructor(pid, initialData) {
@@ -91,6 +92,22 @@ function tick() {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
+test("loads environment set by interactive shell prompt hooks", async () => {
+  const env = await getProjectShellEnv({
+    cwd: "/project",
+    env: { SHELL: "/bin/zsh", EXISTING: "kept" },
+    run: async (_shell, args, options, input) => {
+      assert.deepEqual(args, ["-il"])
+      assert.equal(options.cwd, "/project")
+      const mark = /echo '([0-9a-f]+)'/.exec(input)[1]
+      return `${mark}\nOPENAI_BASE_URL=https://gateway.example/openai/v1\n${mark}\n`
+    },
+  })
+
+  assert.equal(env.EXISTING, "kept")
+  assert.equal(env.OPENAI_BASE_URL, "https://gateway.example/openai/v1")
+})
+
 test("keeps terminal identity scoped to the ACP session and validates launch boundaries", async (t) => {
   const value = fixture()
   t.after(() => value.manager.shutdown())
@@ -174,6 +191,21 @@ test("persists bounded sanitized history and supports clear, restart, detach, an
   assert.deepEqual(replacement.list("acp-1"), [])
 })
 
+
+test("deleting a local session stops its terminals and removes their history", async (t) => {
+  const value = fixture()
+  t.after(() => value.manager.shutdown())
+  await value.manager.open(request(value.root))
+  value.processes[0].data("saved output\n")
+
+  await value.manager.deleteSession("acp-1")
+
+  assert.deepEqual(value.manager.list("acp-1"), [])
+  assert.equal(value.processes[0].kills[0], "SIGTERM")
+  const attached = await value.manager.attach(request(value.root), () => {})
+  assert.equal(attached.snapshot.history, "")
+  attached.detach()
+})
 
 test("drains queued and trailing PTY output before publishing exit", async (t) => {
   const value = fixture()

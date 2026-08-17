@@ -81,7 +81,7 @@ def _with_on_behalf_of(args_schema: Any) -> dict[str, Any]:
     schema: dict[str, Any] = (
         dict(cast("dict[str, Any]", args_schema))
         if isinstance(args_schema, dict)
-        else {"type": "object"}
+        else args_schema.model_json_schema()
     )
     properties: dict[str, Any] = dict(schema.get("properties") or {})
     properties["on_behalf_of"] = {

@@ -1,5 +1,5 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
 
 export interface DesktopProject {
   cwd: string
@@ -21,16 +21,27 @@ export interface DesktopAcpSessionSummary {
   status: "starting" | "idle" | "running" | "error"
   createdAt: number
   updatedAt: number
+  modelId?: string
+  effort?: string
 }
 
 export interface DesktopAcpSession extends DesktopAcpSessionSummary {
   events: Array<DesktopAcpEvent>
 }
 
+export interface DesktopAcpDraftSession {
+  id: string
+  cwd: string
+}
+
 export interface DesktopAcpDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
   files: Array<ThreadPrDiffFile>
+  repository?: {
+    branch: string | null
+    pr: AgentThread["pr"] | null
+  }
 }
 
 export interface DesktopAcpPromptInput {
@@ -150,6 +161,7 @@ declare global {
     openSweDesktop?: {
       isDesktop: true
       listProjects: () => Promise<Array<DesktopProject>>
+      getProjectBranch: (cwd: string) => Promise<string | null>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
       onProjectsChanged: (
@@ -160,17 +172,25 @@ declare global {
         localSessionId: string
         path: string
       }) => Promise<string | null>
+      createAcpDraftSession?: (cwd: string) => Promise<DesktopAcpDraftSession>
+      deleteAcpDraftSession?: (sessionId: string) => Promise<boolean>
       startAcpSession: (
         input: DesktopAcpPromptInput & {
           cwd: string
+          draftSessionId?: string
           modelId?: string
           effort?: string
         }
       ) => Promise<DesktopAcpSession>
       promptAcpSession: (
-        input: DesktopAcpPromptInput & { sessionId: string }
+        input: DesktopAcpPromptInput & {
+          sessionId: string
+          modelId?: string
+          effort?: string
+        }
       ) => Promise<DesktopAcpSession>
       cancelAcpSession: (sessionId: string) => Promise<void>
+      deleteAcpSession: (sessionId: string) => Promise<boolean>
       getAcpSession: (sessionId: string) => Promise<DesktopAcpSession | null>
       listAcpSessions: () => Promise<Array<DesktopAcpSessionSummary>>
       getAcpDiff: (sessionId: string) => Promise<DesktopAcpDiff>

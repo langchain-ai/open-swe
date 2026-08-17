@@ -321,6 +321,20 @@ async def test_thread_summary_includes_pr_and_diff_stats() -> None:
     assert summary["diffStats"] == {"files": 3, "additions": 10, "deletions": 2}
 
 
+async def test_thread_summary_uses_working_repo_for_display_only() -> None:
+    metadata = {
+        "repo": {"owner": "trusted", "name": "default"},
+        "working_repo_full_name": "observed/checkout",
+    }
+
+    summary = await thread_api._thread_summary(_thread_with_metadata(metadata))
+
+    assert summary["repo"] == "default"
+    assert summary["repoFullName"] == "trusted/default"
+    assert summary["workingRepoFullName"] == "observed/checkout"
+    assert metadata["repo"] == {"owner": "trusted", "name": "default"}
+
+
 async def test_thread_summary_defaults_unknown_pr_state_to_open() -> None:
     summary = await thread_api._thread_summary(
         _thread_with_metadata(
@@ -354,6 +368,37 @@ async def test_thread_summary_hides_creating_sandbox_sentinel() -> None:
     )
 
     assert summary["sandboxId"] is None
+
+
+async def test_terminal_sandbox_requires_owner_and_existing_sandbox(monkeypatch) -> None:
+    metadata = {
+        "source": "dashboard",
+        "github_login": "owner",
+        "sandbox_id": "sandbox-123",
+        "repo_name": "repo",
+    }
+
+    class FakeThreads:
+        async def get(self, thread_id: str):
+            return {"thread_id": thread_id, "metadata": metadata}
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    assert await thread_api.get_dashboard_terminal_sandbox("tid", "owner") == (
+        "sandbox-123",
+        "repo",
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.get_dashboard_terminal_sandbox("tid", "intruder")
+    assert exc_info.value.status_code == 404
+
+    metadata["sandbox_id"] = "__creating__"
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.get_dashboard_terminal_sandbox("tid", "owner")
+    assert exc_info.value.status_code == 404
 
 
 async def test_thread_summary_includes_slack_source_url_for_private_repo() -> None:
@@ -531,9 +576,12 @@ async def test_proxy_commands_lazily_creates_missing_thread_only_for_run_start(
 
 
 async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch) -> None:
+    updates: list[dict[str, object]] = []
+
     class FakeThreads:
         async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
-            pass
+            assert thread_id == "tid"
+            updates.append(metadata)
 
     class FakeClient:
         threads = FakeThreads()
@@ -561,13 +609,18 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
         "tid",
         "teammate",
         command,
-        metadata={"source": "dashboard", "github_login": "owner"},
+        metadata={
+            "source": "dashboard",
+            "github_login": "owner",
+            "participant_logins": ["owner"],
+        },
         email="teammate@example.com",
     )
 
     # A non-owner's message is forwarded but tagged with their login.
     last = enriched["params"]["input"]["messages"][-1]
     assert last["content"] == "@teammate: fix the bug"
+    assert updates[-1]["participant_logins"] == ["owner", "teammate"]
 
 
 async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkeypatch) -> None:
@@ -1744,8 +1797,8 @@ async def test_options_includes_fable_when_enabled() -> None:
     ):
         payload = await routes.options()
     assert _FABLE in [m["id"] for m in payload["models"]]
-    gpt_5_5 = next(m for m in payload["models"] if m["id"] == _VISION_MODEL)
-    assert gpt_5_5["context_window"] == 1_050_000
+    openai_model = next(m for m in payload["models"] if m["id"] == _VISION_MODEL)
+    assert openai_model["context_window"] == 272_000
 
 
 @pytest.mark.asyncio
@@ -1778,6 +1831,124 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     assert payload["default_agent_subagent_model"] != _FABLE
     assert payload["default_agent_model"] in model_ids
     assert payload["default_agent_subagent_model"] in model_ids
+
+
+async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
+    metadata = {
+        "sandbox_id": "sandbox-1",
+        "turn_checkpoints": [
+            {
+                "key": "msg-1",
+                "ref": "refs/open-swe/turns/msg-1",
+                "started_at": "t0",
+                "repo_path": "/workspace/repo",
+                "plan_mode": True,
+                "plan_ref": "refs/open-swe/turns/msg-1",
+            }
+        ],
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    create_sandbox = AsyncMock()
+    monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
+
+    result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+
+    assert result == {"status": "ready", "files": [], "truncated": False}
+    create_sandbox.assert_not_awaited()
+
+
+async def test_turn_diff_preserves_changes_before_mid_run_plan_mode(monkeypatch) -> None:
+    metadata = {
+        "sandbox_id": "sandbox-1",
+        "turn_checkpoints": [
+            {
+                "key": "msg-1",
+                "ref": "refs/open-swe/turns/msg-1",
+                "started_at": "t0",
+                "repo_path": "/workspace/repo",
+                "plan_mode": True,
+                "plan_ref": "refs/open-swe/turns/msg-1-plan",
+            }
+        ],
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    sandbox = object()
+    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
+    read_diff = AsyncMock(return_value={"status": "ready", "files": [], "truncated": False})
+    monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
+
+    await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+
+    read_diff.assert_awaited_once_with(
+        sandbox,
+        None,
+        "refs/open-swe/turns/msg-1",
+        "refs/open-swe/turns/msg-1-plan",
+        repo_path="/workspace/repo",
+    )
+
+
+async def test_turn_diff_reads_the_checkpoint_repository(monkeypatch) -> None:
+    metadata = {
+        "sandbox_id": "sandbox-1",
+        "turn_checkpoints": [
+            {
+                "key": "msg-1",
+                "ref": "refs/open-swe/turns/msg-1",
+                "started_at": "t0",
+                "repo_path": "/workspace/repo",
+            },
+            {
+                "key": "msg-2",
+                "ref": "refs/open-swe/turns/msg-2",
+                "started_at": "t1",
+                "repo_path": "/workspace/repo",
+            },
+        ],
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    sandbox = object()
+    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
+    read_diff = AsyncMock(return_value={"status": "ready", "files": [], "truncated": False})
+    monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
+
+    await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+
+    read_diff.assert_awaited_once_with(
+        sandbox,
+        None,
+        "refs/open-swe/turns/msg-1",
+        "refs/open-swe/turns/msg-2",
+        repo_path="/workspace/repo",
+    )
+
+
+async def test_turn_diff_rejects_checkpoints_from_different_repositories(monkeypatch) -> None:
+    metadata = {
+        "sandbox_id": "sandbox-1",
+        "turn_checkpoints": [
+            {
+                "key": "msg-1",
+                "ref": "refs/open-swe/turns/msg-1",
+                "started_at": "t0",
+                "repo_path": "/workspace/one",
+            },
+            {
+                "key": "msg-2",
+                "ref": "refs/open-swe/turns/msg-2",
+                "started_at": "t1",
+                "repo_path": "/workspace/two",
+            },
+        ],
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    create_sandbox = AsyncMock()
+    monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
+
+    result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+
+    assert result == {"status": "missing", "files": [], "truncated": False}
+    create_sandbox.assert_not_awaited()
 
 
 async def test_pr_diff_uses_repository_from_pr_url(monkeypatch) -> None:

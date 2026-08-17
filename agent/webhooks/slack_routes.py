@@ -86,6 +86,7 @@ async def slack_webhook(
         and event.get("channel_type") == "im"
         and bool(event.get("user"))
     )
+    is_untagged_two_party_reply = False
     if event.get("type") != "app_mention":
         message_text = event.get("text", "")
         has_username_mention = bool(
@@ -111,11 +112,18 @@ async def slack_webhook(
             event.get("type") == "message"
             and not event.get("subtype")
             and not is_direct_message
+            # An explicit tag is never an untagged reply: the gate below admits
+            # messages mentioning only Open SWE, so without this an explicitly
+            # tagged request would tell the agent it was not tagged.
+            and not has_username_mention
+            and not has_id_mention
             and await service._slack_thread_allows_untagged_reply(
                 str(event.get("channel") or ""),
                 str(event.get("thread_ts") or ""),
                 message_text,
                 bot_user_id,
+                str(event.get("user") or ""),
+                str(event.get("ts") or ""),
             )
         )
         should_handle_message = any(
@@ -147,7 +155,7 @@ async def slack_webhook(
     channel_context = await common._get_slack_channel_context(channel_id)
 
     if await common._is_docs_plz_slack_channel(channel_id, channel_context):
-        if await common.claim_slack_event(event_id):
+        if await common.claim_slack_event(event_id, channel_id, event_ts):
             background_tasks.add_task(
                 common.post_slack_thread_reply,
                 channel_id,
@@ -166,11 +174,12 @@ async def slack_webhook(
             "attachments": event.get("attachments", []),
             "bot_user_id": bot_user_id,
             "treat_all_messages_as_mentions": is_direct_message,
+            "untagged_reply": is_untagged_two_party_reply,
         }
         repo_config = await common.get_slack_repo_config(
             channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
         )
-        if await common.claim_slack_event(event_id):
+        if await common.claim_slack_event(event_id, channel_id, event_ts):
             background_tasks.add_task(service.process_slack_mention, event_data, repo_config)
             return {"status": "accepted", "message": "Slack mention queued"}
 

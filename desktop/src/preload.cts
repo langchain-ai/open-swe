@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron")
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
+  getProjectBranch: (cwd) => ipcRenderer.invoke("desktop:project-branch", cwd),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
@@ -13,9 +14,14 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.on("desktop:projects-changed", listener)
     return () => ipcRenderer.removeListener("desktop:projects-changed", listener)
   },
+  createAcpDraftSession: (cwd) =>
+    ipcRenderer.invoke("desktop:acp-draft-create", cwd),
+  deleteAcpDraftSession: (sessionId) =>
+    ipcRenderer.invoke("desktop:acp-draft-delete", sessionId),
   startAcpSession: (input) => ipcRenderer.invoke("desktop:acp-start", input),
   promptAcpSession: (input) => ipcRenderer.invoke("desktop:acp-prompt", input),
   cancelAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-cancel", sessionId),
+  deleteAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-delete", sessionId),
   getAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-session", sessionId),
   listAcpSessions: () => ipcRenderer.invoke("desktop:acp-sessions"),
   getAcpDiff: (sessionId) => ipcRenderer.invoke("desktop:acp-diff", sessionId),
@@ -56,8 +62,8 @@ const DRAG_REGION_ID = "open-swe-desktop-drag-region"
 window.addEventListener("DOMContentLoaded", () => {
   if (process.platform !== "darwin") return
 
-  // Keep a draggable strip beside the native controls without forcing sidebar
-  // content into the titlebar row.
+  // Keep draggable space beside the native controls and above the sidebar
+  // content without forcing that content into the titlebar row.
   const style = document.createElement("style")
   style.textContent = `
     #${DRAG_REGION_ID} {
@@ -69,6 +75,14 @@ window.addEventListener("DOMContentLoaded", () => {
       height: 12px;
       z-index: 2147483647;
       user-select: none;
+    }
+
+    [data-sidebar-frame] > div:first-child {
+      -webkit-app-region: drag;
+    }
+
+    [data-sidebar-frame] > div:first-child :is(a, button, input, textarea, select, [role="button"]) {
+      -webkit-app-region: no-drag;
     }
 
     [data-sidebar-expand] {

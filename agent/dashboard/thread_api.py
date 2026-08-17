@@ -8,6 +8,7 @@ import binascii
 import json
 import logging
 import os
+import posixpath
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -37,7 +38,10 @@ from ..utils.thread_ops import (
     langgraph_url,
     queue_message_for_thread,
 )
+from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
+from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
+from .environments import get_environment, slugify
 from .options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -78,6 +82,7 @@ _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", 
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
 _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
+_SANDBOX_CREATING_SENTINEL = "__creating__"
 
 
 async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
@@ -404,6 +409,9 @@ async def _thread_summary(
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
+    working_repo = metadata.get("working_repo_full_name")
+    if not isinstance(working_repo, str) or working_repo.count("/") != 1:
+        working_repo = None
     created_at = metadata.get("created_at_ms")
     updated_at = metadata.get("updated_at_ms")
     title = metadata.get("title") if isinstance(metadata.get("title"), str) else "Untitled agent"
@@ -425,10 +433,11 @@ async def _thread_summary(
     trace_url = await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
 
     raw_sandbox_id = metadata.get("sandbox_id")
-    # "__creating__" is the in-flight sentinel written before the real id lands.
     sandbox_id = (
         raw_sandbox_id
-        if isinstance(raw_sandbox_id, str) and raw_sandbox_id and raw_sandbox_id != "__creating__"
+        if isinstance(raw_sandbox_id, str)
+        and raw_sandbox_id
+        and raw_sandbox_id != _SANDBOX_CREATING_SENTINEL
         else None
     )
 
@@ -437,10 +446,13 @@ async def _thread_summary(
         "title": title,
         "repo": name,
         "repoFullName": full_name,
+        "workingRepoFullName": working_repo,
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
         "planMode": metadata.get("plan_mode") is True,
+        "adminThread": metadata.get("admin_thread") is True,
+        "environment": metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
         "source": _thread_source(metadata),
         "status": status,
@@ -1013,6 +1025,29 @@ async def _mark_thread_viewed(
     return {**metadata, **metadata_update}
 
 
+async def get_dashboard_terminal_sandbox(
+    thread_id: str, login: str, *, email: str | None = None
+) -> tuple[str, str | None]:
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+    metadata = thread_metadata(thread)
+    _assert_thread_owner(metadata, login, email)
+    sandbox_id = metadata.get("sandbox_id")
+    if (
+        not isinstance(sandbox_id, str)
+        or not sandbox_id
+        or sandbox_id == _SANDBOX_CREATING_SENTINEL
+    ):
+        raise HTTPException(404, "thread sandbox is not ready")
+    repo_name = metadata.get("repo_name")
+    if not isinstance(repo_name, str) or posixpath.basename(repo_name) != repo_name:
+        repo_name = None
+    return sandbox_id, repo_name
+
+
 async def get_dashboard_thread(
     thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
 ) -> dict[str, Any]:
@@ -1059,6 +1094,21 @@ async def get_dashboard_thread(
     )
 
 
+async def _resolve_requested_environment(requested: Any) -> str | None:
+    """Normalize a requested environment slug, dropping one that does not exist.
+
+    The picker only offers configured environments, so a miss means a stale client
+    — the thread falls back to the default rather than booting from nothing.
+    """
+    if not isinstance(requested, str) or not requested.strip():
+        return None
+    try:
+        slug = slugify(requested)
+    except ValueError:
+        return None
+    return slug if await get_environment(slug) is not None else None
+
+
 def _resolve_repo_config(repo: str | None) -> dict[str, str]:
     """Resolve the run's repo from the request, or ``{}`` when none is given."""
     return _parse_repo(repo) or {}
@@ -1076,6 +1126,8 @@ async def _create_dashboard_thread_record(
     model_id: str | None = None,
     effort: str | None = None,
     plan_mode: bool = False,
+    admin_thread: bool = False,
+    environment: str | None = None,
 ) -> dict[str, Any]:
     """Create or update dashboard thread metadata without starting a run."""
     profile = await get_profile(login) or {}
@@ -1099,6 +1151,7 @@ async def _create_dashboard_thread_record(
     metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
         "github_login": login,
+        PARTICIPANT_LOGINS_KEY: [login],
         "title": initial_title,
         "base_branch": profile.get("base_branch") or "main",
         "branch_prefix": profile.get("branch_prefix"),
@@ -1110,6 +1163,10 @@ async def _create_dashboard_thread_record(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
+    if admin_thread:
+        metadata["admin_thread"] = True
+    if environment:
+        metadata["environment"] = environment
     if not title:
         metadata["title_seed"] = initial_title
     if has_repo:
@@ -1159,6 +1216,13 @@ async def _build_dashboard_configurable(
             configurable.setdefault(key, value)
     if metadata.get("plan_mode") is True:
         configurable["plan_mode"] = True
+    # The agent re-checks the requesting user against CONFIGURED_ADMINS before it
+    # hands out the environment tools, so this only marks intent.
+    if metadata.get("admin_thread") is True:
+        configurable["admin_thread"] = True
+    environment = metadata.get("environment")
+    if isinstance(environment, str) and environment:
+        configurable["environment"] = environment
     if overrides:
         for key, value in overrides.items():
             if value is not None:
@@ -1330,6 +1394,12 @@ async def _enrich_run_start_command(
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             plan_mode=plan_mode_requested,
+            admin_thread=(
+                client_configurable.get("admin_thread") is True and is_admin(email, login=login)
+            ),
+            environment=await _resolve_requested_environment(
+                client_configurable.get("environment")
+            ),
         )
         metadata = thread_metadata(thread)
         if command_images:
@@ -1362,6 +1432,9 @@ async def _enrich_run_start_command(
         metadata_update: dict[str, Any] = {
             "source": _DASHBOARD_SOURCE,
             "plan_mode": plan_mode_requested,
+            PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+                metadata.get(PARTICIPANT_LOGINS_KEY), login
+            ),
         }
         if command_images and run_model and run_effort:
             overrides["agent_model_id"] = run_model
@@ -1463,6 +1536,9 @@ async def send_dashboard_message(
         "source": _DASHBOARD_SOURCE,
         "updated_at_ms": now_ms,
         "plan_mode": body.plan_mode,
+        PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+            metadata.get(PARTICIPANT_LOGINS_KEY), login
+        ),
     }
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model
@@ -1967,14 +2043,42 @@ async def get_dashboard_thread_turn_diff(
     if index < 0 or not checkpoints or not isinstance(sandbox_id, str) or not sandbox_id:
         return {"status": "missing", "files": [], "truncated": False}
 
+    checkpoint = checkpoints[index]
+    plan_ref = checkpoint.get("plan_ref")
+    if (
+        turn_key is not None
+        and checkpoint.get("plan_mode") is True
+        and (not isinstance(plan_ref, str) or plan_ref == checkpoint.get("ref"))
+    ):
+        return {"status": "ready", "files": [], "truncated": False}
+
+    head = plan_ref if turn_key is not None and isinstance(plan_ref, str) else None
+    if head is None and turn_key and index + 1 < len(checkpoints):
+        next_checkpoint = checkpoints[index + 1]
+        repo_path = checkpoint.get("repo_path")
+        next_repo_path = next_checkpoint.get("repo_path")
+        if (
+            isinstance(repo_path, str)
+            and isinstance(next_repo_path, str)
+            and repo_path != next_repo_path
+        ):
+            return {"status": "missing", "files": [], "truncated": False}
+        head = next_checkpoint["ref"]
+
     try:
         sandbox = await create_sandbox(sandbox_id)
     except Exception:  # noqa: BLE001
         logger.debug("Could not connect to sandbox %s for turn diff", sandbox_id, exc_info=True)
         return {"status": "missing", "files": [], "truncated": False}
 
-    head = checkpoints[index + 1]["ref"] if turn_key and index + 1 < len(checkpoints) else None
-    return await read_turn_diff(sandbox, None, str(checkpoints[index]["ref"]), head)
+    repo_path = checkpoint.get("repo_path")
+    return await read_turn_diff(
+        sandbox,
+        None,
+        str(checkpoint["ref"]),
+        head,
+        repo_path=repo_path if isinstance(repo_path, str) else None,
+    )
 
 
 async def get_dashboard_thread_pr_diff(

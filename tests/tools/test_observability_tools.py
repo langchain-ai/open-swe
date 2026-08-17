@@ -95,6 +95,7 @@ async def test_load_notion_tools_returns_wrappers() -> None:
     assert tools[0].name == "notion_search"
     assert tools[0].description == discovered.description
     schema = cast("dict[str, Any]", tools[0].args_schema)
+    assert "query" in schema["properties"]
     assert "on_behalf_of" in schema["properties"]
     assert "on_behalf_of" in schema["required"]
     assert tools[0].response_format == "content"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -73,7 +74,7 @@ async def generate_and_store_thread_title(
     expected_title = metadata.get("title")
     title_seed = metadata.get("title_seed")
     if (
-        metadata.get("source") != "dashboard"
+        metadata.get("source") not in {"dashboard", "slack"}
         or not isinstance(title_seed, str)
         or expected_title != title_seed
     ):
@@ -85,7 +86,10 @@ async def generate_and_store_thread_title(
             [
                 SystemMessage(content=_TITLE_SYSTEM_PROMPT),
                 HumanMessage(content=user_message),
-            ]
+            ],
+            # Empty callbacks, so this call cannot inherit the run's handlers and
+            # stream its tokens into the thread the user is watching.
+            config={"callbacks": [], "run_name": "thread-title"},
         )
     if not isinstance(result, _ThreadTitle):
         return
@@ -131,6 +135,10 @@ def schedule_thread_title_generation(
         finally:
             _inflight_thread_ids.discard(thread_id)
 
-    task = asyncio.get_running_loop().create_task(run())
+    # A fresh context, not the caller's: an inherited context carries LangGraph's
+    # stream writer, and this call's structured-output chunks would then be
+    # emitted into the run's message stream — rendering as a bogus assistant
+    # message and derailing the client's assembly of every later chunk.
+    task = asyncio.get_running_loop().create_task(run(), context=contextvars.Context())
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)

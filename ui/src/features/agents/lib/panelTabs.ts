@@ -7,6 +7,7 @@ export interface PanelTab {
   kind: PanelTabKind
   /** Overrides the kind's default label (terminal tabs use the shell label). */
   title?: string
+  closable?: boolean
 }
 
 export interface PanelTabsState {

@@ -1,4 +1,6 @@
 import { StartClient } from "@tanstack/react-start/client"
-import { hydrateRoot } from "react-dom/client"
+import { createRoot, hydrateRoot } from "react-dom/client"
 
-hydrateRoot(document, <StartClient />)
+const app = <StartClient />
+if (window.openSweDesktop) createRoot(document).render(app)
+else hydrateRoot(document, app)
