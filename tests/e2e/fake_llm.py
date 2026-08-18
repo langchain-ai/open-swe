@@ -426,6 +426,17 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-breakout-reply",
         ),
     ),
+    "move": (
+        _tool_step(
+            "Moving the Slack thread to its destination channel.",
+            "slack_move_thread",
+            {
+                "message": "Continue the existing Open SWE task in this channel.",
+                "channel_id": "C_TARGET",
+            },
+            "call-move",
+        ),
+    ),
     "plan": (
         _tool_step(
             "This is worth planning first — entering plan mode.",
@@ -466,6 +477,10 @@ def _is_breakout_request(text: str) -> bool:
     return "break out" in t or "separate thread" in t or "split out" in t
 
 
+def _is_move_request(text: str) -> bool:
+    return "E2E_MOVE_THREAD" in text
+
+
 def _is_approval(text: str) -> bool:
     t = text.lower()
     return "approved" in t and "implement" in t
@@ -486,6 +501,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "breakout", lambda ctx: ctx.human_count <= 1 and _is_breakout_request(ctx.first_text)
     ),
+    ScriptRule("move", lambda ctx: ctx.human_count <= 1 and _is_move_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: ctx.human_count <= 1),
     ScriptRule("followup", lambda _ctx: True),
 )
