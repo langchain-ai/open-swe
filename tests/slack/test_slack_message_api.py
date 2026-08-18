@@ -150,12 +150,12 @@ async def test_post_slack_thread_reply_with_ts_sends_blocks(
     client_cm = _async_client_cm(_ok_response())
     with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
         result = await slack_utils.post_slack_thread_reply_with_ts(
-            "C1", "1.0", "Pick", blocks=blocks
+            "C1", "1.0", "Pick", blocks=blocks, agent_thread_id="mapped-thread"
         )
 
     assert result == ("1.0", None)
     payload = client_cm.post.call_args.kwargs["json"]
-    expected_footer = f"<{slack_utils._slack_thread_dashboard_url('C1', '1.0')}|Open in Web>"
+    expected_footer = f"<{slack_utils.dashboard_thread_url('mapped-thread')}|Open in Web>"
     assert payload["text"] == f"Pick {expected_footer}"
     assert payload["blocks"] == [
         *blocks,

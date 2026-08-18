@@ -1,12 +1,10 @@
-from __future__ import annotations
-
+import builtins
 from typing import Any
 
 import pytest
 
 from agent.utils import slack_stop
 from agent.utils.slack_stop import process_slack_stop_reaction
-from agent.utils.thread_ids import generate_thread_id_from_slack_thread
 
 
 class FakeStore:
@@ -56,7 +54,9 @@ class FakeRuns:
         del thread_id
         return self.by_status[status][offset : offset + limit]
 
-    async def cancel_many(self, *, thread_id: str, run_ids: list[str], action: str) -> None:
+    async def cancel_many(
+        self, *, thread_id: str, run_ids: builtins.list[str], action: str
+    ) -> None:
         if self.fail_cancel:
             raise RuntimeError("cancel failed")
         self.cancelled.append({"thread_id": thread_id, "run_ids": run_ids, "action": action})
@@ -79,7 +79,10 @@ def _event(message_ts: str, *, user_id: str = "UOTHER") -> dict[str, Any]:
 
 
 def _add_thread(client: FakeClient, thread_ts: str = "1.000") -> str:
-    thread_id = generate_thread_id_from_slack_thread("C123", thread_ts)
+    thread_id = f"thread-{thread_ts}"
+    client.store.items[(("slack_thread_map", "C123"), thread_ts)] = {
+        "value": {"thread_id": thread_id, "channel_id": "C123", "thread_ts": thread_ts}
+    }
     client.threads.values[thread_id] = {
         "thread_id": thread_id,
         "metadata": {

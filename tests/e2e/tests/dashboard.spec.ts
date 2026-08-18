@@ -191,6 +191,36 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toHaveCount(0);
   });
 
+  test("keeps sent Slack messages visible while work is folded", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    await expectTranscriptVisible(page);
+
+    const worked = page.getByRole("button", { name: /^Worked(?: for .+)?$/ });
+    const acknowledgement = page.getByText("On it!", { exact: true });
+    const edit = page.getByRole("button", { name: "Edited greet.py" });
+
+    await expect(worked).toBeVisible();
+    await expect(acknowledgement).toBeVisible();
+    await expect(edit).toHaveCount(0);
+
+    await worked.click();
+    await expect(edit).toBeVisible();
+    await expect(acknowledgement).toBeVisible();
+    expect(
+      await acknowledgement.evaluate(
+        (message, entry) =>
+          Boolean(
+            message.compareDocumentPosition(entry) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        await edit.elementHandle(),
+      ),
+    ).toBe(true);
+  });
+
   test("expands an Edit call into a highlighted inline diff", async ({
     page,
   }) => {
@@ -232,7 +262,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     expect(threadId).not.toBe("");
     await waitForThreadIdle(page, threadId);
 
-    await page.getByRole("link", { name: "New Agent" }).click();
+    await page.getByRole("link", { name: "New Thread" }).click();
     await expect(page).toHaveURL(/\/agents\/?$/);
     await page.goBack();
     await expect(page).toHaveURL(new RegExp(`/agents/${threadId}$`));

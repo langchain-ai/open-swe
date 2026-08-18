@@ -10,12 +10,13 @@ from langchain.agents.middleware import AgentMiddleware, AgentState, hook_config
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
+from langgraph_sdk import get_client
 
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import post_github_comment
 from ..utils.github_token import get_github_token
 from ..utils.linear import comment_on_linear_issue
-from ..utils.slack import post_slack_thread_reply
+from ..utils.slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
 from ..utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
@@ -127,12 +128,18 @@ def _sandbox_error_streak(messages: Sequence[BaseMessage]) -> SandboxErrorStreak
     return SandboxErrorStreak(sandbox_id=sandbox_id, count=count)
 
 
-def _get_slack_target(configurable: Mapping[str, Any]) -> tuple[str, str] | None:
+async def _get_slack_target(configurable: Mapping[str, Any]) -> tuple[str, str] | None:
     slack_thread = configurable.get("slack_thread")
-    if not isinstance(slack_thread, Mapping):
+    thread_id = configurable.get("thread_id")
+    active = await get_active_slack_thread(
+        get_client(url=LANGGRAPH_URL),
+        thread_id if isinstance(thread_id, str) else None,
+        slack_thread if isinstance(slack_thread, Mapping) else None,
+    )
+    if not active:
         return None
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
+    channel_id = active.get("channel_id")
+    thread_ts = active.get("thread_ts")
     if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
         return None
     if not channel_id or not thread_ts:
@@ -208,10 +215,14 @@ async def post_sandbox_unreachable_notification(
         replacement_attempted=replacement_attempted,
     )
 
-    slack_target = _get_slack_target(configurable)
+    slack_target = await _get_slack_target(configurable)
     if slack_target is not None:
         channel_id, thread_ts = slack_target
-        await post_slack_thread_reply(channel_id, thread_ts, message)
+        thread_id = configurable.get("thread_id")
+        if isinstance(thread_id, str) and thread_id:
+            await post_slack_thread_reply(channel_id, thread_ts, message, agent_thread_id=thread_id)
+        else:
+            await post_slack_thread_reply(channel_id, thread_ts, message)
         logger.info("Sent sandbox circuit breaker notification to Slack thread %s", thread_ts)
         return
 

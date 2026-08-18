@@ -75,5 +75,11 @@ async def test_save_user_instructions_writes_record() -> None:
         patch("agent.tools.save_user_instructions.set_user_instructions", mock_set),
     ):
         result = await save_user_instructions("  Always run tests.  ")
-    assert result == {"ok": True, "login": "octo", "instructions": "Always run tests."}
+    assert result["ok"] is True
+    assert result["login"] == "octo"
+    assert result["instructions"] == "Always run tests."
+    # The updated text is delivered as a new message, never by rewriting the
+    # thread's system prompt, which would invalidate its prefix cache.
+    assert "Always run tests." in result["reminder"]
+    assert result["reminder"].startswith("<system-reminder>")
     mock_set.assert_awaited_once_with("octo", "Always run tests.", updated_by="open-swe")

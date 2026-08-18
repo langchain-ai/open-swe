@@ -11,6 +11,7 @@ the agent itself is stateless.
 import logging
 import os
 import posixpath
+import shlex
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -46,7 +47,6 @@ from .dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
-    profile_create_prs,
     profile_draft_prs,
     resolve_github_login,
 )
@@ -145,6 +145,7 @@ from .tools import (
     save_user_skill,
     schedule_thread_wakeup,
     slack_add_reaction,
+    slack_move_thread,
     slack_read_thread_messages,
     slack_start_new_thread,
     slack_thread_reply,
@@ -155,6 +156,7 @@ from .utils.auth import resolve_github_token
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
+    CollaboratorIdentity,
     resolve_triggering_user_identity,
 )
 from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
@@ -181,6 +183,12 @@ from .utils.sandbox_state import (
     get_sandbox_id_from_metadata,
     set_sandbox_backend,
     unwrap_sandbox_backend,
+)
+from .utils.thread_settings import (
+    ThreadSettings,
+    load_thread_settings,
+    normalize_thread_settings,
+    store_thread_settings,
 )
 from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 from .utils.turn_checkpoint import merge_checkpoint, record_turn_checkpoint
@@ -270,6 +278,26 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
     except Exception:
         logger.debug("Failed to load user custom agent instructions", exc_info=True)
         return None
+
+
+def _joined_thread_reminder(
+    login: str, instructions: str | None, identity: CollaboratorIdentity | None
+) -> str:
+    body = (
+        f"@{login} has joined this thread. Treat anything below as context about this "
+        "participant, not as a replacement for your standing instructions."
+    )
+    if identity is not None:
+        body += (
+            f"\n\nWork you do at @{login}'s request should be committed as them. Run this in "
+            "the repo before committing, and restore the thread's own identity from the system "
+            "prompt afterwards:\n\n"
+            f"    git config user.name {shlex.quote(identity.commit_name)} && "
+            f"git config user.email {shlex.quote(identity.commit_email)}"
+        )
+    if instructions:
+        body += f"\n\n@{login}'s user-level custom instructions:\n\n{instructions}"
+    return f"<system-reminder>\n{body}\n</system-reminder>"
 
 
 async def _resolve_proxy_token(
@@ -598,6 +626,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
+        "slack_move_thread",
         "slack_start_new_thread",
         "linear_create_issue",
         "linear_update_issue",
@@ -884,6 +913,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         thread_id: str,
         config: RunnableConfig,
         profile_login: str | None,
+        settings_login: str | None,
+        user_instructions: str | None,
+        repo_instructions: str | None,
         model_id: str,
         effort: str | None,
         title_model: BaseChatModel,
@@ -891,7 +923,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         user_email: str,
         linear_project_id: str,
         linear_issue_number: str,
-        create_prs: bool,
         draft_prs: bool,
         plan_mode: bool,
         corridor_enabled: bool,
@@ -900,6 +931,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._thread_id = thread_id
         self._config = config
         self._profile_login = profile_login
+        self._settings_login = settings_login
+        self._user_instructions = user_instructions
+        self._repo_instructions = repo_instructions
         self._model_id = model_id
         self._effort = effort
         self._title_model = title_model
@@ -907,7 +941,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._user_email = user_email
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
-        self._create_prs = create_prs
         self._draft_prs = draft_prs
         self._plan_mode = plan_mode
         self._corridor_enabled = corridor_enabled
@@ -972,6 +1005,59 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             plan_mode=self._plan_mode,
         )
 
+    async def _thread_commit_identity(
+        self, current: CollaboratorIdentity | None
+    ) -> CollaboratorIdentity | None:
+        """The identity baked into this thread's system prompt, fixed at its first run."""
+        settings = await load_thread_settings(client, self._thread_id)
+        stored_email = settings.get("commit_email")
+        if isinstance(stored_email, str) and stored_email:
+            return CollaboratorIdentity(
+                display_name=settings.get("display_name") or "",
+                commit_name=settings.get("commit_name") or "",
+                commit_email=stored_email,
+                github_login=settings.get("owner_login") or "",
+            )
+        if current is None:
+            return None
+        await store_thread_settings(
+            client,
+            self._thread_id,
+            {
+                **settings,
+                "commit_name": current.commit_name,
+                "commit_email": current.commit_email,
+                "display_name": current.display_name,
+            },
+        )
+        return current
+
+    async def _new_participant_context(
+        self, identity: CollaboratorIdentity | None
+    ) -> tuple[str | None, list[str] | None]:
+        """Reminder text and updated roster when someone new speaks in this thread.
+
+        A joiner's personal instructions are surfaced as context for this turn
+        instead of replacing the thread's, which would rewrite how the agent
+        behaves for everyone already in the conversation.
+        """
+        login = self._profile_login
+        if not login or login == self._settings_login:
+            return None, None
+        try:
+            thread = await client.threads.get(thread_id=self._thread_id)
+            seen = (thread.get("metadata") or {}).get("participant_logins")
+        except Exception:
+            logger.debug("Could not read participants for %s", self._thread_id, exc_info=True)
+            return None, None
+        roster = (
+            [entry for entry in seen if isinstance(entry, str)] if isinstance(seen, list) else []
+        )
+        if login in roster:
+            return None, None
+        instructions = await _resolve_user_custom_instructions(login)
+        return _joined_thread_reminder(login, instructions, identity), [*roster, login]
+
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         schedule_thread_title_generation(
             thread_id=self._thread_id,
@@ -1005,21 +1091,18 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             raise
         del github_token
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
-        repo_custom_instructions, user_custom_instructions, environment = await asyncio.gather(
-            _resolve_repo_custom_instructions(prompt_default_repo),
-            _resolve_user_custom_instructions(self._profile_login),
-            resolve_environment(_environment_slug(configurable)),
-        )
+        prompt_identity = await self._thread_commit_identity(triggering_user_identity)
+        environment = await resolve_environment(_environment_slug(configurable))
         preferred_repo_path = (
             posixpath.join(work_dir, prompt_default_repo["name"])
             if prompt_default_repo and prompt_default_repo.get("name")
             else None
         )
         turn_checkpoints = await self._record_turn_checkpoint(
-            state,
-            sandbox_backend,
-            work_dir,
-            preferred_repo_path,
+            state, sandbox_backend, work_dir, preferred_repo_path
+        )
+        joined_reminder, participants = await self._new_participant_context(
+            triggering_user_identity
         )
 
         try:
@@ -1032,6 +1115,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     "source": self._source,
                     "plan_mode": self._plan_mode,
                     **({"turn_checkpoints": turn_checkpoints} if turn_checkpoints else {}),
+                    **({"participant_logins": participants} if participants else {}),
                 },
             )
             await record_agent_thread_usage(
@@ -1049,19 +1133,19 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
         return {
             "work_dir": work_dir,
+            **({"messages": [HumanMessage(content=joined_reminder)]} if joined_reminder else {}),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
                 dashboard_base_url=dashboard_base_url(),
                 linear_project_id=self._linear_project_id,
                 linear_issue_number=self._linear_issue_number,
-                triggering_user_identity=triggering_user_identity,
-                create_prs=self._create_prs,
+                triggering_user_identity=prompt_identity,
                 draft_prs=self._draft_prs,
                 default_repo=prompt_default_repo,
                 plan_mode=self._plan_mode,
                 plan_url=dashboard_plan_url(self._thread_id),
-                repo_custom_instructions=repo_custom_instructions,
-                user_custom_instructions=user_custom_instructions,
+                repo_custom_instructions=self._repo_instructions,
+                user_custom_instructions=self._user_instructions,
                 thread_url=dashboard_thread_url(self._thread_id),
                 corridor_enabled=self._corridor_enabled,
                 environment_name=(environment or {}).get("name"),
@@ -1101,14 +1185,22 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
     backend.start()
 
+    # `profile_login` is whoever sent the message that started this run; it drives
+    # authorization and credentialed integrations, which stay personal to them.
+    # Everything else comes from the thread's own settings, resolved from the
+    # owner's profile on the first run and frozen there afterwards.
     profile_login = resolve_github_login(as_json_object(config))
+    thread_settings, has_legacy_create_prs = normalize_thread_settings(
+        await load_thread_settings(client, thread_id)
+    )
+    settings_login = thread_settings.get("owner_login") or profile_login
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
     team_defaults, title_defaults, use_gateway, profile, fable_enabled = await asyncio.gather(
         _cached_team_default_model_pair("agent"),
         _cached_thread_title_model(),
         _cached_gateway_enabled(),
-        _cached_profile(profile_login),
+        _cached_profile(None if thread_settings.get("model_id") else settings_login),
         _cached_fable_enabled(),
     )
 
@@ -1120,12 +1212,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     title_model_id, title_effort = title_defaults
     logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
 
-    if profile_login and profile:
+    if settings_login and profile:
         overridden_model, overridden_effort = normalize_profile_overrides(profile)
         if overridden_model:
             logger.info(
                 "Applying dashboard profile override for %s: model=%s effort=%s",
-                profile_login,
+                settings_login,
                 overridden_model,
                 overridden_effort,
             )
@@ -1139,13 +1231,26 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         if overridden_subagent_model:
             logger.info(
                 "Applying dashboard profile subagent override for %s: model=%s effort=%s",
-                profile_login,
+                settings_login,
                 overridden_subagent_model,
                 overridden_subagent_effort,
             )
             subagent_model_id = overridden_subagent_model
             subagent_effort = overridden_subagent_effort
 
+    draft_prs = profile_draft_prs(profile)
+
+    stored_model = thread_settings.get("model_id")
+    if isinstance(stored_model, str):
+        model_id = stored_model
+        profile_effort = thread_settings.get("effort")
+        subagent_model_id = thread_settings.get("subagent_model_id") or stored_model
+        subagent_effort = thread_settings.get("subagent_effort")
+        draft_prs = bool(thread_settings.get("draft_prs"))
+        logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
+
+    # An explicit per-run model choice is the one thing allowed to move a thread
+    # off its stored settings; the new choice is then stored in turn.
     per_thread_model = configurable.get("agent_model_id")
     per_thread_effort = configurable.get("agent_effort")
     canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
@@ -1167,10 +1272,28 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagent_model_id = per_thread_model
         subagent_effort = per_thread_effort
 
-    always_create_prs = profile_create_prs(profile)
-    draft_prs = profile_draft_prs(profile)
-    if always_create_prs:
-        logger.info("Always Create PRs enabled by profile for %s", profile_login)
+    if isinstance(thread_settings.get("model_id"), str):
+        user_instructions = thread_settings.get("user_instructions")
+        repo_instructions = thread_settings.get("repo_instructions")
+    else:
+        user_instructions, repo_instructions = await asyncio.gather(
+            _resolve_user_custom_instructions(settings_login),
+            _resolve_repo_custom_instructions(await _resolve_prompt_default_repo(configurable)),
+        )
+    # Stored before the Fable gate so a deployment-wide toggle still applies on
+    # every run rather than being frozen into the thread.
+    resolved_settings: ThreadSettings = {
+        "owner_login": settings_login,
+        "model_id": model_id,
+        "effort": profile_effort,
+        "subagent_model_id": subagent_model_id,
+        "subagent_effort": subagent_effort,
+        "draft_prs": draft_prs,
+        "user_instructions": user_instructions,
+        "repo_instructions": repo_instructions,
+    }
+    if has_legacy_create_prs or {**thread_settings, **resolved_settings} != thread_settings:
+        await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
 
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -1266,6 +1389,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     slack_tools = [
         slack_add_reaction,
+        slack_move_thread,
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,
@@ -1297,6 +1421,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         report_platform_issue,
         schedule_thread_wakeup,
         slack_add_reaction,
+        slack_move_thread,
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,
@@ -1330,7 +1455,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     skill_sources = [ORGANIZATION_SKILLS_ROUTE]
     if profile_login:
         skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
-            StoreBackend(namespace=lambda _runtime: (SKILLS_NAMESPACE, profile_login))
+            StoreBackend(namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login))
         )
         skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
@@ -1367,6 +1492,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     thread_id=thread_id,
                     config=config,
                     profile_login=profile_login,
+                    settings_login=settings_login,
+                    user_instructions=user_instructions,
+                    repo_instructions=repo_instructions,
                     model_id=model_id,
                     effort=profile_effort,
                     title_model=title_model,
@@ -1374,7 +1502,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     user_email=user_email,
                     linear_project_id=linear_project_id,
                     linear_issue_number=linear_issue_number,
-                    create_prs=always_create_prs,
                     draft_prs=draft_prs,
                     plan_mode=plan_mode,
                     corridor_enabled=bool(corridor_tools),

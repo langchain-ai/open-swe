@@ -211,6 +211,7 @@ async def approve_plan_for_thread(
     run = await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
     await _maybe_post_plan_approved_to_slack(
         metadata,
+        thread_id=thread_id,
         comment_count=len(comments),
         actor=actor,
     )
@@ -271,7 +272,7 @@ def _plan_approved_slack_blocks(text: str) -> list[dict[str, Any]]:
 
 
 async def _maybe_post_plan_approved_to_slack(
-    metadata: dict[str, Any], *, comment_count: int, actor: str
+    metadata: dict[str, Any], *, thread_id: str, comment_count: int, actor: str
 ) -> None:
     slack_thread = _slack_thread_from_metadata(metadata)
     if slack_thread is None:
@@ -284,6 +285,7 @@ async def _maybe_post_plan_approved_to_slack(
             thread_ts,
             text,
             blocks=_plan_approved_slack_blocks(text),
+            agent_thread_id=thread_id,
         )
     except Exception:
         logger.warning("Could not post plan approval Slack reply", exc_info=True)
