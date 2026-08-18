@@ -190,7 +190,7 @@ export function AgentsSidebar({
           className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
         >
           <PlusIcon className="size-4" />
-          New Agent
+          New Thread
         </Link>
       </div>
 
