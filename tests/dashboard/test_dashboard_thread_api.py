@@ -1026,8 +1026,10 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
         async def __aexit__(self, *a: object) -> None:
             pass
 
-        async def post(self, *a: object, **kw: object) -> FakeResponse:
-            posted.append(kw["json"])
+        async def post(
+            self, url: str, *, json: dict[str, object], headers: dict[str, str]
+        ) -> FakeResponse:
+            posted.append(json)
             return FakeResponse()
 
     posted: list[dict[str, object]] = []
