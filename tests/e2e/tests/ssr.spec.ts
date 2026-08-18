@@ -14,7 +14,7 @@ test.describe("server rendering", () => {
 
   test("the login page arrives server-rendered", async ({ request }) => {
     const html = await (await request.get("/login")).text();
-    expect(html).toContain("Sign in to open-swe");
+    expect(html).toContain("Sign in to Open SWE");
   });
 
   test("an authenticated route is rendered with the session already resolved", async ({
