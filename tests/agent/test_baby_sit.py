@@ -5,15 +5,17 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+from langgraph_sdk.errors import ConflictError
 
 from agent import baby_sit, scheduler
 from agent.utils.slack import GitHubPrRef
 
 
 class _Store:
-    def __init__(self) -> None:
-        self.values: dict[str, dict[str, Any]] = {}
+    def __init__(self, values: dict[str, dict[str, Any]] | None = None) -> None:
+        self.values = values if values is not None else {}
 
     async def get_item(self, _namespace, key: str):
         value = self.values.get(key)
@@ -50,10 +52,35 @@ class _Crons:
         self.deleted.append(cron_id)
 
 
+class _Threads:
+    def __init__(self, active: set[str]) -> None:
+        self.active = active
+        self.deleted: list[str] = []
+        self.create_lock = asyncio.Lock()
+
+    async def create(self, *, thread_id: str, if_exists: str, ttl: int) -> None:
+        assert if_exists == "raise"
+        assert ttl == baby_sit.WATCH_LOCK_TTL_MINUTES
+        async with self.create_lock:
+            if thread_id in self.active:
+                response = httpx.Response(409, request=httpx.Request("POST", "http://test"))
+                raise ConflictError("already exists", response=response, body=None)
+            self.active.add(thread_id)
+
+    async def delete(self, thread_id: str) -> None:
+        self.active.discard(thread_id)
+        self.deleted.append(thread_id)
+
+
 class _Client:
-    def __init__(self) -> None:
-        self.store = _Store()
+    def __init__(
+        self,
+        values: dict[str, dict[str, Any]] | None = None,
+        active_threads: set[str] | None = None,
+    ) -> None:
+        self.store = _Store(values)
         self.crons = _Crons()
+        self.threads = _Threads(active_threads if active_threads is not None else set())
 
 
 @pytest.fixture
@@ -61,6 +88,13 @@ def watch_client(monkeypatch: pytest.MonkeyPatch) -> _Client:
     client = _Client()
     monkeypatch.setattr(baby_sit, "_client", lambda: client)
     return client
+
+
+@pytest.fixture
+def shared_watch_clients() -> tuple[_Client, _Client]:
+    values: dict[str, dict[str, Any]] = {}
+    active_threads: set[str] = set()
+    return _Client(values, active_threads), _Client(values, active_threads)
 
 
 async def _start_watch(client: _Client) -> baby_sit.BabySitWatch:
@@ -85,6 +119,7 @@ async def test_watch_lifecycle_creates_and_deletes_ten_minute_cron(
     watch = await _start_watch(watch_client)
 
     assert watch["key"] == "acme/repo#7"
+    assert watch_client.threads.deleted == []
     assert watch_client.crons.created[0]["schedule"] == "*/10 * * * *"
     assert watch_client.crons.created[0]["input"] == {
         "task": "baby_sit",
@@ -164,9 +199,11 @@ async def test_failure_dispatch_is_deduplicated_until_retry_is_recorded(
 
 
 async def test_concurrent_failure_evaluations_dispatch_once(
-    watch_client: _Client, monkeypatch: pytest.MonkeyPatch
+    shared_watch_clients: tuple[_Client, _Client], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    await _start_watch(watch_client)
+    first_client, second_client = shared_watch_clients
+    monkeypatch.setattr(baby_sit, "_client", lambda: first_client)
+    await _start_watch(first_client)
     monkeypatch.setattr(baby_sit, "get_github_app_installation_token", AsyncMock(return_value="t"))
     monkeypatch.setattr(
         baby_sit,
@@ -183,16 +220,27 @@ async def test_concurrent_failure_evaluations_dispatch_once(
         ),
     )
     monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
-    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    dispatch_started = asyncio.Event()
+    release_dispatch = asyncio.Event()
+
+    async def dispatch_run(*_args: Any, **_kwargs: Any) -> dict[str, str]:
+        dispatch_started.set()
+        await release_dispatch.wait()
+        return {"run_id": "run-1"}
+
+    dispatch = AsyncMock(side_effect=dispatch_run)
     monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
 
-    results = await asyncio.gather(
-        baby_sit.evaluate_watch("acme/repo#7"),
-        baby_sit.evaluate_watch("acme/repo#7"),
-    )
+    first = asyncio.create_task(baby_sit.evaluate_watch("acme/repo#7"))
+    await dispatch_started.wait()
+    monkeypatch.setattr(baby_sit, "_client", lambda: second_client)
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "busy"
+    release_dispatch.set()
 
-    assert sorted(results) == ["dispatched", "duplicate"]
+    assert await first == "dispatched"
     dispatch.assert_awaited_once()
+    monkeypatch.setattr(baby_sit, "_client", lambda: first_client)
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
 
 
 async def test_success_waits_for_stable_check_set_before_notifying(

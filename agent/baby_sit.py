@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
+import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict, cast
-from weakref import WeakValueDictionary
 
 from langgraph_sdk import get_client
+from langgraph_sdk.errors import ConflictError
 
 from .dispatch import dispatch_agent_run
 from .utils.github_app import get_github_app_installation_token
@@ -37,7 +39,31 @@ MAX_DELIVERY_IDS = 50
 MAX_ALERT_KEYS = 30
 MAX_EVALUATION_ERRORS = 3
 CHECK_SET_SETTLE_MINUTES = 10
-_watch_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+WATCH_LOCK_TTL_MINUTES = 5
+
+
+@asynccontextmanager
+async def _watch_lock(key: str) -> AsyncIterator[bool]:
+    client = _client()
+    lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:baby-sit-lock:{key}"))
+    try:
+        await client.threads.create(
+            thread_id=lock_id, if_exists="raise", ttl=WATCH_LOCK_TTL_MINUTES
+        )
+    except ConflictError:
+        yield False
+        return
+    except Exception:
+        logger.warning("Failed to acquire baby-sit lock for %s", key, exc_info=True)
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        try:
+            await client.threads.delete(lock_id)
+        except Exception:
+            logger.warning("Failed to release baby-sit lock for %s", key, exc_info=True)
 
 
 class BabySitWatch(TypedDict):
@@ -67,14 +93,6 @@ class BabySitWatch(TypedDict):
 
 def _client():
     return get_client()
-
-
-def _watch_lock(key: str) -> asyncio.Lock:
-    lock = _watch_locks.get(key)
-    if lock is None:
-        lock = asyncio.Lock()
-        _watch_locks[key] = lock
-    return lock
 
 
 def watch_key(owner: str, repo: str, pr_number: int) -> str:
@@ -108,15 +126,13 @@ async def _put_watch(watch: BabySitWatch) -> BabySitWatch:
 
 
 async def list_active_watches(
-    *, owner: str | None = None, repo: str | None = None, head_sha: str | None = None
+    *, owner: str | None = None, repo: str | None = None
 ) -> list[BabySitWatch]:
     filter: dict[str, Any] = {"active": True}
     if owner:
         filter["owner"] = owner.strip().lower()
     if repo:
         filter["repo"] = repo.strip().lower()
-    if head_sha:
-        filter["head_sha"] = head_sha
 
     watches: list[BabySitWatch] = []
     offset = 0
@@ -322,24 +338,18 @@ def _failure_signals(
 ) -> list[dict[str, Any]]:
     failures = [
         {
-            "kind": "check",
-            "id": run.get("id"),
             "name": run.get("name") or "check",
             "conclusion": run.get("conclusion") or "failure",
             "url": run.get("details_url") or run.get("html_url") or "",
-            "updated_at": run.get("completed_at") or run.get("started_at") or "",
         }
         for run in check_runs
         if run.get("status") == "completed" and run.get("conclusion") in FAILING_CONCLUSIONS
     ]
     failures.extend(
         {
-            "kind": "status",
-            "id": status.get("id"),
             "name": status.get("context") or "status",
             "conclusion": status.get("state") or "failure",
             "url": status.get("target_url") or "",
-            "updated_at": status.get("updated_at") or status.get("created_at") or "",
         }
         for status in statuses
         if status.get("state") in {"failure", "error"}
@@ -460,7 +470,9 @@ async def _record_evaluation_error(watch: BabySitWatch, detail: str) -> str:
 
 
 async def evaluate_watch(key: str, *, token: str | None = None) -> str:
-    async with _watch_lock(key):
+    async with _watch_lock(key) as acquired:
+        if not acquired:
+            return "busy"
         return await _evaluate_watch(key, token=token)
 
 
@@ -606,7 +618,9 @@ async def handle_ci_webhook(
     installation_id = installation.get("id") if isinstance(installation, dict) else None
     dispatched = 0
     for watch in watches:
-        async with _watch_lock(watch["key"]):
+        async with _watch_lock(watch["key"]) as acquired:
+            if not acquired:
+                continue
             current = await get_watch(watch["key"])
             if not current or not current.get("active"):
                 continue
@@ -643,7 +657,9 @@ async def record_retry(
     evidence: str,
     details_url: str = "",
 ) -> dict[str, Any]:
-    async with _watch_lock(key):
+    async with _watch_lock(key) as acquired:
+        if not acquired:
+            return {"success": False, "error": "A baby-sit update is already in progress"}
         return await _record_retry(
             key,
             thread_id=thread_id,
