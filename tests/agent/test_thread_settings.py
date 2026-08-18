@@ -7,6 +7,7 @@ from agent.utils import ttl_cache
 from agent.utils.thread_settings import (
     THREAD_SETTINGS_KEY,
     load_thread_settings,
+    normalize_thread_settings,
     store_thread_settings,
 )
 
@@ -43,6 +44,15 @@ class TestLoadThreadSettings:
         client.threads.get = AsyncMock(side_effect=RuntimeError("gone"))
 
         assert await load_thread_settings(client, "t1") == {}
+
+
+def test_normalize_thread_settings_removes_legacy_create_prs() -> None:
+    settings, changed = normalize_thread_settings(
+        {"model_id": "openai:gpt-5.6-sol", "create_prs": True}
+    )
+
+    assert settings == {"model_id": "openai:gpt-5.6-sol"}
+    assert changed is True
 
 
 class TestStoreThreadSettings:

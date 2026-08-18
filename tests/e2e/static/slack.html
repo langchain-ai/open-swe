@@ -11,6 +11,7 @@
       .msg.bot { background: #f0f7ff; }
       .who { font-weight: 700; font-size: 0.8rem; color: #444; }
       .text { white-space: pre-wrap; }
+      .context { color: #4b5563; font-size: 0.8rem; margin-top: 0.35rem; }
       .compose { display: flex; gap: 0.5rem; margin-top: 1rem; }
       .compose input { flex: 1; padding: 0.5rem; font: inherit; }
       button { padding: 0.5rem 0.9rem; font: inherit; cursor: pointer; }
@@ -61,13 +62,24 @@
       function render(messages) {
         const html = messages
           .map((m, index) => {
-            const who = m.is_bot ? "open-swe (bot)" : userNames[m.user] || m.user;
+            const who = m.is_bot ? "Open SWE (bot)" : userNames[m.user] || m.user;
             const linked = m.text.replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '<a href="$1">$2</a>');
-            return `<div class="msg ${m.is_bot ? "bot" : ""}" data-bot="${m.is_bot}" data-thread-ts="${m.thread_ts || ""}" data-message-index="${index}"><div class="who">${who}</div><div class="text">${linked}</div><div class="actions"></div></div>`;
+            return `<div class="msg ${m.is_bot ? "bot" : ""}" data-bot="${m.is_bot}" data-thread-ts="${m.thread_ts || ""}" data-message-index="${index}"><div class="who">${who}</div><div class="text">${linked}</div><div class="contexts"></div><div class="actions"></div></div>`;
           })
           .join("");
         $("thread").innerHTML = html || "<p style='color:#888'>No messages yet.</p>";
         messages.forEach((message, index) => {
+          const contextContainer = document.querySelector(`[data-message-index="${index}"] .contexts`);
+          const contexts = (message.blocks || [])
+            .filter((block) => block.type === "context")
+            .flatMap((block) => block.elements || [])
+            .filter((element) => element.type === "plain_text" && element.text);
+          for (const context of contexts) {
+            const element = document.createElement("div");
+            element.className = "context";
+            element.textContent = context.text;
+            contextContainer.appendChild(element);
+          }
           const actions = (message.blocks || [])
             .filter((block) => block.type === "actions")
             .flatMap((block) => block.elements || []);

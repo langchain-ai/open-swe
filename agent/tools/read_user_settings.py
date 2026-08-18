@@ -21,7 +21,6 @@ _PROFILE_SETTING_KEYS = (
     "default_subagent_model",
     "subagent_reasoning_effort",
     "auto_fix_ci",
-    "create_prs",
     "draft_prs",
     "review_draft_prs",
 )

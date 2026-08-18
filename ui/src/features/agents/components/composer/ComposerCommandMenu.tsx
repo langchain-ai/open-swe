@@ -37,9 +37,9 @@ interface ComposerCommandMenuProps {
 }
 
 /**
- * The autocomplete popup for `@path` and `/command`. Keyboard navigation lives
- * in the composer (the editor keeps focus while this is open), so this only
- * reflects the active item and reports pointer intent back up.
+ * The autocomplete popup for `@path`, `/command`, and `$skill`. Keyboard
+ * navigation lives in the composer (the editor keeps focus while this is open),
+ * so this only reflects the active item and reports pointer intent back up.
  */
 export const ComposerCommandMenu = memo(function ComposerCommandMenu({
   items,
@@ -64,7 +64,13 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
     <div
       className="dropdown-glass absolute bottom-full left-0 z-50 mb-2 w-full max-w-md overflow-hidden rounded-xl"
       role="listbox"
-      aria-label={triggerKind === "path" ? "Files" : "Commands"}
+      aria-label={
+        triggerKind === "path"
+          ? "Files"
+          : triggerKind === "skill-command"
+            ? "Skills"
+            : "Commands"
+      }
     >
       {items.length > 0 ? (
         <div ref={listRef} className="max-h-64 overflow-y-auto py-1">
