@@ -121,8 +121,8 @@ async def test_dispatch_agent_run_forwards_multitask_strategy(
 
     await dispatch.dispatch_agent_run(
         "thread-1",
-        "follow up",
-        {},
+        "check CI",
+        {"thread_id": "thread-1"},
         source="slack",
         client=client,
         multitask_strategy="enqueue",

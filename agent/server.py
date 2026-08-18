@@ -15,6 +15,7 @@ import shlex
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal, cast
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 from deepagents import create_deep_agent
 from deepagents.backends.composite import CompositeBackend
+from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
@@ -47,7 +49,6 @@ from .dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
-    profile_create_prs,
     profile_draft_prs,
     resolve_github_login,
 )
@@ -133,6 +134,7 @@ from .tools import (
     linear_search_issues,
     linear_update_issue,
     list_environments,
+    manage_baby_sit,
     notify_automation_channel,
     open_pull_request,
     read_user_settings,
@@ -187,6 +189,7 @@ from .utils.sandbox_state import (
 from .utils.thread_settings import (
     ThreadSettings,
     load_thread_settings,
+    normalize_thread_settings,
     store_thread_settings,
 )
 from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
@@ -197,6 +200,8 @@ client = get_client()
 DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
 ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
+BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
+BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "bundled_skills"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
     "edit_file",
@@ -613,6 +618,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
         "task",
         "http_request",
+        "manage_baby_sit",
         "open_pull_request",
         "recreate_sandbox",
         "request_pr_review",
@@ -915,7 +921,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         user_email: str,
         linear_project_id: str,
         linear_issue_number: str,
-        create_prs: bool,
         draft_prs: bool,
         plan_mode: bool,
         corridor_enabled: bool,
@@ -934,7 +939,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._user_email = user_email
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
-        self._create_prs = create_prs
         self._draft_prs = draft_prs
         self._plan_mode = plan_mode
         self._corridor_enabled = corridor_enabled
@@ -1134,7 +1138,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 linear_project_id=self._linear_project_id,
                 linear_issue_number=self._linear_issue_number,
                 triggering_user_identity=prompt_identity,
-                create_prs=self._create_prs,
                 draft_prs=self._draft_prs,
                 default_repo=prompt_default_repo,
                 plan_mode=self._plan_mode,
@@ -1185,7 +1188,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # Everything else comes from the thread's own settings, resolved from the
     # owner's profile on the first run and frozen there afterwards.
     profile_login = resolve_github_login(as_json_object(config))
-    thread_settings = await load_thread_settings(client, thread_id)
+    thread_settings, has_legacy_create_prs = normalize_thread_settings(
+        await load_thread_settings(client, thread_id)
+    )
     settings_login = thread_settings.get("owner_login") or profile_login
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
@@ -1231,7 +1236,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id = overridden_subagent_model
             subagent_effort = overridden_subagent_effort
 
-    always_create_prs = profile_create_prs(profile)
     draft_prs = profile_draft_prs(profile)
 
     stored_model = thread_settings.get("model_id")
@@ -1240,7 +1244,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         profile_effort = thread_settings.get("effort")
         subagent_model_id = thread_settings.get("subagent_model_id") or stored_model
         subagent_effort = thread_settings.get("subagent_effort")
-        always_create_prs = bool(thread_settings.get("create_prs"))
         draft_prs = bool(thread_settings.get("draft_prs"))
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
@@ -1267,9 +1270,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagent_model_id = per_thread_model
         subagent_effort = per_thread_effort
 
-    if always_create_prs:
-        logger.info("Always Create PRs enabled for %s", settings_login)
-
     if isinstance(thread_settings.get("model_id"), str):
         user_instructions = thread_settings.get("user_instructions")
         repo_instructions = thread_settings.get("repo_instructions")
@@ -1286,12 +1286,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "effort": profile_effort,
         "subagent_model_id": subagent_model_id,
         "subagent_effort": subagent_effort,
-        "create_prs": always_create_prs,
         "draft_prs": draft_prs,
         "user_instructions": user_instructions,
         "repo_instructions": repo_instructions,
     }
-    if {**thread_settings, **resolved_settings} != thread_settings:
+    if has_legacy_create_prs or {**thread_settings, **resolved_settings} != thread_settings:
         await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
 
     model_id, profile_effort = gate_fable_model(
@@ -1411,6 +1410,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         linear_list_teams,
         linear_search_issues,
         linear_update_issue,
+        manage_baby_sit,
         notify_automation_channel,
         open_pull_request,
         read_user_settings,
@@ -1448,9 +1448,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     skill_routes: dict[str, BackendProtocol] = {
         ORGANIZATION_SKILLS_ROUTE: ReadOnlyBackend(
             StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
-        )
+        ),
+        BUNDLED_SKILLS_ROUTE: ReadOnlyBackend(
+            FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
+        ),
     }
-    skill_sources = [ORGANIZATION_SKILLS_ROUTE]
+    skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
     if profile_login:
         skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
             StoreBackend(namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login))
@@ -1500,7 +1503,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     user_email=user_email,
                     linear_project_id=linear_project_id,
                     linear_issue_number=linear_issue_number,
-                    create_prs=always_create_prs,
                     draft_prs=draft_prs,
                     plan_mode=plan_mode,
                     corridor_enabled=bool(corridor_tools),

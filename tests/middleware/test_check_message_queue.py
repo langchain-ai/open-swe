@@ -65,19 +65,19 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
     assert message["role"] == "user"
     assert DASHBOARD_HANDOFF_MARKER in message["content"][0]["text"]
     assert message["content"][1] == {"type": "text", "text": "continue in web"}
-    assert result["plan_approval_blocked"] is True
+    assert "plan_approver" not in result
     assert "dashboard/Web UI" in result["rendered_system_prompt"]
     assert "Make `slack_thread_reply` your first tool call" not in result["rendered_system_prompt"]
     assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
 
 
 @pytest.mark.asyncio
-async def test_check_message_queue_allows_owner_dashboard_approval() -> None:
+async def test_check_message_queue_does_not_persist_dashboard_approver() -> None:
     store = _FakeStore(
         {
             (("queue", "thread-1"), "pending_messages"): {
                 "messages": [
-                    {"content": {"text": "go ahead", "source": "dashboard", "from_owner": True}},
+                    {"content": {"text": "go ahead", "source": "dashboard"}},
                 ]
             }
         }
@@ -95,7 +95,7 @@ async def test_check_message_queue_allows_owner_dashboard_approval() -> None:
         )
 
     assert result is not None
-    assert result["plan_approval_blocked"] is False
+    assert "plan_approver" not in result
     assert result["messages"][0]["content"][1] == {"type": "text", "text": "go ahead"}
 
 
