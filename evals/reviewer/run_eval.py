@@ -4,8 +4,6 @@ Usage:
     uv run python -m evals.reviewer.run_eval
 """
 
-from __future__ import annotations
-
 import argparse
 import asyncio
 import contextlib

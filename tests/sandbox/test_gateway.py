@@ -1,7 +1,5 @@
 """Unit tests for LangSmith LLM Gateway routing (agent/utils/gateway.py + make_model)."""
 
-from __future__ import annotations
-
 from typing import Any, cast
 from unittest.mock import patch
 

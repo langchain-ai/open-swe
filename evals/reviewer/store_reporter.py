@@ -7,8 +7,6 @@ heartbeat goes stale to ``failed`` (see ``agent.dashboard.eval_jobs``), so the
 reporter must keep heartbeating while the eval runs.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os

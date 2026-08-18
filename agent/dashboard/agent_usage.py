@@ -1,7 +1,5 @@
 """Forward-looking Open SWE Agent usage telemetry."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from collections import Counter

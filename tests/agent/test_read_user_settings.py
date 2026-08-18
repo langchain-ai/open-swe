@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import inspect
 from unittest.mock import AsyncMock, patch
 

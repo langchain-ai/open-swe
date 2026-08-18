@@ -109,14 +109,19 @@ function requireTrustedDesktopIpc(event) {
   if (!isAppUrl(senderUrl)) throw new Error("Forbidden");
 }
 
-function sendAcpEvent(sessionId, event) {
+function sendAcpUpdate(localSession, event = null) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("desktop:acp-event", {
-      sessionId,
-      event,
-      session: acpSessions.get(sessionId)?.summary(),
+      sessionId: localSession.id,
+      ...(event ? { event } : {}),
+      session: localSession.summary(),
     });
   }
+}
+
+function sendAcpEvent(sessionId, event) {
+  const localSession = acpSessions.get(sessionId);
+  if (localSession) sendAcpUpdate(localSession, event);
 }
 
 async function recordAcpCheckpoint(localSession) {
@@ -308,6 +313,7 @@ async function restoreAcpSession(sessionId) {
     }
     try {
       await localSession.initialize();
+      sendAcpUpdate(localSession);
       return localSession;
     } catch (error) {
       acpSessions.delete(sessionId);

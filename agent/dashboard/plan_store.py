@@ -9,8 +9,6 @@ Reviewers leave whole-document comments, stored one item per comment under
 store operations (no CRDT/WebSocket).
 """
 
-from __future__ import annotations
-
 import logging
 import re
 import uuid

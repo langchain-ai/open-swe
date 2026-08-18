@@ -11,8 +11,6 @@ Writes are best-effort and deterministic (one example id per
 updates in place instead of duplicating.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os

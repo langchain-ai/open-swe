@@ -1,7 +1,5 @@
 """Dashboard-managed recurring agent schedules."""
 
-from __future__ import annotations
-
 import logging
 import re
 import uuid
@@ -13,8 +11,11 @@ from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
 from ..dispatch import create_durable_run
-from ..utils.slack import post_slack_top_level_message_with_ts, store_slack_run_mapping
-from ..utils.thread_ids import generate_thread_id_from_slack_thread
+from ..utils.slack import (
+    bind_slack_thread_id,
+    post_slack_top_level_message_with_ts,
+    store_slack_run_mapping,
+)
 from ..utils.thread_ops import langgraph_client
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
 from .options import (
@@ -493,6 +494,9 @@ def _agent_run_metadata(
     title_prefix = "Test" if test_run else "Scheduled"
     metadata: dict[str, Any] = {
         "source": "schedule",
+        "origin": "schedule",
+        "thread_category": "automation",
+        "trigger_kind": "schedule_test" if test_run else "schedule",
         "schedule_id": record["id"],
         "schedule_name": record.get("name"),
         "schedule_test": test_run,
@@ -599,6 +603,8 @@ async def _launch_agent_schedule_record(
                 "status_code": exc.status_code,
             }
 
+    client = _client()
+    thread_id = str(uuid.uuid4())
     slack_thread: dict[str, Any] | None = None
     slack_channel_id = record.get("slack_channel_id")
     if (
@@ -629,12 +635,9 @@ async def _launch_agent_schedule_record(
             or "",
             "triggering_user_email": record.get("user_email") or "",
         }
-        thread_id = generate_thread_id_from_slack_thread(slack_channel_id, message_ts)
-    else:
-        thread_id = str(uuid.uuid4())
+        await bind_slack_thread_id(client, slack_channel_id, message_ts, thread_id)
 
     metadata = _agent_run_metadata(record, thread_id, slack_thread, test_run=test_run)
-    client = _client()
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     run = await create_durable_run(

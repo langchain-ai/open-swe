@@ -5,8 +5,6 @@ REAL traced agent factory. The langgraph dev config points the ``agent`` graph
 here instead of ``agent.server`` so the patches are in effect in the worker.
 """
 
-from __future__ import annotations
-
 import os
 import sys
 

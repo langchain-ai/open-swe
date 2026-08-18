@@ -4,8 +4,6 @@ Wraps all tool calls in try/except so that unhandled exceptions are
 returned as error ToolMessages instead of crashing the agent run.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping

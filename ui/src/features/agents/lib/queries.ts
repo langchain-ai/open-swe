@@ -20,6 +20,7 @@ export const agentThreadKeys = {
     activeLimit: number
     resolvedLimit: number
     activeThreadId?: string
+    includeAutomations: boolean
   }) => ["agent-threads", "lists", "sidebar", params] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
@@ -223,12 +224,14 @@ function sidebarRefetchInterval(query: { state: { data?: SidebarThreads } }) {
 
 export function useSidebarThreads(
   resolvedLimit: number,
-  activeThreadId?: string
+  activeThreadId?: string,
+  includeAutomations = false
 ) {
   const params = {
     activeLimit: SIDEBAR_ACTIVE_LIMIT,
     resolvedLimit,
     activeThreadId,
+    includeAutomations,
   }
   return useQuery({
     queryKey: agentThreadKeys.sidebar(params),

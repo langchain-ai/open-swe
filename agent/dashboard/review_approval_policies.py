@@ -1,7 +1,5 @@
 """Per-repository automatic approval policies for Open SWE Review."""
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime
 from typing import TypedDict

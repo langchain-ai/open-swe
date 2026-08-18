@@ -31,6 +31,7 @@ import {
 } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
+import { useUnsavedChangesWarning } from "@/features/automations/lib/useUnsavedChangesWarning"
 import { useRepos } from "@/lib/profile"
 
 interface AutomationEditorProps {
@@ -86,10 +87,21 @@ export function AutomationEditor({
     ModelSelection | null | undefined
   >(undefined)
 
+  const initialSelection =
+    scheduleToSelection(models, schedule) ?? defaultSelection
   const activeSelection =
-    selectionOverride !== undefined
-      ? selectionOverride
-      : (scheduleToSelection(models, schedule) ?? defaultSelection)
+    selectionOverride !== undefined ? selectionOverride : initialSelection
+  const isDirty =
+    name !== (schedule?.name ?? template?.name ?? "") ||
+    prompt !== (schedule?.prompt ?? template?.prompt ?? "") ||
+    cron !== initialCron ||
+    repo !== (schedule?.repo ?? null) ||
+    slackChannelId !== (schedule?.slackChannelId ?? "") ||
+    slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
+    enabled !== (schedule?.enabled ?? true) ||
+    activeSelection?.modelId !== initialSelection?.modelId ||
+    activeSelection?.effort !== initialSelection?.effort
+  const allowNavigation = useUnsavedChangesWarning(isDirty)
 
   const error =
     createSchedule.error || updateSchedule.error || deleteSchedule.error
@@ -126,7 +138,12 @@ export function AutomationEditor({
           model_id: modelId,
           effort,
         },
-        { onSuccess: () => navigate({ to: "/agents/automations" }) }
+        {
+          onSuccess: () => {
+            allowNavigation()
+            navigate({ to: "/agents/automations" })
+          },
+        }
       )
       return
     }
@@ -146,7 +163,12 @@ export function AutomationEditor({
           enabled,
         },
       },
-      { onSuccess: () => navigate({ to: "/agents/automations" }) }
+      {
+        onSuccess: () => {
+          allowNavigation()
+          navigate({ to: "/agents/automations" })
+        },
+      }
     )
   }
 
@@ -154,7 +176,10 @@ export function AutomationEditor({
     if (!schedule) return
     if (!window.confirm(`Delete "${schedule.name}"?`)) return
     deleteSchedule.mutate(schedule.id, {
-      onSuccess: () => navigate({ to: "/agents/automations" }),
+      onSuccess: () => {
+        allowNavigation()
+        navigate({ to: "/agents/automations" })
+      },
     })
   }
 

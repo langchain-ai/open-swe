@@ -8,8 +8,6 @@ Everything here only configures *boundaries* (which sandbox, which fake API
 URLs, where git writes its global config). The agent code itself is unchanged.
 """
 
-from __future__ import annotations
-
 import os
 from pathlib import Path
 

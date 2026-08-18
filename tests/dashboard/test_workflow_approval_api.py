@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from agent.dashboard import workflow_approval_api
 
 

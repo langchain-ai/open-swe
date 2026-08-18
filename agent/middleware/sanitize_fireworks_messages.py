@@ -13,8 +13,6 @@ This middleware drops the redundant legacy field from assistant messages before
 they reach the Fireworks serializer, mirroring the thinking-block sanitizer.
 """
 
-from __future__ import annotations
-
 from collections.abc import Awaitable, Callable
 from typing import Any
 

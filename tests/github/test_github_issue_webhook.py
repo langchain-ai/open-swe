@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import hmac
@@ -8,6 +6,7 @@ import json
 import logging
 from typing import cast
 
+import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
 
@@ -23,6 +22,14 @@ request_pr_review_module = importlib.import_module("agent.tools.request_pr_revie
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 _TEST_SLACK_SECRET = "test-slack-secret"
+
+
+@pytest.fixture(autouse=True)
+def _explicit_slack_thread_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def resolve(*args: object, **kwargs: object) -> str:
+        return "mapped-slack-thread"
+
+    monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", resolve)
 
 
 def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
@@ -662,6 +669,7 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
         thread_ts: str,
         slack_user_id: str | None = None,
         channel_context: dict[str, str] | None = None,
+        **kwargs: object,
     ) -> dict[str, str]:
         captured["repo_config_request"] = {
             "channel_id": channel_id,

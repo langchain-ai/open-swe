@@ -272,17 +272,16 @@ test.describe("Environments", () => {
     await page.request.post("/control/reset");
 
     await openNewAgentHome(page);
-    const moreOptions = page.getByRole("button", {
-      name: "More composer options",
-    });
-    await expect(moreOptions).toBeVisible();
-    await moreOptions.click();
-    const enableAdminMode = page.getByRole("menuitem", {
+    const extras = page.getByRole("button", { name: "More composer options" });
+    const enableAdmin = page.getByRole("menuitem", {
       name: "Enable admin mode",
     });
-    await expect(enableAdminMode).toBeVisible();
-    await enableAdminMode.click();
-    await moreOptions.click();
+    await expect(async () => {
+      await extras.click();
+      await expect(enableAdmin).toBeVisible({ timeout: 2000 });
+    }).toPass({ timeout: 20_000 });
+    await enableAdmin.click();
+    await extras.click();
     await expect(
       page.getByRole("menuitem", { name: "Disable admin mode" }),
     ).toBeVisible();

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
@@ -44,6 +42,7 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
         "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
+        "slack_move_thread",
         "slack_start_new_thread",
         "linear_create_issue",
         "linear_update_issue",

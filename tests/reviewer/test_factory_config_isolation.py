@@ -1,7 +1,5 @@
 """Tests that get_reviewer_agent and get_chat_agent do not mutate the caller's config."""
 
-from __future__ import annotations
-
 from typing import cast
 from unittest.mock import MagicMock, patch
 

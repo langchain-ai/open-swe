@@ -7,8 +7,6 @@ the real ``open_pull_request`` tool, and post the result back with the real
 the preceding tool result, exactly as a real model would.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import re
@@ -442,6 +440,23 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_reply_step),
     ),
+    "move": (
+        _tool_step(
+            "Moving the current Open SWE thread to another Slack channel.",
+            "slack_move_thread",
+            {
+                "message": "Continue the existing Open SWE task in this thread.",
+                "channel_id": "C_TARGET",
+            },
+            "call-move",
+        ),
+        _tool_step(
+            "Confirming the moved thread in its new location.",
+            "slack_thread_reply",
+            {"message": "Moved this Open SWE thread and preserved its state."},
+            "call-move-reply",
+        ),
+    ),
     "breakout": (
         _tool_step(
             "Starting a separate Slack thread for the breakout task.",
@@ -515,6 +530,14 @@ def _is_breakout_request(text: str) -> bool:
     return "break out" in t or "separate thread" in t or "split out" in t
 
 
+def _is_move_request(text: str) -> bool:
+    return "E2E_MOVE_THREAD" in text
+
+
+def _is_move_followup(text: str) -> bool:
+    return "E2E_DESTINATION_FOLLOWUP" in text or "E2E_SOURCE_RETAG" in text
+
+
 def _is_approval(text: str) -> bool:
     t = text.lower()
     return "approved" in t and "implement" in t
@@ -533,6 +556,8 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "environment", lambda ctx: ctx.human_count <= 1 and _is_environment_request(ctx.first_text)
     ),
+    ScriptRule("followup", lambda ctx: _is_move_followup(ctx.last_text)),
+    ScriptRule("move", lambda ctx: _is_move_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
     ScriptRule("plan", lambda ctx: _is_revision(ctx.last_text)),
     ScriptRule("plan", lambda ctx: ctx.human_count <= 1 and _is_plan_request(ctx.first_text)),
@@ -572,7 +597,7 @@ class FakeScriptedChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "fake-scripted"
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> FakeScriptedChatModel:  # noqa: ARG002
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "FakeScriptedChatModel":  # noqa: ARG002
         return self
 
     def _generate(

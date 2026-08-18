@@ -10,8 +10,6 @@ withmartian/code-review-benchmark `step3_judge_comments.py` so scores are
 directly comparable to martian's published numbers.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import threading
