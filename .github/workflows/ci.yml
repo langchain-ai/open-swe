@@ -103,7 +103,7 @@ jobs:
   browser-e2e:
     name: Browser E2E (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

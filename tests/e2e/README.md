@@ -94,8 +94,9 @@ npx playwright show-report                       # browse runs; each has a Trace
 npx playwright show-trace test-results/<test>/trace.zip   # open one trace directly
 ```
 
-In CI the `Playwright E2E` job uploads both `playwright-report/` and
-`test-results/` as the **playwright-report** artifact on the run. Download it,
+In CI the browser shards upload **playwright-report-1**, **playwright-report-2**,
+and **playwright-report-3**; Desktop uploads **playwright-report-desktop**. Each
+contains `playwright-report/` and `test-results/`. Download the relevant artifact,
 then `npx playwright show-report <unzipped-dir>` (or drag a `trace.zip` onto
 <https://trace.playwright.dev>) to replay.
 
