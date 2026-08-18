@@ -121,5 +121,12 @@ describe("column ordering", () => {
       "progress",
       "ready",
     ])
+    expect(moveColumnBefore(order, "attention", "ready")).toEqual([
+      "progress",
+      "attention",
+      "ready",
+      "done",
+    ])
+    expect(moveColumnBefore(order, "attention", "progress")).toEqual(order)
   })
 })

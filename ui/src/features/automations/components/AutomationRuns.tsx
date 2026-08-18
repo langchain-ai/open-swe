@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router"
 import { ArrowSquareOutIcon, CircleNotchIcon } from "@phosphor-icons/react"
 
 import type { AgentStatus, AgentThread } from "@/features/agents/lib/types"
+import { Button } from "@/components/ui/button"
 import { useThreadsPage } from "@/features/agents/lib/queries"
 import { cn, formatRelativeTime } from "@/lib/utils"
 
@@ -33,6 +34,25 @@ export function AutomationRuns({
     return (
       <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-xs text-muted-foreground">
         Loading automation runs…
+      </div>
+    )
+  }
+  if (runsQuery.isError) {
+    return (
+      <div className="flex flex-col items-center rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-12 text-center">
+        <p className="text-xs text-destructive">
+          Automation runs could not be loaded.
+        </p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="mt-3"
+          onClick={() => void runsQuery.refetch()}
+          disabled={runsQuery.isFetching}
+        >
+          {runsQuery.isFetching ? "Retrying…" : "Retry"}
+        </Button>
       </div>
     )
   }

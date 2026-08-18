@@ -194,6 +194,8 @@ export function moveColumnBefore(
   if (draggedIndex < 0 || targetIndex < 0) return order
   const next = [...order]
   next.splice(draggedIndex, 1)
-  next.splice(targetIndex, 0, draggedKey)
+  const insertionIndex =
+    draggedIndex < targetIndex ? targetIndex - 1 : targetIndex
+  next.splice(insertionIndex, 0, draggedKey)
   return next
 }
