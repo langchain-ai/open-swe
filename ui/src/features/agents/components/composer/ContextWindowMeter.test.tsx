@@ -1,6 +1,12 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { ContextWindowMeter } from "./ContextWindowMeter"
@@ -9,7 +15,9 @@ afterEach(() => cleanup())
 
 /** The numbers live in a popover, so the collapsed ring carries the accessible label. */
 function meterLabel() {
-  return screen.getByTestId("context-window-indicator").getAttribute("aria-label")
+  return screen
+    .getByTestId("context-window-indicator")
+    .getAttribute("aria-label")
 }
 
 describe("ContextWindowMeter", () => {
@@ -18,9 +26,9 @@ describe("ContextWindowMeter", () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it("reports the context window before usage is available", () => {
-    render(<ContextWindowMeter contextWindow={200_000} />)
-    expect(meterLabel()).toBe("Context window 200.0K tokens")
+  it("stays hidden until usage is reported, even with a known limit", () => {
+    const { container } = render(<ContextWindowMeter contextWindow={200_000} />)
+    expect(container.firstChild).toBeNull()
   })
 
   it("reports a percentage once usage and limit are both known", () => {

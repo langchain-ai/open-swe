@@ -1,12 +1,11 @@
 """Shared sandbox state used by server and middleware."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
 from deepagents.backends.protocol import (
+    DeleteResult,
     EditResult,
     ExecuteOffloadResult,
     ExecuteResponse,
@@ -47,6 +46,9 @@ class SandboxUnreachableError(RuntimeError):
         )
 
 
+_SYNC_UNSUPPORTED = "SandboxBackendProxy is async-only; use the a-prefixed method instead."
+
+
 class SandboxBackendProxy(BaseSandbox):
     """Stable per-thread backend handle whose target can be replaced.
 
@@ -67,6 +69,7 @@ class SandboxBackendProxy(BaseSandbox):
         self._backend = backend
         self._thread_id = thread_id
         self._reconnect = reconnect
+        self._startup_task: asyncio.Task[SandboxBackendProtocol] | None = None
         self._lock: asyncio.Lock | None = None
 
     @property
@@ -79,16 +82,48 @@ class SandboxBackendProxy(BaseSandbox):
 
     def replace_backend(self, backend: SandboxBackendProtocol) -> None:
         self._backend = backend
+        self._startup_task = None
 
     @property
     def has_backend(self) -> bool:
         return self._backend is not None
+
+    def cancel_startup(self) -> None:
+        if self._startup_task is not None:
+            self._startup_task.cancel()
 
     def set_reconnect(
         self,
         reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None,
     ) -> None:
         self._reconnect = reconnect
+
+    def start(self) -> None:
+        if self._startup_task is not None:
+            if not self._startup_task.cancelled():
+                return
+            self._startup_task = None
+        if self._reconnect is None:
+            if self._backend is not None:
+                return
+            raise RuntimeError("Cannot start sandbox without a reconnect callback")
+        self._startup_task = asyncio.ensure_future(self._reconnect())
+        self._startup_task.add_done_callback(self._startup_completed)
+
+    def _startup_completed(self, task: asyncio.Task[SandboxBackendProtocol]) -> None:
+        if task.cancelled():
+            logger.warning("Sandbox startup was cancelled for thread %s", self._thread_id)
+            return
+        exception = task.exception()
+        if exception is not None:
+            logger.warning(
+                "Sandbox startup failed for thread %s: %s",
+                self._thread_id,
+                exception,
+            )
+
+    async def ready(self) -> SandboxBackendProtocol:
+        return await self._aget_backend()
 
     def _get_backend(self) -> SandboxBackendProtocol:
         if self._backend is None:
@@ -102,38 +137,61 @@ class SandboxBackendProxy(BaseSandbox):
         return self._lock
 
     async def _aget_backend(self) -> SandboxBackendProtocol:
-        if self._backend is not None:
+        if self._backend is not None and self._startup_task is None:
             return self._backend
         if not self._thread_id:
             raise RuntimeError("No sandbox backend cached")
 
         async with self._get_lock():
-            if self._backend is not None:
+            if self._backend is not None and self._startup_task is None:
                 return self._backend
+            if self._startup_task is None:
+                if self._reconnect is not None:
+                    logger.info("Reconnecting sandbox backend for thread %s", self._thread_id)
+                    self.start()
+                else:
+                    sandbox_id = await get_sandbox_id_from_metadata(self._thread_id)
+                    if not sandbox_id:
+                        raise ValueError(
+                            f"Missing sandbox_id in thread metadata for {self._thread_id}"
+                        )
 
-            if self._reconnect is not None:
-                logger.info("Reconnecting sandbox backend for thread %s", self._thread_id)
-                sandbox_backend = await self._reconnect()
+                    logger.info(
+                        "Reconnecting sandbox backend for thread %s from metadata", self._thread_id
+                    )
+                    self._startup_task = asyncio.create_task(create_sandbox(sandbox_id))
+                    self._startup_task.add_done_callback(self._startup_completed)
+            startup_task = self._startup_task
+            if startup_task is None:
+                raise RuntimeError(f"Sandbox startup task missing for thread {self._thread_id}")
+
+        try:
+            sandbox_backend = await asyncio.shield(startup_task)
+        except BaseException:
+            if startup_task.done():
+                async with self._get_lock():
+                    if self._startup_task is startup_task:
+                        self._startup_task = None
+            raise
+
+        async with self._get_lock():
+            if self._startup_task is startup_task:
                 self._backend = unwrap_sandbox_backend(sandbox_backend)
-                return self._backend
-
-            sandbox_id = await get_sandbox_id_from_metadata(self._thread_id)
-            if not sandbox_id:
-                raise ValueError(f"Missing sandbox_id in thread metadata for {self._thread_id}")
-
-            logger.info("Reconnecting sandbox backend for thread %s from metadata", self._thread_id)
-            self._backend = await create_sandbox(sandbox_id)
-            SANDBOX_BACKENDS[self._thread_id] = self
-            return self._backend
+                self._startup_task = None
+                SANDBOX_BACKENDS[self._thread_id] = self
+            backend = self._backend
+            if backend is None:
+                raise RuntimeError(f"No sandbox backend cached for thread {self._thread_id}")
+            return backend
 
     def ls(self, path: str) -> LsResult:
-        return self._get_backend().ls(path)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def als(self, path: str) -> LsResult:
         return await (await self._aget_backend()).als(path)
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        return self._get_backend().read(file_path, offset, limit)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
         return await (await self._aget_backend()).aread(file_path, offset, limit)
@@ -146,7 +204,7 @@ class SandboxBackendProxy(BaseSandbox):
         *,
         max_count: int | None = None,
     ) -> GrepResult:
-        return self._get_backend().grep(pattern, path, glob, max_count=max_count)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def agrep(
         self,
@@ -159,13 +217,13 @@ class SandboxBackendProxy(BaseSandbox):
         return await (await self._aget_backend()).agrep(pattern, path, glob, max_count=max_count)
 
     def glob(self, pattern: str, path: str | None = None) -> GlobResult:
-        return self._get_backend().glob(pattern, path)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
         return await (await self._aget_backend()).aglob(pattern, path)
 
     def write(self, file_path: str, content: str) -> WriteResult:
-        return self._get_backend().write(file_path, content)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
         return await (await self._aget_backend()).awrite(file_path, content)
@@ -177,7 +235,7 @@ class SandboxBackendProxy(BaseSandbox):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        return self._get_backend().edit(file_path, old_string, new_string, replace_all)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aedit(
         self,
@@ -190,20 +248,26 @@ class SandboxBackendProxy(BaseSandbox):
             file_path, old_string, new_string, replace_all
         )
 
+    def delete(self, file_path: str) -> DeleteResult:
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
+
+    async def adelete(self, file_path: str) -> DeleteResult:
+        return await (await self._aget_backend()).adelete(file_path)
+
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        return self._get_backend().upload_files(files)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         return await (await self._aget_backend()).aupload_files(files)
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        return self._get_backend().download_files(paths)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         return await (await self._aget_backend()).adownload_files(paths)
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        return self._get_backend().execute(command, timeout=timeout)
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         return await (await self._aget_backend()).aexecute(command, timeout=timeout)
@@ -217,21 +281,7 @@ class SandboxBackendProxy(BaseSandbox):
         max_capture_bytes: int | None = None,
         timeout: int | None = None,
     ) -> ExecuteOffloadResult:
-        # Delegate to the live backend so each provider's own capture-offload
-        # behavior (enable_capture_offload, shell wrapper) is honored.
-        backend = self._get_backend()
-        offload = getattr(backend, "execute_with_offload", None)
-        if offload is None:
-            return ExecuteOffloadResult(
-                offloaded=False, response=self._plain(backend, command, timeout)
-            )
-        return offload(
-            command,
-            capture_path,
-            max_inline_bytes=max_inline_bytes,
-            max_capture_bytes=max_capture_bytes,
-            timeout=timeout,
-        )
+        raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aexecute_with_offload(
         self,
@@ -255,14 +305,6 @@ class SandboxBackendProxy(BaseSandbox):
             max_capture_bytes=max_capture_bytes,
             timeout=timeout,
         )
-
-    @staticmethod
-    def _plain(
-        backend: SandboxBackendProtocol, command: str, timeout: int | None
-    ) -> ExecuteResponse:
-        if timeout is not None and execute_accepts_timeout(type(backend)):
-            return backend.execute(command, timeout=timeout)
-        return backend.execute(command)
 
     @staticmethod
     async def _aplain(
@@ -317,7 +359,9 @@ def get_or_create_sandbox_backend_proxy(
 
 
 def clear_sandbox_backend(thread_id: str) -> None:
-    SANDBOX_BACKENDS.pop(thread_id, None)
+    sandbox_backend = SANDBOX_BACKENDS.pop(thread_id, None)
+    if sandbox_backend is not None:
+        sandbox_backend.cancel_startup()
 
 
 async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
@@ -350,12 +394,7 @@ async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
 async def get_sandbox_backend(thread_id: str) -> SandboxBackendProxy:
     """Get sandbox backend from cache, or connect using thread metadata."""
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
-    if sandbox_backend and sandbox_backend.has_backend:
-        return sandbox_backend
-
-    sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-    if not sandbox_id:
-        raise ValueError(f"Missing sandbox_id in thread metadata for {thread_id}")
-
-    sandbox_backend = await create_sandbox(sandbox_id)
-    return set_sandbox_backend(thread_id, sandbox_backend)
+    if sandbox_backend is None:
+        sandbox_backend = get_or_create_sandbox_backend_proxy(thread_id)
+    await sandbox_backend.ready()
+    return sandbox_backend

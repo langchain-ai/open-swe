@@ -3,14 +3,27 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { ClockIcon, TrashIcon } from "@phosphor-icons/react"
 
 import type { ModelOption } from "@/lib/api"
-import type { AgentSchedule } from "@/features/agents/lib/types"
+import type {
+  AgentSchedule,
+  SlackNotificationMode,
+} from "@/features/agents/lib/types"
 import type { AutomationTemplate } from "@/features/automations/lib/automation-templates"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { describeCron, isDescribableCron } from "@/features/automations/lib/cron"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  describeCron,
+  isDescribableCron,
+} from "@/features/automations/lib/cron"
 import {
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
@@ -18,6 +31,7 @@ import {
 } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
+import { useUnsavedChangesWarning } from "@/features/automations/lib/useUnsavedChangesWarning"
 import { useRepos } from "@/lib/profile"
 
 interface AutomationEditorProps {
@@ -36,9 +50,7 @@ function scheduleToSelection(
     (model) =>
       model.id === schedule.model && model.efforts.includes(schedule.effort!)
   )
-  return supported
-    ? { modelId: schedule.model, effort: schedule.effort }
-    : null
+  return supported ? { modelId: schedule.model, effort: schedule.effort } : null
 }
 
 export function AutomationEditor({
@@ -67,16 +79,29 @@ export function AutomationEditor({
   const [slackChannelId, setSlackChannelId] = useState(
     schedule?.slackChannelId ?? ""
   )
+  const [slackNotificationMode, setSlackNotificationMode] =
+    useState<SlackNotificationMode>(schedule?.slackNotificationMode ?? "always")
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   // undefined = untouched (derive from the schedule / default as models load).
   const [selectionOverride, setSelectionOverride] = useState<
     ModelSelection | null | undefined
   >(undefined)
 
+  const initialSelection =
+    scheduleToSelection(models, schedule) ?? defaultSelection
   const activeSelection =
-    selectionOverride !== undefined
-      ? selectionOverride
-      : (scheduleToSelection(models, schedule) ?? defaultSelection)
+    selectionOverride !== undefined ? selectionOverride : initialSelection
+  const isDirty =
+    name !== (schedule?.name ?? template?.name ?? "") ||
+    prompt !== (schedule?.prompt ?? template?.prompt ?? "") ||
+    cron !== initialCron ||
+    repo !== (schedule?.repo ?? null) ||
+    slackChannelId !== (schedule?.slackChannelId ?? "") ||
+    slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
+    enabled !== (schedule?.enabled ?? true) ||
+    activeSelection?.modelId !== initialSelection?.modelId ||
+    activeSelection?.effort !== initialSelection?.effort
+  const allowNavigation = useUnsavedChangesWarning(isDirty)
 
   const error =
     createSchedule.error || updateSchedule.error || deleteSchedule.error
@@ -109,10 +134,16 @@ export function AutomationEditor({
           schedule: cron.trim(),
           repo,
           slack_channel_id: slackChannelId.trim() || null,
+          slack_notification_mode: slackNotificationMode,
           model_id: modelId,
           effort,
         },
-        { onSuccess: () => navigate({ to: "/agents/automations" }) }
+        {
+          onSuccess: () => {
+            allowNavigation()
+            navigate({ to: "/agents/automations" })
+          },
+        }
       )
       return
     }
@@ -126,12 +157,18 @@ export function AutomationEditor({
           schedule: cron.trim(),
           repo: repo ?? "",
           slack_channel_id: slackChannelId.trim() || null,
+          slack_notification_mode: slackNotificationMode,
           model_id: modelId,
           effort,
           enabled,
         },
       },
-      { onSuccess: () => navigate({ to: "/agents/automations" }) }
+      {
+        onSuccess: () => {
+          allowNavigation()
+          navigate({ to: "/agents/automations" })
+        },
+      }
     )
   }
 
@@ -139,7 +176,10 @@ export function AutomationEditor({
     if (!schedule) return
     if (!window.confirm(`Delete "${schedule.name}"?`)) return
     deleteSchedule.mutate(schedule.id, {
-      onSuccess: () => navigate({ to: "/agents/automations" }),
+      onSuccess: () => {
+        allowNavigation()
+        navigate({ to: "/agents/automations" })
+      },
     })
   }
 
@@ -252,9 +292,33 @@ export function AutomationEditor({
             spellCheck={false}
             className="w-full bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
           />
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
+            <span className="text-xs text-muted-foreground">
+              Notify channel
+            </span>
+            <Select
+              value={slackNotificationMode}
+              onValueChange={(value) =>
+                value && setSlackNotificationMode(value)
+              }
+              disabled={!slackChannelId.trim()}
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="always">Every run</SelectItem>
+                <SelectItem value="on_action">
+                  Only when action is taken
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <p className="mt-2 text-xs text-muted-foreground/70">
-            Optional Slack channel ID. Each run starts a new thread there; the
-            Open SWE bot must be a member of the channel.
+            {slackNotificationMode === "on_action"
+              ? "The agent decides whether it performed an action; read-only and no-op runs stay silent."
+              : "Each run starts a new thread in the channel."}{" "}
+            The Open SWE bot must be a member of the channel.
           </p>
         </div>
 

@@ -1,11 +1,19 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 
 import { desktopAcpMessages } from "./desktopAcpMessages"
 import type {
+  DesktopAcpDiff,
   DesktopAcpEvent,
   DesktopAcpSession,
   DesktopAcpSessionSummary,
 } from "@/desktop"
+
+const NO_DIFF: DesktopAcpDiff = {
+  status: "missing",
+  truncated: false,
+  files: [],
+}
 
 function mergeSession(
   current: DesktopAcpSession | null,
@@ -53,10 +61,12 @@ export function useDesktopAcpSession(sessionId: string) {
     const pendingEvents: Array<DesktopAcpEvent> = []
     const unsubscribe = desktop.onAcpEvent((payload) => {
       if (payload.sessionId !== sessionId) return
-      pendingEvents.push(payload.event)
+      if (payload.event) pendingEvents.push(payload.event)
       setSession((current) => {
         if (!current || current.id !== sessionId) return current
-        return mergeEvent(current, payload.event)
+        return payload.event
+          ? mergeEvent(current, payload.event)
+          : { ...current, ...payload.session }
       })
     })
     void desktop.getAcpSession(sessionId).then((next) => {
@@ -88,6 +98,31 @@ export function useDesktopAcpSession(sessionId: string) {
   }
 }
 
+/**
+ * What a local session changed, read from git in the desktop main process. The
+ * agent edits the real project, so the panel polls while a run is live and
+ * settles with one more read once it finishes.
+ */
+export function useLocalSessionDiff(
+  sessionId: string,
+  enabled: boolean,
+  isRunning: boolean
+) {
+  const query = useQuery({
+    queryKey: ["local-session-diff", sessionId],
+    queryFn: () => window.openSweDesktop?.getAcpDiff(sessionId) ?? NO_DIFF,
+    enabled,
+    refetchInterval: isRunning ? 5000 : false,
+  })
+
+  const { refetch } = query
+  useEffect(() => {
+    if (enabled && !isRunning) void refetch()
+  }, [enabled, isRunning, refetch])
+
+  return query
+}
+
 function mergeSummaries(
   current: Array<DesktopAcpSessionSummary>,
   incoming: Array<DesktopAcpSessionSummary>
@@ -106,18 +141,39 @@ function mergeSummaries(
 
 export function useDesktopAcpSessions() {
   const [sessions, setSessions] = useState<Array<DesktopAcpSessionSummary>>([])
+  const deletedSessionIds = useRef(new Set<string>())
 
   useEffect(() => {
     const desktop = window.openSweDesktop
     if (!desktop) return
     const unsubscribe = desktop.onAcpEvent(({ session }) => {
+      if (deletedSessionIds.current.has(session.id)) return
       setSessions((current) => mergeSummaries(current, [session]))
     })
     void desktop.listAcpSessions().then((incoming) => {
-      setSessions((current) => mergeSummaries(current, incoming))
+      setSessions((current) =>
+        mergeSummaries(
+          current,
+          incoming.filter(
+            (session) => !deletedSessionIds.current.has(session.id)
+          )
+        )
+      )
     })
     return unsubscribe
   }, [])
 
-  return sessions
+  const deleteSession = useCallback(async (sessionId: string) => {
+    const deleted =
+      (await window.openSweDesktop?.deleteAcpSession(sessionId)) ?? false
+    if (deleted) {
+      deletedSessionIds.current.add(sessionId)
+      setSessions((current) =>
+        current.filter((session) => session.id !== sessionId)
+      )
+    }
+    return deleted
+  }, [])
+
+  return { sessions, deleteSession }
 }

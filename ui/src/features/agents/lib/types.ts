@@ -13,18 +13,22 @@ export type ChunkKind =
 export type TodoStatus = "pending" | "in_progress" | "completed"
 
 export type AgentStatus =
-  | "idle"
-  | "running"
-  | "finished"
-  | "interrupted"
-  | "error"
+  "idle" | "running" | "finished" | "interrupted" | "error"
 
 export type AgentSource =
-  | "dashboard"
-  | "github"
-  | "slack"
-  | "linear"
+  "dashboard" | "github" | "slack" | "linear" | "schedule"
+
+export type AgentThreadCategory =
+  "interactive" | "issue" | "pull_request" | "automation" | "review" | "system"
+
+export type AgentTriggerKind =
+  | "user"
   | "schedule"
+  | "schedule_test"
+  | "wakeup"
+  | "reviewer"
+  | "analyzer"
+  | "ci_autofix"
 
 export interface TodoItem {
   content: string
@@ -185,6 +189,8 @@ export interface Project {
   gitBranch?: string
 }
 
+export type SlackNotificationMode = "always" | "on_action"
+
 export interface AgentSchedule {
   id: string
   name: string
@@ -192,6 +198,7 @@ export interface AgentSchedule {
   schedule: string
   repo: string | null
   slackChannelId?: string | null
+  slackNotificationMode: SlackNotificationMode
   model: string
   effort?: string | null
   enabled: boolean
@@ -248,12 +255,19 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
+  workingRepoFullName?: string | null
   branch: string
   model: string
   effort?: string | null
   planMode?: boolean
   planStatus?: string | null
+  adminThread?: boolean
   source?: AgentSource
+  origin?: AgentSource | string
+  threadCategory?: AgentThreadCategory | string
+  triggerKind?: AgentTriggerKind | string
+  automationId?: string | null
+  automationName?: string | null
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null

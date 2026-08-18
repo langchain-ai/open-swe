@@ -1,7 +1,5 @@
 """Gate workflow-file pushes on human approval."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 import logging
@@ -16,6 +14,7 @@ from langchain_core.messages import ToolCall, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
+from langgraph_sdk import get_client
 
 from ..dashboard.workflow_approval import (
     ensure_workflow_push_pending,
@@ -25,7 +24,11 @@ from ..dashboard.workflow_approval import (
 from ..tools.slack_thread_reply import build_workflow_approval_blocks
 from ..utils.dashboard_links import dashboard_workflow_approval_url
 from ..utils.sandbox_state import SANDBOX_BACKENDS
-from ..utils.slack import post_slack_thread_reply_with_ts
+from ..utils.slack import (
+    LANGGRAPH_URL,
+    get_active_slack_thread,
+    post_slack_thread_reply_with_ts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -225,9 +228,9 @@ def _git_command(repo_dir: str | None, args: str) -> str:
     return f"git {args}"
 
 
-def _run_git(backend: Any, repo_dir: str | None, args: str) -> GitInspectResult:
+async def _run_git(backend: Any, repo_dir: str | None, args: str) -> GitInspectResult:
     try:
-        response = backend.execute(_git_command(repo_dir, args), timeout=30)
+        response = await backend.aexecute(_git_command(repo_dir, args), timeout=30)
     except Exception:
         logger.debug("workflow push inspection failed for git %s", args, exc_info=True)
         return GitInspectResult("", False)
@@ -294,45 +297,47 @@ def _approval_url(thread_id: str | None, fingerprint: str) -> str | None:
     return dashboard_workflow_approval_url(thread_id, fingerprint)
 
 
-def _workflow_change_for_push(backend: Any, parsed: ParsedGitPush) -> WorkflowPushChange | None:
-    root_result = _run_git(backend, parsed.repo_dir, "rev-parse --show-toplevel")
+async def _workflow_change_for_push(
+    backend: Any, parsed: ParsedGitPush
+) -> WorkflowPushChange | None:
+    root_result = await _run_git(backend, parsed.repo_dir, "rev-parse --show-toplevel")
     if not root_result.ok:
         return None
     root = _first_line(root_result.output)
     if not root:
         return None
 
-    branch = _run_git(backend, root, "rev-parse --abbrev-ref HEAD")
+    branch = await _run_git(backend, root, "rev-parse --abbrev-ref HEAD")
     branch_name = _first_line(branch.output) if branch.ok else ""
     if not branch_name or branch_name == "HEAD" or parsed.remote_ref != branch_name:
         return None
     if parsed.local_ref not in {"HEAD", branch_name}:
         return None
 
-    target_sha = _run_git(backend, root, f"rev-parse {shlex.quote(parsed.local_ref)}")
+    target_sha = await _run_git(backend, root, f"rev-parse {shlex.quote(parsed.local_ref)}")
     head = _first_line(target_sha.output) if target_sha.ok else ""
     if not head or not _GIT_OBJECT_ID.fullmatch(head):
         return None
 
     remote_branch = f"refs/remotes/{parsed.remote}/{parsed.remote_ref}"
-    remote_branch_exists = _run_git(
+    remote_branch_exists = await _run_git(
         backend, root, f"rev-parse --verify {shlex.quote(remote_branch)}"
     )
     if remote_branch_exists.ok and _first_line(remote_branch_exists.output):
         base_ref = remote_branch
         range_expr = f"{shlex.quote(base_ref)}..{shlex.quote(head)}"
-        base_sha = _first_line(_run_git(backend, root, f"rev-parse {shlex.quote(base_ref)}").output)
+        base_result = await _run_git(backend, root, f"rev-parse {shlex.quote(base_ref)}")
+        base_sha = _first_line(base_result.output)
     else:
-        origin_head = _run_git(backend, root, "symbolic-ref --short refs/remotes/origin/HEAD")
+        origin_head = await _run_git(backend, root, "symbolic-ref --short refs/remotes/origin/HEAD")
         base_ref = _first_line(origin_head.output) if origin_head.ok else "origin/main"
         range_expr = f"{shlex.quote(base_ref)}...{shlex.quote(head)}"
-        base_sha = _first_line(
-            _run_git(
-                backend, root, f"merge-base {shlex.quote(head)} {shlex.quote(base_ref)}"
-            ).output
+        merge_base = await _run_git(
+            backend, root, f"merge-base {shlex.quote(head)} {shlex.quote(base_ref)}"
         )
+        base_sha = _first_line(merge_base.output)
 
-    names = _run_git(
+    names = await _run_git(
         backend,
         root,
         f"diff --name-only --diff-filter=ACMRTD {range_expr} -- .github/workflows",
@@ -347,14 +352,16 @@ def _workflow_change_for_push(backend: Any, parsed: ParsedGitPush) -> WorkflowPu
     if not files:
         return None
 
-    diff = _run_git(backend, root, f"diff --binary --full-index {range_expr} -- .github/workflows")
+    diff = await _run_git(
+        backend, root, f"diff --binary --full-index {range_expr} -- .github/workflows"
+    )
     if not diff.ok or not diff.output:
         return None
-    numstat = _run_git(backend, root, f"diff --numstat {range_expr} -- .github/workflows")
+    numstat = await _run_git(backend, root, f"diff --numstat {range_expr} -- .github/workflows")
     diff_preview, diff_preview_truncated = _diff_preview(diff.output)
     diff_stats = _diff_stats(files, numstat.output if numstat.ok else "")
 
-    remote = _run_git(backend, root, "config --get remote.origin.url")
+    remote = await _run_git(backend, root, "config --get remote.origin.url")
     repo = _normalize_remote(_first_line(remote.output)) if remote.ok else ""
     fixed_refspec = f"{head}:refs/heads/{parsed.remote_ref}"
     fixed_args = ["push"]
@@ -460,10 +467,16 @@ async def _post_slack_approval_if_needed(
         return
     configurable = _configurable(request)
     slack_thread = configurable.get("slack_thread")
-    if not isinstance(slack_thread, Mapping):
+    thread_id = _thread_id(request)
+    active = await get_active_slack_thread(
+        get_client(url=LANGGRAPH_URL),
+        thread_id,
+        slack_thread if isinstance(slack_thread, Mapping) else None,
+    )
+    if not active:
         return
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
+    channel_id = active.get("channel_id")
+    thread_ts = active.get("thread_ts")
     if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
         return
     message = _approval_slack_message(
@@ -474,6 +487,7 @@ async def _post_slack_approval_if_needed(
         thread_ts,
         message,
         blocks=build_workflow_approval_blocks(message, change.fingerprint),
+        agent_thread_id=thread_id,
     )
     if message_ts and not error:
         thread_id = _thread_id(request)
@@ -514,7 +528,7 @@ class WorkflowPushGuardMiddleware(AgentMiddleware):
 
     state_schema = AgentState
 
-    def _change_for_request(self, request: ToolCallRequest) -> WorkflowPushChange | None:
+    async def _change_for_request(self, request: ToolCallRequest) -> WorkflowPushChange | None:
         if _tool_name(request) != "execute":
             return None
         command = _tool_args(request).get("command")
@@ -526,7 +540,7 @@ class WorkflowPushGuardMiddleware(AgentMiddleware):
         backend = _backend(_thread_id(request))
         if backend is None:
             return None
-        return _workflow_change_for_push(backend, parsed)
+        return await _workflow_change_for_push(backend, parsed)
 
     async def _handle_change_async(
         self,
@@ -553,7 +567,7 @@ class WorkflowPushGuardMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
-        change = self._change_for_request(request)
+        change = await self._change_for_request(request)
         if change is None:
             return await handler(request)
         return await self._handle_change_async(request, handler, change)

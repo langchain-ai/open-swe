@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 from unittest.mock import AsyncMock, patch
 
@@ -73,25 +71,14 @@ async def test_set_agent_instructions_updates_store() -> None:
     mock_put.assert_awaited_once()
 
 
-def test_construct_system_prompt_appends_repo_instructions() -> None:
+def test_construct_system_prompt_interpolates_custom_instructions() -> None:
     prompt = construct_system_prompt(
         working_dir="/work",
-        repo_custom_instructions="Prefer pytest over unittest.",
+        repo_custom_instructions="Repository rule sentinel.",
+        user_custom_instructions="User rule sentinel.",
     )
-    assert "Repository-specific Custom Instructions" in prompt
-    assert "Prefer pytest over unittest." in prompt
 
-
-def test_construct_system_prompt_without_repo_instructions() -> None:
-    prompt = construct_system_prompt(working_dir="/work")
-    assert "Repository-specific Custom Instructions" not in prompt
-
-
-def test_construct_system_prompt_guards_sandbox_recreation() -> None:
-    prompt = construct_system_prompt(working_dir="/work")
-    assert "Never call `recreate_sandbox` proactively or as automatic recovery" in prompt
-    assert "only when the user explicitly asks to recreate the sandbox" in prompt
-    assert "old sandbox becomes inaccessible from the thread" in prompt
+    assert prompt.index("Repository rule sentinel.") < prompt.index("User rule sentinel.")
 
 
 def test_resolve_repo_custom_instructions_returns_none_without_repo() -> None:

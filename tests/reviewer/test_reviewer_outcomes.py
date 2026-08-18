@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any, cast
 
 from agent.review.findings import Finding
@@ -55,7 +53,9 @@ def test_example_id_is_deterministic() -> None:
 
 
 class _FakeDataset:
-    id = "ds_123"
+    def __init__(self, dataset_id: str, name: str) -> None:
+        self.id = dataset_id
+        self.name = name
 
 
 class _FakeClient:
@@ -64,10 +64,17 @@ class _FakeClient:
         self.updated: list[dict[str, Any]] = []
         self.conflict_once = False
 
-    def list_datasets(self, dataset_name: str):  # noqa: ANN001
-        return iter([_FakeDataset()])
+    async def __aenter__(self) -> "_FakeClient":
+        return self
 
-    def create_example(self, **kwargs: Any) -> None:
+    async def __aexit__(self, *exc: Any) -> None:
+        return None
+
+    async def list_datasets(self, dataset_name: str):  # noqa: ANN001
+        yield _FakeDataset("ds_wrong", "other-dataset")
+        yield _FakeDataset("ds_123", dataset_name)
+
+    async def create_example(self, **kwargs: Any) -> None:
         if self.conflict_once:
             self.conflict_once = False
             raise RuntimeError("already exists")
@@ -75,6 +82,15 @@ class _FakeClient:
 
     def update_example(self, **kwargs: Any) -> None:
         self.updated.append(kwargs)
+
+
+def _patch_client(monkeypatch, fake: _FakeClient | None) -> None:  # noqa: ANN001
+    if fake is None:
+        monkeypatch.setattr(reviewer_outcomes, "_outcomes_credentials", lambda: None)
+        return
+    monkeypatch.setattr(reviewer_outcomes, "_outcomes_credentials", lambda: ("k", "https://api"))
+    monkeypatch.setattr(reviewer_outcomes, "async_langsmith_client", lambda *a: fake)
+    monkeypatch.setattr(reviewer_outcomes, "sync_langsmith_client", lambda *a: cast(Any, fake))
 
 
 def _finding() -> Finding:
@@ -99,11 +115,11 @@ def _finding() -> Finding:
     )
 
 
-def test_upsert_finding_outcome_builds_payload(monkeypatch) -> None:  # noqa: ANN001
+async def test_upsert_finding_outcome_builds_payload(monkeypatch) -> None:  # noqa: ANN001
     fake = _FakeClient()
-    monkeypatch.setattr(reviewer_outcomes, "_outcomes_client", lambda: fake)
+    _patch_client(monkeypatch, fake)
 
-    ok = upsert_finding_outcome(
+    ok = await upsert_finding_outcome(
         _finding(),
         label=TRUE_POSITIVE,
         label_source="resolved_by_commit",
@@ -129,12 +145,12 @@ def test_upsert_finding_outcome_builds_payload(monkeypatch) -> None:  # noqa: AN
     assert call["metadata"]["run_id"] == "run_1"
 
 
-def test_upsert_finding_outcome_updates_on_conflict(monkeypatch) -> None:  # noqa: ANN001
+async def test_upsert_finding_outcome_updates_on_conflict(monkeypatch) -> None:  # noqa: ANN001
     fake = _FakeClient()
     fake.conflict_once = True
-    monkeypatch.setattr(reviewer_outcomes, "_outcomes_client", lambda: fake)
+    _patch_client(monkeypatch, fake)
 
-    ok = upsert_finding_outcome(
+    ok = await upsert_finding_outcome(
         _finding(), label=FALSE_POSITIVE, label_source="dismissed", repo="o/r"
     )
     assert ok
@@ -142,18 +158,18 @@ def test_upsert_finding_outcome_updates_on_conflict(monkeypatch) -> None:  # noq
     assert len(fake.updated) == 1
 
 
-def test_upsert_no_client_is_noop(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(reviewer_outcomes, "_outcomes_client", lambda: None)
+async def test_upsert_no_client_is_noop(monkeypatch) -> None:  # noqa: ANN001
+    _patch_client(monkeypatch, None)
     assert (
-        upsert_finding_outcome(_finding(), label=TRUE_POSITIVE, label_source="x", repo="o/r")
+        await upsert_finding_outcome(_finding(), label=TRUE_POSITIVE, label_source="x", repo="o/r")
         is False
     )
 
 
-def test_emit_finding_status_outcome_maps_and_calls(monkeypatch) -> None:  # noqa: ANN001
+async def test_emit_finding_status_outcome_maps_and_calls(monkeypatch) -> None:  # noqa: ANN001
     captured: dict[str, Any] = {}
 
-    def fake_upsert(finding, **kwargs: Any) -> bool:  # noqa: ANN001
+    async def fake_upsert(finding, **kwargs: Any) -> bool:  # noqa: ANN001
         captured.update(kwargs)
         captured["finding_id"] = finding["id"]
         return True
@@ -167,7 +183,7 @@ def test_emit_finding_status_outcome_maps_and_calls(monkeypatch) -> None:  # noq
         "base_sha": "aaa",
         "head_sha": "bbb",
     }
-    assert emit_finding_status_outcome(
+    assert await emit_finding_status_outcome(
         _finding(), "resolved", configurable=configurable, thread_id="t1"
     )
     assert captured["repo"] == "o/r"
@@ -176,9 +192,9 @@ def test_emit_finding_status_outcome_maps_and_calls(monkeypatch) -> None:  # noq
     assert captured["pr_number"] == 7
 
 
-def test_emit_finding_status_outcome_no_repo_is_noop(monkeypatch) -> None:  # noqa: ANN001
+async def test_emit_finding_status_outcome_no_repo_is_noop(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(reviewer_outcomes, "upsert_finding_outcome", lambda *a, **k: pytest_fail())
-    assert emit_finding_status_outcome(_finding(), "dismissed", configurable={}) is False
+    assert await emit_finding_status_outcome(_finding(), "dismissed", configurable={}) is False
 
 
 def pytest_fail() -> bool:

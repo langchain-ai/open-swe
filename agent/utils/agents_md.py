@@ -4,8 +4,6 @@ Used by the reviewer to deterministically load repo conventions into context
 without the model having to clone the repo and read the file itself.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import posixpath

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import sys
 from typing import Any
@@ -28,7 +26,7 @@ class _FakeClient:
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> _FakeClient:
+    async def __aenter__(self) -> "_FakeClient":
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
@@ -58,7 +56,7 @@ class _RoutingClient:
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> _RoutingClient:
+    async def __aenter__(self) -> "_RoutingClient":
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
@@ -141,6 +139,23 @@ def test_uses_user_token_for_slack_with_login(monkeypatch: pytest.MonkeyPatch) -
         "body": "body",
         "draft": True,
     }
+
+
+def test_profile_draft_preference_overrides_tool_argument(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117", "draft_prs": False})
+    _stub_token(monkeypatch)
+    client = _FakeClient(
+        post=_FakeResponse(
+            201,
+            {"html_url": "https://x/pull/1", "number": 1, "user": {"login": "johannes117"}},
+        )
+    )
+    _install_client(monkeypatch, client)
+
+    result = _open()
+
+    assert result["success"] is True
+    assert client.post_calls[0]["json"]["draft"] is False
 
 
 def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) -> None:

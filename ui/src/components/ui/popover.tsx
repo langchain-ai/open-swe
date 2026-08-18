@@ -51,8 +51,8 @@ function PopoverPopup({
       >
         <PopoverPrimitive.Popup
           className={cn(
-            "dropdown-glass relative max-h-(--available-height) origin-(--transform-origin) overflow-y-auto rounded-lg p-3 text-popover-foreground outline-none transition-[scale,opacity] data-starting-style:scale-98 data-starting-style:opacity-0",
-            tooltipStyle && "w-fit text-balance rounded-md p-2 text-xs",
+            "dropdown-glass relative max-h-(--available-height) origin-(--transform-origin) overflow-y-auto rounded-lg p-3 text-popover-foreground transition-[scale,opacity] outline-none data-starting-style:scale-98 data-starting-style:opacity-0",
+            tooltipStyle && "w-fit rounded-md p-2 text-xs text-balance",
             className
           )}
           data-slot="popover-popup"
@@ -72,7 +72,7 @@ function PopoverClose(props: PopoverPrimitive.Close.Props) {
 function PopoverTitle({ className, ...props }: PopoverPrimitive.Title.Props) {
   return (
     <PopoverPrimitive.Title
-      className={cn("text-sm font-semibold leading-none", className)}
+      className={cn("text-sm leading-none font-semibold", className)}
       data-slot="popover-title"
       {...props}
     />

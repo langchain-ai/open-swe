@@ -10,7 +10,7 @@ import type {
   ThreadsPageParams,
 } from "./api"
 import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
-import type { SkillInput } from "@/lib/api"
+import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
 
 export const agentThreadKeys = {
@@ -19,6 +19,7 @@ export const agentThreadKeys = {
     activeLimit: number
     resolvedLimit: number
     activeThreadId?: string
+    includeAutomations: boolean
   }) => ["agent-threads", "lists", "sidebar", params] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
@@ -63,51 +64,119 @@ export const agentScheduleKeys = {
 }
 
 export const agentSkillKeys = {
-  all: ["agent-skills"] as const,
+  personal: ["agent-skills", "personal"] as const,
+  organization: ["agent-skills", "organization"] as const,
+}
+
+export const environmentOptionKeys = {
+  all: ["environment-options"] as const,
+}
+
+/** Environments a new thread can boot from. Empty when none are configured. */
+export function useEnvironmentOptions() {
+  return useQuery({
+    queryKey: environmentOptionKeys.all,
+    queryFn: api.listEnvironmentOptions,
+    staleTime: 60_000,
+  })
+}
+
+async function listPersonalSkills() {
+  const items = []
+  let offset = 0
+  do {
+    const page = await api.listSkills(offset)
+    items.push(...page.items)
+    offset = page.next_offset ?? 0
+  } while (offset)
+  return items
+}
+
+async function listOrganizationSkills() {
+  const items: Array<Skill> = []
+  let cursor: string | null = null
+  do {
+    const page = await api.listOrganizationSkills(cursor)
+    items.push(...page.items)
+    cursor = page.next_cursor
+  } while (cursor)
+  return items
+}
+
+export function usePersonalAgentSkills() {
+  return useQuery({
+    queryKey: agentSkillKeys.personal,
+    queryFn: listPersonalSkills,
+  })
+}
+
+export function useOrganizationAgentSkills() {
+  return useQuery({
+    queryKey: agentSkillKeys.organization,
+    queryFn: listOrganizationSkills,
+  })
 }
 
 export function useAgentSkills() {
-  return useQuery({
-    queryKey: agentSkillKeys.all,
-    queryFn: async () => {
-      const items = []
-      let offset = 0
-      do {
-        const page = await api.listSkills(offset)
-        items.push(...page.items)
-        offset = page.next_offset ?? 0
-      } while (offset)
-      return items
-    },
+  const personal = usePersonalAgentSkills()
+  const organization = useOrganizationAgentSkills()
+  return {
+    ...personal,
+    data:
+      personal.data || organization.data
+        ? [
+            ...new Map(
+              [...(personal.data ?? []), ...(organization.data ?? [])].map(
+                (skill) => [skill.name, skill]
+              )
+            ).values(),
+          ]
+        : undefined,
+    error: personal.error ?? organization.error,
+    isError: personal.isError || organization.isError,
+    isLoading: personal.isLoading || organization.isLoading,
+  }
+}
+
+function useSkillMutation(
+  mutationFn: (vars: SkillInput & { name: string }) => Promise<Skill>,
+  queryKey: ReadonlyArray<string>
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
   })
 }
 
-export function useCreateAgentSkill() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({ name, ...body }: SkillInput & { name: string }) =>
-      api.createSkill(name, body),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: agentSkillKeys.all }),
-  })
+export function useCreateAgentSkill(organization = false) {
+  return useSkillMutation(
+    ({ name, ...body }) =>
+      organization
+        ? api.createOrganizationSkill(name, body)
+        : api.createSkill(name, body),
+    organization ? agentSkillKeys.organization : agentSkillKeys.personal
+  )
 }
 
-export function useUpdateAgentSkill() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({ name, ...body }: SkillInput & { name: string }) =>
-      api.saveSkill(name, body),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: agentSkillKeys.all }),
-  })
+export function useUpdateAgentSkill(organization = false) {
+  return useSkillMutation(
+    ({ name, ...body }) =>
+      organization
+        ? api.saveOrganizationSkill(name, body)
+        : api.saveSkill(name, body),
+    organization ? agentSkillKeys.organization : agentSkillKeys.personal
+  )
 }
 
-export function useDeleteAgentSkill() {
+export function useDeleteAgentSkill(organization = false) {
   const queryClient = useQueryClient()
+  const queryKey = organization
+    ? agentSkillKeys.organization
+    : agentSkillKeys.personal
   return useMutation({
-    mutationFn: api.deleteSkill,
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: agentSkillKeys.all }),
+    mutationFn: organization ? api.deleteOrganizationSkill : api.deleteSkill,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
   })
 }
 
@@ -151,12 +220,14 @@ function sidebarRefetchInterval(query: { state: { data?: SidebarThreads } }) {
 
 export function useSidebarThreads(
   resolvedLimit: number,
-  activeThreadId?: string
+  activeThreadId?: string,
+  includeAutomations = false
 ) {
   const params = {
     activeLimit: SIDEBAR_ACTIVE_LIMIT,
     resolvedLimit,
     activeThreadId,
+    includeAutomations,
   }
   return useQuery({
     queryKey: agentThreadKeys.sidebar(params),
@@ -167,9 +238,19 @@ export function useSidebarThreads(
 }
 
 export function useAgentThread(threadId: string) {
+  const queryClient = useQueryClient()
+  const queryKey = agentThreadKeys.detail(threadId)
+
   return useQuery({
-    queryKey: agentThreadKeys.detail(threadId),
-    queryFn: () => agentsApi.getThread(threadId),
+    queryKey,
+    queryFn: async () => {
+      const thread = await agentsApi.getThread(threadId)
+      const queuedMessages =
+        queryClient.getQueryData<AgentThread>(queryKey)?.queuedMessages
+      return thread.status === "running" && queuedMessages?.length
+        ? { ...thread, queuedMessages }
+        : thread
+    },
     // Server truth heartbeat while a run is live. The SDK's SSE transport does
     // not reconnect once a custom `fetch` is supplied (it needs the dashboard
     // session cookie), so a dropped event stream must not leave the view — and
@@ -274,6 +355,18 @@ export function useUpdateAgentSchedule() {
       agentsApi.updateSchedule(vars.scheduleId, vars.body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+    },
+  })
+}
+
+export function useTriggerAgentSchedule() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: agentsApi.triggerSchedule,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+      invalidateAgentThreadLists(queryClient)
     },
   })
 }

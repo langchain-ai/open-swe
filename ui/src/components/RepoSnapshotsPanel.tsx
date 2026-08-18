@@ -45,10 +45,26 @@ export function RepoSnapshotsPanel() {
   const [addRepo, setAddRepo] = useState("")
   const [selected, setSelected] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
+  const [baseDraft, setBaseDraft] = useState<string | null>(null)
 
   const snapshots = useQuery({
     queryKey: ["repoSnapshots"],
     queryFn: api.listRepoSnapshots,
+  })
+
+  const sandboxSettings = useQuery({
+    queryKey: ["sandboxSettings"],
+    queryFn: api.getSandboxSettings,
+  })
+
+  const saveBase = useMutation({
+    mutationFn: (value: string | null) => api.saveSandboxSettings(value),
+    onSuccess: (settings) => {
+      qc.setQueryData(["sandboxSettings"], settings)
+      setBaseDraft(null)
+      setError(null)
+    },
+    onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const repos = useRepos()
@@ -134,6 +150,18 @@ export function RepoSnapshotsPanel() {
       .catch(() => undefined)
   }
 
+  const base = sandboxSettings.data
+  const baseValue = baseDraft ?? base?.base_snapshot_id ?? ""
+  const baseDirty = baseValue.trim() !== (base?.base_snapshot_id ?? "")
+  const baseHint =
+    base?.base_snapshot_source === "admin"
+      ? `Overrides DEFAULT_SANDBOX_SNAPSHOT_ID${
+          base.env_base_snapshot_id ? ` (${base.env_base_snapshot_id})` : ""
+        }. New sandboxes boot from this unless the repo has a ready snapshot below.`
+      : base?.base_snapshot_source === "env"
+        ? `Using DEFAULT_SANDBOX_SNAPSHOT_ID. Set a value here to change it without a redeploy.`
+        : "No base snapshot configured — new sandboxes cannot start until one is set here or in DEFAULT_SANDBOX_SNAPSHOT_ID."
+
   const githubReauth =
     (repos.isError && isGithubReauthError(repos.error)) ||
     (error !== null && /github token|re-login required/i.test(error))
@@ -152,6 +180,50 @@ export function RepoSnapshotsPanel() {
           to list installed repos.
         </div>
       )}
+      <section className="space-y-2">
+        <Label htmlFor="base-snapshot">Base snapshot</Label>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <Input
+            id="base-snapshot"
+            placeholder={base?.env_base_snapshot_id ?? "snapshot id"}
+            value={baseValue}
+            onChange={(e) => setBaseDraft(e.target.value)}
+            disabled={sandboxSettings.isLoading}
+            className="sm:flex-1"
+          />
+          <Button
+            size="sm"
+            className="shrink-0 sm:w-auto"
+            disabled={!baseDirty || saveBase.isPending}
+            onClick={() => void saveBase.mutateAsync(baseValue.trim() || null)}
+          >
+            Save
+          </Button>
+          {base?.base_snapshot_id && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="shrink-0 sm:w-auto"
+              disabled={saveBase.isPending}
+              onClick={() => void saveBase.mutateAsync(null)}
+            >
+              Use env default
+            </Button>
+          )}
+        </div>
+        <p
+          className={`text-xs ${
+            base?.base_snapshot_source === "unset"
+              ? "text-destructive"
+              : "text-muted-foreground"
+          }`}
+        >
+          {baseHint}
+        </p>
+      </section>
+
+      <div className="border-t border-border" />
+
       <section className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="add-snapshot-repo">Add repository</Label>

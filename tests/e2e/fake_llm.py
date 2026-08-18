@@ -7,8 +7,6 @@ the real ``open_pull_request`` tool, and post the result back with the real
 the preceding tool result, exactly as a real model would.
 """
 
-from __future__ import annotations
-
 import os
 import re
 import time
@@ -510,7 +508,7 @@ class FakeScriptedChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "fake-scripted"
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> FakeScriptedChatModel:  # noqa: ARG002
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "FakeScriptedChatModel":  # noqa: ARG002
         return self
 
     def _generate(

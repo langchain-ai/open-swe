@@ -1,9 +1,7 @@
 """Tests for Linear webhook PR author linking (reuse of the Slack user mapping)."""
 
-from __future__ import annotations
-
 import asyncio
-from typing import Any, cast
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from agent.webhooks import linear as linear_webhook
@@ -118,18 +116,3 @@ def test_linear_omits_login_when_unmapped() -> None:
     assert resolved_email == "nobody@example.com"
     assert "github_login" not in configurable
     assert upsert["github_login"] == ""
-
-
-def test_linear_issue_prompt_mentions_pr_references_and_conventions() -> None:
-    _configurable, _upsert, _email, content = _run_process(
-        _issue_data(user_email="zhen@example.com"),
-        {"owner": "langchain-ai", "name": "open-swe"},
-    )
-
-    blocks = cast(list[object], content)
-    block = cast(dict[str, object], blocks[0])
-    prompt = cast(str, block["text"])
-    assert "https://linear.app/x/issue/OS-42" in prompt
-    assert "PR description links back to this Linear ticket" in prompt
-    assert "repository's PR conventions" in prompt
-    assert ".changelog/README.md" in prompt

@@ -1,7 +1,5 @@
 """Open a GitHub pull request attributed to the triggering user."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 from urllib.parse import quote
@@ -15,7 +13,7 @@ from ..dashboard.plan_store import get_plan_content
 from ..utils.dashboard_links import dashboard_plan_url
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
-from ..utils.slack import get_slack_permalink
+from ..utils.slack import get_active_slack_thread, get_slack_permalink
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +72,12 @@ def _github_message(resp: httpx.Response) -> str:
         if isinstance(message, str) and message.strip():
             return message.strip()
     return resp.text.strip() or f"HTTP {resp.status_code}"
+
+
+def _effective_draft(draft: bool) -> bool:
+    configurable = _configurable()
+    preference = configurable.get("draft_prs")
+    return preference if isinstance(preference, bool) else draft
 
 
 def _configurable() -> dict[str, Any]:
@@ -551,6 +555,13 @@ async def _build_source_reference_lines(configurable: dict[str, Any]) -> list[st
 
     if source == "slack":
         slack_thread = configurable.get("slack_thread") or {}
+        thread_id = configurable.get("thread_id")
+        active = await get_active_slack_thread(
+            get_client(),
+            thread_id if isinstance(thread_id, str) else None,
+            slack_thread if isinstance(slack_thread, dict) else None,
+        )
+        slack_thread = active or {}
         channel_id = slack_thread.get("channel_id")
         thread_ts = slack_thread.get("thread_ts")
         permalink = slack_thread.get("permalink")
@@ -658,7 +669,14 @@ async def _open_pull_request(
         if preflight_failure is not None:
             return preflight_failure
         body = await _maybe_append_references(client, token, owner, repo, body)
-        payload = {"title": title, "head": head, "base": base, "body": body, "draft": draft}
+        draft = _effective_draft(draft)
+        payload = {
+            "title": title,
+            "head": head,
+            "base": base,
+            "body": body,
+            "draft": draft,
+        }
         resp = await client.post(
             f"{GITHUB_API}/repos/{owner}/{repo}/pulls",
             headers=_auth_headers(token),
@@ -761,7 +779,7 @@ async def open_pull_request(
     your branch with `git push origin <branch>` BEFORE calling this.
 
     For everything else — updating an existing PR, marking it ready for review,
-    commenting, reading status — keep using `GH_TOKEN=dummy gh`. If a PR already
+    commenting, reading status — keep using `gh`. If a PR already
     exists for the branch, this returns that PR's URL without creating a
     duplicate; switch to `gh pr edit` for updates.
 
@@ -772,7 +790,8 @@ async def open_pull_request(
         base: The branch you want to merge into (e.g. "main").
         title: PR title.
         body: PR description (Markdown).
-        draft: Open as a draft PR. Defaults to True.
+        draft: Requested draft status. The authenticated user's dashboard preference
+          overrides this value for newly created PRs; existing PRs are returned unchanged.
 
     Returns:
         On success: {"success": True, "created": bool, "url": str, "number": int,

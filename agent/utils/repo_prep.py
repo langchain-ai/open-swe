@@ -10,9 +10,6 @@ Best-effort: any failure leaves the sandbox usable (the review still works off
 the fetched diff) and returns ``False`` so callers can skip skill wiring.
 """
 
-from __future__ import annotations
-
-import asyncio
 import logging
 import posixpath
 import shlex
@@ -49,21 +46,21 @@ def _prep_command(
         f"if [ -d {q_repo_dir}/.git ]; then",
         # Tolerate fetch-all failures: the targeted head/base fetches below
         # are what the checkout actually needs.
-        f"  cd {q_repo_dir} && {{ GH_TOKEN=dummy git fetch --all --quiet || true; }}",
+        f"  cd {q_repo_dir} && {{ git fetch --all --quiet || true; }}",
         "else",
-        f"  cd {q_work_dir} && GH_TOKEN=dummy gh repo clone {q_full_name} && cd {q_repo_name}",
+        f"  cd {q_work_dir} && gh repo clone {q_full_name} && cd {q_repo_name}",
         "fi",
     ]
     if base_sha:
         q_base = shlex.quote(base_sha)
-        lines.append(f"GH_TOKEN=dummy git fetch origin {q_base} --quiet 2>/dev/null || true")
+        lines.append(f"git fetch origin {q_base} --quiet 2>/dev/null || true")
     if q_head:
         # Direct sha fetch covers same-repo PRs; the pull ref covers fork PRs
         # whose head commit is not reachable from origin's branches.
-        lines.append(f"GH_TOKEN=dummy git fetch origin {q_head} --quiet 2>/dev/null || true")
+        lines.append(f"git fetch origin {q_head} --quiet 2>/dev/null || true")
         if pr_number is not None:
             pull_ref = shlex.quote(f"refs/pull/{pr_number}/head")
-            lines.append(f"GH_TOKEN=dummy git fetch origin {pull_ref} --quiet 2>/dev/null || true")
+            lines.append(f"git fetch origin {pull_ref} --quiet 2>/dev/null || true")
         # --force: a reused sandbox can have a dirty worktree from a previous
         # run, which would otherwise block the checkout and silently leave the
         # tree at the old head. Strict on purpose: a failed checkout must fail
@@ -93,9 +90,7 @@ async def prepare_review_repo(
 
     command = _prep_command(work_dir, repo_owner, repo_name, head_sha, pr_number, base_sha)
     try:
-        result = await asyncio.to_thread(
-            sandbox_backend.execute, command, timeout=CLONE_TIMEOUT_SECONDS
-        )
+        result = await sandbox_backend.aexecute(command, timeout=CLONE_TIMEOUT_SECONDS)
     except Exception:  # noqa: BLE001
         logger.warning("Failed to prep review repo %s/%s", repo_owner, repo_name, exc_info=True)
         return False
@@ -155,7 +150,7 @@ async def materialize_trusted_skills(
             f"echo {q_dest}"
         )
         try:
-            result = await asyncio.to_thread(sandbox_backend.execute, command)
+            result = await sandbox_backend.aexecute(command)
         except Exception:  # noqa: BLE001
             logger.warning("Failed to extract trusted skills %s", skill_dir, exc_info=True)
             continue

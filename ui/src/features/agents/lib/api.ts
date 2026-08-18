@@ -3,11 +3,16 @@ import type {
   AgentThread,
   ImageChunk,
   Message,
+  SlackNotificationMode,
   WorkflowPushApprovalsResponse,
 } from "./types"
 import { dashboardApiBase } from "@/lib/api-base"
+import {
+  dashboardApiUrl,
+  dashboardForwardedHeaders,
+} from "@/lib/dashboard-fetch"
 
-export type { AgentSchedule, AgentThread, Message }
+export type { AgentSchedule, AgentThread, Message, SlackNotificationMode }
 
 export class AgentsApiError extends Error {
   constructor(
@@ -33,6 +38,7 @@ export interface ScheduleCreateRequest {
   name?: string | null
   repo?: string | null
   slack_channel_id?: string | null
+  slack_notification_mode?: SlackNotificationMode
   model_id?: string | null
   effort?: string | null
 }
@@ -43,9 +49,17 @@ export interface ScheduleUpdateRequest {
   name?: string | null
   repo?: string | null
   slack_channel_id?: string | null
+  slack_notification_mode?: SlackNotificationMode
   model_id?: string | null
   effort?: string | null
   enabled?: boolean | null
+}
+
+export interface ScheduleTriggerResult {
+  status: "started"
+  schedule_id: string
+  thread_id: string
+  run_id: string | null
 }
 
 export interface ThreadPrDiffFile {
@@ -77,6 +91,12 @@ export interface ThreadTurnDiff {
 export interface ThreadRecoveryPatch {
   blob: Blob
   filename: string
+}
+
+export interface CloudTerminalConnection {
+  url: string
+  protocol: string
+  ticket: string
 }
 
 export interface ThreadsPageParams {
@@ -117,11 +137,12 @@ async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
+  const res = await fetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...dashboardForwardedHeaders(),
       ...(init.headers ?? {}),
     },
   })
@@ -150,9 +171,9 @@ function filenameFromContentDisposition(value: string | null): string | null {
 }
 
 async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
-  const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
+  const res = await fetch(dashboardApiUrl(path), {
     credentials: "include",
-    headers: { Accept: "text/x-diff" },
+    headers: { Accept: "text/x-diff", ...dashboardForwardedHeaders() },
   })
   if (!res.ok) {
     let message = res.statusText
@@ -195,6 +216,7 @@ function buildSidebarThreadsQuery(params: {
   activeLimit?: number
   resolvedLimit?: number
   activeThreadId?: string
+  includeAutomations?: boolean
 }): string {
   const search = new URLSearchParams()
   if (params.activeLimit != null) {
@@ -206,6 +228,9 @@ function buildSidebarThreadsQuery(params: {
   if (params.activeThreadId) {
     search.set("active_thread_id", params.activeThreadId)
   }
+  if (params.includeAutomations != null) {
+    search.set("include_automations", String(params.includeAutomations))
+  }
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -216,6 +241,7 @@ export const agentsApi = {
     activeLimit?: number
     resolvedLimit?: number
     activeThreadId?: string
+    includeAutomations?: boolean
   }) =>
     agentsRequest<SidebarThreads>(
       `/threads/sidebar${buildSidebarThreadsQuery(params)}`
@@ -243,6 +269,11 @@ export const agentsApi = {
         method: "PATCH",
         body: JSON.stringify(body),
       }
+    ),
+  triggerSchedule: (scheduleId: string) =>
+    agentsRequest<ScheduleTriggerResult>(
+      `/schedules/${encodeURIComponent(scheduleId)}/trigger`,
+      { method: "POST" }
     ),
   deleteSchedule: (scheduleId: string) =>
     agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
@@ -307,6 +338,11 @@ export const agentsApi = {
   downloadThreadRecoveryPatch: (threadId: string) =>
     agentsBlobRequest(
       `/threads/${encodeURIComponent(threadId)}/recovery.patch`
+    ),
+  connectCloudTerminal: (threadId: string) =>
+    agentsRequest<CloudTerminalConnection>(
+      `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
+      { method: "POST" }
     ),
   streamUrl: (threadId: string) =>
     `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,

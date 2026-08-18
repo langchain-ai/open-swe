@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pytest
 
 from agent.dashboard.review_styles import normalize_repo_full_name

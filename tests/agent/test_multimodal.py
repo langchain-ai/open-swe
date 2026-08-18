@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import socket
 from typing import Any, cast
 from urllib.parse import urlparse

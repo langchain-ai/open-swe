@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Any
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "approve_plan": ".approve_plan",
+    "capture_environment_snapshot": ".environments",
+    "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
@@ -17,16 +19,20 @@ _TOOL_MODULES = {
     "linear_list_teams": ".linear_list_teams",
     "linear_search_issues": ".linear_search_issues",
     "linear_update_issue": ".linear_update_issue",
+    "list_environments": ".environments",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
+    "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
     "publish_review": ".publish_review",
     "read_repo_file": ".read_repo_file",
+    "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": ".request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
+    "save_environment": ".environments",
     "save_plan": ".save_plan",
     "save_user_instructions": ".save_user_instructions",
     "save_user_skill": ".user_skills",
@@ -34,6 +40,7 @@ _TOOL_MODULES = {
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": ".search_repo_code",
     "slack_add_reaction": ".slack_add_reaction",
+    "slack_move_thread": ".slack_move_thread",
     "slack_read_thread_messages": ".slack_read_thread_messages",
     "slack_start_new_thread": ".slack_start_new_thread",
     "slack_thread_reply": ".slack_thread_reply",
@@ -44,6 +51,8 @@ _TOOL_MODULES = {
 __all__ = [
     "add_finding",
     "approve_plan",
+    "capture_environment_snapshot",
+    "delete_environment",
     "enter_plan_mode",
     "fetch_review_diff",
     "fetch_url",
@@ -56,16 +65,20 @@ __all__ = [
     "linear_list_teams",
     "linear_search_issues",
     "linear_update_issue",
+    "list_environments",
     "list_findings",
     "list_review_findings",
+    "notify_automation_channel",
     "open_pull_request",
     "publish_review",
     "read_repo_file",
+    "read_user_settings",
     "recreate_sandbox",
     "report_platform_issue",
     "request_pr_review",
     "reply_to_finding_thread",
     "resolve_finding_thread",
+    "save_environment",
     "save_plan",
     "save_user_instructions",
     "save_user_skill",
@@ -73,6 +86,7 @@ __all__ = [
     "schedule_thread_wakeup",
     "search_repo_code",
     "slack_add_reaction",
+    "slack_move_thread",
     "slack_read_thread_messages",
     "slack_start_new_thread",
     "slack_thread_reply",
@@ -84,6 +98,12 @@ if TYPE_CHECKING:
     from .add_finding import add_finding
     from .approve_plan import approve_plan
     from .enter_plan_mode import enter_plan_mode
+    from .environments import (
+        capture_environment_snapshot,
+        delete_environment,
+        list_environments,
+        save_environment,
+    )
     from .fetch_review_diff import fetch_review_diff
     from .fetch_url import fetch_url
     from .http_request import http_request
@@ -97,9 +117,11 @@ if TYPE_CHECKING:
     from .linear_update_issue import linear_update_issue
     from .list_findings import list_findings
     from .list_review_findings import list_review_findings
+    from .notify_automation_channel import notify_automation_channel
     from .open_pull_request import open_pull_request
     from .publish_review import publish_review
     from .read_repo_file import read_repo_file
+    from .read_user_settings import read_user_settings
     from .recreate_sandbox import recreate_sandbox
     from .reply_to_finding_thread import reply_to_finding_thread
     from .report_platform_issue import report_platform_issue
@@ -110,6 +132,7 @@ if TYPE_CHECKING:
     from .schedule_thread_wakeup import schedule_thread_wakeup
     from .search_repo_code import search_repo_code
     from .slack_add_reaction import slack_add_reaction
+    from .slack_move_thread import slack_move_thread
     from .slack_read_thread_messages import slack_read_thread_messages
     from .slack_start_new_thread import slack_start_new_thread
     from .slack_thread_reply import slack_thread_reply

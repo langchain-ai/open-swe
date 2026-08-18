@@ -1,6 +1,10 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
-import { CircleAlert as CircleAlertIcon, Map as MapIcon } from "lucide-react"
+import {
+  CircleAlert as CircleAlertIcon,
+  FolderOpen,
+  Map as MapIcon,
+} from "lucide-react"
 
 import type {
   AgentThread,
@@ -10,10 +14,9 @@ import type {
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { AgentPanelTab } from "@/features/agents/components/AgentGitPanel"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
-import {
-  AgentGitPanel,
-  PANEL_MIN_CHAT_WIDTH,
-} from "@/features/agents/components/AgentGitPanel"
+import { useSidebarCollapsed } from "@/components/sidebar-layout"
+import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
+import { PANEL_MIN_CHAT_WIDTH } from "@/features/agents/components/AgentPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import {
@@ -91,6 +94,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadStream()
   const isMobile = useIsMobile()
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const sidebarCollapsed = useSidebarCollapsed()
   const skills = useAgentSkills()
 
   const { models, defaultSelection } = useModelOptions()
@@ -127,6 +133,23 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     },
     [thread.id]
   )
+  // The plan renders in the panel, so open it as soon as the agent finishes
+  // writing rather than banner-nagging while it works. Mobile is excluded: there
+  // the panel is a full-screen overlay that would hide the conversation.
+  const planStatus = thread.planStatus
+  const planReady = planStatus === "ready" || planStatus === "shared"
+  // Seeded from the mount status (the view is keyed by thread id and only
+  // renders once the thread has loaded) so revisiting a thread with an
+  // already-ready plan keeps the user's collapsed preference.
+  const lastPlanStatus = useRef<string | null | undefined>(planStatus)
+  useEffect(() => {
+    const previous = lastPlanStatus.current
+    lastPlanStatus.current = planStatus
+    if (isMobile || !planReady || previous === planStatus) return
+    setPanelTab("plan")
+    handlePanelCollapsedChange(false)
+  }, [handlePanelCollapsedChange, isMobile, planReady, planStatus])
+
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const handleOpenFile = useCallback(
     (filePath: string) => {
@@ -168,17 +191,57 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   // this thread. Those are also the paths a follow-up is most likely about.
   const mentionPaths = useMemo(() => editedPaths(baseMessages), [baseMessages])
   const isThinking = stream.isLoading
+  const displayRepo = thread.workingRepoFullName || thread.repoFullName
   const settingUpSandbox = isThinking && baseMessages.length === 0
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
   // Show a loading state during that one-time fetch instead of the empty state.
   const isHydrating = stream.isThreadLoading && !hasMessages
+  // A failed hydrate is indistinguishable from an empty thread in the snapshot,
+  // so say so rather than claiming the thread has no messages. `stream.error`
+  // also carries run failures, hence the dedicated hydration signal.
+  const [hydrateRejected, setHydrateRejected] = useState(false)
+  useEffect(() => {
+    let active = true
+    setHydrateRejected(false)
+    stream.hydrationPromise.catch(() => {
+      if (active) setHydrateRejected(true)
+    })
+    return () => {
+      active = false
+    }
+  }, [stream.hydrationPromise])
+  const hydrationFailed = !isHydrating && !hasMessages && hydrateRejected
 
   return (
     <div className="flex min-w-0 flex-1">
       <div
-        className="flex min-w-0 flex-1 flex-col"
+        className={cn(
+          "flex min-w-0 flex-1 flex-col",
+          thread.adminThread && "bg-destructive/4"
+        )}
         style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
       >
+        <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
+          <div
+            className={cn(
+              "flex h-full w-full items-center gap-3 px-4",
+              sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
+              panelCollapsed && "pr-14"
+            )}
+          >
+            {displayRepo && (
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+                <FolderOpen className="size-3.5 shrink-0" />
+                <span className="truncate" title={displayRepo}>
+                  {displayRepo}
+                </span>
+              </span>
+            )}
+            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+              Cloud
+            </span>
+          </div>
+        </header>
         {thread.status === "error" && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">
@@ -208,50 +271,45 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           threadId={thread.id}
           pollWhileActive={isStreaming}
         />
-        {thread.planStatus &&
-          thread.planStatus !== "approved" &&
-          thread.planStatus !== "cancelled" && (
-            <div
-              className={cn(
-                "mx-auto w-full max-w-3xl shrink-0 px-4 pt-3",
-                // The collapsed panel floats a fixed expand button in the
-                // top-right corner; clear it so it never covers "Review plan →".
-                panelCollapsed && "pr-14"
-              )}
+        {planReady && (
+          <div
+            className={cn(
+              "mx-auto w-full max-w-3xl shrink-0 px-4 pt-3",
+              // Both collapsed panels float a fixed expand button in a top
+              // corner; clear them so neither covers the banner.
+              sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
+              panelCollapsed && "pr-14"
+            )}
+          >
+            <button
+              type="button"
+              data-testid="review-plan-link"
+              className="block w-full rounded-xl text-left transition-colors hover:bg-info/8"
+              onClick={() => {
+                setPanelTab("plan")
+                handlePanelCollapsedChange(false)
+              }}
             >
-              <button
-                type="button"
-                data-testid="review-plan-link"
-                className="block w-full rounded-xl text-left transition-colors hover:bg-info/8"
-                onClick={() => {
-                  setPanelTab("plan")
-                  handlePanelCollapsedChange(false)
-                }}
-              >
-                <Alert variant="info">
-                  <MapIcon />
-                  <AlertDescription>
-                    <span className="text-foreground">
-                      {thread.planStatus === "ready"
-                        ? "A plan is ready for your review."
-                        : thread.planStatus === "shared"
-                          ? "The agent shared a longer response."
-                          : thread.planStatus === "revising"
-                            ? "The agent is revising the plan."
-                            : "The agent is writing a plan."}
-                    </span>
-                  </AlertDescription>
-                  <AlertAction>
-                    <span className="text-xs font-medium text-info-foreground">
-                      {thread.planStatus === "shared"
-                        ? "Open response →"
-                        : "Review plan →"}
-                    </span>
-                  </AlertAction>
-                </Alert>
-              </button>
-            </div>
-          )}
+              <Alert variant="info">
+                <MapIcon />
+                <AlertDescription>
+                  <span className="text-foreground">
+                    {planStatus === "shared"
+                      ? "The agent shared a longer response."
+                      : "A plan is ready for your review."}
+                  </span>
+                </AlertDescription>
+                <AlertAction>
+                  <span className="text-xs font-medium text-info-foreground">
+                    {planStatus === "shared"
+                      ? "Open response →"
+                      : "Review plan →"}
+                  </span>
+                </AlertAction>
+              </Alert>
+            </button>
+          </div>
+        )}
         {hasConversation ? (
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <Messages
@@ -291,23 +349,36 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   contextUsage={{
                     usedTokens,
                     contextWindow: activeModel?.context_window ?? null,
-                    hasMessages,
                   }}
                 />
               </div>
             </div>
           </div>
         ) : isHydrating ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            <p className="text-xs text-muted-foreground/70">
-              Loading conversation…
-            </p>
+          <div className="flex flex-1 items-center justify-center px-6">
+            <img
+              src="/logo-mark.png"
+              alt="Loading conversation"
+              className="size-12 animate-pulse"
+            />
           </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-            <p className="text-xs text-muted-foreground/70">
-              This thread has no messages yet.
-            </p>
+            {hydrationFailed ? (
+              <Alert variant="error" className="max-w-3xl">
+                <CircleAlertIcon />
+                <AlertDescription>
+                  <span>
+                    This thread&apos;s messages could not be loaded. Reload to
+                    try again.
+                  </span>
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <p className="text-xs text-muted-foreground/70">
+                This thread has no messages yet.
+              </p>
+            )}
             <div className="w-full max-w-3xl">
               <AgentPromptBar
                 placeholder="Send the first message"
@@ -329,7 +400,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 contextUsage={{
                   usedTokens,
                   contextWindow: activeModel?.context_window ?? null,
-                  hasMessages,
                 }}
               />
             </div>

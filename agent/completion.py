@@ -12,8 +12,6 @@ manual payloads without a run id fall back to legacy thread-level idempotence so
 missing ids degrade dedupe instead of silencing failure replies.
 """
 
-from __future__ import annotations
-
 import hmac
 import logging
 import os
@@ -144,7 +142,9 @@ async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: 
             thread_ts = slack_thread.get("thread_ts")
             if channel_id and thread_ts:
                 slack_text = _failure_text(status, dashboard_thread_url(thread_id))
-                return await post_slack_thread_reply(channel_id, thread_ts, slack_text)
+                return await post_slack_thread_reply(
+                    channel_id, thread_ts, slack_text, agent_thread_id=thread_id
+                )
         return False
 
     if source == "linear":

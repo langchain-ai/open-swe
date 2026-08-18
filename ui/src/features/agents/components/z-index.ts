@@ -3,4 +3,4 @@ export const Z = {
   OVERLAY: 40,
   DROPDOWN: 50,
   MODAL: 60,
-} as const;
+} as const

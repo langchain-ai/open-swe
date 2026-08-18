@@ -29,13 +29,6 @@ jobs:
             chore
             revert
             release
-          scopes: |
-            shared
-            cli
-            web
-            open-swe
-            docs
-            deps
           requireScope: false
           ignoreLabels: |
             ignore-lint-pr-title

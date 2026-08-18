@@ -75,7 +75,7 @@ async def test_reaction_added_creates_feedback(monkeypatch: pytest.MonkeyPatch) 
     _store_message_mapping(client, "C123", "2.000")
     created: dict[str, Any] = {}
 
-    def fake_create_feedback(
+    async def fake_create_feedback(
         run_id: str,
         key: str,
         *,
@@ -112,7 +112,7 @@ async def test_reaction_added_skips_duplicate_event(monkeypatch: pytest.MonkeyPa
     _store_message_mapping(client, "C123", "2.000")
     client.store.items[(("slack_reaction_events", "C123"), "Ev1")] = {"value": {"event_id": "Ev1"}}
 
-    def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
+    async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("duplicate event should not create feedback")
 
     monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
@@ -137,7 +137,7 @@ async def test_reaction_removed_deletes_feedback_when_last_reaction_removed(
     }
     deleted: dict[str, str] = {}
 
-    def fake_delete_feedback(run_id: str, key: str) -> bool:
+    async def fake_delete_feedback(run_id: str, key: str) -> bool:
         deleted["run_id"] = run_id
         deleted["key"] = key
         return True
@@ -158,7 +158,7 @@ async def test_reaction_without_message_mapping_is_ignored(
 ) -> None:
     client = _FakeClient()
 
-    def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
+    async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("unmapped message should not create feedback")
 
     monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
@@ -174,7 +174,7 @@ async def test_reaction_from_non_triggering_user_is_ignored(
     client = _FakeClient()
     _store_message_mapping(client, "C123", "2.000", triggering_user_id="UTRIGGER")
 
-    def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
+    async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("non-triggering user should not create feedback")
 
     monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
@@ -199,10 +199,10 @@ async def test_conflicting_reactions_clear_feedback(
     }
     deleted: dict[str, str] = {}
 
-    def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
+    async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("conflicting reactions must not record a numeric score")
 
-    def fake_delete_feedback(run_id: str, key: str) -> bool:
+    async def fake_delete_feedback(run_id: str, key: str) -> bool:
         deleted["run_id"] = run_id
         deleted["key"] = key
         return True
@@ -233,6 +233,25 @@ async def test_slack_webhook_queues_reaction_added(monkeypatch: pytest.MonkeyPat
 
     assert response == {"status": "accepted", "message": "Reaction feedback queued"}
     assert background_tasks.tasks == [(webhook_common.process_slack_reaction_added, (event, "Ev1"))]
+
+
+@pytest.mark.asyncio
+async def test_slack_webhook_queues_stop_reaction(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = _reaction_event("x")
+    payload = {"type": "event_callback", "event_id": "EvStop", "event": event}
+    background_tasks = _FakeBackgroundTasks()
+
+    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "accepted", "message": "Stop reaction queued"}
+    assert background_tasks.tasks == [
+        (webhook_common.process_slack_stop_reaction, (event, "EvStop"))
+    ]
 
 
 @pytest.mark.asyncio

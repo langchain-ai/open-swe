@@ -1,13 +1,14 @@
-from __future__ import annotations
-
 import importlib
+import uuid
 from typing import Any
 
 import pytest
 
-from agent.utils.thread_ids import generate_thread_id_from_slack_thread
-
 slack_breakout_tool = importlib.import_module("agent.tools.slack_start_new_thread")
+
+
+async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
+    return "https://smith/x"
 
 
 def _config() -> dict[str, Any]:
@@ -71,6 +72,28 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         }
         return new_ts, None
 
+    async def fake_post_thread_reply(
+        channel_id: str,
+        thread_ts: str,
+        text: str,
+        *,
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
+        blocks: list[dict[str, Any]] | None = None,
+        usage: Any = None,
+        **kwargs: Any,
+    ) -> tuple[str | None, str | None]:
+        captured["thread_reply"] = {
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+            "text": text,
+            "unfurl_links": unfurl_links,
+            "unfurl_media": unfurl_media,
+            "blocks": blocks,
+            "usage": usage,
+        }
+        return "1700000000.222222", None
+
     async def fake_dispatch_agent_run(
         thread_id: str,
         content: str,
@@ -110,17 +133,28 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
             }
         )
 
+    async def fake_bind(client: Any, channel_id: str, thread_ts: str, thread_id: str) -> str:
+        captured["binding"] = {
+            "client": client,
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+            "thread_id": thread_id,
+        }
+        return thread_id
+
     fake_client = _FakeClient(captured)
     monkeypatch.setattr(slack_breakout_tool, "get_config", _config)
+    monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", fake_bind)
     monkeypatch.setattr(slack_breakout_tool, "get_client", lambda url: fake_client)
     monkeypatch.setattr(
         slack_breakout_tool, "post_slack_top_level_message_with_ts", fake_post_top_level
     )
+    monkeypatch.setattr(
+        slack_breakout_tool, "post_slack_thread_reply_with_ts", fake_post_thread_reply
+    )
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
     monkeypatch.setattr(slack_breakout_tool, "store_slack_run_mapping", fake_store_mapping)
-    monkeypatch.setattr(
-        slack_breakout_tool, "get_langsmith_trace_url", lambda thread_id: "https://smith/x"
-    )
+    monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
     monkeypatch.setattr(
         slack_breakout_tool,
         "dashboard_thread_url",
@@ -132,7 +166,8 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         "Use the same repo and investigate the follow-up aspect in detail.",
     )
 
-    expected_thread_id = generate_thread_id_from_slack_thread("C1", new_ts)
+    expected_thread_id = captured["thread_create"]["thread_id"]
+    assert uuid.UUID(expected_thread_id).version == 4
     assert result == {
         "success": True,
         "thread_id": expected_thread_id,
@@ -140,11 +175,28 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         "dashboard_url": f"https://dashboard.example/agents/{expected_thread_id}",
     }
     assert captured["top_level_post"]["channel_id"] == "C1"
-    assert "Investigate follow-up" in captured["top_level_post"]["text"]
-    assert "langchain-ai/open-swe" in captured["top_level_post"]["text"]
+    assert captured["top_level_post"]["text"] == (
+        "*Open SWE breakout thread:* Investigate follow-up"
+    )
     assert captured["top_level_post"]["unfurl_links"] is False
+    assert captured["thread_reply"] == {
+        "channel_id": "C1",
+        "thread_ts": new_ts,
+        "text": (
+            "*Repository:* `langchain-ai/open-swe`\n\n"
+            "*Instructions for the new thread:*\n"
+            "Use the same repo and investigate the follow-up aspect in detail."
+        ),
+        "unfurl_links": False,
+        "unfurl_media": False,
+        "blocks": None,
+        "usage": None,
+    }
     assert captured["thread_create"]["if_exists"] == "do_nothing"
     assert captured["thread_create"]["thread_id"] == expected_thread_id
+    assert captured["binding"]["thread_id"] == expected_thread_id
+    assert captured["binding"]["channel_id"] == "C1"
+    assert captured["binding"]["thread_ts"] == new_ts
     metadata = captured["thread_update"]["metadata"]
     assert metadata["source"] == "slack"
     assert metadata["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
@@ -251,4 +303,44 @@ async def test_slack_start_new_thread_returns_slack_failure_without_dispatch(
     assert result["error"] == "msg_too_long"
     assert result["slack_error"] == "msg_too_long"
     assert "shorter" in result["hint"]
+    assert captured["dispatched"] is False
+
+
+async def test_slack_start_new_thread_returns_detail_failure_without_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {"dispatched": False, "detail_posts": 0, "sleeps": []}
+
+    async def fake_post_top_level(*args: Any, **kwargs: Any) -> tuple[str | None, str | None]:
+        return "1700000000.111111", None
+
+    async def fake_post_thread_reply(*args: Any, **kwargs: Any) -> tuple[str | None, str | None]:
+        captured["detail_posts"] += 1
+        return None, "rate_limited: 30"
+
+    async def fake_sleep(delay: float) -> None:
+        captured["sleeps"].append(delay)
+
+    async def fake_dispatch_agent_run(*args: Any, **kwargs: Any) -> dict[str, str]:
+        captured["dispatched"] = True
+        return {"run_id": "run-123"}
+
+    monkeypatch.setattr(slack_breakout_tool, "get_config", _config)
+    monkeypatch.setattr(
+        slack_breakout_tool, "post_slack_top_level_message_with_ts", fake_post_top_level
+    )
+    monkeypatch.setattr(
+        slack_breakout_tool, "post_slack_thread_reply_with_ts", fake_post_thread_reply
+    )
+    monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
+    monkeypatch.setattr(slack_breakout_tool.asyncio, "sleep", fake_sleep)
+
+    result = await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
+
+    assert result["success"] is False
+    assert result["error"] == "rate_limited: 30"
+    assert result["slack_error"] == "rate_limited: 30"
+    assert "30s" in result["hint"]
+    assert captured["detail_posts"] == 2
+    assert captured["sleeps"] == [30]
     assert captured["dispatched"] is False

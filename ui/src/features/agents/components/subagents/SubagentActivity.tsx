@@ -50,7 +50,14 @@ export function SubagentActivity({
 }
 
 function StepIcon({ status }: { status: SubagentStep["status"] }) {
-  if (status === "completed") return <Check className="h-3 w-3 shrink-0 text-primary" aria-hidden />
-  if (status === "error") return <X className="h-3 w-3 shrink-0 text-red-400" aria-hidden />
-  return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/70" aria-hidden />
+  if (status === "completed")
+    return <Check className="h-3 w-3 shrink-0 text-primary" aria-hidden />
+  if (status === "error")
+    return <X className="h-3 w-3 shrink-0 text-red-400" aria-hidden />
+  return (
+    <Loader2
+      className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/70"
+      aria-hidden
+    />
+  )
 }

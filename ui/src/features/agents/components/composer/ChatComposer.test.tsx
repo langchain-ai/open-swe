@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatComposer, buildCommandItems } from "./ChatComposer"
 import { replaceTextRange } from "./composerTrigger"
+import type { ChatComposerProps } from "./ChatComposer"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 
 const stream = {
@@ -44,14 +45,20 @@ beforeEach(() => {
   cancelThread.mockClear()
 })
 
-function renderComposer(running: boolean) {
+function renderComposer(
+  running: boolean,
+  props: Partial<ChatComposerProps> = {}
+) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   })
   render(
     <QueryClientProvider client={client}>
       <AgentThreadStreamBoundary>
-        <ChatComposer activeRun={{ threadId: "thread-1", running }} />
+        <ChatComposer
+          activeRun={{ threadId: "thread-1", running }}
+          {...props}
+        />
       </AgentThreadStreamBoundary>
     </QueryClientProvider>
   )
@@ -89,11 +96,52 @@ describe("ChatComposer stop button", () => {
     expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
   })
 
+  it("stops the run on Escape", async () => {
+    renderComposer(true)
+
+    fireEvent.keyDown(document.body, { key: "Escape" })
+
+    await waitFor(() => expect(cancelThread).toHaveBeenCalledWith("thread-1"))
+  })
+
+  it("leaves Escape to an open overlay", () => {
+    renderComposer(true)
+    const dialog = document.createElement("div")
+    dialog.setAttribute("role", "dialog")
+    document.body.appendChild(dialog)
+
+    fireEvent.keyDown(dialog, { key: "Escape" })
+
+    expect(cancelThread).not.toHaveBeenCalled()
+  })
+
+  it("ignores Escape when no run is live", () => {
+    renderComposer(false)
+
+    fireEvent.keyDown(document.body, { key: "Escape" })
+
+    expect(cancelThread).not.toHaveBeenCalled()
+  })
+
   it("shows the send button when no run is live", () => {
     renderComposer(false)
 
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
+  })
+})
+
+describe("ChatComposer admin mode", () => {
+  it("tints the composer options control when enabled", () => {
+    renderComposer(false, {
+      adminThread: true,
+      onAdminThreadChange: vi.fn(),
+    })
+
+    const options = screen.getByRole("button", {
+      name: "More composer options",
+    })
+    expect(options.className.split(" ")).toContain("bg-destructive/10")
   })
 })
 
@@ -121,13 +169,17 @@ describe("ChatComposer skill autocomplete", () => {
       rangeStart: 7,
       rangeEnd: 12,
     }
-    const items = buildCommandItems(trigger, [], [
-      {
-        name: "plan",
-        description: "Create an implementation plan",
-        instructions: "",
-      },
-    ])
+    const items = buildCommandItems(
+      trigger,
+      [],
+      [
+        {
+          name: "plan",
+          description: "Create an implementation plan",
+          instructions: "",
+        },
+      ]
+    )
 
     expect(items).toEqual([
       expect.objectContaining({ type: "skill", name: "plan" }),

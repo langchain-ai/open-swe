@@ -1,7 +1,5 @@
 """Unit tests for the unified-diff parsing helpers."""
 
-from __future__ import annotations
-
 import pytest
 
 from agent.review.diff import (
@@ -162,17 +160,17 @@ async def test_materialize_review_diff_writes_supplied_diff() -> None:
 @pytest.mark.asyncio
 async def test_compute_diff_in_sandbox_uses_three_dot_for_merge_base() -> None:
     """First-review path passes merge_base=True so we use base...head, not base..head."""
-    from unittest.mock import MagicMock
+    from unittest.mock import AsyncMock, MagicMock
 
     from agent.review.diff import compute_diff_in_sandbox
 
     backend = MagicMock()
-    backend.execute = MagicMock(return_value="")
+    backend.aexecute = AsyncMock(return_value="")
 
     await compute_diff_in_sandbox(
         backend, work_dir="/w", base_ref="base", head_ref="head", merge_base=True
     )
-    cmd = backend.execute.call_args.args[0]
+    cmd = backend.aexecute.call_args.args[0]
     assert "base...head" in cmd
     assert "base..head" not in cmd.replace("base...head", "")
     assert "--no-prefix" not in cmd  # invalid flag must not appear
@@ -180,14 +178,14 @@ async def test_compute_diff_in_sandbox_uses_three_dot_for_merge_base() -> None:
 
 @pytest.mark.asyncio
 async def test_compute_diff_in_sandbox_reads_execute_response_output() -> None:
-    from unittest.mock import MagicMock
+    from unittest.mock import AsyncMock, MagicMock
 
     from deepagents.backends.protocol import ExecuteResponse
 
     from agent.review.diff import compute_diff_in_sandbox
 
     backend = MagicMock()
-    backend.execute = MagicMock(return_value=ExecuteResponse(output=_TWO_FILE_DIFF, exit_code=0))
+    backend.aexecute = AsyncMock(return_value=ExecuteResponse(output=_TWO_FILE_DIFF, exit_code=0))
 
     result = await compute_diff_in_sandbox(
         backend, work_dir="/w/repo", base_ref="base", head_ref="head"
@@ -199,14 +197,14 @@ async def test_compute_diff_in_sandbox_reads_execute_response_output() -> None:
 @pytest.mark.asyncio
 async def test_compute_diff_in_sandbox_uses_two_dot_by_default() -> None:
     """Re-review delta path passes merge_base=False so we use base..head."""
-    from unittest.mock import MagicMock
+    from unittest.mock import AsyncMock, MagicMock
 
     from agent.review.diff import compute_diff_in_sandbox
 
     backend = MagicMock()
-    backend.execute = MagicMock(return_value="")
+    backend.aexecute = AsyncMock(return_value="")
 
     await compute_diff_in_sandbox(backend, work_dir="/w", base_ref="oldsha", head_ref="newsha")
-    cmd = backend.execute.call_args.args[0]
+    cmd = backend.aexecute.call_args.args[0]
     assert "oldsha..newsha" in cmd
     assert "oldsha...newsha" not in cmd

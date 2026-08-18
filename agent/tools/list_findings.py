@@ -1,7 +1,5 @@
 """Tool: ``list_findings``. Return findings persisted on the reviewer thread."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from ..review.findings import (

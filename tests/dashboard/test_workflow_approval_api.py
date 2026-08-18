@@ -1,34 +1,29 @@
-from __future__ import annotations
-
-import pytest
-from fastapi import HTTPException
-
 from agent.dashboard import workflow_approval_api
 
 
-async def test_list_workflow_push_approvals_requires_thread_owner(monkeypatch) -> None:
+async def test_list_workflow_push_approvals_returns_records_for_non_owner(monkeypatch) -> None:
     async def fake_thread_metadata(thread_id: str) -> dict:
         assert thread_id == "thread-1"
         return {"source": "dashboard", "github_login": "owner"}
 
-    async def fail_get_workflow_push_approvals(thread_id: str) -> dict:
-        raise AssertionError("approval records should not be fetched for non-owners")
+    async def fake_get_workflow_push_approvals(thread_id: str) -> dict:
+        assert thread_id == "thread-1"
+        return {"fp-1": {"fingerprint": "fp-1", "status": "pending"}}
 
     monkeypatch.setattr(workflow_approval_api, "_thread_metadata", fake_thread_metadata)
     monkeypatch.setattr(
         workflow_approval_api,
         "get_workflow_push_approvals",
-        fail_get_workflow_push_approvals,
+        fake_get_workflow_push_approvals,
     )
 
-    with pytest.raises(HTTPException) as exc_info:
-        await workflow_approval_api.list_workflow_push_approvals(
-            "thread-1",
-            session={"sub": "other", "email": "other@example.com"},
-        )
+    response = await workflow_approval_api.list_workflow_push_approvals(
+        "thread-1",
+        session={"sub": "other", "email": "other@example.com"},
+    )
 
-    assert exc_info.value.status_code == 403
-    assert "thread owner" in str(exc_info.value.detail)
+    assert response["isOwner"] is False
+    assert response["approvals"][0]["fingerprint"] == "fp-1"
 
 
 async def test_list_workflow_push_approvals_returns_records_for_owner(monkeypatch) -> None:

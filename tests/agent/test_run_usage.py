@@ -3,7 +3,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 from agent.utils.run_usage import summarize_run_usage
 
 
-def _message(*, model: str, input_tokens: int, output_tokens: int) -> AIMessage:
+def _message(
+    *, model: str, input_tokens: int, output_tokens: int, cache_read_tokens: int = 0
+) -> AIMessage:
     return AIMessage(
         content="",
         response_metadata={"model_name": model},
@@ -11,6 +13,7 @@ def _message(*, model: str, input_tokens: int, output_tokens: int) -> AIMessage:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "total_tokens": input_tokens + output_tokens,
+            "input_token_details": {"cache_read": cache_read_tokens},
         },
     )
 
@@ -31,6 +34,25 @@ def test_summarize_run_usage_uses_only_latest_human_turn() -> None:
     assert summary is not None
     assert summary.models == ("model-a", "model-b")
     assert summary.main_agent_tokens == 3_300
+
+
+def test_summarize_run_usage_excludes_cached_input_tokens() -> None:
+    summary = summarize_run_usage(
+        {
+            "messages": [
+                HumanMessage(content="current"),
+                _message(
+                    model="model-a",
+                    input_tokens=1_000,
+                    output_tokens=100,
+                    cache_read_tokens=600,
+                ),
+            ]
+        }
+    )
+
+    assert summary is not None
+    assert summary.main_agent_tokens == 500
 
 
 def test_summarize_run_usage_ignores_messages_without_usage() -> None:

@@ -1,13 +1,23 @@
-import { memo, useEffect, useState } from "react";
-import { useMessages, useStreamContext as useAgentThreadStream } from "@langchain/react";
-import { Bot, ChevronDown, ChevronRight, Loader2, PauseCircle, TriangleAlert } from "lucide-react";
+import { memo, useEffect, useState } from "react"
+import {
+  useMessages,
+  useStreamContext as useAgentThreadStream,
+} from "@langchain/react"
+import {
+  Bot,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  PauseCircle,
+  TriangleAlert,
+} from "lucide-react"
 
-import { SubagentActivity } from "./SubagentActivity";
+import { SubagentActivity } from "./SubagentActivity"
 import type {
   SubagentDisplayStatus,
   SubagentStep,
-} from "@/features/agents/lib/subagentModel";
-import type { ToolExecutionChunk } from "@/features/agents/lib/types";
+} from "@/features/agents/lib/subagentModel"
+import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import {
   formatElapsed,
   subagentDescription,
@@ -18,13 +28,13 @@ import {
   subagentOutcome,
   subagentResultFromMessages,
   subagentSteps,
-} from "@/features/agents/lib/subagentModel";
-import { useIsAgentRunActive } from "@/features/agents/lib/provider/useIsAgentRunActive";
-import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream";
-import { useTickingNow } from "@/features/agents/lib/useTickingNow";
+} from "@/features/agents/lib/subagentModel"
+import { useIsAgentRunActive } from "@/features/agents/lib/provider/useIsAgentRunActive"
+import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
+import { useTickingNow } from "@/features/agents/lib/useTickingNow"
 
 /** Indentation per nesting level for subagents that spawned subagents. */
-const DEPTH_INDENT_PX = 10;
+const DEPTH_INDENT_PX = 10
 
 /**
  * A single subagent spawned via the `task` tool. Outside a live thread there is
@@ -36,29 +46,34 @@ export const SubagentCard = memo(function SubagentCard({
   chunk,
   onStatus,
 }: {
-  chunk: ToolExecutionChunk;
-  onStatus?: (toolCallId: string, status: SubagentDisplayStatus) => void;
+  chunk: ToolExecutionChunk
+  onStatus?: (toolCallId: string, status: SubagentDisplayStatus) => void
 }) {
-  const namespace = chunk.subagent?.namespace;
+  const namespace = chunk.subagent?.namespace
   return useIsInAgentThreadStream() && namespace && namespace.length > 0 ? (
     <LiveSubagentCard chunk={chunk} namespace={namespace} onStatus={onStatus} />
   ) : (
-    <SubagentCardView chunk={chunk} runActive={false} steps={[]} onStatus={onStatus} />
-  );
-});
+    <SubagentCardView
+      chunk={chunk}
+      runActive={false}
+      steps={[]}
+      onStatus={onStatus}
+    />
+  )
+})
 
 function LiveSubagentCard({
   chunk,
   namespace,
   onStatus,
 }: {
-  chunk: ToolExecutionChunk;
-  namespace: Array<string>;
-  onStatus?: (toolCallId: string, status: SubagentDisplayStatus) => void;
+  chunk: ToolExecutionChunk
+  namespace: Array<string>
+  onStatus?: (toolCallId: string, status: SubagentDisplayStatus) => void
 }) {
-  const stream = useAgentThreadStream();
-  const messages = useMessages(stream, { namespace });
-  const runActive = useIsAgentRunActive();
+  const stream = useAgentThreadStream()
+  const messages = useMessages(stream, { namespace })
+  const runActive = useIsAgentRunActive()
 
   return (
     <SubagentCardView
@@ -71,7 +86,7 @@ function LiveSubagentCard({
       result={subagentResultFromMessages(messages)}
       onStatus={onStatus}
     />
-  );
+  )
 }
 
 function SubagentCardView({
@@ -82,29 +97,32 @@ function SubagentCardView({
   result,
   onStatus,
 }: {
-  chunk: ToolExecutionChunk;
-  runActive: boolean;
-  steps: Array<SubagentStep>;
-  done?: boolean;
-  result?: string;
-  onStatus?: (toolCallId: string, status: SubagentDisplayStatus) => void;
+  chunk: ToolExecutionChunk
+  runActive: boolean
+  steps: Array<SubagentStep>
+  done?: boolean
+  result?: string
+  onStatus?: (toolCallId: string, status: SubagentDisplayStatus) => void
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const snapshotStatus = subagentDisplayStatus(chunk, runActive);
-  const status = done && snapshotStatus !== "error" ? "completed" : snapshotStatus;
-  const isRunning = status === "running";
+  const [expanded, setExpanded] = useState(false)
+  const snapshotStatus = subagentDisplayStatus(chunk, runActive)
+  const status =
+    done && snapshotStatus !== "error" ? "completed" : snapshotStatus
+  const isRunning = status === "running"
   // Freezing the tick freezes the timer: it stops at the moment this subagent
   // finished, not when the whole fan-out did.
-  const now = useTickingNow(isRunning);
-  const elapsedMs = subagentElapsedMs(chunk.subagent, now);
-  const description = subagentDescription(chunk);
-  const outcome = result ? { kind: "result" as const, text: result } : subagentOutcome(chunk);
+  const now = useTickingNow(isRunning)
+  const elapsedMs = subagentElapsedMs(chunk.subagent, now)
+  const description = subagentDescription(chunk)
+  const outcome = result
+    ? { kind: "result" as const, text: result }
+    : subagentOutcome(chunk)
   // Depth 1 is a root-spawned subagent and sits flush with the group.
-  const indent = Math.max(0, (chunk.subagent?.depth ?? 1) - 1) * DEPTH_INDENT_PX;
+  const indent = Math.max(0, (chunk.subagent?.depth ?? 1) - 1) * DEPTH_INDENT_PX
 
   useEffect(() => {
-    onStatus?.(chunk.toolCallId, status);
-  }, [onStatus, chunk.toolCallId, status]);
+    onStatus?.(chunk.toolCallId, status)
+  }, [onStatus, chunk.toolCallId, status])
 
   return (
     <div
@@ -131,16 +149,22 @@ function SubagentCardView({
         </span>
         {elapsedMs !== undefined && (
           <span
-            className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground/70"
+            className="ml-auto shrink-0 text-[10px] text-muted-foreground/70 tabular-nums"
             data-testid="subagent-elapsed"
           >
             {formatElapsed(elapsedMs)}
           </span>
         )}
         {expanded ? (
-          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/50" aria-hidden />
+          <ChevronDown
+            className="h-3 w-3 shrink-0 text-muted-foreground/50"
+            aria-hidden
+          />
         ) : (
-          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" aria-hidden />
+          <ChevronRight
+            className="h-3 w-3 shrink-0 text-muted-foreground/50"
+            aria-hidden
+          />
         )}
       </button>
 
@@ -149,7 +173,7 @@ function SubagentCardView({
       </span>
 
       {expanded && description && (
-        <p className="whitespace-pre-wrap break-words text-[11px] leading-4 text-muted-foreground/70">
+        <p className="text-[11px] leading-4 break-words whitespace-pre-wrap text-muted-foreground/70">
           {description}
         </p>
       )}
@@ -157,13 +181,17 @@ function SubagentCardView({
       <SubagentActivity steps={steps} expanded={expanded} />
 
       {status === "stalled" && (
-        <p className="text-[10px] text-muted-foreground/50">Stopped without finishing.</p>
+        <p className="text-[10px] text-muted-foreground/50">
+          Stopped without finishing.
+        </p>
       )}
 
       {outcome && (
         <p
-          className={`whitespace-pre-wrap break-words border-t border-border pt-1.5 text-[11px] leading-4 ${
-            outcome.kind === "error" ? "text-red-400" : "text-muted-foreground/70"
+          className={`border-t border-border pt-1.5 text-[11px] leading-4 break-words whitespace-pre-wrap ${
+            outcome.kind === "error"
+              ? "text-red-400"
+              : "text-muted-foreground/70"
           } ${expanded ? "" : "line-clamp-3"}`}
           data-testid={`subagent-${outcome.kind}`}
         >
@@ -171,15 +199,31 @@ function SubagentCardView({
         </p>
       )}
     </div>
-  );
+  )
 }
 
-function StatusIcon({ status }: { status: ReturnType<typeof subagentDisplayStatus> }) {
+function StatusIcon({
+  status,
+}: {
+  status: ReturnType<typeof subagentDisplayStatus>
+}) {
   if (status === "running")
-    return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" aria-hidden />;
+    return (
+      <Loader2
+        className="h-3 w-3 shrink-0 animate-spin text-primary"
+        aria-hidden
+      />
+    )
   if (status === "error")
-    return <TriangleAlert className="h-3 w-3 shrink-0 text-red-400" aria-hidden />;
+    return (
+      <TriangleAlert className="h-3 w-3 shrink-0 text-red-400" aria-hidden />
+    )
   if (status === "stalled")
-    return <PauseCircle className="h-3 w-3 shrink-0 text-muted-foreground/50" aria-hidden />;
-  return <Bot className="h-3 w-3 shrink-0 text-primary" aria-hidden />;
+    return (
+      <PauseCircle
+        className="h-3 w-3 shrink-0 text-muted-foreground/50"
+        aria-hidden
+      />
+    )
+  return <Bot className="h-3 w-3 shrink-0 text-primary" aria-hidden />
 }

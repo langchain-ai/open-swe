@@ -10,9 +10,6 @@ Both the snapshot and the read-back are best effort: on any failure the caller
 gets ``None`` / ``status="error"`` and the UI degrades to "diff unavailable".
 """
 
-from __future__ import annotations
-
-import asyncio
 import base64
 import binascii
 import json
@@ -48,38 +45,57 @@ def checkpoint_ref(turn_key: str) -> str:
     return f"refs/open-swe/turns/{_UNSAFE_KEY.sub('-', turn_key)[:100]}"
 
 
-def _cd_repo(work_dir: str | None) -> str:
+def plan_checkpoint_ref(turn_key: str) -> str:
+    return f"{checkpoint_ref(turn_key)}-plan"
+
+
+def _cd_repo(work_dir: str | None, repo_path: str | None = None) -> str:
     roots = " ".join(
         shlex.quote(root) for root in ([work_dir] if work_dir else []) + ["/workspace"]
     )
+    preferred = shlex.quote(repo_path) if repo_path else '""'
     return (
-        f'R=""; for w in {roots} "$PWD"; do for d in "$w" "$w"/*; do '
-        'if [ -e "$d/.git" ]; then R="$d"; break 2; fi; done; done; '
+        f"R={preferred}; "
+        'if [ -z "$R" ] || [ ! -e "$R/.git" ]; then R=""; '
+        f'for w in {roots} "$PWD"; do for d in "$w" "$w"/*; do '
+        'if [ -e "$d/.git" ]; then R="$d"; break 2; fi; done; done; fi; '
         '[ -n "$R" ] || exit 3; cd "$R"'
     )
 
 
-def _checkpoint_command(work_dir: str | None, ref: str) -> str:
+def _checkpoint_command(work_dir: str | None, ref: str, repo_path: str | None = None) -> str:
+    quoted_ref = shlex.quote(ref)
     return (
-        f"{_cd_repo(work_dir)}; {_WRITE_WORKTREE_TREE}; "
+        f"{_cd_repo(work_dir, repo_path)}; R=$(git rev-parse --show-toplevel); "
+        f"if C=$(git rev-parse --verify -q {quoted_ref}); then :; else "
+        f"{_WRITE_WORKTREE_TREE}; "
         "if git rev-parse --verify -q HEAD >/dev/null; then "
         'C=$(git commit-tree "$T" -p HEAD -m open-swe-turn); '
         'else C=$(git commit-tree "$T" -m open-swe-turn); fi; '
-        f'git update-ref {shlex.quote(ref)} "$C" && echo "$C"'
+        f'git update-ref {quoted_ref} "$C" || exit; fi; printf \'%s\\n%s\' "$C" "$R"'
     )
 
 
-def _diff_command(work_dir: str | None, base: str, head: str | None) -> str:
+def _diff_command(
+    work_dir: str | None, base: str, head: str | None, repo_path: str | None = None
+) -> str:
     resolve_head = f"H={shlex.quote(head)}" if head else f"{_WRITE_WORKTREE_TREE}; H=$T"
     rng = f"{shlex.quote(base)} $H"
     return (
-        f"{_cd_repo(work_dir)}; {resolve_head}; "
-        f"git diff --numstat -z --no-renames {rng}; printf '{_SECTION}'; "
-        f"git diff --name-status -z --no-renames {rng}; printf '{_SECTION}%s' \"$H\""
+        f"{_cd_repo(work_dir, repo_path)}; {resolve_head}; "
+        f"git diff --numstat -z --no-renames {rng} || exit; printf '{_SECTION}'; "
+        f"git diff --name-status -z --no-renames {rng} || exit; "
+        f"printf '{_SECTION}%s' \"$H\""
     )
 
 
-def _contents_command(work_dir: str | None, base: str, head: str, paths: Sequence[str]) -> str:
+def _contents_command(
+    work_dir: str | None,
+    base: str,
+    head: str,
+    paths: Sequence[str],
+    repo_path: str | None = None,
+) -> str:
     payload = base64.b64encode(
         json.dumps({"base": base, "head": head, "paths": list(paths)}).encode()
     ).decode()
@@ -114,7 +130,7 @@ print(json.dumps({
 }))
 PY"""
     script = script.replace("__PAYLOAD__", payload).replace("__MAX__", str(_MAX_FILE_BYTES))
-    return f"{_cd_repo(work_dir)}; {script}"
+    return f"{_cd_repo(work_dir, repo_path)}; {script}"
 
 
 def _output(response: Any) -> str:
@@ -136,7 +152,7 @@ def _ok(response: Any) -> bool:
 
 
 async def _execute(sandbox: Any, command: str, timeout: int) -> Any:
-    return await asyncio.to_thread(sandbox.execute, command, timeout=timeout)
+    return await sandbox.aexecute(command, timeout=timeout)
 
 
 def parse_numstat(raw: str) -> list[tuple[str, int | None, int | None]]:
@@ -205,33 +221,97 @@ def build_diff_files(
     return files
 
 
-def merge_checkpoint(existing: Any, key: str, ref: str, started_at: str) -> list[dict[str, str]]:
-    """Append a checkpoint to the thread's bounded list; the earliest wins per key.
-
-    A resumed or re-dispatched run for the same user message must not move the
-    turn's base forward — the first snapshot is the real turn start.
-    """
-    entries = [
-        {
-            "key": str(entry["key"]),
-            "ref": str(entry.get("ref", "")),
-            "started_at": str(entry.get("started_at", "")),
+def _checkpoint_entries(existing: Any) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for value in existing if isinstance(existing, list) else []:
+        if not isinstance(value, Mapping) or not isinstance(value.get("key"), str):
+            continue
+        entry: dict[str, Any] = {
+            "key": str(value["key"]),
+            "ref": str(value.get("ref", "")),
+            "started_at": str(value.get("started_at", "")),
         }
-        for entry in (existing if isinstance(existing, list) else [])
-        if isinstance(entry, Mapping) and isinstance(entry.get("key"), str)
-    ]
+        if isinstance(value.get("repo_path"), str) and value["repo_path"]:
+            entry["repo_path"] = value["repo_path"]
+        if isinstance(value.get("plan_ref"), str) and value["plan_ref"]:
+            entry["plan_ref"] = value["plan_ref"]
+        if value.get("plan_mode") is True:
+            entry["plan_mode"] = True
+        entries.append(entry)
+    return entries
+
+
+def merge_checkpoint(
+    existing: Any,
+    key: str,
+    ref: str,
+    started_at: str,
+    *,
+    repo_path: str | None = None,
+    plan_mode: bool = False,
+) -> list[dict[str, Any]]:
+    """Append a checkpoint to the thread's bounded list; the earliest wins per key."""
+    entries = _checkpoint_entries(existing)
     if any(entry["key"] == key for entry in entries):
         return entries
-    entries.append({"key": key, "ref": ref, "started_at": started_at})
+    entry: dict[str, Any] = {"key": key, "ref": ref, "started_at": started_at}
+    if repo_path:
+        entry["repo_path"] = repo_path
+    if plan_mode:
+        entry["plan_mode"] = True
+        entry["plan_ref"] = ref
+    entries.append(entry)
     return entries[-MAX_CHECKPOINTS:]
 
 
-async def record_turn_checkpoint(sandbox: Any, work_dir: str | None, turn_key: str) -> str | None:
-    """Snapshot the worktree for ``turn_key``; returns the ref, or ``None``."""
+def mark_checkpoint_plan_mode(
+    existing: Any, key: str, plan_ref: str | None = None
+) -> list[dict[str, Any]]:
+    """Mark one existing turn checkpoint as read-only planning."""
+    entries = _checkpoint_entries(existing)
+    for entry in entries:
+        if entry["key"] == key:
+            entry["plan_mode"] = True
+            entry["plan_ref"] = plan_ref or entry["ref"]
+            break
+    return entries
+
+
+async def record_plan_checkpoint(
+    sandbox: Any,
+    work_dir: str | None,
+    turn_key: str,
+    *,
+    repo_path: str | None = None,
+) -> str | None:
+    """Snapshot the worktree where a turn enters plan mode."""
+    ref = plan_checkpoint_ref(turn_key)
+    try:
+        response = await _execute(
+            sandbox,
+            _checkpoint_command(work_dir, ref, repo_path),
+            CHECKPOINT_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        logger.debug("plan checkpoint failed for %s", turn_key, exc_info=True)
+        return None
+    return ref if _ok(response) else None
+
+
+async def record_turn_checkpoint(
+    sandbox: Any,
+    work_dir: str | None,
+    turn_key: str,
+    *,
+    repo_path: str | None = None,
+) -> tuple[str, str] | None:
+    """Snapshot the worktree for ``turn_key``; returns its ref and repository."""
     ref = checkpoint_ref(turn_key)
     try:
         response = await _execute(
-            sandbox, _checkpoint_command(work_dir, ref), CHECKPOINT_TIMEOUT_SECONDS
+            sandbox,
+            _checkpoint_command(work_dir, ref, repo_path),
+            CHECKPOINT_TIMEOUT_SECONDS,
         )
     except Exception:
         logger.debug("turn checkpoint failed for %s", turn_key, exc_info=True)
@@ -239,16 +319,27 @@ async def record_turn_checkpoint(sandbox: Any, work_dir: str | None, turn_key: s
     if not _ok(response):
         logger.debug("turn checkpoint command failed for %s: %s", turn_key, _output(response))
         return None
-    return ref
+    lines = _output(response).strip().splitlines()
+    if len(lines) < 2 or not lines[-2] or not lines[-1].startswith("/"):
+        logger.debug("turn checkpoint returned invalid output for %s: %s", turn_key, lines)
+        return None
+    return ref, lines[-1]
 
 
 async def read_turn_diff(
-    sandbox: Any, work_dir: str | None, base: str, head: str | None
+    sandbox: Any,
+    work_dir: str | None,
+    base: str,
+    head: str | None,
+    *,
+    repo_path: str | None = None,
 ) -> dict[str, Any]:
     """Files changed between ``base`` and ``head`` (or the live worktree)."""
     try:
         response = await _execute(
-            sandbox, _diff_command(work_dir, base, head), DIFF_TIMEOUT_SECONDS
+            sandbox,
+            _diff_command(work_dir, base, head, repo_path),
+            DIFF_TIMEOUT_SECONDS,
         )
     except Exception:
         logger.debug("turn diff failed for %s", base, exc_info=True)
@@ -268,7 +359,7 @@ async def read_turn_diff(
         try:
             blobs = await _execute(
                 sandbox,
-                _contents_command(work_dir, base, head_tree.strip(), paths),
+                _contents_command(work_dir, base, head_tree.strip(), paths, repo_path),
                 DIFF_TIMEOUT_SECONDS,
             )
             decoded = json.loads(_output(blobs).strip().splitlines()[-1])

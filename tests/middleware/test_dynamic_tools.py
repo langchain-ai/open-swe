@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, replace
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -27,7 +25,7 @@ class _Request:
     tool_call: dict[str, Any] | None = None
     tool: BaseTool | None = None
 
-    def override(self, **kwargs: Any) -> _Request:
+    def override(self, **kwargs: Any) -> "_Request":
         return replace(self, **kwargs)
 
 
@@ -92,6 +90,6 @@ def test_general_purpose_subagent_includes_dynamic_tools() -> None:
     from agent.server import _general_purpose_subagent
 
     middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
-    subagent = _general_purpose_subagent(MagicMock(), dynamic_tools=middleware)
+    subagent = _general_purpose_subagent(MagicMock(), tools=[], dynamic_tools=middleware)
 
     assert middleware in subagent.get("middleware", [])

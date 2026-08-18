@@ -1,7 +1,5 @@
 """Middleware that removes malformed Anthropic thinking blocks before model calls."""
 
-from __future__ import annotations
-
 from collections.abc import Awaitable, Callable
 from typing import Any
 

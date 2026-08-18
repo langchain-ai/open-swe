@@ -1,8 +1,7 @@
 """GitHub organization membership checks for webhook gating."""
 
-from __future__ import annotations
-
 import logging
+import os
 from urllib.parse import quote
 
 import httpx
@@ -14,7 +13,14 @@ from .github_app import (
 
 logger = logging.getLogger(__name__)
 
-INTERNAL_BOT_LOGINS: frozenset[str] = frozenset({"open-swe[bot]", "openswe-dev[bot]"})
+INTERNAL_BOT_LOGINS: frozenset[str] = frozenset(
+    {"open-swe[bot]", "openswe-dev[bot]"}
+    | {
+        login.strip()
+        for login in os.environ.get("EXTRA_INTERNAL_BOT_LOGINS", "").split(",")
+        if login.strip()
+    }
+)
 
 
 async def is_user_active_org_member(username: str, org: str) -> bool:

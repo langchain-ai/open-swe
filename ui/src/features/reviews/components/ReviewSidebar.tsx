@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   TREE_UNSAFE_CSS,
   treeThemeStyle,
-} from "@/features/agents/components/AgentGitPanel"
+} from "@/features/agents/components/DiffFilesView"
 import { cn } from "@/lib/utils"
 
 function reviewFileGitStatus(status: ReviewDiffFile["status"]): GitStatus {
@@ -231,9 +231,7 @@ const ReviewGroupRow = memo(function ReviewGroupRow({
       <span
         className={cn(
           "min-w-0 text-xs leading-5",
-          active
-            ? "font-medium text-foreground"
-            : "text-muted-foreground"
+          active ? "font-medium text-foreground" : "text-muted-foreground"
         )}
       >
         {title}

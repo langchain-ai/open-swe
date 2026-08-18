@@ -6,19 +6,49 @@ const {
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   appRedirectUrl,
   backendRequestUrl,
-  isGithubOAuthUrl,
+  desktopExchangeUrl,
+  desktopLoginUrl,
+  isAppLoginUrl,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
   resolveBackendUrl,
+  resolveAppRuntime,
   staticFilePath,
   validateBackendUrl,
-} = require("../src/config.cjs")
+} = require("../build/config.cjs")
 
 test("uses the local backend for development", () => {
   assert.equal(
     resolveBackendUrl({ argv: [], env: {}, isPackaged: false }),
     `${DEFAULT_DEVELOPMENT_BACKEND_URL}/`
+  )
+})
+
+test("uses an isolated app profile for development runs", () => {
+  const appDataPath = path.join("/tmp", "open-swe-app-data")
+  const expected = {
+    isDevelopment: true,
+    name: "Open SWE Development",
+    appUserModelId: "com.langchain.openswe.dev",
+    userDataPath: path.join(appDataPath, "Open SWE Development"),
+  }
+  assert.deepEqual(
+    resolveAppRuntime({ argv: [], isPackaged: false, appDataPath }),
+    expected
+  )
+  assert.deepEqual(
+    resolveAppRuntime({ argv: ["--dev"], isPackaged: true, appDataPath }),
+    expected
+  )
+  assert.deepEqual(
+    resolveAppRuntime({ argv: [], isPackaged: true, appDataPath }),
+    {
+      isDevelopment: false,
+      name: "Open SWE",
+      appUserModelId: "com.langchain.openswe",
+      userDataPath: null,
+    }
   )
 })
 
@@ -76,6 +106,15 @@ test("rejects non-web backend URLs", () => {
 
 test("only grants expected permissions to the bundled app", () => {
   assert.equal(isTrustedPermissionRequest("notifications", `${APP_URL}settings`), true)
+  assert.equal(
+    isTrustedPermissionRequest("media", APP_URL, { mediaTypes: ["audio"] }),
+    true
+  )
+  assert.equal(isTrustedPermissionRequest("media", APP_URL, { mediaType: "audio" }), true)
+  assert.equal(
+    isTrustedPermissionRequest("media", APP_URL, { mediaTypes: ["audio", "video"] }),
+    false
+  )
   assert.equal(isTrustedPermissionRequest("camera", APP_URL), false)
   assert.equal(
     isTrustedPermissionRequest("notifications", "https://dashboard.example"),
@@ -84,35 +123,27 @@ test("only grants expected permissions to the bundled app", () => {
 })
 
 test("only proxies requests from the bundled app window", () => {
-  const requestUrl = `${APP_URL}dashboard/api/threads/thread-id/commands`
-  assert.equal(isTrustedProxyRequest("POST", APP_URL, requestUrl), true)
-  assert.equal(
-    isTrustedProxyRequest("POST", "https://evil.example", requestUrl),
-    false
-  )
-  assert.equal(
-    isTrustedProxyRequest(
-      "GET",
-      "https://github.com/login/oauth/authorize",
-      `${APP_URL}dashboard/api/auth/callback?code=123`
-    ),
-    true
-  )
-  assert.equal(
-    isTrustedProxyRequest(
-      "GET",
-      "https://github.com/login/oauth/authorize",
-      `${APP_URL}dashboard/api/me`
-    ),
-    false
-  )
+  assert.equal(isTrustedProxyRequest(APP_URL), true)
+  assert.equal(isTrustedProxyRequest("https://evil.example"), false)
+  assert.equal(isTrustedProxyRequest("https://github.com/login/oauth/authorize"), false)
 })
 
-test("only keeps GitHub login pages in the app window", () => {
-  assert.equal(isGithubOAuthUrl("https://github.com/login/oauth/authorize?client_id=1"), true)
-  assert.equal(isGithubOAuthUrl("https://github.com/login"), false)
-  assert.equal(isGithubOAuthUrl("https://github.com/langchain-ai/open-swe"), false)
-  assert.equal(isGithubOAuthUrl("https://evil.example/login/oauth/authorize"), false)
+test("sends login to the user's browser instead of the app window", () => {
+  assert.equal(isAppLoginUrl(`${APP_URL}dashboard/api/auth/login`), true)
+  assert.equal(isAppLoginUrl(`${APP_URL}dashboard/api/auth/login?redirect_to=%2F`), true)
+  assert.equal(isAppLoginUrl(`${APP_URL}dashboard/api/auth/callback`), false)
+  assert.equal(isAppLoginUrl("https://backend.example/dashboard/api/auth/login"), false)
+})
+
+test("carries the loopback port and PKCE challenge into the browser login", () => {
+  assert.equal(
+    desktopLoginUrl("https://backend.example", { challenge: "abc", port: 51234 }),
+    "https://backend.example/dashboard/api/auth/login?desktop_handoff=abc&desktop_port=51234"
+  )
+  assert.equal(
+    desktopExchangeUrl("https://backend.example/base/"),
+    "https://backend.example/dashboard/api/auth/desktop/exchange"
+  )
 })
 
 test("maps desktop API requests to the selected backend", () => {

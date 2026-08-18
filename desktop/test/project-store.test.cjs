@@ -8,7 +8,7 @@ const {
   addProject,
   readProjects,
   removeProject,
-} = require("../src/project-store.cjs")
+} = require("../build/project-store.cjs")
 
 test("persists, deduplicates, and removes projects", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-projects-"))

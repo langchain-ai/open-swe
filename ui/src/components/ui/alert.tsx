@@ -5,14 +5,15 @@ import type * as React from "react"
 import { cn } from "@/lib/utils"
 
 const alertVariants = cva(
-  "relative rounded-xl border px-3.5 py-3 text-card-foreground text-sm",
+  "relative rounded-xl border px-3.5 py-3 text-sm text-card-foreground",
   {
     defaultVariants: {
       variant: "default",
     },
     variants: {
       variant: {
-        default: "bg-transparent dark:bg-input/32 [&_svg]:text-muted-foreground",
+        default:
+          "bg-transparent dark:bg-input/32 [&_svg]:text-muted-foreground",
         error:
           "border-destructive/32 bg-destructive/4 text-destructive-foreground [&_[data-slot=alert-description]]:text-destructive-foreground/80 [&_svg]:text-destructive",
         info: "border-info/32 bg-info/4 [&_svg]:text-info",
@@ -107,7 +108,9 @@ function Alert({
           <div
             className={cn(
               "flex shrink-0 items-center",
-              controlAlignment === "first-line" ? "h-lh self-start" : "self-center"
+              controlAlignment === "first-line"
+                ? "h-lh self-start"
+                : "self-center"
             )}
           >
             {action}
@@ -128,7 +131,10 @@ function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-function AlertDescription({ className, ...props }: React.ComponentProps<"div">) {
+function AlertDescription({
+  className,
+  ...props
+}: React.ComponentProps<"div">) {
   return (
     <div
       className={cn("flex flex-col gap-2.5 text-muted-foreground", className)}
@@ -140,7 +146,11 @@ function AlertDescription({ className, ...props }: React.ComponentProps<"div">) 
 
 function AlertAction({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <div className={cn("flex gap-1", className)} data-slot="alert-action" {...props} />
+    <div
+      className={cn("flex gap-1", className)}
+      data-slot="alert-action"
+      {...props}
+    />
   )
 }
 

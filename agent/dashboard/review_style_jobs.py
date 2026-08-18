@@ -1,7 +1,5 @@
 """Kick off and sync per-repo review style analysis runs."""
 
-from __future__ import annotations
-
 import logging
 import os
 import uuid
@@ -134,7 +132,7 @@ async def start_bootstrap_analysis(
                         "content": (
                             f"Analyze review style for `{full_name}`. Follow the "
                             "bootstrap-repo-analysis skill: browse merged PR review feedback "
-                            "with `GH_TOKEN=dummy gh` until you have enough human examples, "
+                            "with `gh` until you have enough human examples, "
                             "then save the repository-specific prompt."
                         ),
                     }
