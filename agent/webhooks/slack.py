@@ -223,7 +223,7 @@ async def _dispatch_or_queue_slack_run(
             source="slack",
             metadata=common._AGENT_VERSION_METADATA,
             client=client,
-            multitask_strategy="interrupt",
+            multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
         )
     )
 
