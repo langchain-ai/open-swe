@@ -466,12 +466,16 @@ async def _update_selected_option_message(
     action: dict[str, common.Any],
     fallback_label: str,
 ) -> None:
-    channel = payload.get("channel") if isinstance(payload.get("channel"), dict) else {}
-    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
-    container = payload.get("container") if isinstance(payload.get("container"), dict) else {}
+    channel_value = payload.get("channel")
+    channel = channel_value if isinstance(channel_value, dict) else {}
+    message_value = payload.get("message")
+    message = message_value if isinstance(message_value, dict) else {}
+    container_value = payload.get("container")
+    container = container_value if isinstance(container_value, dict) else {}
     channel_id = str(channel.get("id") or container.get("channel_id") or "")
     message_ts = str(message.get("ts") or container.get("message_ts") or "")
-    action_text = action.get("text") if isinstance(action.get("text"), dict) else {}
+    action_text_value = action.get("text")
+    action_text = action_text_value if isinstance(action_text_value, dict) else {}
     label = str(action_text.get("text") or fallback_label).strip()[:150]
     blocks = _selected_option_blocks(message, label)
     if not channel_id or not message_ts or not label or not blocks:
