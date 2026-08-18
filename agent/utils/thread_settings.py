@@ -1,10 +1,9 @@
 """Per-thread snapshot of the profile settings a conversation runs under.
 
 Threads are multi-party and long-lived: anyone can reply, and the owner can edit
-their dashboard profile at any time. Both would otherwise change how an
-in-flight conversation behaves — swapping the model mid-history, or rewriting
-the standing instructions the earlier turns were produced under. Settings are
-therefore resolved once, on the thread's first run, and stored on the thread.
+their dashboard profile at any time. Thread-level model and repository settings
+are therefore resolved once on the first run and stored on the thread. Sender
+identity, personal instructions, and PR preferences remain per-message context.
 
 Later changes reach a thread only when something explicitly rewrites the
 snapshot, which today means a per-run model override.
@@ -27,13 +26,7 @@ class ThreadSettings(TypedDict, total=False):
     effort: str | None
     subagent_model_id: str
     subagent_effort: str | None
-    create_prs: bool
-    draft_prs: bool
-    user_instructions: str | None
     repo_instructions: str | None
-    commit_name: str | None
-    commit_email: str | None
-    display_name: str | None
 
 
 def _cache_key(thread_id: str) -> str:

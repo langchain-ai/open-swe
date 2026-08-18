@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from agent.dashboard.agent_overrides import profile_create_prs, profile_draft_prs
-from agent.prompt import construct_system_prompt
+from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.utils import github_comments
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -176,14 +176,12 @@ def test_construct_system_prompt_shell_escapes_user_name() -> None:
         github_login="oconnor",
     )
 
-    prompt = construct_system_prompt(
-        working_dir="/workspace",
-        triggering_user_identity=identity,
-    )
+    system_prompt = construct_system_prompt(working_dir="/workspace")
+    sender_context = construct_sender_context(identity)
 
-    assert f"git config user.name {shlex.quote(hostile)}" in prompt
-    # The raw, unescaped name must never appear as a bare shell argument.
-    assert f"git config user.name {hostile}" not in prompt
+    assert hostile not in system_prompt
+    assert f"git config user.name {shlex.quote(hostile)}" in sender_context
+    assert f"git config user.name {hostile}" not in sender_context
 
 
 def test_add_pr_collaboration_note_replaces_legacy_footer() -> None:

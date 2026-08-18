@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
 from agent.middleware.prepare_run import BasePrepareRunMiddleware
+from agent.server import PrepareAgentRunMiddleware
 from agent.utils import ttl_cache
 
 
@@ -90,6 +91,28 @@ async def test_prepare_prompt_injection():
     )()
     await middleware.awrap_model_call(cast(ModelRequest[None], request), handler)
     assert seen["system_prompt"] == "prepared prompt"
+
+
+def test_sender_context_updates_only_latest_human_message():
+    first = HumanMessage("first", id="first")
+    latest = HumanMessage(
+        content=[{"type": "text", "text": "second"}],
+        id="second",
+        name="participant",
+    )
+
+    updated = PrepareAgentRunMiddleware._sender_context_message(
+        cast(AgentState, {"messages": [first, latest]}), "<sender_context>sender</sender_context>"
+    )
+
+    assert updated is not None
+    assert updated.id == latest.id
+    assert updated.name == latest.name
+    assert first.content == "first"
+    assert updated.content == [
+        {"type": "text", "text": "second"},
+        {"type": "text", "text": "<sender_context>sender</sender_context>"},
+    ]
 
 
 @pytest.mark.asyncio
