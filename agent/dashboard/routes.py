@@ -1348,7 +1348,7 @@ async def list_repos(
     refresh: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    """List repos where open-swe is installed and the user has access.
+    """List repos where Open SWE is installed and the user has access.
 
     Served from the per-login cache (stale-while-revalidate) unless
     ``refresh=true``, because the fan-out over every installation takes 10s+
@@ -1961,6 +1961,8 @@ async def api_list_threads_page(
     source: str | None = None,
     status: str | None = None,
     q: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not _session_is_admin(session):
@@ -1976,6 +1978,8 @@ async def api_list_threads_page(
         source=source,
         status=status,
         query=q,
+        scope=scope,
+        automation_id=automation_id,
     )
 
 

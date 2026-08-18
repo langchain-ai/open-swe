@@ -60,7 +60,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
 
 1. Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.com/settings/apps) → [New GitHub App](https://github.com/settings/apps/new)**
 2. Fill in:
-   - **App name**: `open-swe` (or your preferred name)
+   - **App name**: `Open SWE` (or your preferred name)
    - **Homepage URL**: This can be any valid URL — it's only shown on the GitHub Marketplace page (which you won't be using). Use something like `https://github.com/langchain-ai/open-swe`
    - **Callback URL**: GitHub Apps allow multiple callback URLs (one per line). Add **both**:
      1. `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/your-org-github-oauth`). This is the **agent-runtime** OAuth callback, brokered by LangSmith (step 4b).
@@ -76,9 +76,9 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
      - Contents: Read & write
      - Pull requests: Read & write — required to publish review comments and, when an admin explicitly enables the disabled-by-default policy, submit approvals. Bot approvals may not satisfy CODEOWNERS or repository rules that exclude the App identity.
      - Issues: Read & write
-     - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs, and reads third-party CI conclusions for the auto-fix flow (it watches failing checks on agent-authored PRs and pushes fixes). Without it, check-run creation fails (logged, best-effort) but reviews still work, and CI auto-fix is disabled.
-     - Commit statuses: Read-only — only needed if you enable the `Status` event below; the CI auto-fix flow reads the legacy combined commit-status API for integrations that report via statuses instead of check runs. Without it, status-based CI is silently ignored (logged as "Failed to read combined status").
-     - Actions: Read-only — optional; lets Open SWE's sandbox proxy tokens download GitHub Actions workflow/job logs when troubleshooting CI failures. Do **not** grant Actions write for log access: write permission also allows rerunning, canceling, and deleting workflow runs, which is unnecessary for diagnostics.
+     - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs and lets `/baby-sit` read third-party CI conclusions. Without it, check-run creation fails (logged, best-effort), reviews still work, and `/baby-sit` fails closed when it cannot read the complete check set.
+     - Commit statuses: Read-only — required for `/baby-sit` to evaluate the complete PR status set, including integrations that report via legacy commit statuses instead of check runs.
+     - Actions: Read-only — optional for CI diagnostics and log access. Grant **Read & write** only to enable `/baby-sit` to rerun evidence-backed flaky GitHub Actions jobs. Existing installations must approve this permission elevation. Actions write also permits rerunning, canceling, and deleting workflow runs at the token level; `/baby-sit` is instructed to use only failed-job reruns.
      - Workflows: Read & write — required to let Open SWE directly push branches containing explicitly requested GitHub Actions workflow changes.
      - Metadata: Read-only
    - **Organization permissions** (required only if you plan to set `ALLOWED_GITHUB_ORGS` — see step 5 / Security):
@@ -87,9 +87,9 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
    - `Issue comment`
    - `Pull request review`
    - `Pull request review comment`
-   - `Check run` — required for CI auto-fix (watching failing GitHub Actions checks on agent PRs)
-   - `Check suite` — required for CI auto-fix
-   - `Workflow run` — required for CI auto-fix
+   - `Check run` — required for immediate `/baby-sit` failure detection
+   - `Check suite` — required for immediate `/baby-sit` failure detection
+   - `Workflow run` — required for immediate `/baby-sit` failure detection
    - `Status` — optional; covers integrations that report via the legacy commit-status API
 5. Click **Create GitHub App**
 
@@ -290,7 +290,9 @@ ALLOWED_GITHUB_ORGS="langchain-ai,anthropics"
 ALLOWED_GITHUB_REPOS="some-user/their-repo,another-org/specific-repo"
 ```
 
-A GitHub or Linear webhook is accepted if the resolved repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`. If both are empty, all repos are allowed. Slack mentions are not rejected from regex-inferred repository text; repository access is bounded by the GitHub App installation permissions.
+A GitHub or Linear webhook is accepted if the resolved repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`. If both are empty, all repos are allowed.
+
+For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level edit guard. To modify a repository outside those organizations, the user must explicitly request that exact repository with its full `https://github.com/<owner>/<repo>` URL. Repository hints, defaults, shorthand, and contextual links do not qualify. This does not bypass the server-side GitHub/Linear webhook filter above or GitHub credential and App installation permissions.
 
 `ALLOWED_GITHUB_ORGS` also gates **dashboard login**: when set, only GitHub accounts that are active members of one of the listed organizations can complete the OAuth login and receive a session. Membership is verified server-side with the GitHub App installation token (so private memberships are visible and no extra OAuth scope is required), and the check fails closed on any API error. When `ALLOWED_GITHUB_ORGS` is empty, dashboard login is open to any GitHub account (the prior behavior).
 
@@ -306,7 +308,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 
 1. In Linear, go to **Settings → API → Webhooks → New webhook**
 2. Fill in:
-   - **Label**: `open-swe`
+   - **Label**: `Open SWE`
    - **URL**: `https://<your-ngrok-url>/webhooks/linear` — use the ngrok URL from step 2
    - **Secret**: generate with `openssl rand -hex 32` — save this as `LINEAR_WEBHOOK_SECRET`
 3. Under **Data change events**, enable **Comments → Create** only
@@ -315,7 +317,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 **Get your API key:**
 
 1. Go to **Settings → API → Personal API keys → New API key**
-2. Name it `open-swe`, select **All access**, and copy the key
+2. Name it `Open SWE`, select **All access**, and copy the key
 3. Save it as `LINEAR_API_KEY`
 
 **Configure team-to-repo mapping:**
@@ -502,14 +504,14 @@ GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
 X_SERVICE_AUTH_JWT_SECRET=""
 
 # === Repo Allowlist (optional) ===
-# Comma-separated list of GitHub orgs the agent is allowed to operate on.
-# Also gates dashboard login to members of these orgs (requires the GitHub App's
-# Organization -> Members: Read-only permission; without it, all dashboard logins are rejected).
-# Leave empty to allow all orgs.
+# Comma-separated list of GitHub orgs allowed by the GitHub/Linear webhook filter.
+# Also gates dashboard login and prompts the agent to require an explicit full repository
+# URL before editing outside these orgs (requires Organization -> Members: Read-only).
+# Leave empty to allow all orgs and disable the prompt-level edit guard.
 ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
-# Comma-separated list of specific owner/repo pairs the agent is allowed to operate on.
-# For GitHub/Linear webhooks, a repo is allowed if its org is in ALLOWED_GITHUB_ORGS OR its owner/repo is in ALLOWED_GITHUB_REPOS.
-# Slack mentions are not rejected from regex-inferred repository text; repository access is bounded by GitHub App installation permissions.
+# Comma-separated list of specific owner/repo pairs allowed by the GitHub/Linear webhook filter.
+# A repo is accepted if its org is in ALLOWED_GITHUB_ORGS OR its owner/repo is in ALLOWED_GITHUB_REPOS.
+# Slack/dashboard access remains bounded by GitHub credentials and App installation permissions.
 # Leave both empty to allow all repos.
 ALLOWED_GITHUB_REPOS=""                # e.g. "some-user/their-repo,another-org/specific-repo"
 

@@ -99,6 +99,8 @@ export interface CloudTerminalConnection {
   ticket: string
 }
 
+export type ThreadScope = "all" | "interactive" | "automation"
+
 export interface ThreadsPageParams {
   limit?: number
   offset?: number
@@ -108,6 +110,8 @@ export interface ThreadsPageParams {
   source?: string
   status?: string
   q?: string
+  scope?: ThreadScope
+  automationId?: string
 }
 
 export interface ThreadsPage {
@@ -208,6 +212,8 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.source) search.set("source", params.source)
   if (params.status) search.set("status", params.status)
   if (params.q) search.set("q", params.q)
+  if (params.scope) search.set("scope", params.scope)
+  if (params.automationId) search.set("automation_id", params.automationId)
   const query = search.toString()
   return query ? `?${query}` : ""
 }

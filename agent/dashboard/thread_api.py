@@ -10,7 +10,7 @@ import os
 import posixpath
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
@@ -18,6 +18,7 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..dispatch import DASHBOARD_STREAM_MODES
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_INSTRUCTION
 from ..utils.json_types import (
     JsonObject,
@@ -60,17 +61,7 @@ logger = logging.getLogger(__name__)
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 # Modes required for the v2 event-stream protocol (`POST …/stream/events`).
-# `@langchain/react` subscribes to `messages`, `tools`, `lifecycle`, etc.;
-# legacy `messages-tuple`-only runs emit almost nothing on those channels.
-_DASHBOARD_STREAM_MODES: tuple[str, ...] = (
-    "values",
-    "updates",
-    "messages",
-    "messages-tuple",
-    "tools",
-    "checkpoints",
-    "events",
-)
+_DASHBOARD_STREAM_MODES = DASHBOARD_STREAM_MODES
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
@@ -703,13 +694,19 @@ def _owner_search_filters(
 
 
 def _search_metadata_filter(
-    owner_filter: dict[str, Any], *, resolved: bool | None = None, source: str | None = None
+    owner_filter: dict[str, Any],
+    *,
+    resolved: bool | None = None,
+    source: str | None = None,
+    automation_id: str | None = None,
 ) -> dict[str, Any]:
     metadata = dict(owner_filter)
     if resolved is True:
         metadata["resolved"] = True
     if source and source != _DASHBOARD_SOURCE:
         metadata["source"] = source
+    if automation_id:
+        metadata["schedule_id"] = automation_id
     return metadata
 
 
@@ -748,8 +745,17 @@ def _metadata_matches_filters(
     resolved: bool | None,
     source: str | None,
     query: str | None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
+    is_automation = _is_automation_thread(metadata)
+    if scope == "interactive" and is_automation:
+        return False
+    if scope == "automation" and not is_automation:
+        return False
+    if automation_id and _metadata_string(metadata, "schedule_id") != automation_id:
+        return False
     if resolved is not None and _is_thread_resolved(metadata) is not resolved:
         return False
     if source and _thread_source(metadata) != source:
@@ -858,13 +864,20 @@ async def _collect_thread_candidates(
     resolved: bool | None = None,
     source: str | None = None,
     query: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
     target_per_search: int | None = None,
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     for owner_filter in searches:
         matched_for_search = 0
         offset = 0
-        metadata_filter = _search_metadata_filter(owner_filter, resolved=resolved, source=source)
+        metadata_filter = _search_metadata_filter(
+            owner_filter,
+            resolved=resolved,
+            source=source,
+            automation_id=automation_id,
+        )
         while offset < _THREADS_PAGE_SCAN_CAP:
             batch = await _search_threads_batch(
                 client,
@@ -883,6 +896,8 @@ async def _collect_thread_candidates(
                     resolved=resolved,
                     source=source,
                     query=query,
+                    scope=scope,
+                    automation_id=automation_id,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -1083,6 +1098,8 @@ async def list_dashboard_threads_page(
     source: str | None = None,
     status: str | None = None,
     query: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
 ) -> dict[str, Any]:
     client = langgraph_client()
     searches = _owner_search_filters(login, email=email, include_all=include_all)
@@ -1100,6 +1117,8 @@ async def list_dashboard_threads_page(
         resolved=resolved,
         source=source,
         query=query,
+        scope=scope,
+        automation_id=automation_id,
         target_per_search=target,
     )
 
@@ -1607,6 +1626,9 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
+    # Subagents run as subgraphs; without this the server streams only the top
+    # graph and their nested tool calls never reach the transcript.
+    params.setdefault("stream_subgraphs", True)
     params["config"] = {**client_config, "configurable": merged_configurable}
     params["metadata"] = run_metadata
     command["params"] = params
@@ -1698,7 +1720,6 @@ async def send_dashboard_message(
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
-        "from_owner": _user_owns_thread(metadata, login, email),
     }
     if isinstance(content, list):
         queue_payload["images"] = [
