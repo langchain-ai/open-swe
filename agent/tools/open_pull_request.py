@@ -451,6 +451,48 @@ async def _fetch_pr_details(
     return data if isinstance(data, dict) else {}
 
 
+def _pull_request_key(record: dict[str, Any]) -> tuple[str, str] | None:
+    repo_full_name = record.get("repo_full_name")
+    number = record.get("number")
+    if isinstance(repo_full_name, str) and repo_full_name and isinstance(number, int):
+        return "repo", f"{repo_full_name.casefold()}#{number}"
+    url = record.get("url")
+    if isinstance(url, str) and url:
+        return "url", url.rstrip("/").casefold()
+    return None
+
+
+def _upsert_pull_request(records: object, record: dict[str, Any]) -> list[dict[str, Any]]:
+    existing = (
+        [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
+    )
+    key = _pull_request_key(record)
+    url = record.get("url")
+    normalized_url = url.rstrip("/").casefold() if isinstance(url, str) else ""
+    retained = []
+    for item in existing:
+        item_url = item.get("url")
+        same_url = (
+            normalized_url
+            and isinstance(item_url, str)
+            and item_url.rstrip("/").casefold() == normalized_url
+        )
+        if not same_url and (key is None or _pull_request_key(item) != key):
+            retained.append(item)
+    return [*retained, record]
+
+
+async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
+    try:
+        thread = await get_client().threads.get(thread_id)
+    except Exception:
+        logger.debug("Failed to read existing PR metadata for thread %s", thread_id, exc_info=True)
+        return []
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    records = metadata.get("pull_requests") if isinstance(metadata, dict) else None
+    return [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
+
+
 async def _record_pr_telemetry(
     *,
     client: httpx.AsyncClient,
@@ -508,19 +550,53 @@ async def _record_pr_telemetry(
             base_repo = details.get("base", {}).get("repo")
             if isinstance(base_repo, dict) and isinstance(base_repo.get("private"), bool):
                 repo_private = base_repo["private"]
+            pr_state = derive_pr_state(state=state, merged=merged, draft=is_draft)
+            pr_title = details.get("title") or pr.get("title")
+            pr_user = details.get("user") or pr.get("user")
+            author = pr_user.get("login") if isinstance(pr_user, dict) else None
+            author_avatar_url = pr_user.get("avatar_url") if isinstance(pr_user, dict) else None
+            diff_stats = {
+                "files": changed_files,
+                "additions": additions,
+                "deletions": deletions,
+            }
+            record = {
+                "repo_full_name": f"{owner}/{repo}",
+                "number": pr_number,
+                "url": pr_url if isinstance(pr_url, str) else "",
+                "title": pr_title if isinstance(pr_title, str) else "",
+                "state": pr_state,
+                "head_ref": head,
+                "base_ref": base,
+                "author": author if isinstance(author, str) else "",
+                "author_avatar_url": (
+                    author_avatar_url if isinstance(author_avatar_url, str) else ""
+                ),
+                "created_at": (
+                    details.get("created_at")
+                    if isinstance(details.get("created_at"), str)
+                    else pr.get("created_at")
+                    if isinstance(pr.get("created_at"), str)
+                    else ""
+                ),
+                "diff_stats": diff_stats,
+            }
+            pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
             metadata: dict[str, Any] = {
                 "agent_kind": "agent",
                 "pr_url": pr_url if isinstance(pr_url, str) else "",
                 "pr_number": pr_number,
-                "pr_state": derive_pr_state(state=state, merged=merged, draft=is_draft),
-                "pr_title": details.get("title") or pr.get("title"),
+                "pr_state": pr_state,
+                "pr_title": pr_title,
                 "branch_name": head,
                 "base_branch": base,
-                "diff_stats": {
-                    "files": changed_files,
-                    "additions": additions,
-                    "deletions": deletions,
-                },
+                "diff_stats": diff_stats,
+                "pull_requests": pull_requests,
+                "pr_urls": [
+                    item["url"]
+                    for item in pull_requests
+                    if isinstance(item.get("url"), str) and item["url"]
+                ],
             }
             if repo_private is not None:
                 metadata["repo_private"] = repo_private

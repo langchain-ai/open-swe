@@ -5,11 +5,13 @@ import base64
 import binascii
 import json
 import logging
+import math
 import os
 import posixpath
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import HTTPException
@@ -438,6 +440,68 @@ def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     return category, origin, trigger_kind
 
 
+def _pr_count(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return 0
+    if isinstance(value, float) and not math.isfinite(value):
+        return 0
+    return max(0, int(value))
+
+
+def _pr_diff_stats(value: object) -> dict[str, int]:
+    stats = value if isinstance(value, dict) else {}
+    return {
+        "files": _pr_count(stats.get("files")),
+        "additions": _pr_count(stats.get("additions")),
+        "deletions": _pr_count(stats.get("deletions")),
+    }
+
+
+def _pull_request_summary(record: object, fallback_title: str) -> dict[str, Any] | None:
+    if not isinstance(record, dict):
+        return None
+    repo_full_name = record.get("repo_full_name")
+    number = record.get("number")
+    raw_url = record.get("url")
+    if (
+        not isinstance(repo_full_name, str)
+        or repo_full_name.count("/") != 1
+        or not isinstance(number, int)
+        or isinstance(number, bool)
+        or number <= 0
+        or not isinstance(raw_url, str)
+    ):
+        return None
+    parsed_url = urlparse(raw_url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        return None
+    title = record.get("title")
+    state = record.get("state")
+    head_ref = record.get("head_ref")
+    base_ref = record.get("base_ref")
+    author = record.get("author")
+    author_avatar_url = record.get("author_avatar_url")
+    created_at = record.get("created_at")
+    return {
+        "repoFullName": repo_full_name,
+        "number": number,
+        "title": title if isinstance(title, str) and title else fallback_title,
+        "state": state if state in _PR_STATES else "open",
+        "headRef": head_ref if isinstance(head_ref, str) else "",
+        "baseRef": base_ref if isinstance(base_ref, str) else "main",
+        "url": raw_url,
+        "author": author if isinstance(author, str) and author else None,
+        "authorAvatarUrl": (
+            author_avatar_url
+            if isinstance(author_avatar_url, str)
+            and urlparse(author_avatar_url).scheme in {"http", "https"}
+            else None
+        ),
+        "createdAt": created_at if isinstance(created_at, str) and created_at else None,
+        "diffStats": _pr_diff_stats(record.get("diff_stats")),
+    }
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -520,22 +584,42 @@ async def _thread_summary(
         "sourceUrl": _thread_source_url(metadata),
         "sandboxId": sandbox_id,
     }
-    if isinstance(pr_number, int) and isinstance(pr_url, str):
-        summary["pr"] = {
+    pull_requests = [
+        parsed
+        for record in (
+            metadata.get("pull_requests") if isinstance(metadata.get("pull_requests"), list) else []
+        )
+        if (parsed := _pull_request_summary(record, title)) is not None
+    ]
+    if not pull_requests and isinstance(pr_number, int) and isinstance(pr_url, str):
+        pr_ref = parse_github_pr_url(pr_url)
+        legacy_repo = (
+            full_name
+            if full_name.count("/") == 1
+            else f"{pr_ref.owner}/{pr_ref.repo}"
+            if pr_ref
+            else "unknown/unknown"
+        )
+        legacy_record = {
+            "repo_full_name": legacy_repo,
             "number": pr_number,
-            "title": pr_title if isinstance(pr_title, str) else title,
-            "state": pr_state if pr_state in _PR_STATES else "open",
-            "headRef": metadata.get("branch_name") or "",
-            "baseRef": metadata.get("base_branch") or "main",
             "url": pr_url,
+            "title": pr_title,
+            "state": pr_state,
+            "head_ref": metadata.get("branch_name"),
+            "base_ref": metadata.get("base_branch"),
+            "diff_stats": as_json_object(metadata.get("diff_stats")),
         }
-    diff_stats = as_json_object(metadata.get("diff_stats"))
-    if diff_stats:
-        summary["diffStats"] = {
-            "files": int(diff_stats.get("files") or 0),
-            "additions": int(diff_stats.get("additions") or 0),
-            "deletions": int(diff_stats.get("deletions") or 0),
+        legacy_pr = _pull_request_summary(legacy_record, title)
+        if legacy_pr:
+            pull_requests.append(legacy_pr)
+    if pull_requests:
+        latest_pr = pull_requests[-1]
+        summary["pullRequests"] = pull_requests
+        summary["pr"] = {
+            key: latest_pr[key] for key in ("number", "title", "state", "headRef", "baseRef", "url")
         }
+        summary["diffStats"] = latest_pr["diffStats"]
     # The transcript hydrates client-side from the SDK (`GET …/state` →
     # `stream.messages`); the summary only carries metadata.
     summary["messages"] = []

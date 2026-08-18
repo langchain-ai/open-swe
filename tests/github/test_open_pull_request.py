@@ -653,6 +653,40 @@ def test_does_not_duplicate_existing_references(monkeypatch: pytest.MonkeyPatch)
     assert client.post_calls
 
 
+def test_upsert_pull_request_keeps_multiple_repositories() -> None:
+    first = {
+        "repo_full_name": "langchain-ai/open-swe",
+        "number": 42,
+        "url": "https://github.com/langchain-ai/open-swe/pull/42",
+        "title": "Open SWE",
+    }
+    second = {
+        "repo_full_name": "langchain-ai/langchain",
+        "number": 42,
+        "url": "https://github.com/langchain-ai/langchain/pull/42",
+        "title": "LangChain",
+    }
+
+    assert opr._upsert_pull_request([first], second) == [first, second]
+
+
+def test_upsert_pull_request_replaces_duplicate_and_moves_it_latest() -> None:
+    first = {
+        "repo_full_name": "langchain-ai/open-swe",
+        "number": 42,
+        "url": "https://github.com/langchain-ai/open-swe/pull/42",
+        "state": "draft",
+    }
+    other = {
+        "repo_full_name": "langchain-ai/langchain",
+        "number": 7,
+        "url": "https://github.com/langchain-ai/langchain/pull/7",
+    }
+    updated = {**first, "state": "open"}
+
+    assert opr._upsert_pull_request([first, other], updated) == [other, updated]
+
+
 def test_derive_pr_state_prefers_merged() -> None:
     assert opr.derive_pr_state(state="closed", merged=True, draft=True) == "merged"
 

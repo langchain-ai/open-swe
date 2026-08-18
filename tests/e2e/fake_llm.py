@@ -22,6 +22,10 @@ from e2e_env import (
     OWNER,
     PR_TITLE,
     REPO,
+    SECOND_FEATURE_BRANCH,
+    SECOND_OWNER,
+    SECOND_PR_TITLE,
+    SECOND_REPO,
 )
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel, ModelProfile
@@ -61,6 +65,37 @@ git add -A
 git commit -m "{PR_TITLE}"
 git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
+""".strip()
+
+_MULTI_REPO_SCRIPT = f"""
+set -e
+rm -rf repo companion
+git clone "$E2E_REMOTE" repo
+cd repo
+git config user.email "dev@example.com"
+git config user.name "Dev User"
+git checkout -b {FEATURE_BRANCH}
+cat > {FEATURE_FILE} <<'EOF'
+def greet(name):
+    return f"Hello, {{name}}!"
+EOF
+git add -A
+git commit -m "{PR_TITLE}"
+git push origin {FEATURE_BRANCH}
+cd ..
+git clone "$E2E_SECOND_REMOTE" companion
+cd companion
+git config user.email "dev@example.com"
+git config user.name "Dev User"
+git checkout -b {SECOND_FEATURE_BRANCH}
+cat > integration.py <<'EOF'
+def connect():
+    return "connected"
+EOF
+git add -A
+git commit -m "{SECOND_PR_TITLE}"
+git push origin {SECOND_FEATURE_BRANCH}
+echo BOTH_PUSHED_OK
 """.strip()
 
 _DESKTOP_PR_PAYLOAD = json.dumps(
@@ -212,6 +247,25 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
             "output_tokens": 345,
             "total_tokens": 12_345,
         },
+    )
+
+
+def _multi_pr_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    return AIMessage(
+        content="Replying in the Slack thread with the cross-repository PRs.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {
+                    "message": (
+                        f"Opened pull requests in `{OWNER}/{REPO}` and "
+                        f"`{SECOND_OWNER}/{SECOND_REPO}`; latest: <{url}|{SECOND_PR_TITLE}>."
+                    )
+                },
+                "id": "call-multi-pr-reply",
+            }
+        ],
     )
 
 
@@ -396,6 +450,49 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_reply_step),
     ),
+    "multi_pr": (
+        _tool_step(
+            "Acknowledging the cross-repository request before starting work.",
+            "slack_thread_reply",
+            {"message": "On it!"},
+            "call-multi-ack",
+        ),
+        _tool_step(
+            "Implementing and pushing both repository changes.",
+            "execute",
+            {"command": _MULTI_REPO_SCRIPT},
+            "call-multi-repos",
+        ),
+        _tool_step(
+            "Opening the primary pull request.",
+            "open_pull_request",
+            {
+                "owner": OWNER,
+                "repo": REPO,
+                "head": FEATURE_BRANCH,
+                "base": BASE_BRANCH,
+                "title": PR_TITLE,
+                "body": "Adds a `greet()` helper as requested.",
+                "draft": True,
+            },
+            "call-multi-first-pr",
+        ),
+        _tool_step(
+            "Opening the companion pull request.",
+            "open_pull_request",
+            {
+                "owner": SECOND_OWNER,
+                "repo": SECOND_REPO,
+                "head": SECOND_FEATURE_BRANCH,
+                "base": BASE_BRANCH,
+                "title": SECOND_PR_TITLE,
+                "body": "Adds the companion integration as requested.",
+                "draft": False,
+            },
+            "call-multi-second-pr",
+        ),
+        _dynamic_step(_multi_pr_reply_step),
+    ),
     "move": (
         _tool_step(
             "Moving the current Open SWE thread to another Slack channel.",
@@ -520,6 +617,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "breakout", lambda ctx: ctx.human_count <= 1 and _is_breakout_request(ctx.first_text)
     ),
+    ScriptRule(
+        "multi_pr",
+        lambda ctx: ctx.human_count <= 1 and "E2E_MULTI_PR" in f"{ctx.first_text}\n{ctx.last_text}",
+    ),
     ScriptRule("implement", lambda ctx: ctx.human_count <= 1),
     ScriptRule("followup", lambda _ctx: True),
 )
@@ -542,7 +643,7 @@ class FakeScriptedChatModel(BaseChatModel):
     model: str = "fake"
     profile: ModelProfile | None = {
         "tool_calling": True,
-        "max_input_tokens": 8_000,
+        "max_input_tokens": 128_000,
     }
     script: list[Any] = []
 

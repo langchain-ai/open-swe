@@ -48,7 +48,11 @@ async def test_update_agent_thread_pr_state_updates_matching_thread() -> None:
         return_value=[
             {
                 "thread_id": "t1",
-                "metadata": {"kind": "agent", "pr_state": "draft"},
+                "metadata": {
+                    "kind": "agent",
+                    "pr_url": "https://github.com/lc/repo/pull/7",
+                    "pr_state": "draft",
+                },
             }
         ]
     )
@@ -57,7 +61,7 @@ async def test_update_agent_thread_pr_state_updates_matching_thread() -> None:
     with patch("agent.webhooks.common.get_client", return_value=fake_client):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 
-    fake_client.threads.search.assert_awaited_once()
+    assert fake_client.threads.search.await_count == 2
     fake_client.threads.update.assert_awaited_once()
     call_args = fake_client.threads.update.await_args
     assert call_args is not None
@@ -80,10 +84,61 @@ async def test_update_agent_thread_pr_state_skips_reviewer_threads() -> None:
 
 
 @pytest.mark.asyncio
+async def test_update_agent_thread_pr_state_updates_non_latest_collection_entry() -> None:
+    older_pr = {
+        "repo_full_name": "lc/repo",
+        "number": 7,
+        "url": "https://github.com/lc/repo/pull/7",
+        "state": "draft",
+    }
+    latest_pr = {
+        "repo_full_name": "lc/other",
+        "number": 9,
+        "url": "https://github.com/lc/other/pull/9",
+        "state": "open",
+    }
+    fake_client = MagicMock()
+    fake_client.threads.search = AsyncMock(
+        side_effect=[
+            [],
+            [
+                {
+                    "thread_id": "t1",
+                    "metadata": {
+                        "kind": "agent",
+                        "pr_url": latest_pr["url"],
+                        "pr_state": "open",
+                        "pr_urls": [older_pr["url"], latest_pr["url"]],
+                        "pull_requests": [older_pr, latest_pr],
+                    },
+                }
+            ],
+        ]
+    )
+    fake_client.threads.update = AsyncMock()
+
+    with patch("agent.webhooks.common.get_client", return_value=fake_client):
+        await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
+
+    fake_client.threads.update.assert_awaited_once_with(
+        thread_id="t1",
+        metadata={"pull_requests": [{**older_pr, "state": "closed"}, latest_pr]},
+    )
+
+
+@pytest.mark.asyncio
 async def test_update_agent_thread_pr_state_noop_when_state_unchanged() -> None:
     fake_client = MagicMock()
     fake_client.threads.search = AsyncMock(
-        return_value=[{"thread_id": "t1", "metadata": {"pr_state": "merged"}}]
+        return_value=[
+            {
+                "thread_id": "t1",
+                "metadata": {
+                    "pr_url": "https://github.com/lc/repo/pull/7",
+                    "pr_state": "merged",
+                },
+            }
+        ]
     )
     fake_client.threads.update = AsyncMock()
 

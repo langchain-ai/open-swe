@@ -1417,6 +1417,24 @@ def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
     )
 
 
+def _pull_requests_with_state(
+    records: object, pr_url: str, new_state: str
+) -> tuple[list[dict[str, Any]] | None, bool]:
+    if not isinstance(records, list):
+        return None, False
+    changed = False
+    updated: list[dict[str, Any]] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if record.get("url") == pr_url and record.get("state") != new_state:
+            updated.append({**record, "state": new_state})
+            changed = True
+        else:
+            updated.append(record)
+    return updated, changed
+
+
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     """Keep an agent thread's tracked PR state in sync with PR lifecycle events.
 
@@ -1432,25 +1450,36 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         return
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
-    try:
-        threads = await langgraph_client.threads.search(metadata={"pr_url": pr_url}, limit=10)
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not search threads for PR %s state update", pr_url, exc_info=True)
-        return
+    matching_threads: dict[str, dict[str, Any]] = {}
+    for metadata_filter in ({"pr_url": pr_url}, {"pr_urls": [pr_url]}):
+        try:
+            threads = await langgraph_client.threads.search(metadata=metadata_filter, limit=50)
+        except Exception:  # noqa: BLE001
+            logger.debug("Could not search threads for PR %s state update", pr_url, exc_info=True)
+            continue
+        for thread in threads or []:
+            thread_id = (
+                (thread.get("thread_id") or thread.get("id")) if isinstance(thread, dict) else None
+            )
+            if isinstance(thread_id, str) and thread_id:
+                matching_threads[thread_id] = thread
 
-    for thread in threads or []:
-        metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    for thread_id, thread in matching_threads.items():
+        metadata = thread.get("metadata")
         if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
             continue
-        thread_id = thread.get("thread_id") or thread.get("id")
-        if not isinstance(thread_id, str) or not thread_id:
-            continue
-        if metadata.get("pr_state") == new_state:
+        pull_requests, collection_changed = _pull_requests_with_state(
+            metadata.get("pull_requests"), pr_url, new_state
+        )
+        metadata_update: dict[str, Any] = {}
+        if collection_changed and pull_requests is not None:
+            metadata_update["pull_requests"] = pull_requests
+        if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
+            metadata_update["pr_state"] = new_state
+        if not metadata_update:
             continue
         try:
-            await langgraph_client.threads.update(
-                thread_id=thread_id, metadata={"pr_state": new_state}
-            )
+            await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata_update)
         except Exception:  # noqa: BLE001
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
 

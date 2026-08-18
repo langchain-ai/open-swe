@@ -84,6 +84,25 @@ async function openThreadViaSlackLink(
 
 // The SDK hydrates an idle thread's transcript from getState on load, which can
 // briefly lag; a reload re-fetches it. Retry until the PR link renders.
+async function openMultiRepoPrThreadViaSlackLink(page: Page) {
+  await page.goto("/mock/slack");
+  await page.locator("#reset").click();
+  await page
+    .locator("#text")
+    .fill(
+      "<@U0BOT> E2E_MULTI_PR open related pull requests in both repositories",
+    );
+  await page.locator("#send").click();
+  await expect(
+    page.locator(".msg.bot").filter({ hasText: "anotherorg/companion" }),
+  ).toBeVisible();
+
+  const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
+  await expect(webLink).toBeVisible();
+  await webLink.click();
+  await expect(page).toHaveURL(/\/agents\//);
+}
+
 async function expectTranscriptVisible(page: Page) {
   await expect(async () => {
     await page.reload();
@@ -166,6 +185,64 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(
       page.getByRole("link", { name: "Add greet() helper" }).first(),
     ).toBeVisible();
+  });
+
+  test("keeps pull requests from multiple repositories above the composer", async ({
+    page,
+  }, testInfo) => {
+    await loginAs(page, SAME_USER);
+    await openMultiRepoPrThreadViaSlackLink(page);
+
+    const companionLink = page.getByRole("link", {
+      name: "Open anotherorg/companion pull request #2",
+    });
+    await expect(async () => {
+      await page.reload();
+      await expect(companionLink).toBeVisible({ timeout: 8000 });
+    }).toPass({ timeout: 60_000 });
+
+    const strip = page.getByTestId("thread-pull-requests");
+    await expect(strip).toBeVisible();
+    await expect(
+      page.getByRole("link", {
+        name: "Open fakeorg/demo pull request #1",
+      }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Show 1 more" }),
+    ).toBeVisible();
+
+    const restingPath = testInfo.outputPath("thread-pr-links-resting.png");
+    await page.screenshot({ path: restingPath, fullPage: true });
+    await testInfo.attach("thread-pr-links-resting", {
+      path: restingPath,
+      contentType: "image/png",
+    });
+
+    await companionLink.hover();
+    const hoverCard = page.getByTestId("pr-hover-card-anotherorg/companion-2");
+    await expect(hoverCard).toBeVisible();
+    await expect(hoverCard).toContainText("anotherorg/companion #2");
+    await expect(hoverCard).toContainText("Add companion integration");
+    await expect(hoverCard).toContainText("open-swe[bot]");
+    await expect(hoverCard).toContainText("main");
+    await expect(hoverCard).toContainText("add-integration");
+    await expect(hoverCard).toContainText("1 file");
+
+    const hoverPath = testInfo.outputPath("thread-pr-links-hover.png");
+    await page.screenshot({ path: hoverPath, fullPage: true });
+    await testInfo.attach("thread-pr-links-hover", {
+      path: hoverPath,
+      contentType: "image/png",
+    });
+
+    await page.getByRole("button", { name: "Show 1 more" }).click();
+    await expect(
+      page.getByRole("link", {
+        name: "Open fakeorg/demo pull request #1",
+      }),
+    ).toBeVisible();
+    await expect(companionLink).toBeVisible();
   });
 
   // A cold load of a finished thread must hydrate from `getState()` alone. The

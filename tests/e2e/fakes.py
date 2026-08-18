@@ -11,7 +11,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-from e2e_env import BARE_REMOTE, BASE_BRANCH, OWNER, REPO
+from e2e_env import (
+    BARE_REMOTE,
+    BASE_BRANCH,
+    OWNER,
+    REPO,
+    SECOND_BARE_REMOTE,
+    SECOND_OWNER,
+    SECOND_REPO,
+)
 
 # --- Slack -----------------------------------------------------------------
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
@@ -69,6 +77,10 @@ def slack_messages(channel: str) -> list[dict[str, Any]]:
 PULLS: list[dict[str, Any]] = []
 REPO_PRIVATE = [False]
 _pr_seq = [0]
+_REMOTES = {
+    (OWNER, REPO): BARE_REMOTE,
+    (SECOND_OWNER, SECOND_REPO): SECOND_BARE_REMOTE,
+}
 
 
 def _git(*args: str, cwd: Path | None = None) -> str:
@@ -82,30 +94,34 @@ def _git(*args: str, cwd: Path | None = None) -> str:
     return result.stdout
 
 
-def seed_bare_remote() -> None:
-    """Create a fresh bare repo (the fake GitHub remote) with one commit on main."""
-    if BARE_REMOTE.exists():
-        shutil.rmtree(BARE_REMOTE)
-    seed_work = BARE_REMOTE.parent / f"seed-{OWNER}-{REPO}"
-    if seed_work.exists():
+def seed_bare_remotes() -> None:
+    """Create fresh fake GitHub remotes with one commit on main."""
+    for (owner, repo), remote in _REMOTES.items():
+        if remote.exists():
+            shutil.rmtree(remote)
+        seed_work = remote.parent / f"seed-{owner}-{repo}"
+        if seed_work.exists():
+            shutil.rmtree(seed_work)
+
+        seed_work.mkdir(parents=True)
+        ident = ["-c", "user.email=seed@example.com", "-c", "user.name=Seed"]
+        _git("init", "-b", BASE_BRANCH, str(seed_work))
+        (seed_work / "README.md").write_text(f"# {repo}\n\nA tiny demo repo.\n")
+        _git("add", "-A", cwd=seed_work)
+        _git(*ident, "commit", "-m", "Initial commit", cwd=seed_work)
+        _git("init", "--bare", "-b", BASE_BRANCH, str(remote))
+        _git("remote", "add", "origin", str(remote), cwd=seed_work)
+        _git("push", "origin", BASE_BRANCH, cwd=seed_work)
         shutil.rmtree(seed_work)
 
-    seed_work.mkdir(parents=True)
-    ident = ["-c", "user.email=seed@example.com", "-c", "user.name=Seed"]
-    _git("init", "-b", BASE_BRANCH, str(seed_work))
-    (seed_work / "README.md").write_text("# demo\n\nA tiny demo repo.\n")
-    _git("add", "-A", cwd=seed_work)
-    _git(*ident, "commit", "-m", "Initial commit", cwd=seed_work)
-    _git("init", "--bare", "-b", BASE_BRANCH, str(BARE_REMOTE))
-    _git("remote", "add", "origin", str(BARE_REMOTE), cwd=seed_work)
-    _git("push", "origin", BASE_BRANCH, cwd=seed_work)
-    shutil.rmtree(seed_work)
 
-
-def _diff_files(base: str, head: str) -> list[dict[str, Any]]:
+def _diff_files(owner: str, repo: str, base: str, head: str) -> list[dict[str, Any]]:
     """Compute changed files for a PR from the pushed branch in the bare remote."""
+    remote = _REMOTES.get((owner, repo))
+    if remote is None:
+        return []
     try:
-        out = _git("--git-dir", str(BARE_REMOTE), "diff", "--numstat", base, head)
+        out = _git("--git-dir", str(remote), "diff", "--numstat", base, head)
     except subprocess.CalledProcessError:
         return []
     files = []
@@ -123,10 +139,13 @@ def _diff_files(base: str, head: str) -> list[dict[str, Any]]:
     return files
 
 
-def branch_exists(branch: str) -> bool:
+def branch_exists(owner: str, repo: str, branch: str) -> bool:
     """Check whether a branch exists in the bare remote (the fake GitHub)."""
+    remote = _REMOTES.get((owner, repo))
+    if remote is None:
+        return False
     try:
-        _git("--git-dir", str(BARE_REMOTE), "rev-parse", "--verify", f"refs/heads/{branch}")
+        _git("--git-dir", str(remote), "rev-parse", "--verify", f"refs/heads/{branch}")
         return True
     except subprocess.CalledProcessError:
         return False
@@ -137,7 +156,7 @@ def create_pull(
 ) -> dict[str, Any]:
     _pr_seq[0] += 1
     number = _pr_seq[0]
-    files = _diff_files(base, head)
+    files = _diff_files(owner, repo, base, head)
     pr = {
         "number": number,
         "owner": owner,
@@ -150,6 +169,9 @@ def create_pull(
         "state": "open",
         "merged": False,
         "author": "open-swe[bot]",
+        "created_at": time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 5 * 24 * 60 * 60)
+        ),
         "files": files,
         "additions": sum(f["additions"] for f in files),
         "deletions": sum(f["deletions"] for f in files),
@@ -197,4 +219,4 @@ def reset() -> None:
     DELETED_SNAPSHOTS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0
-    seed_bare_remote()
+    seed_bare_remotes()
