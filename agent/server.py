@@ -1220,6 +1220,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         else await _cached_profile(profile_login)
     )
     sender_draft_prs = profile_draft_prs(sender_profile)
+    configurable["draft_prs"] = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
         repo_instructions = thread_settings.get("repo_instructions")
     else:

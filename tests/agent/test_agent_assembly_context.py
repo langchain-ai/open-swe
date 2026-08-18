@@ -38,6 +38,9 @@ def _base_config() -> RunnableConfig:
 
 async def _capture_create_deep_agent_kwargs(
     config: RunnableConfig | None = None,
+    *,
+    profile: dict[str, object] | None = None,
+    thread_settings: dict[str, object] | None = None,
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
     config = config or _base_config()
@@ -70,7 +73,12 @@ async def _capture_create_deep_agent_kwargs(
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
-        patch("agent.server.load_profile", new_callable=AsyncMock, return_value=None),
+        patch("agent.server.load_profile", new_callable=AsyncMock, return_value=profile),
+        patch(
+            "agent.server.load_thread_settings",
+            new_callable=AsyncMock,
+            return_value=thread_settings or {},
+        ),
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.make_model", side_effect=[MagicMock(), MagicMock()]),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
@@ -80,6 +88,23 @@ async def _capture_create_deep_agent_kwargs(
 
     clear_sandbox_backend(thread_id)
     return captured
+
+
+@pytest.mark.asyncio
+async def test_existing_thread_reloads_sender_draft_preference_into_run_config() -> None:
+    config = _base_config()
+    config["configurable"]["github_login"] = "draft-preference-owner"
+
+    await _capture_create_deep_agent_kwargs(
+        config,
+        profile={"draft_prs": False},
+        thread_settings={
+            "owner_login": "draft-preference-owner",
+            "model_id": "openai:gpt-5.6-sol",
+        },
+    )
+
+    assert config["configurable"]["draft_prs"] is False
 
 
 @pytest.mark.asyncio
