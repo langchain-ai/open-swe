@@ -1,4 +1,7 @@
-# Build from the repo root: docker build -f ui/Dockerfile --build-arg DASHBOARD_API_URL=... .
+# Build from the repo root: docker build -f ui/Dockerfile .
+#
+# The backend this dashboard fronts is read from DASHBOARD_API_URL at runtime, so
+# one image serves any deployment. Set it in the deployment's environment.
 FROM node:24-alpine AS build
 
 RUN corepack enable
@@ -10,13 +13,6 @@ RUN pnpm install --frozen-lockfile --filter open-swe-dashboard...
 
 COPY ui ui
 
-# Baked into the bundle as the `/dashboard/api/*` proxy target and the backend
-# server renders call, so one image belongs to exactly one backend. No default:
-# a fallback would be production's backend, silently inherited by every other
-# deployment. See docs/PREVIEW_ENV.md.
-ARG DASHBOARD_API_URL
-RUN test -n "$DASHBOARD_API_URL" || (echo "DASHBOARD_API_URL build-arg is required" >&2; exit 1)
-ENV DASHBOARD_API_URL=$DASHBOARD_API_URL
 RUN pnpm --filter open-swe-dashboard run build
 
 FROM node:24-alpine

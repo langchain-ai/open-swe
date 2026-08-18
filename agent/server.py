@@ -15,6 +15,7 @@ import shlex
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal, cast
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 from deepagents import create_deep_agent
 from deepagents.backends.composite import CompositeBackend
+from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
@@ -134,6 +136,7 @@ from .tools import (
     linear_search_issues,
     linear_update_issue,
     list_environments,
+    manage_baby_sit,
     notify_automation_channel,
     open_pull_request,
     read_user_settings,
@@ -199,6 +202,8 @@ client = get_client()
 DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
 ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
+BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
+BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "bundled_skills"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
     "edit_file",
@@ -615,6 +620,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
         "task",
         "http_request",
+        "manage_baby_sit",
         "open_pull_request",
         "recreate_sandbox",
         "request_pr_review",
@@ -1436,6 +1442,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         linear_list_teams,
         linear_search_issues,
         linear_update_issue,
+        manage_baby_sit,
         notify_automation_channel,
         open_pull_request,
         read_user_settings,
@@ -1473,9 +1480,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     skill_routes: dict[str, BackendProtocol] = {
         ORGANIZATION_SKILLS_ROUTE: ReadOnlyBackend(
             StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
-        )
+        ),
+        BUNDLED_SKILLS_ROUTE: ReadOnlyBackend(
+            FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
+        ),
     }
-    skill_sources = [ORGANIZATION_SKILLS_ROUTE]
+    skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
     if profile_login:
         skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
             StoreBackend(namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login))

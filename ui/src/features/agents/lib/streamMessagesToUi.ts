@@ -11,7 +11,13 @@ import type {
   SubagentDiscoverySnapshot,
 } from "@langchain/react"
 
-import type { Chunk, DiffData, Message, ToolExecutionChunk } from "./types"
+import type {
+  Chunk,
+  DiffData,
+  Message,
+  SubagentInfo,
+  ToolExecutionChunk,
+} from "./types"
 
 const READ_TOOLS = new Set(["read_file", "read", "ls"])
 const EDIT_TOOLS = new Set([
@@ -50,7 +56,7 @@ function toolKind(name: string): ToolKind {
   return "other"
 }
 
-function toolTitle(name: string, args: Record<string, unknown>): string {
+export function toolTitle(name: string, args: Record<string, unknown>): string {
   const path = args.path ?? args.file_path ?? args.target_file
   if (typeof path === "string" && path.trim()) return `${name} ${path.trim()}`
   const command = args.command
@@ -233,6 +239,67 @@ function toolStatus(
   return "in_progress"
 }
 
+/** Flatten a {@link SubagentDiscoverySnapshot} onto the chunk model. */
+function subagentInfo(snapshot: SubagentDiscoverySnapshot): SubagentInfo {
+  const info: SubagentInfo = {
+    namespace: [...snapshot.namespace],
+    name: snapshot.name,
+    depth: snapshot.depth,
+    parentId: snapshot.parentId,
+  }
+  const startedAt = isoOrUndefined(snapshot.startedAt)
+  if (startedAt) info.startedAt = startedAt
+  const completedAt = isoOrUndefined(snapshot.completedAt)
+  if (completedAt) info.completedAt = completedAt
+  const result = subagentResultText(snapshot.output)
+  if (result) info.result = result
+  const error = snapshot.error?.trim()
+  if (error) info.error = error
+  return info
+}
+
+function isoOrUndefined(value: Date | null | undefined): string | undefined {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime()))
+    return undefined
+  return value.toISOString()
+}
+
+function subagentResultText(output: unknown): string | undefined {
+  if (output == null) return undefined
+  if (typeof output === "string") return output.trim() || undefined
+  const content = messageContent(output)
+  if (content != null) return content.trim() || undefined
+  try {
+    return JSON.stringify(output)
+  } catch {
+    return String(output)
+  }
+}
+
+function messageContent(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined
+  const record = value as Record<string, unknown>
+  for (const source of [record, record.kwargs, record.lc_kwargs]) {
+    if (!source || typeof source !== "object") continue
+    const content = (source as Record<string, unknown>).content
+    if (typeof content === "string") return content
+    if (Array.isArray(content)) {
+      return content
+        .map((block) =>
+          block &&
+          typeof block === "object" &&
+          "text" in block &&
+          typeof block.text === "string"
+            ? block.text
+            : ""
+        )
+        .join("")
+    }
+  }
+  return undefined
+}
+
 /** Map a {@link SubagentDiscoverySnapshot}'s lifecycle to the UI tool status. */
 function subagentStatus(
   snapshot: SubagentDiscoverySnapshot
@@ -413,7 +480,7 @@ export function streamMessagesToUi(
         // its namespace (for scoped nested activity) and authoritative status.
         const subagent = subagentsByCallId.get(toolCallId)
         if (subagent) {
-          chunk.subagentNamespace = [...subagent.namespace]
+          chunk.subagent = subagentInfo(subagent)
           chunk.status = subagentStatus(subagent)
         }
         chunks.push(chunk)

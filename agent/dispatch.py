@@ -1,12 +1,12 @@
 """Single durable dispatch contract behind every agent/reviewer run trigger.
 
 Replaces the per-site ``runs.create`` calls (plus the ``is_thread_active``
-busy-check and the custom store-queue) with one function that always uses:
+busy-check and the custom store-queue) with one function that uses:
 
-- ``multitask_strategy="interrupt"`` — a follow-up halts the active run
+- ``multitask_strategy="interrupt"`` by default — a follow-up halts the active run
   (progress preserved by the sync checkpoint) and resumes the agent with full
-  history + the new message; on an idle thread it just starts. This is the
-  platform-native, cross-process replacement for the racy busy-check + queue.
+  history + the new message; on an idle thread it just starts. Background
+  follow-ups such as `/baby-sit` can opt into ``enqueue`` instead.
 - ``durability="sync"`` — checkpoint before each step so a crash/recycle
   resumes from the last checkpoint instead of losing all work.
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
@@ -131,6 +131,27 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
         systems=systems,
     )
 
+
+# `@langchain/react` subscribes to `messages`, `tools`, `lifecycle`, etc.;
+# legacy `messages-tuple`-only runs emit almost nothing on those channels. Every
+# run the dashboard can render must therefore carry the full set, whether it was
+# started from the UI or from a webhook.
+DASHBOARD_STREAM_MODES: tuple[str, ...] = (
+    "values",
+    "updates",
+    "messages",
+    "messages-tuple",
+    "tools",
+    "checkpoints",
+    "events",
+)
+
+# `runs.create` validates against a narrower enum than the streaming endpoints:
+# it has no `tools` mode (the client assembles tool calls from `messages`), and
+# passing it 422s the whole run.
+RUN_CREATE_STREAM_MODES: tuple[str, ...] = tuple(
+    mode for mode in DASHBOARD_STREAM_MODES if mode != "tools"
+)
 
 # FastAPI route the platform POSTs run completion/failure to. The platform
 # rejects loopback webhooks (relative URLs / localhost) — they bypass auth via
@@ -258,6 +279,7 @@ async def create_durable_run(
     if_not_exists: str = "create",
     stream_mode: Any | None = None,
     stream_resumable: bool = True,
+    stream_subgraphs: bool = True,
     after_seconds: int | float | None = None,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
@@ -270,11 +292,14 @@ async def create_durable_run(
         "durability": durability,
         "if_not_exists": if_not_exists,
         "stream_resumable": stream_resumable,
+        # Subagents run as subgraphs, and the server streams only the top graph
+        # by default — without this their tool calls never reach the dashboard,
+        # so a subagent card can show that it is running but never what it did.
+        "stream_subgraphs": stream_subgraphs,
     }
+    create_kwargs["stream_mode"] = list(stream_mode or RUN_CREATE_STREAM_MODES)
     if COMPLETION_WEBHOOK_URL:
         create_kwargs["webhook"] = COMPLETION_WEBHOOK_URL
-    if stream_mode is not None:
-        create_kwargs["stream_mode"] = stream_mode
     if after_seconds is not None:
         create_kwargs["after_seconds"] = after_seconds
 
@@ -309,8 +334,9 @@ async def dispatch_agent_run(
     assistant_id: str = "agent",
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
+    multitask_strategy: str = "interrupt",
 ) -> Run:
-    """Create (or interrupt-and-resume) a run for ``thread_id``.
+    """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
     Routes every Slack / Linear / GitHub / dashboard trigger through one
     contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
@@ -342,4 +368,5 @@ async def dispatch_agent_run(
         metadata=metadata or {},
         source=source,
         client=client or dispatch_client(),
+        multitask_strategy=multitask_strategy,
     )

@@ -29,42 +29,12 @@ function RepositoriesOwnerPage() {
     queryFn: api.listAutoReviewRepos,
     enabled: !!session.data,
   })
-  const approvalPolicies = useQuery({
-    queryKey: ["reviewApprovalPolicies"],
-    queryFn: api.listReviewApprovalPolicies,
-    enabled: !!session.data,
-  })
 
   const toggleAutoReview = useMutation({
     mutationFn: ({ full_name, on }: { full_name: string; on: boolean }) =>
       api.setAutoReviewRepo(full_name, on),
     onSuccess: (data) => {
       qc.setQueryData(["autoReviewRepos"], data)
-    },
-  })
-
-  const updateApprovalPolicy = useMutation({
-    mutationFn: ({
-      full_name,
-      enabled,
-      threshold,
-    }: {
-      full_name: string
-      enabled: boolean
-      threshold: number | null
-    }) => api.setReviewApprovalPolicy(full_name, enabled, threshold),
-    onSuccess: ({ policy }) => {
-      qc.setQueryData<
-        Awaited<ReturnType<typeof api.listReviewApprovalPolicies>>
-      >(["reviewApprovalPolicies"], (current) => ({
-        policies: [
-          ...(current?.policies ?? []).filter(
-            (item) =>
-              item.full_name.toLowerCase() !== policy.full_name.toLowerCase()
-          ),
-          policy,
-        ],
-      }))
     },
   })
 
@@ -79,16 +49,6 @@ function RepositoriesOwnerPage() {
   const autoReviewSet = useMemo(
     () => new Set(autoReview.data?.repos ?? []),
     [autoReview.data?.repos]
-  )
-  const approvalPolicyMap = useMemo(
-    () =>
-      new Map(
-        (approvalPolicies.data?.policies ?? []).map((policy) => [
-          policy.full_name.toLowerCase(),
-          policy,
-        ])
-      ),
-    [approvalPolicies.data?.policies]
   )
 
   const [page, setPage] = useState(0)
@@ -113,8 +73,7 @@ function RepositoriesOwnerPage() {
   const autoReviewCount = ownerRepos.filter((r) =>
     autoReviewSet.has(r.full_name)
   ).length
-  const loading =
-    repos.isLoading || autoReview.isLoading || approvalPolicies.isLoading
+  const loading = repos.isLoading || autoReview.isLoading
 
   return (
     <AppShell
@@ -150,11 +109,6 @@ function RepositoriesOwnerPage() {
           <ul className="divide-y divide-border">
             {pageRepos.map((r) => {
               const runsAutomatically = autoReviewSet.has(r.full_name)
-              const approvalPolicy = approvalPolicyMap.get(
-                r.full_name.toLowerCase()
-              )
-              const autoApprove = approvalPolicy?.enabled ?? false
-              const threshold = approvalPolicy?.threshold ?? null
               return (
                 <li
                   key={r.full_name}
@@ -173,11 +127,18 @@ function RepositoriesOwnerPage() {
                       </span>
                     )}
                   </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">
-                        Run automatically
-                      </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      Run automatically
+                    </span>
+                    <span
+                      title={
+                        !canEdit
+                          ? "Only team admins can modify automatic review settings"
+                          : undefined
+                      }
+                      className={!canEdit ? "cursor-not-allowed" : undefined}
+                    >
                       <Switch
                         aria-label={`Run reviews automatically for ${r.full_name}`}
                         checked={runsAutomatically}
@@ -189,53 +150,7 @@ function RepositoriesOwnerPage() {
                           })
                         }
                       />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">
-                        Auto-approve
-                      </span>
-                      <input
-                        key={`${r.full_name}-${threshold ?? "default"}`}
-                        aria-label={`Approval threshold for ${r.full_name}`}
-                        title="Leave blank to use the team default"
-                        type="number"
-                        min={0}
-                        max={100}
-                        placeholder="Default"
-                        defaultValue={threshold ?? ""}
-                        disabled={!canEdit || updateApprovalPolicy.isPending}
-                        onBlur={(event) => {
-                          const next = event.target.value
-                            ? Number(event.target.value)
-                            : null
-                          if (
-                            next === null ||
-                            (Number.isInteger(next) && next >= 0 && next <= 100)
-                          ) {
-                            updateApprovalPolicy.mutate({
-                              full_name: r.full_name,
-                              enabled: autoApprove,
-                              threshold: next,
-                            })
-                          } else {
-                            event.target.value = threshold?.toString() ?? ""
-                          }
-                        }}
-                        className="h-7 w-20 rounded-md border border-border bg-background px-2 text-[11px] disabled:opacity-50"
-                      />
-                      <Switch
-                        aria-label={`Automatically approve passing reviews for ${r.full_name}`}
-                        checked={autoApprove}
-                        disabled={!canEdit || updateApprovalPolicy.isPending}
-                        onCheckedChange={(enabled) =>
-                          updateApprovalPolicy.mutate({
-                            full_name: r.full_name,
-                            enabled,
-                            threshold,
-                          })
-                        }
-                      />
-                    </div>
+                    </span>
                   </div>
                 </li>
               )

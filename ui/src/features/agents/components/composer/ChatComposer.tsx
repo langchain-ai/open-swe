@@ -752,7 +752,11 @@ export const ChatComposer = memo(function ChatComposer({
               render={
                 <ComposerControl
                   aria-label="More composer options"
-                  className="size-7 px-0"
+                  className={cn(
+                    "size-7 px-0",
+                    adminThread &&
+                      "bg-destructive/10 text-foreground hover:bg-destructive/10 hover:text-foreground"
+                  )}
                   type="button"
                 />
               }
