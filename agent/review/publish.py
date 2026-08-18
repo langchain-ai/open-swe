@@ -21,12 +21,11 @@ the GraphQL ``resolveReviewThread`` mutation (REST doesn't expose this).
 import json
 import logging
 import re
-from typing import Any, Literal, TypedDict
+from typing import Any, TypedDict
 
 import httpx
 
 from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.github_app import get_github_app_slug
 from ..utils.github_checks import CheckConclusion, complete_review_check_run
 from ..utils.github_http import (
     GITHUB_API_BASE,
@@ -60,16 +59,6 @@ class ReviewCommentMarker(TypedDict):
     start_line: int | None
     end_line: int | None
     side: DiffSide
-
-
-class ApprovalPreflight(TypedDict):
-    live_head_sha: str
-    pr_open: bool
-    pr_draft: bool
-    pr_author: str
-    app_login: str
-    active_human_change_requests: list[str]
-    duplicate_approval_review_id: int | None
 
 
 def _optional_int(value: Any) -> int | None:
@@ -291,9 +280,6 @@ def render_review_body(
     ui_url: str | None = None,
     out_of_diff_findings: list[Finding] | None = None,
     additional_findings_count: int = 0,
-    approval_score: int | None = None,
-    approval_decision: str | None = None,
-    approval_blockers: list[str] | None = None,
 ) -> str:
     """Compose the top-level review body.
 
@@ -315,13 +301,6 @@ def render_review_body(
         headline = f"**Open SWE Review** found {surfaced_count} potential {issue_word}."
 
     parts = [headline]
-    if approval_decision is not None:
-        score_text = f"{approval_score}/100" if approval_score is not None else "unavailable"
-        decision_text = approval_decision.replace("_", " ")
-        line = f"Approval score: **{score_text}** · Decision: **{decision_text}**"
-        if approval_blockers:
-            line += f" · Blocked by: {', '.join(blocker.replace('_', ' ') for blocker in approval_blockers)}"
-        parts.append(line)
     if has_additional:
         noun = "finding" if additional_findings_count == 1 else "findings"
         parts.append(f"{additional_findings_count} additional {noun} can be viewed in the web app.")
@@ -561,105 +540,6 @@ async def open_swe_review_exists(
             params["page"] += 1
 
 
-async def fetch_approval_preflight(
-    *,
-    owner: str,
-    repo: str,
-    pr_number: int,
-    assessed_sha: str,
-    token: str,
-) -> ApprovalPreflight | None:
-    app_slug = await get_github_app_slug()
-    if not app_slug:
-        return None
-    app_login = f"{app_slug}[bot]"
-    pr_url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}"
-    reviews_url = f"{pr_url}/reviews"
-    try:
-        async with github_client(token=token) as client:
-            pr_response = await github_request(client, "GET", pr_url)
-            pr_response.raise_for_status()
-            pr_data = pr_response.json()
-            if not isinstance(pr_data, dict):
-                return None
-
-            reviews: list[dict[str, Any]] = []
-            page = 1
-            while True:
-                response = await github_request(
-                    client,
-                    "GET",
-                    reviews_url,
-                    params={"per_page": 100, "page": page},
-                )
-                response.raise_for_status()
-                data = response.json()
-                if not isinstance(data, list):
-                    return None
-                if any(not isinstance(review, dict) for review in data):
-                    return None
-                reviews.extend(data)
-                if len(data) < 100:  # noqa: PLR2004
-                    break
-                page += 1
-    except httpx.HTTPError:
-        logger.warning("Failed auto-approval preflight for %s/%s#%s", owner, repo, pr_number)
-        return None
-
-    head = pr_data.get("head")
-    user = pr_data.get("user")
-    live_head_sha = head.get("sha") if isinstance(head, dict) else None
-    pr_author = user.get("login") if isinstance(user, dict) else None
-    if not isinstance(live_head_sha, str) or not live_head_sha:
-        return None
-    if not isinstance(pr_author, str) or not pr_author:
-        return None
-    pr_state = pr_data.get("state")
-    pr_draft = pr_data.get("draft")
-    pr_merged = pr_data.get("merged")
-    if pr_state not in {"open", "closed"} or not isinstance(pr_draft, bool):
-        return None
-    if not isinstance(pr_merged, bool):
-        return None
-
-    reviewer_states: dict[str, str] = {}
-    duplicate_review_id: int | None = None
-    for review in reviews:
-        review_user = review.get("user")
-        login = review_user.get("login") if isinstance(review_user, dict) else None
-        user_type = review_user.get("type") if isinstance(review_user, dict) else None
-        state = review.get("state")
-        if not isinstance(login, str) or not login or not isinstance(user_type, str):
-            return None
-        if state not in {"APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"}:
-            return None
-        if (
-            login.casefold() == app_login.casefold()
-            and state == "APPROVED"
-            and review.get("commit_id") == assessed_sha
-            and review_summary_marker(pr_number) in str(review.get("body") or "")
-        ):
-            review_id = review.get("id")
-            if isinstance(review_id, int):
-                duplicate_review_id = review_id
-        if user_type.casefold() == "bot" or login.casefold() == app_login.casefold():
-            continue
-        if state in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
-            reviewer_states[login.casefold()] = state
-
-    return {
-        "live_head_sha": live_head_sha,
-        "pr_open": pr_state == "open" and not pr_merged,
-        "pr_draft": pr_draft,
-        "pr_author": pr_author,
-        "app_login": app_login,
-        "active_human_change_requests": sorted(
-            login for login, state in reviewer_states.items() if state == "CHANGES_REQUESTED"
-        ),
-        "duplicate_approval_review_id": duplicate_review_id,
-    }
-
-
 async def post_pull_request_review(
     *,
     owner: str,
@@ -669,13 +549,12 @@ async def post_pull_request_review(
     body: str,
     inline_comments: list[dict[str, Any]],
     token: str,
-    event: Literal["COMMENT", "APPROVE"] = "COMMENT",
 ) -> dict[str, Any] | None:
     """POST one GitHub PR Review with inline comments. Returns the API response or None."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
     payload: dict[str, Any] = {
         "commit_id": head_sha,
-        "event": event,
+        "event": "COMMENT",
         "body": body,
         "comments": inline_comments,
     }

@@ -279,6 +279,9 @@ async def slack_action(request: Request) -> JSONResponse:
     user_id = str(body.get("user") or TEST_USERS[0]["slack_id"])
     if not isinstance(action, dict) or not channel_id or not thread_ts or not message_ts:
         raise HTTPException(status_code=400, detail="Missing Slack action context")
+    source_message = fakes.slack_message(channel_id, thread_ts, message_ts)
+    if source_message is None:
+        raise HTTPException(status_code=404, detail="Slack message not found")
 
     payload = {
         "type": "block_actions",
@@ -289,7 +292,12 @@ async def slack_action(request: Request) -> JSONResponse:
             "message_ts": message_ts,
             "thread_ts": thread_ts,
         },
-        "message": {"ts": message_ts, "thread_ts": thread_ts},
+        "message": {
+            "ts": message_ts,
+            "thread_ts": thread_ts,
+            "text": source_message["text"],
+            "blocks": source_message["blocks"],
+        },
         "actions": [{**action, "action_ts": fakes.next_slack_ts()}],
     }
     response = await _deliver_slack_interaction(payload)
@@ -690,6 +698,20 @@ async def slack_post_message(request: Request) -> JSONResponse:
         is_bot=True,
     )
     return _ok({"ts": ts, "message": {"ts": ts}})
+
+
+@app.post("/fake-slack/chat.update")
+async def slack_update_message(request: Request) -> JSONResponse:
+    body = await request.json()
+    message = fakes.update_slack_message(
+        str(body.get("channel") or ""),
+        str(body.get("ts") or ""),
+        text=str(body.get("text") or ""),
+        blocks=body.get("blocks"),
+    )
+    if message is None:
+        return JSONResponse({"ok": False, "error": "message_not_found"})
+    return _ok({"ts": message["ts"], "message": message})
 
 
 @app.post("/fake-slack/chat.postEphemeral")
