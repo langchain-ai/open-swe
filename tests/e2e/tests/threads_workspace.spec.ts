@@ -350,6 +350,10 @@ function boardColumn(main: Locator, name: string): Locator {
   return main.locator(`section:has(h2:text-is("${name}"))`);
 }
 
+function sidebarGroup(sidebar: Locator, name: string): Locator {
+  return sidebar.locator(`div:has(> button > span:text-is("${name}"))`);
+}
+
 function sourceFilter(main: Locator): Locator {
   return main.locator('select:has(option[value="github"])');
 }
@@ -523,6 +527,53 @@ test.describe("threads workspace", () => {
     await expect(main).toContainText(TITLES.done);
     await expect(main).not.toContainText(TITLES.attention);
     await expect(main).not.toContainText(TITLES.running);
+  });
+
+  test("shows the board focus groups in the sidebar", async ({
+    page,
+    request,
+  }, testInfo) => {
+    await seedThreads(request, workspaceThreads());
+    await loginAs(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/agents/threads");
+
+    const sidebar = page.locator("[data-sidebar-frame]");
+    await sidebar
+      .getByRole("button", { name: "Group and filter threads" })
+      .click();
+    await page
+      .getByRole("menuitemradio", { name: "Focus", exact: true })
+      .click();
+    await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+    await page
+      .getByRole("menuitemcheckbox", { name: "Include resolved", exact: true })
+      .click();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+
+    const attention = sidebarGroup(sidebar, "Needs attention");
+    const progress = sidebarGroup(sidebar, "In progress");
+    const ready = sidebarGroup(sidebar, "Ready");
+    const done = sidebarGroup(sidebar, "Done");
+
+    await expect(attention).toContainText(TITLES.attention);
+    await expect(attention).toContainText(TITLES.error);
+    await expect(attention).toContainText(TITLES.interrupted);
+    await expect(attention.locator("> button > span").last()).toHaveText("3");
+    await expect(progress).toContainText(TITLES.running);
+    await expect(progress.locator("> button > span").last()).toHaveText("1");
+    await expect(ready).toContainText(TITLES.ready);
+    await expect(ready.locator("> button > span").last()).toHaveText("1");
+    await expect(done).toContainText(TITLES.done);
+    await expect(done.locator("> button > span").last()).toHaveText("1");
+
+    const screenshotPath = testInfo.outputPath("focus-grouping-sidebar.png");
+    await sidebar.screenshot({ path: screenshotPath });
+    await testInfo.attach("focus-grouping-sidebar", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
   });
 
   test("persists layout and column order and resolves threads", async ({
