@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: us-docker.pkg.dev/langchain-artifacts/langchain/open-swe-dashboard
+  IMAGE: us-docker.pkg.dev/langchain-artifacts/langchain-nonprod/open-swe-dashboard
 
 jobs:
   publish:
