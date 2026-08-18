@@ -7,6 +7,7 @@ the real ``open_pull_request`` tool, and post the result back with the real
 the preceding tool result, exactly as a real model would.
 """
 
+import json
 import os
 import re
 import time
