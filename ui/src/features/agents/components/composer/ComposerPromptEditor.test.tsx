@@ -11,7 +11,13 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 afterEach(() => cleanup())
 
 /** Drives the editor the way `ChatComposer` does: controlled value plus cursor. */
-function Harness({ initialValue = "" }: { initialValue?: string }) {
+function Harness({
+  initialValue = "",
+  skillNames,
+}: {
+  initialValue?: string
+  skillNames?: ReadonlySet<string>
+}) {
   const [value, setValue] = useState(initialValue)
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null)
 
@@ -21,6 +27,7 @@ function Harness({ initialValue = "" }: { initialValue?: string }) {
         editorRef={editorRef}
         onChange={setValue}
         placeholder="Ask anything"
+        skillNames={skillNames}
         value={value}
       />
       <output data-testid="prompt-value">{value}</output>
@@ -33,6 +40,20 @@ describe("ComposerPromptEditor", () => {
     render(<Harness initialValue="rename the handler" />)
     expect(screen.getByTestId("composer-editor").textContent).toBe(
       "rename the handler"
+    )
+  })
+
+  it("renders a selected skill as a badge while preserving its command", () => {
+    render(
+      <Harness
+        initialValue="/autopilot fix this"
+        skillNames={new Set(["autopilot"])}
+      />
+    )
+
+    expect(screen.getByText("/autopilot")).toBeTruthy()
+    expect(screen.getByTestId("composer-editor").textContent).toBe(
+      "/autopilot fix this"
     )
   })
 

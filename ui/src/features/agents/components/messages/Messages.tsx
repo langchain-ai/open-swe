@@ -9,6 +9,7 @@ import {
 } from "react"
 import { ChevronDown } from "lucide-react"
 
+import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { UserMessage } from "./UserMessage"
@@ -20,8 +21,10 @@ const BOTTOM_LOCK_THRESHOLD_PX = 24
 
 function QueuedMessages({
   queuedMessages,
+  skillNames = new Set(),
 }: {
   queuedMessages: NonNullable<MessagesProps["queuedMessages"]>
+  skillNames?: ReadonlySet<string>
 }) {
   if (queuedMessages.length === 0) return null
 
@@ -45,7 +48,10 @@ function QueuedMessages({
             </div>
             {message.content && (
               <div className="break-words whitespace-pre-wrap">
-                {message.content}
+                <SkillPromptText
+                  text={message.content}
+                  skillNames={skillNames}
+                />
               </div>
             )}
             {imageCount > 0 && (
@@ -64,6 +70,7 @@ export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
   queuedMessages = [],
+  skillNames,
   isStreaming,
   streamIsLoading,
   isThinking,
@@ -270,7 +277,13 @@ export const Messages = memo(function MessagesComponent({
               const messageIsMarkdownLive = message.id === liveMarkdownMessageId
 
               if (message.author === "user") {
-                return <UserMessage key={message.id} message={message} />
+                return (
+                  <UserMessage
+                    key={message.id}
+                    message={message}
+                    skillNames={skillNames}
+                  />
+                )
               }
 
               return (
@@ -289,7 +302,10 @@ export const Messages = memo(function MessagesComponent({
                 />
               )
             })}
-            <QueuedMessages queuedMessages={queuedMessages} />
+            <QueuedMessages
+              queuedMessages={queuedMessages}
+              skillNames={skillNames}
+            />
             <ThinkingSpinner
               isActive={isThinking ?? streamIsLoading ?? isStreaming}
               settingUpSandbox={settingUpSandbox}

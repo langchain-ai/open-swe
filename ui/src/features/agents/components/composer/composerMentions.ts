@@ -18,6 +18,14 @@ export interface ComposerMentionToken {
 export type ComposerPromptSegment =
   | { type: "text"; text: string }
   | { type: "mention"; path: string; source: string }
+  | { type: "skill"; name: string; source: string }
+
+interface ComposerSkillToken {
+  readonly name: string
+  readonly source: string
+  readonly start: number
+  readonly end: number
+}
 
 // Both require a boundary on each side: a mention is a whole token, never a
 // fragment of a longer word or of an inline code span.
@@ -26,6 +34,7 @@ const FILE_LINK_TOKEN_REGEX =
   /(^|\s)\[((?:\\.|[^\]\\])*)\]\(([^)\s]+)\)(?=\s|$)/g
 const URI_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/
 const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/
+const SKILL_TOKEN_REGEX = /(^|\s)\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/g
 
 function collectFileLinkTokens(text: string): Array<ComposerMentionToken> {
   const tokens: Array<ComposerMentionToken> = []
@@ -92,18 +101,40 @@ export function collectComposerMentions(
 
 /** Splits a prompt into the alternating runs of plain text and mentions the editor renders. */
 export function splitPromptIntoSegments(
-  prompt: string
+  prompt: string,
+  skillNames: ReadonlySet<string> = new Set()
 ): Array<ComposerPromptSegment> {
   if (!prompt) return []
 
+  const skills: Array<ComposerSkillToken> = []
+  for (const match of prompt.matchAll(SKILL_TOKEN_REGEX)) {
+    const prefix = match[1] ?? ""
+    const name = match[2] ?? ""
+    if (!skillNames.has(name)) continue
+    const start = match.index + prefix.length
+    skills.push({
+      name,
+      source: `/${name}`,
+      start,
+      end: start + name.length + 1,
+    })
+  }
+
   const segments: Array<ComposerPromptSegment> = []
   let cursor = 0
+  const tokens = [...collectComposerMentions(prompt), ...skills].sort(
+    (left, right) => left.start - right.start
+  )
 
-  for (const token of collectComposerMentions(prompt)) {
+  for (const token of tokens) {
     if (token.start < cursor) continue
     if (token.start > cursor)
       segments.push({ type: "text", text: prompt.slice(cursor, token.start) })
-    segments.push({ type: "mention", path: token.path, source: token.source })
+    segments.push(
+      "name" in token
+        ? { type: "skill", name: token.name, source: token.source }
+        : { type: "mention", path: token.path, source: token.source }
+    )
     cursor = token.end
   }
 

@@ -115,6 +115,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
+  const skillNames = useMemo(
+    () => new Set((skills.data ?? []).map((skill) => skill.name)),
+    [skills.data]
+  )
   const usedTokens = useMemo(
     () => latestContextTokens(stream.messages),
     [stream.messages]
@@ -321,6 +325,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               streamIsLoading={stream.isLoading}
               isThinking={isThinking}
               settingUpSandbox={settingUpSandbox}
+              skillNames={skillNames}
               contentWidthClass="max-w-3xl"
             />
             <div className="shrink-0 px-4 pb-4">

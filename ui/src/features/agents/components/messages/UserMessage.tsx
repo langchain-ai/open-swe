@@ -1,9 +1,16 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 
+import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
 import type { Message } from "@/features/agents/lib/types"
 
-export function UserMessage({ message }: { message: Message }) {
+export function UserMessage({
+  message,
+  skillNames = new Set(),
+}: {
+  message: Message
+  skillNames?: ReadonlySet<string>
+}) {
   const text = message.chunks
     .filter((c) => c.kind === "text")
     .map((c) => c.text)
@@ -65,7 +72,7 @@ export function UserMessage({ message }: { message: Message }) {
                   WebkitMaskImage: textEdgeMask,
                 }}
               >
-                {text}
+                <SkillPromptText text={text} skillNames={skillNames} />
               </div>
             )}
           </div>
