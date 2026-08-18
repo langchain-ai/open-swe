@@ -108,7 +108,7 @@ Model + reasoning effort are resolved per run in this precedence (highest wins):
 
 Custom instructions are layered into the system prompt from two stores: per-repo (`agent/dashboard/agent_instructions.py`, edited on the Repository Instructions page) and per-user (`agent/dashboard/user_instructions.py`, edited in the dashboard Profile tab or by the agent itself via `save_user_instructions`). Repo instructions and `AGENTS.md` win over user-level ones on conflict.
 
-Supported model IDs and per-model effort/reasoning rules live in `agent/dashboard/options.py`. Profile flags also drive run behavior — e.g. `profile_create_prs` enables the opt-in Always Create PRs policy. Model construction goes through `agent/utils/model.py` (`make_model`, `provider_model_kwargs`, `fallback_model_id_for`).
+Supported model IDs and per-model effort/reasoning rules live in `agent/dashboard/options.py`. Profile preferences also control draft PRs and CI automation. Model construction goes through `agent/utils/model.py` (`make_model`, `provider_model_kwargs`, `fallback_model_id_for`).
 
 ### Auth
 

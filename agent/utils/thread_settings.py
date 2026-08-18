@@ -11,7 +11,8 @@ snapshot, which today means a per-run model override.
 """
 
 import logging
-from typing import Any, TypedDict
+from collections.abc import Mapping
+from typing import Any, TypedDict, cast
 
 from . import ttl_cache
 
@@ -27,13 +28,20 @@ class ThreadSettings(TypedDict, total=False):
     effort: str | None
     subagent_model_id: str
     subagent_effort: str | None
-    create_prs: bool
     draft_prs: bool
     user_instructions: str | None
     repo_instructions: str | None
     commit_name: str | None
     commit_email: str | None
     display_name: str | None
+
+
+def normalize_thread_settings(settings: Mapping[str, Any]) -> tuple[ThreadSettings, bool]:
+    """Remove settings that are no longer supported."""
+    value = dict(settings)
+    changed = "create_prs" in value
+    value.pop("create_prs", None)
+    return cast(ThreadSettings, value), changed
 
 
 def _cache_key(thread_id: str) -> str:
