@@ -67,6 +67,13 @@ export interface DiffData {
   totalLines: number
 }
 
+export interface OutputIframeDisplay {
+  type: "output_iframe"
+  html: string
+  title: string
+  filename: string
+}
+
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
@@ -77,19 +84,43 @@ export interface ToolExecutionChunk {
   input?: Record<string, unknown>
   status: AcpToolStatus
   output?: string
+  display?: OutputIframeDisplay
   elapsedMs?: number
   approvalRequestId?: string
   diffData?: DiffData
   diffs?: Array<DiffData>
   locations?: Array<AcpToolLocation>
   /**
-   * Namespace of the subagent this `task` call spawned, from the SDK's
-   * `stream.subagents` discovery map (correlated by tool-call id). Present only
-   * for `toolKind: "task"` chunks whose subagent the SDK has discovered; lets
-   * the UI open a scoped `useToolCalls(stream, { namespace })` subscription to
-   * show the subagent's nested activity.
+   * The subagent this `task` call spawned, from the SDK's `stream.subagents`
+   * discovery map (correlated by tool-call id). Present only for
+   * `toolKind: "task"` chunks whose subagent the SDK has discovered.
    */
-  subagentNamespace?: Array<string>
+  subagent?: SubagentInfo
+}
+
+/**
+ * Projection of the SDK's `SubagentDiscoverySnapshot` onto the chunk model.
+ * `Date`s are flattened to ISO strings so a chunk stays structurally
+ * comparable (memoized render items) and serializable.
+ */
+export interface SubagentInfo {
+  /**
+   * Event namespace for this subagent. Scopes a `useToolCalls(stream, {
+   * namespace })` subscription to exactly this subagent's nested activity.
+   */
+  namespace: Array<string>
+  /** Subagent type, e.g. `"researcher"`. */
+  name: string
+  /** Nesting depth from the root agent (a root-spawned subagent is 1). */
+  depth: number
+  /** Tool-call id of the spawning subagent, or `null` when spawned by the root. */
+  parentId: string | null
+  startedAt?: string
+  /** Absent while the subagent is still running. */
+  completedAt?: string
+  /** The subagent's final output, once it completed. */
+  result?: string
+  error?: string
 }
 
 export interface TextChunk {

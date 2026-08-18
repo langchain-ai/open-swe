@@ -22,8 +22,10 @@ _TOOL_MODULES = {
     "list_environments": ".environments",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
+    "manage_baby_sit": ".manage_baby_sit",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
+    "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
     "read_repo_file": ".read_repo_file",
     "read_user_settings": ".read_user_settings",
@@ -68,8 +70,10 @@ __all__ = [
     "list_environments",
     "list_findings",
     "list_review_findings",
+    "manage_baby_sit",
     "notify_automation_channel",
     "open_pull_request",
+    "output_iframe",
     "publish_review",
     "read_repo_file",
     "read_user_settings",
@@ -117,8 +121,10 @@ if TYPE_CHECKING:
     from .linear_update_issue import linear_update_issue
     from .list_findings import list_findings
     from .list_review_findings import list_review_findings
+    from .manage_baby_sit import manage_baby_sit
     from .notify_automation_channel import notify_automation_channel
     from .open_pull_request import open_pull_request
+    from .output_iframe import output_iframe
     from .publish_review import publish_review
     from .read_repo_file import read_repo_file
     from .read_user_settings import read_user_settings

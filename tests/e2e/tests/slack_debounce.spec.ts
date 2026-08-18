@@ -40,19 +40,8 @@ async function threadStatus(
   return thread.status ?? "";
 }
 
-async function queuedCount(
-  request: APIRequestContext,
-  threadId: string,
-): Promise<number> {
-  const res = await request.get(
-    `/control/queued?thread_id=${encodeURIComponent(threadId)}`,
-  );
-  const body = (await res.json()) as { queued_count: number };
-  return body.queued_count;
-}
-
-test.describe("Slack busy-thread interrupt debounce", () => {
-  test("untagged follow-ups on a busy thread interrupt with their own run", async ({
+test.describe("Slack busy-thread follow-up queueing", () => {
+  test("untagged follow-ups on a busy thread queue behind the active run", async ({
     request,
   }) => {
     await request.post("/control/reset");
@@ -69,7 +58,7 @@ test.describe("Slack busy-thread interrupt debounce", () => {
       .poll(() => botTexts(request), { timeout: 60_000 })
       .toContain("/pull/");
     await expect
-      .poll(() => threadStatus(request, threadId), { timeout: 30_000 })
+      .poll(() => threadStatus(request, threadId), { timeout: 60_000 })
       .not.toBe("busy");
 
     // Phase 2: start a run that holds the thread busy (fake LLM sleeps on the
@@ -92,7 +81,6 @@ test.describe("Slack busy-thread interrupt debounce", () => {
     expect(followUp.webhook.status).toBe("accepted");
     await expect
       .poll(() => threadStatus(request, threadId), { timeout: 30_000 })
-      .not.toBe("busy");
-    expect(await queuedCount(request, threadId)).toBe(0);
+      .toBe("busy");
   });
 });

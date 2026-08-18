@@ -22,7 +22,41 @@ export type RenderItem =
   | { type: "edit-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
+
+const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
+  "text-chunk",
+  "reply-item",
+  "iframe-item",
+])
+
+export function splitWorkAndReply(items: Array<RenderItem>): {
+  workItems: Array<RenderItem>
+  replyItems: Array<RenderItem>
+} {
+  let trailingReplyIndex = items.length
+  while (trailingReplyIndex > 0) {
+    const prev = items[trailingReplyIndex - 1]
+    if (!prev || !REPLY_ITEM_TYPES.has(prev.type)) break
+    trailingReplyIndex -= 1
+  }
+
+  const workItems: Array<RenderItem> = []
+  const replyItems: Array<RenderItem> = []
+  items.forEach((item, index) => {
+    if (
+      item.type === "reply-item" ||
+      item.type === "iframe-item" ||
+      index >= trailingReplyIndex
+    ) {
+      replyItems.push(item)
+    } else {
+      workItems.push(item)
+    }
+  })
+  return { workItems, replyItems }
+}
 
 function getChunkRenderKey(chunk: Chunk, sourceIndex: number): string {
   switch (chunk.kind) {
@@ -126,6 +160,16 @@ export function buildRenderItems(
     if (!chunk) continue
 
     if (chunk.kind === "tool-execution") {
+      if (chunk.display?.type === "output_iframe") {
+        flushGroups()
+        items.push({
+          type: "iframe-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+        continue
+      }
+
       if (isSubagentTool(chunk)) {
         flushExplored()
         if (subagentBuffer.length === 0) subagentStartIndex = i

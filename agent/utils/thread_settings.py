@@ -10,7 +10,8 @@ snapshot, which today means a per-run model override.
 """
 
 import logging
-from typing import Any, TypedDict
+from collections.abc import Mapping
+from typing import Any, TypedDict, cast
 
 from . import ttl_cache
 
@@ -27,6 +28,23 @@ class ThreadSettings(TypedDict, total=False):
     subagent_model_id: str
     subagent_effort: str | None
     repo_instructions: str | None
+
+
+def normalize_thread_settings(settings: Mapping[str, Any]) -> tuple[ThreadSettings, bool]:
+    """Remove participant settings that are now resolved for each message."""
+    value = dict(settings)
+    removed = {
+        "create_prs",
+        "draft_prs",
+        "user_instructions",
+        "commit_name",
+        "commit_email",
+        "display_name",
+    }
+    changed = not removed.isdisjoint(value)
+    for key in removed:
+        value.pop(key, None)
+    return cast(ThreadSettings, value), changed
 
 
 def _cache_key(thread_id: str) -> str:

@@ -307,16 +307,6 @@ function CloudAgentsPage() {
               />
             }
           />
-          <SettingsRow
-            label="Always Create PRs"
-            description="Always create a pull request for code changes. When disabled, agents create PRs only when necessary or requested."
-            control={
-              <Switch
-                checked={profile.data?.create_prs ?? false}
-                onCheckedChange={(v) => persist({ create_prs: v })}
-              />
-            }
-          />
         </div>
       </SettingsSection>
 
