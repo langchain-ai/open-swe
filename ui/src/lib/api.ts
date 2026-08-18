@@ -1034,6 +1034,17 @@ export const api = {
     request<ReviewCommentsPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
     ),
+  updateReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    commentId: number,
+    body: string
+  ) =>
+    request<ReviewCommentResult>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments/${commentId}`,
+      { method: "PATCH", body: JSON.stringify({ body }) }
+    ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }

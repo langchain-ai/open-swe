@@ -81,18 +81,24 @@ def _github_error_message(response: httpx.Response) -> str:
     return message_str or detail or fallback
 
 
-async def _github_post(path: str, token: str, *, json: dict[str, Any]) -> Any:
+async def _github_write(
+    method: Literal["POST", "PATCH"], path: str, token: str, *, json: dict[str, Any]
+) -> Any:
     async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
-        response = await client.post(
-            f"{_GITHUB_API}{path}", headers=github_headers(token), json=json
+        response = await client.request(
+            method, f"{_GITHUB_API}{path}", headers=github_headers(token), json=json
         )
     if response.status_code >= 400:
         message = _github_error_message(response)
-        logger.warning("GitHub POST %s failed: %s %s", path, response.status_code, message)
+        logger.warning("GitHub %s %s failed: %s %s", method, path, response.status_code, message)
         # Pass 4xx through verbatim (422 = line not in diff, 403 = perms); collapse
         # 5xx to a 502 so a GitHub outage doesn't masquerade as a client error.
         raise HTTPException(response.status_code if response.status_code < 500 else 502, message)
     return response.json()
+
+
+async def _github_post(path: str, token: str, *, json: dict[str, Any]) -> Any:
+    return await _github_write("POST", path, token, json=json)
 
 
 def reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
@@ -490,6 +496,32 @@ async def create_review_comment(
     return await _github_post(
         f"/repos/{owner}/{repo}/pulls/{pr_number}/comments", token, json=payload
     )
+
+
+async def update_review_comment(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    comment_id: int,
+    *,
+    token: str,
+    viewer_login: str,
+    body: str,
+) -> dict[str, Any]:
+    """Update an inline review comment owned by the signed-in user."""
+    path = f"/repos/{owner}/{repo}/pulls/comments/{comment_id}"
+    comment = as_json_object(await _github_get(path, token))
+    author = as_json_object(comment.get("user")).get("login")
+    pull_request_url = comment.get("pull_request_url")
+    expected_pr_url = f"{_GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
+    if (
+        not isinstance(author, str)
+        or author.lower() != viewer_login.lower()
+        or not isinstance(pull_request_url, str)
+        or pull_request_url.lower() != expected_pr_url.lower()
+    ):
+        raise HTTPException(403, "comment is not editable by this user")
+    return await _github_write("PATCH", path, token, json={"body": body})
 
 
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
