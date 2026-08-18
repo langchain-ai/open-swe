@@ -154,14 +154,14 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(loggedOut).toHaveURL(
       new RegExp(`/login\\?redirect=.*${threadId}.*plan`),
     );
-    await expect(loggedOut.getByText("Sign in to open-swe")).toBeVisible({
+    await expect(loggedOut.getByText("Sign in to Open SWE")).toBeVisible({
       timeout: 30_000,
     });
     await loggedOut.getByRole("link", { name: "Continue with GitHub" }).click();
     await expect(loggedOut).toHaveURL(/\/fake-gh\/login\/oauth\/authorize/);
     await expect(loggedOut.getByTestId("fake-github-login")).toBeVisible();
     await loggedOut.getByLabel("GitHub user").selectOption(OWNER.login);
-    await loggedOut.getByRole("button", { name: "Authorize open-swe" }).click();
+    await loggedOut.getByRole("button", { name: "Authorize Open SWE" }).click();
     await expect(loggedOut).toHaveURL(new RegExp(`/agents/${threadId}/plan$`));
     await expect(loggedOut.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
