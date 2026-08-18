@@ -34,8 +34,11 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-_SETUP_SCRIPT = f"""
+# One shell command that does the whole git workflow. Each execute() runs in a
+# fresh shell rooted at the sandbox dir, so the clone+commit+push is bundled.
+_IMPLEMENT_SCRIPT = f"""
 set -e
+sleep 8
 rm -rf repo
 git clone "$E2E_REMOTE" repo
 cd repo
@@ -43,20 +46,9 @@ git config user.email "dev@example.com"
 git config user.name "Dev User"
 git checkout -b {FEATURE_BRANCH}
 cat > {FEATURE_FILE} <<'EOF'
-def normalize(name):
-    return name.strip()
-
 def greet(name):
-    return "Hello!"
-
-def farewell(name):
-    return f"Goodbye, {{name}}!"
+    return f"Hello, {{name}}!"
 EOF
-""".strip()
-
-_COMMIT_SCRIPT = f"""
-set -e
-cd repo
 git add -A
 git commit -m "{PR_TITLE}"
 git push origin {FEATURE_BRANCH}
@@ -114,7 +106,6 @@ curl --fail --silent --show-error \
 # agent was actually told (e.g. the environment section) rather than infer it.
 LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
 
-_BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
 
@@ -160,6 +151,10 @@ def _tool_step(content: str, name: str, args: ToolArgs, call_id: str) -> StepSpe
 
 def _dynamic_step(factory: StepFactory) -> StepSpec:
     return StepSpec(factory=factory)
+
+
+def _parallel_tool_step(content: str, calls: tuple[ToolCallSpec, ...]) -> StepSpec:
+    return StepSpec(content=content, tool_calls=calls)
 
 
 def _render_step(step: StepSpec, messages: list[BaseMessage]) -> AIMessage:
@@ -324,20 +319,13 @@ def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
                 "name": "slack_thread_reply",
                 "args": {
                     "message": f"✅ The plan is ready for review: <{url}|open the plan>. "
-                    "Take a look, leave comments, and choose what to do next.",
-                    "options": ["Approve & implement", "Request changes"],
+                    "Take a look, leave comments, and approve it when you're happy."
                 },
                 "id": "call-plan-done",
             }
         ],
     )
 
-
-ENVIRONMENT_NAME = "default"
-ENVIRONMENT_PROMPT = (
-    "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`."
-)
-ENVIRONMENT_PROVISION_SCRIPT = "mkdir -p repos && echo provisioned > repos/.provisioned && ls repos"
 
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
 
@@ -360,6 +348,35 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
     attribution = _latest_attribution(messages)
     suffix = f" I saw this follow-up was from {attribution}." if attribution else ""
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
+
+
+# --- Subagents -------------------------------------------------------------
+#
+# The `task` tool runs a nested deepagents loop against this same fake model,
+# so a subagent's own turns land back in `_generate`. Its message list starts
+# fresh at the task description, which is what routes it to its own script.
+
+SUBAGENT_TASKS: dict[str, str] = {
+    "scout": "Scout the repository layout and report which files define the greet helper.",
+    "auditor": "Audit the repository for missing tests and report what is uncovered.",
+}
+
+SCOUT_RESULT = "Scout done: greet() lives in the feature module; no other definitions found."
+AUDITOR_RESULT = "Audit done: the greet() helper has no test coverage."
+
+# Each nested `execute` sleeps so the parent's card is observably `running`
+# before it settles — the transition is what the E2E asserts on.
+_SCOUT_SCRIPT = """
+set -e
+sleep 15
+echo SCOUTED
+""".strip()
+
+_AUDIT_SCRIPT = """
+set -e
+sleep 25
+echo AUDITED
+""".strip()
 
 
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
@@ -409,6 +426,65 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_desktop_reply_step),
     ),
+    "subagents": (
+        _tool_step(
+            "Acknowledging before fanning out.",
+            "slack_thread_reply",
+            {"message": "On it — fanning out to a couple of subagents."},
+            "call-subagents-ack",
+        ),
+        _parallel_tool_step(
+            "Delegating the scouting and the audit in parallel.",
+            (
+                _tool_call(
+                    "task",
+                    {
+                        "subagent_type": "general-purpose",
+                        "description": SUBAGENT_TASKS["scout"],
+                    },
+                    "call-task-scout",
+                ),
+                _tool_call(
+                    "task",
+                    {
+                        "subagent_type": "general-purpose",
+                        "description": SUBAGENT_TASKS["auditor"],
+                    },
+                    "call-task-auditor",
+                ),
+            ),
+        ),
+        _tool_step(
+            "Reporting what the subagents found.",
+            "slack_thread_reply",
+            {"message": "Both subagents finished — the greet() helper is untested."},
+            "call-subagents-reply",
+        ),
+    ),
+    "subagent:scout": (
+        _tool_step(
+            "Listing the repository.",
+            "execute",
+            {"command": _SCOUT_SCRIPT},
+            "call-scout-ls",
+        ),
+        _tool_step(
+            "Grepping for the helper.",
+            "execute",
+            {"command": "grep -r greet . || true"},
+            "call-scout-grep",
+        ),
+        StepSpec(content=SCOUT_RESULT),
+    ),
+    "subagent:auditor": (
+        _tool_step(
+            "Looking for tests.",
+            "execute",
+            {"command": _AUDIT_SCRIPT},
+            "call-audit-find",
+        ),
+        StepSpec(content=AUDITOR_RESULT),
+    ),
     "implement": (
         _tool_step(
             "Acknowledging the Slack request before starting work.",
@@ -417,26 +493,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-ack",
         ),
         _tool_step(
-            "Setting up the repository.",
+            "Setting up the repo and implementing the change.",
             "execute",
-            {"command": _SETUP_SCRIPT},
-            "call-setup",
-        ),
-        _tool_step(
-            "Implementing the greeting.",
-            "edit_file",
-            {
-                "file_path": f"/repo/{FEATURE_FILE}",
-                "old_string": 'def greet(name):\n    return "Hello!"',
-                "new_string": 'def greet(name):\n    return f"Hello, {name}!"',
-            },
-            "call-edit",
-        ),
-        _tool_step(
-            "Committing and pushing the change.",
-            "execute",
-            {"command": _COMMIT_SCRIPT},
-            "call-commit",
+            {"command": _IMPLEMENT_SCRIPT},
+            "call-impl",
         ),
         _tool_step(
             "Opening a pull request.",
@@ -453,23 +513,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-pr",
         ),
         _dynamic_step(_reply_step),
-    ),
-    "move": (
-        _tool_step(
-            "Moving the current Open SWE thread to another Slack channel.",
-            "slack_move_thread",
-            {
-                "message": "Continue the existing Open SWE task in this thread.",
-                "channel_id": "C_TARGET",
-            },
-            "call-move",
-        ),
-        _tool_step(
-            "Confirming the moved thread in its new location.",
-            "slack_thread_reply",
-            {"message": "Moved this Open SWE thread and preserved its state."},
-            "call-move-reply",
-        ),
     ),
     "breakout": (
         _tool_step(
@@ -502,37 +545,25 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_plan_complete_step),
         StepSpec(content="I'll wait for your review and approval before implementing."),
     ),
-    "environment": (
-        _tool_step(
-            "Provisioning this sandbox before capturing it.",
-            "execute",
-            {"command": ENVIRONMENT_PROVISION_SCRIPT},
-            "call-env-provision",
-        ),
-        _tool_step(
-            "Saving the environment record.",
-            "save_environment",
-            {
-                "name": ENVIRONMENT_NAME,
-                "prompt": ENVIRONMENT_PROMPT,
-                "repos": [f"{OWNER}/{REPO}"],
-            },
-            "call-env-save",
-        ),
-        _tool_step(
-            "Capturing this sandbox as the environment snapshot.",
-            "capture_environment_snapshot",
-            {"name": ENVIRONMENT_NAME},
-            "call-env-capture",
-        ),
-        StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
-    ),
     "followup": (_dynamic_step(_followup_step),),
 }
 
 
 def _is_iframe_request(text: str) -> bool:
     return "E2E_IFRAME" in text
+
+
+def _subagent_script_name(first_text: str) -> str | None:
+    """Route a nested loop to its script by the task description it was handed."""
+    for name, description in SUBAGENT_TASKS.items():
+        if description in first_text:
+            return f"subagent:{name}"
+    return None
+
+
+def _is_subagent_request(text: str) -> bool:
+    t = text.lower()
+    return "fan out" in t or "subagent" in t
 
 
 def _is_plan_request(text: str) -> bool:
@@ -578,6 +609,9 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule("followup", lambda ctx: _is_move_followup(ctx.last_text)),
     ScriptRule("move", lambda ctx: _is_move_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
+    ScriptRule(
+        "subagents", lambda ctx: ctx.human_count <= 1 and _is_subagent_request(ctx.first_text)
+    ),
     ScriptRule("plan", lambda ctx: _is_revision(ctx.last_text)),
     ScriptRule("plan", lambda ctx: ctx.human_count <= 1 and _is_plan_request(ctx.first_text)),
     ScriptRule(
@@ -589,6 +623,11 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
 
 
 def _script_for(context: ScriptContext) -> tuple[StepSpec, ...]:
+    # A nested loop is identified by its task description, never by the parent
+    # rules — its first human message is the description, not the user's ask.
+    nested = _subagent_script_name(context.first_text)
+    if nested is not None:
+        return SCRIPT_LIBRARY[nested]
     for rule in SCRIPT_RULES:
         if rule.predicate(context):
             return SCRIPT_LIBRARY[rule.name]
@@ -642,13 +681,8 @@ class FakeScriptedChatModel(BaseChatModel):
 
         # Keep a run busy on demand so E2E can land follow-ups mid-run (exercising
         # the interrupt-debounce path). Only the triggering message carries the
-        # marker. The block lands on the second model call so the Slack
-        # acknowledgement — and the web link a spec may need to click — is already
-        # out by the time the run stalls. `E2E_BUSY_HOLD:<n>` overrides the window
-        # so a spec needing a short hold does not leave a run in flight for the
-        # specs that follow it.
-        hold = _BUSY_HOLD_RE.search(context.last_text) if step_index == 1 else None
-        if hold:
-            time.sleep(float(hold.group(1) or os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
+        # marker, and only the first model call of that run blocks.
+        if step_index == 0 and "E2E_BUSY_HOLD" in context.last_text:
+            time.sleep(float(os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
         step = script[step_index] if step_index < len(script) else SCRIPT_LIBRARY["followup"][0]
         return ChatResult(generations=[ChatGeneration(message=_render_step(step, messages))])
