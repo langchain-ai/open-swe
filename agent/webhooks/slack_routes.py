@@ -286,6 +286,12 @@ async def slack_interactivity(
                 agent_thread_id=thread_id,
             )
             return {"status": "ignored", "reason": "workflow approval not found"}
+        background_tasks.add_task(
+            _update_selected_option_message,
+            payload,
+            action,
+            "Approve workflow push" if approved else "Reject workflow push",
+        )
         if not approved:
             await common.post_slack_thread_reply(
                 channel_id=channel_id,
@@ -349,6 +355,9 @@ async def slack_interactivity(
             return {"status": "ignored", "reason": "Slack thread is not associated"}
 
         if plan_action == "cancel":
+            background_tasks.add_task(
+                _update_selected_option_message, payload, action, "Cancel plan"
+            )
             await common.post_slack_thread_reply(
                 channel_id=channel_id,
                 thread_ts=thread_ts,
@@ -367,6 +376,9 @@ async def slack_interactivity(
                 )
                 return {"status": "ignored", "reason": "approver is not the thread owner"}
             await common._set_thread_plan_mode(thread_id, False)
+            background_tasks.add_task(
+                _update_selected_option_message, payload, action, "Approve plan"
+            )
             channel_context = await common._get_slack_channel_context(channel_id)
             repo_config = await common.get_slack_repo_config(
                 channel_id,
@@ -391,6 +403,9 @@ async def slack_interactivity(
             )
             return {"status": "accepted", "message": "Plan approved, starting implementation"}
 
+        background_tasks.add_task(
+            _update_selected_option_message, payload, action, "Request plan changes"
+        )
         return {"status": "accepted", "message": "Reply to revise the plan"}
 
     if action_value.get("type") != "open_swe_option":
@@ -428,6 +443,7 @@ async def slack_interactivity(
         channel_context=channel_context,
         thread_id=thread_id,
     )
+    background_tasks.add_task(_update_selected_option_message, payload, action, response)
     background_tasks.add_task(
         service.process_slack_mention,
         {
@@ -443,6 +459,79 @@ async def slack_interactivity(
         repo_config,
     )
     return {"status": "accepted", "message": "Slack option queued"}
+
+
+async def _update_selected_option_message(
+    payload: dict[str, common.Any],
+    action: dict[str, common.Any],
+    fallback_label: str,
+) -> None:
+    channel = payload.get("channel") if isinstance(payload.get("channel"), dict) else {}
+    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+    container = payload.get("container") if isinstance(payload.get("container"), dict) else {}
+    channel_id = str(channel.get("id") or container.get("channel_id") or "")
+    message_ts = str(message.get("ts") or container.get("message_ts") or "")
+    action_text = action.get("text") if isinstance(action.get("text"), dict) else {}
+    label = str(action_text.get("text") or fallback_label).strip()[:150]
+    blocks = _selected_option_blocks(message, label)
+    if not channel_id or not message_ts or not label or not blocks:
+        return
+
+    try:
+        ok, error = await common.update_slack_message(
+            channel_id,
+            message_ts,
+            str(message.get("text") or label),
+            blocks=blocks,
+        )
+    except Exception:
+        common.logger.warning(
+            "Could not persist Slack option selection: channel=%s ts=%s",
+            channel_id,
+            message_ts,
+            exc_info=True,
+        )
+        return
+    if not ok:
+        common.logger.warning(
+            "Could not persist Slack option selection: channel=%s ts=%s error=%s",
+            channel_id,
+            message_ts,
+            error,
+        )
+
+
+def _selected_option_blocks(
+    message: dict[str, common.Any], label: str
+) -> list[dict[str, common.Any]]:
+    raw_blocks = message.get("blocks")
+    if not isinstance(raw_blocks, list):
+        return []
+
+    selected_block: dict[str, common.Any] = {
+        "type": "context",
+        "elements": [{"type": "plain_text", "text": f"Selected: {label}"}],
+    }
+    updated_blocks: list[dict[str, common.Any]] = []
+    replaced = False
+    for block in raw_blocks:
+        if not isinstance(block, dict):
+            continue
+        elements = block.get("elements")
+        if block.get("type") != "actions" or _first_open_swe_option_action(elements) is None:
+            updated_blocks.append(block)
+            continue
+        if not replaced:
+            updated_blocks.append(selected_block)
+            replaced = True
+        if isinstance(elements, list):
+            remaining = [
+                element for element in elements if _first_open_swe_option_action([element]) is None
+            ]
+            if remaining:
+                updated_blocks.append({**block, "elements": remaining})
+
+    return updated_blocks if replaced else []
 
 
 def _first_open_swe_option_action(actions: common.Any) -> dict[str, common.Any] | None:
