@@ -10,8 +10,6 @@ via the langgraph SDK (a future UI lists all reviewer threads by filtering on
 already uses for durable non-secret run state like ``sandbox_id``.
 """
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import json
@@ -137,9 +135,9 @@ class Finding(TypedDict):
     resolution_note: str | None
     diff_hunk: str | None
     fingerprint: str
-    anchor: FindingAnchor | None
-    surface: FindingSurface | None
-    interactions: list[FindingInteraction]
+    anchor: "FindingAnchor | None"
+    surface: "FindingSurface | None"
+    interactions: "list[FindingInteraction]"
 
 
 class AppendFindingResult(TypedDict):

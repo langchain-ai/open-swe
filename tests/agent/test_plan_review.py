@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -410,7 +409,7 @@ class _FakeReq:
         self.tools = tools
         self.state = state
 
-    def override(self, **kw: Any) -> _FakeReq:
+    def override(self, **kw: Any) -> "_FakeReq":
         return _FakeReq(kw.get("tools", self.tools), self.state)
 
 
@@ -475,6 +474,50 @@ async def test_set_plan_status_preserves_plan_file_path(monkeypatch: pytest.Monk
     await plan_store.set_plan_status("t", plan_store.PLAN_STATUS_REVISING, plan_mode=True)
     assert saved["plan_file_path"] == "/workspace/plans/foo.md"
     assert saved["status"] == plan_store.PLAN_STATUS_REVISING
+
+
+async def test_set_plan_status_records_approver_audit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.dashboard import plan_store
+
+    saved: dict[str, Any] = {}
+    merged: dict[str, Any] = {}
+
+    class _Store:
+        async def get_item(self, *a: Any, **k: Any) -> Any:
+            return {
+                "value": {
+                    "markdown": "# Plan",
+                    "status": "ready",
+                    "plan_file_path": "/workspace/plans/foo.md",
+                }
+            }
+
+        async def put_item(self, namespace: Any, key: str, value: Any, *a: Any, **k: Any) -> None:
+            saved.update(value)
+
+    async def fake_merge(thread_id: str, metadata: dict[str, Any]) -> None:
+        merged.update(metadata)
+
+    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    monkeypatch.setattr(plan_store, "_merge_thread_metadata", fake_merge)
+
+    await plan_store.set_plan_status(
+        "t",
+        plan_store.PLAN_STATUS_APPROVED,
+        plan_mode=False,
+        approved_by={"id": "octo", "name": "Octo", "source": "dashboard"},
+    )
+
+    assert saved["markdown"] == "# Plan"
+    assert saved["plan_file_path"] == "/workspace/plans/foo.md"
+    assert saved["approved_by"] == {"id": "octo", "name": "Octo", "source": "dashboard"}
+    assert isinstance(saved["approved_at"], str)
+    assert merged == {
+        "plan_status": "approved",
+        "plan_mode": False,
+        "plan_approved_by": saved["approved_by"],
+        "plan_approved_at": saved["approved_at"],
+    }
 
 
 async def test_set_plan_status_clears_shared_content_when_entering_plan_mode(
@@ -559,6 +602,37 @@ async def test_save_plan_content_can_skip_plan_mode_metadata(
     await plan_store.save_plan_content("t", markdown="x", plan_mode=None)
 
     assert merged == {"plan_status": "ready"}
+
+
+async def test_get_plan_returns_approval_attribution(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.dashboard import plan_api
+
+    async def fake_meta(thread_id: str) -> dict[str, Any]:
+        return {"source": "slack", "github_login": "owner"}
+
+    async def fake_content(thread_id: str) -> dict[str, Any]:
+        return {
+            "markdown": "# Plan",
+            "status": "approved",
+            "approved_by": {"id": "reviewer", "name": "Reviewer", "source": "dashboard"},
+            "approved_at": "2026-08-16T12:00:00+00:00",
+        }
+
+    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "get_plan_content", fake_content)
+
+    result = await plan_api.get_plan(
+        "t1",
+        session={"sub": "reviewer", "email": None, "name": "Reviewer"},
+    )
+
+    assert result["isOwner"] is False
+    assert result["approvedBy"] == {
+        "id": "reviewer",
+        "name": "Reviewer",
+        "source": "dashboard",
+    }
+    assert result["approvedAt"] == "2026-08-16T12:00:00+00:00"
 
 
 def _patch_update_plan_deps(
@@ -682,7 +756,23 @@ async def test_update_plan_blocked_once_approved(monkeypatch: pytest.MonkeyPatch
     assert exc.value.status_code == 409
 
 
-async def test_approve_plan_dispatches_published_markdown(
+async def test_approve_plan_hides_unreadable_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi import HTTPException
+
+    from agent.dashboard import plan_api
+
+    async def fake_meta(thread_id: str) -> dict[str, Any]:
+        return {"source": "unknown", "github_login": "owner"}
+
+    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+
+    with pytest.raises(HTTPException) as exc:
+        await plan_api.approve_plan("t1", session={"sub": "reviewer", "email": None})
+
+    assert exc.value.status_code == 404
+
+
+async def test_non_owner_can_approve_and_dispatch_published_markdown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent.dashboard import plan_api
@@ -690,7 +780,7 @@ async def test_approve_plan_dispatches_published_markdown(
     dispatched: dict[str, Any] = {}
 
     async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {"plan_status": "ready"}
+        return {"source": "slack", "plan_mode": True, "plan_status": "ready"}
 
     async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
         return {"markdown": "# Edited plan\n\nstep one", "status": "ready"}
@@ -698,8 +788,14 @@ async def test_approve_plan_dispatches_published_markdown(
     async def fake_list(thread_id: str, *, raise_on_error: bool = False) -> list[dict[str, Any]]:
         return [{"author": "bob", "body": "use snake_case"}]
 
-    async def fake_set_status(thread_id: str, status: str, *, plan_mode: Any = None) -> None:
-        return None
+    async def fake_set_status(
+        thread_id: str,
+        status: str,
+        *,
+        plan_mode: Any = None,
+        approved_by: Any = None,
+    ) -> None:
+        dispatched.update(status=status, approved_by=approved_by)
 
     async def fake_dispatch(
         thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
@@ -721,6 +817,111 @@ async def test_approve_plan_dispatches_published_markdown(
     assert "reasonable engineering judgment" in dispatched["text"]
     assert "exactly as written" not in dispatched["text"]
     assert dispatched["plan_mode"] is False
+    assert dispatched["approved_by"] == {"id": "a", "name": "a", "source": "dashboard"}
+
+
+async def test_concurrent_plan_approvals_dispatch_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from agent.dashboard import plan_api
+
+    state = {"source": "dashboard", "plan_mode": True, "plan_status": "ready"}
+    dispatches: list[str] = []
+
+    async def fake_meta(thread_id: str) -> dict[str, Any]:
+        return dict(state)
+
+    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
+        return {"markdown": "# Plan", "status": state["plan_status"]}
+
+    async def fake_list(thread_id: str, *, raise_on_error: bool = False) -> list[dict[str, Any]]:
+        return []
+
+    async def fake_set_status(
+        thread_id: str,
+        status: str,
+        *,
+        plan_mode: Any = None,
+        approved_by: Any = None,
+    ) -> None:
+        state.update(plan_mode=plan_mode, plan_status=status)
+
+    async def fake_dispatch(
+        thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
+    ) -> dict[str, Any]:
+        dispatches.append(thread_id)
+        return {"run_id": "run-1"}
+
+    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
+    monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
+    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
+    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+    monkeypatch.setattr(plan_api, "_maybe_post_plan_approved_to_slack", AsyncMock())
+
+    approver = {"id": "reviewer", "name": "Reviewer", "source": "dashboard"}
+    results = await asyncio.gather(
+        plan_api.approve_plan_for_thread("t1", approver=approver),
+        plan_api.approve_plan_for_thread("t1", approver=approver),
+    )
+
+    assert dispatches == ["t1"]
+    assert results[0] == {"status": "approved", "run_id": "run-1"}
+    assert results[1] == {"status": "approved", "already_approved": True}
+
+
+async def test_failed_approval_dispatch_rolls_back_and_can_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.dashboard import plan_api
+
+    state = {"source": "dashboard", "plan_mode": True, "plan_status": "ready"}
+    status_updates: list[tuple[str, Any]] = []
+    dispatch_attempts = 0
+
+    async def fake_meta(thread_id: str) -> dict[str, Any]:
+        return dict(state)
+
+    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
+        return {"markdown": "# Plan", "status": state["plan_status"]}
+
+    async def fake_list(thread_id: str, *, raise_on_error: bool = False) -> list[dict[str, Any]]:
+        return []
+
+    async def fake_set_status(
+        thread_id: str,
+        status: str,
+        *,
+        plan_mode: Any = None,
+        approved_by: Any = None,
+    ) -> None:
+        status_updates.append((status, plan_mode))
+        state.update(plan_mode=plan_mode, plan_status=status)
+
+    async def fake_dispatch(
+        thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
+    ) -> dict[str, Any]:
+        nonlocal dispatch_attempts
+        dispatch_attempts += 1
+        if dispatch_attempts == 1:
+            raise RuntimeError("dispatch unavailable")
+        return {"run_id": "run-2"}
+
+    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
+    monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
+    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
+    monkeypatch.setattr(plan_api, "_dispatch_followup", fake_dispatch)
+    monkeypatch.setattr(plan_api, "_maybe_post_plan_approved_to_slack", AsyncMock())
+
+    approver = {"id": "reviewer", "name": "Reviewer", "source": "dashboard"}
+    with pytest.raises(RuntimeError, match="dispatch unavailable"):
+        await plan_api.approve_plan_for_thread("t1", approver=approver)
+
+    assert status_updates == [("approved", False), ("ready", True)]
+    result = await plan_api.approve_plan_for_thread("t1", approver=approver)
+    assert result == {"status": "approved", "run_id": "run-2"}
+    assert dispatch_attempts == 2
 
 
 async def test_approve_plan_posts_slack_approval_notice(
@@ -733,6 +934,8 @@ async def test_approve_plan_posts_slack_approval_notice(
 
     async def fake_meta(thread_id: str) -> dict[str, Any]:
         return {
+            "source": "slack",
+            "plan_mode": True,
             "plan_status": "ready",
             "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "123.45"}},
         }
@@ -746,7 +949,13 @@ async def test_approve_plan_posts_slack_approval_notice(
             {"author": "bob", "body": "add a test"},
         ]
 
-    async def fake_set_status(thread_id: str, status: str, *, plan_mode: Any = None) -> None:
+    async def fake_set_status(
+        thread_id: str,
+        status: str,
+        *,
+        plan_mode: Any = None,
+        approved_by: Any = None,
+    ) -> None:
         return None
 
     async def fake_post(
@@ -755,8 +964,15 @@ async def test_approve_plan_posts_slack_approval_notice(
         text: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> bool:
-        posted.update(channel_id=channel_id, thread_ts=thread_ts, text=text, blocks=blocks)
+        posted.update(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            text=text,
+            blocks=blocks,
+            **kwargs,
+        )
         return True
 
     async def fake_dispatch(
@@ -793,6 +1009,7 @@ async def test_approve_plan_posts_slack_approval_notice(
                 ],
             }
         ],
+        "agent_thread_id": "t1",
     }
     assert dispatched["plan_mode"] is False
 
@@ -805,14 +1022,20 @@ async def test_approve_plan_aborts_when_plan_read_fails(
     dispatched: list[Any] = []
 
     async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {"plan_status": "ready"}
+        return {"source": "slack", "plan_mode": True, "plan_status": "ready"}
 
     async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
         # A transient store failure must abort approval, not silently drop the
         # owner's edited plan and dispatch the generic fallback text.
         raise RuntimeError("store down")
 
-    async def fake_set_status(thread_id: str, status: str, *, plan_mode: Any = None) -> None:
+    async def fake_set_status(
+        thread_id: str,
+        status: str,
+        *,
+        plan_mode: Any = None,
+        approved_by: Any = None,
+    ) -> None:
         return None
 
     async def fake_dispatch(*a: Any, **k: Any) -> None:
@@ -839,7 +1062,7 @@ async def test_approve_plan_rejects_shared_content(
     dispatched: list[Any] = []
 
     async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {"plan_status": "shared"}
+        return {"source": "slack", "plan_status": "shared"}
 
     async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
         return {"markdown": "# Report", "status": "shared"}
@@ -868,7 +1091,7 @@ async def test_reject_plan_rejects_shared_content(
     dispatched: list[Any] = []
 
     async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {"plan_status": "shared"}
+        return {"source": "slack", "plan_status": "shared"}
 
     async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
         return {"markdown": "# Report", "status": "shared"}

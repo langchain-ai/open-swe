@@ -18,7 +18,7 @@ dependencies = [
     "markdownify>=1.2.3",
     "langchain-anthropic>=1.5.4",
     "langgraph-cli[inmem]>=0.4.31",
-    "langsmith>=0.10.18",
+    "langsmith>=0.11.0",
     "langchain-openai>=1.4.1",
     "langchain-fireworks>=1.5.2",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
@@ -72,10 +72,14 @@ select = [
     "B",   # flake8-bugbear
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
+    "TID251",
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"__future__.annotations".msg = "Do not use postponed annotation evaluation."
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

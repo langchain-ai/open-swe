@@ -1,7 +1,5 @@
 """Tool: ``add_finding``. Records one review finding on the reviewer thread."""
 
-from __future__ import annotations
-
 from typing import Annotated, Any
 
 from langgraph.config import get_config

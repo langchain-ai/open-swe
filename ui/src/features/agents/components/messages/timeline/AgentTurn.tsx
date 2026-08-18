@@ -27,10 +27,9 @@ import { formatElapsed } from "@/lib/utils"
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 1
 
 /**
- * Render-item types that count as the agent's reply rather than its work.
- * Everything before the trailing run of these folds away when a turn settles.
+ * Render-item types that count as the trailing agent reply rather than its work.
  */
-const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
+const TRAILING_REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
 ])
@@ -39,16 +38,23 @@ function splitWorkAndReply(items: Array<RenderItem>): {
   workItems: Array<RenderItem>
   replyItems: Array<RenderItem>
 } {
-  let splitIndex = items.length
-  while (splitIndex > 0) {
-    const prev = items[splitIndex - 1]
-    if (!prev || !REPLY_ITEM_TYPES.has(prev.type)) break
-    splitIndex -= 1
+  let trailingReplyIndex = items.length
+  while (trailingReplyIndex > 0) {
+    const prev = items[trailingReplyIndex - 1]
+    if (!prev || !TRAILING_REPLY_ITEM_TYPES.has(prev.type)) break
+    trailingReplyIndex -= 1
   }
-  return {
-    workItems: items.slice(0, splitIndex),
-    replyItems: items.slice(splitIndex),
-  }
+
+  const workItems: Array<RenderItem> = []
+  const replyItems: Array<RenderItem> = []
+  items.forEach((item, index) => {
+    if (item.type === "reply-item" || index >= trailingReplyIndex) {
+      replyItems.push(item)
+    } else {
+      workItems.push(item)
+    }
+  })
+  return { workItems, replyItems }
 }
 
 function EditWorkEntry({
@@ -288,15 +294,16 @@ export function AgentTurn({
             expanded={workFoldExpanded}
             onToggle={toggleWorkFold}
           />
-          {workFoldExpanded && (
+          {workFoldExpanded ? (
             <div className="space-y-0.5">
-              {workItems.map((item, index) =>
-                renderItem(item, index, workItems.length)
+              {renderItems.map((item, index) =>
+                renderItem(item, index, renderItems.length)
               )}
             </div>
-          )}
-          {replyItems.map((item, index) =>
-            renderItem(item, workItems.length + index, renderItems.length)
+          ) : (
+            replyItems.map((item, index) =>
+              renderItem(item, workItems.length + index, renderItems.length)
+            )
           )}
         </>
       ) : (

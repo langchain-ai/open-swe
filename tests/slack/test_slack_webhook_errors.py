@@ -34,7 +34,7 @@ async def test_slack_processing_error_posts_dashboard_link(
 
     monkeypatch.setattr(slack_webhook, "_process_slack_mention_impl", fail_processing)
     monkeypatch.setattr(
-        slack_webhook.common, "generate_thread_id_from_slack_thread", lambda *_: "t1"
+        slack_webhook.common, "lookup_slack_thread_id", AsyncMock(return_value="t1")
     )
     monkeypatch.setattr(
         slack_webhook.common, "strip_bot_mention", lambda text, *_args, **_kwargs: text
@@ -72,15 +72,13 @@ async def test_slack_processing_error_posts_dashboard_link(
     assert "<https://ui/t1|Open SWE Web>" in await_args.args[2]
 
 
-async def test_natural_language_plan_approval_uses_shared_approval_flow(
+async def test_non_owner_natural_language_plan_approval_uses_shared_flow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    is_owner = AsyncMock(return_value=True)
     metadata = {"plan_mode": True, "plan_status": "ready"}
     load_metadata = AsyncMock(return_value=metadata)
-    approve = AsyncMock(return_value={"status": "approved"})
+    approve = AsyncMock(return_value={"status": "approved", "run_id": "run-1"})
 
-    monkeypatch.setattr(slack_webhook.common, "_slack_user_is_thread_owner", is_owner)
     monkeypatch.setattr(plan_api, "_thread_metadata", load_metadata)
     monkeypatch.setattr(plan_api, "approve_plan_for_thread", approve)
 
@@ -89,9 +87,42 @@ async def test_natural_language_plan_approval_uses_shared_approval_flow(
     )
 
     assert handled is True
-    is_owner.assert_awaited_once_with("t1", "U1")
     load_metadata.assert_awaited_once_with("t1")
-    approve.assert_awaited_once_with("t1", metadata=metadata, actor="Alice")
+    approve.assert_awaited_once_with(
+        "t1",
+        approver={"id": "U1", "name": "Alice", "source": "slack"},
+    )
+
+
+async def test_approval_phrase_on_missing_thread_continues_as_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        plan_api, "_thread_metadata", AsyncMock(side_effect=RuntimeError("missing"))
+    )
+
+    handled = await slack_webhook._maybe_approve_ready_plan_reply(
+        "new-thread", "C1", "123.45", "U1", "Alice", "please implement issue 123"
+    )
+
+    assert handled is False
+
+
+async def test_non_owner_can_send_untagged_ready_plan_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        plan_api,
+        "_thread_metadata",
+        AsyncMock(return_value={"plan_mode": True, "plan_status": "ready"}),
+    )
+    lookup_thread = AsyncMock(return_value="t1")
+    monkeypatch.setattr(slack_webhook.common, "lookup_slack_thread_id", lookup_thread)
+
+    allowed = await slack_webhook._slack_user_can_reply_to_ready_plan("C1", "123.45", "U2")
+
+    assert allowed is True
+    lookup_thread.assert_awaited_once()
 
 
 @pytest.mark.parametrize("reply", ["LGTM, thanks", "Looks good — please implement this"])
@@ -99,14 +130,11 @@ async def test_plan_approval_allows_polite_surrounding_words(
     monkeypatch: pytest.MonkeyPatch, reply: str
 ) -> None:
     monkeypatch.setattr(
-        slack_webhook.common, "_slack_user_is_thread_owner", AsyncMock(return_value=True)
-    )
-    monkeypatch.setattr(
         plan_api,
         "_thread_metadata",
         AsyncMock(return_value={"plan_mode": True, "plan_status": "ready"}),
     )
-    approve = AsyncMock(return_value={"status": "approved"})
+    approve = AsyncMock(return_value={"status": "approved", "run_id": "run-1"})
     monkeypatch.setattr(plan_api, "approve_plan_for_thread", approve)
 
     assert (
@@ -118,18 +146,17 @@ async def test_plan_approval_allows_polite_surrounding_words(
     approve.assert_awaited_once()
 
 
-async def test_duplicate_plan_approval_dispatches_once(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_duplicate_plan_approval_returns_shared_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     metadata = {"plan_mode": True, "plan_status": "ready"}
-
-    async def approve(*_args: object, **_kwargs: object) -> dict[str, str]:
-        metadata.update(plan_mode=False, plan_status="approved")
-        return {"status": "approved"}
-
-    monkeypatch.setattr(
-        slack_webhook.common, "_slack_user_is_thread_owner", AsyncMock(return_value=True)
-    )
     monkeypatch.setattr(plan_api, "_thread_metadata", AsyncMock(return_value=metadata))
-    approve_mock = AsyncMock(side_effect=approve)
+    approve_mock = AsyncMock(
+        side_effect=[
+            {"status": "approved", "run_id": "run-1"},
+            {"status": "approved", "already_approved": True},
+        ]
+    )
     monkeypatch.setattr(plan_api, "approve_plan_for_thread", approve_mock)
 
     results = await asyncio.gather(
@@ -142,7 +169,28 @@ async def test_duplicate_plan_approval_dispatches_once(monkeypatch: pytest.Monke
     )
 
     assert results == [True, False]
-    approve_mock.assert_awaited_once()
+    assert approve_mock.await_count == 2
+
+
+async def test_slack_plan_button_failure_notifies_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    approve = AsyncMock(side_effect=RuntimeError("store down"))
+    notify = AsyncMock()
+    monkeypatch.setattr(slack_webhook, "_maybe_approve_ready_plan_reply", approve)
+    monkeypatch.setattr(slack_webhook, "_notify_slack_processing_error", notify)
+    event_data = {
+        "thread_id": "t1",
+        "channel_id": "C1",
+        "thread_ts": "123.45",
+        "user_id": "U1",
+        "user_name": "Alice",
+    }
+    repo_config = {"owner": "langchain-ai", "name": "open-swe"}
+
+    await slack_webhook.process_slack_plan_approval(event_data, repo_config)
+
+    notify.assert_awaited_once_with(event_data, repo_config)
 
 
 async def test_plan_revision_reply_does_not_trigger_approval(
@@ -266,12 +314,6 @@ class _FakeStatusClient:
 
 
 @pytest.mark.asyncio
-async def test_slack_thread_is_busy_reflects_status() -> None:
-    assert await slack_webhook._slack_thread_is_busy(_FakeStatusClient("busy"), "t1") is True
-    assert await slack_webhook._slack_thread_is_busy(_FakeStatusClient("idle"), "t1") is False
-
-
-@pytest.mark.asyncio
 async def test_dispatch_or_queue_dispatches_when_idle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -283,7 +325,6 @@ async def test_dispatch_or_queue_dispatches_when_idle(
     monkeypatch.setattr(slack_webhook.common, "_thread_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_owner_metadata", AsyncMock())
     monkeypatch.setattr(slack_webhook.common, "get_client", lambda *, url: _FakeClient())
-    monkeypatch.setattr(slack_webhook, "_slack_thread_is_busy", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_webhook.common, "dispatch_agent_run", dispatch)
     monkeypatch.setattr(slack_webhook.common, "queue_message_for_thread", queue)
 
@@ -329,7 +370,7 @@ async def test_dispatch_or_queue_dispatches_on_first_mention_without_status_chec
 
 
 @pytest.mark.asyncio
-async def test_dispatch_or_queue_coalesces_untagged_follow_up_when_busy(
+async def test_dispatch_or_queue_dispatches_untagged_follow_up_when_busy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
@@ -347,10 +388,9 @@ async def test_dispatch_or_queue_coalesces_untagged_follow_up_when_busy(
         explicitly_tagged=False,
     )
 
-    # Untagged + busy → parked on the queue for the active run to drain.
-    assert run is None
-    dispatch.assert_not_awaited()
-    queue.assert_awaited_once_with("t1", blocks)
+    assert run == {"run_id": "run-1"}
+    dispatch.assert_awaited_once()
+    queue.assert_not_awaited()
 
 
 @pytest.mark.asyncio

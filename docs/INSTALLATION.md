@@ -60,7 +60,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
 
 1. Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.com/settings/apps) → [New GitHub App](https://github.com/settings/apps/new)**
 2. Fill in:
-   - **App name**: `open-swe` (or your preferred name)
+   - **App name**: `Open SWE` (or your preferred name)
    - **Homepage URL**: This can be any valid URL — it's only shown on the GitHub Marketplace page (which you won't be using). Use something like `https://github.com/langchain-ai/open-swe`
    - **Callback URL**: GitHub Apps allow multiple callback URLs (one per line). Add **both**:
      1. `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/your-org-github-oauth`). This is the **agent-runtime** OAuth callback, brokered by LangSmith (step 4b).
@@ -308,7 +308,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 
 1. In Linear, go to **Settings → API → Webhooks → New webhook**
 2. Fill in:
-   - **Label**: `open-swe`
+   - **Label**: `Open SWE`
    - **URL**: `https://<your-ngrok-url>/webhooks/linear` — use the ngrok URL from step 2
    - **Secret**: generate with `openssl rand -hex 32` — save this as `LINEAR_WEBHOOK_SECRET`
 3. Under **Data change events**, enable **Comments → Create** only
@@ -317,7 +317,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 **Get your API key:**
 
 1. Go to **Settings → API → Personal API keys → New API key**
-2. Name it `open-swe`, select **All access**, and copy the key
+2. Name it `Open SWE`, select **All access**, and copy the key
 3. Save it as `LINEAR_API_KEY`
 
 **Configure team-to-repo mapping:**

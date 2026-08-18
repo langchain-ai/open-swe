@@ -1,7 +1,5 @@
 """LangGraph entrypoint that fans cron ticks into fresh agent threads."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any, TypedDict
 

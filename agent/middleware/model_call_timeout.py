@@ -8,8 +8,6 @@ This middleware turns that hang into a timeout error, so the fallback model — 
 the run-completion webhook — reports it instead of the run going silent.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -103,7 +101,7 @@ async def test_resolves_github_participants_from_issue_context() -> None:
     }
     with (
         patch.object(participants, "get_client", return_value=_Client(metadata)),
-        patch.object(participants, "get_mapping", side_effect=_active_mapping),
+        patch.object(participants, "get_mapping", return_value=None),
         patch.object(participants, "get_github_token", return_value="token"),
         patch.object(
             participants,
@@ -148,3 +146,11 @@ async def test_source_fetch_failure_does_not_fall_back_to_metadata_owner() -> No
     assert logins is None
     assert unresolved == 0
     assert error == "Could not verify Slack thread participants"
+
+
+@pytest.mark.asyncio
+async def test_rejects_acting_for_another_verified_participant() -> None:
+    config = {"configurable": {"github_login": "attacker"}}
+    with patch.object(participants, "get_config", return_value=config):
+        with pytest.raises(ValueError, match="must match the user"):
+            await participants.resolve_participant("victim")

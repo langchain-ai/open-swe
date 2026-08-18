@@ -1,7 +1,5 @@
 """Tests for GitHub proxy auth configuration."""
 
-from __future__ import annotations
-
 import base64
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import importlib
 from typing import Any
 
@@ -29,6 +27,7 @@ async def test_slack_thread_reply_returns_structured_error_for_msg_too_long(
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> tuple[str | None, str | None]:
         return None, "msg_too_long"
 
@@ -57,6 +56,7 @@ async def test_slack_thread_reply_hints_not_to_retry_channel_errors(
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> tuple[str | None, str | None]:
         return None, slack_error
 
@@ -82,6 +82,7 @@ async def test_slack_thread_reply_rate_limited_hint_includes_retry_after(
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> tuple[str | None, str | None]:
         return None, "rate_limited: 30"
 
@@ -106,6 +107,7 @@ async def test_slack_thread_reply_rate_limited_hint_without_retry_after(
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> tuple[str | None, str | None]:
         return None, "rate_limited"
 
@@ -128,6 +130,7 @@ async def test_slack_thread_reply_uses_post_failed_without_slack_error(
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> tuple[str | None, str | None]:
         return None, None
 
@@ -153,6 +156,7 @@ async def test_slack_thread_reply_posts_plain_text_without_options(
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> tuple[str | None, str | None]:
         captured.update(message=message, blocks=blocks)
         return "2.0", None
@@ -177,6 +181,7 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
         message: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> tuple[str | None, str | None]:
         captured.update(
             {"channel_id": channel_id, "thread_ts": thread_ts, "message": message, "blocks": blocks}

@@ -5,8 +5,6 @@ Credentials are read from environment variables and attached as an
 LangGraph server process. The sandbox never holds Corridor credentials.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 from dataclasses import dataclass

@@ -4,8 +4,6 @@ Each record holds a synthesized custom prompt (editable in the dashboard),
 analysis metadata, and the status of the background style-analysis run.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime
 from typing import Any, Literal

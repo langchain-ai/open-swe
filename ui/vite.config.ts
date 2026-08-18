@@ -141,9 +141,14 @@ if (process.env.VERCEL && !process.env.DASHBOARD_API_URL) {
 const DASHBOARD_API_URL =
   process.env.DASHBOARD_API_URL ?? "http://localhost:2024"
 
-// A deployed dashboard only fronts the API; dev fronts every backend path so a
-// local mock backend's login redirects resolve on this origin.
-const PROXIED_PREFIXES = IS_PRODUCTION ? ["/dashboard/api"] : BACKEND_PREFIXES
+// A deployed dashboard fronts the API and the webhook endpoints — a webhook
+// sender only ever gets one URL per instance, and unproxied paths fall through
+// to the app router, which answers a signed POST with a login redirect. Dev
+// fronts every backend path so a local mock backend's login redirects resolve on
+// this origin.
+const PROXIED_PREFIXES = IS_PRODUCTION
+  ? ["/dashboard/api", "/webhooks"]
+  : BACKEND_PREFIXES
 
 // Nitro's proxy follows redirects itself, which swallows the OAuth 3xx hops: the
 // browser's address bar never moves and login dies at the first hop. Vercel's

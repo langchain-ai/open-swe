@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from agent.utils.model import anthropic_effort_for, anthropic_thinking_for
 
 

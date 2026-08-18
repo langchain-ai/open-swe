@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
@@ -8,7 +6,7 @@ from langchain_core.language_models.base import LangSmithParams
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from agent.dashboard.agent_overrides import profile_create_prs, profile_draft_prs
+from agent.dashboard.agent_overrides import profile_draft_prs
 from agent.prompt import construct_system_prompt
 from agent.utils import github_comments
 from agent.utils.authorship import (
@@ -34,7 +32,7 @@ class _CaptureRequestModel(BaseChatModel):
     def _get_ls_params(self, stop: list[str] | None = None, **kwargs: Any) -> LangSmithParams:
         return LangSmithParams(ls_provider="openai")
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> _CaptureRequestModel:
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "_CaptureRequestModel":
         self.captured_tools = tools
         return self
 
@@ -88,6 +86,7 @@ def test_construct_system_prompt_includes_operational_safeguards() -> None:
     assert "### Committing Changes and Opening Pull Requests" in prompt
     assert "Never run `git push --force`" in prompt
     assert "do not retry via `gh pr create`" in prompt
+    assert "do not call `schedule_thread_wakeup` again" in prompt
 
 
 def test_slack_information_only_response_uses_single_output_path() -> None:
@@ -151,12 +150,6 @@ def test_todo_tool_and_prompt_are_hidden_from_model_request_by_default() -> None
     system_text = "\n".join(_content_text(message.content) for message in model.captured_messages)
     assert "write_todos" not in tool_names
     assert "You have access to the `write_todos` tool" not in system_text
-
-
-def test_profile_create_prs_defaults_to_normal_pr_policy() -> None:
-    assert profile_create_prs(None) is False
-    assert profile_create_prs({}) is False
-    assert profile_create_prs({"create_prs": True}) is True
 
 
 def test_profile_draft_prs_defaults_to_draft_policy() -> None:

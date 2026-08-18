@@ -18,6 +18,18 @@ export type AgentStatus =
 export type AgentSource =
   "dashboard" | "github" | "slack" | "linear" | "schedule"
 
+export type AgentThreadCategory =
+  "interactive" | "issue" | "pull_request" | "automation" | "review" | "system"
+
+export type AgentTriggerKind =
+  | "user"
+  | "schedule"
+  | "schedule_test"
+  | "wakeup"
+  | "reviewer"
+  | "analyzer"
+  | "ci_autofix"
+
 export interface TodoItem {
   content: string
   status: TodoStatus
@@ -228,6 +240,11 @@ export interface AgentThread {
   planStatus?: string | null
   adminThread?: boolean
   source?: AgentSource
+  origin?: AgentSource | string
+  threadCategory?: AgentThreadCategory | string
+  triggerKind?: AgentTriggerKind | string
+  automationId?: string | null
+  automationName?: string | null
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null
