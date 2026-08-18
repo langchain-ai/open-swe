@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
-import { CircleAlert, FolderOpen, X } from "lucide-react"
+import {
+  CircleAlert,
+  FolderOpen,
+  GitPullRequestIcon,
+  RefreshCwIcon,
+  X,
+} from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import {
   AgentPanelShell,
   PANEL_MIN_CHAT_WIDTH,
@@ -65,11 +72,15 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const initialPromptRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isMobile = useIsMobile()
+  const sidebarCollapsed = useSidebarCollapsed()
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
   )
   const panel = usePanelTabs(sessionId)
-  const terminals = useTerminalGroups(sessionId, thread?.cwd ?? "")
+  const terminals = useTerminalGroups(
+    { kind: "local", sessionId },
+    thread?.cwd ?? ""
+  )
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
   const handlePanelCollapsedChange = useCallback(
@@ -139,6 +150,32 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
   )
+  const repository = diff.data?.repository
+  const pr = repository?.pr
+  const diffActions = (
+    <>
+      <button
+        type="button"
+        aria-label="Refresh changes"
+        title="Refresh changes"
+        onClick={() => void diff.refetch()}
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <RefreshCwIcon className="size-3.5" />
+      </button>
+      {pr && (
+        <a
+          href={pr.url}
+          target="_blank"
+          rel="noreferrer"
+          className="flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+        >
+          <GitPullRequestIcon className="size-3.5" />
+          View PR
+        </a>
+      )}
+    </>
+  )
   const messages = useMemo(
     () =>
       streamMessagesToUi(
@@ -176,6 +213,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           {
             config: {
               configurable: {
+                source: "desktop",
                 local_project_path: thread.cwd,
                 ...(thread.modelId ? { agent_model_id: thread.modelId } : {}),
                 ...(thread.effort ? { agent_effort: thread.effort } : {}),
@@ -246,18 +284,25 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
       >
-        <div
-          className={cn(
-            "mx-auto flex w-full max-w-3xl items-center gap-2 px-4 pt-3 text-xs text-muted-foreground",
-            panelCollapsed && "pr-14"
-          )}
-        >
-          <FolderOpen className="size-3.5" />
-          <span className="truncate" title={thread.cwd}>
-            {thread.cwd}
-          </span>
-          <span className="ml-auto shrink-0">This Mac</span>
-        </div>
+        <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
+          <div
+            className={cn(
+              "flex h-full w-full items-center gap-3 px-4",
+              sidebarCollapsed && "pl-32",
+              panelCollapsed && "pr-14"
+            )}
+          >
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+              <FolderOpen className="size-3.5 shrink-0" />
+              <span className="truncate" title={thread.cwd}>
+                {thread.cwd}
+              </span>
+            </span>
+            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+              This Mac
+            </span>
+          </div>
+        </header>
         {(error || thread.status === "error") && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
             <Alert variant="error">
@@ -362,6 +407,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   diff.isPending
                 )}
                 truncated={diff.data?.truncated}
+                leading={
+                  <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                    Branch{repository?.branch ? ` · ${repository.branch}` : ""}
+                  </span>
+                }
+                actions={diffActions}
               />
             )}
             {(panel.activeTab?.kind === "browser" ||
@@ -378,7 +429,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   )}
                 >
                   <TerminalPanel
-                    localSessionId={thread.id}
+                    target={{ kind: "local", sessionId: thread.id }}
                     cwd={thread.cwd}
                     groupId={tab.id}
                     terminals={terminals}

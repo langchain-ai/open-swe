@@ -40,19 +40,8 @@ async function threadStatus(
   return thread.status ?? "";
 }
 
-async function queuedCount(
-  request: APIRequestContext,
-  threadId: string,
-): Promise<number> {
-  const res = await request.get(
-    `/control/queued?thread_id=${encodeURIComponent(threadId)}`,
-  );
-  const body = (await res.json()) as { queued_count: number };
-  return body.queued_count;
-}
-
-test.describe("Slack busy-thread interrupt debounce", () => {
-  test("untagged follow-ups on a busy thread coalesce onto the queue", async ({
+test.describe("Slack busy-thread follow-up queueing", () => {
+  test("untagged follow-ups on a busy thread queue behind the active run", async ({
     request,
   }) => {
     await request.post("/control/reset");
@@ -69,7 +58,7 @@ test.describe("Slack busy-thread interrupt debounce", () => {
       .poll(() => botTexts(request), { timeout: 60_000 })
       .toContain("/pull/");
     await expect
-      .poll(() => threadStatus(request, threadId), { timeout: 30_000 })
+      .poll(() => threadStatus(request, threadId), { timeout: 60_000 })
       .not.toBe("busy");
 
     // Phase 2: start a run that holds the thread busy (fake LLM sleeps on the
@@ -84,29 +73,14 @@ test.describe("Slack busy-thread interrupt debounce", () => {
       .poll(() => threadStatus(request, threadId), { timeout: 30_000 })
       .toBe("busy");
 
-    // 3. First UNTAGGED follow-up while busy → parked on the queue, no interrupt.
-    const b = await send(request, {
+    const followUp = await send(request, {
       text: "also rename it to hello()",
       mention_bot: false,
       thread_ts: threadTs,
     });
-    expect(b.webhook.status).toBe("accepted");
+    expect(followUp.webhook.status).toBe("accepted");
     await expect
-      .poll(() => queuedCount(request, threadId), { timeout: 30_000 })
-      .toBe(1);
-
-    // 4. Second UNTAGGED follow-up while still busy → coalesced onto the queue.
-    const c = await send(request, {
-      text: "and add a type hint",
-      mention_bot: false,
-      thread_ts: threadTs,
-    });
-    expect(c.webhook.status).toBe("accepted");
-    await expect
-      .poll(() => queuedCount(request, threadId), { timeout: 30_000 })
-      .toBe(2);
-
-    // The run is still busy — the untagged follow-ups did not interrupt it.
-    expect(await threadStatus(request, threadId)).toBe("busy");
+      .poll(() => threadStatus(request, threadId), { timeout: 30_000 })
+      .toBe("busy");
   });
 });

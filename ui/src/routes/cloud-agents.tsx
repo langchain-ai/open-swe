@@ -307,16 +307,6 @@ function CloudAgentsPage() {
               />
             }
           />
-          <SettingsRow
-            label="Always Create PRs"
-            description="Always create a pull request for code changes. When disabled, agents create PRs only when necessary or requested."
-            control={
-              <Switch
-                checked={profile.data?.create_prs ?? false}
-                onCheckedChange={(v) => persist({ create_prs: v })}
-              />
-            }
-          />
         </div>
       </SettingsSection>
 
@@ -327,11 +317,18 @@ function CloudAgentsPage() {
           description="Per-repo custom instructions injected into the agent's system prompt."
         />
         {session.data.is_admin && (
-          <SettingsNavRow
-            to="/agents/snapshots"
-            label="Repository Snapshots"
-            description="Build a per-repo sandbox image from a custom Dockerfile. Falls back to the default image."
-          />
+          <>
+            <SettingsNavRow
+              to="/agents/environments"
+              label="Environments"
+              description="A named prompt plus a sandbox snapshot every run boots from. Built from admin threads."
+            />
+            <SettingsNavRow
+              to="/agents/snapshots"
+              label="Repository Snapshots"
+              description="Build a per-repo sandbox image from a custom Dockerfile. Falls back to the default image."
+            />
+          </>
         )}
       </SettingsSection>
 

@@ -6,8 +6,21 @@ import viteReact from "@vitejs/plugin-react"
 import viteTsConfigPaths from "vite-tsconfig-paths"
 import tailwindcss from "@tailwindcss/vite"
 import { nitro } from "nitro/vite"
-import { VitePWA } from "vite-plugin-pwa"
 import type { Plugin } from "vite"
+
+// Paths the backend owns, not the app router. `/dashboard/api` is the only one a
+// deployed dashboard serves; the rest exist when the backend is the mock harness,
+// and a browser navigates to `/fake-gh` mid-login, so dev has to reach them too.
+const BACKEND_PREFIXES = [
+  "/dashboard/api",
+  "/webhooks",
+  "/mock",
+  "/control",
+  "/fake-gh",
+  "/fake-slack",
+  "/static",
+  "/ok",
+]
 
 // Dev-only: when E2E_HARNESS is set (the `dev:mock` local harness) serve the app
 // and the harness from one origin by proxying the API routes + the Yjs collab
@@ -16,16 +29,7 @@ import type { Plugin } from "vite"
 function mockHarnessProxy(): Plugin | null {
   const target = process.env.E2E_HARNESS
   if (!target) return null
-  const prefixes = [
-    "/dashboard/api",
-    "/webhooks",
-    "/mock",
-    "/control",
-    "/fake-gh",
-    "/fake-slack",
-    "/static",
-    "/ok",
-  ]
+  const prefixes = BACKEND_PREFIXES
   const matches = (url?: string): boolean =>
     !!url &&
     prefixes.some(
@@ -116,11 +120,46 @@ const SHIKI_LANGS = [
   "yaml",
 ]
 
+// Browser `/dashboard/api/*` calls are proxied to the Python backend by the
+// server rather than sent cross-origin, so the session cookie stays same-origin.
+const IS_PRODUCTION = process.env.NODE_ENV === "production"
+
+// Dev proxies every backend path in-process so a local mock backend's login
+// redirects resolve on this origin. A deployed build proxies at runtime instead,
+// in server/middleware/backend-proxy.ts, so one image can front any backend.
+const devRouteRules = IS_PRODUCTION
+  ? {}
+  : Object.fromEntries(
+      BACKEND_PREFIXES.map((prefix) => [
+        `${prefix}/**`,
+        {
+          proxy: {
+            to: `${process.env.DASHBOARD_API_URL ?? "http://localhost:2024"}${prefix}/**`,
+            fetchOptions: { redirect: "manual" as const },
+          },
+        },
+      ])
+    )
+
+// The Electron app and the service worker's offline navigation both load a
+// client-only `_shell.html`. SSR alone doesn't emit one, so prerender `/` with
+// the header that tells the Start handler to render the shell instead of the route.
+const SHELL_PAGE = {
+  path: "/",
+  prerender: {
+    enabled: true,
+    outputPath: "/_shell",
+    autoSubfolderIndex: false,
+    crawlLinks: false,
+    headers: { "X-TSS_SHELL": "true" },
+  },
+  sitemap: { exclude: true },
+}
+
 const config = defineConfig({
   base: "/",
   optimizeDeps: {
     include: [
-      "workbox-window",
       "streamdown",
       "shiki",
       "@pierre/diffs",
@@ -136,57 +175,42 @@ const config = defineConfig({
   plugins: [
     mockHarnessProxy(),
     devtools(),
-    nitro(),
+    nitro({
+      routeRules: devRouteRules,
+      // Registered explicitly: nitro's convention scan does not reach this
+      // directory under the vite plugin. Deployed builds only — dev proxies the
+      // same prefixes through devRouteRules, which has a localhost default the
+      // handler deliberately refuses to have. Only the two prefixes a deployed
+      // dashboard fronts, since proxying `/static` would shadow nitro's assets.
+      handlers: IS_PRODUCTION
+        ? ["/dashboard/api", "/webhooks"].map((prefix) => ({
+            route: `${prefix}/**`,
+            handler: "./server/backend-proxy.ts",
+          }))
+        : [],
+      // Nitro gives every node_modules package its own server chunk. The
+      // LangGraph SDK reaches CJS-only `eventemitter3` through `p-queue`, and
+      // splitting that cycle puts the CommonJS interop helper in the SDK's chunk
+      // while eventemitter3's chunk calls it at module scope — one tick before
+      // it exists. Rendering any route that imports the SDK then throws
+      // `__commonJSMin is not a function` and falls back to the client. Keeping
+      // the cycle in one chunk gives it one initialisation order.
+      // One server chunk instead of one per package. The `@langchain/*` +
+      // `langsmith` + `p-queue` + `eventemitter3` dependency cycle is CommonJS,
+      // and splitting it across chunks leaves each chunk reading the other's
+      // interop helper before it initialises (`__commonJSMin is not a function`,
+      // `Cannot access 'PQueueMod' before initialization`). Those throw during
+      // `renderToReadableStream`, so every route silently fell back to client
+      // rendering. Nitro's chunk groups can't be overridden — its own catch-all
+      // group is merged ahead of any user group — but disabling code splitting
+      // gives the cycle a single initialisation order.
+      inlineDynamicImports: true,
+    }),
     viteTsConfigPaths({
       projects: ["./tsconfig.json"],
     }),
     tailwindcss(),
-    tanstackStart({ spa: { enabled: true } }),
-    VitePWA({
-      injectRegister: false,
-      registerType: "prompt",
-      outDir: ".output/public",
-      devOptions: {
-        // Off in dev: the service worker precaches assets and defeats HMR (and
-        // a stale registration lingers per-origin). Dev is HMR-only.
-        enabled: false,
-      },
-      integration: {
-        closeBundleOrder: "pre",
-      },
-      manifest: {
-        id: "/",
-        name: "Open SWE",
-        short_name: "Open SWE",
-        description: "Open-source coding agents for Slack, Linear, and GitHub.",
-        start_url: "/",
-        scope: "/",
-        display: "standalone",
-        theme_color: "#000000",
-        background_color: "#ffffff",
-        icons: [
-          {
-            src: "/favicon.png",
-            sizes: "192x192",
-            type: "image/png",
-          },
-          {
-            src: "/logo512.png",
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "any maskable",
-          },
-        ],
-      },
-      workbox: {
-        navigateFallback: "/_shell.html",
-        navigateFallbackDenylist: [/^\/dashboard\/api\//, /^\/_serverFn\//],
-        globPatterns: ["**/*.{js,css,png,svg,ico,webmanifest}"],
-        additionalManifestEntries: [
-          { url: "/_shell.html", revision: new Date().toISOString() },
-        ],
-      },
-    }),
+    tanstackStart({ pages: [SHELL_PAGE] }),
     viteReact(),
   ],
 })

@@ -81,11 +81,9 @@ export function PlanReview({
   }, [plan.markdown, editing])
 
   const isShared = plan.status === "shared"
-  const canEdit =
-    plan.isOwner &&
-    !isShared &&
-    plan.status !== "approved" &&
-    plan.status !== "cancelled"
+  const isTerminal = plan.status === "approved" || plan.status === "cancelled"
+  const canEdit = plan.isOwner && !isShared && !isTerminal
+  const canApprove = plan.status === "ready"
 
   const startEditing = useCallback(() => {
     setEditDraft(markdown)
@@ -221,15 +219,15 @@ export function PlanReview({
   return (
     <div
       data-testid="plan-review"
-      className="flex min-h-0 flex-1 flex-col bg-background text-foreground"
+      className="@container flex min-h-0 flex-1 flex-col bg-background text-foreground"
     >
       <div
         className={cn(
-          "flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between md:gap-4",
+          "flex flex-col gap-3 border-b border-border px-4 py-3 @3xl:flex-row @3xl:items-center @3xl:justify-between @3xl:gap-4",
           !compact && "md:px-6"
         )}
       >
-        <div className="min-w-0">
+        <div data-testid="plan-summary" className="min-w-0">
           <h1 className="text-base font-semibold text-foreground">
             {isShared ? "Shared response" : "Implementation plan"}
           </h1>
@@ -237,13 +235,17 @@ export function PlanReview({
             {isShared ? "Viewing" : "Reviewing"} as {plan.user.name}
             {plan.isOwner ? " (owner)" : ""} · status:{" "}
             <span data-testid="plan-status">{plan.status}</span>
+            {plan.approvedBy ? ` · approved by ${plan.approvedBy.name}` : ""}
           </p>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-2 md:shrink-0 md:justify-end">
+        <div
+          data-testid="plan-actions"
+          className="flex min-w-0 flex-wrap items-center gap-2 @3xl:shrink-0 @3xl:justify-end"
+        >
           {decision && (
             <span
               data-testid="plan-decision"
-              className="w-full text-xs text-muted-foreground/70 md:w-auto"
+              className="w-full text-xs text-muted-foreground/70 @3xl:w-auto"
             >
               {decision}
             </span>
@@ -286,7 +288,7 @@ export function PlanReview({
               >
                 {copied ? "Copied!" : "Copy markdown"}
               </Button>
-              {!isShared && plan.isOwner && (
+              {canApprove && (
                 <Button
                   data-testid="approve-plan"
                   disabled={busy !== null || decision !== null}

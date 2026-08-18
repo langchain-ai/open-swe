@@ -60,7 +60,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
 
 1. Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.com/settings/apps) → [New GitHub App](https://github.com/settings/apps/new)**
 2. Fill in:
-   - **App name**: `open-swe` (or your preferred name)
+   - **App name**: `Open SWE` (or your preferred name)
    - **Homepage URL**: This can be any valid URL — it's only shown on the GitHub Marketplace page (which you won't be using). Use something like `https://github.com/langchain-ai/open-swe`
    - **Callback URL**: GitHub Apps allow multiple callback URLs (one per line). Add **both**:
      1. `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` — replace `<your-provider-id>` with the ID you chose in step 3a (e.g. `https://smith.langchain.com/host-oauth-callback/your-org-github-oauth`). This is the **agent-runtime** OAuth callback, brokered by LangSmith (step 4b).
@@ -76,9 +76,9 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
      - Contents: Read & write
      - Pull requests: Read & write
      - Issues: Read & write
-     - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs, and reads third-party CI conclusions for the auto-fix flow (it watches failing checks on agent-authored PRs and pushes fixes). Without it, check-run creation fails (logged, best-effort) but reviews still work, and CI auto-fix is disabled.
-     - Commit statuses: Read-only — only needed if you enable the `Status` event below; the CI auto-fix flow reads the legacy combined commit-status API for integrations that report via statuses instead of check runs. Without it, status-based CI is silently ignored (logged as "Failed to read combined status").
-     - Actions: Read-only — optional; lets Open SWE's sandbox proxy tokens download GitHub Actions workflow/job logs when troubleshooting CI failures. Do **not** grant Actions write for log access: write permission also allows rerunning, canceling, and deleting workflow runs, which is unnecessary for diagnostics.
+     - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs and lets `/baby-sit` read third-party CI conclusions. Without it, check-run creation fails (logged, best-effort), reviews still work, and `/baby-sit` fails closed when it cannot read the complete check set.
+     - Commit statuses: Read-only — required for `/baby-sit` to evaluate the complete PR status set, including integrations that report via legacy commit statuses instead of check runs.
+     - Actions: Read-only — optional for CI diagnostics and log access. Grant **Read & write** only to enable `/baby-sit` to rerun evidence-backed flaky GitHub Actions jobs. Existing installations must approve this permission elevation. Actions write also permits rerunning, canceling, and deleting workflow runs at the token level; `/baby-sit` is instructed to use only failed-job reruns.
      - Workflows: Read & write — required to let Open SWE directly push branches containing explicitly requested GitHub Actions workflow changes.
      - Metadata: Read-only
    - **Organization permissions** (required only if you plan to set `ALLOWED_GITHUB_ORGS` — see step 5 / Security):
@@ -87,9 +87,9 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
    - `Issue comment`
    - `Pull request review`
    - `Pull request review comment`
-   - `Check run` — required for CI auto-fix (watching failing GitHub Actions checks on agent PRs)
-   - `Check suite` — required for CI auto-fix
-   - `Workflow run` — required for CI auto-fix
+   - `Check run` — required for immediate `/baby-sit` failure detection
+   - `Check suite` — required for immediate `/baby-sit` failure detection
+   - `Workflow run` — required for immediate `/baby-sit` failure detection
    - `Status` — optional; covers integrations that report via the legacy commit-status API
 5. Click **Create GitHub App**
 
@@ -222,6 +222,14 @@ REPO_SNAPSHOT_BASE_IMAGE="<your-docker-hub>/<name-of-your-image>"
 
 A base snapshot is required when `SANDBOX_TYPE=langsmith` — either `DEFAULT_SANDBOX_SNAPSHOT_ID` or the runtime setting described below. The server logs a warning at startup when neither the env var nor a stored setting is present, and sandbox creation fails until one is. The snapshot should include the GitHub CLI from `Dockerfile.sandbox`; Open SWE authenticates `git` and `gh` through the LangSmith sandbox proxy using runtime-minted GitHub App installation tokens, not deployment-stored GitHub access tokens.
 
+### Environments
+
+An **environment** pairs a prompt with a snapshot every run boots from, and can span several repos. Admins build one from an **admin thread** (the **Admin** toggle in the composer, available when their login or email is in `CONFIGURED_ADMINS`): the agent provisions its own sandbox — cloning repos, installing toolchains, warming caches — and then captures it. The environment named `default` is the one runs use; any other name is a draft. Records are managed on the admin **Environments** page.
+
+With more than one environment configured, a picker appears in the dashboard composer (any signed-in user, names only), and a Slack thread can pick one with an `env:<name>` tag on the message that opens it — `@Open SWE env:staging fix the flaky test`. Only the opening message can: the sandbox is created once, so a later tag would change the prompt but not the image. A run with no selection uses `default`.
+
+Captures are named `openswe-environment-<name>` (the platform appends its own `:latest` tag, and rejects a name that carries one); set `ENVIRONMENT_SNAPSHOT_PREFIX` to replace the `openswe` prefix when several deployments share one LangSmith workspace. Snapshot resolution for a new sandbox is: the run's environment, then the repo's snapshot, then the base snapshot below.
+
 ### Changing the base snapshot without a redeploy
 
 Admins can override `DEFAULT_SANDBOX_SNAPSHOT_ID` at runtime from the **Repository Snapshots** page (**Base snapshot** field). The stored value wins; clearing it falls back to the env var. Per-repo snapshots still take precedence for runs targeting a repo with a ready snapshot.
@@ -282,7 +290,9 @@ ALLOWED_GITHUB_ORGS="langchain-ai,anthropics"
 ALLOWED_GITHUB_REPOS="some-user/their-repo,another-org/specific-repo"
 ```
 
-A GitHub or Linear webhook is accepted if the resolved repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`. If both are empty, all repos are allowed. Slack mentions are not rejected from regex-inferred repository text; repository access is bounded by the GitHub App installation permissions.
+A GitHub or Linear webhook is accepted if the resolved repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`. If both are empty, all repos are allowed.
+
+For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level edit guard. To modify a repository outside those organizations, the user must explicitly request that exact repository with its full `https://github.com/<owner>/<repo>` URL. Repository hints, defaults, shorthand, and contextual links do not qualify. This does not bypass the server-side GitHub/Linear webhook filter above or GitHub credential and App installation permissions.
 
 `ALLOWED_GITHUB_ORGS` also gates **dashboard login**: when set, only GitHub accounts that are active members of one of the listed organizations can complete the OAuth login and receive a session. Membership is verified server-side with the GitHub App installation token (so private memberships are visible and no extra OAuth scope is required), and the check fails closed on any API error. When `ALLOWED_GITHUB_ORGS` is empty, dashboard login is open to any GitHub account (the prior behavior).
 
@@ -298,7 +308,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 
 1. In Linear, go to **Settings → API → Webhooks → New webhook**
 2. Fill in:
-   - **Label**: `open-swe`
+   - **Label**: `Open SWE`
    - **URL**: `https://<your-ngrok-url>/webhooks/linear` — use the ngrok URL from step 2
    - **Secret**: generate with `openssl rand -hex 32` — save this as `LINEAR_WEBHOOK_SECRET`
 3. Under **Data change events**, enable **Comments → Create** only
@@ -307,7 +317,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 **Get your API key:**
 
 1. Go to **Settings → API → Personal API keys → New API key**
-2. Name it `open-swe`, select **All access**, and copy the key
+2. Name it `Open SWE`, select **All access**, and copy the key
 3. Save it as `LINEAR_API_KEY`
 
 **Configure team-to-repo mapping:**
@@ -453,9 +463,12 @@ LANGSMITH_URL_PROD="https://smith.langchain.com"
 
 # === LLM ===
 ANTHROPIC_API_KEY=""                   # Anthropic API key
-OPENAI_API_KEY=""                      # OpenAI API key (when using openai: models)
+OPENAI_API_KEY=""                      # OpenAI models and dashboard voice dictation
+# OPENAI_BASE_URL="https://api.openai.com/v1"  # Optional OpenAI-compatible API base URL
 GOOGLE_API_KEY=""                      # Google AI API key (when using google_genai: models)
 FIREWORKS_API_KEY=""                   # Fireworks API key (when using fireworks: models)
+# Voice dictation uses this OpenAI configuration.
+# Admins choose its transcription model in the dashboard Admin page.
 
 # === GitHub App (required) ===
 GITHUB_APP_ID=""                       # From step 3c
@@ -491,14 +504,14 @@ GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
 X_SERVICE_AUTH_JWT_SECRET=""
 
 # === Repo Allowlist (optional) ===
-# Comma-separated list of GitHub orgs the agent is allowed to operate on.
-# Also gates dashboard login to members of these orgs (requires the GitHub App's
-# Organization -> Members: Read-only permission; without it, all dashboard logins are rejected).
-# Leave empty to allow all orgs.
+# Comma-separated list of GitHub orgs allowed by the GitHub/Linear webhook filter.
+# Also gates dashboard login and prompts the agent to require an explicit full repository
+# URL before editing outside these orgs (requires Organization -> Members: Read-only).
+# Leave empty to allow all orgs and disable the prompt-level edit guard.
 ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
-# Comma-separated list of specific owner/repo pairs the agent is allowed to operate on.
-# For GitHub/Linear webhooks, a repo is allowed if its org is in ALLOWED_GITHUB_ORGS OR its owner/repo is in ALLOWED_GITHUB_REPOS.
-# Slack mentions are not rejected from regex-inferred repository text; repository access is bounded by GitHub App installation permissions.
+# Comma-separated list of specific owner/repo pairs allowed by the GitHub/Linear webhook filter.
+# A repo is accepted if its org is in ALLOWED_GITHUB_ORGS OR its owner/repo is in ALLOWED_GITHUB_REPOS.
+# Slack/dashboard access remains bounded by GitHub credentials and App installation permissions.
 # Leave both empty to allow all repos.
 ALLOWED_GITHUB_REPOS=""                # e.g. "some-user/their-repo,another-org/specific-repo"
 
@@ -570,6 +583,7 @@ DEFAULT_SANDBOX_VCPUS=""               # vCPUs per sandbox (default: 4)
 DEFAULT_SANDBOX_MEM_BYTES=""           # Memory in bytes per sandbox (default: 16 GiB)
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS=""    # Auto-stop after N seconds idle (default: 7200; 0 disables)
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS=""  # Delete N seconds after stop (default: 2592000; 0 disables)
+ENVIRONMENT_SNAPSHOT_PREFIX=""         # Prefix for environment snapshot names (default: openswe)
 
 # === Token Encryption ===
 TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32
@@ -627,24 +641,22 @@ make dev          # uv run langgraph dev
 
 ## 8. Run the dashboard (optional)
 
-The dashboard is the web app in `ui/`. It's a static TanStack Start client that calls the FastAPI dashboard API from step 7. Run it in a third terminal:
+The dashboard is the web app in `ui/`. It's a server-rendered TanStack Start app that calls the FastAPI dashboard API from step 7. Run it in a third terminal:
 
 ```bash
-cd ui
-pnpm install
-cat > .env <<'EOF'
-VITE_DASHBOARD_API_BASE_URL="http://localhost:2024"
-EOF
-pnpm run dev          # vite dev --port 3000 -> http://localhost:3000
+pnpm install          # from the repo root: ui/ and desktop/ are one pnpm workspace
+pnpm run dev          # turbo -> vite dev --port 3000 -> http://localhost:3000
 ```
 
-The dashboard needs `VITE_DASHBOARD_API_BASE_URL` in `ui/.env` pointing at the backend for local dev. The file is intentionally untracked because `.env*` files are gitignored.
+No `ui/.env` is needed: the dev server proxies `/dashboard/api/*` to `DASHBOARD_API_URL`, which defaults to `http://localhost:2024`. Point it elsewhere by exporting that variable before `pnpm run dev`. It is read at request time, so the same build can front any backend.
 
-The client calls `${VITE_DASHBOARD_API_BASE_URL}/dashboard/api/*` with `credentials: "include"`, so the backend's `osw_session` cookie rides along. Because the UI (`:3000`) and API (`:2024`) are different origins, the backend needs **CORS** enabled for the UI origin — set `DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"` (CORS is off unless this is set). Keep `DASHBOARD_API_BASE_URL` on an `http://` URL locally so the cookie uses `SameSite=Lax` rather than `Secure`.
+Because the browser only ever talks to `http://localhost:3000`, no **CORS** preflight is involved. `DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"` is still required, though: the same allowlist is the backend's CSRF gate for every non-GET request, and it compares the browser's `Origin` — the dashboard's — against the origins it knows. Without it, the dashboard reads fine and every save returns `403 CSRF check failed`.
+
+The `osw_session` cookie has to be set on the dashboard origin too: set `DASHBOARD_API_BASE_URL="http://localhost:3000"` and register `http://localhost:3000/dashboard/api/auth/callback` as a GitHub App callback URL. Keep it on an `http://` URL locally so the cookie uses `SameSite=Lax` rather than `Secure`.
 
 For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `DASHBOARD_JWT_SECRET`, `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `DASHBOARD_ALLOWED_ORIGINS`. To reach the admin pages (user mappings, etc.), add your GitHub login or email to `CONFIGURED_ADMINS`.
 
-Other UI scripts: `pnpm run build`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`.
+Other root scripts run the same task across the workspace through Turborepo: `pnpm run build`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`. Scope one to a package with `pnpm --filter open-swe-dashboard run <script>`.
 
 ### Run the desktop app (optional)
 
@@ -655,9 +667,8 @@ The Electron app in `desktop/` includes the compiled dashboard UI. It only needs
 backend to be running:
 
 ```bash
-pnpm --dir ui install
-pnpm --dir desktop install
-pnpm --dir desktop run dev
+pnpm install                  # from the repo root
+pnpm run dev:desktop
 ```
 
 Development connects to `http://localhost:2024`. To use a hosted backend instead, run
@@ -745,9 +756,11 @@ The `langgraph.json` at the project root defines the graphs and HTTP app baked i
 
 **Backend — LangGraph Cloud / Platform:** alternatively, push your code to a GitHub repository, connect the repo to LangGraph Cloud, set the same environment variables in the deployment config, and use the hosted deployment URL for `LANGGRAPH_URL` and webhook callbacks.
 
-**Dashboard** — the `ui/` app deploys to [Vercel](https://vercel.com/). The recommended production setup uses **same-origin** requests to `/dashboard/api/*` (leave `VITE_DASHBOARD_API_BASE_URL` empty), and `ui/vercel.json` rewrites those to the hosted backend. In this mode, set both `DASHBOARD_API_BASE_URL` and the GitHub App dashboard callback URL to the Vercel/dashboard origin (for example, `https://your-dashboard.vercel.app/dashboard/api/auth/callback`). The OAuth callback response then sets the `osw_session` cookie on the dashboard host, and later same-origin `/dashboard/api/*` requests include it. Update the rewrite `destination` in `ui/vercel.json` to your own backend URL.
+**Dashboard** — the `ui/` app builds to a Nitro server that renders routes on request. Set `DASHBOARD_API_URL` in its environment to your hosted backend URL; it is read per request, so one image serves any backend. Browser requests to `/dashboard/api/*` and webhook deliveries to `/webhooks/*` are proxied to it, and server renders call it directly with the request's `osw_session` cookie forwarded.
 
-Alternatively, you can run the dashboard as a direct cross-origin client: set `VITE_DASHBOARD_API_BASE_URL` to the hosted backend origin, set `DASHBOARD_API_BASE_URL` to that same backend origin, and include the dashboard origin in `DASHBOARD_ALLOWED_ORIGINS`.
+Requests are therefore **same-origin**: set both `DASHBOARD_API_BASE_URL` and the GitHub App dashboard callback URL to the Vercel/dashboard origin (for example, `https://your-dashboard.vercel.app/dashboard/api/auth/callback`). The OAuth callback response then sets the `osw_session` cookie on the dashboard host, and later `/dashboard/api/*` requests include it.
+
+Alternatively, you can have the browser call the backend cross-origin: set `VITE_DASHBOARD_API_BASE_URL` to the hosted backend origin, set `DASHBOARD_API_BASE_URL` to that same backend origin, and include the dashboard origin in `DASHBOARD_ALLOWED_ORIGINS`. Keep `DASHBOARD_API_URL` pointed at the same backend so server renders and the webhook proxy reach it too. In this mode `osw_session` belongs to the backend's origin, so the dashboard's own requests never carry it and the session is resolved on the client instead — pages render unauthenticated and fill in after hydration.
 
 ## Troubleshooting
 
@@ -775,7 +788,7 @@ Alternatively, you can run the dashboard as a direct cross-origin client: set `V
 ### Dashboard UI can't reach the backend
 
 - Confirm the backend is running via `make dev` on `:2024` (not `make run` on `:8000`).
-- Confirm `ui/.env` has `VITE_DASHBOARD_API_BASE_URL=http://localhost:2024`. If it's empty, the UI falls back to relative `/dashboard/api/*`, which only works behind the Vercel rewrite, not in local dev.
+- Confirm the dev server is proxying: `curl -i http://localhost:3000/dashboard/api/me` should return the backend's `401`, not an HTML page. If the backend is on another port, export `DASHBOARD_API_URL` before `pnpm run dev`.
 
 ### Sandbox creation failures
 

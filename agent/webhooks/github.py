@@ -7,6 +7,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 import uuid
 from typing import Any
 
+from ..baby_sit import handle_ci_webhook
 from ..review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from ..utils.github_comments import GitHubAuthError
 from ..utils.slack import GitHubPrRef
@@ -47,7 +48,7 @@ def build_github_issue_prompt(
         "this issue and follows this repository's PR conventions for the title, body, "
         "release note, and/or changelog. Inspect AGENTS.md, PR templates, "
         ".changelog/README.md, and nearby docs before choosing the PR title/body format. "
-        "When you need to communicate on GitHub, use `GH_TOKEN=dummy gh issue comment` "
+        "When you need to communicate on GitHub, use `gh issue comment` "
         "with the issue number."
     )
 
@@ -622,6 +623,13 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         client=langgraph_client,
     )
     await common._store_current_reviewer_run_id(thread_id, run)
+
+
+async def process_github_ci_event(
+    payload: dict[str, Any], event_type: str, delivery_id: str | None = None
+) -> None:
+    """Evaluate active baby-sit watches for a signed GitHub CI event."""
+    await handle_ci_webhook(payload, event_type, delivery_id=delivery_id)
 
 
 async def process_github_pr_comment(payload: dict[str, Any], event_type: str) -> None:

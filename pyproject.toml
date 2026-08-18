@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.1",
+    "deepagents==0.7.6",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.0",
     "httpx>=0.28.1",
@@ -18,7 +18,7 @@ dependencies = [
     "markdownify>=1.2.3",
     "langchain-anthropic>=1.5.4",
     "langgraph-cli[inmem]>=0.4.31",
-    "langsmith>=0.10.16",
+    "langsmith>=0.11.0",
     "langchain-openai>=1.4.1",
     "langchain-fireworks>=1.5.2",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
@@ -32,6 +32,7 @@ dependencies = [
     "langchain-mcp-adapters>=0.3.1",
     "stagehand>=3.22.0",
     "websockets>=15.0.1",
+    "langgraph-api>=0.12",
 ]
 
 [project.optional-dependencies]
@@ -44,10 +45,10 @@ dev = [
 
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares
-# `deepagents<0.7.0`, but 0.7.0 keeps the sandbox API backward compatible. Its e2b
+# `deepagents<0.7.0`, but 0.7.6 keeps the sandbox API backward compatible. Its e2b
 # dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
-override-dependencies = ["deepagents==0.7.1", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.6", "wcmatch>=11.0"]
 
 [build-system]
 requires = ["hatchling"]
@@ -72,10 +73,14 @@ select = [
     "B",   # flake8-bugbear
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
+    "TID251",
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"__future__.annotations".msg = "Do not use postponed annotation evaluation."
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

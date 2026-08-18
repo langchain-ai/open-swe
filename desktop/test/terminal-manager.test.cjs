@@ -6,7 +6,8 @@ const test = require("node:test")
 const {
   createTerminalManager,
   ensurePtySpawnHelperExecutable,
-} = require("../src/terminal-manager.cjs")
+  getProjectShellEnv,
+} = require("../build/terminal-manager.cjs")
 
 class FakeProcess {
   constructor(pid, initialData) {
@@ -64,11 +65,11 @@ function fixture(options = {}) {
       return process
     },
   }
-  const acpSessions = new Map([["acp-1", { cwd: root }]])
+  const localThreads = new Map([["acp-1", { cwd: root }]])
   const manager = createTerminalManager({
     logsDir: path.join(root, ".history"),
     listProjects: () => [{ cwd: root }],
-    getAcpSession: (id) => acpSessions.get(id),
+    getLocalThread: (id) => localThreads.get(id),
     pty: adapter,
     env: {
       PATH: "/usr/bin",
@@ -80,7 +81,7 @@ function fixture(options = {}) {
     historyLines: 3,
     ...options,
   })
-  return { root, child, outside, processes, spawnInputs, acpSessions, manager }
+  return { root, child, outside, processes, spawnInputs, localThreads, manager }
 }
 
 function request(cwd, extra = {}) {
@@ -91,7 +92,23 @@ function tick() {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
-test("keeps terminal identity scoped to the ACP session and validates launch boundaries", async (t) => {
+test("loads environment set by interactive shell prompt hooks", async () => {
+  const env = await getProjectShellEnv({
+    cwd: "/project",
+    env: { SHELL: "/bin/zsh", EXISTING: "kept" },
+    run: async (_shell, args, options, input) => {
+      assert.deepEqual(args, ["-il"])
+      assert.equal(options.cwd, "/project")
+      const mark = /echo '([0-9a-f]+)'/.exec(input)[1]
+      return `${mark}\nOPENAI_BASE_URL=https://gateway.example/openai/v1\n${mark}\n`
+    },
+  })
+
+  assert.equal(env.EXISTING, "kept")
+  assert.equal(env.OPENAI_BASE_URL, "https://gateway.example/openai/v1")
+})
+
+test("keeps terminal identity scoped to the local thread and validates launch boundaries", async (t) => {
   const value = fixture()
   t.after(() => value.manager.shutdown())
 
@@ -154,7 +171,7 @@ test("persists bounded sanitized history and supports clear, restart, detach, an
   const replacement = createTerminalManager({
     logsDir: path.join(value.root, ".history"),
     listProjects: () => [{ cwd: value.root }],
-    getAcpSession: () => ({ cwd: value.root }),
+    getLocalThread: () => ({ cwd: value.root }),
     pty: { spawn: () => new FakeProcess(999) },
     env: { PATH: "/usr/bin" },
     inspect: async () => null,
@@ -174,6 +191,21 @@ test("persists bounded sanitized history and supports clear, restart, detach, an
   assert.deepEqual(replacement.list("acp-1"), [])
 })
 
+
+test("deleting a local session stops its terminals and removes their history", async (t) => {
+  const value = fixture()
+  t.after(() => value.manager.shutdown())
+  await value.manager.open(request(value.root))
+  value.processes[0].data("saved output\n")
+
+  await value.manager.deleteSession("acp-1")
+
+  assert.deepEqual(value.manager.list("acp-1"), [])
+  assert.equal(value.processes[0].kills[0], "SIGTERM")
+  const attached = await value.manager.attach(request(value.root), () => {})
+  assert.equal(attached.snapshot.history, "")
+  attached.detach()
+})
 
 test("drains queued and trailing PTY output before publishing exit", async (t) => {
   const value = fixture()
@@ -207,7 +239,7 @@ test("retains every running session and limits only inactive sessions", async (t
   assert.equal(value.manager.list("acp-1").length, 1)
 })
 
-test("serializes lifecycle per ACP session and coalesces pending resize to the latest size", async (t) => {
+test("serializes lifecycle per local thread and coalesces pending resize to the latest size", async (t) => {
   const value = fixture()
   t.after(() => value.manager.shutdown())
   await value.manager.open(request(value.root))
@@ -236,7 +268,7 @@ test("uses zsh nopromptsp and falls back only for missing executables", async (t
   const manager = createTerminalManager({
     logsDir: path.join(root, ".history"),
     listProjects: () => [{ cwd: root }],
-    getAcpSession: () => ({ cwd: root }),
+    getLocalThread: () => ({ cwd: root }),
     pty: adapter,
     env: { SHELL: "/custom/zsh", PATH: "/usr/bin" },
     inspect: async () => null,
@@ -253,7 +285,7 @@ test("uses zsh nopromptsp and falls back only for missing executables", async (t
   const fatal = createTerminalManager({
     logsDir: path.join(root, ".history-fatal"),
     listProjects: () => [{ cwd: root }],
-    getAcpSession: () => ({ cwd: root }),
+    getLocalThread: () => ({ cwd: root }),
     pty: { spawn: (shell) => { fatalInputs.push(shell); throw new Error("permission denied") } },
     env: { SHELL: "/custom/zsh" },
     inspect: async () => null,

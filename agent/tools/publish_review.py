@@ -1,7 +1,5 @@
 """Tool: ``publish_review``. Post the findings list to GitHub as a PR Review."""
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Annotated, Any
 
@@ -898,7 +896,7 @@ async def _maybe_post_slack_completion_reply(
         review_url = f"{review_url}#pullrequestreview-{review_id}"
     text = f"{headline} <{review_url}|View review>"
 
-    await post_slack_thread_reply(channel_id, thread_ts, text)
+    await post_slack_thread_reply(channel_id, thread_ts, text, agent_thread_id=thread_id)
 
 
 async def _store_thread_ids_on_findings(

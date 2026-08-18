@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
 import { MessageTimestamp } from "../MessageTimestamp"
 import { ReasoningBlock } from "../ReasoningBlock"
-import { buildRenderItems } from "../renderItems"
+import { buildRenderItems, splitWorkAndReply } from "../renderItems"
 import { TurnChangedFilesCard } from "../TurnChangedFilesCard"
 import { MessageCopyButton } from "./MessageCopyButton"
 import { WorkEntryRow } from "./WorkEntryRow"
@@ -14,6 +15,7 @@ import type { ReactNode } from "react"
 import type { RenderItem } from "../renderItems"
 import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
+import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
@@ -26,31 +28,6 @@ import { formatElapsed } from "@/lib/utils"
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 1
 
 /**
- * Render-item types that count as the agent's reply rather than its work.
- * Everything before the trailing run of these folds away when a turn settles.
- */
-const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
-  "text-chunk",
-  "reply-item",
-])
-
-function splitWorkAndReply(items: Array<RenderItem>): {
-  workItems: Array<RenderItem>
-  replyItems: Array<RenderItem>
-} {
-  let splitIndex = items.length
-  while (splitIndex > 0) {
-    const prev = items[splitIndex - 1]
-    if (!prev || !REPLY_ITEM_TYPES.has(prev.type)) break
-    splitIndex -= 1
-  }
-  return {
-    workItems: items.slice(0, splitIndex),
-    replyItems: items.slice(splitIndex),
-  }
-}
-
-/**
  * One row per edit call, showing only what the call targeted. The diff lives in
  * the turn's changed-files card and the side panel, both of which read git —
  * rendering a per-call diff here made repeated edits of one file look duplicated.
@@ -58,20 +35,16 @@ function splitWorkAndReply(items: Array<RenderItem>): {
 function EditWorkEntry({
   chunk,
   projectPath,
-  onOpenFile,
 }: {
   chunk: ToolExecutionChunk
   projectPath?: string
-  onOpenFile?: (filePath: string) => void
 }) {
-  const filePath = latestDiff(chunk)?.filePath
+  const diff = latestDiff(chunk)
   return (
     <WorkEntryRow
       entry={describeWorkEntry(chunk, projectPath)}
       timestamp={chunk.timestamp}
-      onActivate={
-        filePath && onOpenFile ? () => onOpenFile(filePath) : undefined
-      }
+      body={diff ? <DiffView diffData={diff} snippet /> : undefined}
     />
   )
 }
@@ -241,7 +214,6 @@ export function AgentTurn({
             key={item.key}
             chunk={item.chunk}
             projectPath={projectPath}
-            onOpenFile={callbacks.onOpenFile}
           />
         )
 
@@ -257,6 +229,11 @@ export function AgentTurn({
 
       case "reply-item":
         return <ReplyCard key={item.key} chunk={item.chunk} />
+
+      case "iframe-item":
+        return item.chunk.display ? (
+          <OutputIframe key={item.key} display={item.chunk.display} />
+        ) : null
 
       case "tool-item":
         return (
@@ -297,15 +274,16 @@ export function AgentTurn({
             expanded={workFoldExpanded}
             onToggle={toggleWorkFold}
           />
-          {workFoldExpanded && (
+          {workFoldExpanded ? (
             <div className="space-y-0.5">
-              {workItems.map((item, index) =>
-                renderItem(item, index, workItems.length)
+              {renderItems.map((item, index) =>
+                renderItem(item, index, renderItems.length)
               )}
             </div>
-          )}
-          {replyItems.map((item, index) =>
-            renderItem(item, workItems.length + index, renderItems.length)
+          ) : (
+            replyItems.map((item, index) =>
+              renderItem(item, workItems.length + index, renderItems.length)
+            )
           )}
         </>
       ) : (

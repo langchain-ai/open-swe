@@ -12,7 +12,7 @@ import { agentThreadKeys, invalidateAgentThreadLists } from "./queries"
 import type { ReactNode } from "react"
 
 const AGENT_ASSISTANT_ID = "agent"
-const LOCAL_AGENT_ASSISTANT_ID = "local_agent"
+const LOCAL_AGENT_ASSISTANT_ID = "agent"
 
 const dashboardFetch: typeof fetch = (input, init) =>
   fetch(input, { ...init, credentials: "include" })

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 import pytest
@@ -174,9 +172,7 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
     )
 
     assert client.threads.updates[0]["source"] == "dashboard"
-    assert queued_messages == [
-        {"text": "continue in web", "source": "dashboard", "from_owner": True}
-    ]
+    assert queued_messages == [{"text": "continue in web", "source": "dashboard"}]
 
 
 @pytest.mark.asyncio
@@ -223,9 +219,7 @@ async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
         email="octocat@example.com",
     )
 
-    assert queued_messages == [
-        {"text": "continue in web", "source": "dashboard", "from_owner": True}
-    ]
+    assert queued_messages == [{"text": "continue in web", "source": "dashboard"}]
     assert handoff_updates == [
         {"channel_id": "C1", "message_ts": "123.46", "thread_id": "thread-1"}
     ]
@@ -317,7 +311,6 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
         {
             "text": "continue in web",
             "source": "dashboard",
-            "from_owner": True,
             "images": [{"type": "image", "data": "aW1hZ2U=", "mime_type": "image/png"}],
         }
     ]

@@ -135,7 +135,6 @@ class BackendSupervisor {
       env: {
         ...process.env,
         ...this.options.env,
-        LANGGRAPH_AUTH_TYPE: "noop",
         OPEN_SWE_LOCAL_AUTH_TOKEN: this.token,
         OPEN_SWE_LOCAL_PROJECTS_FILE: this.options.projectsFile,
         PYTHONUNBUFFERED: "1",
@@ -194,7 +193,7 @@ class BackendSupervisor {
   }
 
   publicConfig() {
-    return { apiUrl: "/local-graph", graphId: "local_agent" }
+    return { apiUrl: "/local-graph", graphId: "agent" }
   }
 
   async request(pathname, init = {}) {
@@ -212,7 +211,7 @@ class BackendSupervisor {
       body: JSON.stringify({
         thread_id: threadId,
         if_exists: "do_nothing",
-        metadata: { graph_id: "local_agent" },
+        metadata: { graph_id: "agent" },
       }),
     })
     if (!response.ok) {

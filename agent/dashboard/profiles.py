@@ -10,8 +10,6 @@ Each upsert only touches its own namespace, so the two flows can't clobber
 each other's fields even when they interleave.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
@@ -44,12 +42,11 @@ class ProfileUpdate(BaseModel):
     base_branch: str | None = None
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
-    create_prs: bool = False
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
 
     @model_validator(mode="after")
-    def _normalize_stale_model_pairs(self) -> ProfileUpdate:
+    def _normalize_stale_model_pairs(self) -> "ProfileUpdate":
         model, effort = _normalize_stale_model_pair(
             self.default_model,
             self.reasoning_effort,
@@ -98,6 +95,7 @@ def _normalize_stale_model_pair(model: str, effort: str | None) -> tuple[str, st
 
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
+    value.pop("create_prs", None)
     model = value.get("default_model")
     effort = value.get("reasoning_effort")
     if isinstance(model, str):
@@ -158,7 +156,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "base_branch": update.base_branch,
         "branch_prefix": update.branch_prefix,
         "auto_fix_ci": update.auto_fix_ci,
-        "create_prs": update.create_prs,
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
@@ -171,6 +168,7 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "allow_artifacts",
         "slack_notifications",
         "preferred_pr_destination",
+        "create_prs",
     ):
         value.pop(stale_field, None)
     await _client().store.put_item(PROFILES_NAMESPACE, login, value)

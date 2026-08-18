@@ -4,8 +4,6 @@ Each record holds a user-authored instruction prompt (edited in the dashboard)
 that is appended to the main agent's system prompt for runs targeting that repo.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime
 from typing import Any

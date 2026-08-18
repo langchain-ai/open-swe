@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils"
 export interface ContextWindowMeterProps {
   usedTokens?: number | null
   contextWindow?: number | null
-  hasMessages?: boolean
 }
 
 const RADIUS = 9.75
@@ -28,24 +27,21 @@ function formatPercentage(value: number): string {
 export function ContextWindowMeter({
   usedTokens,
   contextWindow,
-  hasMessages = false,
 }: ContextWindowMeterProps) {
   const used = cleanTokenCount(usedTokens)
   const limit = cleanTokenCount(contextWindow)
-  if (used == null && limit == null) return null
+  if (used == null) return null
 
   const percentage =
-    used != null && limit != null
-      ? Math.max(0, Math.min(100, (used / limit) * 100))
-      : 0
-  const hasPercentage = used != null && limit != null
+    limit != null ? Math.max(0, Math.min(100, (used / limit) * 100)) : 0
+  const hasPercentage = limit != null
   const isOverloaded = hasPercentage && percentage >= OVERLOADED_PERCENTAGE
   const usageColor = isOverloaded
     ? "var(--color-destructive)"
     : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)"
   const label = hasPercentage
     ? `Context window ${formatPercentage(percentage)} used`
-    : `Context window ${formatTokenCount(used ?? limit ?? 0)} tokens`
+    : `Context window ${formatTokenCount(used)} tokens`
 
   return (
     <Popover>
@@ -119,7 +115,7 @@ export function ContextWindowMeter({
                   </span>
                 </>
               ) : (
-                formatTokenCount(used ?? limit ?? 0)
+                formatTokenCount(used)
               )}
             </div>
           </div>
@@ -140,11 +136,7 @@ export function ContextWindowMeter({
           )}
           {!hasPercentage && (
             <p className="text-[11px] leading-4 text-muted-foreground/70">
-              {used != null
-                ? "The context window for this model was not reported."
-                : hasMessages
-                  ? "Token usage has not been reported for this thread yet."
-                  : "Send a message to start measuring context usage."}
+              The context window for this model was not reported.
             </p>
           )}
           {isOverloaded && (

@@ -1,5 +1,5 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
 
 export interface DesktopProject {
   cwd: string
@@ -22,6 +22,7 @@ export interface DesktopLocalDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
   files: Array<ThreadPrDiffFile>
+  repository?: { branch: string | null; pr: AgentThread["pr"] | null }
 }
 
 export interface DesktopLocalPromptInput {
@@ -30,12 +31,10 @@ export interface DesktopLocalPromptInput {
 }
 
 export type DesktopTerminalStatus = "starting" | "running" | "exited" | "error"
-
 export interface DesktopTerminalTarget {
   localSessionId: string
   terminalId: string
 }
-
 export interface DesktopTerminalSessionSnapshot extends DesktopTerminalTarget {
   cwd: string
   status: DesktopTerminalStatus
@@ -48,7 +47,6 @@ export interface DesktopTerminalSessionSnapshot extends DesktopTerminalTarget {
   updatedAt: string
   sequence: number
 }
-
 export interface DesktopTerminalSummary extends DesktopTerminalTarget {
   cwd: string
   status: DesktopTerminalStatus
@@ -59,28 +57,20 @@ export interface DesktopTerminalSummary extends DesktopTerminalTarget {
   label: string
   updatedAt: string
 }
-
 export type DesktopTerminalAttachEvent =
   | (DesktopTerminalTarget & {
       type: "started" | "restarted"
       snapshot: DesktopTerminalSessionSnapshot
       sequence: number
     })
-  | (DesktopTerminalTarget & {
-      type: "output"
-      data: string
-      sequence: number
-    })
+  | (DesktopTerminalTarget & { type: "output"; data: string; sequence: number })
   | (DesktopTerminalTarget & {
       type: "exited"
       exitCode: number | null
       exitSignal: number | null
       sequence: number
     })
-  | (DesktopTerminalTarget & {
-      type: "closed" | "cleared"
-      sequence: number
-    })
+  | (DesktopTerminalTarget & { type: "closed" | "cleared"; sequence: number })
   | (DesktopTerminalTarget & {
       type: "error"
       message: string
@@ -92,7 +82,6 @@ export type DesktopTerminalAttachEvent =
       label: string
       sequence: number
     })
-
 export type DesktopTerminalMetadataEvent =
   | { type: "upsert"; terminal: DesktopTerminalSummary }
   | (DesktopTerminalTarget & { type: "remove" })
@@ -107,11 +96,7 @@ export interface DesktopTerminalBridge {
     }
   ) => Promise<DesktopTerminalSessionSnapshot>
   open: (
-    input: DesktopTerminalTarget & {
-      cwd: string
-      cols?: number
-      rows?: number
-    }
+    input: DesktopTerminalTarget & { cwd: string; cols?: number; rows?: number }
   ) => Promise<DesktopTerminalSessionSnapshot>
   write: (input: DesktopTerminalTarget & { data: string }) => Promise<void>
   resize: (
@@ -141,6 +126,7 @@ declare global {
     openSweDesktop?: {
       isDesktop: true
       listProjects: () => Promise<Array<DesktopProject>>
+      getProjectBranch: (cwd: string) => Promise<string | null>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
       onProjectsChanged: (
@@ -151,10 +137,9 @@ declare global {
         localSessionId: string
         path: string
       }) => Promise<string | null>
-      localModelCredentialStatus: (modelId?: string) => Promise<{
-        available: boolean
-        variable: string | null
-      }>
+      localModelCredentialStatus: (
+        modelId?: string
+      ) => Promise<{ available: boolean; variable: string | null }>
       startLocalThread: (
         input: DesktopLocalPromptInput & {
           cwd: string

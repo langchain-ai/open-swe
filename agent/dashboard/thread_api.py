@@ -1,22 +1,22 @@
 """Dashboard thread list/detail/run/stream endpoints backed by LangGraph."""
 
-from __future__ import annotations
-
 import asyncio
 import base64
 import binascii
 import json
 import logging
 import os
+import posixpath
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..dispatch import DASHBOARD_STREAM_MODES
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_INSTRUCTION
 from ..utils.json_types import (
     JsonObject,
@@ -26,14 +26,21 @@ from ..utils.json_types import (
     thread_metadata,
 )
 from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.slack import lookup_slack_thread_run_mapping, update_slack_trace_reply_for_web_handoff
+from ..utils.slack import (
+    lookup_slack_thread_run_mapping,
+    parse_github_pr_url,
+    update_slack_trace_reply_for_web_handoff,
+)
 from ..utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
     langgraph_url,
     queue_message_for_thread,
 )
+from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
+from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
+from .environments import get_environment, slugify
 from .options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -52,17 +59,7 @@ logger = logging.getLogger(__name__)
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 # Modes required for the v2 event-stream protocol (`POST …/stream/events`).
-# `@langchain/react` subscribes to `messages`, `tools`, `lifecycle`, etc.;
-# legacy `messages-tuple`-only runs emit almost nothing on those channels.
-_DASHBOARD_STREAM_MODES: tuple[str, ...] = (
-    "values",
-    "updates",
-    "messages",
-    "messages-tuple",
-    "tools",
-    "checkpoints",
-    "events",
-)
+_DASHBOARD_STREAM_MODES = DASHBOARD_STREAM_MODES
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
@@ -74,6 +71,7 @@ _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", 
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
 _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
+_SANDBOX_CREATING_SENTINEL = "__creating__"
 
 
 async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
@@ -390,6 +388,47 @@ def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
     return permalink.strip() if isinstance(permalink, str) and permalink.strip() else None
 
 
+def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
+    value = metadata.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
+    return (
+        _metadata_string(metadata, "thread_category") == "automation"
+        or _thread_source(metadata) == "schedule"
+        or _metadata_string(metadata, "schedule_id") is not None
+    )
+
+
+def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
+    source = _thread_source(metadata)
+    origin = _metadata_string(metadata, "origin") or source
+    trigger_kind = _metadata_string(metadata, "trigger_kind") or (
+        "schedule_test"
+        if metadata.get("schedule_test") is True
+        else "schedule"
+        if source == "schedule" or _metadata_string(metadata, "schedule_id")
+        else "user"
+    )
+    category = _metadata_string(metadata, "thread_category")
+    if not category:
+        source_context = metadata.get("source_context")
+        if _is_automation_thread(metadata):
+            category = "automation"
+        elif isinstance(metadata.get("pr_number"), int) or (
+            isinstance(source_context, dict) and source_context.get("pr_number")
+        ):
+            category = "pull_request"
+        elif isinstance(source_context, dict) and (
+            source_context.get("github_issue") or source_context.get("linear_issue")
+        ):
+            category = "issue"
+        else:
+            category = "interactive"
+    return category, origin, trigger_kind
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -400,6 +439,9 @@ async def _thread_summary(
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
+    working_repo = metadata.get("working_repo_full_name")
+    if not isinstance(working_repo, str) or working_repo.count("/") != 1:
+        working_repo = None
     created_at = metadata.get("created_at_ms")
     updated_at = metadata.get("updated_at_ms")
     title = metadata.get("title") if isinstance(metadata.get("title"), str) else "Untitled agent"
@@ -416,15 +458,17 @@ async def _thread_summary(
     pr_url = metadata.get("pr_url")
     pr_title = metadata.get("pr_title")
     pr_state = metadata.get("pr_state")
+    thread_category, origin, trigger_kind = _thread_classification(metadata)
 
     thread_id = thread.get("thread_id") or thread.get("id")
     trace_url = await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
 
     raw_sandbox_id = metadata.get("sandbox_id")
-    # "__creating__" is the in-flight sentinel written before the real id lands.
     sandbox_id = (
         raw_sandbox_id
-        if isinstance(raw_sandbox_id, str) and raw_sandbox_id and raw_sandbox_id != "__creating__"
+        if isinstance(raw_sandbox_id, str)
+        and raw_sandbox_id
+        and raw_sandbox_id != _SANDBOX_CREATING_SENTINEL
         else None
     )
 
@@ -433,12 +477,20 @@ async def _thread_summary(
         "title": title,
         "repo": name,
         "repoFullName": full_name,
+        "workingRepoFullName": working_repo,
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
         "planMode": metadata.get("plan_mode") is True,
+        "adminThread": metadata.get("admin_thread") is True,
+        "environment": metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
         "source": _thread_source(metadata),
+        "origin": origin,
+        "threadCategory": thread_category,
+        "triggerKind": trigger_kind,
+        "automationId": _metadata_string(metadata, "schedule_id"),
+        "automationName": _metadata_string(metadata, "schedule_name"),
         "status": status,
         "viewed": _is_thread_viewed(metadata, latest_run_id),
         "viewedAt": (
@@ -534,6 +586,7 @@ _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+_DISCOVERY_HISTORY_LIMIT = 5
 
 
 def _thread_id(thread: ThreadLike) -> str | None:
@@ -557,13 +610,19 @@ def _owner_search_filters(
 
 
 def _search_metadata_filter(
-    owner_filter: dict[str, Any], *, resolved: bool | None = None, source: str | None = None
+    owner_filter: dict[str, Any],
+    *,
+    resolved: bool | None = None,
+    source: str | None = None,
+    automation_id: str | None = None,
 ) -> dict[str, Any]:
     metadata = dict(owner_filter)
     if resolved is True:
         metadata["resolved"] = True
     if source and source != _DASHBOARD_SOURCE:
         metadata["source"] = source
+    if automation_id:
+        metadata["schedule_id"] = automation_id
     return metadata
 
 
@@ -602,8 +661,17 @@ def _metadata_matches_filters(
     resolved: bool | None,
     source: str | None,
     query: str | None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
+    is_automation = _is_automation_thread(metadata)
+    if scope == "interactive" and is_automation:
+        return False
+    if scope == "automation" and not is_automation:
+        return False
+    if automation_id and _metadata_string(metadata, "schedule_id") != automation_id:
+        return False
     if resolved is not None and _is_thread_resolved(metadata) is not resolved:
         return False
     if source and _thread_source(metadata) != source:
@@ -712,13 +780,20 @@ async def _collect_thread_candidates(
     resolved: bool | None = None,
     source: str | None = None,
     query: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
     target_per_search: int | None = None,
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     for owner_filter in searches:
         matched_for_search = 0
         offset = 0
-        metadata_filter = _search_metadata_filter(owner_filter, resolved=resolved, source=source)
+        metadata_filter = _search_metadata_filter(
+            owner_filter,
+            resolved=resolved,
+            source=source,
+            automation_id=automation_id,
+        )
         while offset < _THREADS_PAGE_SCAN_CAP:
             batch = await _search_threads_batch(
                 client,
@@ -737,6 +812,8 @@ async def _collect_thread_candidates(
                     resolved=resolved,
                     source=source,
                     query=query,
+                    scope=scope,
+                    automation_id=automation_id,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -811,6 +888,7 @@ async def list_dashboard_threads_sidebar(
     active_limit: int = 50,
     resolved_limit: int = 20,
     active_thread_id: str | None = None,
+    include_automations: bool = False,
     include_all: bool = False,
 ) -> dict[str, Any]:
     client = langgraph_client()
@@ -840,6 +918,8 @@ async def list_dashboard_threads_sidebar(
             for thread in batch:
                 metadata = _thread_metadata(thread)
                 if not include_all and not _user_owns_thread(metadata, login, email):
+                    continue
+                if not include_automations and _is_automation_thread(metadata):
                     continue
                 thread_id = _thread_id(thread)
                 if not thread_id or thread_id in active or thread_id in resolved_threads:
@@ -934,6 +1014,8 @@ async def list_dashboard_threads_page(
     source: str | None = None,
     status: str | None = None,
     query: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
 ) -> dict[str, Any]:
     client = langgraph_client()
     searches = _owner_search_filters(login, email=email, include_all=include_all)
@@ -951,6 +1033,8 @@ async def list_dashboard_threads_page(
         resolved=resolved,
         source=source,
         query=query,
+        scope=scope,
+        automation_id=automation_id,
         target_per_search=target,
     )
 
@@ -1009,6 +1093,29 @@ async def _mark_thread_viewed(
     return {**metadata, **metadata_update}
 
 
+async def get_dashboard_terminal_sandbox(
+    thread_id: str, login: str, *, email: str | None = None
+) -> tuple[str, str | None]:
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+    metadata = thread_metadata(thread)
+    _assert_thread_owner(metadata, login, email)
+    sandbox_id = metadata.get("sandbox_id")
+    if (
+        not isinstance(sandbox_id, str)
+        or not sandbox_id
+        or sandbox_id == _SANDBOX_CREATING_SENTINEL
+    ):
+        raise HTTPException(404, "thread sandbox is not ready")
+    repo_name = metadata.get("repo_name")
+    if not isinstance(repo_name, str) or posixpath.basename(repo_name) != repo_name:
+        repo_name = None
+    return sandbox_id, repo_name
+
+
 async def get_dashboard_thread(
     thread_id: str, login: str, *, email: str | None = None, mark_viewed: bool = True
 ) -> dict[str, Any]:
@@ -1055,6 +1162,21 @@ async def get_dashboard_thread(
     )
 
 
+async def _resolve_requested_environment(requested: Any) -> str | None:
+    """Normalize a requested environment slug, dropping one that does not exist.
+
+    The picker only offers configured environments, so a miss means a stale client
+    — the thread falls back to the default rather than booting from nothing.
+    """
+    if not isinstance(requested, str) or not requested.strip():
+        return None
+    try:
+        slug = slugify(requested)
+    except ValueError:
+        return None
+    return slug if await get_environment(slug) is not None else None
+
+
 def _resolve_repo_config(repo: str | None) -> dict[str, str]:
     """Resolve the run's repo from the request, or ``{}`` when none is given."""
     return _parse_repo(repo) or {}
@@ -1072,6 +1194,8 @@ async def _create_dashboard_thread_record(
     model_id: str | None = None,
     effort: str | None = None,
     plan_mode: bool = False,
+    admin_thread: bool = False,
+    environment: str | None = None,
 ) -> dict[str, Any]:
     """Create or update dashboard thread metadata without starting a run."""
     profile = await get_profile(login) or {}
@@ -1091,10 +1215,15 @@ async def _create_dashboard_thread_record(
         metadata_model = resolved_model
         metadata_effort = resolved_effort
     has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
+    initial_title = title or prompt[:80] or "New agent"
     metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
+        "origin": _DASHBOARD_SOURCE,
+        "thread_category": "interactive",
+        "trigger_kind": "user",
         "github_login": login,
-        "title": title or prompt[:80] or "New agent",
+        PARTICIPANT_LOGINS_KEY: [login],
+        "title": initial_title,
         "base_branch": profile.get("base_branch") or "main",
         "branch_prefix": profile.get("branch_prefix"),
         "model": metadata_model,
@@ -1105,6 +1234,12 @@ async def _create_dashboard_thread_record(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
+    if admin_thread:
+        metadata["admin_thread"] = True
+    if environment:
+        metadata["environment"] = environment
+    if not title:
+        metadata["title_seed"] = initial_title
     if has_repo:
         metadata["repo_owner"] = repo_config["owner"]
         metadata["repo_name"] = repo_config["name"]
@@ -1152,6 +1287,13 @@ async def _build_dashboard_configurable(
             configurable.setdefault(key, value)
     if metadata.get("plan_mode") is True:
         configurable["plan_mode"] = True
+    # The agent re-checks the requesting user against CONFIGURED_ADMINS before it
+    # hands out the environment tools, so this only marks intent.
+    if metadata.get("admin_thread") is True:
+        configurable["admin_thread"] = True
+    environment = metadata.get("environment")
+    if isinstance(environment, str) and environment:
+        configurable["environment"] = environment
     if overrides:
         for key, value in overrides.items():
             if value is not None:
@@ -1323,6 +1465,12 @@ async def _enrich_run_start_command(
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             plan_mode=plan_mode_requested,
+            admin_thread=(
+                client_configurable.get("admin_thread") is True and is_admin(email, login=login)
+            ),
+            environment=await _resolve_requested_environment(
+                client_configurable.get("environment")
+            ),
         )
         metadata = thread_metadata(thread)
         if command_images:
@@ -1352,7 +1500,13 @@ async def _enrich_run_start_command(
         if metadata.get("source") == "slack":
             content = _prepend_message_content_block(content, DASHBOARD_HANDOFF_INSTRUCTION)
         _set_command_last_message_content(params, content)
-        metadata_update: dict[str, Any] = {"plan_mode": plan_mode_requested}
+        metadata_update: dict[str, Any] = {
+            "source": _DASHBOARD_SOURCE,
+            "plan_mode": plan_mode_requested,
+            PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+                metadata.get(PARTICIPANT_LOGINS_KEY), login
+            ),
+        }
         if command_images and run_model and run_effort:
             overrides["agent_model_id"] = run_model
             overrides["agent_effort"] = run_effort
@@ -1388,6 +1542,9 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
+    # Subagents run as subgraphs; without this the server streams only the top
+    # graph and their nested tool calls never reach the transcript.
+    params.setdefault("stream_subgraphs", True)
     params["config"] = {**client_config, "configurable": merged_configurable}
     params["metadata"] = run_metadata
     command["params"] = params
@@ -1453,6 +1610,9 @@ async def send_dashboard_message(
         "source": _DASHBOARD_SOURCE,
         "updated_at_ms": now_ms,
         "plan_mode": body.plan_mode,
+        PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+            metadata.get(PARTICIPANT_LOGINS_KEY), login
+        ),
     }
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model
@@ -1476,7 +1636,6 @@ async def send_dashboard_message(
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
-        "from_owner": _user_owns_thread(metadata, login, email),
     }
     if isinstance(content, list):
         queue_payload["images"] = [
@@ -1957,14 +2116,42 @@ async def get_dashboard_thread_turn_diff(
     if index < 0 or not checkpoints or not isinstance(sandbox_id, str) or not sandbox_id:
         return {"status": "missing", "files": [], "truncated": False}
 
+    checkpoint = checkpoints[index]
+    plan_ref = checkpoint.get("plan_ref")
+    if (
+        turn_key is not None
+        and checkpoint.get("plan_mode") is True
+        and (not isinstance(plan_ref, str) or plan_ref == checkpoint.get("ref"))
+    ):
+        return {"status": "ready", "files": [], "truncated": False}
+
+    head = plan_ref if turn_key is not None and isinstance(plan_ref, str) else None
+    if head is None and turn_key and index + 1 < len(checkpoints):
+        next_checkpoint = checkpoints[index + 1]
+        repo_path = checkpoint.get("repo_path")
+        next_repo_path = next_checkpoint.get("repo_path")
+        if (
+            isinstance(repo_path, str)
+            and isinstance(next_repo_path, str)
+            and repo_path != next_repo_path
+        ):
+            return {"status": "missing", "files": [], "truncated": False}
+        head = next_checkpoint["ref"]
+
     try:
         sandbox = await create_sandbox(sandbox_id)
     except Exception:  # noqa: BLE001
         logger.debug("Could not connect to sandbox %s for turn diff", sandbox_id, exc_info=True)
         return {"status": "missing", "files": [], "truncated": False}
 
-    head = checkpoints[index + 1]["ref"] if turn_key and index + 1 < len(checkpoints) else None
-    return await read_turn_diff(sandbox, None, str(checkpoints[index]["ref"]), head)
+    repo_path = checkpoint.get("repo_path")
+    return await read_turn_diff(
+        sandbox,
+        None,
+        str(checkpoint["ref"]),
+        head,
+        repo_path=repo_path if isinstance(repo_path, str) else None,
+    )
 
 
 async def get_dashboard_thread_pr_diff(
@@ -1972,7 +2159,10 @@ async def get_dashboard_thread_pr_diff(
 ) -> dict[str, Any]:
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     pr_number = metadata.get("pr_number")
+    pr_ref = parse_github_pr_url(str(metadata.get("pr_url") or ""))
     _, _, full_name = _metadata_repo(metadata)
+    if pr_ref and pr_ref.number == pr_number:
+        full_name = f"{pr_ref.owner}/{pr_ref.repo}"
     if not isinstance(pr_number, int) or not full_name:
         raise HTTPException(404, "thread has no pull request")
 
@@ -2140,10 +2330,21 @@ async def proxy_dashboard_thread_history(
 ) -> tuple[int, bytes, str | None]:
     _require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
+    try:
+        payload = json.loads(body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(400, "history body must be a JSON object") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "history body must be a JSON object")
+    limit = payload.get("limit", _DISCOVERY_HISTORY_LIMIT)
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise HTTPException(400, "history limit must be a positive integer")
+    if not any(payload.get(key) for key in ("before", "checkpoint", "metadata")):
+        payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = _langgraph_proxy_headers(content_type=content_type)
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
-        response = await client.post(url, content=body or b"{}", headers=headers)
+        response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 

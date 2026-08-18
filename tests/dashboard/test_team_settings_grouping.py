@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,7 +9,7 @@ from agent.dashboard.team_settings import (
 )
 
 _REVIEWER_SUBAGENT_PAIR = ("openai:gpt-5.6-sol", "low")
-_GROUPING_PAIR = ("google_genai:gemini-3.6-flash", "low")
+_GROUPING_PAIR = ("google_genai:gemini-3.7-flash", "low")
 
 
 def _settings(**overrides: object) -> dict[str, object]:

@@ -5,8 +5,6 @@ These stores are the single source of truth that both the real agent code
 sees in the UI is exactly what the agent produced.
 """
 
-from __future__ import annotations
-
 import shutil
 import subprocess
 import time
@@ -18,7 +16,6 @@ from e2e_env import BARE_REMOTE, BASE_BRANCH, OWNER, REPO
 # --- Slack -----------------------------------------------------------------
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
 SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
-SLACK_STATUSES: list[dict[str, Any]] = []
 _slack_seq = [1]
 
 
@@ -66,6 +63,29 @@ def slack_messages(channel: str) -> list[dict[str, Any]]:
         if message_channel == channel:
             messages.extend(thread_messages)
     return sorted(messages, key=lambda message: message["ts"])
+
+
+def slack_message(channel: str, thread_ts: str, message_ts: str) -> dict[str, Any] | None:
+    return next(
+        (message for message in slack_thread(channel, thread_ts) if message["ts"] == message_ts),
+        None,
+    )
+
+
+def update_slack_message(
+    channel: str, message_ts: str, *, text: str, blocks: Any = None
+) -> dict[str, Any] | None:
+    for (message_channel, _thread_ts), thread_messages in SLACK_MESSAGES.items():
+        if message_channel != channel:
+            continue
+        for message in thread_messages:
+            if message["ts"] != message_ts:
+                continue
+            message["text"] = text
+            if blocks is not None:
+                message["blocks"] = blocks
+            return message
+    return None
 
 
 # --- GitHub ----------------------------------------------------------------
@@ -173,10 +193,31 @@ def repo_private() -> bool:
     return REPO_PRIVATE[0]
 
 
+# --- LangSmith snapshots ---------------------------------------------------
+# Captures the environment tools asked for: {"snapshot_id", "name", "sandbox_id"}.
+# The E2E sandbox is the local provider, so there is no real snapshot service —
+# this store stands in for it and is what the specs assert on.
+SNAPSHOTS: list[dict[str, Any]] = []
+DELETED_SNAPSHOTS: list[str] = []
+_snapshot_seq = [0]
+
+
+def record_snapshot_capture(sandbox_id: str, name: str) -> str:
+    _snapshot_seq[0] += 1
+    snapshot_id = f"snap-{_snapshot_seq[0]}"
+    SNAPSHOTS.append({"snapshot_id": snapshot_id, "name": name, "sandbox_id": sandbox_id})
+    return snapshot_id
+
+
+def record_snapshot_delete(snapshot_id: str) -> None:
+    DELETED_SNAPSHOTS.append(snapshot_id)
+
+
 def reset() -> None:
     SLACK_MESSAGES.clear()
-    SLACK_STATUSES.clear()
     PULLS.clear()
+    SNAPSHOTS.clear()
+    DELETED_SNAPSHOTS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0
     seed_bare_remote()

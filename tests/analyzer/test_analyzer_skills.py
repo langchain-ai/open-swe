@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pathlib
 
 from deepagents.middleware.skills import _parse_skill_metadata

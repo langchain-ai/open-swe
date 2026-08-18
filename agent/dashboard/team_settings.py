@@ -5,10 +5,9 @@ configuration in one place. Per-repo style prompts live in
 :mod:`agent.dashboard.review_styles`.
 """
 
-from __future__ import annotations
-
 import logging
 import os
+import re
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -35,15 +34,32 @@ TEAM_SETTINGS_KEY = "default"
 # prompt. Generous enough for a detailed policy, small enough to stay bounded.
 ORG_GUIDELINES_MAX_CHARS = 10_000
 REVIEW_TRACING_PROJECT_MAX_CHARS = 256
+DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-5.6-luna"
+DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
+DEFAULT_TRANSCRIPTION_MODEL = "gpt-transcribe"
+TRANSCRIPTION_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
 
-class TeamSettingsUpdate(BaseModel):
+class TranscriptionSettingsUpdate(BaseModel):
+    transcription_model: str = DEFAULT_TRANSCRIPTION_MODEL
+
+    @field_validator("transcription_model")
+    @classmethod
+    def _validate_transcription_model(cls, value: str) -> str:
+        value = value.strip()
+        if not TRANSCRIPTION_MODEL_RE.fullmatch(value):
+            raise ValueError("invalid transcription model")
+        return value
+
+
+class TeamSettingsUpdate(TranscriptionSettingsUpdate):
     review_draft_prs: bool = False
     pr_summaries: bool = True
     review_trace_links: bool = True
     # Tri-state LLM Gateway toggle: True/False is authoritative, None inherits the
     # LANGSMITH_GATEWAY_ENABLED deployment default.
     gateway_enabled: bool | None = None
+    transcription_model: str = DEFAULT_TRANSCRIPTION_MODEL
     fable_enabled: bool = False
     review_tracing_project: str | None = None
     org_guidelines: str | None = None
@@ -60,6 +76,8 @@ class TeamSettingsUpdate(BaseModel):
     default_grouping_reasoning_effort: str | None = None
     default_chat_model: str | None = None
     default_chat_reasoning_effort: str | None = None
+    default_thread_title_model: str | None = None
+    default_thread_title_reasoning_effort: str | None = None
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -95,7 +113,7 @@ class TeamSettingsUpdate(BaseModel):
         return text
 
     @model_validator(mode="after")
-    def _validate_model_pairs(self) -> TeamSettingsUpdate:
+    def _validate_model_pairs(self) -> "TeamSettingsUpdate":
         self.default_agent_model, self.default_agent_reasoning_effort = _normalize_stale_model_pair(
             self.default_agent_model,
             self.default_agent_reasoning_effort,
@@ -129,6 +147,12 @@ class TeamSettingsUpdate(BaseModel):
             self.default_chat_model,
             self.default_chat_reasoning_effort,
         )
+        self.default_thread_title_model, self.default_thread_title_reasoning_effort = (
+            _normalize_stale_model_pair(
+                self.default_thread_title_model,
+                self.default_thread_title_reasoning_effort,
+            )
+        )
         _validate_model_effort_pair(
             self.default_agent_model, self.default_agent_reasoning_effort, "agent"
         )
@@ -153,6 +177,11 @@ class TeamSettingsUpdate(BaseModel):
         _validate_model_effort_pair(
             self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
         )
+        _validate_model_effort_pair(
+            self.default_thread_title_model,
+            self.default_thread_title_reasoning_effort,
+            "thread title",
+        )
         if not self.fable_enabled:
             # Disabling Fable is the ZDR kill switch and must always succeed: rather
             # than reject a payload that still carries a Fable default, swap each
@@ -165,6 +194,7 @@ class TeamSettingsUpdate(BaseModel):
                 ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
                 ("default_grouping_model", "default_grouping_reasoning_effort"),
                 ("default_chat_model", "default_chat_reasoning_effort"),
+                ("default_thread_title_model", "default_thread_title_reasoning_effort"),
             ):
                 model = getattr(self, model_field)
                 if model in FABLE_MODEL_IDS:
@@ -205,6 +235,7 @@ _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
     ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
     ("default_grouping_model", "default_grouping_reasoning_effort"),
     ("default_chat_model", "default_chat_reasoning_effort"),
+    ("default_thread_title_model", "default_thread_title_reasoning_effort"),
 )
 
 
@@ -247,6 +278,7 @@ def _default_settings() -> dict[str, Any]:
         "pr_summaries": True,
         "review_trace_links": True,
         "gateway_enabled": None,
+        "transcription_model": DEFAULT_TRANSCRIPTION_MODEL,
         "fable_enabled": False,
         "review_tracing_project": None,
         "org_guidelines": None,
@@ -266,6 +298,8 @@ def _default_settings() -> dict[str, Any]:
         # No hardcoded chat default: unset means "inherit the Agent default".
         "default_chat_model": None,
         "default_chat_reasoning_effort": None,
+        "default_thread_title_model": DEFAULT_THREAD_TITLE_MODEL,
+        "default_thread_title_reasoning_effort": DEFAULT_THREAD_TITLE_REASONING_EFFORT,
         "updated_at": None,
     }
 
@@ -303,6 +337,7 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
         "gateway_enabled": update.gateway_enabled,
+        "transcription_model": update.transcription_model,
         "fable_enabled": update.fable_enabled,
         "review_tracing_project": update.review_tracing_project,
         "org_guidelines": update.org_guidelines,
@@ -319,6 +354,8 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "default_grouping_reasoning_effort": update.default_grouping_reasoning_effort,
         "default_chat_model": update.default_chat_model,
         "default_chat_reasoning_effort": update.default_chat_reasoning_effort,
+        "default_thread_title_model": update.default_thread_title_model,
+        "default_thread_title_reasoning_effort": update.default_thread_title_reasoning_effort,
         "updated_at": datetime.now(UTC).isoformat(),
     }
     await _client().store.put_item(TEAM_SETTINGS_NAMESPACE, TEAM_SETTINGS_KEY, value)
@@ -418,10 +455,42 @@ async def get_team_default_grouping_model() -> tuple[str, str]:
     )
 
 
+async def get_team_default_thread_title_model() -> tuple[str, str]:
+    settings = await get_team_settings()
+    model = settings.get("default_thread_title_model")
+    effort = settings.get("default_thread_title_reasoning_effort")
+    if (
+        isinstance(model, str)
+        and isinstance(effort, str)
+        and model in SUPPORTED_MODEL_IDS
+        and model_supports_effort(model, effort)
+    ):
+        return _resolve_default_pair(model, effort)
+    return DEFAULT_THREAD_TITLE_MODEL, DEFAULT_THREAD_TITLE_REASONING_EFFORT
+
+
 async def get_team_review_trace_links_enabled() -> bool:
     """Return whether GitHub review bodies should include a LangSmith trace link."""
     settings = await get_team_settings()
     return bool(settings.get("review_trace_links", True))
+
+
+async def get_team_transcription_model() -> str:
+    value = (await get_team_settings()).get("transcription_model")
+    return (
+        value
+        if isinstance(value, str) and TRANSCRIPTION_MODEL_RE.fullmatch(value)
+        else DEFAULT_TRANSCRIPTION_MODEL
+    )
+
+
+async def update_team_transcription_model(model: str) -> dict[str, Any]:
+    settings = await get_team_settings()
+    settings["transcription_model"] = TranscriptionSettingsUpdate(
+        transcription_model=model
+    ).transcription_model
+    settings.pop("updated_at", None)
+    return await upsert_team_settings(TeamSettingsUpdate.model_validate(settings))
 
 
 async def get_team_gateway_enabled() -> bool | None:

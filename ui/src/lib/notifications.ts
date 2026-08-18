@@ -36,7 +36,10 @@ export function setNotificationsPref(enabled: boolean) {
   }
 }
 
-export function showRunNotification(thread: AgentThread) {
+export function showRunNotification(
+  thread: AgentThread,
+  onClick: (threadId: string) => void
+) {
   if (!notificationsEnabled()) return
   const statusLabel =
     thread.status === "error"
@@ -54,6 +57,7 @@ export function showRunNotification(thread: AgentThread) {
     })
     n.onclick = () => {
       window.focus()
+      onClick(thread.id)
       n.close()
     }
   } catch {

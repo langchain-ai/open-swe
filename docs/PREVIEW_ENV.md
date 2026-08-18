@@ -54,16 +54,22 @@ copy across by mistake:
 Scope preview with its own `ALLOWED_GITHUB_ORGS` / `ALLOWED_GITHUB_REPOS` and install its
 GitHub App only on the repositories it should touch.
 
-## Vercel
+## Dashboard
 
-Root directory `ui/`, production branch `preview`, and `VITE_DASHBOARD_API_BASE_URL` set
-to the preview LangGraph deployment URL. The UI calls that URL directly (cross-origin
-with credentials), so add the preview Vercel domain to `DASHBOARD_ALLOWED_ORIGINS`.
+The dashboard reads `DASHBOARD_API_URL` — the backend it fronts — from its own
+environment at request time, so one built image serves any deployment. Set it wherever
+the dashboard runs (the pod environment on Kubernetes, the project settings on Vercel).
+It has no default: a fallback would be production's backend, and preview would inherit it
+and drive production's agents, threads, and sandboxes.
 
-> `ui/vercel.json` hardcodes the production LangGraph URL in a `/dashboard/api/:path*`
-> rewrite. Vercel does not interpolate environment variables in `vercel.json`, so the
-> preview project cannot override it. It is unused as long as
-> `VITE_DASHBOARD_API_BASE_URL` is an absolute URL — which it must be for preview.
+Requests stay same-origin — the server proxies `/dashboard/api/*` and `/webhooks/*` to
+that backend — so `DASHBOARD_API_BASE_URL`, the GitHub App callback URL, and the
+`DASHBOARD_ALLOWED_ORIGINS` entry must all point at the dashboard's own domain, not the
+backend's. That allowlist is the backend's CSRF gate as well as its CORS config, so a
+missing entry leaves the dashboard readable but unable to save.
+
+Webhook senders get the dashboard's domain too: `/webhooks/*` is proxied for exactly this
+reason, so each instance publishes one hostname rather than leaking its LangGraph URL.
 
 ## Verifying isolation
 

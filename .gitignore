@@ -23,6 +23,7 @@
 
 # misc
 .DS_Store
+node_modules/
 .vscode/
 *.pem
 *.key
@@ -69,5 +70,5 @@ __pycache__/
 *.egg-info/
 .eggs/
 
-#
+# Local E2E artifacts: harness logs, screenshots, and Playwright videos.
 logs/

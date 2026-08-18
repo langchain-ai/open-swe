@@ -62,6 +62,8 @@ function AdminPage() {
 
       <LLMGatewaySection />
 
+      <DictationSection />
+
       <FableSection />
 
       <TriggerReviewSection />
@@ -749,6 +751,96 @@ function LLMGatewaySection() {
   )
 }
 
+const TRANSCRIPTION_MODELS = [
+  { value: "gpt-transcribe", label: "GPT Transcribe (recommended)" },
+  { value: "gpt-4o-transcribe", label: "GPT-4o Transcribe (legacy)" },
+  { value: "gpt-4o-mini-transcribe", label: "GPT-4o Mini Transcribe (legacy)" },
+]
+
+function DictationSection() {
+  const qc = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["teamSettings"],
+    queryFn: api.getTeamSettings,
+  })
+  const [error, setError] = useState<string | null>(null)
+  const [customModel, setCustomModel] = useState<string | null>(null)
+  const selectedModel = settings.data?.transcription_model ?? "gpt-transcribe"
+  const preset = TRANSCRIPTION_MODELS.some(
+    (model) => model.value === selectedModel
+  )
+  const save = useMutation({
+    mutationFn: api.saveTranscriptionModel,
+    onSuccess: (saved) => {
+      qc.setQueryData(["teamSettings"], saved)
+      setError(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  return (
+    <SettingsSection
+      title="Voice dictation"
+      description="Configure speech-to-text for the web and desktop message composer. Uses the same OpenAI API key and base URL as OpenAI LLMs."
+    >
+      <SettingsRow
+        label="Transcription model"
+        description="GPT Transcribe is OpenAI's recommended model for recorded speech."
+        control={
+          <Select
+            value={preset && customModel === null ? selectedModel : "custom"}
+            onValueChange={(model) => {
+              if (model === null) return
+              if (model === "custom")
+                setCustomModel(preset ? "" : selectedModel)
+              else {
+                setCustomModel(null)
+                save.mutate(model)
+              }
+            }}
+            disabled={!settings.data || save.isPending}
+          >
+            <SelectTrigger className="w-56">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TRANSCRIPTION_MODELS.map((model) => (
+                <SelectItem key={model.value} value={model.value}>
+                  {model.label}
+                </SelectItem>
+              ))}
+              <SelectItem value="custom">Custom model</SelectItem>
+            </SelectContent>
+          </Select>
+        }
+      />
+      {(!preset || customModel !== null) && (
+        <SettingsRow
+          label="Custom model ID"
+          control={
+            <div className="flex items-center gap-2">
+              <Input
+                className="w-56"
+                value={customModel ?? selectedModel}
+                onChange={(event) => setCustomModel(event.target.value)}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!customModel?.trim() || save.isPending}
+                onClick={() => customModel && save.mutate(customModel.trim())}
+              >
+                Save
+              </Button>
+            </div>
+          }
+        />
+      )}
+      {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+    </SettingsSection>
+  )
+}
+
 function FableSection() {
   const qc = useQueryClient()
   const settings = useQuery({
@@ -849,6 +941,22 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
               ...settings.data,
               default_agent_subagent_model: model,
               default_agent_subagent_reasoning_effort: effort,
+            })
+          }
+          disabled={!settings.data || save.isPending}
+        />
+        <RolePicker
+          label="Thread title generation"
+          description="Model used to name new agent threads in the background."
+          models={models}
+          model={settings.data?.default_thread_title_model ?? null}
+          effort={settings.data?.default_thread_title_reasoning_effort ?? null}
+          onChange={(model, effort) =>
+            settings.data &&
+            save.mutate({
+              ...settings.data,
+              default_thread_title_model: model,
+              default_thread_title_reasoning_effort: effort,
             })
           }
           disabled={!settings.data || save.isPending}

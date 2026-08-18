@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Literal, cast
+from typing import Any, Literal, cast
 from unittest.mock import AsyncMock, call, patch
 
 import pytest
@@ -10,6 +8,16 @@ from langchain_core.tools import StructuredTool
 from agent import server
 from agent.dashboard.team_credentials import DatadogCredentials, LangSmithCredentials
 from agent.integrations import datadog_mcp, langsmith_tools, notion_mcp
+
+
+@pytest.fixture(autouse=True)
+def _resolve_participant():
+    """Tools resolve the acting participant at call time; tests act as "alice"."""
+    with (
+        patch.object(notion_mcp, "resolve_participant", AsyncMock(return_value="alice")),
+        patch.object(langsmith_tools, "resolve_participant", AsyncMock(return_value="alice")),
+    ):
+        yield
 
 
 @pytest.mark.asyncio
@@ -84,7 +92,10 @@ async def test_load_notion_tools_returns_wrappers() -> None:
     assert len(tools) == 1
     assert tools[0].name == "notion_search"
     assert tools[0].description == discovered.description
-    assert tools[0].args_schema == discovered.args_schema
+    schema = cast("dict[str, Any]", tools[0].args_schema)
+    assert "query" in schema["properties"]
+    assert "on_behalf_of" in schema["properties"]
+    assert "on_behalf_of" in schema["required"]
     assert tools[0].response_format == "content"
 
 
@@ -100,7 +111,7 @@ async def test_notion_wrapper_normalizes_content_and_artifact_tools() -> None:
     ):
         tools = await notion_mcp.load_notion_tools("alice")
         assert tools[0].response_format == "content"
-        result = await tools[0].ainvoke({"query": "roadmap"})
+        result = await tools[0].ainvoke({"on_behalf_of": "alice", "query": "roadmap"})
     assert result == {"query": "roadmap", "token": "fresh-token"}
 
 
@@ -113,7 +124,7 @@ async def test_notion_wrapper_refreshes_token_at_call_time() -> None:
         patch.object(notion_mcp, "_build_mcp_tools", build_tools),
     ):
         tools = await notion_mcp.load_notion_tools("alice")
-        result = await tools[0].ainvoke({"query": "roadmap"})
+        result = await tools[0].ainvoke({"on_behalf_of": "alice", "query": "roadmap"})
     assert result == {"query": "roadmap", "token": "fresh-token"}
     assert get_token.await_count == 2
     assert [call.args[0] for call in build_tools.await_args_list] == [
@@ -132,22 +143,36 @@ async def test_notion_wrapper_fails_when_token_missing_at_call_time() -> None:
     ):
         tools = await notion_mcp.load_notion_tools("alice")
         with pytest.raises(RuntimeError, match="Notion MCP authorization unavailable"):
-            await tools[0].ainvoke({"query": "roadmap"})
+            await tools[0].ainvoke({"on_behalf_of": "alice", "query": "roadmap"})
     assert build_tools.await_count == 1
 
 
 @pytest.mark.asyncio
 async def test_load_langsmith_tools_empty_when_not_connected() -> None:
-    with patch.object(langsmith_tools, "get_langsmith_credentials", AsyncMock(return_value=None)):
-        assert await langsmith_tools.load_langsmith_tools() == []
+    with (
+        patch.object(
+            langsmith_tools, "get_user_langsmith_credentials", AsyncMock(return_value=None)
+        ),
+        patch.object(
+            langsmith_tools, "get_team_langsmith_credentials", AsyncMock(return_value=None)
+        ),
+    ):
+        assert await langsmith_tools.load_langsmith_tools("alice") == []
 
 
 @pytest.mark.asyncio
 async def test_load_langsmith_tools_names() -> None:
     creds = LangSmithCredentials(api_key="k", endpoint="https://api.smith.langchain.com")
-    with patch.object(langsmith_tools, "get_langsmith_credentials", AsyncMock(return_value=creds)):
-        tools = await langsmith_tools.load_langsmith_tools()
+    team_credentials = AsyncMock()
+    with (
+        patch.object(
+            langsmith_tools, "get_user_langsmith_credentials", AsyncMock(return_value=creds)
+        ),
+        patch.object(langsmith_tools, "get_team_langsmith_credentials", team_credentials),
+    ):
+        tools = await langsmith_tools.load_langsmith_tools("alice")
     assert {t.name for t in tools} == {"langsmith_get_trace", "langsmith_list_runs"}
+    team_credentials.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -177,10 +202,13 @@ async def test_langsmith_get_trace_serializes() -> None:
             assert run_id == "run-1"
             return _Run()
 
-    tools = langsmith_tools._make_tools(creds)
+    tools = langsmith_tools._make_tools(allow_team=True)
     get_trace = next(t for t in tools if t.name == "langsmith_get_trace")
-    with patch.object(langsmith_tools, "_client", lambda _c: _FakeClient()):
-        result = await get_trace.ainvoke({"run_id": "run-1"})
+    with (
+        patch.object(langsmith_tools, "_creds_for", AsyncMock(return_value=creds)),
+        patch.object(langsmith_tools, "_client", lambda _c: _FakeClient()),
+    ):
+        result = await get_trace.ainvoke({"on_behalf_of": "octo", "run_id": "run-1"})
     assert result["success"] is True
     assert result["run"]["name"] == "my-run"
     assert result["run"]["trace_id"] == "trace-1"
@@ -204,10 +232,15 @@ async def test_langsmith_list_runs_caps_limit() -> None:
             return
             yield
 
-    tools = langsmith_tools._make_tools(creds)
+    tools = langsmith_tools._make_tools(allow_team=True)
     list_runs = next(t for t in tools if t.name == "langsmith_list_runs")
-    with patch.object(langsmith_tools, "_client", lambda _c: _FakeClient()):
-        result = await list_runs.ainvoke({"project_name": "p", "limit": 9999})
+    with (
+        patch.object(langsmith_tools, "_creds_for", AsyncMock(return_value=creds)),
+        patch.object(langsmith_tools, "_client", lambda _c: _FakeClient()),
+    ):
+        result = await list_runs.ainvoke(
+            {"on_behalf_of": "octo", "project_name": "p", "limit": 9999}
+        )
     assert result["success"] is True
     assert captured["limit"] == langsmith_tools._MAX_LIST_RUNS
 
@@ -218,7 +251,7 @@ async def test_load_observability_tools_skipped_when_unauthorized() -> None:
         patch.object(server, "load_datadog_tools", AsyncMock(return_value=["dd"])),
         patch.object(server, "load_langsmith_tools", AsyncMock(return_value=["ls"])),
     ):
-        assert await server._load_observability_tools(authorized=False) == []
+        assert await server._load_observability_tools(authorized=False, profile_login=None) == []
 
 
 @pytest.mark.asyncio
@@ -227,7 +260,10 @@ async def test_load_observability_tools_loaded_when_authorized() -> None:
         patch.object(server, "load_datadog_tools", AsyncMock(return_value=["dd"])),
         patch.object(server, "load_langsmith_tools", AsyncMock(return_value=["ls"])),
     ):
-        assert await server._load_observability_tools(authorized=True) == ["dd", "ls"]
+        assert await server._load_observability_tools(authorized=True, profile_login="alice") == [
+            "dd",
+            "ls",
+        ]
 
 
 @pytest.mark.asyncio

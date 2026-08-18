@@ -14,8 +14,6 @@ GitHub-backed tools never receive a user credential.
 """
 # ruff: noqa: E402
 
-from __future__ import annotations
-
 import logging
 import warnings
 from typing import Any, cast
@@ -50,6 +48,7 @@ from .middleware import (
     ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
     SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
@@ -96,6 +95,7 @@ def _chat_general_purpose_subagent() -> SubAgent:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 FilesystemMiddleware(tools=["read_file", "ls", "glob", "grep"]),
+                SanitizeOpenAIResponsesMiddleware(),
                 ModelCallTimeoutMiddleware(),
             ],
         ),
@@ -132,7 +132,7 @@ Guidance:
 
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )
@@ -140,7 +140,7 @@ async def _cached_gateway_enabled() -> bool:
 
 async def _cached_team_chat_model() -> tuple[str, str]:
     return await ttl_cache.cached(
-        f"team-default-model:chat:{id(get_team_default_model)}",
+        "team-default-model:chat",
         60,
         lambda: get_team_default_model("chat"),
     )
@@ -254,6 +254,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),
                 SanitizeFireworksMessagesMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 ModelCallTimeoutMiddleware(),
             ],

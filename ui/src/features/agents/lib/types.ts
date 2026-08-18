@@ -18,6 +18,18 @@ export type AgentStatus =
 export type AgentSource =
   "dashboard" | "github" | "slack" | "linear" | "schedule"
 
+export type AgentThreadCategory =
+  "interactive" | "issue" | "pull_request" | "automation" | "review" | "system"
+
+export type AgentTriggerKind =
+  | "user"
+  | "schedule"
+  | "schedule_test"
+  | "wakeup"
+  | "reviewer"
+  | "analyzer"
+  | "ci_autofix"
+
 export interface TodoItem {
   content: string
   status: TodoStatus
@@ -55,6 +67,13 @@ export interface DiffData {
   totalLines: number
 }
 
+export interface OutputIframeDisplay {
+  type: "output_iframe"
+  html: string
+  title: string
+  filename: string
+}
+
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
@@ -65,19 +84,43 @@ export interface ToolExecutionChunk {
   input?: Record<string, unknown>
   status: AcpToolStatus
   output?: string
+  display?: OutputIframeDisplay
   elapsedMs?: number
   approvalRequestId?: string
   diffData?: DiffData
   diffs?: Array<DiffData>
   locations?: Array<AcpToolLocation>
   /**
-   * Namespace of the subagent this `task` call spawned, from the SDK's
-   * `stream.subagents` discovery map (correlated by tool-call id). Present only
-   * for `toolKind: "task"` chunks whose subagent the SDK has discovered; lets
-   * the UI open a scoped `useToolCalls(stream, { namespace })` subscription to
-   * show the subagent's nested activity.
+   * The subagent this `task` call spawned, from the SDK's `stream.subagents`
+   * discovery map (correlated by tool-call id). Present only for
+   * `toolKind: "task"` chunks whose subagent the SDK has discovered.
    */
-  subagentNamespace?: Array<string>
+  subagent?: SubagentInfo
+}
+
+/**
+ * Projection of the SDK's `SubagentDiscoverySnapshot` onto the chunk model.
+ * `Date`s are flattened to ISO strings so a chunk stays structurally
+ * comparable (memoized render items) and serializable.
+ */
+export interface SubagentInfo {
+  /**
+   * Event namespace for this subagent. Scopes a `useToolCalls(stream, {
+   * namespace })` subscription to exactly this subagent's nested activity.
+   */
+  namespace: Array<string>
+  /** Subagent type, e.g. `"researcher"`. */
+  name: string
+  /** Nesting depth from the root agent (a root-spawned subagent is 1). */
+  depth: number
+  /** Tool-call id of the spawning subagent, or `null` when spawned by the root. */
+  parentId: string | null
+  startedAt?: string
+  /** Absent while the subagent is still running. */
+  completedAt?: string
+  /** The subagent's final output, once it completed. */
+  result?: string
+  error?: string
 }
 
 export interface TextChunk {
@@ -154,6 +197,8 @@ export interface Project {
   gitBranch?: string
 }
 
+export type SlackNotificationMode = "always" | "on_action"
+
 export interface AgentSchedule {
   id: string
   name: string
@@ -161,6 +206,7 @@ export interface AgentSchedule {
   schedule: string
   repo: string | null
   slackChannelId?: string | null
+  slackNotificationMode: SlackNotificationMode
   model: string
   effort?: string | null
   enabled: boolean
@@ -217,12 +263,19 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
+  workingRepoFullName?: string | null
   branch: string
   model: string
   effort?: string | null
   planMode?: boolean
   planStatus?: string | null
+  adminThread?: boolean
   source?: AgentSource
+  origin?: AgentSource | string
+  threadCategory?: AgentThreadCategory | string
+  triggerKind?: AgentTriggerKind | string
+  automationId?: string | null
+  automationName?: string | null
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null

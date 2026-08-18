@@ -11,8 +11,6 @@ Writes are best-effort and deterministic (one example id per
 updates in place instead of duplicating.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os
@@ -80,7 +78,8 @@ def _outcomes_credentials() -> tuple[str, str] | None:
 
 async def _find_dataset(client: AsyncLangSmithClient) -> Any:
     async for dataset in client.list_datasets(dataset_name=OUTCOMES_DATASET_NAME):
-        return dataset
+        if dataset.name == OUTCOMES_DATASET_NAME:
+            return dataset
     return None
 
 

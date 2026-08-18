@@ -1,7 +1,5 @@
 """Tool that schedules a one-shot re-trigger of the current agent thread."""
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -10,6 +8,7 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 from langgraph_sdk.schema import Config
 
+from ..utils.slack import get_active_slack_thread
 from ..utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
@@ -198,6 +197,14 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         value = configurable.get(key)
         if value is not None:
             wakeup_configurable[key] = value
+    slack_thread = configurable.get("slack_thread")
+    active = await get_active_slack_thread(
+        get_client(url=langgraph_url()),
+        thread_id,
+        slack_thread if isinstance(slack_thread, dict) else None,
+    )
+    if active:
+        wakeup_configurable["slack_thread"] = active
 
     await _purge_expired_wakeups_best_effort()
 

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import importlib
 from typing import Any
 
@@ -50,12 +48,29 @@ async def test_slack_add_reaction_accepts_explicit_message_and_normalizes_emoji(
     monkeypatch.setattr(slack_reaction_tool, "get_config", _config)
     monkeypatch.setattr(slack_reaction_tool, "add_slack_reaction", fake_add_slack_reaction)
 
-    result = await slack_reaction_tool.slack_add_reaction(
-        emoji=":white_check_mark:", message_ts="1.2"
-    )
+    result = await slack_reaction_tool.slack_add_reaction(emoji=":eyes:", message_ts="1.2")
 
     assert result == {"success": True}
-    assert captured == {"channel_id": "C1", "message_ts": "1.2", "emoji": "white_check_mark"}
+    assert captured == {"channel_id": "C1", "message_ts": "1.2", "emoji": "eyes"}
+
+
+@pytest.mark.parametrize("emoji", ["white_check_mark", ":white_check_mark:"])
+async def test_slack_add_reaction_rejects_white_check_mark(
+    monkeypatch: pytest.MonkeyPatch,
+    emoji: str,
+) -> None:
+    async def fail_if_called(channel_id: str, message_ts: str, reaction: str) -> bool:
+        pytest.fail(f"unexpected Slack reaction: {channel_id} {message_ts} {reaction}")
+
+    monkeypatch.setattr(slack_reaction_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reaction_tool, "add_slack_reaction", fail_if_called)
+
+    result = await slack_reaction_tool.slack_add_reaction(emoji=emoji)
+
+    assert result == {
+        "success": False,
+        "error": "white_check_mark is not allowed because it can imply PR approval",
+    }
 
 
 async def test_slack_add_reaction_requires_slack_channel(monkeypatch: pytest.MonkeyPatch) -> None:

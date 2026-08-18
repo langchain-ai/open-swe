@@ -1,10 +1,19 @@
 """Shared pytest fixtures."""
 
-from __future__ import annotations
+from collections.abc import Iterator
 
 import pytest
 
+from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
+
+
+@pytest.fixture(autouse=True)
+def _reset_ttl_cache() -> Iterator[None]:
+    """Keep the process-global TTL cache from leaking team settings between tests."""
+    ttl_cache.clear()
+    yield
+    ttl_cache.clear()
 
 
 @pytest.fixture(autouse=True)

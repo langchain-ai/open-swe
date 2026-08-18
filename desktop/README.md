@@ -6,21 +6,13 @@
 The Electron package ships the compiled Open SWE web UI. Users configure only the URL of a
 compatible Open SWE backend; they do not need a separately hosted dashboard.
 
-Desktop users can choose **This Mac** in the new-task composer to run Open SWE directly in a
-selected local project. Electron supervises one local LangGraph process bound to a random
-`127.0.0.1` port and protects it with a per-launch bearer token. The renderer reaches it only through
-the same-origin `/local-graph/*` protocol route, so neither the token nor the raw port enters browser
-state. Source launches run the repository graph with `uv`; packaged apps use the bundled Python
-runtime and local backend built by `build:local-backend`. No `dcode` installation is required; local
-model credentials are read from the environment that launched Open SWE.
+Desktop users can choose **This Mac** in the new-task composer to run the same Open SWE LangGraph agent over a selected local project. Electron owns a loopback-only LangGraph server, proxies it to the bundled UI, and stops it with the app. Local threads use the same streaming protocol, graph, tools, subagents, and middleware assembly as cloud threads; only the filesystem backend and unavailable cloud integrations differ.
 
-Added projects, LangGraph state, and local thread metadata are atomically persisted under Electron
-`userData`. Local threads retain their model, effort, pending first prompt, status, and git checkpoint
-across restarts;
-an interrupted running thread is reconciled to `error`. Project paths are realpath-checked against
-the desktop project allowlist before thread creation and again by the local graph. The side panel's
-**Changes** tab diffs the project against the retained git checkpoint. Checkpoint refs survive app
-quit and are removed only when the user explicitly deletes the local thread.
+The packaged app bundles its Python runtime and locked Open SWE dependencies. Source development uses `uv run langgraph dev`. Provider credentials stay in the local LangGraph process and are not inherited by agent shell commands. Added projects and local thread history are persisted in the desktop app's local data.
+
+The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
+started, so it shows what the agent changed and not the working tree's prior state. It also shows
+the current branch and discovers its pull request when the GitHub CLI is installed and authenticated.
 
 ## How it connects
 
@@ -37,14 +29,25 @@ The backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` 
 Set `ALLOWED_GITHUB_ORGS` on the backend to prevent GitHub users outside the organization from
 creating dashboard sessions.
 
-## Local development
+## Install on macOS
 
-Install both packages, run the backend at `http://localhost:2024`, then start Electron:
+Install Git, Node.js 22, and `uv`, clone this repository, then run this from its root:
 
 ```bash
-pnpm --dir ui install
-pnpm --dir desktop install
-pnpm --dir desktop run dev
+make install-desktop
+```
+
+The command fast-forwards to the latest `main`, builds Open SWE Desktop, and installs it in
+`/Applications` (or `~/Applications` when needed). Run it again to update and replace the app; saved
+backend settings, login sessions, and projects are preserved.
+
+## Local development
+
+Install the workspace dependencies, run the backend at `http://localhost:2024`, then start Electron:
+
+```bash
+pnpm install                  # from the repo root
+pnpm run dev:desktop
 ```
 
 Source launches use an isolated `Open SWE Development` Electron profile, so the dev app can run
@@ -52,12 +55,9 @@ beside an installed `Open SWE` app without sharing its login session, backend co
 projects, or single-instance lock. The dev window is labeled **Open SWE Development**; its first
 launch may require signing in and adding projects again.
 
-Install `uv`, sync the repository Python environment, and set the selected model provider's API key
-in the environment before starting the desktop app. Electron starts
-`uv run langgraph dev --config langgraph.desktop.json` on demand for local threads.
+A separate agent installation is not required. Confirm `uv --version` succeeds before starting the desktop app in development.
 
-Development defaults to `http://localhost:2024` for cloud/dashboard traffic. Point to another
-backend with:
+Development defaults to `http://localhost:2024`. Point to another backend with:
 
 ```bash
 pnpm --dir desktop run start -- --backend-url=https://open-swe-api.example.com
@@ -74,10 +74,8 @@ pnpm --dir desktop run pack # unpacked application for the current platform
 pnpm --dir desktop run dist # installer for the current platform
 ```
 
-Both commands build `ui/`, run `build:local-backend` to assemble a platform-specific managed Python
-runtime with the Open SWE package, and package both resources with Electron. Build outputs are
-written to `desktop/dist/`. Packaging therefore requires `uv` and network access to download the
-managed Python runtime and locked Python dependencies.
+Both commands build `ui/` and package its static output with Electron. Build outputs are written
+to `desktop/dist/`.
 
 ## macOS releases
 

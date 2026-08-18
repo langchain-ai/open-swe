@@ -2,7 +2,11 @@ import type {
   AcpToolStatus,
   ToolExecutionChunk,
 } from "@/features/agents/lib/types"
-import { formatToolDisplayParts } from "@/features/agents/components/chat/toolExecutionDisplay"
+import {
+  formatPathDisplayParts,
+  formatToolDisplayParts,
+} from "@/features/agents/components/chat/toolExecutionDisplay"
+import { countLineChanges } from "@/features/agents/utils/diffStats"
 
 export type WorkEntryIconName =
   | "bot"
@@ -24,6 +28,8 @@ export interface WorkEntryView {
   heading: string
   /** Dimmed argument shown after the heading; null when it would just repeat it. */
   preview: string | null
+  previewTooltip?: string
+  diffStats?: { additions: number; deletions: number }
   tone: WorkEntryTone
   status: AcpToolStatus
   /** Plain-text detail for rows that have no richer renderer of their own. */
@@ -140,10 +146,15 @@ export function describeWorkEntry(
             ? "Created"
             : "Edited"
           : "Editing"
+    const pathDisplay = formatPathDisplayParts(heading, diff.filePath)
     return {
       icon: "square-pen",
-      heading,
-      preview: stripProjectPath(diff.filePath, projectPath),
+      ...pathDisplay,
+      diffStats: countLineChanges(
+        diff.originalContent,
+        diff.newContent,
+        diff.filePath
+      ),
       tone: toneForChunk(chunk),
       status: chunk.status,
       // The diff itself is the body; a text dump alongside it would be noise.
@@ -151,7 +162,7 @@ export function describeWorkEntry(
     }
   }
 
-  const { heading, preview } = formatToolDisplayParts(
+  const { heading, preview, previewTooltip } = formatToolDisplayParts(
     chunk.title,
     chunk.toolKind,
     chunk.input,
@@ -167,6 +178,7 @@ export function describeWorkEntry(
       normalizeForCompare(resolvedPreview) !== normalizeForCompare(heading)
         ? resolvedPreview
         : null,
+    previewTooltip,
     tone: toneForChunk(chunk),
     status: chunk.status,
     expandedText: expandedTextForChunk(chunk, projectPath),

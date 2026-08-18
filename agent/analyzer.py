@@ -10,8 +10,6 @@ on public repos even when the GitHub App is not installed on them.
 """
 # ruff: noqa: E402
 
-from __future__ import annotations
-
 import logging
 import os
 import warnings
@@ -37,6 +35,7 @@ from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     BasePrepareRunMiddleware,
     PrepareRunState,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeToolInputsMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
@@ -70,7 +69,7 @@ STYLE_ANALYZER_MODEL_CALL_LIMIT = 80
 STYLE_ANALYZER_PROMPT = """You are a code-review style analyst for `{repo_owner}/{repo_name}`.
 
 Sandbox: `{working_dir}`. Use the shell (``execute``) to run GitHub commands.
-**Always invoke gh as:** `GH_TOKEN=dummy gh <command>`.
+`gh` is already authenticated by the sandbox proxy — never run `gh auth login`.
 
 Your job is to produce/refine the per-repo review-style prompt and persist it with
 `save_review_style_prompt`.
@@ -102,7 +101,7 @@ async def _configure_sandbox_github_proxy(
 
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )
@@ -202,6 +201,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
                 ),
                 ToolErrorMiddleware(),
                 TimeoutWrapupMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
             ],
         ),
     ).with_config(config)

@@ -1,7 +1,5 @@
 """Tests for the Slack account-link prompt."""
 
-from __future__ import annotations
-
 from typing import TypedDict
 
 import pytest
@@ -29,7 +27,7 @@ def test_account_link_prompt_posts_generic_token_free_link(
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
     calls: dict[str, _Reply] = {}
 
-    async def fake_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+    async def fake_reply(channel_id: str, thread_ts: str, text: str, **kwargs: object) -> bool:
         calls["reply"] = {"channel_id": channel_id, "thread_ts": thread_ts, "text": text}
         return True
 
@@ -52,7 +50,7 @@ def test_account_link_prompt_revoked_wording(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
     calls: dict[str, str] = {}
 
-    async def fake_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+    async def fake_reply(channel_id: str, thread_ts: str, text: str, **kwargs: object) -> bool:
         calls["text"] = text
         return True
 
@@ -74,7 +72,7 @@ def test_account_link_prompt_skips_when_dashboard_url_unset(
     monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
     posted = False
 
-    async def fake_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+    async def fake_reply(channel_id: str, thread_ts: str, text: str, **kwargs: object) -> bool:
         nonlocal posted
         posted = True
         return True

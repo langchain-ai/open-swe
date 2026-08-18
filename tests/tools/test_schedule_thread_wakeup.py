@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import importlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -19,7 +17,11 @@ def _stub_purge(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _noop() -> None:
         return None
 
+    async def _active(client: Any, thread_id: str, fallback: Any) -> Any:
+        return fallback
+
     monkeypatch.setattr(wakeup_tool, "_purge_expired_wakeups_best_effort", _noop)
+    monkeypatch.setattr(wakeup_tool, "get_active_slack_thread", _active)
 
 
 class _FakeCrons:
@@ -164,52 +166,6 @@ async def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPat
     assert captured["fire_time"].microsecond == 0
 
 
-async def test_schedule_thread_wakeup_uses_default_prompt_when_none(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    async def fake_create_wakeup_cron(
-        *,
-        thread_id: str,
-        fire_time: datetime,
-        prompt: str,
-        configurable: dict[str, Any],
-    ) -> dict[str, Any]:
-        captured["prompt"] = prompt
-        return {"success": True, "cron_id": "cron-1", "scheduled_for": "", "thread_id": thread_id}
-
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
-    monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
-
-    result = await wakeup_tool.schedule_thread_wakeup(5)
-    assert result["success"] is True
-    assert "automated re-trigger" in captured["prompt"].lower()
-
-
-async def test_schedule_thread_wakeup_uses_default_prompt_when_blank(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    async def fake_create_wakeup_cron(
-        *,
-        thread_id: str,
-        fire_time: datetime,
-        prompt: str,
-        configurable: dict[str, Any],
-    ) -> dict[str, Any]:
-        captured["prompt"] = prompt
-        return {"success": True, "cron_id": "cron-1", "scheduled_for": "", "thread_id": thread_id}
-
-    monkeypatch.setattr(wakeup_tool, "get_config", _config)
-    monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
-
-    result = await wakeup_tool.schedule_thread_wakeup(5, prompt="   ")
-    assert result["success"] is True
-    assert "automated re-trigger" in captured["prompt"].lower()
-
-
 async def test_schedule_thread_wakeup_returns_error_on_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -230,8 +186,10 @@ async def test_schedule_thread_wakeup_returns_error_on_exception(
     assert "connection refused" in result["error"]
 
 
-async def test_schedule_thread_wakeup_does_not_pass_none_configurable_keys(
+@pytest.mark.parametrize("prompt", [None, "   "])
+async def test_schedule_thread_wakeup_defaults_prompt_and_omits_none_configurable_keys(
     monkeypatch: pytest.MonkeyPatch,
+    prompt: str | None,
 ) -> None:
     captured: dict[str, Any] = {}
 
@@ -243,17 +201,19 @@ async def test_schedule_thread_wakeup_does_not_pass_none_configurable_keys(
         configurable: dict[str, Any],
     ) -> dict[str, Any]:
         captured["configurable"] = configurable
+        captured["prompt"] = prompt
         return {"success": True, "cron_id": "cron-1", "scheduled_for": "", "thread_id": thread_id}
 
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 
-    result = await wakeup_tool.schedule_thread_wakeup(5)
+    result = await wakeup_tool.schedule_thread_wakeup(5, prompt=prompt)
     assert result["success"] is True
     cfg = captured["configurable"]
     assert "linear_issue" not in cfg
     assert "schedule_id" not in cfg
     assert cfg["thread_id"] == "test-thread-123"
+    assert "automated re-trigger" in captured["prompt"].lower()
 
 
 def test_ceil_to_next_minute_keeps_exact_minute() -> None:

@@ -7,8 +7,6 @@ safety net: find busy threads, look for stale ``pending`` runs on them, and
 cancel the ones older than ``max_age_seconds`` so the thread frees up.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime
 from typing import Any

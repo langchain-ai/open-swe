@@ -1,7 +1,5 @@
 """Profile lookup + override helpers consumed by ``agent.server.get_agent``."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -85,16 +83,6 @@ async def load_profile(login: str) -> dict[str, Any] | None:
         return None
     value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
     return value if isinstance(value, dict) else None
-
-
-def profile_create_prs(profile: dict[str, Any] | None) -> bool:
-    """Return whether the agent should always open a PR. Defaults to False."""
-    if not isinstance(profile, dict):
-        return False
-    value = profile.get("create_prs")
-    if isinstance(value, bool):
-        return value
-    return False
 
 
 def profile_draft_prs(profile: dict[str, Any] | None) -> bool:
