@@ -35,6 +35,27 @@ ContentBlocks = str | list[dict[str, Any]]
 RunInput = dict[str, Any]
 RunConfig = dict[str, Any]
 
+# `@langchain/react` subscribes to `messages`, `tools`, `lifecycle`, etc.;
+# legacy `messages-tuple`-only runs emit almost nothing on those channels. Every
+# run the dashboard can render must therefore carry the full set, whether it was
+# started from the UI or from a webhook.
+DASHBOARD_STREAM_MODES: tuple[str, ...] = (
+    "values",
+    "updates",
+    "messages",
+    "messages-tuple",
+    "tools",
+    "checkpoints",
+    "events",
+)
+
+# `runs.create` validates against a narrower enum than the streaming endpoints:
+# it has no `tools` mode (the client assembles tool calls from `messages`), and
+# passing it 422s the whole run.
+RUN_CREATE_STREAM_MODES: tuple[str, ...] = tuple(
+    mode for mode in DASHBOARD_STREAM_MODES if mode != "tools"
+)
+
 # FastAPI route the platform POSTs run completion/failure to. The platform
 # rejects loopback webhooks (relative URLs / localhost) — they bypass auth via
 # the in-process ASGI transport — so a loopback URL would 422 *every* run at
@@ -122,6 +143,7 @@ async def create_durable_run(
     if_not_exists: str = "create",
     stream_mode: Any | None = None,
     stream_resumable: bool = True,
+    stream_subgraphs: bool = True,
     after_seconds: int | float | None = None,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
@@ -133,11 +155,14 @@ async def create_durable_run(
         "durability": durability,
         "if_not_exists": if_not_exists,
         "stream_resumable": stream_resumable,
+        # Subagents run as subgraphs, and the server streams only the top graph
+        # by default — without this their tool calls never reach the dashboard,
+        # so a subagent card can show that it is running but never what it did.
+        "stream_subgraphs": stream_subgraphs,
     }
+    create_kwargs["stream_mode"] = list(stream_mode or RUN_CREATE_STREAM_MODES)
     if COMPLETION_WEBHOOK_URL:
         create_kwargs["webhook"] = COMPLETION_WEBHOOK_URL
-    if stream_mode is not None:
-        create_kwargs["stream_mode"] = stream_mode
     if after_seconds is not None:
         create_kwargs["after_seconds"] = after_seconds
 
