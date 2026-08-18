@@ -110,8 +110,9 @@ export function splitPromptIntoSegments(
   for (const match of prompt.matchAll(SKILL_TOKEN_REGEX)) {
     const prefix = match[1] ?? ""
     const name = match[2] ?? ""
-    if (skillNames && !skillNames.has(name)) continue
     const start = match.index + prefix.length
+    if (skillNames ? !skillNames.has(name) : prompt.slice(0, start).trim())
+      continue
     skills.push({
       name,
       source: `/${name}`,

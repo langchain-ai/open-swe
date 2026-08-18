@@ -4,6 +4,7 @@ import { useRef, useState } from "react"
 import { act, cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { SkillPromptText } from "../SkillBadge"
 import { ComposerPromptEditor } from "./ComposerPromptEditor"
 import type { ComposerPromptEditorHandle } from "./ComposerPromptEditor"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -71,6 +72,12 @@ describe("ComposerPromptEditor", () => {
     })
 
     expect(screen.getByText("/autopilot")).toBeTruthy()
+  })
+
+  it("does not badge slash paths in ordinary message text", () => {
+    render(<SkillPromptText text="check /workspace" />)
+    expect(screen.queryByText("/workspace")).toBeNull()
+    expect(screen.getByText("check /workspace")).toBeTruthy()
   })
 
   it("renders a file link as a chip whose text content is the original source", () => {
