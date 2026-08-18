@@ -14,6 +14,7 @@ import { ThinkingSpinner } from "./ThinkingSpinner"
 import { UserMessage } from "./UserMessage"
 import type { MessagesProps } from "./types"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
 const BOTTOM_LOCK_THRESHOLD_PX = 24
@@ -63,6 +64,7 @@ function QueuedMessages({
 export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
+  showPlanArtifact = false,
   queuedMessages = [],
   isStreaming,
   streamIsLoading,
@@ -289,6 +291,9 @@ export const Messages = memo(function MessagesComponent({
                 />
               )
             })}
+            {threadId && showPlanArtifact && (
+              <InlinePlanArtifact threadId={threadId} />
+            )}
             <QueuedMessages queuedMessages={queuedMessages} />
             <ThinkingSpinner
               isActive={isThinking ?? streamIsLoading ?? isStreaming}

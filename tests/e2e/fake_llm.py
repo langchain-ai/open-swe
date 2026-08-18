@@ -224,23 +224,44 @@ def _desktop_reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.md"
+PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.html"
 
-PLAN_MARKDOWN = """## Plan: Add greet() helper
-
-### Overview
-Add a tiny greeting helper to the demo repo.
-
-### Files to change
-- `greet.py` — new module exposing a `greet(name)` function.
-
-### Steps
-1. Create `greet.py` with a `greet(name)` function.
-2. Open a draft PR with the change.
-
-### Verification
-- Import `greet` and confirm it returns the expected string.
-"""
+PLAN_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Greeting Blueprint</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&amp;family=Newsreader:opsz,wght@6..72,600&amp;display=swap">
+  <style>
+    :root { --ground: #f3f7f6; --surface: #ffffff; --ink: #17312c; --muted: #526b66; --accent: #087f6c; --rule: #bfd3ce; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ground: #10201d; --surface: #172b27; --ink: #e4f2ee; --muted: #a6c0b9; --accent: #5bd5bd; --rule: #35534c; } }
+    :root[data-theme="dark"] { --ground: #10201d; --surface: #172b27; --ink: #e4f2ee; --muted: #a6c0b9; --accent: #5bd5bd; --rule: #35534c; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.6 Georgia, serif; }
+    main { width: min(100% - 40px, 760px); margin: 0 auto; padding: 48px 0 72px; display: grid; gap: 28px; }
+    header { display: grid; gap: 8px; border-bottom: 2px solid var(--accent); padding-bottom: 20px; }
+    h1, h2, p { margin: 0; }
+    h1, h2 { font-family: Newsreader, Georgia, serif; text-wrap: balance; }
+    h1 { font-size: clamp(2rem, 7vw, 4rem); line-height: .95; }
+    h2 { font-size: 1.35rem; }
+    .eyebrow { color: var(--accent); font: 500 .75rem/1.4 "IBM Plex Mono", monospace; letter-spacing: .12em; text-transform: uppercase; }
+    .summary { max-width: 62ch; color: var(--muted); }
+    section { display: grid; gap: 12px; padding: 20px; border: 1px solid var(--rule); background: var(--surface); }
+    ul, ol { margin: 0; padding-left: 1.4rem; }
+    code { font-family: "IBM Plex Mono", monospace; color: var(--accent); }
+    :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header><p class="eyebrow">Implementation plan</p><h1>Add greet() helper</h1><p class="summary">Add a tiny, tested greeting helper to the demo repository.</p></header>
+    <section><h2>Approach</h2><ol><li>Create <code>greet.py</code> with <code>greet(name)</code>.</li><li>Open a draft PR with the focused change.</li></ol></section>
+    <section><h2>Verification</h2><ul><li>Import <code>greet</code> and confirm it returns the expected string.</li></ul></section>
+  </main>
+</body>
+</html>"""
 
 
 def _plan_link_step(messages: list[BaseMessage]) -> AIMessage:
@@ -274,7 +295,7 @@ def _write_plan_step(_messages: list[BaseMessage]) -> AIMessage:
         tool_calls=[
             {
                 "name": "write_file",
-                "args": {"file_path": PLAN_FILE_PATH, "content": PLAN_MARKDOWN},
+                "args": {"file_path": PLAN_FILE_PATH, "content": PLAN_HTML},
                 "id": "call-write-plan",
             }
         ],

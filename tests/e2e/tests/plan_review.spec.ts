@@ -8,7 +8,7 @@ import {
 // Full plan-review flow, driven through the mock Slack UI + the real dashboard:
 //   user asks Open SWE in Slack to PLAN something ->
 //   agent calls enter_plan_mode, posts the plan-review link to Slack, writes the
-//   plan as a markdown file (save_plan), and posts "ready" back to Slack ->
+//   plan as a self-contained HTML file (save_plan), and posts "ready" back to Slack ->
 //   owner (user1) and a collaborator (user2) open the plan and leave whole-document
 //   comments over plain HTTP (each polls and sees the other's) ->
 //   only the owner can approve -> on approval the agent implements, opens a PR,
@@ -166,12 +166,12 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(loggedOut.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(loggedOut.getByTestId("plan-document")).toContainText(
-      "greet",
-      {
-        timeout: 30_000,
-      },
-    );
+    await expect(
+      loggedOut
+        .getByTestId("plan-artifact-frame")
+        .contentFrame()
+        .getByText("Add greet() helper"),
+    ).toBeVisible({ timeout: 30_000 });
     const summaryBox = await loggedOut
       .getByTestId("plan-summary")
       .boundingBox();
@@ -201,33 +201,39 @@ test.describe("Plan review (HTTP comments)", () => {
     await ownerCtx.request.post("/control/login", { data: OWNER });
     const owner = await ownerCtx.newPage();
     await owner.goto(`/agents/${threadId}`);
-    const reviewLink = owner.getByTestId("review-plan-link");
+    const reviewLink = owner.getByTestId("inline-plan-artifact");
     await expect(reviewLink).toBeVisible({ timeout: 30_000 });
-    await reviewLink.click();
-    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
+    await expect(reviewLink).toHaveCSS("height", "250px");
+    await expect(owner.getByTestId("inline-plan-fade")).toBeVisible();
     await expect(
       owner.locator('button[aria-current="page"]', { hasText: "Plan" }),
-    ).toBeVisible();
+    ).toHaveCount(0);
+    await reviewLink.click();
+    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}/plan$`));
     await expect(owner.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(owner.getByText("Back to conversation")).toHaveCount(0);
-    await expect(owner.getByTestId("plan-document")).toContainText("greet", {
+    await expect(owner.getByText("Back to conversation")).toBeVisible();
+    const ownerArtifact = owner.getByTestId("plan-artifact-frame");
+    await expect(
+      ownerArtifact.contentFrame().getByText("Add greet() helper"),
+    ).toBeVisible({
       timeout: 30_000,
     });
+    await expect(ownerArtifact).toHaveAttribute("sandbox", "");
     await expect(owner.getByTestId("approve-plan")).toBeVisible();
     // "Request changes" is meaningless with no feedback → disabled until a
     // comment exists.
     await expect(owner.getByTestId("reject-plan")).toBeDisabled();
 
-    // Copy the whole plan as markdown.
+    // Copy the whole plan as HTML.
     await owner.getByTestId("copy-plan").click();
     await expect(owner.getByTestId("copy-plan")).toContainText("Copied!");
     const clipboard = await owner.evaluate(() =>
       navigator.clipboard.readText(),
     );
-    expect(clipboard).toContain("## Plan: Add greet() helper");
-    expect(clipboard).toContain("### Verification");
+    expect(clipboard).toContain("<title>Greeting Blueprint</title>");
+    expect(clipboard).toContain("<h2>Verification</h2>");
 
     // Owner leaves a comment with Cmd+Enter.
     await addComment(owner, "Owner: looks solid, ship it.", "meta");
@@ -243,9 +249,12 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(collab.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(collab.getByTestId("plan-document")).toContainText("greet", {
-      timeout: 30_000,
-    });
+    await expect(
+      collab
+        .getByTestId("plan-artifact-frame")
+        .contentFrame()
+        .getByText("Add greet() helper"),
+    ).toBeVisible({ timeout: 30_000 });
     await expect(collab.getByTestId("plan-comment")).toHaveCount(1, {
       timeout: 30_000,
     });
@@ -360,5 +369,142 @@ test.describe("Plan review (HTTP comments)", () => {
       .toBeGreaterThan(0);
 
     await ownerCtx.close();
+  });
+
+  test("HTML artifact stays sandboxed, themed, and script-free", async ({
+    browser,
+    request,
+  }) => {
+    await request.post("/control/reset");
+    const send = await request.post("/mock/slack/send", {
+      data: {
+        text: "<@U0BOT> plan how to add a greet() helper",
+        mention_bot: true,
+      },
+    });
+    const { thread_id: threadId } = (await send.json()) as {
+      thread_id: string;
+    };
+    await expect
+      .poll(async () => (await botMessages(request, threadId)).join("\n"), {
+        timeout: 60_000,
+      })
+      .toMatch(/ready for review/i);
+
+    const context = await browser.newContext({ colorScheme: "dark" });
+    await context.request.post("/control/login", { data: OWNER });
+    const page = await context.newPage();
+    await page.goto(`/agents/${threadId}`);
+
+    const preview = page.getByTestId("inline-plan-artifact");
+    await expect(preview).toBeVisible({ timeout: 30_000 });
+    const previewBox = await preview.boundingBox();
+    expect(previewBox?.height).toBe(250);
+    await expect(page.getByTestId("inline-plan-fade")).toHaveCSS(
+      "pointer-events",
+      "none",
+    );
+    const previewFrame = page.getByTestId("plan-artifact-frame");
+    await expect(previewFrame).toHaveAttribute("sandbox", "");
+    await expect(previewFrame).toHaveAttribute("referrerpolicy", "no-referrer");
+
+    await preview.click();
+    await expect(page).toHaveURL(new RegExp(`/agents/${threadId}/plan$`));
+    const frame = page.getByTestId("plan-artifact-frame");
+    await expect(frame).toHaveAttribute("sandbox", "");
+    const documentRoot = frame.contentFrame().locator("html");
+    await expect(documentRoot).toHaveAttribute("data-theme", "dark");
+    await expect(
+      frame.contentFrame().locator('link[href*="fonts.googleapis.com"]'),
+    ).toHaveCount(1);
+    await expect(frame.contentFrame().locator("script")).toHaveCount(0);
+    await expect(frame.contentFrame().locator("body")).toHaveCSS(
+      "background-color",
+      "rgb(16, 32, 29)",
+    );
+    await context.close();
+  });
+
+  test("owner edits HTML and the iframe refreshes", async ({
+    browser,
+    request,
+  }) => {
+    await request.post("/control/reset");
+    const send = await request.post("/mock/slack/send", {
+      data: {
+        text: "<@U0BOT> plan how to add a greet() helper",
+        mention_bot: true,
+      },
+    });
+    const { thread_id: threadId } = (await send.json()) as {
+      thread_id: string;
+    };
+    await expect
+      .poll(async () => (await botMessages(request, threadId)).join("\n"), {
+        timeout: 60_000,
+      })
+      .toMatch(/ready for review/i);
+
+    const context = await browser.newContext();
+    await context.request.post("/control/login", { data: OWNER });
+    const page = await context.newPage();
+    await page.goto(`/agents/${threadId}/plan`);
+    await expect(page.getByTestId("edit-plan")).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.getByTestId("edit-plan").click();
+    const editor = page.getByTestId("plan-editor");
+    await expect(editor).toContainText("Greeting Blueprint");
+    await editor.fill(
+      '<!doctype html><html><head><title>Revised Greeting</title></head><body style="background:#fff;color:#111"><h1>Revised verification</h1></body></html>',
+    );
+    await page.getByTestId("save-plan").click();
+    await expect(page.getByTestId("plan-editor")).toHaveCount(0);
+    await expect(
+      page
+        .getByTestId("plan-artifact-frame")
+        .contentFrame()
+        .getByRole("heading", {
+          name: "Revised verification",
+        }),
+    ).toBeVisible();
+    await context.close();
+  });
+
+  test("plan takes the main thread width on mobile", async ({
+    browser,
+    request,
+  }) => {
+    await request.post("/control/reset");
+    const send = await request.post("/mock/slack/send", {
+      data: {
+        text: "<@U0BOT> plan how to add a greet() helper",
+        mention_bot: true,
+      },
+    });
+    const { thread_id: threadId } = (await send.json()) as {
+      thread_id: string;
+    };
+    await expect
+      .poll(async () => (await botMessages(request, threadId)).join("\n"), {
+        timeout: 60_000,
+      })
+      .toMatch(/ready for review/i);
+
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    await context.request.post("/control/login", { data: OWNER });
+    const page = await context.newPage();
+    await page.goto(`/agents/${threadId}/plan`);
+    const review = page.getByTestId("plan-review");
+    await expect(review).toBeVisible({ timeout: 30_000 });
+    const reviewBox = await review.boundingBox();
+    expect(reviewBox?.width).toBeGreaterThan(350);
+    await expect(
+      page.locator('button[aria-current="page"]', { hasText: "Plan" }),
+    ).toHaveCount(0);
+    await expect(page.getByTestId("plan-comments")).toBeVisible();
+    await context.close();
   });
 });

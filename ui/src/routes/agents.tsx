@@ -35,7 +35,6 @@ function AgentsLayout() {
   const activeThreadId =
     section === "agents" &&
     threadId &&
-    nestedRoute !== "plan" &&
     threadId !== "automations" &&
     threadId !== "skills" &&
     threadId !== "threads" &&

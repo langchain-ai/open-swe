@@ -313,7 +313,10 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
 
     async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
         assert raise_on_error is True
-        return {"markdown": "# Plan\n\nDo it", "status": "ready"}
+        return {
+            "html": "<html><head><title>Plan</title></head><body>Do it</body></html>",
+            "status": "ready",
+        }
 
     async def fake_list_comments(
         thread_id: str, *, raise_on_error: bool = False
@@ -342,7 +345,7 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     assert len(messages) == 1
     assert isinstance(messages[0], ToolMessage)
     assert messages[0].tool_call_id == "call-1"
-    assert "# Plan" in messages[0].content
+    assert "<title>Plan</title>" in messages[0].content
     assert "add tests" in messages[0].content
     assert "reasonable engineering judgment" in messages[0].content
     assert "source of truth" not in messages[0].content

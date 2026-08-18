@@ -428,7 +428,13 @@ def test_appends_plan_reference_from_thread_id(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     _set_config(monkeypatch, {"source": "dashboard", "thread_id": "thread-1"})
     _stub_token(monkeypatch)
-    _stub_plan(monkeypatch, {"markdown": "# Plan\n- step 1", "status": "ready"})
+    _stub_plan(
+        monkeypatch,
+        {
+            "html": "<html><head><title>Plan</title></head><body>step 1</body></html>",
+            "status": "ready",
+        },
+    )
 
     client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
     _install_client(monkeypatch, client)
@@ -456,11 +462,11 @@ def test_omits_plan_reference_when_no_plan_exists(monkeypatch: pytest.MonkeyPatc
     assert client.post_calls
 
 
-def test_omits_plan_reference_when_plan_markdown_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_omits_plan_reference_when_plan_html_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     _set_config(monkeypatch, {"source": "dashboard", "thread_id": "thread-1"})
     _stub_token(monkeypatch)
-    _stub_plan(monkeypatch, {"markdown": "   \n  ", "status": "ready"})
+    _stub_plan(monkeypatch, {"html": "   \n  ", "status": "ready"})
 
     client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
     _install_client(monkeypatch, client)
@@ -503,7 +509,13 @@ def test_plan_reference_survives_source_reference_failure(
         },
     )
     _stub_token(monkeypatch)
-    _stub_plan(monkeypatch, {"markdown": "# Plan\n- step 1", "status": "ready"})
+    _stub_plan(
+        monkeypatch,
+        {
+            "html": "<html><head><title>Plan</title></head><body>step 1</body></html>",
+            "status": "ready",
+        },
+    )
 
     async def fail_permalink(*_args: Any, **_kwargs: Any) -> str:
         raise RuntimeError("slack failed")
@@ -556,7 +568,13 @@ def test_public_repo_appends_plan_but_not_slack_reference(
         },
     )
     _stub_token(monkeypatch)
-    _stub_plan(monkeypatch, {"markdown": "# Plan\n- step 1", "status": "ready"})
+    _stub_plan(
+        monkeypatch,
+        {
+            "html": "<html><head><title>Plan</title></head><body>step 1</body></html>",
+            "status": "ready",
+        },
+    )
     monkeypatch.setattr(
         opr, "get_slack_permalink", lambda *_a, **_k: _coro("https://slack.example/p1")
     )

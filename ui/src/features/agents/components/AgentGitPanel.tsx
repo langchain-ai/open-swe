@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
-import { useQueryClient } from "@tanstack/react-query"
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -15,8 +13,6 @@ import type { AgentThread } from "@/features/agents/lib/types"
 import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
 import { agentsApi } from "@/features/agents/lib/api"
 import {
-  agentThreadKeys,
-  invalidateAgentThreadLists,
   useAgentThreadPrDiff,
   useAgentThreadTurnDiff,
 } from "@/features/agents/lib/queries"
@@ -34,14 +30,13 @@ import {
   DiffFilesView,
   toPanelFiles,
 } from "@/features/agents/components/DiffFilesView"
-import { PlanView } from "@/features/agents/components/PlanView"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
 import { usePanelTabs } from "@/features/agents/lib/panelTabs"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
 import { cn } from "@/lib/utils"
 
-export type AgentPanelTab = "git" | "plan"
+export type AgentPanelTab = "git"
 
 interface AgentGitPanelProps {
   thread: AgentThread
@@ -61,8 +56,6 @@ export function AgentGitPanel({
   onCollapsedChange,
   onTabChange,
 }: AgentGitPanelProps) {
-  const queryClient = useQueryClient()
-  const stream = useAgentThreadStream()
   const [tab, setTab] = useState<"diff" | "review" | "commits">("diff")
   const [wrap, setWrap] = useDiffWrap()
   const panel = usePanelTabs(`cloud:${thread.id}`)
@@ -70,18 +63,8 @@ export function AgentGitPanel({
     { kind: "cloud", threadId: thread.id },
     ""
   )
-  const hasPlan = Boolean(
-    thread.planStatus &&
-    thread.planStatus !== "approved" &&
-    thread.planStatus !== "cancelled"
-  )
-
   const topTab =
-    requestedTab === "plan" && hasPlan
-      ? "plan"
-      : panel.activeTab?.kind === "terminal"
-        ? panel.activeTab.id
-        : "git"
+    panel.activeTab?.kind === "terminal" ? panel.activeTab.id : requestedTab
   const handleOpenKind = useCallback(
     (kind: PanelTabKind) => {
       if (kind !== "terminal") return
@@ -92,7 +75,7 @@ export function AgentGitPanel({
   )
   const handleSelectTab = useCallback(
     (id: string) => {
-      if (id === "git" || id === "plan") {
+      if (id === "git") {
         onTabChange(id)
         panel.select("")
         return
@@ -107,7 +90,7 @@ export function AgentGitPanel({
   )
   const handleCloseTab = useCallback(
     async (id: string) => {
-      if (id === "git" || id === "plan") {
+      if (id === "git") {
         onCollapsedChange(true)
         return
       }
@@ -122,30 +105,7 @@ export function AgentGitPanel({
   useEffect(() => {
     syncTerminals(terminalGroupIds ? terminalGroupIds.split(",") : [])
   }, [syncTerminals, terminalGroupIds])
-  const onPlanApproved = useCallback(
-    (runId: string) => {
-      queryClient.setQueryData<AgentThread>(
-        agentThreadKeys.detail(thread.id),
-        (current) =>
-          current
-            ? { ...current, planStatus: "approved", status: "running" }
-            : current
-      )
-      void queryClient.invalidateQueries({ queryKey: ["plan", thread.id] })
-      invalidateAgentThreadLists(queryClient)
-      panel.select("")
-      onTabChange("git")
-      void stream.client.runs.join(thread.id, runId).finally(() => {
-        void queryClient.invalidateQueries({
-          queryKey: agentThreadKeys.detail(thread.id),
-        })
-      })
-    },
-    [onTabChange, panel, queryClient, stream, thread.id]
-  )
-
-  // Collapsed state is owned by the parent (so the plan banner can reserve space
-  // for the floating expand button); persistence to localStorage lives there too.
+  // Collapsed state is owned and persisted by the parent.
   const setCollapsed = onCollapsedChange
 
   const pr = thread.pr
@@ -310,9 +270,6 @@ export function AgentGitPanel({
     <AgentPanelShell
       tabs={[
         { id: "git", kind: "review" as const, closable: false },
-        ...(hasPlan
-          ? [{ id: "plan", kind: "plan" as const, closable: false }]
-          : []),
         ...panel.tabs.map((panelTab) => ({
           ...panelTab,
           title: terminalTabTitle(terminals, panelTab.id),
@@ -335,9 +292,7 @@ export function AgentGitPanel({
     >
       {({ fullScreen }) => (
         <>
-          {topTab === "plan" ? (
-            <PlanView threadId={thread.id} onApprove={onPlanApproved} />
-          ) : topTab === "git" ? (
+          {topTab === "git" ? (
             <>
               {reviewHeader}
               {tab === "diff" ? (
