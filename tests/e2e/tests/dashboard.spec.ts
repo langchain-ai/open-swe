@@ -262,7 +262,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     expect(threadId).not.toBe("");
     await waitForThreadIdle(page, threadId);
 
-    await page.getByRole("link", { name: "New Agent" }).click();
+    await page.getByRole("link", { name: "New Thread" }).click();
     await expect(page).toHaveURL(/\/agents\/?$/);
     await page.goBack();
     await expect(page).toHaveURL(new RegExp(`/agents/${threadId}$`));
