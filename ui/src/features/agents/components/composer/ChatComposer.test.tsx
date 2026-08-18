@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatComposer, buildCommandItems } from "./ChatComposer"
 import { replaceTextRange } from "./composerTrigger"
+import type { ChatComposerProps } from "./ChatComposer"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 
 const stream = {
@@ -44,14 +45,20 @@ beforeEach(() => {
   cancelThread.mockClear()
 })
 
-function renderComposer(running: boolean) {
+function renderComposer(
+  running: boolean,
+  props: Partial<ChatComposerProps> = {}
+) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   })
   render(
     <QueryClientProvider client={client}>
       <AgentThreadStreamBoundary>
-        <ChatComposer activeRun={{ threadId: "thread-1", running }} />
+        <ChatComposer
+          activeRun={{ threadId: "thread-1", running }}
+          {...props}
+        />
       </AgentThreadStreamBoundary>
     </QueryClientProvider>
   )
@@ -121,6 +128,20 @@ describe("ChatComposer stop button", () => {
 
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
+  })
+})
+
+describe("ChatComposer admin mode", () => {
+  it("tints the composer options control when enabled", () => {
+    renderComposer(false, {
+      adminThread: true,
+      onAdminThreadChange: vi.fn(),
+    })
+
+    const options = screen.getByRole("button", {
+      name: "More composer options",
+    })
+    expect(options.className.split(" ")).toContain("bg-destructive/10")
   })
 })
 

@@ -1,12 +1,12 @@
 """Single durable dispatch contract behind every agent/reviewer run trigger.
 
 Replaces the per-site ``runs.create`` calls (plus the ``is_thread_active``
-busy-check and the custom store-queue) with one function that always uses:
+busy-check and the custom store-queue) with one function that uses:
 
-- ``multitask_strategy="interrupt"`` — a follow-up halts the active run
+- ``multitask_strategy="interrupt"`` by default — a follow-up halts the active run
   (progress preserved by the sync checkpoint) and resumes the agent with full
-  history + the new message; on an idle thread it just starts. This is the
-  platform-native, cross-process replacement for the racy busy-check + queue.
+  history + the new message; on an idle thread it just starts. Background
+  follow-ups such as `/baby-sit` can opt into ``enqueue`` instead.
 - ``durability="sync"`` — checkpoint before each step so a crash/recycle
   resumes from the last checkpoint instead of losing all work.
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
@@ -161,8 +161,9 @@ async def dispatch_agent_run(
     assistant_id: str = "agent",
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
+    multitask_strategy: str = "interrupt",
 ) -> Run:
-    """Create (or interrupt-and-resume) a run for ``thread_id``.
+    """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
     Routes every Slack / Linear / GitHub / dashboard trigger through one
     contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
@@ -176,4 +177,5 @@ async def dispatch_agent_run(
         metadata=metadata or {},
         source=source,
         client=client or dispatch_client(),
+        multitask_strategy=multitask_strategy,
     )
