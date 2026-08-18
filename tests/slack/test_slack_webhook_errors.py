@@ -116,13 +116,13 @@ async def test_non_owner_can_send_untagged_ready_plan_reply(
         "_thread_metadata",
         AsyncMock(return_value={"plan_mode": True, "plan_status": "ready"}),
     )
-    owner_check = AsyncMock(return_value=False)
-    monkeypatch.setattr(slack_webhook.common, "_slack_user_is_thread_owner", owner_check)
+    lookup_thread = AsyncMock(return_value="t1")
+    monkeypatch.setattr(slack_webhook.common, "lookup_slack_thread_id", lookup_thread)
 
     allowed = await slack_webhook._slack_user_can_reply_to_ready_plan("C1", "123.45", "U2")
 
     assert allowed is True
-    owner_check.assert_not_awaited()
+    lookup_thread.assert_awaited_once()
 
 
 @pytest.mark.parametrize("reply", ["LGTM, thanks", "Looks good — please implement this"])
