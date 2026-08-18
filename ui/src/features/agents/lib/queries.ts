@@ -504,10 +504,20 @@ export function useResolveAgentThread() {
   })
 }
 
-export function useThreadsPage(params: ThreadsPageParams) {
+export function useThreadsPage(
+  params: ThreadsPageParams,
+  options: { staleWhileRevalidate?: boolean } = {}
+) {
   return useQuery({
     queryKey: agentThreadKeys.page(params),
     queryFn: () => agentsApi.listThreadsPage(params),
     placeholderData: (prev) => prev,
+    ...(options.staleWhileRevalidate
+      ? {
+          staleTime: 30_000,
+          gcTime: Infinity,
+          refetchOnWindowFocus: true,
+        }
+      : {}),
   })
 }
