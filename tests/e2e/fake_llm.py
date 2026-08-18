@@ -426,7 +426,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _tool_step(
             "Confirming the breakout thread was started.",
             "slack_thread_reply",
-            {"message": "I started a separate Open SWE thread for that aspect."},
+            {"message": "I started a separate Jarvis thread for that aspect."},
             "call-breakout-reply",
         ),
     ),

@@ -26,8 +26,8 @@ __all__ = ["github_headers"]
 
 logger = logging.getLogger(__name__)
 
-REVIEW_CHECK_RUN_NAME = "Open SWE Review"
-AUTOFIX_CHECK_RUN_NAME = "Open SWE Auto-fix"
+REVIEW_CHECK_RUN_NAME = "Jarvis Review"
+AUTOFIX_CHECK_RUN_NAME = "Jarvis Auto-fix"
 
 _GITHUB_API_BASE = GITHUB_API_BASE
 

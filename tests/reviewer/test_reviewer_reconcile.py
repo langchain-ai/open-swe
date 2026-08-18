@@ -28,7 +28,7 @@ async def test_reconcile_marks_resolved_github_thread_resolved() -> None:
                     "id": "THREAD_1",
                     "is_resolved": True,
                     "is_outdated": False,
-                    "comments": [{"id": 11, "author": "open-swe[bot]", "body": "bug"}],
+                    "comments": [{"id": 11, "author": "jarvis-aeteq[bot]", "body": "bug"}],
                 }
             ],
         )
@@ -64,7 +64,7 @@ async def test_reconcile_backfills_comment_and_thread_ids_from_bot_marker() -> N
                     "comments": [
                         {
                             "id": 11,
-                            "author": "open-swe[bot]",
+                            "author": "jarvis-aeteq[bot]",
                             "body": (
                                 '<!-- open-swe-review-comment {"id":"f1",'
                                 '"file_path":"a.py","start_line":1,'
@@ -109,7 +109,7 @@ async def test_reconcile_backfills_marker_from_graphql_app_login() -> None:
                     "comments": [
                         {
                             "id": 11,
-                            "author": "open-swe",
+                            "author": "jarvis-aeteq",
                             "body": (
                                 '<!-- open-swe-review-comment {"id":"f1",'
                                 '"file_path":"a.py","start_line":1,'
@@ -154,13 +154,13 @@ async def test_reconcile_duplicate_markers_require_all_threads_terminal() -> Non
                     "id": "THREAD_OLD",
                     "is_resolved": False,
                     "is_outdated": True,
-                    "comments": [{"id": 11, "author": "open-swe[bot]", "body": marker}],
+                    "comments": [{"id": 11, "author": "jarvis-aeteq[bot]", "body": marker}],
                 },
                 {
                     "id": "THREAD_OPEN",
                     "is_resolved": False,
                     "is_outdated": False,
-                    "comments": [{"id": 12, "author": "open-swe[bot]", "body": marker}],
+                    "comments": [{"id": 12, "author": "jarvis-aeteq[bot]", "body": marker}],
                 },
             ],
         )
@@ -199,13 +199,13 @@ async def test_reconcile_duplicate_markers_stay_open_when_some_threads_only_outd
                     "id": "THREAD_OLD",
                     "is_resolved": False,
                     "is_outdated": True,
-                    "comments": [{"id": 11, "author": "open-swe[bot]", "body": marker}],
+                    "comments": [{"id": 11, "author": "jarvis-aeteq[bot]", "body": marker}],
                 },
                 {
                     "id": "THREAD_RESOLVED",
                     "is_resolved": True,
                     "is_outdated": False,
-                    "comments": [{"id": 12, "author": "open-swe[bot]", "body": marker}],
+                    "comments": [{"id": 12, "author": "jarvis-aeteq[bot]", "body": marker}],
                 },
             ],
         )
@@ -277,7 +277,7 @@ async def test_reconcile_records_latest_human_reply_after_bot_comment() -> None:
                     "is_resolved": False,
                     "is_outdated": False,
                     "comments": [
-                        {"id": 11, "author": "open-swe[bot]", "body": "bug"},
+                        {"id": 11, "author": "jarvis-aeteq[bot]", "body": "bug"},
                         {
                             "id": 12,
                             "author": "human",

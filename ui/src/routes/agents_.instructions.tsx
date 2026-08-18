@@ -27,7 +27,7 @@ function AgentInstructionsPage() {
       user={session.data}
       title="Repository Instructions"
       description="Per-repo custom instructions appended to the coding agent's system prompt for runs targeting that repository."
-      backTo={{ to: "/cloud-agents", label: "Back to Open SWE Agent" }}
+      backTo={{ to: "/cloud-agents", label: "Back to Jarvis Agent" }}
     >
       <div className="rounded-lg border border-border bg-card">
         <AgentInstructionsPanel />

@@ -98,7 +98,7 @@ def test_render_inline_comment_body_without_suggestion() -> None:
     assert "<!-- open-swe-review-comment" in body
     assert '"id":"f_' in body
     assert "just text" in body
-    assert "Your feedback helps Open SWE learn." in body
+    assert "Your feedback helps Jarvis learn." in body
     assert "👍 or 👎" in body
     assert "tell us if this review comment was useful" in body
 
@@ -232,19 +232,19 @@ def test_render_inline_comment_payload_returns_none_for_file_level() -> None:
 
 def test_render_review_body_with_findings_uses_potential_issue_phrasing() -> None:
     body = render_review_body(pr_number=123, surfaced_count=2)
-    assert body.startswith("**Open SWE Review** found 2 potential issues.")
+    assert body.startswith("**Jarvis Review** found 2 potential issues.")
     assert "<!-- open-swe-reviewer pr=123 -->" in body
 
 
 def test_render_review_body_singular_finding() -> None:
     body = render_review_body(pr_number=123, surfaced_count=1)
-    assert body.startswith("**Open SWE Review** found 1 potential issue.")
+    assert body.startswith("**Jarvis Review** found 1 potential issue.")
 
 
 def test_render_review_body_no_findings_message() -> None:
     body = render_review_body(pr_number=99, surfaced_count=0)
-    assert "## ✅ Open SWE Review: No issues found" in body
-    assert "Open SWE reviewed this PR and found no potential bugs to report." in body
+    assert "## ✅ Jarvis Review: No issues found" in body
+    assert "Jarvis reviewed this PR and found no potential bugs to report." in body
     assert "additional" not in body
 
 
@@ -255,7 +255,7 @@ def test_render_review_body_with_additional_findings_and_ui_link() -> None:
         additional_findings_count=2,
         ui_url="https://dash.example/agents/reviews/o/r/99",
     )
-    assert "## ✅ Open SWE Review: No issues found" in body
+    assert "## ✅ Jarvis Review: No issues found" in body
     assert "2 additional findings can be viewed in the web app." in body
     assert "[Open in Web](https://dash.example/agents/reviews/o/r/99)" in body
 
@@ -284,7 +284,7 @@ def test_render_review_body_additional_findings_zero_omits_line() -> None:
 def test_render_status_comment_reviewing_includes_ui_link(monkeypatch: Any) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dash.example")
     body = render_status_comment(pr_number=7, thread_id="tid-1")
-    assert "🔍 Open SWE Review: in progress" in body
+    assert "🔍 Jarvis Review: in progress" in body
     assert "[Open in Web](https://dash.example/agents/tid-1)" in body
     assert status_comment_marker(7) in body
 
@@ -303,7 +303,7 @@ def test_render_review_body_orders_ui_link_before_trace() -> None:
         ui_url="https://dash.example/agents/tid-1",
         trace_url="https://trace.example/x",
     )
-    assert "[Open in Web](https://dash.example/agents/tid-1) • [View Open SWE trace]" in body
+    assert "[Open in Web](https://dash.example/agents/tid-1) • [View Jarvis trace]" in body
 
 
 @pytest.mark.asyncio
@@ -413,7 +413,7 @@ def test_render_review_body_includes_trace_link_when_provided() -> None:
         surfaced_count=0,
         trace_url="https://smith.langchain.com/o/t/project/p/t/thread-id",
     )
-    assert "[View Open SWE trace](https://smith.langchain.com/o/t/project/p/t/thread-id)" in body
+    assert "[View Jarvis trace](https://smith.langchain.com/o/t/project/p/t/thread-id)" in body
     assert body.endswith("<!-- open-swe-reviewer pr=123 -->")
 
 
@@ -1108,7 +1108,7 @@ async def test_open_swe_review_exists_detects_summary_marker() -> None:
     response = MagicMock()
     response.json.return_value = [
         {"id": 1, "body": "some human review"},
-        {"id": 2, "body": f"## ✅ Open SWE Review\n\n{review_summary_marker(7)}"},
+        {"id": 2, "body": f"## ✅ Jarvis Review\n\n{review_summary_marker(7)}"},
     ]
     response.raise_for_status.return_value = None
 
@@ -1165,7 +1165,7 @@ async def test_re_review_backfills_existing_marker_and_skips_duplicate_post() ->
         "comments": [
             {
                 "id": 101,
-                "author": "open-swe[bot]",
+                "author": "jarvis-aeteq[bot]",
                 "body": render_inline_comment_body(finding),
                 "created_at": "2026-05-27T10:00:00Z",
             }
@@ -1226,7 +1226,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
             "comments": [
                 {
                     "id": 101,
-                    "author": "open-swe[bot]",
+                    "author": "jarvis-aeteq[bot]",
                     "body": render_inline_comment_body(finding),
                     "created_at": "2026-05-27T10:00:00Z",
                 }
@@ -1239,7 +1239,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
             "comments": [
                 {
                     "id": 102,
-                    "author": "open-swe[bot]",
+                    "author": "jarvis-aeteq[bot]",
                     "body": render_inline_comment_body(finding),
                     "created_at": "2026-05-27T10:01:00Z",
                 }
@@ -1306,7 +1306,7 @@ async def test_publish_review_backfills_from_threads_when_review_comments_are_em
         "comments": [
             {
                 "id": 202,
-                "author": "open-swe[bot]",
+                "author": "jarvis-aeteq[bot]",
                 "body": render_inline_comment_body(finding),
                 "created_at": "2026-05-27T10:00:00Z",
             }
@@ -1781,7 +1781,7 @@ async def test_fetch_pr_review_threads_parses_threads_and_comments() -> None:
                                     "nodes": [
                                         {
                                             "databaseId": 101,
-                                            "author": {"login": "open-swe[bot]"},
+                                            "author": {"login": "jarvis-aeteq[bot]"},
                                             "authorAssociation": "MEMBER",
                                             "body": "additionalTtlPrefixes removes lifecycle rules",
                                             "createdAt": "2026-05-23T10:00:00Z",

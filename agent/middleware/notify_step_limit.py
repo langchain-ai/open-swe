@@ -80,7 +80,7 @@ async def notify_step_limit_reached(
         return None
 
     message = warning(
-        "Open SWE reached its maximum step limit and had to stop. "
+        "Jarvis reached its maximum step limit and had to stop. "
         "The task may be incomplete. You can retry with a more focused request, "
         "or ask it to continue from where it left off."
     )

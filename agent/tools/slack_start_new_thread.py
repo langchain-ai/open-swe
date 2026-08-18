@@ -100,7 +100,7 @@ def _truncate_for_slack(text: str) -> str:
 
 
 def _visible_message(title: str) -> str:
-    return f"*Open SWE breakout thread:* {title}"
+    return f"*Jarvis breakout thread:* {title}"
 
 
 def _thread_details(instructions: str, repo: dict[str, str] | None) -> str:
@@ -111,7 +111,7 @@ def _thread_details(instructions: str, repo: dict[str, str] | None) -> str:
 async def _run_links_section(thread_id: str) -> str:
     dashboard_url = dashboard_thread_url(thread_id)
     trace_url = await get_langsmith_trace_url(thread_id)
-    lines = ["## Open SWE Links"]
+    lines = ["## Jarvis Links"]
     if dashboard_url:
         lines.append(f"- Web: {dashboard_url}")
     if trace_url:
