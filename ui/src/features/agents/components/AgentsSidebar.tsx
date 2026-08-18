@@ -16,6 +16,7 @@ import {
   FolderPlusIcon,
   GitMergeIcon,
   GitPullRequestIcon,
+  KanbanIcon,
   LightningIcon,
   PlusIcon,
   SparkleIcon,
@@ -106,6 +107,7 @@ interface AgentsSidebarProps {
 }
 
 const NAV = [
+  { to: "/agents/threads", label: "Threads", icon: KanbanIcon },
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/my-settings", label: "Dashboard", icon: ChartLineUpIcon },
@@ -716,7 +718,12 @@ function ResolvedThreadGroup({
           {hasMore && (
             <Link
               to="/agents/threads"
-              search={{ resolved: true, page: 1 }}
+              search={{
+                resolved: true,
+                page: 1,
+                layout: "board",
+                group: "focus",
+              }}
               onClick={onNavigate}
               className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
             >
