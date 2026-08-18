@@ -161,8 +161,9 @@ async def dispatch_agent_run(
     assistant_id: str = "agent",
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
+    multitask_strategy: str = "interrupt",
 ) -> Run:
-    """Create (or interrupt-and-resume) a run for ``thread_id``.
+    """Create a durable run for ``thread_id``.
 
     Routes every Slack / Linear / GitHub / dashboard trigger through one
     contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
@@ -176,4 +177,5 @@ async def dispatch_agent_run(
         metadata=metadata or {},
         source=source,
         client=client or dispatch_client(),
+        multitask_strategy=multitask_strategy,
     )

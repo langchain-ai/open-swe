@@ -1401,6 +1401,7 @@ async def store_slack_run_mapping(
     message_ts: str | None = None,
     triggering_user_id: str | None = None,
     trace_message_ts: str | None = None,
+    agent_thread_id: str | None = None,
 ) -> None:
     """Persist Slack thread/message to LangGraph run mapping."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
@@ -1415,6 +1416,8 @@ async def store_slack_run_mapping(
         value["triggering_user_id"] = triggering_user_id
     if trace_message_ts:
         value["trace_message_ts"] = trace_message_ts
+    if agent_thread_id:
+        value["agent_thread_id"] = agent_thread_id
     try:
         await langgraph_client.store.put_item(
             namespace, f"{_THREAD_RUN_KEY_PREFIX}{thread_ts}", value
@@ -1456,6 +1459,7 @@ async def store_slack_message_run_mapping(
             return
         triggering_user_id: str | None = None
         trace_message_ts: str | None = None
+        agent_thread_id: str | None = None
         if isinstance(item, dict):
             value = item.get("value")
             if isinstance(value, dict):
@@ -1465,6 +1469,9 @@ async def store_slack_message_run_mapping(
                 candidate = value.get("trace_message_ts")
                 if isinstance(candidate, str) and candidate:
                     trace_message_ts = candidate
+                candidate = value.get("agent_thread_id")
+                if isinstance(candidate, str) and candidate:
+                    agent_thread_id = candidate
         await store_slack_run_mapping(
             langgraph_client,
             channel_id,
@@ -1473,6 +1480,7 @@ async def store_slack_message_run_mapping(
             message_ts=message_ts,
             triggering_user_id=triggering_user_id,
             trace_message_ts=trace_message_ts,
+            agent_thread_id=agent_thread_id,
         )
     except Exception:
         logger.exception(

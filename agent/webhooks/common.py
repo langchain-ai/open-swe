@@ -111,6 +111,7 @@ from ..utils.slack import (
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
     is_slack_channel_named,
+    lookup_slack_run_mapping,  # noqa: F401
     lookup_slack_thread_id,  # noqa: F401
     normalize_slack_channel_context,  # noqa: F401
     post_slack_thread_reply,

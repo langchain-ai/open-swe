@@ -86,49 +86,76 @@ async def slack_webhook(
             if isinstance(first_user, str):
                 bot_user_id = first_user
 
+    is_message_update = event.get("type") == "message" and event.get("subtype") == "message_changed"
+    updated_message = event.get("message") if is_message_update else event
+    if not isinstance(updated_message, dict):
+        return {"status": "ignored", "reason": "Invalid updated message"}
+
+    channel_id = event.get("channel")
+    event_ts = event.get("event_ts") or event.get("ts")
+    original_message_ts = updated_message.get("ts")
+    thread_ts = updated_message.get("thread_ts") or original_message_ts
+    user_id = updated_message.get("user")
+    text = updated_message.get("text")
+    attachments = updated_message.get("attachments", [])
+    if not (
+        isinstance(channel_id, str)
+        and channel_id
+        and isinstance(event_ts, str)
+        and event_ts
+        and isinstance(original_message_ts, str)
+        and original_message_ts
+        and isinstance(thread_ts, str)
+        and thread_ts
+        and isinstance(user_id, str)
+        and user_id
+        and isinstance(text, str)
+    ):
+        return {"status": "ignored", "reason": "Missing channel/message fields"}
+    if not isinstance(attachments, list):
+        attachments = []
+    if is_message_update:
+        previous_message = event.get("previous_message")
+        if not isinstance(previous_message, dict):
+            return {"status": "ignored", "reason": "Invalid previous message"}
+        previous_ts = previous_message.get("ts")
+        previous_thread_ts = previous_message.get("thread_ts") or previous_ts
+        if (
+            previous_message.get("user") != user_id
+            or previous_ts != original_message_ts
+            or previous_thread_ts != thread_ts
+        ):
+            return {"status": "ignored", "reason": "Updated message identity changed"}
+
     is_direct_message = (
-        event.get("type") == "message"
-        and event.get("channel_type") == "im"
-        and bool(event.get("user"))
+        not is_message_update and event.get("channel_type") == "im" and bool(user_id)
     )
     is_untagged_two_party_reply = False
-    if event.get("type") != "app_mention":
-        message_text = event.get("text", "")
+    if event.get("type") != "app_mention" and not is_message_update:
         has_username_mention = bool(
-            event.get("type") == "message"
-            and common.SLACK_BOT_USERNAME
-            and f"@{common.SLACK_BOT_USERNAME}" in message_text
+            common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text
         )
-        has_id_mention = bool(
-            event.get("type") == "message"
-            and common.SLACK_BOT_USER_ID
-            and f"<@{common.SLACK_BOT_USER_ID}>" in message_text
-        )
+        has_id_mention = bool(bot_user_id and f"<@{bot_user_id}>" in text)
         is_ready_plan_reply = bool(
-            event.get("type") == "message"
-            and not is_direct_message
+            not is_direct_message
             and await service._slack_user_can_reply_to_ready_plan(
-                str(event.get("channel") or ""),
+                channel_id,
                 str(event.get("thread_ts") or ""),
-                str(event.get("user") or ""),
+                user_id,
             )
         )
         is_untagged_two_party_reply = bool(
-            event.get("type") == "message"
-            and not event.get("subtype")
+            not event.get("subtype")
             and not is_direct_message
-            # An explicit tag is never an untagged reply: the gate below admits
-            # messages mentioning only Open SWE, so without this an explicitly
-            # tagged request would tell the agent it was not tagged.
             and not has_username_mention
             and not has_id_mention
             and await service._slack_thread_allows_untagged_reply(
-                str(event.get("channel") or ""),
+                channel_id,
                 str(event.get("thread_ts") or ""),
-                message_text,
+                text,
                 bot_user_id,
-                str(event.get("user") or ""),
-                str(event.get("ts") or ""),
+                user_id,
+                event_ts,
             )
         )
         should_handle_message = any(
@@ -143,16 +170,13 @@ async def slack_webhook(
         if not should_handle_message:
             return {"status": "ignored", "reason": "Not an app mention, DM, or plan reply"}
 
-    if event.get("subtype") == "bot_message" or event.get("bot_id"):
+    if (
+        event.get("subtype") == "bot_message"
+        or event.get("bot_id")
+        or updated_message.get("subtype") == "bot_message"
+        or updated_message.get("bot_id")
+    ):
         return {"status": "ignored", "reason": "Event from a bot"}
-
-    channel_id = event.get("channel", "")
-    event_ts = event.get("ts", "")
-    thread_ts = event.get("thread_ts") or event_ts
-    user_id = event.get("user", "")
-    text = event.get("text", "")
-    if not channel_id or not event_ts or not thread_ts:
-        return {"status": "ignored", "reason": "Missing channel/thread timestamp"}
 
     if bot_user_id and user_id == bot_user_id:
         return {"status": "ignored", "reason": "Event from this bot user"}
@@ -170,30 +194,52 @@ async def slack_webhook(
             return {"status": "accepted", "message": "Slack mention gated for docs-plz"}
     else:
         langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-        try:
-            thread_id = await common.resolve_slack_thread_id(
-                langgraph_client, channel_id, thread_ts
+        if is_message_update:
+            try:
+                thread_id = await common.lookup_slack_thread_id(
+                    langgraph_client, channel_id, thread_ts
+                )
+            except common.SlackThreadMappingError:
+                return {"status": "ignored", "reason": "Invalid Slack thread mapping"}
+            if not thread_id or not await common._thread_exists(thread_id):
+                return {"status": "ignored", "reason": "Slack thread is not associated"}
+            delivered_message = await common.lookup_slack_run_mapping(
+                langgraph_client, channel_id, original_message_ts
             )
-        except common.SlackThreadMappingError:
-            common.logger.exception("Could not resolve explicit Slack thread mapping")
-            await common.post_slack_thread_reply(
-                channel_id,
-                thread_ts,
-                "Open SWE found conflicting state for this Slack thread and will not guess which agent thread to use.",
-            )
-            return {"status": "error", "message": "Conflicting Slack thread mapping"}
+            if (
+                not delivered_message
+                or delivered_message.get("thread_ts") != thread_ts
+                or delivered_message.get("triggering_user_id") != user_id
+                or delivered_message.get("agent_thread_id") != thread_id
+            ):
+                return {"status": "ignored", "reason": "Slack message was not delivered"}
+        else:
+            try:
+                thread_id = await common.resolve_slack_thread_id(
+                    langgraph_client, channel_id, thread_ts
+                )
+            except common.SlackThreadMappingError:
+                common.logger.exception("Could not resolve explicit Slack thread mapping")
+                await common.post_slack_thread_reply(
+                    channel_id,
+                    thread_ts,
+                    "Open SWE found conflicting state for this Slack thread and will not guess which agent thread to use.",
+                )
+                return {"status": "error", "message": "Conflicting Slack thread mapping"}
         event_data = {
             "channel_id": channel_id,
             "channel_context": channel_context,
             "thread_ts": thread_ts,
             "event_ts": event_ts,
+            "original_message_ts": original_message_ts,
             "user_id": user_id,
             "text": text,
-            "attachments": event.get("attachments", []),
+            "attachments": attachments,
             "bot_user_id": bot_user_id,
             "thread_id": thread_id,
             "treat_all_messages_as_mentions": is_direct_message,
             "untagged_reply": is_untagged_two_party_reply,
+            "message_update": is_message_update,
         }
         repo_config = await common.get_slack_repo_config(
             channel_id,

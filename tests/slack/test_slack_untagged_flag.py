@@ -62,6 +62,38 @@ def _message_payload(text: str, event_id: str) -> dict[str, Any]:
     }
 
 
+def _message_update_payload(*, bot_message: bool = False) -> dict[str, Any]:
+    updated_message: dict[str, Any] = {
+        "type": "message",
+        "user": "BOT" if bot_message else "U1",
+        "text": "new corrected text",
+        "ts": "1786573369.551099",
+        "thread_ts": "1786573300.000000",
+    }
+    if bot_message:
+        updated_message["bot_id"] = "B1"
+    return {
+        "type": "event_callback",
+        "event_id": "Ev-update",
+        "authorizations": [{"user_id": "BOT"}],
+        "event": {
+            "type": "message",
+            "subtype": "message_changed",
+            "channel": "C1",
+            "event_ts": "1786573400.000000",
+            "ts": "1786573400.000000",
+            "message": updated_message,
+            "previous_message": {
+                "type": "message",
+                "user": "BOT" if bot_message else "U1",
+                "text": "old text that must not be resent",
+                "ts": "1786573369.551099",
+                "thread_ts": "1786573300.000000",
+            },
+        },
+    }
+
+
 @pytest.fixture(autouse=True)
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
@@ -78,6 +110,20 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_events, "get_client", lambda url: _FakeClient())
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
+    monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(return_value="t1"))
+    monkeypatch.setattr(
+        webhook_common,
+        "lookup_slack_run_mapping",
+        AsyncMock(
+            return_value={
+                "run_id": "run-1",
+                "thread_ts": "1786573300.000000",
+                "triggering_user_id": "U1",
+                "agent_thread_id": "t1",
+            }
+        ),
+    )
+    monkeypatch.setattr(webhook_common, "_thread_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
     monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
@@ -110,3 +156,143 @@ async def test_username_mention_is_not_marked_untagged() -> None:
 
 async def test_message_without_a_mention_is_marked_untagged() -> None:
     assert await _untagged_flag_for("how about now", "Ev-plain") is True
+
+
+async def test_message_update_queues_only_the_new_text() -> None:
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response["status"] == "accepted"
+    event_data = background_tasks.tasks[0][1][0]
+    assert event_data["message_update"] is True
+    assert event_data["event_ts"] == "1786573400.000000"
+    assert event_data["original_message_ts"] == "1786573369.551099"
+    assert event_data["thread_ts"] == "1786573300.000000"
+    assert event_data["text"] == "new corrected text"
+    assert "old text that must not be resent" not in str(event_data)
+
+
+async def test_root_message_update_uses_original_message_as_thread() -> None:
+    payload = _message_update_payload()
+    del payload["event"]["message"]["thread_ts"]
+    del payload["event"]["previous_message"]["thread_ts"]
+    lookup_run = cast(AsyncMock, webhook_common.lookup_slack_run_mapping)
+    lookup_run.return_value = {
+        "run_id": "run-1",
+        "thread_ts": "1786573369.551099",
+        "triggering_user_id": "U1",
+        "agent_thread_id": "t1",
+    }
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response["status"] == "accepted"
+    event_data = background_tasks.tasks[0][1][0]
+    assert event_data["thread_ts"] == "1786573369.551099"
+    lookup = cast(AsyncMock, webhook_common.lookup_slack_thread_id)
+    lookup.assert_awaited_once()
+    await_args = lookup.await_args
+    assert await_args is not None
+    assert await_args.args[2] == "1786573369.551099"
+
+
+async def test_message_update_requires_an_existing_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(return_value=None))
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "Slack thread is not associated"}
+    assert background_tasks.tasks == []
+
+
+async def test_message_update_requires_the_mapped_agent_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_common, "_thread_exists", AsyncMock(return_value=False))
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "Slack thread is not associated"}
+    assert background_tasks.tasks == []
+
+
+async def test_message_update_requires_a_delivered_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_common, "lookup_slack_run_mapping", AsyncMock(return_value=None))
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "Slack message was not delivered"}
+    assert background_tasks.tasks == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("triggering_user_id", "UOTHER"), ("agent_thread_id", "other-thread")],
+)
+async def test_message_update_rejects_mismatched_delivery_mapping(
+    field: str,
+    value: str,
+) -> None:
+    lookup_run = cast(AsyncMock, webhook_common.lookup_slack_run_mapping)
+    delivered = dict(lookup_run.return_value)
+    delivered[field] = value
+    lookup_run.return_value = delivered
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "Slack message was not delivered"}
+    assert background_tasks.tasks == []
+
+
+async def test_message_update_rejects_changed_sender_identity() -> None:
+    payload = _message_update_payload()
+    payload["event"]["previous_message"]["user"] = "UOTHER"
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "Updated message identity changed"}
+    assert background_tasks.tasks == []
+
+
+async def test_message_update_from_a_bot_is_ignored() -> None:
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload(bot_message=True))),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "Event from a bot"}
+    assert background_tasks.tasks == []
