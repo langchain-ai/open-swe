@@ -134,9 +134,11 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
         model_kwargs.setdefault("timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS)
 
     if model_id.startswith("openai:"):
-        # Direct-provider default: Responses API over the OpenAI websocket base.
-        # Gateway routing overrides this below (an HTTP(S) proxy can't carry wss).
-        model_kwargs["base_url"] = OPENAI_RESPONSES_WS_BASE_URL
+        model_kwargs["base_url"] = (
+            os.environ.get("OPENAI_BASE_URL")
+            or os.environ.get("OPENAI_API_BASE")
+            or OPENAI_RESPONSES_WS_BASE_URL
+        )
         model_kwargs["use_responses_api"] = True
 
     enabled = gateway_env_default() if use_gateway is None else use_gateway
