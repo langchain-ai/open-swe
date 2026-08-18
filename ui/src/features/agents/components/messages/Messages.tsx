@@ -21,10 +21,8 @@ const BOTTOM_LOCK_THRESHOLD_PX = 24
 
 function QueuedMessages({
   queuedMessages,
-  skillNames = new Set(),
 }: {
   queuedMessages: NonNullable<MessagesProps["queuedMessages"]>
-  skillNames?: ReadonlySet<string>
 }) {
   if (queuedMessages.length === 0) return null
 
@@ -48,10 +46,7 @@ function QueuedMessages({
             </div>
             {message.content && (
               <div className="break-words whitespace-pre-wrap">
-                <SkillPromptText
-                  text={message.content}
-                  skillNames={skillNames}
-                />
+                <SkillPromptText text={message.content} />
               </div>
             )}
             {imageCount > 0 && (
@@ -70,7 +65,6 @@ export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
   queuedMessages = [],
-  skillNames,
   isStreaming,
   streamIsLoading,
   isThinking,
@@ -277,13 +271,7 @@ export const Messages = memo(function MessagesComponent({
               const messageIsMarkdownLive = message.id === liveMarkdownMessageId
 
               if (message.author === "user") {
-                return (
-                  <UserMessage
-                    key={message.id}
-                    message={message}
-                    skillNames={skillNames}
-                  />
-                )
+                return <UserMessage key={message.id} message={message} />
               }
 
               return (
@@ -302,10 +290,7 @@ export const Messages = memo(function MessagesComponent({
                 />
               )
             })}
-            <QueuedMessages
-              queuedMessages={queuedMessages}
-              skillNames={skillNames}
-            />
+            <QueuedMessages queuedMessages={queuedMessages} />
             <ThinkingSpinner
               isActive={isThinking ?? streamIsLoading ?? isStreaming}
               settingUpSandbox={settingUpSandbox}

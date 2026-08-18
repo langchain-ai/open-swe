@@ -102,7 +102,7 @@ export function collectComposerMentions(
 /** Splits a prompt into the alternating runs of plain text and mentions the editor renders. */
 export function splitPromptIntoSegments(
   prompt: string,
-  skillNames: ReadonlySet<string> = new Set()
+  skillNames?: ReadonlySet<string>
 ): Array<ComposerPromptSegment> {
   if (!prompt) return []
 
@@ -110,7 +110,7 @@ export function splitPromptIntoSegments(
   for (const match of prompt.matchAll(SKILL_TOKEN_REGEX)) {
     const prefix = match[1] ?? ""
     const name = match[2] ?? ""
-    if (!skillNames.has(name)) continue
+    if (skillNames && !skillNames.has(name)) continue
     const start = match.index + prefix.length
     skills.push({
       name,

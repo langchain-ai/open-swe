@@ -60,6 +60,7 @@ export interface ComposerPromptEditorHandle {
   readSnapshot: () => { value: string; cursor: number }
 }
 
+const EMPTY_SKILL_NAMES = new Set<string>()
 const MENTION_CHIP_CLASS_NAME =
   "inline-flex max-w-full select-none items-center gap-1 rounded-md border border-border/70 bg-accent/40 px-1.5 py-px align-middle text-[12px] font-medium leading-[1.1] text-foreground"
 
@@ -522,7 +523,7 @@ function ComposerPromptEditorInner({
   value,
   cursor,
   disabled = false,
-  skillNames = new Set(),
+  skillNames = EMPTY_SKILL_NAMES,
   placeholder,
   className,
   editorRef,
@@ -532,7 +533,8 @@ function ComposerPromptEditorInner({
 }: ComposerPromptEditorProps) {
   const [editor] = useLexicalComposerContext()
   const onChangeRef = useRef(onChange)
-  const snapshotRef = useRef({ value, cursor: value.length })
+  const skillNamesKey = [...skillNames].sort().join("\0")
+  const snapshotRef = useRef({ value, cursor: value.length, skillNamesKey })
   // Set while a controlled `value` change is being written into the editor, so
   // the resulting OnChange doesn't echo back to the parent as a user edit.
   const applyingControlledUpdateRef = useRef(false)
@@ -546,12 +548,16 @@ function ComposerPromptEditorInner({
   }, [disabled, editor])
 
   useLayoutEffect(() => {
-    if (snapshotRef.current.value === value) return
+    if (
+      snapshotRef.current.value === value &&
+      snapshotRef.current.skillNamesKey === skillNamesKey
+    )
+      return
     const nextCursor = Math.max(
       0,
       Math.min(cursor ?? value.length, value.length)
     )
-    snapshotRef.current = { value, cursor: nextCursor }
+    snapshotRef.current = { value, cursor: nextCursor, skillNamesKey }
     applyingControlledUpdateRef.current = true
     editor.update(() => {
       $setComposerPrompt(value, skillNames)
@@ -560,7 +566,7 @@ function ComposerPromptEditorInner({
     queueMicrotask(() => {
       applyingControlledUpdateRef.current = false
     })
-  }, [cursor, editor, skillNames, value])
+  }, [cursor, editor, skillNames, skillNamesKey, value])
 
   const readSnapshot = useCallback(() => {
     let snapshot = snapshotRef.current
@@ -572,11 +578,12 @@ function ComposerPromptEditorInner({
           $readSelectionOffset(snapshotRef.current.cursor),
           nextValue.length
         ),
+        skillNamesKey,
       }
     })
     snapshotRef.current = snapshot
     return snapshot
-  }, [editor])
+  }, [editor, skillNamesKey])
 
   const focusAt = useCallback(
     (cursor: number) => {
@@ -600,20 +607,28 @@ function ComposerPromptEditorInner({
     [focusAt, readSnapshot]
   )
 
-  const handleEditorChange = useCallback((editorState: EditorState) => {
-    editorState.read(() => {
-      const nextValue = $getRoot().getTextContent()
-      const nextCursor = Math.min(
-        $readSelectionOffset(snapshotRef.current.cursor),
-        nextValue.length
-      )
-      const previous = snapshotRef.current
-      if (previous.value === nextValue && previous.cursor === nextCursor) return
-      snapshotRef.current = { value: nextValue, cursor: nextCursor }
-      if (applyingControlledUpdateRef.current) return
-      onChangeRef.current(nextValue, nextCursor)
-    })
-  }, [])
+  const handleEditorChange = useCallback(
+    (editorState: EditorState) => {
+      editorState.read(() => {
+        const nextValue = $getRoot().getTextContent()
+        const nextCursor = Math.min(
+          $readSelectionOffset(snapshotRef.current.cursor),
+          nextValue.length
+        )
+        const previous = snapshotRef.current
+        if (previous.value === nextValue && previous.cursor === nextCursor)
+          return
+        snapshotRef.current = {
+          value: nextValue,
+          cursor: nextCursor,
+          skillNamesKey,
+        }
+        if (applyingControlledUpdateRef.current) return
+        onChangeRef.current(nextValue, nextCursor)
+      })
+    },
+    [skillNamesKey]
+  )
 
   return (
     <div className="relative">

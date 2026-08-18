@@ -57,6 +57,22 @@ describe("ComposerPromptEditor", () => {
     )
   })
 
+  it("renders a draft skill after skills load", async () => {
+    const { rerender } = render(<Harness initialValue="/autopilot fix this" />)
+    expect(screen.queryByText("/autopilot")).toBeNull()
+
+    await act(async () => {
+      rerender(
+        <Harness
+          initialValue="/autopilot fix this"
+          skillNames={new Set(["autopilot"])}
+        />
+      )
+    })
+
+    expect(screen.getByText("/autopilot")).toBeTruthy()
+  })
+
   it("renders a file link as a chip whose text content is the original source", () => {
     render(<Harness initialValue="fix [app.tsx](ui/src/app.tsx) now" />)
 

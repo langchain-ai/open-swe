@@ -4,13 +4,7 @@ import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
 import type { Message } from "@/features/agents/lib/types"
 
-export function UserMessage({
-  message,
-  skillNames = new Set(),
-}: {
-  message: Message
-  skillNames?: ReadonlySet<string>
-}) {
+export function UserMessage({ message }: { message: Message }) {
   const text = message.chunks
     .filter((c) => c.kind === "text")
     .map((c) => c.text)
@@ -72,7 +66,7 @@ export function UserMessage({
                   WebkitMaskImage: textEdgeMask,
                 }}
               >
-                <SkillPromptText text={text} skillNames={skillNames} />
+                <SkillPromptText text={text} />
               </div>
             )}
           </div>

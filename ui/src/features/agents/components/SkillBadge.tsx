@@ -8,14 +8,8 @@ export function SkillBadge({ name }: { name: string }) {
   )
 }
 
-export function SkillPromptText({
-  text,
-  skillNames,
-}: {
-  text: string
-  skillNames: ReadonlySet<string>
-}) {
-  return splitPromptIntoSegments(text, skillNames).map((segment, index) =>
+export function SkillPromptText({ text }: { text: string }) {
+  return splitPromptIntoSegments(text).map((segment, index) =>
     segment.type === "skill" ? (
       <SkillBadge key={index} name={segment.name} />
     ) : (
