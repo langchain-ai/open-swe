@@ -63,14 +63,14 @@ describe("desktopAcpMessages", () => {
         sequence: 0,
         timestamp: "2026-08-05T20:00:00Z",
         type: "user-message",
-        text: '<dynamic_context kind="system" id="system:local"><display_name>Local automation</display_name></dynamic_context>',
+        text: '<dynamic-context kind="system" id="system:local"><display_name>Local automation</display_name></dynamic-context>',
         images: [],
       },
       {
         sequence: 1,
         timestamp: "2026-08-05T20:00:01Z",
         type: "user-message",
-        text: '<chat_message sender="system:local" surface="desktop"><content>Run &lt;safe&gt;</content></chat_message>',
+        text: '<chat-message sender="system:local" surface="desktop"><content>Run &lt;safe&gt;</content></chat-message>',
         images: [],
       },
       {

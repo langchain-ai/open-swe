@@ -170,9 +170,9 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
         if not isinstance(message, HumanMessage):
             continue
         text = _text(message.content).lstrip()
-        if text.startswith("<dynamic_context "):
+        if text.startswith("<dynamic-context "):
             continue
-        if text.startswith("<chat_message "):
+        if text.startswith("<chat-message "):
             header = text.split(">", 1)[0]
             if 'kind="system"' in header:
                 slack_request_pending = 'surface="slack"' in header

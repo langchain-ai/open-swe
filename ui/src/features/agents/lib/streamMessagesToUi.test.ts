@@ -9,22 +9,22 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "person-entity",
         content:
-          '<dynamic_context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic_context>',
+          '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
       }),
       new HumanMessage({
         id: "system-entity",
         content:
-          '<dynamic_context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic_context>',
+          '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
       }),
       new HumanMessage({
         id: "person-message",
         content:
-          '<chat_message sender="github:alice" surface="web" kind="human"><content>Hello &lt;b&gt;world&lt;/b&gt;</content></chat_message>',
+          '<chat-message sender="github:alice" surface="web" kind="human"><content>Hello &lt;b&gt;world&lt;/b&gt;</content></chat-message>',
       }),
       new HumanMessage({
         id: "system-message",
         content:
-          '<chat_message sender="system:scheduler" surface="automation"><content>Check CI</content></chat_message>',
+          '<chat-message sender="system:scheduler" surface="automation"><content>Check CI</content></chat-message>',
       }),
       new HumanMessage({ id: "legacy", content: "Legacy message" }),
     ])

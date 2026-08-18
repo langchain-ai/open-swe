@@ -423,25 +423,25 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
               type: "human",
               id: "entity-person",
               content:
-                '<dynamic_context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic_context>',
+                '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
             },
             {
               type: "human",
               id: "entity-system",
               content:
-                '<dynamic_context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic_context>',
+                '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
             },
             {
               type: "human",
               id: "structured-person",
               content:
-                '<chat_message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></chat_message>',
+                '<chat-message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></chat-message>',
             },
             {
               type: "human",
               id: "structured-system",
               content:
-                '<chat_message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></chat_message>',
+                '<chat-message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></chat-message>',
             },
             {
               type: "human",

@@ -7,12 +7,12 @@ import {
 } from "./structuredInputMessages"
 
 describe("structured input messages", () => {
-  const person = `<dynamic_context kind="person" id="github:alice">
+  const person = `<dynamic-context kind="person" id="github:alice">
   <display_name>Alice &amp; Bob</display_name>
-</dynamic_context>`
-  const system = `<dynamic_context kind="system" id="system:scheduler">
+</dynamic-context>`
+  const system = `<dynamic-context kind="system" id="system:scheduler">
   <display_name>Scheduler</display_name>
-</dynamic_context>`
+</dynamic-context>`
 
   it("recognizes entity introductions so transcripts can hide them", () => {
     expect(parseStructuredInput(person)).toEqual({
@@ -28,7 +28,7 @@ describe("structured input messages", () => {
 
     expect(
       parseStructuredInput(
-        '<chat_message sender="github:alice" surface="web" kind="human">\n  <content>Hello &amp; welcome</content>\n</chat_message>',
+        '<chat-message sender="github:alice" surface="web" kind="human">\n  <content>Hello &amp; welcome</content>\n</chat-message>',
         entities
       )
     ).toEqual({
@@ -39,7 +39,7 @@ describe("structured input messages", () => {
     })
     expect(
       parseStructuredInput(
-        '<chat_message sender="system:scheduler" surface="automation"><content>Check CI</content></chat_message>',
+        '<chat-message sender="system:scheduler" surface="automation"><content>Check CI</content></chat-message>',
         entities
       )
     ).toEqual({
@@ -57,12 +57,12 @@ describe("structured input messages", () => {
   })
 
   it("leaves malformed and legacy messages unchanged", () => {
-    const legacy = "Legacy <chat_message> text & markdown"
+    const legacy = "Legacy <chat-message> text & markdown"
     expect(parseStructuredInput(legacy)).toEqual({
       type: "legacy",
       content: legacy,
     })
-    const malformed = '<chat_message sender="github:alice"><content>incomplete'
+    const malformed = '<chat-message sender="github:alice"><content>incomplete'
     expect(parseStructuredInput(malformed)).toEqual({
       type: "legacy",
       content: malformed,

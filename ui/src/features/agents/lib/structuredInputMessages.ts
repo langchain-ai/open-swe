@@ -16,9 +16,9 @@ export interface StructuredEntity {
 }
 
 const ENTITY_PATTERN =
-  /^\s*<dynamic_context\b([^>]*)>([\s\S]*?)<\/dynamic_context>\s*$/
+  /^\s*<dynamic-context\b([^>]*)>([\s\S]*?)<\/dynamic-context>\s*$/
 const MESSAGE_PATTERN =
-  /^\s*<chat_message\b([^>]*)>([\s\S]*?)<\/chat_message>\s*$/
+  /^\s*<chat-message\b([^>]*)>([\s\S]*?)<\/chat-message>\s*$/
 const CONTENT_PATTERN = /<content>([\s\S]*?)<\/content>/
 const ATTRIBUTE_PATTERN = /([A-Za-z_][\w:.-]*)\s*=\s*("[^"]*"|'[^']*')/g
 

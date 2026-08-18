@@ -91,9 +91,9 @@ async def test_prepare_prompt_injection():
     )()
     await middleware.awrap_model_call(cast(ModelRequest[None], request), handler)
     prompt = ElementTree.fromstring(seen["system_prompt"])
-    assert prompt.tag == "chat_system"
-    entity = prompt.find("dynamic_context")
-    message = prompt.find("chat_message")
+    assert prompt.tag == "chat-system"
+    entity = prompt.find("dynamic-context")
+    message = prompt.find("chat-message")
     assert entity is not None
     assert message is not None
     assert entity.attrib["id"] == "system:open-swe"

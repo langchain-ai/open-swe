@@ -72,7 +72,7 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
 }
 _UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose"})
 _SYSTEM_ENTITY_ID = "system:open-swe"
-_SYSTEM_WRAPPER_MARKER = '<chat_system format="open-swe-v1">'
+_SYSTEM_WRAPPER_MARKER = '<chat-system format="open-swe-v1">'
 
 
 def _xml_text(value: object) -> str:
@@ -100,13 +100,13 @@ def message_sender_id(content: object) -> str | None:
     values = content if isinstance(content, list) else [content]
     for value in values:
         text = value.get("text") if isinstance(value, dict) else value
-        if not isinstance(text, str) or "<chat_message" not in text:
+        if not isinstance(text, str) or "<chat-message" not in text:
             continue
         try:
             root = ElementTree.fromstring(text)
         except ElementTree.ParseError:
             continue
-        messages = [root] if root.tag == "chat_message" else root.findall(".//chat_message")
+        messages = [root] if root.tag == "chat-message" else root.findall(".//chat-message")
         for message in messages:
             sender = message.get("sender")
             if sender:
@@ -118,13 +118,13 @@ def dynamic_context_hash(content: object) -> str | None:
     values = content if isinstance(content, list) else [content]
     for value in values:
         text = value.get("text") if isinstance(value, dict) else value
-        if not isinstance(text, str) or "<dynamic_context" not in text:
+        if not isinstance(text, str) or "<dynamic-context" not in text:
             continue
         try:
             root = ElementTree.fromstring(text)
         except ElementTree.ParseError:
             continue
-        if root.tag != "dynamic_context":
+        if root.tag != "dynamic-context":
             continue
         claimed_hash = root.attrib.pop("hash", None)
         canonical = ElementTree.tostring(root, encoding="unicode")
@@ -169,10 +169,10 @@ def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
         trust = ' trust="untrusted"' if field in _UNTRUSTED_ENTITY_FIELDS else ""
         children.append(f"<{field}{trust}>{_xml_text(value)}</{field}>")
     body = "\n".join(children)
-    canonical = f'<dynamic_context kind="{kind}" id="{_xml_text(entity_id)}">'
+    canonical = f'<dynamic-context kind="{kind}" id="{_xml_text(entity_id)}">'
     if body:
         canonical += f"\n{body}\n"
-    canonical += "</dynamic_context>"
+    canonical += "</dynamic-context>"
     context_hash = hashlib.sha256(canonical.encode()).hexdigest()
     serialized = canonical.replace(">", f' hash="{context_hash}">', 1)
     return {"role": "user", "content": serialized}
@@ -215,7 +215,7 @@ def _serialize_message(text: str, context: InputMessageContext) -> str:
     children = [_data_element(name, value) for name, value in context.get("data", {}).items()]
     children.append(f"<content>{_xml_text(text)}</content>")
     body = "\n".join(children)
-    return f"<chat_message {' '.join(attributes)}>\n{body}\n</chat_message>"
+    return f"<chat-message {' '.join(attributes)}>\n{body}\n</chat-message>"
 
 
 def _structured_content(
@@ -251,7 +251,7 @@ def filter_new_dynamic_contexts(
     newly_injected: set[str] = set()
     for message in messages:
         content = message.get("content")
-        if not isinstance(content, str) or "<dynamic_context" not in content:
+        if not isinstance(content, str) or "<dynamic-context" not in content:
             filtered.append(message)
             continue
         context_hash = dynamic_context_hash(content)
@@ -323,10 +323,10 @@ def build_run_input(
 
 
 def wrap_system_prompt(text: str, *, additions: list[str] | None = None) -> str:
-    if text.startswith(_SYSTEM_WRAPPER_MARKER) and text.endswith("</chat_system>"):
+    if text.startswith(_SYSTEM_WRAPPER_MARKER) and text.endswith("</chat-system>"):
         if not additions:
             return text
-        closing = "</chat_system>"
+        closing = "</chat-system>"
         serialized_additions = [
             _serialize_message(
                 addition,
@@ -352,4 +352,4 @@ def wrap_system_prompt(text: str, *, additions: list[str] | None = None) -> str:
         )
         for addition in additions or []
     ]
-    return "\n".join([_SYSTEM_WRAPPER_MARKER, str(identity), message, *extras, "</chat_system>"])
+    return "\n".join([_SYSTEM_WRAPPER_MARKER, str(identity), message, *extras, "</chat-system>"])

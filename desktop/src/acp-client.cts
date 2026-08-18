@@ -113,18 +113,18 @@ function escapeXml(value) {
 }
 
 function desktopIdentityIntroduction() {
-  const canonical = `<dynamic_context kind="person" id="desktop:local">
+  const canonical = `<dynamic-context kind="person" id="desktop:local">
   <display_name>Local user</display_name>
   <platform>desktop</platform>
-</dynamic_context>`
+</dynamic-context>`
   const hash = createHash("sha256").update(canonical).digest("hex")
   return canonical.replace(">", ` hash="${hash}">`)
 }
 
 function desktopChatMessage(text) {
-  return `<chat_message sender="desktop:local" surface="desktop" kind="human">
+  return `<chat-message sender="desktop:local" surface="desktop" kind="human">
   <content>${escapeXml(text.trim())}</content>
-</chat_message>`
+</chat-message>`
 }
 
 function promptBlocks(text, images = [], introduceIdentity = false) {

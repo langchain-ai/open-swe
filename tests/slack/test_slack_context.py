@@ -975,7 +975,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     entities = [
         ElementTree.fromstring(message["content"])
         for message in messages
-        if isinstance(message["content"], str) and message["content"].startswith("<dynamic_context")
+        if isinstance(message["content"], str) and message["content"].startswith("<dynamic-context")
     ]
     person = next(entity for entity in entities if entity.attrib["id"] == "slack:U123")
     channel = next(entity for entity in entities if entity.attrib["id"] == "slack:C123")

@@ -134,13 +134,13 @@ async def test_create_durable_run_persists_and_filters_entity_introductions() ->
     client = _FakeClient()
     entity = {
         "role": "user",
-        "content": '<dynamic_context kind="person" id="github:octocat"></dynamic_context>',
+        "content": '<dynamic-context kind="person" id="github:octocat"></dynamic-context>',
     }
     actual = {
         "role": "user",
         "content": (
-            '<chat_message sender="github:octocat" surface="web" kind="human">'
-            "<content>keep me</content></chat_message>"
+            '<chat-message sender="github:octocat" surface="web" kind="human">'
+            "<content>keep me</content></chat-message>"
         ),
     }
 
