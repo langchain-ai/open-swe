@@ -26,7 +26,6 @@ import {
 import { Messages } from "@/features/agents/components/messages"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
-import { threadMessagesForDisplay } from "@/features/agents/lib/threadMessageDisplay"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
@@ -161,28 +160,21 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     [handlePanelCollapsedChange]
   )
 
-  const liveMessages = useMemo<Array<Message>>(
-    () =>
-      streamMessagesToUi(
-        stream.messages,
-        stream.toolCalls,
-        stream.subagents,
-        messageArrivalTimestamp
-      ),
-    [stream.messages, stream.toolCalls, stream.subagents]
-  )
-  const retainedMessages = useRef<Array<Message>>([])
-  useEffect(() => {
-    if (liveMessages.length > 0) retainedMessages.current = liveMessages
-  }, [liveMessages])
-  const baseMessages = threadMessagesForDisplay({
-    live: liveMessages,
-    retained: retainedMessages.current,
-    optimistic: thread.messages,
-    streamThreadId: stream.threadId,
-    threadId: thread.id,
-    isThreadLoading: stream.isThreadLoading,
-  })
+  const baseMessages = useMemo<Array<Message>>(() => {
+    const live = streamMessagesToUi(
+      stream.messages,
+      stream.toolCalls,
+      stream.subagents,
+      messageArrivalTimestamp
+    )
+    if (live.length > 0) return live
+    // Optimistic transcript seeded by `AgentsHome` on thread creation (the
+    // only case where a fetched thread carries messages — `getThread` returns
+    // none). Bridges the brief gap before the SDK's optimistic `submit` echo
+    // lands in `stream.messages`.
+    if (thread.messages.length > 0) return thread.messages
+    return live
+  }, [stream.messages, stream.toolCalls, stream.subagents, thread.messages])
 
   const isStreaming = thread.status === "running" || stream.isLoading
   const activeRun = useMemo(
