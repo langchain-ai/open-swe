@@ -517,7 +517,8 @@ async def _thread_summary(
         working_repo = None
     created_at = metadata.get("created_at_ms")
     updated_at = metadata.get("updated_at_ms")
-    title = metadata.get("title") if isinstance(metadata.get("title"), str) else "Untitled agent"
+    raw_title = metadata.get("title")
+    title: str = raw_title if isinstance(raw_title, str) else "Untitled agent"
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
     effort = metadata.get("effort") if isinstance(metadata.get("effort"), str) else None
     thread_status = thread.get("status") if isinstance(thread.get("status"), str) else "idle"
@@ -584,11 +585,11 @@ async def _thread_summary(
         "sourceUrl": _thread_source_url(metadata),
         "sandboxId": sandbox_id,
     }
+    raw_pull_requests = metadata.get("pull_requests")
+    pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []
     pull_requests = [
         parsed
-        for record in (
-            metadata.get("pull_requests") if isinstance(metadata.get("pull_requests"), list) else []
-        )
+        for record in pull_request_records
         if (parsed := _pull_request_summary(record, title)) is not None
     ]
     if not pull_requests and isinstance(pr_number, int) and isinstance(pr_url, str):

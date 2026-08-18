@@ -1450,7 +1450,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         return
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
-    matching_threads: dict[str, dict[str, Any]] = {}
+    matching_threads: dict[str, Any] = {}
     for metadata_filter in ({"pr_url": pr_url}, {"pr_urls": [pr_url]}):
         try:
             threads = await langgraph_client.threads.search(metadata=metadata_filter, limit=50)
