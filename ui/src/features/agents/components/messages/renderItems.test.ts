@@ -32,7 +32,14 @@ describe("buildRenderItems", () => {
     ])
   })
 
-  it("keeps iframe output visible when later tools run", () => {
+  it("keeps sent replies visible when later work runs", () => {
+    const sentReply: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "call-reply",
+      title: "Replied",
+      toolKind: "slack",
+      status: "completed",
+    }
     const laterTool: ToolExecutionChunk = {
       kind: "tool-execution",
       toolCallId: "call-2",
@@ -41,6 +48,7 @@ describe("buildRenderItems", () => {
       status: "completed",
     }
     const items = buildRenderItems([
+      sentReply,
       iframeChunk(),
       laterTool,
       { kind: "text", text: "Done" },
@@ -49,6 +57,7 @@ describe("buildRenderItems", () => {
     const { workItems, replyItems } = splitWorkAndReply(items)
     expect(workItems.map((item) => item.type)).toEqual(["tool-item"])
     expect(replyItems.map((item) => item.type)).toEqual([
+      "reply-item",
       "iframe-item",
       "text-chunk",
     ])

@@ -35,20 +35,27 @@ export function splitWorkAndReply(items: Array<RenderItem>): {
   workItems: Array<RenderItem>
   replyItems: Array<RenderItem>
 } {
-  let splitIndex = items.length
-  while (splitIndex > 0) {
-    const prev = items[splitIndex - 1]
+  let trailingReplyIndex = items.length
+  while (trailingReplyIndex > 0) {
+    const prev = items[trailingReplyIndex - 1]
     if (!prev || !REPLY_ITEM_TYPES.has(prev.type)) break
-    splitIndex -= 1
+    trailingReplyIndex -= 1
   }
-  const leadingItems = items.slice(0, splitIndex)
-  return {
-    workItems: leadingItems.filter((item) => item.type !== "iframe-item"),
-    replyItems: [
-      ...leadingItems.filter((item) => item.type === "iframe-item"),
-      ...items.slice(splitIndex),
-    ],
-  }
+
+  const workItems: Array<RenderItem> = []
+  const replyItems: Array<RenderItem> = []
+  items.forEach((item, index) => {
+    if (
+      item.type === "reply-item" ||
+      item.type === "iframe-item" ||
+      index >= trailingReplyIndex
+    ) {
+      replyItems.push(item)
+    } else {
+      workItems.push(item)
+    }
+  })
+  return { workItems, replyItems }
 }
 
 function getChunkRenderKey(chunk: Chunk, sourceIndex: number): string {
