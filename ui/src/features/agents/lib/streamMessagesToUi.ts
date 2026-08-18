@@ -265,6 +265,15 @@ function messageContent(value: unknown): string | undefined {
     if (!source || typeof source !== "object") continue;
     const content = (source as Record<string, unknown>).content;
     if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      return content
+        .map((block) =>
+          block && typeof block === "object" && "text" in block && typeof block.text === "string"
+            ? block.text
+            : "",
+        )
+        .join("");
+    }
   }
   return undefined;
 }

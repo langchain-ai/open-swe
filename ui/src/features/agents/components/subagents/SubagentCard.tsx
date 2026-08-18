@@ -91,7 +91,7 @@ function SubagentCardView({
 }) {
   const [expanded, setExpanded] = useState(false);
   const snapshotStatus = subagentDisplayStatus(chunk, runActive);
-  const status = snapshotStatus === "running" && done ? "completed" : snapshotStatus;
+  const status = done && snapshotStatus !== "error" ? "completed" : snapshotStatus;
   const isRunning = status === "running";
   // Freezing the tick freezes the timer: it stops at the moment this subagent
   // finished, not when the whole fan-out did.
