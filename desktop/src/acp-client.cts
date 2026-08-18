@@ -118,7 +118,10 @@ function desktopIdentityIntroduction() {
   <platform>desktop</platform>
 </dynamic-context>`
   const hash = createHash("sha256").update(canonical).digest("hex")
-  return canonical.replace(">", ` hash="${hash}">`)
+  return `<dynamic-context kind="person" id="desktop:local" hash="${hash}">
+  <display_name>Local user</display_name>
+  <platform>desktop</platform>
+</dynamic-context>`
 }
 
 function desktopChatMessage(text) {

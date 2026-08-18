@@ -1,5 +1,6 @@
 const test = require("node:test")
 const assert = require("node:assert/strict")
+const { createHash } = require("node:crypto")
 
 const {
   AcpSession,
@@ -81,6 +82,12 @@ test("optionally introduces the local desktop identity before a prompt", () => {
   assert.match(
     blocks[0].text,
     /^<dynamic-context kind="person" id="desktop:local" hash="[a-f0-9]{64}">/,
+  )
+  const context = blocks[0].text
+  const hash = context.match(/ hash="([a-f0-9]{64})"/)?.[1]
+  assert.equal(
+    hash,
+    createHash("sha256").update(context.replace(` hash="${hash}"`, "")).digest("hex"),
   )
   assert.equal(
     blocks[1].text,
