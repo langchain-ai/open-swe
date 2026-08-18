@@ -13,7 +13,7 @@ from ..dashboard.plan_store import get_plan_content
 from ..utils.dashboard_links import dashboard_plan_url
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
-from ..utils.slack import get_active_slack_thread, get_slack_permalink
+from ..utils.slack import get_active_slack_thread, get_slack_permalink, parse_github_pr_url
 
 logger = logging.getLogger(__name__)
 
@@ -489,8 +489,41 @@ async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
         logger.debug("Failed to read existing PR metadata for thread %s", thread_id, exc_info=True)
         return []
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    records = metadata.get("pull_requests") if isinstance(metadata, dict) else None
-    return [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
+    if not isinstance(metadata, dict):
+        return []
+    records = metadata.get("pull_requests")
+    if isinstance(records, list):
+        return [item for item in records if isinstance(item, dict)]
+    pr_url = metadata.get("pr_url")
+    pr_number = metadata.get("pr_number")
+    pr_ref = parse_github_pr_url(pr_url) if isinstance(pr_url, str) else None
+    if not pr_ref or not isinstance(pr_number, int) or isinstance(pr_number, bool):
+        return []
+    return [
+        {
+            "repo_full_name": f"{pr_ref.owner}/{pr_ref.repo}",
+            "number": pr_number,
+            "url": pr_url,
+            "title": metadata.get("pr_title") if isinstance(metadata.get("pr_title"), str) else "",
+            "state": metadata.get("pr_state")
+            if isinstance(metadata.get("pr_state"), str)
+            else "open",
+            "head_ref": (
+                metadata.get("branch_name") if isinstance(metadata.get("branch_name"), str) else ""
+            ),
+            "base_ref": (
+                metadata.get("base_branch")
+                if isinstance(metadata.get("base_branch"), str)
+                else "main"
+            ),
+            "author": "",
+            "author_avatar_url": "",
+            "created_at": "",
+            "diff_stats": (
+                metadata.get("diff_stats") if isinstance(metadata.get("diff_stats"), dict) else {}
+            ),
+        }
+    ]
 
 
 async def _record_pr_telemetry(

@@ -1,6 +1,7 @@
 import asyncio
 import sys
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -651,6 +652,43 @@ def test_does_not_duplicate_existing_references(monkeypatch: pytest.MonkeyPatch)
 
     assert client.post_calls[0]["json"]["body"] == "body\n\n## References\n- existing"
     assert client.post_calls
+
+
+@pytest.mark.asyncio
+async def test_thread_pull_requests_seeds_legacy_metadata() -> None:
+    fake_client = MagicMock()
+    fake_client.threads.get = AsyncMock(
+        return_value={
+            "metadata": {
+                "pr_url": "https://github.com/langchain-ai/open-swe/pull/42",
+                "pr_number": 42,
+                "pr_title": "Legacy PR",
+                "pr_state": "draft",
+                "branch_name": "feature/legacy",
+                "base_branch": "main",
+                "diff_stats": {"files": 2, "additions": 5, "deletions": 1},
+            }
+        }
+    )
+
+    with patch.object(opr, "get_client", return_value=fake_client):
+        records = await opr._thread_pull_requests("thread-1")
+
+    assert records == [
+        {
+            "repo_full_name": "langchain-ai/open-swe",
+            "number": 42,
+            "url": "https://github.com/langchain-ai/open-swe/pull/42",
+            "title": "Legacy PR",
+            "state": "draft",
+            "head_ref": "feature/legacy",
+            "base_ref": "main",
+            "author": "",
+            "author_avatar_url": "",
+            "created_at": "",
+            "diff_stats": {"files": 2, "additions": 5, "deletions": 1},
+        }
+    ]
 
 
 def test_upsert_pull_request_keeps_multiple_repositories() -> None:

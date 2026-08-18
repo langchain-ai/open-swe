@@ -1451,18 +1451,31 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     matching_threads: dict[str, Any] = {}
+    page_size = 50
     for metadata_filter in ({"pr_url": pr_url}, {"pr_urls": [pr_url]}):
-        try:
-            threads = await langgraph_client.threads.search(metadata=metadata_filter, limit=50)
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not search threads for PR %s state update", pr_url, exc_info=True)
-            continue
-        for thread in threads or []:
-            thread_id = (
-                (thread.get("thread_id") or thread.get("id")) if isinstance(thread, dict) else None
-            )
-            if isinstance(thread_id, str) and thread_id:
-                matching_threads[thread_id] = thread
+        offset = 0
+        while True:
+            try:
+                threads = await langgraph_client.threads.search(
+                    metadata=metadata_filter, limit=page_size, offset=offset
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "Could not search threads for PR %s state update", pr_url, exc_info=True
+                )
+                break
+            page = threads or []
+            for thread in page:
+                thread_id = (
+                    (thread.get("thread_id") or thread.get("id"))
+                    if isinstance(thread, dict)
+                    else None
+                )
+                if isinstance(thread_id, str) and thread_id:
+                    matching_threads[thread_id] = thread
+            if len(page) < page_size:
+                break
+            offset += page_size
 
     for thread_id, thread in matching_threads.items():
         metadata = thread.get("metadata")
