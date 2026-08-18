@@ -74,21 +74,12 @@ def _isolate_publish_review_pr_state() -> Iterator[None]:
         patch("agent.tools.publish_review.replace_findings", AsyncMock()),
         patch("agent.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
         patch("agent.tools.publish_review.clear_review_started_comment", AsyncMock()),
-        patch("agent.tools.publish_review.persist_approval_assessment", AsyncMock()),
         patch(
-            "agent.tools.publish_review.get_effective_review_approval_policy",
+            "agent.tools.publish_review.resolve_review_head_sha",
             AsyncMock(
-                return_value={
-                    "team_enabled": False,
-                    "team_threshold": 90,
-                    "repo_enabled": False,
-                    "repo_threshold": None,
-                    "effective_enabled": False,
-                    "effective_threshold": 90,
-                }
+                side_effect=lambda thread_id, configurable: configurable.get("head_sha") or ""
             ),
         ),
-        patch("agent.tools.publish_review.fetch_approval_preflight", AsyncMock(return_value=None)),
     ):
         yield
 
@@ -935,8 +926,10 @@ async def test_publish_review_skips_duplicate_empty_summary_when_open_swe_alread
 
 
 @pytest.mark.asyncio
-async def test_publish_review_stays_bound_to_reviewed_head_sha() -> None:
-    """The interrupted follow-up run, not stale metadata, owns a pushed head."""
+async def test_publish_review_uses_resolved_head_sha_for_commit_and_last_reviewed() -> None:
+    """A push that landed mid-run updates the live head in thread metadata.
+    publish_review must anchor the GitHub review to that head and advance
+    last_reviewed_sha to it, not the stale head frozen in the run config."""
     from agent.tools.publish_review import _publish_review_async
 
     finding = _f(id="f_new", file="b.py", start_line=2, end_line=2)
@@ -946,6 +939,10 @@ async def test_publish_review_stays_bound_to_reviewed_head_sha() -> None:
     with (
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[finding])),
+        patch(
+            "agent.tools.publish_review.resolve_review_head_sha",
+            AsyncMock(return_value="freshhead"),
+        ),
         patch("agent.tools.publish_review.post_pull_request_review", post_review),
         patch("agent.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
         patch(
@@ -973,10 +970,10 @@ async def test_publish_review_stays_bound_to_reviewed_head_sha() -> None:
 
     assert result["success"] is True
     assert post_review.await_args is not None
-    assert post_review.await_args.kwargs["head_sha"] == "stalehead"
+    assert post_review.await_args.kwargs["head_sha"] == "freshhead"
     final = set_metadata.await_args_list[-1]
     assert final.args[0] == "tid"
-    assert final.kwargs["last_reviewed_sha"] == "stalehead"
+    assert final.kwargs["last_reviewed_sha"] == "freshhead"
 
 
 @pytest.mark.asyncio
