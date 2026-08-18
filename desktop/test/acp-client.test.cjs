@@ -65,9 +65,9 @@ test("builds escaped desktop ACP messages with native image blocks", () => {
     [
       {
         type: "text",
-        text: `<chat-message sender="desktop:local" surface="desktop" kind="human">
+        text: `<input-message sender="desktop:local" surface="desktop" kind="human">
   <content>fix &lt;tag attr=&quot;value&quot;&gt; &amp; it</content>
-</chat-message>`,
+</input-message>`,
       },
       { type: "image", data: "cG5n", mimeType: "image/png" },
     ]
@@ -84,9 +84,9 @@ test("optionally introduces the local desktop identity before a prompt", () => {
   )
   assert.equal(
     blocks[1].text,
-    `<chat-message sender="desktop:local" surface="desktop" kind="human">
+    `<input-message sender="desktop:local" surface="desktop" kind="human">
   <content>fix it</content>
-</chat-message>`,
+</input-message>`,
   )
 })
 
@@ -159,7 +159,7 @@ test("introduces the desktop identity once even when the prompt fails", async ()
   await session.prompt("second", [])
 
   assert.equal(prompts[0][0].text.startsWith("<dynamic-context"), true)
-  assert.equal(prompts[1][0].text.startsWith("<chat-message"), true)
+  assert.equal(prompts[1][0].text.startsWith("<input-message"), true)
   assert.equal(changes.includes(true), true)
   assert.equal(changes.indexOf(true), changes.lastIndexOf(false) + 1)
 })

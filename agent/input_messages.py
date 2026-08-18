@@ -72,7 +72,7 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
 }
 _UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose"})
 _SYSTEM_ENTITY_ID = "system:open-swe"
-_SYSTEM_WRAPPER_MARKER = '<chat-system format="open-swe-v1">'
+_SYSTEM_WRAPPER_MARKER = '<system-instructions format="open-swe-v1">'
 
 
 def _xml_text(value: object) -> str:
@@ -100,13 +100,13 @@ def message_sender_id(content: object) -> str | None:
     values = content if isinstance(content, list) else [content]
     for value in values:
         text = value.get("text") if isinstance(value, dict) else value
-        if not isinstance(text, str) or "<chat-message" not in text:
+        if not isinstance(text, str) or "<input-message" not in text:
             continue
         try:
             root = ElementTree.fromstring(text)
         except ElementTree.ParseError:
             continue
-        messages = [root] if root.tag == "chat-message" else root.findall(".//chat-message")
+        messages = [root] if root.tag == "input-message" else root.findall(".//input-message")
         for message in messages:
             sender = message.get("sender")
             if sender:
@@ -215,7 +215,7 @@ def _serialize_message(text: str, context: InputMessageContext) -> str:
     children = [_data_element(name, value) for name, value in context.get("data", {}).items()]
     children.append(f"<content>{_xml_text(text)}</content>")
     body = "\n".join(children)
-    return f"<chat-message {' '.join(attributes)}>\n{body}\n</chat-message>"
+    return f"<input-message {' '.join(attributes)}>\n{body}\n</input-message>"
 
 
 def _structured_content(
@@ -323,10 +323,10 @@ def build_run_input(
 
 
 def wrap_system_prompt(text: str, *, additions: list[str] | None = None) -> str:
-    if text.startswith(_SYSTEM_WRAPPER_MARKER) and text.endswith("</chat-system>"):
+    if text.startswith(_SYSTEM_WRAPPER_MARKER) and text.endswith("</system-instructions>"):
         if not additions:
             return text
-        closing = "</chat-system>"
+        closing = "</system-instructions>"
         serialized_additions = [
             _serialize_message(
                 addition,
@@ -352,4 +352,6 @@ def wrap_system_prompt(text: str, *, additions: list[str] | None = None) -> str:
         )
         for addition in additions or []
     ]
-    return "\n".join([_SYSTEM_WRAPPER_MARKER, str(identity), message, *extras, "</chat-system>"])
+    return "\n".join(
+        [_SYSTEM_WRAPPER_MARKER, str(identity), message, *extras, "</system-instructions>"]
+    )

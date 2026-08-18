@@ -435,13 +435,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
               type: "human",
               id: "structured-person",
               content:
-                '<chat-message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></chat-message>',
+                '<input-message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></input-message>',
             },
             {
               type: "human",
               id: "structured-system",
               content:
-                '<chat-message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></chat-message>',
+                '<input-message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></input-message>',
             },
             {
               type: "human",

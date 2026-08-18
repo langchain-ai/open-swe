@@ -70,7 +70,7 @@ describe("desktopAcpMessages", () => {
         sequence: 1,
         timestamp: "2026-08-05T20:00:01Z",
         type: "user-message",
-        text: '<chat-message sender="system:local" surface="desktop"><content>Run &lt;safe&gt;</content></chat-message>',
+        text: '<input-message sender="system:local" surface="desktop"><content>Run &lt;safe&gt;</content></input-message>',
         images: [],
       },
       {

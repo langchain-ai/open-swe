@@ -19,12 +19,12 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "person-message",
         content:
-          '<chat-message sender="github:alice" surface="web" kind="human"><content>Hello &lt;b&gt;world&lt;/b&gt;</content></chat-message>',
+          '<input-message sender="github:alice" surface="web" kind="human"><content>Hello &lt;b&gt;world&lt;/b&gt;</content></input-message>',
       }),
       new HumanMessage({
         id: "system-message",
         content:
-          '<chat-message sender="system:scheduler" surface="automation"><content>Check CI</content></chat-message>',
+          '<input-message sender="system:scheduler" surface="automation"><content>Check CI</content></input-message>',
       }),
       new HumanMessage({ id: "legacy", content: "Legacy message" }),
     ])

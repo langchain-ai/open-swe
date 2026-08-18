@@ -28,7 +28,7 @@ describe("structured input messages", () => {
 
     expect(
       parseStructuredInput(
-        '<chat-message sender="github:alice" surface="web" kind="human">\n  <content>Hello &amp; welcome</content>\n</chat-message>',
+        '<input-message sender="github:alice" surface="web" kind="human">\n  <content>Hello &amp; welcome</content>\n</input-message>',
         entities
       )
     ).toEqual({
@@ -39,7 +39,7 @@ describe("structured input messages", () => {
     })
     expect(
       parseStructuredInput(
-        '<chat-message sender="system:scheduler" surface="automation"><content>Check CI</content></chat-message>',
+        '<input-message sender="system:scheduler" surface="automation"><content>Check CI</content></input-message>',
         entities
       )
     ).toEqual({
@@ -57,12 +57,12 @@ describe("structured input messages", () => {
   })
 
   it("leaves malformed and legacy messages unchanged", () => {
-    const legacy = "Legacy <chat-message> text & markdown"
+    const legacy = "Legacy <input-message> text & markdown"
     expect(parseStructuredInput(legacy)).toEqual({
       type: "legacy",
       content: legacy,
     })
-    const malformed = '<chat-message sender="github:alice"><content>incomplete'
+    const malformed = '<input-message sender="github:alice"><content>incomplete'
     expect(parseStructuredInput(malformed)).toEqual({
       type: "legacy",
       content: malformed,

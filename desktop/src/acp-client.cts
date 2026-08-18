@@ -122,9 +122,9 @@ function desktopIdentityIntroduction() {
 }
 
 function desktopChatMessage(text) {
-  return `<chat-message sender="desktop:local" surface="desktop" kind="human">
+  return `<input-message sender="desktop:local" surface="desktop" kind="human">
   <content>${escapeXml(text.trim())}</content>
-</chat-message>`
+</input-message>`
 }
 
 function promptBlocks(text, images = [], introduceIdentity = false) {

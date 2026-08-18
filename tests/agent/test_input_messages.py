@@ -95,8 +95,8 @@ def test_system_prompt_wrapping_is_idempotent_and_additions_are_distinct() -> No
     augmented = wrap_system_prompt(wrapped, additions=["Wrap up now"])
 
     root = _parse(augmented)
-    assert root.tag == "chat-system"
-    messages = root.findall("chat-message")
+    assert root.tag == "system-instructions"
+    messages = root.findall("input-message")
     assert [message.findtext("content") for message in messages] == [
         "Follow <rules> & finish",
         "Wrap up now",

@@ -139,8 +139,8 @@ async def test_create_durable_run_persists_and_filters_entity_introductions() ->
     actual = {
         "role": "user",
         "content": (
-            '<chat-message sender="github:octocat" surface="web" kind="human">'
-            "<content>keep me</content></chat-message>"
+            '<input-message sender="github:octocat" surface="web" kind="human">'
+            "<content>keep me</content></input-message>"
         ),
     }
 
