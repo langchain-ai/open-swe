@@ -2332,14 +2332,14 @@ async def proxy_dashboard_thread_history(
     await _readable_thread_metadata(thread_id, login=login, email=email)
     try:
         payload = json.loads(body or b"{}")
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(400, "history body must be a JSON object") from exc
     if not isinstance(payload, dict):
         raise HTTPException(400, "history body must be a JSON object")
     limit = payload.get("limit", _DISCOVERY_HISTORY_LIMIT)
     if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
         raise HTTPException(400, "history limit must be a positive integer")
-    if not payload.get("before") and not payload.get("checkpoint"):
+    if not any(payload.get(key) for key in ("before", "checkpoint", "metadata")):
         payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = _langgraph_proxy_headers(content_type=content_type)
