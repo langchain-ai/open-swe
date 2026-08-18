@@ -15,6 +15,7 @@ async def slack_add_reaction(
     Prefer `saluting_face` for taking ownership, `eyes` for active review,
     `thinking_face` for investigation, and `tada` for genuine wins. Never use
     `white_check_mark`, because teams use it to indicate that a pull request is approved.
+    To target a specific message, pass its `message_ts` identifier shown in Slack context.
     If `message_ts` is omitted, this reacts to the latest message that triggered the run.
     Pass emoji names without surrounding colons.
     """
@@ -33,17 +34,7 @@ async def slack_add_reaction(
     if not channel_id:
         return {"success": False, "error": "Missing slack_thread.channel_id in config"}
 
-    configured = slack_thread if isinstance(slack_thread, dict) else {}
-    same_location = (active.get("channel_id"), active.get("thread_ts")) == (
-        configured.get("channel_id"),
-        configured.get("thread_ts"),
-    )
-    default_target_ts = (
-        configured.get("triggering_event_ts")
-        if same_location
-        else active.get("triggering_event_ts")
-    )
-    target_ts = (message_ts or default_target_ts or "").strip()
+    target_ts = (message_ts or active.get("triggering_event_ts") or "").strip()
     if not target_ts:
         return {
             "success": False,

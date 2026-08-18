@@ -312,7 +312,12 @@ def format_slack_messages_for_prompt(
             else:
                 bot_name = message.get("username") or "Bot"
             author = f"@{bot_name}(bot)"
-        line = f"{author}: {text}"
+        raw_message_ts = message.get("ts")
+        message_ts = raw_message_ts.strip() if isinstance(raw_message_ts, str) else ""
+        identifier = (
+            f" [message_ts={message_ts}]" if _SLACK_MESSAGE_TS_RE.fullmatch(message_ts) else ""
+        )
+        line = f"{author}{identifier}: {text}"
         if forwarded:
             line += f"\n{forwarded}"
         lines.append(line)
