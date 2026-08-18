@@ -7,6 +7,7 @@ the real ``open_pull_request`` tool, and post the result back with the real
 the preceding tool result, exactly as a real model would.
 """
 
+import json
 import os
 import re
 import time
@@ -37,11 +38,8 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-# One shell command that does the whole git workflow. Each execute() runs in a
-# fresh shell rooted at the sandbox dir, so the clone+commit+push is bundled.
-_IMPLEMENT_SCRIPT = f"""
+_SETUP_SCRIPT = f"""
 set -e
-sleep 8
 rm -rf repo
 git clone "$E2E_REMOTE" repo
 cd repo
@@ -49,9 +47,20 @@ git config user.email "dev@example.com"
 git config user.name "Dev User"
 git checkout -b {FEATURE_BRANCH}
 cat > {FEATURE_FILE} <<'EOF'
+def normalize(name):
+    return name.strip()
+
 def greet(name):
-    return f"Hello, {{name}}!"
+    return "Hello!"
+
+def farewell(name):
+    return f"Goodbye, {{name}}!"
 EOF
+""".strip()
+
+_COMMIT_SCRIPT = f"""
+set -e
+cd repo
 git add -A
 git commit -m "{PR_TITLE}"
 git push origin {FEATURE_BRANCH}
@@ -89,8 +98,37 @@ git push origin {SECOND_FEATURE_BRANCH}
 echo BOTH_PUSHED_OK
 """.strip()
 
+_DESKTOP_PR_PAYLOAD = json.dumps(
+    {
+        "head": FEATURE_BRANCH,
+        "base": BASE_BRANCH,
+        "title": PR_TITLE,
+        "body": "Adds a `greet()` helper as requested.",
+        "draft": True,
+    }
+)
+_DESKTOP_IMPLEMENT_SCRIPT = f"""
+set -e
+git checkout -b {FEATURE_BRANCH}
+cat > {FEATURE_FILE} <<'EOF'
+def greet(name):
+    return f"Hello, {{name}}!"
+EOF
+git add {FEATURE_FILE}
+git -c "user.email=dev@example.com" -c "user.name=Dev User" commit -m "{PR_TITLE}"
+git push origin {FEATURE_BRANCH}
+curl --fail --silent --show-error \
+  --request POST \
+  --header 'content-type: application/json' \
+  --data '{_DESKTOP_PR_PAYLOAD}' \
+  "$E2E_FAKE_GITHUB_API/repos/{OWNER}/{REPO}/pulls"
+""".strip()
+
+# The system prompt of the most recent model call, so specs can assert what the
+# agent was actually told (e.g. the environment section) rather than infer it.
 LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
 
+_BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
 
@@ -174,25 +212,6 @@ def _pr_url_from_messages(messages: list[BaseMessage]) -> str | None:
     return None
 
 
-def _multi_pr_reply_step(messages: list[BaseMessage]) -> AIMessage:
-    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
-    return AIMessage(
-        content="Replying in the Slack thread with the cross-repository PRs.",
-        tool_calls=[
-            {
-                "name": "slack_thread_reply",
-                "args": {
-                    "message": (
-                        f"Opened pull requests in `{OWNER}/{REPO}` and "
-                        f"`{SECOND_OWNER}/{SECOND_REPO}`; latest: <{url}|{SECOND_PR_TITLE}>."
-                    )
-                },
-                "id": "call-multi-pr-reply",
-            }
-        ],
-    )
-
-
 def _plan_url_from_messages(messages: list[BaseMessage]) -> str | None:
     """The plan-review URL is injected into the system prompt; a real model would read it."""
     for msg in messages:
@@ -232,6 +251,34 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
             "output_tokens": 345,
             "total_tokens": 12_345,
         },
+    )
+
+
+def _multi_pr_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    return AIMessage(
+        content="Replying in the Slack thread with the cross-repository PRs.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {
+                    "message": (
+                        f"Opened pull requests in `{OWNER}/{REPO}` and "
+                        f"`{SECOND_OWNER}/{SECOND_REPO}`; latest: <{url}|{SECOND_PR_TITLE}>."
+                    )
+                },
+                "id": "call-multi-pr-reply",
+            }
+        ],
+    )
+
+
+def _desktop_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    return AIMessage(
+        content=(
+            f"Done! I added `{FEATURE_FILE}` and opened [{PR_TITLE}]({url}) on the fake GitHub."
+        )
     )
 
 
@@ -314,13 +361,20 @@ def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
                 "name": "slack_thread_reply",
                 "args": {
                     "message": f"✅ The plan is ready for review: <{url}|open the plan>. "
-                    "Take a look, leave comments, and approve it when you're happy."
+                    "Take a look, leave comments, and choose what to do next.",
+                    "options": ["Approve & implement", "Request changes"],
                 },
                 "id": "call-plan-done",
             }
         ],
     )
 
+
+ENVIRONMENT_NAME = "default"
+ENVIRONMENT_PROMPT = (
+    "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`."
+)
+ENVIRONMENT_PROVISION_SCRIPT = "mkdir -p repos && echo provisioned > repos/.provisioned && ls repos"
 
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
 
@@ -344,12 +398,6 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
     suffix = f" I saw this follow-up was from {attribution}." if attribution else ""
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
 
-
-# --- Subagents -------------------------------------------------------------
-#
-# The `task` tool runs a nested deepagents loop against this same fake model,
-# so a subagent's own turns land back in `_generate`. Its message list starts
-# fresh at the task description, which is what routes it to its own script.
 
 SUBAGENT_TASKS: dict[str, str] = {
     "scout": "Scout the repository layout and report which files define the greet helper.",
@@ -434,6 +482,15 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content=AUDITOR_RESULT),
     ),
+    "desktop": (
+        _tool_step(
+            "Implementing the change in the selected local project.",
+            "execute",
+            {"command": _DESKTOP_IMPLEMENT_SCRIPT},
+            "call-desktop-impl",
+        ),
+        _dynamic_step(_desktop_reply_step),
+    ),
     "implement": (
         _tool_step(
             "Acknowledging the Slack request before starting work.",
@@ -442,10 +499,26 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-ack",
         ),
         _tool_step(
-            "Setting up the repo and implementing the change.",
+            "Setting up the repository.",
             "execute",
-            {"command": _IMPLEMENT_SCRIPT},
-            "call-impl",
+            {"command": _SETUP_SCRIPT},
+            "call-setup",
+        ),
+        _tool_step(
+            "Implementing the greeting.",
+            "edit_file",
+            {
+                "file_path": f"/repo/{FEATURE_FILE}",
+                "old_string": 'def greet(name):\n    return "Hello!"',
+                "new_string": 'def greet(name):\n    return f"Hello, {name}!"',
+            },
+            "call-edit",
+        ),
+        _tool_step(
+            "Committing and pushing the change.",
+            "execute",
+            {"command": _COMMIT_SCRIPT},
+            "call-commit",
         ),
         _tool_step(
             "Opening a pull request.",
@@ -506,6 +579,23 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_multi_pr_reply_step),
     ),
+    "move": (
+        _tool_step(
+            "Moving the current Open SWE thread to another Slack channel.",
+            "slack_move_thread",
+            {
+                "message": "Continue the existing Open SWE task in this thread.",
+                "channel_id": "C_TARGET",
+            },
+            "call-move",
+        ),
+        _tool_step(
+            "Confirming the moved thread in its new location.",
+            "slack_thread_reply",
+            {"message": "Moved this Open SWE thread and preserved its state."},
+            "call-move-reply",
+        ),
+    ),
     "breakout": (
         _tool_step(
             "Starting a separate Slack thread for the breakout task.",
@@ -537,6 +627,31 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_plan_complete_step),
         StepSpec(content="I'll wait for your review and approval before implementing."),
     ),
+    "environment": (
+        _tool_step(
+            "Provisioning this sandbox before capturing it.",
+            "execute",
+            {"command": ENVIRONMENT_PROVISION_SCRIPT},
+            "call-env-provision",
+        ),
+        _tool_step(
+            "Saving the environment record.",
+            "save_environment",
+            {
+                "name": ENVIRONMENT_NAME,
+                "prompt": ENVIRONMENT_PROMPT,
+                "repos": [f"{OWNER}/{REPO}"],
+            },
+            "call-env-save",
+        ),
+        _tool_step(
+            "Capturing this sandbox as the environment snapshot.",
+            "capture_environment_snapshot",
+            {"name": ENVIRONMENT_NAME},
+            "call-env-capture",
+        ),
+        StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
+    ),
     "followup": (_dynamic_step(_followup_step),),
 }
 
@@ -558,9 +673,21 @@ def _is_plan_request(text: str) -> bool:
     return "plan" in text.lower()
 
 
+def _is_environment_request(text: str) -> bool:
+    return "environment" in text.lower()
+
+
 def _is_breakout_request(text: str) -> bool:
     t = text.lower()
     return "break out" in t or "separate thread" in t or "split out" in t
+
+
+def _is_move_request(text: str) -> bool:
+    return "E2E_MOVE_THREAD" in text
+
+
+def _is_move_followup(text: str) -> bool:
+    return "E2E_DESTINATION_FOLLOWUP" in text or "E2E_SOURCE_RETAG" in text
 
 
 def _is_approval(text: str) -> bool:
@@ -574,10 +701,19 @@ def _is_revision(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
-    ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
     ScriptRule(
         "subagents", lambda ctx: ctx.human_count <= 1 and _is_subagent_request(ctx.first_text)
     ),
+    ScriptRule(
+        "desktop",
+        lambda ctx: ctx.human_count <= 1 and "E2E_DESKTOP_LOCAL" in ctx.first_text,
+    ),
+    ScriptRule(
+        "environment", lambda ctx: ctx.human_count <= 1 and _is_environment_request(ctx.first_text)
+    ),
+    ScriptRule("followup", lambda ctx: _is_move_followup(ctx.last_text)),
+    ScriptRule("move", lambda ctx: _is_move_request(ctx.first_text)),
+    ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
     ScriptRule("plan", lambda ctx: _is_revision(ctx.last_text)),
     ScriptRule("plan", lambda ctx: ctx.human_count <= 1 and _is_plan_request(ctx.first_text)),
     ScriptRule(
@@ -593,8 +729,6 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
 
 
 def _script_for(context: ScriptContext) -> tuple[StepSpec, ...]:
-    # A nested loop is identified by its task description, never by the parent
-    # rules — its first human message is the description, not the user's ask.
     nested = _subagent_script_name(context.first_text)
     if nested is not None:
         return SCRIPT_LIBRARY[nested]
@@ -651,8 +785,13 @@ class FakeScriptedChatModel(BaseChatModel):
 
         # Keep a run busy on demand so E2E can land follow-ups mid-run (exercising
         # the interrupt-debounce path). Only the triggering message carries the
-        # marker, and only the first model call of that run blocks.
-        if step_index == 0 and "E2E_BUSY_HOLD" in context.last_text:
-            time.sleep(float(os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
+        # marker. The block lands on the second model call so the Slack
+        # acknowledgement — and the web link a spec may need to click — is already
+        # out by the time the run stalls. `E2E_BUSY_HOLD:<n>` overrides the window
+        # so a spec needing a short hold does not leave a run in flight for the
+        # specs that follow it.
+        hold = _BUSY_HOLD_RE.search(context.last_text) if step_index == 1 else None
+        if hold:
+            time.sleep(float(hold.group(1) or os.environ.get("E2E_BUSY_HOLD_SECONDS", "10")))
         step = script[step_index] if step_index < len(script) else SCRIPT_LIBRARY["followup"][0]
         return ChatResult(generations=[ChatGeneration(message=_render_step(step, messages))])
