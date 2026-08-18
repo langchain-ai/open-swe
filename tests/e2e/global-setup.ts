@@ -37,10 +37,17 @@ export default async function globalSetup() {
     });
   }
 
+  // DASHBOARD_API_URL is read per request, so the running server needs it too —
+  // not just the build.
   const child = spawn("node", [server], {
     cwd: ui,
     stdio: "inherit",
-    env: { ...process.env, HOST: "127.0.0.1", PORT: uiPort },
+    env: {
+      ...process.env,
+      HOST: "127.0.0.1",
+      PORT: uiPort,
+      DASHBOARD_API_URL: harness,
+    },
   });
   child.on("exit", (code) => {
     if (code) throw new Error(`ui server exited with code ${code}`);
