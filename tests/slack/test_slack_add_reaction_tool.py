@@ -36,6 +36,66 @@ async def test_slack_add_reaction_defaults_to_triggering_event(
     assert captured == {"channel_id": "C1", "message_ts": "1.1", "emoji": "saluting_face"}
 
 
+async def test_slack_add_reaction_uses_current_run_trigger_when_metadata_is_newer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+    config = _config()
+    config["configurable"]["thread_id"] = "thread-1"
+
+    async def fake_get_active_slack_thread(*_args: object) -> dict[str, str]:
+        return {
+            "channel_id": "C1",
+            "thread_ts": "1.0",
+            "triggering_event_ts": "1.2",
+        }
+
+    async def fake_add_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> bool:
+        captured.update({"channel_id": channel_id, "message_ts": message_ts, "emoji": emoji})
+        return True
+
+    monkeypatch.setattr(slack_reaction_tool, "get_config", lambda: config)
+    monkeypatch.setattr(
+        slack_reaction_tool, "get_active_slack_thread", fake_get_active_slack_thread
+    )
+    monkeypatch.setattr(slack_reaction_tool, "add_slack_reaction", fake_add_slack_reaction)
+
+    result = await slack_reaction_tool.slack_add_reaction(emoji="eyes")
+
+    assert result == {"success": True}
+    assert captured == {"channel_id": "C1", "message_ts": "1.1", "emoji": "eyes"}
+
+
+async def test_slack_add_reaction_uses_active_trigger_after_thread_move(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+    config = _config()
+    config["configurable"]["thread_id"] = "thread-1"
+
+    async def fake_get_active_slack_thread(*_args: object) -> dict[str, str]:
+        return {
+            "channel_id": "C2",
+            "thread_ts": "2.0",
+            "triggering_event_ts": "2.0",
+        }
+
+    async def fake_add_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> bool:
+        captured.update({"channel_id": channel_id, "message_ts": message_ts, "emoji": emoji})
+        return True
+
+    monkeypatch.setattr(slack_reaction_tool, "get_config", lambda: config)
+    monkeypatch.setattr(
+        slack_reaction_tool, "get_active_slack_thread", fake_get_active_slack_thread
+    )
+    monkeypatch.setattr(slack_reaction_tool, "add_slack_reaction", fake_add_slack_reaction)
+
+    result = await slack_reaction_tool.slack_add_reaction(emoji="eyes")
+
+    assert result == {"success": True}
+    assert captured == {"channel_id": "C2", "message_ts": "2.0", "emoji": "eyes"}
+
+
 async def test_slack_add_reaction_accepts_explicit_message_and_normalizes_emoji(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
