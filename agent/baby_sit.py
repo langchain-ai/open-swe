@@ -1,7 +1,5 @@
 """Durable, opt-in PR CI watches for the `/baby-sit` skill."""
 
-from __future__ import annotations
-
 import hashlib
 import logging
 import uuid
