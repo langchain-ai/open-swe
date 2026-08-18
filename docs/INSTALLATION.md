@@ -290,7 +290,9 @@ ALLOWED_GITHUB_ORGS="langchain-ai,anthropics"
 ALLOWED_GITHUB_REPOS="some-user/their-repo,another-org/specific-repo"
 ```
 
-A GitHub or Linear webhook is accepted if the resolved repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`. If both are empty, all repos are allowed. Slack mentions are not rejected from regex-inferred repository text; repository access is bounded by the GitHub App installation permissions.
+A GitHub or Linear webhook is accepted if the resolved repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`. If both are empty, all repos are allowed.
+
+For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level edit guard. To modify a repository outside those organizations, the user must explicitly request that exact repository with its full `https://github.com/<owner>/<repo>` URL. Repository hints, defaults, shorthand, and contextual links do not qualify. This does not bypass the server-side GitHub/Linear webhook filter above or GitHub credential and App installation permissions.
 
 `ALLOWED_GITHUB_ORGS` also gates **dashboard login**: when set, only GitHub accounts that are active members of one of the listed organizations can complete the OAuth login and receive a session. Membership is verified server-side with the GitHub App installation token (so private memberships are visible and no extra OAuth scope is required), and the check fails closed on any API error. When `ALLOWED_GITHUB_ORGS` is empty, dashboard login is open to any GitHub account (the prior behavior).
 
@@ -502,14 +504,14 @@ GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
 X_SERVICE_AUTH_JWT_SECRET=""
 
 # === Repo Allowlist (optional) ===
-# Comma-separated list of GitHub orgs the agent is allowed to operate on.
-# Also gates dashboard login to members of these orgs (requires the GitHub App's
-# Organization -> Members: Read-only permission; without it, all dashboard logins are rejected).
-# Leave empty to allow all orgs.
+# Comma-separated list of GitHub orgs allowed by the GitHub/Linear webhook filter.
+# Also gates dashboard login and prompts the agent to require an explicit full repository
+# URL before editing outside these orgs (requires Organization -> Members: Read-only).
+# Leave empty to allow all orgs and disable the prompt-level edit guard.
 ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
-# Comma-separated list of specific owner/repo pairs the agent is allowed to operate on.
-# For GitHub/Linear webhooks, a repo is allowed if its org is in ALLOWED_GITHUB_ORGS OR its owner/repo is in ALLOWED_GITHUB_REPOS.
-# Slack mentions are not rejected from regex-inferred repository text; repository access is bounded by GitHub App installation permissions.
+# Comma-separated list of specific owner/repo pairs allowed by the GitHub/Linear webhook filter.
+# A repo is accepted if its org is in ALLOWED_GITHUB_ORGS OR its owner/repo is in ALLOWED_GITHUB_REPOS.
+# Slack/dashboard access remains bounded by GitHub credentials and App installation permissions.
 # Leave both empty to allow all repos.
 ALLOWED_GITHUB_REPOS=""                # e.g. "some-user/their-repo,another-org/specific-repo"
 
