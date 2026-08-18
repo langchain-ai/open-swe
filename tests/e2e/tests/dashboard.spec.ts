@@ -269,6 +269,28 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(
       page.getByRole("link", { name: "Add greet() helper" }).first(),
     ).toBeVisible();
+    const worked = page.getByRole("button", { name: /^Worked(?: for .+)?$/ });
+    await expect(worked).toBeVisible();
+    await page.evaluate(() => {
+      const workedButton = [...document.querySelectorAll("button")].find(
+        (button) =>
+          /^Worked(?: for .+)?$/.test(button.textContent?.trim() ?? ""),
+      );
+      if (!workedButton) throw new Error("Worked button not found");
+      const state = { removed: false } as {
+        removed: boolean;
+        observer: MutationObserver;
+      };
+      state.observer = new MutationObserver(() => {
+        if (!workedButton.isConnected) state.removed = true;
+      });
+      state.observer.observe(document.body, { childList: true, subtree: true });
+      (
+        window as unknown as {
+          __foregroundRecovery: typeof state;
+        }
+      ).__foregroundRecovery = state;
+    });
 
     const hydrated = page.waitForResponse((response) => {
       const path = new URL(response.url()).pathname;
@@ -281,6 +303,26 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       document.dispatchEvent(new Event("visibilitychange")),
     );
     expect((await hydrated).ok()).toBeTruthy();
+    const flickered = await page.evaluate(
+      () =>
+        new Promise<boolean>((resolve) =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const state = (
+                window as unknown as {
+                  __foregroundRecovery: {
+                    removed: boolean;
+                    observer: MutationObserver;
+                  };
+                }
+              ).__foregroundRecovery;
+              state.observer.disconnect();
+              resolve(state.removed);
+            }),
+          ),
+        ),
+    );
+    expect(flickered).toBe(false);
 
     await typeIntoComposer(page, "Can you also add a docstring?");
     await expect(
