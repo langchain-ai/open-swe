@@ -82,10 +82,11 @@ function SendButton({
   canSubmit,
   submitting,
   onSubmit,
-}: ComposerPrimaryActionsProps) {
+  label = "Send message",
+}: ComposerPrimaryActionsProps & { label?: string }) {
   return (
     <button
-      aria-label="Send message"
+      aria-label={label}
       className={cn(
         "relative isolate flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/90 text-primary-foreground shadow-xs shadow-primary/25 transition-all duration-150",
         "hover:scale-105 hover:bg-primary active:shadow-none enabled:cursor-pointer",
@@ -188,11 +189,14 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
     return <SendButton {...props} />
 
   return (
-    <StopButton
-      disabled={stopping}
-      onStop={() => void handleStop()}
-      stopOnEscape={props.stopOnEscape}
-    />
+    <div className="flex gap-1">
+      <SendButton {...props} label="Steer agent" />
+      <StopButton
+        disabled={stopping}
+        onStop={() => void handleStop()}
+        stopOnEscape={props.stopOnEscape}
+      />
+    </div>
   )
 }
 

@@ -746,7 +746,9 @@ export const ChatComposer = memo(function ChatComposer({
           }}
           onCommandKeyDown={handleCommandKeyDown}
           onPaste={handlePaste}
-          placeholder={busy ? "Send a message to queue next..." : placeholder}
+          placeholder={
+            busy ? "Steer the agent after its current step..." : placeholder
+          }
           value={value}
         />
 
