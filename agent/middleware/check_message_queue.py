@@ -18,11 +18,7 @@ from langgraph_sdk import get_client
 from ..dashboard.options import model_supports_images
 from ..input_messages import PersonIdentity, build_input_messages, entity_ids_from_messages
 from ..prompt import replace_source_guidance
-from ..utils.dashboard_handoff import (  # noqa: F401
-    DASHBOARD_HANDOFF_BODY,
-    DASHBOARD_HANDOFF_INSTRUCTION,
-    DASHBOARD_HANDOFF_MARKER,
-)
+from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.multimodal import fetch_image_block, vision_not_supported_warning
 

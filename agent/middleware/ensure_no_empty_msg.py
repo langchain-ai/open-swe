@@ -6,7 +6,8 @@ from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
-from .check_message_queue import DASHBOARD_HANDOFF_MARKER
+from ..input_messages import message_sender_id
+from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_SENDER_ID
 
 _DASHBOARD_SOURCE = "dashboard"
 
@@ -45,21 +46,10 @@ def check_if_no_op(messages: list[AnyMessage]) -> bool:
     return False
 
 
-def _content_contains_text(content: object, text: str) -> bool:
-    if isinstance(content, str):
-        return text in content
-    if not isinstance(content, list):
-        return False
-    for block in content:
-        if isinstance(block, dict) and text in str(block.get("text", "")):
-            return True
-    return False
-
-
 def _last_human_is_dashboard_handoff(state: AgentState) -> bool:
     for msg in reversed(state["messages"]):
         if msg.type == "human":
-            return _content_contains_text(msg.content, DASHBOARD_HANDOFF_MARKER)
+            return message_sender_id(msg.content) == DASHBOARD_HANDOFF_SENDER_ID
     return False
 
 

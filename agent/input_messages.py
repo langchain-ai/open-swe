@@ -95,6 +95,24 @@ def introduced_entity_ids_from_metadata(metadata: object) -> set[str]:
     return {value for value in values if isinstance(value, str) and value}
 
 
+def message_sender_id(content: object) -> str | None:
+    values = content if isinstance(content, list) else [content]
+    for value in values:
+        text = value.get("text") if isinstance(value, dict) else value
+        if not isinstance(text, str) or "<chat_message" not in text:
+            continue
+        try:
+            root = ElementTree.fromstring(text)
+        except ElementTree.ParseError:
+            continue
+        messages = [root] if root.tag == "chat_message" else root.findall(".//chat_message")
+        for message in messages:
+            sender = message.get("sender")
+            if sender:
+                return sender
+    return None
+
+
 def entity_ids_from_messages(messages: object) -> set[str]:
     if not isinstance(messages, (list, tuple)):
         return set()

@@ -77,6 +77,20 @@ jobs:
       - name: Run format check
         run: pnpm run format:check
 
+  ui-typecheck:
+    name: UI typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
+      - name: Run typecheck
+        run: pnpm --dir ui run typecheck
+
   desktop:
     name: Desktop checks
     runs-on: ubuntu-latest
