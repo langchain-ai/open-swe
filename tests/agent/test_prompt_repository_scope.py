@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pytest
 
 from agent.prompt import construct_system_prompt
