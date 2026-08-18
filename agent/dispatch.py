@@ -37,9 +37,9 @@ from .input_messages import (
     Surface,
     SystemIdentity,
     build_run_input,
-    entity_ids_from_messages,
-    filter_new_entity_introductions,
-    introduced_entity_ids_from_metadata,
+    dynamic_context_hashes_from_messages,
+    filter_new_dynamic_contexts,
+    injected_dynamic_context_hashes_from_metadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -212,7 +212,7 @@ async def _filter_and_persist_first_seen_entities(
     metadata: dict[str, Any] | None,
 ) -> tuple[RunInput, dict[str, Any] | None]:
     thread_metadata: dict[str, Any] = {}
-    history_entity_ids: set[str] = set()
+    history_context_hashes: set[str] = set()
     try:
         thread = await client.threads.get(thread_id)
         stored = thread.get("metadata") if isinstance(thread, dict) else None
@@ -221,23 +221,25 @@ async def _filter_and_persist_first_seen_entities(
         state = await client.threads.get_state(thread_id)
         values = state.get("values") if isinstance(state, dict) else None
         if isinstance(values, dict):
-            history_entity_ids = entity_ids_from_messages(values.get("messages"))
+            history_context_hashes = dynamic_context_hashes_from_messages(values.get("messages"))
     except Exception:
         logger.debug("Could not load prior entity state for thread %s", thread_id, exc_info=True)
 
-    introduced = introduced_entity_ids_from_metadata(thread_metadata) | history_entity_ids
-    filtered_messages, newly_introduced = filter_new_entity_introductions(
-        input.get("messages", []), introduced
+    injected = (
+        injected_dynamic_context_hashes_from_metadata(thread_metadata) | history_context_hashes
+    )
+    filtered_messages, newly_injected = filter_new_dynamic_contexts(
+        input.get("messages", []), injected
     )
     filtered_input: RunInput = {**input, "messages": filtered_messages}
-    all_introduced = introduced | newly_introduced
-    if not all_introduced:
+    all_injected = injected | newly_injected
+    if not all_injected:
         return filtered_input, metadata
 
     merged_metadata = {
         **thread_metadata,
         **(metadata or {}),
-        "introduced_entity_ids": sorted(all_introduced),
+        "injected_dynamic_context_hashes": sorted(all_injected),
     }
     try:
         await client.threads.update(thread_id=thread_id, metadata=merged_metadata)
@@ -283,8 +285,8 @@ async def create_durable_run(
         create_kwargs["after_seconds"] = after_seconds
 
     run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
-    introduced = introduced_entity_ids_from_metadata(metadata)
-    if introduced:
+    injected = injected_dynamic_context_hashes_from_metadata(metadata)
+    if injected:
         try:
             await client.threads.update(thread_id=thread_id, metadata=metadata or {})
         except Exception:

@@ -7,12 +7,12 @@ import {
 } from "./structuredInputMessages"
 
 describe("structured input messages", () => {
-  const person = `<chat_entity kind="person" id="github:alice">
+  const person = `<dynamic_context kind="person" id="github:alice">
   <display_name>Alice &amp; Bob</display_name>
-</chat_entity>`
-  const system = `<chat_entity kind="system" id="system:scheduler">
+</dynamic_context>`
+  const system = `<dynamic_context kind="system" id="system:scheduler">
   <display_name>Scheduler</display_name>
-</chat_entity>`
+</dynamic_context>`
 
   it("recognizes entity introductions so transcripts can hide them", () => {
     expect(parseStructuredInput(person)).toEqual({

@@ -19,8 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..input_messages import (
     PersonIdentity,
     build_input_messages,
-    entity_ids_from_messages,
-    introduced_entity_ids_from_metadata,
+    dynamic_context_hashes_from_messages,
+    injected_dynamic_context_hashes_from_metadata,
 )
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from ..utils.json_types import (
@@ -1483,12 +1483,12 @@ async def _enrich_run_start_command(
         if content is None:
             content = ""
         sender_id = f"github:{login}"
-        introduced = introduced_entity_ids_from_metadata(metadata)
+        injected = injected_dynamic_context_hashes_from_metadata(metadata)
         try:
             prior_state = await client.threads.get_state(thread_id)
             values = prior_state.get("values") if isinstance(prior_state, dict) else None
             if isinstance(values, dict):
-                introduced.update(entity_ids_from_messages(values.get("messages")))
+                injected.update(dynamic_context_hashes_from_messages(values.get("messages")))
         except Exception:
             logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
         person: PersonIdentity = {
@@ -1513,7 +1513,7 @@ async def _enrich_run_start_command(
                 if metadata.get("source") == "slack"
                 else None
             ),
-            introduced_entity_ids=introduced,
+            injected_dynamic_context_hashes=injected,
         )
         if metadata.get("source") == "slack":
             structured.insert(
@@ -1525,7 +1525,7 @@ async def _enrich_run_start_command(
                         "surface": "automation",
                         "kind": "system",
                     },
-                    introduced_entity_ids={"system:dashboard-handoff"},
+                    injected_dynamic_context_hashes={"system:dashboard-handoff"},
                 )[0],
             )
         run_input = params.get("input")
@@ -1537,7 +1537,7 @@ async def _enrich_run_start_command(
             PARTICIPANT_LOGINS_KEY: merge_participant_logins(
                 metadata.get(PARTICIPANT_LOGINS_KEY), login
             ),
-            "introduced_entity_ids": sorted(introduced),
+            "injected_dynamic_context_hashes": sorted(injected),
         }
         if command_images and run_model and run_effort:
             overrides["agent_model_id"] = run_model

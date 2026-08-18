@@ -1,12 +1,13 @@
 """Typed construction and serialization for application-owned model inputs."""
 
+import hashlib
 from html import escape
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict, cast
 from xml.etree import ElementTree
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AnyMessage, BaseMessage
 
-INTRODUCED_ENTITY_IDS_KEY = "introduced_entity_ids"
+INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 
 Surface = Literal["slack", "linear", "github", "web", "desktop", "automation", "eval"]
 EntityKind = Literal["person", "channel", "system"]
@@ -86,10 +87,10 @@ def _validate_entity_id(entity_id: str) -> str:
     return entity_id
 
 
-def introduced_entity_ids_from_metadata(metadata: object) -> set[str]:
+def injected_dynamic_context_hashes_from_metadata(metadata: object) -> set[str]:
     if not isinstance(metadata, dict):
         return set()
-    values = metadata.get(INTRODUCED_ENTITY_IDS_KEY)
+    values = metadata.get(INJECTED_DYNAMIC_CONTEXT_HASHES_KEY)
     if not isinstance(values, list):
         return set()
     return {value for value in values if isinstance(value, str) and value}
@@ -113,29 +114,49 @@ def message_sender_id(content: object) -> str | None:
     return None
 
 
-def entity_ids_from_messages(messages: object) -> set[str]:
+def dynamic_context_hash(content: object) -> str | None:
+    values = content if isinstance(content, list) else [content]
+    for value in values:
+        text = value.get("text") if isinstance(value, dict) else value
+        if not isinstance(text, str) or "<dynamic_context" not in text:
+            continue
+        try:
+            root = ElementTree.fromstring(text)
+        except ElementTree.ParseError:
+            continue
+        if root.tag != "dynamic_context":
+            continue
+        claimed_hash = root.attrib.pop("hash", None)
+        canonical = ElementTree.tostring(root, encoding="unicode")
+        context_hash = hashlib.sha256(canonical.encode()).hexdigest()
+        if claimed_hash is None or claimed_hash == context_hash:
+            return context_hash
+    return None
+
+
+def dynamic_context_messages(messages: object) -> list[AnyMessage]:
     if not isinstance(messages, (list, tuple)):
-        return set()
-    found: set[str] = set()
+        return []
+    found: list[AnyMessage] = []
+    hashes: set[str] = set()
     for message in messages:
-        content = message.content if isinstance(message, BaseMessage) else None
-        if content is None and isinstance(message, dict):
-            content = message.get("content")
-        values = content if isinstance(content, list) else [content]
-        for value in values:
-            text = value.get("text") if isinstance(value, dict) else value
-            if not isinstance(text, str) or "<chat_entity" not in text:
-                continue
-            try:
-                root = ElementTree.fromstring(text)
-            except ElementTree.ParseError:
-                continue
-            entities = [root] if root.tag == "chat_entity" else root.findall(".//chat_entity")
-            for entity in entities:
-                entity_id = entity.get("id")
-                if entity_id:
-                    found.add(entity_id)
+        if not isinstance(message, BaseMessage):
+            continue
+        message = cast(AnyMessage, message)
+        context_hash = dynamic_context_hash(message.content)
+        if context_hash is not None and context_hash not in hashes:
+            hashes.add(context_hash)
+            found.append(message)
     return found
+
+
+def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
+    hashes: set[str] = set()
+    for message in dynamic_context_messages(messages):
+        context_hash = dynamic_context_hash(message.content)
+        if context_hash is not None:
+            hashes.add(context_hash)
+    return hashes
 
 
 def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
@@ -148,10 +169,12 @@ def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
         trust = ' trust="untrusted"' if field in _UNTRUSTED_ENTITY_FIELDS else ""
         children.append(f"<{field}{trust}>{_xml_text(value)}</{field}>")
     body = "\n".join(children)
-    serialized = f'<chat_entity kind="{kind}" id="{_xml_text(entity_id)}">'
+    canonical = f'<dynamic_context kind="{kind}" id="{_xml_text(entity_id)}">'
     if body:
-        serialized += f"\n{body}\n"
-    serialized += "</chat_entity>"
+        canonical += f"\n{body}\n"
+    canonical += "</dynamic_context>"
+    context_hash = hashlib.sha256(canonical.encode()).hexdigest()
+    serialized = canonical.replace(">", f' hash="{context_hash}">', 1)
     return {"role": "user", "content": serialized}
 
 
@@ -221,29 +244,24 @@ def system_input(text: str, context: InputMessageContext) -> RunMessage:
     return {"role": "user", "content": _serialize_message(text, context)}
 
 
-def filter_new_entity_introductions(
-    messages: list[RunMessage], introduced_entity_ids: set[str]
+def filter_new_dynamic_contexts(
+    messages: list[RunMessage], injected_dynamic_context_hashes: set[str]
 ) -> tuple[list[RunMessage], set[str]]:
     filtered: list[RunMessage] = []
-    newly_introduced: set[str] = set()
+    newly_injected: set[str] = set()
     for message in messages:
         content = message.get("content")
-        if not isinstance(content, str) or "<chat_entity" not in content:
+        if not isinstance(content, str) or "<dynamic_context" not in content:
             filtered.append(message)
             continue
-        try:
-            root = ElementTree.fromstring(content)
-        except ElementTree.ParseError:
+        context_hash = dynamic_context_hash(content)
+        if context_hash is None:
             filtered.append(message)
             continue
-        entity_id = root.get("id") if root.tag == "chat_entity" else None
-        if not entity_id:
+        if context_hash not in injected_dynamic_context_hashes:
             filtered.append(message)
-            continue
-        if entity_id not in introduced_entity_ids:
-            filtered.append(message)
-            newly_introduced.add(entity_id)
-    return filtered, newly_introduced
+            newly_injected.add(context_hash)
+    return filtered, newly_injected
 
 
 def build_input_messages(
@@ -253,20 +271,23 @@ def build_input_messages(
     people: list[PersonIdentity] | None = None,
     channels: list[ChannelIdentity] | None = None,
     systems: list[SystemIdentity] | None = None,
-    introduced_entity_ids: set[str] | None = None,
+    injected_dynamic_context_hashes: set[str] | None = None,
 ) -> list[RunMessage]:
-    introduced = introduced_entity_ids if introduced_entity_ids is not None else set()
+    injected = (
+        injected_dynamic_context_hashes if injected_dynamic_context_hashes is not None else set()
+    )
     messages: list[RunMessage] = []
     for identity, builder in (
         *((person, person_introduction) for person in people or []),
         *((channel, channel_introduction) for channel in channels or []),
         *((system, system_introduction) for system in systems or []),
     ):
-        entity_id = _validate_entity_id(identity["id"])
-        if entity_id in introduced:
+        message = builder(identity)  # type: ignore[arg-type]
+        context_hash = dynamic_context_hash(message["content"])
+        if context_hash is None or context_hash in injected:
             continue
-        messages.append(builder(identity))  # type: ignore[arg-type]
-        introduced.add(entity_id)
+        messages.append(message)
+        injected.add(context_hash)
     if context["kind"] == "human":
         messages.append(human_input(content, context))
     else:
@@ -283,7 +304,7 @@ def build_run_input(
     people: list[PersonIdentity] | None = None,
     channels: list[ChannelIdentity] | None = None,
     systems: list[SystemIdentity] | None = None,
-    introduced_entity_ids: set[str] | None = None,
+    injected_dynamic_context_hashes: set[str] | None = None,
     files: dict[str, Any] | None = None,
 ) -> RunInput:
     result: RunInput = {
@@ -293,7 +314,7 @@ def build_run_input(
             people=people,
             channels=channels,
             systems=systems,
-            introduced_entity_ids=introduced_entity_ids,
+            injected_dynamic_context_hashes=injected_dynamic_context_hashes,
         )
     }
     if files is not None:

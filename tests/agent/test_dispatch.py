@@ -134,7 +134,7 @@ async def test_create_durable_run_persists_and_filters_entity_introductions() ->
     client = _FakeClient()
     entity = {
         "role": "user",
-        "content": '<chat_entity kind="person" id="github:octocat"></chat_entity>',
+        "content": '<dynamic_context kind="person" id="github:octocat"></dynamic_context>',
     }
     actual = {
         "role": "user",
@@ -153,7 +153,9 @@ async def test_create_durable_run_persists_and_filters_entity_introductions() ->
 
     assert client.runs.created[0]["input"]["messages"] == [entity, actual]
     assert client.runs.created[1]["input"]["messages"] == [actual]
-    assert client.threads.metadata["introduced_entity_ids"] == ["github:octocat"]
+    hashes = client.threads.metadata["injected_dynamic_context_hashes"]
+    assert len(hashes) == 1
+    assert len(hashes[0]) == 64
 
 
 def test_dispatch_slack_identity_includes_verified_context() -> None:

@@ -15,7 +15,8 @@ export interface StructuredEntity {
   displayName?: string
 }
 
-const ENTITY_PATTERN = /^\s*<chat_entity\b([^>]*)>([\s\S]*?)<\/chat_entity>\s*$/
+const ENTITY_PATTERN =
+  /^\s*<dynamic_context\b([^>]*)>([\s\S]*?)<\/dynamic_context>\s*$/
 const MESSAGE_PATTERN =
   /^\s*<chat_message\b([^>]*)>([\s\S]*?)<\/chat_message>\s*$/
 const CONTENT_PATTERN = /<content>([\s\S]*?)<\/content>/

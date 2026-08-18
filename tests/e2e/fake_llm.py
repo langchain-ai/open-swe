@@ -170,7 +170,7 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
         if not isinstance(message, HumanMessage):
             continue
         text = _text(message.content).lstrip()
-        if text.startswith("<chat_entity "):
+        if text.startswith("<dynamic_context "):
             continue
         if text.startswith("<chat_message "):
             header = text.split(">", 1)[0]

@@ -84,6 +84,7 @@ from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
+    DynamicContextMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
@@ -1517,6 +1518,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                DynamicContextMiddleware(),
                 PrepareAgentRunMiddleware(
                     thread_id=thread_id,
                     config=config,

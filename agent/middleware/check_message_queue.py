@@ -16,7 +16,11 @@ from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
 
 from ..dashboard.options import model_supports_images
-from ..input_messages import PersonIdentity, build_input_messages, entity_ids_from_messages
+from ..input_messages import (
+    PersonIdentity,
+    build_input_messages,
+    dynamic_context_hashes_from_messages,
+)
 from ..prompt import replace_source_guidance
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
@@ -178,7 +182,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             return None
 
         content_blocks: list[dict[str, Any]] = []
-        introduced = entity_ids_from_messages(state.get("messages"))
+        injected = dynamic_context_hashes_from_messages(state.get("messages"))
         plan_approval_blocked: bool | None = None
         dashboard_handoff = False
         pending_autofix = await _consume_pending_autofix_event(store, thread_id)
@@ -238,7 +242,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                             "platform": "open-swe",
                         }
                     ],
-                    introduced_entity_ids=introduced,
+                    injected_dynamic_context_hashes=injected,
                 )
                 for handoff_message in handoff:
                     content_blocks.append({"type": "text", "text": handoff_message["content"]})
@@ -269,7 +273,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                         blocks,
                         {"sender_id": person["id"], "surface": "web", "kind": "human"},
                         people=[person],
-                        introduced_entity_ids=introduced,
+                        injected_dynamic_context_hashes=injected,
                     )
                     for structured_message in structured:
                         structured_content = structured_message["content"]

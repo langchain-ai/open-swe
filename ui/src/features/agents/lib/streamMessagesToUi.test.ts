@@ -9,12 +9,12 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "person-entity",
         content:
-          '<chat_entity kind="person" id="github:alice"><display_name>Alice</display_name></chat_entity>',
+          '<dynamic_context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic_context>',
       }),
       new HumanMessage({
         id: "system-entity",
         content:
-          '<chat_entity kind="system" id="system:scheduler"><display_name>Scheduler</display_name></chat_entity>',
+          '<dynamic_context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic_context>',
       }),
       new HumanMessage({
         id: "person-message",

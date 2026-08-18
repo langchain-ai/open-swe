@@ -77,21 +77,17 @@ test("builds escaped desktop ACP messages with native image blocks", () => {
 test("optionally introduces the local desktop identity before a prompt", () => {
   const blocks = promptBlocks("fix it", [], true)
 
-  assert.deepEqual(blocks, [
-    {
-      type: "text",
-      text: `<chat_entity kind="person" id="desktop:local">
-  <display_name>Local user</display_name>
-  <platform>desktop</platform>
-</chat_entity>`,
-    },
-    {
-      type: "text",
-      text: `<chat_message sender="desktop:local" surface="desktop" kind="human">
+  assert.equal(blocks.length, 2)
+  assert.match(
+    blocks[0].text,
+    /^<dynamic_context kind="person" id="desktop:local" hash="[a-f0-9]{64}">/,
+  )
+  assert.equal(
+    blocks[1].text,
+    `<chat_message sender="desktop:local" surface="desktop" kind="human">
   <content>fix it</content>
 </chat_message>`,
-    },
-  ])
+  )
 })
 
 test("switches model before continuing an ACP session", async () => {
@@ -162,7 +158,7 @@ test("introduces the desktop identity once even when the prompt fails", async ()
   await assert.rejects(session.prompt("first", []), /failed/)
   await session.prompt("second", [])
 
-  assert.equal(prompts[0][0].text.startsWith("<chat_entity"), true)
+  assert.equal(prompts[0][0].text.startsWith("<dynamic_context"), true)
   assert.equal(prompts[1][0].text.startsWith("<chat_message"), true)
   assert.equal(changes.includes(true), true)
   assert.equal(changes.indexOf(true), changes.lastIndexOf(false) + 1)

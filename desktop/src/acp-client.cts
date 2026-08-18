@@ -1,6 +1,6 @@
 const { spawn } = require("node:child_process")
 const readline = require("node:readline")
-const { randomUUID } = require("node:crypto")
+const { createHash, randomUUID } = require("node:crypto")
 
 const ACP_PROTOCOL_VERSION = 1
 const DELETE_TIMEOUT_MS = 15_000
@@ -113,10 +113,12 @@ function escapeXml(value) {
 }
 
 function desktopIdentityIntroduction() {
-  return `<chat_entity kind="person" id="desktop:local">
+  const canonical = `<dynamic_context kind="person" id="desktop:local">
   <display_name>Local user</display_name>
   <platform>desktop</platform>
-</chat_entity>`
+</dynamic_context>`
+  const hash = createHash("sha256").update(canonical).digest("hex")
+  return canonical.replace(">", ` hash="${hash}">`)
 }
 
 function desktopChatMessage(text) {
