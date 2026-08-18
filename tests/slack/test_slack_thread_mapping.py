@@ -116,6 +116,35 @@ async def test_binding_refuses_to_overwrite_another_thread() -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_mapping_uses_executing_run_without_replacing_thread_mapping() -> None:
+    client: Any = _Client()
+    await store_slack_run_mapping(
+        client,
+        "C1",
+        "1.0",
+        "queued-run",
+        triggering_user_id="U1",
+        agent_thread_id="thread-one",
+    )
+
+    await store_slack_message_run_mapping(
+        client,
+        "C1",
+        "1.0",
+        "1.1",
+        run_id="active-run",
+        triggering_user_id="active-user",
+    )
+
+    namespace = ("slack_run_map", "C1")
+    assert client.store.items[(namespace, "thread:1.0")]["value"]["run_id"] == "queued-run"
+    message = client.store.items[(namespace, "message:1.1")]["value"]
+    assert message["run_id"] == "active-run"
+    assert message["triggering_user_id"] == "active-user"
+    assert message["agent_thread_id"] == "thread-one"
+
+
+@pytest.mark.asyncio
 async def test_delete_does_not_remove_a_location_reassigned_to_another_thread() -> None:
     client: Any = _Client()
     await bind_slack_thread_id(client, "C1", "1.0", "new-thread")

@@ -4,7 +4,7 @@ import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
 import { MessageTimestamp } from "../MessageTimestamp"
 import { ReasoningBlock } from "../ReasoningBlock"
-import { buildRenderItems } from "../renderItems"
+import { buildRenderItems, splitWorkAndReply } from "../renderItems"
 import { TurnChangedFilesCard } from "../TurnChangedFilesCard"
 import { MessageCopyButton } from "./MessageCopyButton"
 import { WorkEntryRow } from "./WorkEntryRow"
@@ -15,6 +15,7 @@ import type { ReactNode } from "react"
 import type { RenderItem } from "../renderItems"
 import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
+import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
@@ -27,36 +28,10 @@ import { formatElapsed } from "@/lib/utils"
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 1
 
 /**
- * Render-item types that count as the trailing agent reply rather than its work.
+ * One row per edit call, showing only what the call targeted. The diff lives in
+ * the turn's changed-files card and the side panel, both of which read git —
+ * rendering a per-call diff here made repeated edits of one file look duplicated.
  */
-const TRAILING_REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
-  "text-chunk",
-  "reply-item",
-])
-
-function splitWorkAndReply(items: Array<RenderItem>): {
-  workItems: Array<RenderItem>
-  replyItems: Array<RenderItem>
-} {
-  let trailingReplyIndex = items.length
-  while (trailingReplyIndex > 0) {
-    const prev = items[trailingReplyIndex - 1]
-    if (!prev || !TRAILING_REPLY_ITEM_TYPES.has(prev.type)) break
-    trailingReplyIndex -= 1
-  }
-
-  const workItems: Array<RenderItem> = []
-  const replyItems: Array<RenderItem> = []
-  items.forEach((item, index) => {
-    if (item.type === "reply-item" || index >= trailingReplyIndex) {
-      replyItems.push(item)
-    } else {
-      workItems.push(item)
-    }
-  })
-  return { workItems, replyItems }
-}
-
 function EditWorkEntry({
   chunk,
   projectPath,
@@ -254,6 +229,11 @@ export function AgentTurn({
 
       case "reply-item":
         return <ReplyCard key={item.key} chunk={item.chunk} />
+
+      case "iframe-item":
+        return item.chunk.display ? (
+          <OutputIframe key={item.key} display={item.chunk.display} />
+        ) : null
 
       case "tool-item":
         return (

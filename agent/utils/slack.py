@@ -1474,6 +1474,7 @@ async def store_slack_run_mapping(
     message_ts: str | None = None,
     triggering_user_id: str | None = None,
     trace_message_ts: str | None = None,
+    agent_thread_id: str | None = None,
 ) -> None:
     """Persist Slack thread/message to LangGraph run mapping."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
@@ -1488,6 +1489,8 @@ async def store_slack_run_mapping(
         value["triggering_user_id"] = triggering_user_id
     if trace_message_ts:
         value["trace_message_ts"] = trace_message_ts
+    if agent_thread_id:
+        value["agent_thread_id"] = agent_thread_id
     try:
         await langgraph_client.store.put_item(
             namespace, f"{_THREAD_RUN_KEY_PREFIX}{thread_ts}", value
@@ -1523,17 +1526,20 @@ async def store_slack_message_run_mapping(
     message_ts: str,
     *,
     run_id: str | None = None,
+    triggering_user_id: str | None = None,
 ) -> None:
     """Persist an exact run-to-Slack-message mapping."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
     try:
-        item = await langgraph_client.store.get_item(
-            namespace,
-            f"{_RUN_MESSAGE_KEY_PREFIX}{run_id}"
-            if run_id
-            else f"{_THREAD_RUN_KEY_PREFIX}{thread_ts}",
+        thread_item = await langgraph_client.store.get_item(
+            namespace, f"{_THREAD_RUN_KEY_PREFIX}{thread_ts}"
         )
-        resolved_run_id = run_id or _extract_run_id_from_store_item(item)
+        run_item = (
+            await langgraph_client.store.get_item(namespace, f"{_RUN_MESSAGE_KEY_PREFIX}{run_id}")
+            if run_id
+            else thread_item
+        )
+        resolved_run_id = run_id or _extract_run_id_from_store_item(thread_item)
         if not resolved_run_id:
             logger.debug(
                 "No Slack run mapping found for channel=%s thread=%s",
@@ -1541,13 +1547,17 @@ async def store_slack_message_run_mapping(
                 thread_ts,
             )
             return
-        stored_value = item.get("value") if isinstance(item, dict) else None
-        value = {
-            **(stored_value if isinstance(stored_value, dict) else {}),
+        thread_value = thread_item.get("value") if isinstance(thread_item, dict) else None
+        run_value = run_item.get("value") if isinstance(run_item, dict) else None
+        value: dict[str, Any] = {
+            **(thread_value if isinstance(thread_value, dict) else {}),
+            **(run_value if isinstance(run_value, dict) else {}),
             "run_id": resolved_run_id,
             "thread_ts": thread_ts,
             "message_ts": message_ts,
         }
+        if triggering_user_id:
+            value["triggering_user_id"] = triggering_user_id
         await langgraph_client.store.put_item(
             namespace, f"{_MESSAGE_RUN_KEY_PREFIX}{message_ts}", value
         )

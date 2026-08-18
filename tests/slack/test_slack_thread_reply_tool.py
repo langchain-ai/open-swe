@@ -1,5 +1,6 @@
 import importlib
 from typing import Any
+from uuid import UUID
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -143,6 +144,33 @@ async def test_slack_thread_reply_uses_post_failed_without_slack_error(
     assert result["error"] == "post failed"
     assert result["slack_error"] is None
     assert result["message_chars"] == 5
+
+
+async def test_slack_thread_reply_passes_executing_run_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_post_and_store_mapping(
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        **kwargs: Any,
+    ) -> tuple[str | None, str | None]:
+        captured.update(kwargs)
+        return "2.0", None
+
+    config = _config()
+    config["run_id"] = UUID("12345678-1234-5678-1234-567812345678")
+    config["configurable"]["slack_thread"]["triggering_user_id"] = "active-user"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+
+    result = await slack_reply_tool.slack_thread_reply("hello")
+
+    assert result == {"success": True}
+    assert captured["run_id"] == "12345678-1234-5678-1234-567812345678"
+    assert captured["triggering_user_id"] == "active-user"
 
 
 async def test_slack_thread_reply_posts_plain_text_without_options(

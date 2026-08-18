@@ -137,6 +137,7 @@ from .tools import (
     manage_baby_sit,
     notify_automation_channel,
     open_pull_request,
+    output_iframe,
     read_user_settings,
     recreate_sandbox,
     report_platform_issue,
@@ -214,6 +215,13 @@ DEEP_AGENT_TOOL_NAMES = {
     "write_file",
 }
 STOP_SUMMARY_EXCLUDED_TOOLS = frozenset({"delete", "edit_file", "execute", "task", "write_file"})
+
+
+def _registered_tool_name(value: Any) -> str:
+    name = getattr(value, "name", None) or getattr(value, "__name__", None)
+    if not isinstance(name, str) or not name:
+        raise TypeError(f"tool has no registered name: {value!r}")
+    return name
 
 
 def _tool_loader_timeout_seconds() -> float:
@@ -1413,6 +1421,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         manage_baby_sit,
         notify_automation_channel,
         open_pull_request,
+        output_iframe,
         read_user_settings,
         request_pr_review,
         recreate_sandbox,
@@ -1427,7 +1436,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     ]
     if stop_summary_mode:
         static_tools = [slack_read_thread_messages, slack_thread_reply]
-    reserved_tool_names = {tool.__name__ for tool in static_tools}
+    reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     if not _slack_tools_enabled(configurable):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
