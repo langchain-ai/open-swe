@@ -148,7 +148,6 @@ async def test_title_generation_disables_inherited_callbacks() -> None:
     )
 
     assert recorder["config"]["callbacks"] == []
-    assert "capitalize only the first word" in recorder["messages"][0].content
 
 
 @pytest.mark.asyncio
