@@ -29,7 +29,10 @@ function ReviewDetailPage() {
   )
   const closeActiveComment = useCallback(() => setActiveComment(null), [])
   const updateActiveComment = useCallback(
-    (comment: PrReviewComment) => setActiveComment(comment),
+    (comment: PrReviewComment) =>
+      setActiveComment((current) =>
+        current?.id === comment.id ? comment : current
+      ),
     []
   )
 
