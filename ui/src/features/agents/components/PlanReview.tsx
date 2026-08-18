@@ -221,11 +221,11 @@ export function PlanReview({
   return (
     <div
       data-testid="plan-review"
-      className="flex min-h-0 flex-1 flex-col bg-background text-foreground"
+      className="@container flex min-h-0 flex-1 flex-col bg-background text-foreground"
     >
       <div
         className={cn(
-          "flex flex-col gap-3 border-b border-border px-4 py-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4",
+          "flex flex-col gap-3 border-b border-border px-4 py-3 @3xl:flex-row @3xl:items-center @3xl:justify-between @3xl:gap-4",
           !compact && "md:px-6"
         )}
       >
@@ -241,12 +241,12 @@ export function PlanReview({
         </div>
         <div
           data-testid="plan-actions"
-          className="flex min-w-0 flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end"
+          className="flex min-w-0 flex-wrap items-center gap-2 @3xl:shrink-0 @3xl:justify-end"
         >
           {decision && (
             <span
               data-testid="plan-decision"
-              className="w-full text-xs text-muted-foreground/70 lg:w-auto"
+              className="w-full text-xs text-muted-foreground/70 @3xl:w-auto"
             >
               {decision}
             </span>

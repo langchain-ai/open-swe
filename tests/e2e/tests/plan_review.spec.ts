@@ -215,6 +215,17 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(owner.getByTestId("plan-document")).toContainText("greet", {
       timeout: 30_000,
     });
+    const embeddedSummaryBox = await owner
+      .getByTestId("plan-summary")
+      .boundingBox();
+    const embeddedActionsBox = await owner
+      .getByTestId("plan-actions")
+      .boundingBox();
+    expect(embeddedSummaryBox).not.toBeNull();
+    expect(embeddedActionsBox).not.toBeNull();
+    expect(embeddedActionsBox!.y).toBeGreaterThanOrEqual(
+      embeddedSummaryBox!.y + embeddedSummaryBox!.height,
+    );
     await expect(owner.getByTestId("approve-plan")).toBeVisible();
     // "Request changes" is meaningless with no feedback → disabled until a
     // comment exists.
