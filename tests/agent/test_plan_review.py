@@ -549,12 +549,7 @@ async def test_set_plan_status_clears_shared_content_when_entering_plan_mode(
     await plan_store.set_plan_status("t", plan_store.PLAN_STATUS_PLANNING, plan_mode=True)
 
     assert saved == {"markdown": "", "status": "planning"}
-    assert merged == {
-        "plan_status": "planning",
-        "plan_mode": True,
-        "plan_approved_by": None,
-        "plan_approved_at": None,
-    }
+    assert merged == {"plan_status": "planning", "plan_mode": True}
 
 
 async def test_save_plan_content_clear_comments_flag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -606,11 +601,7 @@ async def test_save_plan_content_can_skip_plan_mode_metadata(
 
     await plan_store.save_plan_content("t", markdown="x", plan_mode=None)
 
-    assert merged == {
-        "plan_status": "ready",
-        "plan_approved_by": None,
-        "plan_approved_at": None,
-    }
+    assert merged == {"plan_status": "ready"}
 
 
 async def test_get_plan_returns_approval_attribution(monkeypatch: pytest.MonkeyPatch) -> None:

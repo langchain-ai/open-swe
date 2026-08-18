@@ -104,11 +104,7 @@ async def save_plan_content(
         except Exception:
             # Best-effort: a failed cleanup must not block publishing the new plan.
             pass
-    metadata: dict[str, Any] = {
-        "plan_status": status,
-        "plan_approved_by": None,
-        "plan_approved_at": None,
-    }
+    metadata: dict[str, Any] = {"plan_status": status}
     if plan_mode is not None:
         metadata["plan_mode"] = plan_mode
     await _merge_thread_metadata(thread_id, metadata)
@@ -172,11 +168,7 @@ async def set_plan_status(
     plan_file_path = existing.get("plan_file_path")
     if not entering_plan_after_share and isinstance(plan_file_path, str) and plan_file_path:
         record["plan_file_path"] = plan_file_path
-    metadata: dict[str, Any] = {
-        "plan_status": status,
-        "plan_approved_by": None,
-        "plan_approved_at": None,
-    }
+    metadata: dict[str, Any] = {"plan_status": status}
     if status == PLAN_STATUS_APPROVED and approved_by is not None:
         approver = make_plan_approver(
             actor_id=str(approved_by.get("id") or ""),
