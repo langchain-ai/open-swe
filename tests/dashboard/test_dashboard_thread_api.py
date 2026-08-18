@@ -1027,10 +1027,11 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
             pass
 
         async def post(self, *a: object, **kw: object) -> FakeResponse:
+            assert kw["json"] == {"limit": thread_api._DISCOVERY_HISTORY_LIMIT}
             return FakeResponse()
 
     monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
-    await thread_api.proxy_dashboard_thread_history("tid", "teammate", b"{}")
+    await thread_api.proxy_dashboard_thread_history("tid", "teammate", b'{"limit": 20}')
 
 
 async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(monkeypatch) -> None:
