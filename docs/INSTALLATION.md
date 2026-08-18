@@ -648,7 +648,7 @@ pnpm install          # from the repo root: ui/ and desktop/ are one pnpm worksp
 pnpm run dev          # turbo -> vite dev --port 3000 -> http://localhost:3000
 ```
 
-No `ui/.env` is needed: the dev server proxies `/dashboard/api/*` to `DASHBOARD_API_URL`, which defaults to `http://localhost:2024`. Point it elsewhere by exporting that variable before `pnpm run dev`. It is read at build time, so a production build bakes in the backend it proxies to.
+No `ui/.env` is needed: the dev server proxies `/dashboard/api/*` to `DASHBOARD_API_URL`, which defaults to `http://localhost:2024`. Point it elsewhere by exporting that variable before `pnpm run dev`. It is read at request time, so the same build can front any backend.
 
 Because the browser only ever talks to `http://localhost:3000`, no **CORS** preflight is involved. `DASHBOARD_ALLOWED_ORIGINS="http://localhost:3000"` is still required, though: the same allowlist is the backend's CSRF gate for every non-GET request, and it compares the browser's `Origin` — the dashboard's — against the origins it knows. Without it, the dashboard reads fine and every save returns `403 CSRF check failed`.
 
@@ -756,11 +756,11 @@ The `langgraph.json` at the project root defines the graphs and HTTP app baked i
 
 **Backend — LangGraph Cloud / Platform:** alternatively, push your code to a GitHub repository, connect the repo to LangGraph Cloud, set the same environment variables in the deployment config, and use the hosted deployment URL for `LANGGRAPH_URL` and webhook callbacks.
 
-**Dashboard** — the `ui/` app deploys to [Vercel](https://vercel.com/). The build detects Vercel and emits a Nitro server that renders routes on request, so set `DASHBOARD_API_URL` in the Vercel project to your hosted backend URL. Browser requests to `/dashboard/api/*` are rewritten to it at the platform edge (no function in the path, so streaming responses are unaffected), and server renders call it directly with the request's `osw_session` cookie forwarded.
+**Dashboard** — the `ui/` app builds to a Nitro server that renders routes on request. Set `DASHBOARD_API_URL` in its environment to your hosted backend URL; it is read per request, so one image serves any backend. Browser requests to `/dashboard/api/*` and webhook deliveries to `/webhooks/*` are proxied to it, and server renders call it directly with the request's `osw_session` cookie forwarded.
 
 Requests are therefore **same-origin**: set both `DASHBOARD_API_BASE_URL` and the GitHub App dashboard callback URL to the Vercel/dashboard origin (for example, `https://your-dashboard.vercel.app/dashboard/api/auth/callback`). The OAuth callback response then sets the `osw_session` cookie on the dashboard host, and later `/dashboard/api/*` requests include it.
 
-Alternatively, you can have the browser call the backend cross-origin: set `VITE_DASHBOARD_API_BASE_URL` to the hosted backend origin, set `DASHBOARD_API_BASE_URL` to that same backend origin, and include the dashboard origin in `DASHBOARD_ALLOWED_ORIGINS`. Keep `DASHBOARD_API_URL` pointed at the same backend so server renders reach it too. In this mode `osw_session` belongs to the backend's origin, so the dashboard's own requests never carry it and the session is resolved on the client instead — pages render unauthenticated and fill in after hydration.
+Alternatively, you can have the browser call the backend cross-origin: set `VITE_DASHBOARD_API_BASE_URL` to the hosted backend origin, set `DASHBOARD_API_BASE_URL` to that same backend origin, and include the dashboard origin in `DASHBOARD_ALLOWED_ORIGINS`. Keep `DASHBOARD_API_URL` pointed at the same backend so server renders and the webhook proxy reach it too. In this mode `osw_session` belongs to the backend's origin, so the dashboard's own requests never carry it and the session is resolved on the client instead — pages render unauthenticated and fill in after hydration.
 
 ## Troubleshooting
 
