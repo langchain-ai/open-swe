@@ -217,6 +217,29 @@ def test_slack_action_ids_are_unique_and_recognized() -> None:
     assert slack_routes._first_open_swe_option_action([{"action_id": "unrelated"}]) is None
 
 
+async def test_slack_thread_reply_passes_live_run_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_post_and_store_mapping(
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        **kwargs: Any,
+    ) -> tuple[str | None, str | None]:
+        captured.update(kwargs)
+        return "2.0", None
+
+    config = _config()
+    config["run_id"] = "run-live"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+
+    assert await slack_reply_tool.slack_thread_reply("Done") == {"success": True}
+    assert captured["run_id"] == "run-live"
+
+
 async def test_slack_thread_reply_passes_model_reported_usage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -115,7 +115,7 @@ def dispatch_client() -> LangGraphClient:
     return get_client(url=_langgraph_url())
 
 
-def _config_with_prepare_run_id(
+def prepare_run_config(
     config: RunConfig | None,
     metadata: dict[str, Any] | None,
 ) -> RunConfig:
@@ -124,8 +124,12 @@ def _config_with_prepare_run_id(
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
     configurable.setdefault("prepare_run_id", str(uuid.uuid4()))
     run_config["configurable"] = configurable
+    existing_metadata = run_config.get("metadata")
+    merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
     if metadata is not None:
-        run_config["metadata"] = metadata
+        merged_metadata.update(metadata)
+    merged_metadata["prepare_run_id"] = configurable["prepare_run_id"]
+    run_config["metadata"] = merged_metadata
     return run_config
 
 
@@ -148,9 +152,11 @@ async def create_durable_run(
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
     client = client or dispatch_client()
+    run_config = prepare_run_config(config, metadata)
     create_kwargs: dict[str, Any] = {
         "input": input,
-        "config": _config_with_prepare_run_id(config, metadata),
+        "config": run_config,
+        "metadata": run_config["metadata"],
         "multitask_strategy": multitask_strategy,
         "durability": durability,
         "if_not_exists": if_not_exists,

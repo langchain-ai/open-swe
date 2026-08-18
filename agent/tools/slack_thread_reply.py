@@ -1,5 +1,6 @@
 import json
 import os
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 from langgraph.config import get_config
@@ -17,6 +18,17 @@ from ..utils.slack import (
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
 )
+
+
+def _current_run_id(config: Mapping[str, Any]) -> str | None:
+    candidates = [config.get("run_id")]
+    configurable = config.get("configurable")
+    if isinstance(configurable, dict):
+        candidates.append(configurable.get("run_id"))
+    return next(
+        (candidate for candidate in candidates if isinstance(candidate, str) and candidate),
+        None,
+    )
 
 
 async def slack_thread_reply(
@@ -85,6 +97,7 @@ async def slack_thread_reply(
         blocks=slack_blocks,
         usage=usage,
         agent_thread_id=thread_id if isinstance(thread_id, str) else None,
+        run_id=_current_run_id(config),
         langgraph_client=langgraph_client,
     )
     if message_ts is None:
@@ -183,6 +196,7 @@ async def _post_and_store_mapping(
     blocks: list[dict[str, Any]] | None = None,
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
+    run_id: str | None = None,
     langgraph_client: Any | None = None,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
@@ -195,5 +209,11 @@ async def _post_and_store_mapping(
     )
     if message_ts:
         resolved_client = langgraph_client or get_client(url=LANGGRAPH_URL)
-        await store_slack_message_run_mapping(resolved_client, channel_id, thread_ts, message_ts)
+        await store_slack_message_run_mapping(
+            resolved_client,
+            channel_id,
+            thread_ts,
+            message_ts,
+            run_id=run_id,
+        )
     return message_ts, slack_error
