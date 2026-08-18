@@ -9,6 +9,15 @@ from typing import Any, cast
 import httpx
 from langchain_core.messages.content import create_text_block
 
+from agent.input_messages import (
+    PersonIdentity,
+    RunInput,
+    human_input,
+    person_introduction,
+    system_input,
+    system_introduction,
+)
+
 from . import common
 
 
@@ -70,7 +79,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         )
 
     comments = full_issue.get("comments", {}).get("nodes", [])
-    comments_text = ""
+    included_comments: list[dict[str, Any]] = []
     triggering_comment = issue_data.get("triggering_comment", "")
     triggering_comment_id = issue_data.get("triggering_comment_id", "")
 
@@ -107,7 +116,6 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             relevant_comments = common.get_recent_comments(comments, bot_message_prefixes)
 
         if relevant_comments:
-            comments_text = "\n\n## Comments:\n"
             for comment in relevant_comments:
                 user = comment.get("user") or {}
                 author = user.get("name", "User")
@@ -122,11 +130,9 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                     )
                 if any(body.startswith(prefix) for prefix in bot_message_prefixes):
                     continue
-                comments_text += f"\n**{author}:** {body}\n"
+                included_comments.append(comment)
 
     if triggering_comment and triggering_comment_id not in comment_ids:
-        if not comments_text:
-            comments_text = "\n\n## Comments:\n"
         trigger_author = comment_author.get("name", "Unknown")
         trigger_body = triggering_comment
         trigger_image_urls = common.extract_image_urls(trigger_body)
@@ -137,7 +143,13 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                 len(trigger_image_urls),
                 trigger_author,
             )
-        comments_text += f"\n**{trigger_author}:** {trigger_body}\n"
+        included_comments.append(
+            {
+                "id": triggering_comment_id,
+                "body": trigger_body,
+                "user": comment_author,
+            }
+        )
         common.logger.debug(
             "Appended triggering comment %s not present in issue comments list",
             triggering_comment_id or "<missing-id>",
@@ -160,8 +172,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         f"{triggered_by_line}"
         f"## Linear Ticket: {identifier} - Ticket ID: {issue_id}\n\n"
         f"{ticket_url_line}"
-        f"## Description:\n{description}\n"
-        f"{comments_text}\n\n"
+        f"## Description:\n{description}\n\n"
         "Please analyze this issue and implement the necessary changes. "
         "If you open a PR for this issue, make sure the PR description links back to "
         "this Linear ticket and follows this repository's PR conventions for the title, body, "
@@ -238,11 +249,65 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         source_context={"linear_issue": configurable["linear_issue"]},
     )
 
+    run_messages = [
+        system_introduction(
+            {"id": "system:linear-issue", "display_name": "Linear issue", "platform": "linear"}
+        ),
+        system_input(
+            prompt,
+            {
+                "sender_id": "system:linear-issue",
+                "surface": "linear",
+                "kind": "system",
+                "data": {
+                    "issue": {
+                        "id": issue_id,
+                        "identifier": identifier,
+                        "url": ticket_url,
+                        "repository": f"{repo_config.get('owner')}/{repo_config.get('name')}",
+                        "title": title,
+                    }
+                },
+            },
+        ),
+    ]
+    introduced: set[str] = set()
+    for comment in included_comments:
+        author = comment.get("user") or {}
+        author_key = author.get("id") or author.get("email") or author.get("name") or "unknown"
+        sender_id = f"linear:{str(author_key).replace(' ', '-')}"
+        person: PersonIdentity = {"id": sender_id, "platform": "linear"}
+        if author.get("name"):
+            person["display_name"] = str(author["name"])
+        if author.get("email"):
+            person["email"] = str(author["email"])
+        if sender_id not in introduced:
+            run_messages.append(person_introduction(person))
+            introduced.add(sender_id)
+        blocks: str | list[dict[str, Any]] = str(comment.get("body", ""))
+        if comment is included_comments[-1] and content_blocks[1:]:
+            blocks = [
+                cast(dict[str, Any], create_text_block(str(comment.get("body", "")))),
+                *content_blocks[1:],
+            ]
+        run_messages.append(
+            human_input(
+                blocks,
+                {
+                    "sender_id": sender_id,
+                    "surface": "linear",
+                    "kind": "human",
+                    "data": {"comment_id": str(comment.get("id", ""))},
+                },
+            )
+        )
+    run_input: RunInput = {"messages": run_messages}
     run = await common.dispatch_agent_run(
         thread_id,
-        content_blocks,
+        None,
         configurable,
         source="linear",
+        input=run_input,
         metadata=common._AGENT_VERSION_METADATA,
     )
     common.logger.info(

@@ -16,8 +16,10 @@ from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
 
 from ..dashboard.options import model_supports_images
+from ..input_messages import PersonIdentity, build_input_messages, entity_ids_from_messages
 from ..prompt import replace_source_guidance
 from ..utils.dashboard_handoff import (  # noqa: F401
+    DASHBOARD_HANDOFF_BODY,
     DASHBOARD_HANDOFF_INSTRUCTION,
     DASHBOARD_HANDOFF_MARKER,
 )
@@ -180,6 +182,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             return None
 
         content_blocks: list[dict[str, Any]] = []
+        introduced = entity_ids_from_messages(state.get("messages"))
         plan_approval_blocked: bool | None = None
         dashboard_handoff = False
         pending_autofix = await _consume_pending_autofix_event(store, thread_id)
@@ -225,7 +228,24 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             content = msg.get("content")
             if _is_dashboard_queued_message(content):
                 dashboard_handoff = True
-                content_blocks.append({"type": "text", "text": DASHBOARD_HANDOFF_INSTRUCTION})
+                handoff = build_input_messages(
+                    DASHBOARD_HANDOFF_BODY,
+                    {
+                        "sender_id": "system:dashboard-handoff",
+                        "surface": "automation",
+                        "kind": "system",
+                    },
+                    systems=[
+                        {
+                            "id": "system:dashboard-handoff",
+                            "display_name": "Dashboard handoff",
+                            "platform": "open-swe",
+                        }
+                    ],
+                    introduced_entity_ids=introduced,
+                )
+                for handoff_message in handoff:
+                    content_blocks.append({"type": "text", "text": handoff_message["content"]})
                 if _dashboard_queued_message_from_owner(content):
                     plan_approval_blocked = False
                 elif plan_approval_blocked is None:
@@ -235,7 +255,34 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             ):
                 logger.debug("Queued message contains text + image URLs")
                 blocks = await _build_blocks_from_payload(content, model_id=resolved_model_id)
-                content_blocks.extend(blocks)
+                sender = content.get("sender")
+                if isinstance(sender, dict) and isinstance(sender.get("id"), str):
+                    person: PersonIdentity = {"id": sender["id"]}
+                    for key in (
+                        "display_name",
+                        "handle",
+                        "platform",
+                        "github_login",
+                        "email",
+                        "timezone",
+                    ):
+                        value = sender.get(key)
+                        if isinstance(value, str):
+                            cast(dict[str, str], person)[key] = value
+                    structured = build_input_messages(
+                        blocks,
+                        {"sender_id": person["id"], "surface": "web", "kind": "human"},
+                        people=[person],
+                        introduced_entity_ids=introduced,
+                    )
+                    for structured_message in structured:
+                        structured_content = structured_message["content"]
+                        if isinstance(structured_content, str):
+                            content_blocks.append({"type": "text", "text": structured_content})
+                        else:
+                            content_blocks.extend(structured_content)
+                else:
+                    content_blocks.extend(blocks)
                 continue
             if isinstance(content, list):
                 logger.debug("Queued message contains %d content block(s)", len(content))

@@ -13,6 +13,17 @@ import httpx
 from langchain_core.messages.content import create_text_block
 
 from agent.dashboard.environments import get_environment, parse_environment_tag
+from agent.input_messages import (
+    InputMessageContext,
+    PersonIdentity,
+    RunInput,
+    SystemIdentity,
+    channel_introduction,
+    human_input,
+    person_introduction,
+    system_input,
+    system_introduction,
+)
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 
@@ -163,19 +174,22 @@ async def _slack_thread_allows_untagged_reply(
 async def _dispatch_or_queue_slack_run(
     client: Any,
     thread_id: str,
-    content_blocks: list[dict[str, Any]],
+    run_input: RunInput | list[dict[str, Any]],
     configurable: dict[str, Any],
     *,
     is_first_mention: bool,
     explicitly_tagged: bool,
 ) -> dict[str, Any] | None:
     """Start a run for the verified sender, interrupting one already in flight."""
+    if isinstance(run_input, list):
+        run_input = {"messages": cast(list[Any], run_input)}
     return as_json_object(
         await common.dispatch_agent_run(
             thread_id,
-            content_blocks,
+            None,
             configurable,
             source="slack",
+            input=run_input,
             metadata=common._AGENT_VERSION_METADATA,
             client=client,
         )
@@ -252,6 +266,123 @@ async def _format_slack_run_links_section(thread_id: str) -> str:
         "- A compact Web footer is added automatically to Slack replies; do not duplicate it manually. Share the Web or trace URL above only if asked."
     )
     return "\n".join(lines)
+
+
+def _slack_person(user_id: str, name: str = "") -> PersonIdentity:
+    person: PersonIdentity = {"id": f"slack:{user_id}", "platform": "slack"}
+    if name:
+        person["display_name"] = name
+    return person
+
+
+def _slack_message_text(message: dict[str, Any], bot_user_id: str) -> str:
+    forwarded = common.format_slack_messages_for_prompt(
+        [message], {}, bot_user_id=bot_user_id, bot_username=common.SLACK_BOT_USERNAME
+    )
+    _, separator, content = forwarded.partition(": ")
+    return content if separator else forwarded
+
+
+def _slack_context_input(
+    messages: list[dict[str, Any]],
+    user_names_by_id: dict[str, str],
+    *,
+    channel_id: str,
+    bot_user_id: str,
+    event_ts: str,
+    request_text: str,
+    request_blocks: list[dict[str, Any]],
+    operational_context: str,
+) -> RunInput:
+    channel_entity_id = f"slack:{channel_id}"
+    run_messages = [channel_introduction({"id": channel_entity_id, "platform": "slack"})]
+    introduced: set[str] = {channel_entity_id}
+    for message in messages:
+        if str(message.get("ts", "")) == str(event_ts):
+            continue
+        user_id = message.get("user")
+        if isinstance(user_id, str) and user_id:
+            person = _slack_person(user_id, user_names_by_id.get(user_id, ""))
+            sender_id = person["id"]
+            introduction = person_introduction(person)
+        else:
+            bot_id = str(message.get("bot_id") or message.get("username") or "unknown")
+            sender_id = f"system:slack-bot-{bot_id}"
+            profile = message.get("bot_profile")
+            display_name = (
+                profile.get("name", "Slack bot") if isinstance(profile, dict) else "Slack bot"
+            )
+            system: SystemIdentity = {
+                "id": sender_id,
+                "display_name": display_name,
+                "platform": "slack",
+            }
+            introduction = system_introduction(system)
+        if sender_id not in introduced:
+            run_messages.append(introduction)
+            introduced.add(sender_id)
+        data: dict[str, object] = {"timestamp": str(message.get("ts", ""))}
+        message_context: InputMessageContext = {
+            "sender_id": sender_id,
+            "channel_id": channel_entity_id,
+            "surface": "slack",
+            "kind": "human" if isinstance(user_id, str) and user_id else "system",
+            "data": data,
+        }
+        text = _slack_message_text(message, bot_user_id)
+        run_messages.append(
+            human_input(text, message_context)
+            if message_context["kind"] == "human"
+            else system_input(text, message_context)
+        )
+    run_messages.append(
+        system_introduction(
+            {"id": "system:slack-context", "display_name": "Slack context", "platform": "slack"}
+        )
+    )
+    run_messages.append(
+        system_input(
+            operational_context,
+            {
+                "sender_id": "system:slack-context",
+                "channel_id": channel_entity_id,
+                "surface": "slack",
+                "kind": "system",
+            },
+        )
+    )
+    trigger_id = next(
+        (
+            str(message.get("user"))
+            for message in messages
+            if str(message.get("ts", "")) == str(event_ts) and message.get("user")
+        ),
+        "unknown",
+    )
+    trigger_person = _slack_person(trigger_id, user_names_by_id.get(trigger_id, ""))
+    if trigger_person["id"] not in introduced:
+        run_messages.append(person_introduction(trigger_person))
+    current_message = next(
+        (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
+    )
+    rendered_request = _slack_message_text(current_message, bot_user_id)
+    _, separator, forwarded_context = rendered_request.partition("\n")
+    if separator and forwarded_context:
+        request_text = f"{request_text}\n{forwarded_context}"
+    request_blocks[0] = {**request_blocks[0], "text": request_text}
+    run_messages.append(
+        human_input(
+            request_blocks,
+            {
+                "sender_id": trigger_person["id"],
+                "channel_id": channel_entity_id,
+                "surface": "slack",
+                "kind": "human",
+                "data": {"timestamp": event_ts},
+            },
+        )
+    )
+    return {"messages": run_messages}
 
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
@@ -456,12 +587,6 @@ async def _process_slack_mention_impl(
     user_names_by_id = await common.get_slack_user_names(context_user_ids)
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
-    context_text = common.format_slack_messages_for_prompt(
-        context_messages,
-        user_names_by_id,
-        bot_user_id=bot_user_id,
-        bot_username=common.SLACK_BOT_USERNAME,
-    )
     context_source = "the beginning of the thread"
     if context_mode == "last_mention":
         context_source = (
@@ -504,19 +629,17 @@ async def _process_slack_mention_impl(
     slack_thread_section = _format_slack_thread_section(
         channel_id, thread_ts, context_source, channel_context
     )
-    prompt = (
+    operational_context = (
         _slack_prompt_preamble(untagged_reply) + "## Default Repository Hint\n"
         f"{repo_config.get('owner')}/{repo_config.get('name')}\n"
         "Use this only if the Slack conversation does not identify a different repository.\n\n"
         f"## Triggered by\n{trigger_user}\n\n"
         f"{trigger_user_timezone_section}"
         f"{slack_thread_section}\n\n"
-        f"{await _format_slack_run_links_section(thread_id)}\n\n"
-        f"## Conversation Context\n{context_text}\n\n"
-        + f"{_slack_request_heading(untagged_reply)}\n{clean_text}"
+        f"{await _format_slack_run_links_section(thread_id)}"
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
     )
-    content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
+    content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
 
     image_urls = common.dedupe_urls(
         [url for msg in context_messages for url in common.extract_image_urls(msg.get("text", ""))]
@@ -669,10 +792,20 @@ async def _process_slack_mention_impl(
         or (bot_user_id and f"<@{bot_user_id}>" in text)
         or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
     )
+    run_input = _slack_context_input(
+        context_messages,
+        user_names_by_id,
+        channel_id=channel_id,
+        bot_user_id=bot_user_id,
+        event_ts=event_ts,
+        request_text=clean_text,
+        request_blocks=content_blocks,
+        operational_context=operational_context,
+    )
     run = await _dispatch_or_queue_slack_run(
         langgraph_client,
         thread_id,
-        content_blocks,
+        run_input,
         configurable,
         is_first_mention=is_first_mention,
         explicitly_tagged=explicitly_tagged,

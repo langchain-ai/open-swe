@@ -1,5 +1,6 @@
 import asyncio
 from typing import cast
+from xml.etree import ElementTree
 
 import pytest
 
@@ -913,9 +914,10 @@ def test_process_slack_mention_preserves_forwarded_attachment_from_event(
     run_create = captured["run_create"]
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
-    prompt_block = kwargs["input"]["messages"][0]["content"][0]
-    assert "[Forwarded Slack message from Teammate]" in prompt_block["text"]
-    assert "Forwarded requirements" in prompt_block["text"]
+    prompt_block = kwargs["input"]["messages"][-1]["content"][0]
+    prompt = ElementTree.fromstring(prompt_block["text"]).findtext("content") or ""
+    assert "[Forwarded Slack message from Teammate]" in prompt
+    assert "Forwarded requirements" in prompt
 
 
 def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
@@ -950,10 +952,15 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
 
     assert captured["thread_exists_check"] == expected_thread_id
     assert captured["fetch_thread"] == {"channel_id": "C123", "thread_ts": thread_ts}
-    assert captured["metadata_update"] == {
-        "thread_id": expected_thread_id,
-        "metadata": {"repo": {"owner": "langchain-ai", "name": "open-swe"}},
-    }
+    metadata_update = captured["metadata_update"]
+    assert isinstance(metadata_update, dict)
+    assert metadata_update["thread_id"] == expected_thread_id
+    assert metadata_update["metadata"]["introduced_entity_ids"] == [
+        "slack:C123",
+        "slack:U123",
+        "slack:U456",
+        "system:slack-context",
+    ]
     assert "trace_reply" not in captured
 
     run_create = captured["run_create"]
@@ -967,23 +974,41 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     slack_thread_context = kwargs["config"]["configurable"]["slack_thread"]
     assert slack_thread_context["thread_ts"] == thread_ts
     assert slack_thread_context["triggering_user_timezone"] == "America/New_York"
-    prompt_block = kwargs["input"]["messages"][0]["content"][0]
-    assert "## Default Repository Hint\nlangchain-ai/open-swe" in prompt_block["text"]
-    assert "## Triggering User Time Zone\nAmerica/New_York" in prompt_block["text"]
+    messages = kwargs["input"]["messages"]
+    entities = [
+        ElementTree.fromstring(message["content"])
+        for message in messages
+        if isinstance(message["content"], str) and message["content"].startswith("<chat_entity")
+    ]
+    person = next(entity for entity in entities if entity.attrib["id"] == "slack:U123")
+    channel = next(entity for entity in entities if entity.attrib["id"] == "slack:C123")
+    request_block = messages[-1]["content"][0]
+    request = ElementTree.fromstring(request_block["text"]).findtext("content") or ""
+    prompt_message = next(
+        message
+        for message in messages
+        if isinstance(message["content"], str)
+        and 'sender="system:slack-context"' in message["content"]
+    )
+    prompt = ElementTree.fromstring(prompt_message["content"]).findtext("content") or ""
+    assert person.findtext("display_name") == "Mason"
+    assert channel.attrib["id"] == "slack:C123"
+    assert "## Default Repository Hint\nlangchain-ai/open-swe" in prompt
+    assert "## Triggering User Time Zone\nAmerica/New_York" in prompt
     assert (
         "Use this only if the Slack conversation does not identify a different repository."
-        in (prompt_block["text"])
+        in prompt
     )
-    assert prompt_block["text"].count("## Slack Thread") == 1
-    assert f"Thread TS: {thread_ts}" in prompt_block["text"]
-    assert "## Open SWE Links" in prompt_block["text"]
-    assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt_block["text"]
-    assert "- Trace: https://smith/x" in prompt_block["text"]
-    assert "do not duplicate it manually" in prompt_block["text"]
-    assert "slack_thread_reply" not in prompt_block["text"]
-    assert "slack_add_reaction" not in prompt_block["text"]
-    assert "slack_read_thread_messages" not in prompt_block["text"]
-    assert prompt_block["text"].endswith("## Latest Mention Request\ncontinue on the branch")
+    assert prompt.count("## Slack Thread") == 1
+    assert f"Thread TS: {thread_ts}" in prompt
+    assert "## Open SWE Links" in prompt
+    assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt
+    assert "- Trace: https://smith/x" in prompt
+    assert "do not duplicate it manually" in prompt
+    assert "slack_thread_reply" not in prompt
+    assert "slack_add_reaction" not in prompt
+    assert "slack_read_thread_messages" not in prompt
+    assert request == "continue on the branch"
 
 
 def test_process_slack_mention_treats_direct_message_as_implicit_mention(
@@ -1030,9 +1055,18 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
 
     run_create = captured["run_create"]
     assert isinstance(run_create, dict)
-    prompt_block = run_create["kwargs"]["input"]["messages"][0]["content"][0]
-    assert "Context starts at: the previous direct message" in prompt_block["text"]
-    assert "## Latest Mention Request\ncontinue on the branch" in prompt_block["text"]
+    messages = run_create["kwargs"]["input"]["messages"]
+    prompt_message = next(
+        message
+        for message in messages
+        if isinstance(message["content"], str)
+        and 'sender="system:slack-context"' in message["content"]
+    )
+    prompt = ElementTree.fromstring(prompt_message["content"]).findtext("content") or ""
+    request_block = messages[-1]["content"][0]
+    request = ElementTree.fromstring(request_block["text"]).findtext("content") or ""
+    assert "Context starts at: the previous direct message" in prompt
+    assert request == "continue on the branch"
     context_messages = captured["context_messages"]
     assert isinstance(context_messages, list)
     assert [message["ts"] for message in context_messages] == [

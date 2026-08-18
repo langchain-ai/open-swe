@@ -1,5 +1,6 @@
 import importlib
 from typing import Any
+from xml.etree import ElementTree
 
 import pytest
 
@@ -55,9 +56,25 @@ class _FakeRuns:
         return {"run_id": "run-1"}
 
 
+class _FakeThreads:
+    def __init__(self) -> None:
+        self.metadata: dict[str, Any] = {}
+        self.messages: list[dict[str, Any]] = []
+
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        return {"thread_id": thread_id, "metadata": self.metadata}
+
+    async def get_state(self, thread_id: str) -> dict[str, Any]:
+        return {"values": {"messages": self.messages}}
+
+    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
+        self.metadata = metadata
+
+
 class _FakeClient:
     def __init__(self) -> None:
         self.runs = _FakeRuns()
+        self.threads = _FakeThreads()
 
 
 @pytest.mark.asyncio
@@ -110,3 +127,64 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_stream_kwarg
     assert created["stream_mode"] == ["values"]
     assert created["stream_resumable"] is False
     assert created["config"]["configurable"]["prepare_run_id"] == "existing"
+
+
+@pytest.mark.asyncio
+async def test_create_durable_run_persists_and_filters_entity_introductions() -> None:
+    client = _FakeClient()
+    entity = {
+        "role": "user",
+        "content": '<chat_entity kind="person" id="github:octocat"></chat_entity>',
+    }
+    actual = {
+        "role": "user",
+        "content": (
+            '<chat_message sender="github:octocat" surface="web" kind="human">'
+            "<content>keep me</content></chat_message>"
+        ),
+    }
+
+    await dispatch.create_durable_run(
+        "thread-1", "agent", input={"messages": [entity, actual]}, source="web", client=client
+    )
+    await dispatch.create_durable_run(
+        "thread-1", "agent", input={"messages": [entity, actual]}, source="web", client=client
+    )
+
+    assert client.runs.created[0]["input"]["messages"] == [entity, actual]
+    assert client.runs.created[1]["input"]["messages"] == [actual]
+    assert client.threads.metadata["introduced_entity_ids"] == ["github:octocat"]
+
+
+def test_dispatch_slack_identity_includes_verified_context() -> None:
+    run_input = dispatch._dispatch_input(
+        "hello",
+        "slack",
+        {
+            "github_login": "mason-gh",
+            "user_email": "mason@example.com",
+            "slack_thread": {
+                "triggering_user_id": "U123",
+                "triggering_user_name": "Mason",
+                "triggering_user_timezone": "America/New_York",
+                "channel_id": "C123",
+                "thread_ts": "123.45",
+                "channel_context": {
+                    "name": "eng",
+                    "topic": "Ship <safely>",
+                    "purpose": "Engineering work",
+                },
+            },
+        },
+    )
+
+    person = ElementTree.fromstring(run_input["messages"][0]["content"])
+    channel = ElementTree.fromstring(run_input["messages"][1]["content"])
+    assert person.findtext("display_name") == "Mason"
+    assert person.findtext("timezone") == "America/New_York"
+    assert channel.findtext("name") == "eng"
+    assert channel.findtext("topic") == "Ship <safely>"
+    topic = channel.find("topic")
+    assert topic is not None
+    assert topic.attrib["trust"] == "untrusted"
+    assert channel.findtext("purpose") == "Engineering work"

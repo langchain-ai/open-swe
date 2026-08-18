@@ -16,7 +16,13 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_INSTRUCTION
+from ..input_messages import (
+    PersonIdentity,
+    build_input_messages,
+    entity_ids_from_messages,
+    introduced_entity_ids_from_metadata,
+)
+from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from ..utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -1474,18 +1480,64 @@ async def _enrich_run_start_command(
         if command_images and run_model and run_effort:
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
         _validate_command_images(content, model_id=run_model)
-        prefix = _attribution_prefix(metadata, login, email)
-        if prefix:
-            content = _prefix_message_content(content, prefix)
+        if content is None:
+            content = ""
+        sender_id = f"github:{login}"
+        introduced = introduced_entity_ids_from_metadata(metadata)
+        try:
+            prior_state = await client.threads.get_state(thread_id)
+            values = prior_state.get("values") if isinstance(prior_state, dict) else None
+            if isinstance(values, dict):
+                introduced.update(entity_ids_from_messages(values.get("messages")))
+        except Exception:
+            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
+        person: PersonIdentity = {
+            "id": sender_id,
+            "platform": "github",
+            "github_login": login,
+        }
+        if email:
+            person["email"] = email
+        structured = build_input_messages(
+            content,
+            {"sender_id": sender_id, "surface": "web", "kind": "human"},
+            people=[person],
+            systems=(
+                [
+                    {
+                        "id": "system:dashboard-handoff",
+                        "display_name": "Dashboard handoff",
+                        "platform": "open-swe",
+                    }
+                ]
+                if metadata.get("source") == "slack"
+                else None
+            ),
+            introduced_entity_ids=introduced,
+        )
         if metadata.get("source") == "slack":
-            content = _prepend_message_content_block(content, DASHBOARD_HANDOFF_INSTRUCTION)
-        _set_command_last_message_content(params, content)
+            structured.insert(
+                -1,
+                build_input_messages(
+                    DASHBOARD_HANDOFF_BODY,
+                    {
+                        "sender_id": "system:dashboard-handoff",
+                        "surface": "automation",
+                        "kind": "system",
+                    },
+                    introduced_entity_ids={"system:dashboard-handoff"},
+                )[0],
+            )
+        run_input = params.get("input")
+        if isinstance(run_input, dict):
+            run_input["messages"] = structured
         metadata_update: dict[str, Any] = {
             "source": _DASHBOARD_SOURCE,
             "plan_mode": plan_mode_requested,
             PARTICIPANT_LOGINS_KEY: merge_participant_logins(
                 metadata.get(PARTICIPANT_LOGINS_KEY), login
             ),
+            "introduced_entity_ids": sorted(introduced),
         }
         if command_images and run_model and run_effort:
             overrides["agent_model_id"] = run_model
@@ -1579,7 +1631,7 @@ async def send_dashboard_message(
     metadata = thread_metadata(thread)
     _assert_thread_readable(metadata)
 
-    prompt = f"{_attribution_prefix(metadata, login, email)}{body.content.strip()}"
+    prompt = body.content.strip()
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
     handoff_metadata = dict(metadata)
@@ -1613,6 +1665,13 @@ async def send_dashboard_message(
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
+        "surface": "web",
+        "sender": {
+            "id": f"github:{login}",
+            "platform": "github",
+            "github_login": login,
+            **({"email": email} if email else {}),
+        },
         "from_owner": _user_owns_thread(metadata, login, email),
     }
     if isinstance(content, list):

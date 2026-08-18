@@ -1146,6 +1146,7 @@ async def _trigger_or_queue_run(
     thread_id: str,
     prompt: str,
     *,
+    input: Any | None = None,
     github_login: str,
     github_user_id: int | None,
     repo_config: dict[str, str],
@@ -1172,6 +1173,7 @@ async def _trigger_or_queue_run(
             "pr_number": pr_number,
         },
         source="github",
+        input=input,
         metadata=_AGENT_VERSION_METADATA,
     )
     logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)

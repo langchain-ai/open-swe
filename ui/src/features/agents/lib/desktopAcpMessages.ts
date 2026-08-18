@@ -1,4 +1,8 @@
 import type { DesktopAcpEvent } from "@/desktop"
+import {
+  collectStructuredEntities,
+  parseStructuredInput,
+} from "@/features/agents/lib/structuredInputMessages"
 import type {
   AcpToolKind,
   AcpToolStatus,
@@ -91,20 +95,37 @@ function toolChunk(event: DesktopAcpEvent): ToolExecutionChunk | null {
 export function desktopAcpMessages(
   events: Array<DesktopAcpEvent>
 ): Array<Message> {
+  const entities = collectStructuredEntities(
+    events
+      .filter((event) => event.type === "user-message")
+      .map((event) => eventText(event, "text"))
+  )
   const messages: Array<Message> = []
   for (const event of events) {
     if (event.type === "user-message") {
       const chunks: Array<Chunk> = []
-      const text = eventText(event, "text")
+      const parsed = parseStructuredInput(eventText(event, "text"), entities)
+      if (parsed.type === "entity") continue
+      const text = parsed.content
       if (text) chunks.push({ kind: "text", text })
       if (Array.isArray(event.images)) {
         chunks.push(...(event.images as Array<ImageChunk>))
       }
       messages.push({
         id: `local-user-${event.sequence}`,
-        author: "user",
+        author:
+          parsed.type === "message" && parsed.senderKind === "system"
+            ? "system"
+            : "user",
         timestamp: event.timestamp,
         chunks,
+        ...(parsed.type === "message"
+          ? {
+              structuredSenderId: parsed.sender,
+              structuredSenderKind: parsed.senderKind,
+              structuredSenderName: entities.get(parsed.sender)?.displayName,
+            }
+          : {}),
       })
       continue
     }

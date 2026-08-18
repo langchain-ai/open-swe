@@ -144,6 +144,9 @@ export interface Message {
   id: string
   author: Author
   timestamp: string
+  structuredSenderId?: string
+  structuredSenderKind?: "person" | "system"
+  structuredSenderName?: string
   /**
    * Id of the user message that opened this agent turn. Matches the key the
    * agent stamps on its git checkpoint, so the turn's changed files can be read

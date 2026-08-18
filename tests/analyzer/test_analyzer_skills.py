@@ -55,5 +55,7 @@ def test_continual_run_payload_carries_mode_and_skill_files() -> None:
     assert configurable.get("thread_id")
 
     run_input = build_continual_run_input("o/r")
-    assert "/continual-learning/SKILL.md" in run_input["files"]
+    files = run_input.get("files")
+    assert files is not None
+    assert "/continual-learning/SKILL.md" in files
     assert run_input["messages"][0]["role"] == "user"

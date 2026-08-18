@@ -100,9 +100,37 @@ function sessionTitle(text) {
   return value.slice(0, 80) || "New local agent"
 }
 
-function promptBlocks(text, images = []) {
+function escapeXml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => {
+    return {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&apos;",
+    }[character]
+  })
+}
+
+function desktopIdentityIntroduction() {
+  return `<chat_entity kind="person" id="desktop:local">
+  <display_name>Local user</display_name>
+  <platform>desktop</platform>
+</chat_entity>`
+}
+
+function desktopChatMessage(text) {
+  return `<chat_message sender="desktop:local" surface="desktop" kind="human">
+  <content>${escapeXml(text.trim())}</content>
+</chat_message>`
+}
+
+function promptBlocks(text, images = [], introduceIdentity = false) {
   return [
-    ...(text.trim() ? [{ type: "text", text: text.trim() }] : []),
+    ...(introduceIdentity
+      ? [{ type: "text", text: desktopIdentityIntroduction() }]
+      : []),
+    { type: "text", text: desktopChatMessage(text) },
     ...images.map((image) => ({
       type: "image",
       data: image.base64,
@@ -348,6 +376,7 @@ class AcpSession {
     this.tools = new Map()
     this.replayUsers = new Map()
     this.suppressUpdates = false
+    this.identityIntroduced = restored?.identityIntroduced === true
     this.connect(target, env)
   }
 
@@ -484,10 +513,15 @@ class AcpSession {
     this.status = "running"
     this.emit({ type: "user-message", text, images })
     this.emit({ type: "run-start" })
+    const introduceIdentity = !this.identityIntroduced
+    if (introduceIdentity) {
+      this.identityIntroduced = true
+      this.notifyChange()
+    }
     try {
       await this.rpc.request("session/prompt", {
         sessionId: this.acpSessionId,
-        prompt: promptBlocks(text, images),
+        prompt: promptBlocks(text, images, introduceIdentity),
       })
       this.status = "idle"
       this.emit({ type: "run-end" })
@@ -545,6 +579,10 @@ class AcpSession {
           if (typeof update.messageId === "string") {
             this.replayUsers.set(update.messageId, event)
           }
+        }
+        const replayed = this.replayUsers.get(update.messageId)
+        if (replayed?.text.trim() === desktopIdentityIntroduction()) {
+          this.identityIntroduced = true
         }
       }
       return

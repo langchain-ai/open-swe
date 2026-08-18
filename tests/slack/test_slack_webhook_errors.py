@@ -294,7 +294,8 @@ async def test_dispatch_or_queue_dispatches_when_idle(
     queue.assert_not_awaited()
     await_args = dispatch.await_args
     assert await_args is not None
-    assert await_args.args[1] == blocks
+    assert await_args.args[1] is None
+    assert await_args.kwargs["input"] == {"messages": blocks}
 
 
 @pytest.mark.asyncio

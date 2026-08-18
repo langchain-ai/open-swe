@@ -161,6 +161,7 @@ function sessionRecord(localSession) {
     updatedAt: localSession.updatedAt,
     ...(localSession.modelId ? { modelId: localSession.modelId } : {}),
     ...(localSession.effort ? { effort: localSession.effort } : {}),
+    ...(localSession.identityIntroduced ? { identityIntroduced: true } : {}),
     ...(acpCheckpoints.get(localSession.id)
       ? { checkpoint: acpCheckpoints.get(localSession.id) }
       : {}),

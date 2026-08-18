@@ -52,9 +52,9 @@ test("uses the first prompt as the local session title", () => {
   assert.equal(sessionTitle("   "), "New local agent")
 })
 
-test("builds ACP text and image prompt blocks", () => {
+test("builds escaped desktop ACP messages with native image blocks", () => {
   assert.deepEqual(
-    promptBlocks("  fix it  ", [
+    promptBlocks('  fix <tag attr="value"> & it  ', [
       {
         kind: "image",
         base64: "cG5n",
@@ -63,10 +63,35 @@ test("builds ACP text and image prompt blocks", () => {
       },
     ]),
     [
-      { type: "text", text: "fix it" },
+      {
+        type: "text",
+        text: `<chat_message sender="desktop:local" surface="desktop" kind="human">
+  <content>fix &lt;tag attr=&quot;value&quot;&gt; &amp; it</content>
+</chat_message>`,
+      },
       { type: "image", data: "cG5n", mimeType: "image/png" },
     ]
   )
+})
+
+test("optionally introduces the local desktop identity before a prompt", () => {
+  const blocks = promptBlocks("fix it", [], true)
+
+  assert.deepEqual(blocks, [
+    {
+      type: "text",
+      text: `<chat_entity kind="person" id="desktop:local">
+  <display_name>Local user</display_name>
+  <platform>desktop</platform>
+</chat_entity>`,
+    },
+    {
+      type: "text",
+      text: `<chat_message sender="desktop:local" surface="desktop" kind="human">
+  <content>fix it</content>
+</chat_message>`,
+    },
+  ])
 })
 
 test("switches model before continuing an ACP session", async () => {
@@ -112,6 +137,58 @@ test("switches model before continuing an ACP session", async () => {
   assert.equal(session.modelId, "new:model")
   assert.equal(session.effort, "high")
   assert.deepEqual(emitted, { type: "error", message: "load failed" })
+})
+
+test("introduces the desktop identity once even when the prompt fails", async () => {
+  const prompts = []
+  const changes = []
+  const session = Object.assign(Object.create(AcpSession.prototype), {
+    status: "idle",
+    closed: false,
+    identityIntroduced: false,
+    acpSessionId: "session",
+    events: [],
+    replayUsers: new Map(),
+    onEvent() {},
+    onChange: (value) => changes.push(value.identityIntroduced),
+    rpc: {
+      request: async (_method, params) => {
+        prompts.push(params.prompt)
+        if (prompts.length === 1) throw new Error("failed")
+      },
+    },
+  })
+
+  await assert.rejects(session.prompt("first", []), /failed/)
+  await session.prompt("second", [])
+
+  assert.equal(prompts[0][0].text.startsWith("<chat_entity"), true)
+  assert.equal(prompts[1][0].text.startsWith("<chat_message"), true)
+  assert.equal(changes.includes(true), true)
+  assert.equal(changes.indexOf(true), changes.lastIndexOf(false) + 1)
+})
+
+test("restored structured replays prevent duplicate identity introductions", () => {
+  const session = Object.assign(Object.create(AcpSession.prototype), {
+    id: "session",
+    title: "Restored session",
+    events: [],
+    identityIntroduced: false,
+    replayUsers: new Map(),
+    onEvent() {},
+    onChange() {},
+  })
+  const introduction = promptBlocks("ignored", [], true)[0].text
+
+  session.handleNotification("session/update", {
+    update: {
+      sessionUpdate: "user_message_chunk",
+      messageId: "identity",
+      content: { type: "text", text: introduction },
+    },
+  })
+
+  assert.equal(session.identityIntroduced, true)
 })
 
 test("combines chunked user messages when replaying an ACP session", () => {

@@ -74,6 +74,7 @@ from .dashboard.team_settings import (
     get_team_fable_enabled,
 )
 from .dashboard.user_mappings import email_for_login
+from .input_messages import build_input_messages
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
@@ -1125,9 +1126,39 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 "Failed to record agent usage for thread %s", self._thread_id, exc_info=True
             )
 
+        joined_messages = (
+            build_input_messages(
+                joined_reminder,
+                {
+                    "sender_id": f"github:{self._profile_login}",
+                    "surface": "automation",
+                    "kind": "system",
+                },
+                people=[
+                    {
+                        "id": f"github:{self._profile_login}",
+                        "platform": "github",
+                        "github_login": self._profile_login,
+                    }
+                ],
+            )
+            if joined_reminder and self._profile_login
+            else []
+        )
         return {
             "work_dir": work_dir,
-            **({"messages": [HumanMessage(content=joined_reminder)]} if joined_reminder else {}),
+            **(
+                {
+                    "messages": [
+                        HumanMessage(
+                            content=cast(str | list[str | dict[Any, Any]], item["content"])
+                        )
+                        for item in joined_messages
+                    ]
+                }
+                if joined_messages
+                else {}
+            ),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
                 dashboard_base_url=dashboard_base_url(),

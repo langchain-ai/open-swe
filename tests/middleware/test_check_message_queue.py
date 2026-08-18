@@ -1,10 +1,10 @@
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
+from xml.etree import ElementTree
 
 import pytest
 
 from agent.middleware.check_message_queue import (
-    DASHBOARD_HANDOFF_MARKER,
     LinearNotifyState,
     _build_blocks_from_payload,
     check_message_queue_before_model,
@@ -36,7 +36,17 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
         {
             (("queue", "thread-1"), "pending_messages"): {
                 "messages": [
-                    {"content": {"text": "continue in web", "source": "dashboard"}},
+                    {
+                        "content": {
+                            "text": "continue in web",
+                            "source": "dashboard",
+                            "sender": {
+                                "id": "github:octocat",
+                                "platform": "github",
+                                "github_login": "octocat",
+                            },
+                        }
+                    },
                 ]
             }
         }
@@ -63,8 +73,15 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
     assert result is not None
     message = result["messages"][0]
     assert message["role"] == "user"
-    assert DASHBOARD_HANDOFF_MARKER in message["content"][0]["text"]
-    assert message["content"][1] == {"type": "text", "text": "continue in web"}
+    handoff_entity = ElementTree.fromstring(message["content"][0]["text"])
+    handoff_message = ElementTree.fromstring(message["content"][1]["text"])
+    user_entity = ElementTree.fromstring(message["content"][2]["text"])
+    user_message = ElementTree.fromstring(message["content"][3]["text"])
+    assert handoff_entity.attrib["id"] == "system:dashboard-handoff"
+    assert handoff_message.attrib["kind"] == "system"
+    assert "conversation has moved to Web" in (handoff_message.findtext("content") or "")
+    assert user_entity.attrib["id"] == "github:octocat"
+    assert user_message.findtext("content") == "continue in web"
     assert result["plan_approval_blocked"] is True
     assert "dashboard/Web UI" in result["rendered_system_prompt"]
     assert "Make `slack_thread_reply` your first tool call" not in result["rendered_system_prompt"]
@@ -77,7 +94,18 @@ async def test_check_message_queue_allows_owner_dashboard_approval() -> None:
         {
             (("queue", "thread-1"), "pending_messages"): {
                 "messages": [
-                    {"content": {"text": "go ahead", "source": "dashboard", "from_owner": True}},
+                    {
+                        "content": {
+                            "text": "go ahead",
+                            "source": "dashboard",
+                            "from_owner": True,
+                            "sender": {
+                                "id": "github:owner",
+                                "platform": "github",
+                                "github_login": "owner",
+                            },
+                        }
+                    },
                 ]
             }
         }
@@ -96,7 +124,8 @@ async def test_check_message_queue_allows_owner_dashboard_approval() -> None:
 
     assert result is not None
     assert result["plan_approval_blocked"] is False
-    assert result["messages"][0]["content"][1] == {"type": "text", "text": "go ahead"}
+    user_message = ElementTree.fromstring(result["messages"][0]["content"][-1]["text"])
+    assert user_message.findtext("content") == "go ahead"
 
 
 @pytest.mark.asyncio

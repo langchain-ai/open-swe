@@ -163,6 +163,29 @@ def _text(content: Any) -> str:
     return str(content)
 
 
+def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
+    selected: list[HumanMessage] = []
+    slack_request_pending = False
+    for message in messages:
+        if not isinstance(message, HumanMessage):
+            continue
+        text = _text(message.content).lstrip()
+        if text.startswith("<chat_entity "):
+            continue
+        if text.startswith("<chat_message "):
+            header = text.split(">", 1)[0]
+            if 'kind="system"' in header:
+                slack_request_pending = 'surface="slack"' in header
+                continue
+            if 'surface="slack"' in header:
+                if slack_request_pending:
+                    selected.append(message)
+                    slack_request_pending = False
+                continue
+        selected.append(message)
+    return selected
+
+
 def _pr_url_from_messages(messages: list[BaseMessage]) -> str | None:
     for msg in reversed(messages):
         if isinstance(msg, ToolMessage):
@@ -564,7 +587,7 @@ class FakeScriptedChatModel(BaseChatModel):
             if isinstance(message, SystemMessage):
                 LAST_SYSTEM_PROMPT["text"] = _text(message.content)
                 break
-        humans = [m for m in messages if isinstance(m, HumanMessage)]
+        humans = _script_humans(messages)
         context = ScriptContext(
             first_text=_text(humans[0].content) if humans else "",
             last_text=_text(humans[-1].content) if humans else "",

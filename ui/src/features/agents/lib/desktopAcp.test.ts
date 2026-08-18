@@ -57,6 +57,44 @@ function installDesktop(
 }
 
 describe("desktopAcpMessages", () => {
+  it("parses structured desktop messages and hides entity introductions", () => {
+    const messages = desktopAcpMessages([
+      {
+        sequence: 0,
+        timestamp: "2026-08-05T20:00:00Z",
+        type: "user-message",
+        text: '<chat_entity kind="system" id="system:local"><display_name>Local automation</display_name></chat_entity>',
+        images: [],
+      },
+      {
+        sequence: 1,
+        timestamp: "2026-08-05T20:00:01Z",
+        type: "user-message",
+        text: '<chat_message sender="system:local" surface="desktop"><content>Run &lt;safe&gt;</content></chat_message>',
+        images: [],
+      },
+      {
+        sequence: 2,
+        timestamp: "2026-08-05T20:00:02Z",
+        type: "user-message",
+        text: "Legacy desktop prompt",
+        images: [],
+      },
+    ])
+
+    expect(messages).toHaveLength(2)
+    expect(messages[0]).toMatchObject({
+      author: "system",
+      structuredSenderKind: "system",
+      structuredSenderName: "Local automation",
+      chunks: [{ kind: "text", text: "Run <safe>" }],
+    })
+    expect(messages[1]).toMatchObject({
+      author: "user",
+      chunks: [{ kind: "text", text: "Legacy desktop prompt" }],
+    })
+  })
+
   it("builds a local conversation and updates tool calls in place", () => {
     const messages = desktopAcpMessages([
       {

@@ -269,7 +269,10 @@ export const Messages = memo(function MessagesComponent({
               const messageIsStreaming = isStreaming && isLastMessage
               const messageIsMarkdownLive = message.id === liveMarkdownMessageId
 
-              if (message.author === "user") {
+              if (
+                message.author === "user" ||
+                message.structuredSenderKind === "system"
+              ) {
                 return <UserMessage key={message.id} message={message} />
               }
 
