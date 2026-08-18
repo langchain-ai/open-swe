@@ -1,7 +1,5 @@
 """After-agent middleware that notifies users when the step limit is reached."""
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -9,8 +7,9 @@ from typing import Any
 from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
+from langgraph_sdk import get_client
 
-from ..utils.slack import post_slack_thread_reply
+from ..utils.slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
 from ..utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
@@ -58,12 +57,18 @@ async def notify_step_limit_reached(
     config = get_config()
     configurable = config.get("configurable", {})
     slack_thread = configurable.get("slack_thread") if isinstance(configurable, dict) else None
-    if not isinstance(slack_thread, dict):
+    thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
+    active = await get_active_slack_thread(
+        get_client(url=LANGGRAPH_URL),
+        thread_id if isinstance(thread_id, str) else None,
+        slack_thread if isinstance(slack_thread, dict) else None,
+    )
+    if not active:
         logger.info("No Slack thread config — cannot send step-limit notification")
         return None
 
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
+    channel_id = active.get("channel_id")
+    thread_ts = active.get("thread_ts")
 
     if (
         not isinstance(channel_id, str)
@@ -81,7 +86,12 @@ async def notify_step_limit_reached(
     )
 
     try:
-        await post_slack_thread_reply(channel_id, thread_ts, message)
+        await post_slack_thread_reply(
+            channel_id,
+            thread_ts,
+            message,
+            agent_thread_id=thread_id if isinstance(thread_id, str) else None,
+        )
         logger.info("Sent step-limit notification to Slack thread %s", thread_ts)
     except Exception:
         logger.exception("Failed to send step-limit notification")

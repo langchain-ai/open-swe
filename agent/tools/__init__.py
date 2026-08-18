@@ -26,6 +26,7 @@ _TOOL_MODULES = {
     "open_pull_request": ".open_pull_request",
     "publish_review": ".publish_review",
     "read_repo_file": ".read_repo_file",
+    "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": ".request_pr_review",
@@ -39,6 +40,7 @@ _TOOL_MODULES = {
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": ".search_repo_code",
     "slack_add_reaction": ".slack_add_reaction",
+    "slack_move_thread": ".slack_move_thread",
     "slack_read_thread_messages": ".slack_read_thread_messages",
     "slack_start_new_thread": ".slack_start_new_thread",
     "slack_thread_reply": ".slack_thread_reply",
@@ -70,6 +72,7 @@ __all__ = [
     "open_pull_request",
     "publish_review",
     "read_repo_file",
+    "read_user_settings",
     "recreate_sandbox",
     "report_platform_issue",
     "request_pr_review",
@@ -83,6 +86,7 @@ __all__ = [
     "schedule_thread_wakeup",
     "search_repo_code",
     "slack_add_reaction",
+    "slack_move_thread",
     "slack_read_thread_messages",
     "slack_start_new_thread",
     "slack_thread_reply",
@@ -117,6 +121,7 @@ if TYPE_CHECKING:
     from .open_pull_request import open_pull_request
     from .publish_review import publish_review
     from .read_repo_file import read_repo_file
+    from .read_user_settings import read_user_settings
     from .recreate_sandbox import recreate_sandbox
     from .reply_to_finding_thread import reply_to_finding_thread
     from .report_platform_issue import report_platform_issue
@@ -127,6 +132,7 @@ if TYPE_CHECKING:
     from .schedule_thread_wakeup import schedule_thread_wakeup
     from .search_repo_code import search_repo_code
     from .slack_add_reaction import slack_add_reaction
+    from .slack_move_thread import slack_move_thread
     from .slack_read_thread_messages import slack_read_thread_messages
     from .slack_start_new_thread import slack_start_new_thread
     from .slack_thread_reply import slack_thread_reply

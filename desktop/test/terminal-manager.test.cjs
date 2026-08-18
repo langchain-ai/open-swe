@@ -7,7 +7,7 @@ const {
   createTerminalManager,
   ensurePtySpawnHelperExecutable,
   getProjectShellEnv,
-} = require("../src/terminal-manager.cjs")
+} = require("../build/terminal-manager.cjs")
 
 class FakeProcess {
   constructor(pid, initialData) {

@@ -7,8 +7,6 @@ claims give us a Slack-*verified* member id and email, so a logged-in GitHub
 user can only ever link their own Slack identity (no self-asserted spoofing).
 """
 
-from __future__ import annotations
-
 import logging
 import os
 from dataclasses import dataclass

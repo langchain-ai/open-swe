@@ -37,9 +37,37 @@ function filters(overrides: Partial<SidebarFilters> = {}): SidebarFilters {
 }
 
 describe("filterThreads", () => {
-  it("returns all threads with default filters", () => {
-    const threads = [makeThread(), makeThread()]
-    expect(filterThreads(threads, DEFAULT_SIDEBAR_FILTERS)).toHaveLength(2)
+  it("returns ordinary threads with default filters", () => {
+    const threads = [
+      makeThread(),
+      makeThread({ source: "schedule", threadCategory: "automation" }),
+    ]
+    expect(filterThreads(threads, DEFAULT_SIDEBAR_FILTERS)).toHaveLength(1)
+  })
+
+  it("includes automations when requested", () => {
+    const ordinary = makeThread()
+    const automation = makeThread({
+      source: "schedule",
+      threadCategory: "automation",
+    })
+    expect(
+      filterThreads(
+        [ordinary, automation],
+        filters({ includeAutomations: true })
+      )
+    ).toEqual([ordinary, automation])
+  })
+
+  it("includes automations when Schedule is the selected source", () => {
+    const ordinary = makeThread()
+    const automation = makeThread({
+      source: "schedule",
+      threadCategory: "automation",
+    })
+    expect(
+      filterThreads([ordinary, automation], filters({ sources: ["schedule"] }))
+    ).toEqual([automation])
   })
 
   it("filters by ownership", () => {
@@ -192,7 +220,8 @@ describe("hasActiveFilters", () => {
   it("is true when any dimension changes", () => {
     expect(hasActiveFilters(filters({ ownership: "mine" }))).toBe(true)
     expect(hasActiveFilters(filters({ statuses: ["running"] }))).toBe(true)
-    expect(hasActiveFilters(filters({ includeResolved: false }))).toBe(true)
+    expect(hasActiveFilters(filters({ includeAutomations: true }))).toBe(true)
+    expect(hasActiveFilters(filters({ includeResolved: true }))).toBe(true)
   })
 })
 

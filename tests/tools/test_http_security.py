@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import importlib
 import socket as real_socket
 import sys
@@ -72,14 +70,14 @@ class FakeAsyncClient:
     installed in place of ``httpx.AsyncClient`` on the tool module under test.
     """
 
-    last_instance: FakeAsyncClient | None = None
+    last_instance: "FakeAsyncClient | None" = None
 
     def __init__(self, responder, *args: Any, **kwargs: Any) -> None:
         self._responder = responder
         self.calls: list[dict[str, Any]] = []
         FakeAsyncClient.last_instance = self
 
-    async def __aenter__(self) -> FakeAsyncClient:
+    async def __aenter__(self) -> "FakeAsyncClient":
         return self
 
     async def __aexit__(self, *exc: Any) -> bool:

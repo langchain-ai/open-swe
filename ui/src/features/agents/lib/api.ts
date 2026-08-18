@@ -93,6 +93,12 @@ export interface ThreadRecoveryPatch {
   filename: string
 }
 
+export interface CloudTerminalConnection {
+  url: string
+  protocol: string
+  ticket: string
+}
+
 export interface ThreadsPageParams {
   limit?: number
   offset?: number
@@ -210,6 +216,7 @@ function buildSidebarThreadsQuery(params: {
   activeLimit?: number
   resolvedLimit?: number
   activeThreadId?: string
+  includeAutomations?: boolean
 }): string {
   const search = new URLSearchParams()
   if (params.activeLimit != null) {
@@ -221,6 +228,9 @@ function buildSidebarThreadsQuery(params: {
   if (params.activeThreadId) {
     search.set("active_thread_id", params.activeThreadId)
   }
+  if (params.includeAutomations != null) {
+    search.set("include_automations", String(params.includeAutomations))
+  }
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -231,6 +241,7 @@ export const agentsApi = {
     activeLimit?: number
     resolvedLimit?: number
     activeThreadId?: string
+    includeAutomations?: boolean
   }) =>
     agentsRequest<SidebarThreads>(
       `/threads/sidebar${buildSidebarThreadsQuery(params)}`
@@ -327,6 +338,11 @@ export const agentsApi = {
   downloadThreadRecoveryPatch: (threadId: string) =>
     agentsBlobRequest(
       `/threads/${encodeURIComponent(threadId)}/recovery.patch`
+    ),
+  connectCloudTerminal: (threadId: string) =>
+    agentsRequest<CloudTerminalConnection>(
+      `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
+      { method: "POST" }
     ),
   streamUrl: (threadId: string) =>
     `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,

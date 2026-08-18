@@ -1,7 +1,5 @@
 """Read-only adapter for virtual backend routes."""
 
-from __future__ import annotations
-
 from deepagents.backends.protocol import (
     BackendProtocol,
     FileDownloadResponse,

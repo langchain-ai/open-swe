@@ -6,8 +6,6 @@ operator who installs the GitHub App into a new org doesn't get surprise
 review comments on every PR.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime
 

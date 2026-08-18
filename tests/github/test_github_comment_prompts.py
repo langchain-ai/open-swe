@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
@@ -34,7 +32,7 @@ class _CaptureRequestModel(BaseChatModel):
     def _get_ls_params(self, stop: list[str] | None = None, **kwargs: Any) -> LangSmithParams:
         return LangSmithParams(ls_provider="openai")
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> _CaptureRequestModel:
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "_CaptureRequestModel":
         self.captured_tools = tools
         return self
 
@@ -88,6 +86,7 @@ def test_construct_system_prompt_includes_operational_safeguards() -> None:
     assert "### Committing Changes and Opening Pull Requests" in prompt
     assert "Never run `git push --force`" in prompt
     assert "do not retry via `gh pr create`" in prompt
+    assert "do not call `schedule_thread_wakeup` again" in prompt
 
 
 def test_slack_information_only_response_uses_single_output_path() -> None:

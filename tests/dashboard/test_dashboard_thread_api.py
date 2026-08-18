@@ -221,6 +221,9 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     stamped = created["metadata"]
     assert isinstance(stamped, dict)
     assert stamped["source"] == "dashboard"
+    assert stamped["origin"] == "dashboard"
+    assert stamped["thread_category"] == "interactive"
+    assert stamped["trigger_kind"] == "user"
     assert stamped["github_login"] == "octocat"
     assert stamped["title"] == "Fix the flaky test"
     assert stamped["repo_owner"] == "octo"
@@ -576,9 +579,12 @@ async def test_proxy_commands_lazily_creates_missing_thread_only_for_run_start(
 
 
 async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch) -> None:
+    updates: list[dict[str, object]] = []
+
     class FakeThreads:
         async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
-            pass
+            assert thread_id == "tid"
+            updates.append(metadata)
 
     class FakeClient:
         threads = FakeThreads()
@@ -606,13 +612,18 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
         "tid",
         "teammate",
         command,
-        metadata={"source": "dashboard", "github_login": "owner"},
+        metadata={
+            "source": "dashboard",
+            "github_login": "owner",
+            "participant_logins": ["owner"],
+        },
         email="teammate@example.com",
     )
 
     # A non-owner's message is forwarded but tagged with their login.
     last = enriched["params"]["input"]["messages"][-1]
     assert last["content"] == "@teammate: fix the bug"
+    assert updates[-1]["participant_logins"] == ["owner", "teammate"]
 
 
 async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkeypatch) -> None:
@@ -1496,6 +1507,45 @@ async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(mo
     assert result["active"]["hasMore"] is True
     assert result["resolved"]["hasMore"] is True
     assert {call["offset"] for call in searches} == {0, page_size}
+
+
+async def test_list_dashboard_threads_sidebar_excludes_automations_before_limiting(
+    monkeypatch,
+) -> None:
+    page_size = thread_api._THREADS_SEARCH_PAGE
+    threads = _make_threads(page_size + 5, resolved_before=0)
+    for thread in threads[:page_size]:
+        metadata = cast(dict[str, object], thread["metadata"])
+        metadata["source"] = "schedule"
+        metadata["schedule_id"] = f"schedule-{thread['thread_id']}"
+    offsets: list[int] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            offsets.append(offset)
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_sidebar(
+        "octocat", email=None, active_limit=5, resolved_limit=5
+    )
+
+    assert [item["id"] for item in result["active"]["items"]] == [
+        f"t{index}" for index in range(page_size, page_size + 5)
+    ]
+    assert set(offsets) == {0, page_size}
 
 
 async def test_list_dashboard_threads_sidebar_includes_readable_active_thread(

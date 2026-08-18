@@ -1,7 +1,5 @@
 """GitHub OAuth and LangSmith authentication utilities."""
 
-from __future__ import annotations
-
 import logging
 import os
 from collections.abc import Mapping
@@ -22,7 +20,7 @@ from .github_token import (
 )
 from .http import DEFAULT_HTTP_TIMEOUT
 from .linear import comment_on_linear_issue
-from .slack import post_slack_thread_reply
+from .slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
 from .user_messages import WARNING_ICON, warning
 
 logger = logging.getLogger(__name__)
@@ -258,8 +256,14 @@ async def leave_failure_comment(
         return
     if source == "slack":
         slack_thread = configurable.get("slack_thread", {})
-        channel_id = slack_thread.get("channel_id") if isinstance(slack_thread, dict) else None
-        thread_ts = slack_thread.get("thread_ts") if isinstance(slack_thread, dict) else None
+        thread_id = configurable.get("thread_id")
+        active = await get_active_slack_thread(
+            get_client(url=LANGGRAPH_URL),
+            thread_id if isinstance(thread_id, str) else None,
+            slack_thread if isinstance(slack_thread, dict) else None,
+        )
+        channel_id = active.get("channel_id") if active else None
+        thread_ts = active.get("thread_ts") if active else None
         if channel_id and thread_ts:
             # The auth-failure ``message`` can carry a per-user GitHub auth URL,
             # which must not be posted in a shared thread (anyone could complete
@@ -283,9 +287,9 @@ async def leave_failure_comment(
                 thread_ts,
                 warning(
                     "Open SWE couldn't resolve your GitHub account for this run. Sign in "
-                    f"with GitHub and connect your Slack account in {link}, then mention "
-                    "it again."
+                    f"with GitHub and connect your Slack account in {link}, then mention it again."
                 ),
+                agent_thread_id=thread_id if isinstance(thread_id, str) else None,
             )
         return
     if source in ("github", "github_push"):

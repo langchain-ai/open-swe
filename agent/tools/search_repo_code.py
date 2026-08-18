@@ -1,7 +1,5 @@
 """Tool: ``search_repo_code``. Search the PR's repository via the GitHub code-search API."""
 
-from __future__ import annotations
-
 from typing import Any
 
 import httpx

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import contextvars
 import logging
@@ -29,6 +27,7 @@ Return only the structured title field.
 
 Rules:
 - Use 3-8 words and no more than 80 characters.
+- Use sentence case: capitalize only the first word, except for proper nouns and acronyms.
 - Name the durable subject and desired outcome, not the current workflow step.
 - Prefer a compact noun phrase or clear action phrase.
 - For reviews, name what is being reviewed and the relevant concern.
@@ -74,7 +73,7 @@ async def generate_and_store_thread_title(
     expected_title = metadata.get("title")
     title_seed = metadata.get("title_seed")
     if (
-        metadata.get("source") != "dashboard"
+        metadata.get("source") not in {"dashboard", "slack"}
         or not isinstance(title_seed, str)
         or expected_title != title_seed
     ):

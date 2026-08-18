@@ -1,7 +1,5 @@
 """Unit tests for the unified-diff parsing helpers."""
 
-from __future__ import annotations
-
 import pytest
 
 from agent.review.diff import (

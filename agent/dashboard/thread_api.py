@@ -1,7 +1,5 @@
 """Dashboard thread list/detail/run/stream endpoints backed by LangGraph."""
 
-from __future__ import annotations
-
 import asyncio
 import base64
 import binascii
@@ -38,6 +36,7 @@ from ..utils.thread_ops import (
     langgraph_url,
     queue_message_for_thread,
 )
+from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
 from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
 from .environments import get_environment, slugify
@@ -398,6 +397,47 @@ def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
     return permalink.strip() if isinstance(permalink, str) and permalink.strip() else None
 
 
+def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
+    value = metadata.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
+    return (
+        _metadata_string(metadata, "thread_category") == "automation"
+        or _thread_source(metadata) == "schedule"
+        or _metadata_string(metadata, "schedule_id") is not None
+    )
+
+
+def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
+    source = _thread_source(metadata)
+    origin = _metadata_string(metadata, "origin") or source
+    trigger_kind = _metadata_string(metadata, "trigger_kind") or (
+        "schedule_test"
+        if metadata.get("schedule_test") is True
+        else "schedule"
+        if source == "schedule" or _metadata_string(metadata, "schedule_id")
+        else "user"
+    )
+    category = _metadata_string(metadata, "thread_category")
+    if not category:
+        source_context = metadata.get("source_context")
+        if _is_automation_thread(metadata):
+            category = "automation"
+        elif isinstance(metadata.get("pr_number"), int) or (
+            isinstance(source_context, dict) and source_context.get("pr_number")
+        ):
+            category = "pull_request"
+        elif isinstance(source_context, dict) and (
+            source_context.get("github_issue") or source_context.get("linear_issue")
+        ):
+            category = "issue"
+        else:
+            category = "interactive"
+    return category, origin, trigger_kind
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -427,6 +467,7 @@ async def _thread_summary(
     pr_url = metadata.get("pr_url")
     pr_title = metadata.get("pr_title")
     pr_state = metadata.get("pr_state")
+    thread_category, origin, trigger_kind = _thread_classification(metadata)
 
     thread_id = thread.get("thread_id") or thread.get("id")
     trace_url = await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
@@ -454,6 +495,11 @@ async def _thread_summary(
         "environment": metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
         "source": _thread_source(metadata),
+        "origin": origin,
+        "threadCategory": thread_category,
+        "triggerKind": trigger_kind,
+        "automationId": _metadata_string(metadata, "schedule_id"),
+        "automationName": _metadata_string(metadata, "schedule_name"),
         "status": status,
         "viewed": _is_thread_viewed(metadata, latest_run_id),
         "viewedAt": (
@@ -826,6 +872,7 @@ async def list_dashboard_threads_sidebar(
     active_limit: int = 50,
     resolved_limit: int = 20,
     active_thread_id: str | None = None,
+    include_automations: bool = False,
     include_all: bool = False,
 ) -> dict[str, Any]:
     client = langgraph_client()
@@ -855,6 +902,8 @@ async def list_dashboard_threads_sidebar(
             for thread in batch:
                 metadata = _thread_metadata(thread)
                 if not include_all and not _user_owns_thread(metadata, login, email):
+                    continue
+                if not include_automations and _is_automation_thread(metadata):
                     continue
                 thread_id = _thread_id(thread)
                 if not thread_id or thread_id in active or thread_id in resolved_threads:
@@ -1149,7 +1198,11 @@ async def _create_dashboard_thread_record(
     initial_title = title or prompt[:80] or "New agent"
     metadata: dict[str, Any] = {
         "source": _DASHBOARD_SOURCE,
+        "origin": _DASHBOARD_SOURCE,
+        "thread_category": "interactive",
+        "trigger_kind": "user",
         "github_login": login,
+        PARTICIPANT_LOGINS_KEY: [login],
         "title": initial_title,
         "base_branch": profile.get("base_branch") or "main",
         "branch_prefix": profile.get("branch_prefix"),
@@ -1430,6 +1483,9 @@ async def _enrich_run_start_command(
         metadata_update: dict[str, Any] = {
             "source": _DASHBOARD_SOURCE,
             "plan_mode": plan_mode_requested,
+            PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+                metadata.get(PARTICIPANT_LOGINS_KEY), login
+            ),
         }
         if command_images and run_model and run_effort:
             overrides["agent_model_id"] = run_model
@@ -1531,6 +1587,9 @@ async def send_dashboard_message(
         "source": _DASHBOARD_SOURCE,
         "updated_at_ms": now_ms,
         "plan_mode": body.plan_mode,
+        PARTICIPANT_LOGINS_KEY: merge_participant_logins(
+            metadata.get(PARTICIPANT_LOGINS_KEY), login
+        ),
     }
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model

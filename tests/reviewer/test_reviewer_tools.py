@@ -1,7 +1,5 @@
 """Unit tests for the add_finding / update_finding / list_findings tools."""
 
-from __future__ import annotations
-
 from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, patch

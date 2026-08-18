@@ -7,8 +7,7 @@ the real ``open_pull_request`` tool, and post the result back with the real
 the preceding tool result, exactly as a real model would.
 """
 
-from __future__ import annotations
-
+import json
 import os
 import re
 import time
@@ -25,7 +24,7 @@ from e2e_env import (
     REPO,
 )
 from langchain_core.callbacks import CallbackManagerForLLMRun
-from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models import BaseChatModel, ModelProfile
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -35,9 +34,7 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-# One shell command that does the whole git workflow. Each execute() runs in a
-# fresh shell rooted at the sandbox dir, so the clone+commit+push is bundled.
-_IMPLEMENT_SCRIPT = f"""
+_SETUP_SCRIPT = f"""
 set -e
 rm -rf repo
 git clone "$E2E_REMOTE" repo
@@ -46,13 +43,50 @@ git config user.email "dev@example.com"
 git config user.name "Dev User"
 git checkout -b {FEATURE_BRANCH}
 cat > {FEATURE_FILE} <<'EOF'
+def normalize(name):
+    return name.strip()
+
 def greet(name):
-    return f"Hello, {{name}}!"
+    return "Hello!"
+
+def farewell(name):
+    return f"Goodbye, {{name}}!"
 EOF
+""".strip()
+
+_COMMIT_SCRIPT = f"""
+set -e
+cd repo
 git add -A
 git commit -m "{PR_TITLE}"
 git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
+""".strip()
+
+_DESKTOP_PR_PAYLOAD = json.dumps(
+    {
+        "head": FEATURE_BRANCH,
+        "base": BASE_BRANCH,
+        "title": PR_TITLE,
+        "body": "Adds a `greet()` helper as requested.",
+        "draft": True,
+    }
+)
+_DESKTOP_IMPLEMENT_SCRIPT = f"""
+set -e
+git checkout -b {FEATURE_BRANCH}
+cat > {FEATURE_FILE} <<'EOF'
+def greet(name):
+    return f"Hello, {{name}}!"
+EOF
+git add {FEATURE_FILE}
+git -c "user.email=dev@example.com" -c "user.name=Dev User" commit -m "{PR_TITLE}"
+git push origin {FEATURE_BRANCH}
+curl --fail --silent --show-error \
+  --request POST \
+  --header 'content-type: application/json' \
+  --data '{_DESKTOP_PR_PAYLOAD}' \
+  "$E2E_FAKE_GITHUB_API/repos/{OWNER}/{REPO}/pulls"
 """.strip()
 
 # The system prompt of the most recent model call, so specs can assert what the
@@ -181,6 +215,15 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+def _desktop_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    return AIMessage(
+        content=(
+            f"Done! I added `{FEATURE_FILE}` and opened [{PR_TITLE}]({url}) on the fake GitHub."
+        )
+    )
+
+
 PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.md"
 
 PLAN_MARKDOWN = """## Plan: Add greet() helper
@@ -299,6 +342,15 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
 
 
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    "desktop": (
+        _tool_step(
+            "Implementing the change in the selected local project.",
+            "execute",
+            {"command": _DESKTOP_IMPLEMENT_SCRIPT},
+            "call-desktop-impl",
+        ),
+        _dynamic_step(_desktop_reply_step),
+    ),
     "implement": (
         _tool_step(
             "Acknowledging the Slack request before starting work.",
@@ -307,10 +359,26 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-ack",
         ),
         _tool_step(
-            "Setting up the repo and implementing the change.",
+            "Setting up the repository.",
             "execute",
-            {"command": _IMPLEMENT_SCRIPT},
-            "call-impl",
+            {"command": _SETUP_SCRIPT},
+            "call-setup",
+        ),
+        _tool_step(
+            "Implementing the greeting.",
+            "edit_file",
+            {
+                "file_path": f"/repo/{FEATURE_FILE}",
+                "old_string": 'def greet(name):\n    return "Hello!"',
+                "new_string": 'def greet(name):\n    return f"Hello, {name}!"',
+            },
+            "call-edit",
+        ),
+        _tool_step(
+            "Committing and pushing the change.",
+            "execute",
+            {"command": _COMMIT_SCRIPT},
+            "call-commit",
         ),
         _tool_step(
             "Opening a pull request.",
@@ -327,6 +395,23 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-pr",
         ),
         _dynamic_step(_reply_step),
+    ),
+    "move": (
+        _tool_step(
+            "Moving the current Open SWE thread to another Slack channel.",
+            "slack_move_thread",
+            {
+                "message": "Continue the existing Open SWE task in this thread.",
+                "channel_id": "C_TARGET",
+            },
+            "call-move",
+        ),
+        _tool_step(
+            "Confirming the moved thread in its new location.",
+            "slack_thread_reply",
+            {"message": "Moved this Open SWE thread and preserved its state."},
+            "call-move-reply",
+        ),
     ),
     "breakout": (
         _tool_step(
@@ -401,6 +486,14 @@ def _is_breakout_request(text: str) -> bool:
     return "break out" in t or "separate thread" in t or "split out" in t
 
 
+def _is_move_request(text: str) -> bool:
+    return "E2E_MOVE_THREAD" in text
+
+
+def _is_move_followup(text: str) -> bool:
+    return "E2E_DESTINATION_FOLLOWUP" in text or "E2E_SOURCE_RETAG" in text
+
+
 def _is_approval(text: str) -> bool:
     t = text.lower()
     return "approved" in t and "implement" in t
@@ -413,8 +506,14 @@ def _is_revision(text: str) -> bool:
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
+        "desktop",
+        lambda ctx: ctx.human_count <= 1 and "E2E_DESKTOP_LOCAL" in ctx.first_text,
+    ),
+    ScriptRule(
         "environment", lambda ctx: ctx.human_count <= 1 and _is_environment_request(ctx.first_text)
     ),
+    ScriptRule("followup", lambda ctx: _is_move_followup(ctx.last_text)),
+    ScriptRule("move", lambda ctx: _is_move_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
     ScriptRule("plan", lambda ctx: _is_revision(ctx.last_text)),
     ScriptRule("plan", lambda ctx: ctx.human_count <= 1 and _is_plan_request(ctx.first_text)),
@@ -440,13 +539,18 @@ def build_script() -> list[StepSpec]:
 class FakeScriptedChatModel(BaseChatModel):
     """Returns the next scripted AIMessage based on how far the loop has run."""
 
+    model: str = "fake"
+    profile: ModelProfile | None = {
+        "tool_calling": True,
+        "max_input_tokens": 8_000,
+    }
     script: list[Any] = []
 
     @property
     def _llm_type(self) -> str:
         return "fake-scripted"
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> FakeScriptedChatModel:  # noqa: ARG002
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "FakeScriptedChatModel":  # noqa: ARG002
         return self
 
     def _generate(

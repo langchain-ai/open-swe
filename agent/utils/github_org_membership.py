@@ -1,7 +1,5 @@
 """GitHub organization membership checks for webhook gating."""
 
-from __future__ import annotations
-
 import logging
 import os
 from urllib.parse import quote

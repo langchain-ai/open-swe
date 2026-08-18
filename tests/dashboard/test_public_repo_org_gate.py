@@ -1,7 +1,5 @@
 """Tests for the public-repo org-membership gate on GitHub webhooks."""
 
-from __future__ import annotations
-
 import hashlib
 import hmac
 import json
@@ -362,7 +360,7 @@ class _FakeAsyncClient:
     def __init__(self, response) -> None:
         self._response = response
 
-    async def __aenter__(self) -> _FakeAsyncClient:
+    async def __aenter__(self) -> "_FakeAsyncClient":
         return self
 
     async def __aexit__(self, *_args) -> None:

@@ -15,7 +15,7 @@ on:
       model_id:
         description: Reviewer model id
         type: string
-        default: google_genai:gemini-3.5-flash
+        default: google_genai:gemini-3.7-flash
       reasoning_effort:
         description: Reasoning effort
         type: string

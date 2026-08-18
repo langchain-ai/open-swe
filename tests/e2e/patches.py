@@ -10,8 +10,6 @@ Applied at import of both the graph entrypoint and the HTTP harness (same dev
 process), so it runs before the first run regardless of import order. Idempotent.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 
@@ -107,7 +105,7 @@ class _FakeSnapshot:
 class _FakeSandboxClient:
     """Stands in for ``AsyncSandboxClient`` for snapshot calls only."""
 
-    async def __aenter__(self) -> _FakeSandboxClient:
+    async def __aenter__(self) -> "_FakeSandboxClient":
         return self
 
     async def __aexit__(self, *_exc: object) -> bool:

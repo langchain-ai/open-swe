@@ -1,7 +1,5 @@
 """Tests for Linear webhook PR author linking (reuse of the Slack user mapping)."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, patch

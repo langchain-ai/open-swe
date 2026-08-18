@@ -8,8 +8,6 @@ the chat counterpart of ``thread_api``'s agent proxy, pinned to assistant
 ``chat`` and scoped to the review's PR.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 from collections.abc import AsyncIterator

@@ -1,7 +1,5 @@
 """Client-side execution deadline for the LangSmith sandbox backend."""
 
-from __future__ import annotations
-
 import asyncio
 import time
 from types import SimpleNamespace

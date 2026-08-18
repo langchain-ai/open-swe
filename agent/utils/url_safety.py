@@ -1,12 +1,3 @@
-"""Shared SSRF guard: resolve a URL's host and confirm it is publicly routable.
-
-Used by the ``http_request`` tool (which additionally pins the connection and
-re-validates every redirect hop) and by server-side image fetching, so an
-untrusted URL can't reach internal services or the cloud metadata endpoint.
-"""
-
-from __future__ import annotations
-
 import ipaddress
 import socket
 from collections.abc import Callable, Mapping
