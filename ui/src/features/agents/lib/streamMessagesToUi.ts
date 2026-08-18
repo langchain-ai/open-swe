@@ -11,6 +11,7 @@ import type {
   Chunk,
   DiffData,
   Message,
+  OutputIframeDisplay,
   SubagentInfo,
   ToolExecutionChunk,
 } from "./types"
@@ -322,6 +323,30 @@ function toolOutputText(
   return text || undefined
 }
 
+function outputIframeDisplay(
+  toolMessage: ToolMessage | undefined
+): OutputIframeDisplay | undefined {
+  const artifact = toolMessage?.artifact
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return undefined
+  }
+  const value = artifact as Record<string, unknown>
+  if (
+    value.type !== "output_iframe" ||
+    typeof value.html !== "string" ||
+    typeof value.title !== "string" ||
+    typeof value.filename !== "string"
+  ) {
+    return undefined
+  }
+  return {
+    type: "output_iframe",
+    html: value.html,
+    title: value.title,
+    filename: value.filename,
+  }
+}
+
 /**
  * Convert the SDK's live projections into the dashboard chunk model so the
  * transcript streams (and hydrates) directly from the SDK instead of a
@@ -449,6 +474,8 @@ export function streamMessagesToUi(
         }
         const output = toolOutputText(assembled, toolMessage)
         if (output) chunk.output = output
+        const display = outputIframeDisplay(toolMessage)
+        if (display) chunk.display = display
         const diffData = maybeDiffFromArgs(args)
         if (diffData) chunk.diffData = diffData
         // When the SDK has discovered the subagent this `task` call spawned, take

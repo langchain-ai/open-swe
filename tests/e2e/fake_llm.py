@@ -34,11 +34,8 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-# One shell command that does the whole git workflow. Each execute() runs in a
-# fresh shell rooted at the sandbox dir, so the clone+commit+push is bundled.
-_IMPLEMENT_SCRIPT = f"""
+_SETUP_SCRIPT = f"""
 set -e
-sleep 8
 rm -rf repo
 git clone "$E2E_REMOTE" repo
 cd repo
@@ -46,9 +43,20 @@ git config user.email "dev@example.com"
 git config user.name "Dev User"
 git checkout -b {FEATURE_BRANCH}
 cat > {FEATURE_FILE} <<'EOF'
+def normalize(name):
+    return name.strip()
+
 def greet(name):
-    return f"Hello, {{name}}!"
+    return "Hello!"
+
+def farewell(name):
+    return f"Goodbye, {{name}}!"
 EOF
+""".strip()
+
+_COMMIT_SCRIPT = f"""
+set -e
+cd repo
 git add -A
 git commit -m "{PR_TITLE}"
 git push origin {FEATURE_BRANCH}
@@ -69,6 +77,27 @@ git commit -m "{PR_TITLE}"
 git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
 """.strip()
+
+_IFRAME_HTML_PATH = "/workspace/iframe-output.html"
+_IFRAME_DATA_PATH = "/workspace/iframe-data.json"
+_IFRAME_CSS_PATH = "/workspace/iframe-theme.css"
+_IFRAME_HTML = """<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Iframe E2E Preview</title></head>
+<body>
+  <main>
+    <h1>Iframe preview</h1>
+    <p id="output-data">Loading bundled data...</p>
+  </main>
+  <script>
+    const data = JSON.parse(window.__FILES__["data.json"]);
+    document.getElementById("output-data").textContent = data.label;
+  </script>
+</body>
+</html>
+"""
+_IFRAME_DATA = '{"label":"Bundled data loaded"}'
+_IFRAME_CSS = "body { min-height: 420px; margin: 0; color: rebeccapurple; }"
 
 _DESKTOP_PR_PAYLOAD = json.dumps(
     {
@@ -225,6 +254,15 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+def _desktop_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    return AIMessage(
+        content=(
+            f"Done! I added `{FEATURE_FILE}` and opened [{PR_TITLE}]({url}) on the fake GitHub."
+        )
+    )
+
+
 PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.md"
 
 PLAN_MARKDOWN = """## Plan: Add greet() helper
@@ -365,6 +403,52 @@ echo AUDITED
 
 
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    "iframe": (
+        _tool_step(
+            "Acknowledging the iframe preview request.",
+            "slack_thread_reply",
+            {"message": "Preparing the iframe preview now."},
+            "call-iframe-ack",
+        ),
+        _tool_step(
+            "Writing the iframe HTML.",
+            "write_file",
+            {"file_path": _IFRAME_HTML_PATH, "content": _IFRAME_HTML},
+            "call-iframe-html",
+        ),
+        _tool_step(
+            "Writing the iframe data.",
+            "write_file",
+            {"file_path": _IFRAME_DATA_PATH, "content": _IFRAME_DATA},
+            "call-iframe-data",
+        ),
+        _tool_step(
+            "Writing the iframe stylesheet.",
+            "write_file",
+            {"file_path": _IFRAME_CSS_PATH, "content": _IFRAME_CSS},
+            "call-iframe-css",
+        ),
+        _tool_step(
+            "Rendering the iframe preview.",
+            "output_iframe",
+            {
+                "path": _IFRAME_HTML_PATH,
+                "title": "Iframe E2E Preview",
+                "files": {"data.json": _IFRAME_DATA_PATH, "theme.css": _IFRAME_CSS_PATH},
+            },
+            "call-output-iframe",
+        ),
+        StepSpec(content="Rendered the iframe preview."),
+    ),
+    "desktop": (
+        _tool_step(
+            "Implementing the change in the selected local project.",
+            "execute",
+            {"command": _DESKTOP_IMPLEMENT_SCRIPT},
+            "call-desktop-impl",
+        ),
+        _dynamic_step(_desktop_reply_step),
+    ),
     "subagents": (
         _tool_step(
             "Acknowledging before fanning out.",
@@ -432,10 +516,26 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-ack",
         ),
         _tool_step(
-            "Setting up the repo and implementing the change.",
+            "Setting up the repository.",
             "execute",
-            {"command": _IMPLEMENT_SCRIPT},
-            "call-impl",
+            {"command": _SETUP_SCRIPT},
+            "call-setup",
+        ),
+        _tool_step(
+            "Implementing the greeting.",
+            "edit_file",
+            {
+                "file_path": f"/repo/{FEATURE_FILE}",
+                "old_string": 'def greet(name):\n    return "Hello!"',
+                "new_string": 'def greet(name):\n    return f"Hello, {name}!"',
+            },
+            "call-edit",
+        ),
+        _tool_step(
+            "Committing and pushing the change.",
+            "execute",
+            {"command": _COMMIT_SCRIPT},
+            "call-commit",
         ),
         _tool_step(
             "Opening a pull request.",
@@ -528,6 +628,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
 }
 
 
+def _is_iframe_request(text: str) -> bool:
+    return "E2E_IFRAME" in text
+
+
 def _subagent_script_name(first_text: str) -> str | None:
     """Route a nested loop to its script by the task description it was handed."""
     for name, description in SUBAGENT_TASKS.items():
@@ -545,6 +649,10 @@ def _is_plan_request(text: str) -> bool:
     return "plan" in text.lower()
 
 
+def _is_environment_request(text: str) -> bool:
+    return "environment" in text.lower()
+
+
 def _is_breakout_request(text: str) -> bool:
     t = text.lower()
     return "break out" in t or "separate thread" in t or "split out" in t
@@ -552,6 +660,10 @@ def _is_breakout_request(text: str) -> bool:
 
 def _is_move_request(text: str) -> bool:
     return "E2E_MOVE_THREAD" in text
+
+
+def _is_move_followup(text: str) -> bool:
+    return "E2E_DESTINATION_FOLLOWUP" in text or "E2E_SOURCE_RETAG" in text
 
 
 def _is_approval(text: str) -> bool:
@@ -565,6 +677,16 @@ def _is_revision(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
+    ScriptRule(
+        "desktop",
+        lambda ctx: ctx.human_count <= 1 and "E2E_DESKTOP_LOCAL" in ctx.first_text,
+    ),
+    ScriptRule(
+        "environment", lambda ctx: ctx.human_count <= 1 and _is_environment_request(ctx.first_text)
+    ),
+    ScriptRule("followup", lambda ctx: _is_move_followup(ctx.last_text)),
+    ScriptRule("move", lambda ctx: _is_move_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
     ScriptRule(
         "subagents", lambda ctx: ctx.human_count <= 1 and _is_subagent_request(ctx.first_text)
