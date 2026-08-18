@@ -167,6 +167,7 @@ async def test_message_update_queues_only_the_new_text() -> None:
     )
 
     assert response["status"] == "accepted"
+    assert background_tasks.tasks[0][0] is slack_routes._process_slack_message_update
     event_data = background_tasks.tasks[0][1][0]
     assert event_data["message_update"] is True
     assert event_data["event_ts"] == "1786573400.000000"
@@ -174,6 +175,11 @@ async def test_message_update_queues_only_the_new_text() -> None:
     assert event_data["thread_ts"] == "1786573300.000000"
     assert event_data["text"] == "new corrected text"
     assert "old text that must not be resent" not in str(event_data)
+
+
+async def _run_message_update_task(background_tasks: _FakeBackgroundTasks) -> None:
+    func, args = background_tasks.tasks[0]
+    await func(*args)
 
 
 async def test_root_message_update_uses_original_message_as_thread() -> None:
@@ -193,6 +199,7 @@ async def test_root_message_update_uses_original_message_as_thread() -> None:
         cast(Request, _FakeRequest(payload)),
         cast(BackgroundTasks, background_tasks),
     )
+    await _run_message_update_task(background_tasks)
 
     assert response["status"] == "accepted"
     event_data = background_tasks.tasks[0][1][0]
@@ -204,56 +211,41 @@ async def test_root_message_update_uses_original_message_as_thread() -> None:
     assert await_args.args[2] == "1786573369.551099"
 
 
-async def test_message_update_requires_an_existing_thread(
+@pytest.mark.parametrize(
+    ("patch_name", "patch_value"),
+    [
+        ("lookup_slack_thread_id", None),
+        ("_thread_exists", False),
+        ("lookup_slack_run_mapping", None),
+    ],
+)
+async def test_message_update_background_task_requires_delivered_message(
     monkeypatch: pytest.MonkeyPatch,
+    patch_name: str,
+    patch_value: object,
 ) -> None:
-    monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(webhook_common, patch_name, AsyncMock(return_value=patch_value))
+    monkeypatch.setattr(slack_routes, "_MESSAGE_UPDATE_RETRY_DELAYS", ())
+    process = AsyncMock()
+    monkeypatch.setattr(slack_service, "process_slack_mention", process)
     background_tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(_message_update_payload())),
         cast(BackgroundTasks, background_tasks),
     )
+    await _run_message_update_task(background_tasks)
 
-    assert response == {"status": "ignored", "reason": "Slack thread is not associated"}
-    assert background_tasks.tasks == []
-
-
-async def test_message_update_requires_the_mapped_agent_thread(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(webhook_common, "_thread_exists", AsyncMock(return_value=False))
-    background_tasks = _FakeBackgroundTasks()
-
-    response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(_message_update_payload())),
-        cast(BackgroundTasks, background_tasks),
-    )
-
-    assert response == {"status": "ignored", "reason": "Slack thread is not associated"}
-    assert background_tasks.tasks == []
-
-
-async def test_message_update_requires_a_delivered_message(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(webhook_common, "lookup_slack_run_mapping", AsyncMock(return_value=None))
-    background_tasks = _FakeBackgroundTasks()
-
-    response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(_message_update_payload())),
-        cast(BackgroundTasks, background_tasks),
-    )
-
-    assert response == {"status": "ignored", "reason": "Slack message was not delivered"}
-    assert background_tasks.tasks == []
+    assert response == {"status": "accepted", "message": "Slack update queued"}
+    process.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [("triggering_user_id", "UOTHER"), ("agent_thread_id", "other-thread")],
 )
-async def test_message_update_rejects_mismatched_delivery_mapping(
+async def test_message_update_background_task_rejects_mismatched_delivery_mapping(
+    monkeypatch: pytest.MonkeyPatch,
     field: str,
     value: str,
 ) -> None:
@@ -261,15 +253,75 @@ async def test_message_update_rejects_mismatched_delivery_mapping(
     delivered = dict(lookup_run.return_value)
     delivered[field] = value
     lookup_run.return_value = delivered
+    process = AsyncMock()
+    monkeypatch.setattr(slack_service, "process_slack_mention", process)
     background_tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(_message_update_payload())),
         cast(BackgroundTasks, background_tasks),
     )
+    await _run_message_update_task(background_tasks)
 
-    assert response == {"status": "ignored", "reason": "Slack message was not delivered"}
-    assert background_tasks.tasks == []
+    assert response == {"status": "accepted", "message": "Slack update queued"}
+    process.assert_not_awaited()
+
+
+async def test_message_update_retries_until_delivery_mapping_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lookup_run = AsyncMock(
+        side_effect=[
+            None,
+            {
+                "run_id": "run-1",
+                "thread_ts": "1786573300.000000",
+                "triggering_user_id": "U1",
+                "agent_thread_id": "t1",
+            },
+        ]
+    )
+    sleep = AsyncMock()
+    process = AsyncMock()
+    monkeypatch.setattr(webhook_common, "lookup_slack_run_mapping", lookup_run)
+    monkeypatch.setattr(slack_routes, "_MESSAGE_UPDATE_RETRY_DELAYS", (0.1,))
+    monkeypatch.setattr(slack_routes.asyncio, "sleep", sleep)
+    monkeypatch.setattr(slack_service, "process_slack_mention", process)
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(BackgroundTasks, background_tasks),
+    )
+    assert response["status"] == "accepted"
+    sleep.assert_not_awaited()
+
+    await _run_message_update_task(background_tasks)
+
+    sleep.assert_awaited_once_with(0.1)
+    process.assert_awaited_once()
+
+
+async def test_unassociated_message_update_does_not_trigger_docs_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_common, "lookup_slack_run_mapping", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_routes, "_MESSAGE_UPDATE_RETRY_DELAYS", ())
+    is_docs_plz = AsyncMock(return_value=True)
+    post_reply = AsyncMock()
+    monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", is_docs_plz)
+    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(BackgroundTasks, background_tasks),
+    )
+    await _run_message_update_task(background_tasks)
+
+    assert response == {"status": "accepted", "message": "Slack update queued"}
+    is_docs_plz.assert_not_awaited()
+    post_reply.assert_not_awaited()
 
 
 async def test_message_update_rejects_changed_sender_identity() -> None:

@@ -1,11 +1,82 @@
 """Slack webhook HTTP routes."""
 
+import asyncio
+from typing import Any
+
 from fastapi import APIRouter
+from langgraph_sdk.client import LangGraphClient
 
 from . import common
 from . import slack as service
 
 router = APIRouter()
+
+_MESSAGE_UPDATE_RETRY_DELAYS = (0.1, 0.2, 0.5, 1, 2, 4, 8, 14)
+
+
+async def _lookup_delivered_message_update(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    message_ts: str,
+    user_id: str,
+) -> tuple[str | None, dict[str, Any] | None]:
+    for delay in (*_MESSAGE_UPDATE_RETRY_DELAYS, None):
+        try:
+            thread_id = await common.lookup_slack_thread_id(langgraph_client, channel_id, thread_ts)
+        except common.SlackThreadMappingError:
+            return None, None
+        delivered_message = await common.lookup_slack_run_mapping(
+            langgraph_client, channel_id, message_ts
+        )
+        if thread_id and delivered_message:
+            if (
+                delivered_message.get("thread_ts") != thread_ts
+                or delivered_message.get("triggering_user_id") != user_id
+                or delivered_message.get("agent_thread_id") != thread_id
+            ):
+                return None, None
+            if await common._thread_exists(thread_id):
+                return thread_id, delivered_message
+        if delay is None:
+            break
+        await asyncio.sleep(delay)
+    return None, None
+
+
+async def _process_slack_message_update(
+    event_data: dict[str, Any],
+    channel_id: str,
+    thread_ts: str,
+    message_ts: str,
+    user_id: str,
+) -> None:
+    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    thread_id, delivered_message = await _lookup_delivered_message_update(
+        langgraph_client,
+        channel_id,
+        thread_ts,
+        message_ts,
+        user_id,
+    )
+    if not thread_id or not delivered_message:
+        common.logger.info(
+            "Ignoring undelivered Slack message update channel=%s message=%s",
+            channel_id,
+            message_ts,
+        )
+        return
+    event_data["thread_id"] = thread_id
+    channel_context = await common._get_slack_channel_context(channel_id)
+    event_data["channel_context"] = channel_context
+    repo_config = await common.get_slack_repo_config(
+        channel_id,
+        thread_ts,
+        slack_user_id=user_id,
+        channel_context=channel_context,
+        thread_id=thread_id,
+    )
+    await service.process_slack_mention(event_data, repo_config)
 
 
 @router.post("/webhooks/slack")
@@ -181,6 +252,32 @@ async def slack_webhook(
     if bot_user_id and user_id == bot_user_id:
         return {"status": "ignored", "reason": "Event from this bot user"}
 
+    if is_message_update:
+        if await common.claim_slack_event(event_id, channel_id, event_ts):
+            event_data = {
+                "channel_id": channel_id,
+                "thread_ts": thread_ts,
+                "event_ts": event_ts,
+                "original_message_ts": original_message_ts,
+                "user_id": user_id,
+                "text": text,
+                "attachments": attachments,
+                "bot_user_id": bot_user_id,
+                "message_update": True,
+            }
+            background_tasks.add_task(
+                _process_slack_message_update,
+                event_data,
+                channel_id,
+                thread_ts,
+                original_message_ts,
+                user_id,
+            )
+            return {"status": "accepted", "message": "Slack update queued"}
+        return {"status": "ignored", "reason": "Duplicate Slack event delivery"}
+
+    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    thread_id: str | None = None
     channel_context = await common._get_slack_channel_context(channel_id)
 
     if await common._is_docs_plz_slack_channel(channel_id, channel_context):
@@ -193,27 +290,7 @@ async def slack_webhook(
             )
             return {"status": "accepted", "message": "Slack mention gated for docs-plz"}
     else:
-        langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-        if is_message_update:
-            try:
-                thread_id = await common.lookup_slack_thread_id(
-                    langgraph_client, channel_id, thread_ts
-                )
-            except common.SlackThreadMappingError:
-                return {"status": "ignored", "reason": "Invalid Slack thread mapping"}
-            if not thread_id or not await common._thread_exists(thread_id):
-                return {"status": "ignored", "reason": "Slack thread is not associated"}
-            delivered_message = await common.lookup_slack_run_mapping(
-                langgraph_client, channel_id, original_message_ts
-            )
-            if (
-                not delivered_message
-                or delivered_message.get("thread_ts") != thread_ts
-                or delivered_message.get("triggering_user_id") != user_id
-                or delivered_message.get("agent_thread_id") != thread_id
-            ):
-                return {"status": "ignored", "reason": "Slack message was not delivered"}
-        else:
+        if not is_message_update:
             try:
                 thread_id = await common.resolve_slack_thread_id(
                     langgraph_client, channel_id, thread_ts
