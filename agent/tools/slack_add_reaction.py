@@ -12,11 +12,10 @@ async def slack_add_reaction(
     """Add a context-appropriate reaction to a Slack message in the current thread.
 
     Prefer `saluting_face` for taking ownership, `eyes` for active review,
-    `thinking_face` for investigation, `white_check_mark` for handled work, and
-    `tada` for genuine wins. Never use `white_check_mark` on a root-level Slack post
-    containing a pull request link; use a neutral reaction instead. If `message_ts`
-    is omitted, this reacts to the latest message that triggered the run. Pass
-    emoji names without surrounding colons.
+    `thinking_face` for investigation, and `tada` for genuine wins. Never use
+    `white_check_mark`, because teams use it to indicate that a pull request is approved.
+    If `message_ts` is omitted, this reacts to the latest message that triggered the run.
+    Pass emoji names without surrounding colons.
     """
     config = get_config()
     configurable = config.get("configurable", {})
@@ -36,6 +35,11 @@ async def slack_add_reaction(
     reaction = emoji.strip().strip(":")
     if not reaction:
         return {"success": False, "error": "emoji is required"}
+    if reaction == "white_check_mark":
+        return {
+            "success": False,
+            "error": "white_check_mark is not allowed because it can imply PR approval",
+        }
     if any(char.isspace() for char in reaction):
         return {
             "success": False,

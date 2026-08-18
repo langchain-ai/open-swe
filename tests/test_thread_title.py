@@ -58,12 +58,12 @@ class _Threads:
     [
         (
             {
-                "source": "dashboard",
+                "source": "slack",
                 "title": "please review title generation",
                 "title_seed": "please review title generation",
             },
             {
-                "source": "dashboard",
+                "source": "slack",
                 "title": "Review thread title generation",
                 "title_seed": None,
             },

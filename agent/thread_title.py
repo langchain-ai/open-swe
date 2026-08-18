@@ -74,7 +74,7 @@ async def generate_and_store_thread_title(
     expected_title = metadata.get("title")
     title_seed = metadata.get("title_seed")
     if (
-        metadata.get("source") != "dashboard"
+        metadata.get("source") not in {"dashboard", "slack"}
         or not isinstance(title_seed, str)
         or expected_title != title_seed
     ):

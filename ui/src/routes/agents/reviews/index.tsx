@@ -153,6 +153,19 @@ function ReviewsPage() {
                 </div>
                 <div className="flex shrink-0 items-center gap-3 text-xs">
                   {statusBadge(review)}
+                  {review.approval_score != null && (
+                    <span
+                      className={cn(
+                        "rounded border px-1.5 py-0.5 tabular-nums",
+                        review.approval_event === "APPROVE" &&
+                          !review.approval_stale
+                          ? "border-emerald-600/40 text-emerald-500"
+                          : "border-border text-muted-foreground"
+                      )}
+                    >
+                      {review.approval_score}/100
+                    </span>
+                  )}
                   <span
                     className={cn(
                       "inline-flex items-center gap-1",
