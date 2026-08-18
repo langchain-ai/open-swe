@@ -17,7 +17,9 @@ import type { SubagentInfo, ToolExecutionChunk } from "./types"
 
 const START = Date.parse("2026-08-07T12:00:00.000Z")
 
-function chunk(overrides: Partial<ToolExecutionChunk> = {}): ToolExecutionChunk {
+function chunk(
+  overrides: Partial<ToolExecutionChunk> = {}
+): ToolExecutionChunk {
   return {
     kind: "tool-execution",
     toolCallId: "call-1",
@@ -41,19 +43,29 @@ function subagent(overrides: Partial<SubagentInfo> = {}): SubagentInfo {
 
 describe("subagentDisplayStatus", () => {
   it("maps chunk status onto the subagent states", () => {
-    expect(subagentDisplayStatus(chunk({ status: "in_progress" }))).toBe("running")
+    expect(subagentDisplayStatus(chunk({ status: "in_progress" }))).toBe(
+      "running"
+    )
     expect(subagentDisplayStatus(chunk({ status: "pending" }))).toBe("running")
-    expect(subagentDisplayStatus(chunk({ status: "completed" }))).toBe("completed")
+    expect(subagentDisplayStatus(chunk({ status: "completed" }))).toBe(
+      "completed"
+    )
     expect(subagentDisplayStatus(chunk({ status: "error" }))).toBe("error")
   })
 
   it("calls an unfinished subagent stalled once its run is no longer active", () => {
-    expect(subagentDisplayStatus(chunk({ status: "in_progress" }), false)).toBe("stalled")
+    expect(subagentDisplayStatus(chunk({ status: "in_progress" }), false)).toBe(
+      "stalled"
+    )
   })
 
   it("leaves a settled subagent alone when the run ends", () => {
-    expect(subagentDisplayStatus(chunk({ status: "completed" }), false)).toBe("completed")
-    expect(subagentDisplayStatus(chunk({ status: "error" }), false)).toBe("error")
+    expect(subagentDisplayStatus(chunk({ status: "completed" }), false)).toBe(
+      "completed"
+    )
+    expect(subagentDisplayStatus(chunk({ status: "error" }), false)).toBe(
+      "error"
+    )
   })
 })
 
@@ -64,13 +76,20 @@ describe("sanitization of agent-authored text", () => {
   const ZWSP = String.fromCharCode(0x200b)
 
   it("strips bidi overrides from the description so it cannot render reversed", () => {
-    const item = chunk({ input: { description: `delete ${RLO}nothing${PDF} here` } })
+    const item = chunk({
+      input: { description: `delete ${RLO}nothing${PDF} here` },
+    })
     expect(subagentDescription(item)).toBe("delete nothing here")
   })
 
   it("strips escapes and zero-width characters from the result", () => {
-    const item = chunk({ subagent: subagent({ result: `ok${ESC}[31m${ZWSP}done` }) })
-    expect(subagentOutcome(item)).toEqual({ kind: "result", text: "ok[31mdone" })
+    const item = chunk({
+      subagent: subagent({ result: `ok${ESC}[31m${ZWSP}done` }),
+    })
+    expect(subagentOutcome(item)).toEqual({
+      kind: "result",
+      text: "ok[31mdone",
+    })
   })
 
   it("keeps newlines and tabs, which carry meaning in agent output", () => {
@@ -90,13 +109,17 @@ describe("subagentElapsedMs", () => {
   })
 
   it("prefers an observed stop over a completedAt stamped once the fan-out ended", () => {
-    const info = subagent({ completedAt: new Date(START + 23_000).toISOString() })
+    const info = subagent({
+      completedAt: new Date(START + 23_000).toISOString(),
+    })
     expect(subagentElapsedMs(info, START + 13_000)).toBe(13_000)
   })
 
   it("returns undefined without a start time", () => {
     expect(subagentElapsedMs(undefined, START)).toBeUndefined()
-    expect(subagentElapsedMs(subagent({ startedAt: undefined }), START)).toBeUndefined()
+    expect(
+      subagentElapsedMs(subagent({ startedAt: undefined }), START)
+    ).toBeUndefined()
   })
 
   it("ignores a clock that ran backwards rather than showing a negative timer", () => {
@@ -117,7 +140,10 @@ describe("formatElapsed", () => {
 
 describe("subagentLabel", () => {
   it("prefers the requested subagent_type over the discovered name", () => {
-    const item = chunk({ input: { subagent_type: "reviewer" }, subagent: subagent() })
+    const item = chunk({
+      input: { subagent_type: "reviewer" },
+      subagent: subagent(),
+    })
     expect(subagentLabel(item)).toBe("reviewer")
   })
 
@@ -137,8 +163,15 @@ describe("subagentOutcome", () => {
   })
 
   it("falls back to the tool output when the snapshot carries no result", () => {
-    const item = chunk({ status: "completed", output: "from tool message", subagent: subagent() })
-    expect(subagentOutcome(item)).toEqual({ kind: "result", text: "from tool message" })
+    const item = chunk({
+      status: "completed",
+      output: "from tool message",
+      subagent: subagent(),
+    })
+    expect(subagentOutcome(item)).toEqual({
+      kind: "result",
+      text: "from tool message",
+    })
   })
 
   it("truncates a long result", () => {
@@ -160,7 +193,7 @@ describe("summarizeSubagentGroup", () => {
         chunk({ toolCallId: "a", status: "completed", subagent: subagent() }),
         chunk({ toolCallId: "b", status: "in_progress", subagent: subagent() }),
       ],
-      START + 3000,
+      START + 3000
     )
     expect(summary.headline).toBe("Running 1/2 subagents")
     expect(summary.running).toBe(1)
@@ -174,7 +207,7 @@ describe("summarizeSubagentGroup", () => {
         chunk({ toolCallId: "b", status: "in_progress", subagent: subagent() }),
       ],
       START + 3000,
-      false,
+      false
     )
     expect(summary.running).toBe(0)
     expect(summary.finished).toBe(0)
@@ -185,10 +218,18 @@ describe("summarizeSubagentGroup", () => {
     const done = new Date(START + 1000).toISOString()
     const summary = summarizeSubagentGroup(
       [
-        chunk({ toolCallId: "a", status: "completed", subagent: subagent({ completedAt: done }) }),
-        chunk({ toolCallId: "b", status: "error", subagent: subagent({ completedAt: done }) }),
+        chunk({
+          toolCallId: "a",
+          status: "completed",
+          subagent: subagent({ completedAt: done }),
+        }),
+        chunk({
+          toolCallId: "b",
+          status: "error",
+          subagent: subagent({ completedAt: done }),
+        }),
       ],
-      START + 50_000,
+      START + 50_000
     )
     expect(summary.headline).toBe("Ran 2 subagents")
     expect(summary.failed).toBe(1)
@@ -201,23 +242,27 @@ describe("summarizeSubagentGroup", () => {
         chunk({
           toolCallId: "a",
           status: "completed",
-          subagent: subagent({ completedAt: new Date(START + 1000).toISOString() }),
+          subagent: subagent({
+            completedAt: new Date(START + 1000).toISOString(),
+          }),
         }),
         chunk({
           toolCallId: "b",
           status: "completed",
-          subagent: subagent({ completedAt: new Date(START + 7000).toISOString() }),
+          subagent: subagent({
+            completedAt: new Date(START + 7000).toISOString(),
+          }),
         }),
       ],
-      START + 9000,
+      START + 9000
     )
     expect(summary.elapsedMs).toBe(7000)
   })
 
   it("uses the singular for a lone subagent", () => {
-    expect(summarizeSubagentGroup([chunk({ status: "completed" })], START).headline).toBe(
-      "Ran 1 subagent",
-    )
+    expect(
+      summarizeSubagentGroup([chunk({ status: "completed" })], START).headline
+    ).toBe("Ran 1 subagent")
   })
 })
 
@@ -226,7 +271,10 @@ describe("subagentSteps", () => {
 
   it("pairs each tool call with the ToolMessage that resolved it", () => {
     const steps = subagentSteps([
-      new AIMessage({ content: "", tool_calls: [call("a", "execute"), call("b", "grep")] }),
+      new AIMessage({
+        content: "",
+        tool_calls: [call("a", "execute"), call("b", "grep")],
+      }),
       new ToolMessage({ content: "ok", tool_call_id: "a" }),
     ])
     expect(steps).toEqual([
@@ -253,18 +301,24 @@ describe("subagentMessagesDone", () => {
   it("is done once the subagent answers without calling another tool", () => {
     expect(
       subagentMessagesDone([
-        new AIMessage({ content: "", tool_calls: [{ id: "a", name: "execute", args: {} }] }),
+        new AIMessage({
+          content: "",
+          tool_calls: [{ id: "a", name: "execute", args: {} }],
+        }),
         new ToolMessage({ content: "ok", tool_call_id: "a" }),
         new AIMessage({ content: "Scout done: nothing found." }),
-      ]),
+      ])
     ).toBe(true)
   })
 
   it("is not done while a tool call is still outstanding", () => {
     expect(
       subagentMessagesDone([
-        new AIMessage({ content: "", tool_calls: [{ id: "a", name: "execute", args: {} }] }),
-      ]),
+        new AIMessage({
+          content: "",
+          tool_calls: [{ id: "a", name: "execute", args: {} }],
+        }),
+      ])
     ).toBe(false)
     expect(subagentMessagesDone([])).toBe(false)
   })
@@ -276,15 +330,18 @@ describe("subagentResultFromMessages", () => {
       subagentResultFromMessages([
         new ToolMessage({ content: "ok", tool_call_id: "a" }),
         new AIMessage({ content: "Scout done: nothing found." }),
-      ]),
+      ])
     ).toBe("Scout done: nothing found.")
   })
 
   it("withholds a result while the subagent is still working", () => {
     expect(
       subagentResultFromMessages([
-        new AIMessage({ content: "", tool_calls: [{ id: "a", name: "execute", args: {} }] }),
-      ]),
+        new AIMessage({
+          content: "",
+          tool_calls: [{ id: "a", name: "execute", args: {} }],
+        }),
+      ])
     ).toBeUndefined()
   })
 })
@@ -296,8 +353,8 @@ describe("summarizeSubagentGroup with reported statuses", () => {
       chunk({ toolCallId: "b", status: "in_progress", subagent: subagent() }),
     ]
     const reported = new Map([["a", "completed" as const]])
-    expect(summarizeSubagentGroup(chunks, START + 3000, true, reported).headline).toBe(
-      "Running 1/2 subagents",
-    )
+    expect(
+      summarizeSubagentGroup(chunks, START + 3000, true, reported).headline
+    ).toBe("Running 1/2 subagents")
   })
 })

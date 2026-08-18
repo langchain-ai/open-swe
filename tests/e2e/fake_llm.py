@@ -23,8 +23,14 @@ from e2e_env import (
     REPO,
 )
 from langchain_core.callbacks import CallbackManagerForLLMRun
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.language_models import BaseChatModel, ModelProfile
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 # One shell command that does the whole git workflow. Each execute() runs in a
@@ -47,6 +53,8 @@ git commit -m "{PR_TITLE}"
 git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
 """.strip()
+
+LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
 
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
@@ -502,6 +510,11 @@ def build_script() -> list[StepSpec]:
 class FakeScriptedChatModel(BaseChatModel):
     """Returns the next scripted AIMessage based on how far the loop has run."""
 
+    model: str = "fake"
+    profile: ModelProfile | None = {
+        "tool_calling": True,
+        "max_input_tokens": 8_000,
+    }
     script: list[Any] = []
 
     @property
@@ -518,6 +531,10 @@ class FakeScriptedChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,  # noqa: ARG002
         **kwargs: Any,
     ) -> ChatResult:
+        for message in messages:
+            if isinstance(message, SystemMessage):
+                LAST_SYSTEM_PROMPT["text"] = _text(message.content)
+                break
         humans = [m for m in messages if isinstance(m, HumanMessage)]
         context = ScriptContext(
             first_text=_text(humans[0].content) if humans else "",

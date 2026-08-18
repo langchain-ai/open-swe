@@ -21,7 +21,9 @@ const UNSAFE_RANGES: ReadonlyArray<readonly [number, number]> = [
 ]
 
 function isUnsafe(codePoint: number): boolean {
-  return UNSAFE_RANGES.some(([start, end]) => codePoint >= start && codePoint <= end)
+  return UNSAFE_RANGES.some(
+    ([start, end]) => codePoint >= start && codePoint <= end
+  )
 }
 
 /**

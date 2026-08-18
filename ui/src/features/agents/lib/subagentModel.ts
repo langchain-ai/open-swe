@@ -23,10 +23,15 @@ export interface SubagentStep {
  * from the subagent's AI messages, and their outcome from the `ToolMessage`
  * carrying the matching `tool_call_id`.
  */
-export function subagentSteps(messages: ReadonlyArray<BaseMessage>): Array<SubagentStep> {
+export function subagentSteps(
+  messages: ReadonlyArray<BaseMessage>
+): Array<SubagentStep> {
   const results = new Map<string, ToolMessage>()
   for (const message of messages) {
-    if (ToolMessage.isInstance(message) && typeof message.tool_call_id === "string") {
+    if (
+      ToolMessage.isInstance(message) &&
+      typeof message.tool_call_id === "string"
+    ) {
       results.set(message.tool_call_id, message)
     }
   }
@@ -42,7 +47,11 @@ export function subagentSteps(messages: ReadonlyArray<BaseMessage>): Array<Subag
         id,
         name: call.name,
         label: sanitizeAgentText(toolTitle(call.name, call.args ?? {})),
-        status: !result ? "running" : result.status === "error" ? "error" : "completed",
+        status: !result
+          ? "running"
+          : result.status === "error"
+            ? "error"
+            : "completed",
       })
     }
   }
@@ -57,18 +66,21 @@ const RESULT_PREVIEW_CHARS = 280
  * by a run that ended (crash, step limit, reload of a dead thread). Without it
  * the card spins forever, claiming work is in flight that nothing is doing.
  */
-export type SubagentDisplayStatus = "running" | "stalled" | "completed" | "error"
+export type SubagentDisplayStatus =
+  "running" | "stalled" | "completed" | "error"
 
 export function subagentDisplayStatus(
   chunk: ToolExecutionChunk,
-  runActive = true,
+  runActive = true
 ): SubagentDisplayStatus {
   if (chunk.status === "error") return "error"
   if (chunk.status === "completed") return "completed"
   return runActive ? "running" : "stalled"
 }
 
-export function isTerminalSubagentStatus(status: SubagentDisplayStatus): boolean {
+export function isTerminalSubagentStatus(
+  status: SubagentDisplayStatus
+): boolean {
   return status !== "running"
 }
 
@@ -89,7 +101,10 @@ function parseTime(value: string | undefined): number | undefined {
  * accurate there, but too high when the card mounted after the fact. The
  * earlier of the two is the one that saw the subagent stop.
  */
-export function subagentElapsedMs(info: SubagentInfo | undefined, now: number): number | undefined {
+export function subagentElapsedMs(
+  info: SubagentInfo | undefined,
+  now: number
+): number | undefined {
   const startedAt = parseTime(info?.startedAt)
   if (startedAt === undefined) return undefined
   const completedAt = parseTime(info?.completedAt)
@@ -114,8 +129,12 @@ export function formatElapsed(ms: number): string {
 /** Subagent type for display, falling back to the generic label. */
 export function subagentLabel(chunk: ToolExecutionChunk): string {
   const fromInput =
-    typeof chunk.input?.subagent_type === "string" ? chunk.input.subagent_type.trim() : ""
-  return sanitizeAgentText(fromInput || chunk.subagent?.name?.trim() || "subagent")
+    typeof chunk.input?.subagent_type === "string"
+      ? chunk.input.subagent_type.trim()
+      : ""
+  return sanitizeAgentText(
+    fromInput || chunk.subagent?.name?.trim() || "subagent"
+  )
 }
 
 /** The task description the parent handed to the subagent. */
@@ -129,7 +148,7 @@ export function subagentDescription(chunk: ToolExecutionChunk): string {
  * one, otherwise the subagent's returned result.
  */
 export function subagentOutcome(
-  chunk: ToolExecutionChunk,
+  chunk: ToolExecutionChunk
 ): { kind: "error" | "result"; text: string } | undefined {
   const error = chunk.subagent?.error?.trim()
   if (error) return { kind: "error", text: truncate(error) }
@@ -169,7 +188,7 @@ export function summarizeSubagentGroup(
   runActive = true,
   // Statuses each card derived from its own message stream, which settles
   // per-subagent instead of all at once (see `subagentMessagesDone`).
-  reported: ReadonlyMap<string, SubagentDisplayStatus> = new Map(),
+  reported: ReadonlyMap<string, SubagentDisplayStatus> = new Map()
 ): SubagentGroupSummary {
   let running = 0
   let failed = 0
@@ -177,22 +196,25 @@ export function summarizeSubagentGroup(
   let elapsedMs: number | undefined
 
   for (const chunk of chunks) {
-    const status = reported.get(chunk.toolCallId) ?? subagentDisplayStatus(chunk, runActive)
+    const status =
+      reported.get(chunk.toolCallId) ?? subagentDisplayStatus(chunk, runActive)
     if (status === "running") running += 1
     if (status === "error") failed += 1
     if (status === "completed" || status === "error") finished += 1
     const chunkElapsed = subagentElapsedMs(chunk.subagent, now)
-    if (chunkElapsed !== undefined) elapsedMs = Math.max(elapsedMs ?? 0, chunkElapsed)
+    if (chunkElapsed !== undefined)
+      elapsedMs = Math.max(elapsedMs ?? 0, chunkElapsed)
   }
 
   const total = chunks.length
   const noun = total === 1 ? "subagent" : "subagents"
   const headline =
-    running > 0 ? `Running ${finished}/${total} ${noun}` : `Ran ${total} ${noun}`
+    running > 0
+      ? `Running ${finished}/${total} ${noun}`
+      : `Ran ${total} ${noun}`
 
   return { total, finished, running, failed, elapsedMs, headline }
 }
-
 
 /**
  * Whether a subagent's own messages show it has finished.
@@ -203,7 +225,9 @@ export function summarizeSubagentGroup(
  * duration. A subagent's own loop ends when it emits a message with no further
  * tool calls, which is both earlier and per-subagent.
  */
-export function subagentMessagesDone(messages: ReadonlyArray<BaseMessage>): boolean {
+export function subagentMessagesDone(
+  messages: ReadonlyArray<BaseMessage>
+): boolean {
   const last = messages[messages.length - 1]
   if (last == null || !AIMessage.isInstance(last)) return false
   return (last.tool_calls?.length ?? 0) === 0
@@ -217,7 +241,7 @@ export function subagentMessagesDone(messages: ReadonlyArray<BaseMessage>): bool
  * wrapped around the same text.
  */
 export function subagentResultFromMessages(
-  messages: ReadonlyArray<BaseMessage>,
+  messages: ReadonlyArray<BaseMessage>
 ): string | undefined {
   if (!subagentMessagesDone(messages)) return undefined
   const last = messages[messages.length - 1]
