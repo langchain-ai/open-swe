@@ -170,8 +170,12 @@ export function AgentsSidebar({
   const facets = availableFacets(visibleThreads)
   const filteredActive = filterThreads(activeThreads, prefs.filters)
   const filteredResolved = filterThreads(resolvedThreads, prefs.filters)
-  const sections = groupThreadsByMode(filteredActive, prefs.group)
   const showResolved = prefs.filters.includeResolved
+  const groupedThreads =
+    prefs.group === "focus" && showResolved
+      ? [...filteredActive, ...filteredResolved]
+      : filteredActive
+  const sections = groupThreadsByMode(groupedThreads, prefs.group)
   const isEmpty =
     localGroups.length === 0 &&
     sections.length === 0 &&
@@ -315,9 +319,19 @@ export function AgentsSidebar({
                     onNavigate={layout.closeOnMobile}
                     defaultCollapsed={section.defaultCollapsed}
                     compact={prefs.compact}
+                    hasMore={
+                      prefs.group === "focus" && section.key === "done"
+                        ? resolvedHasMore
+                        : false
+                    }
+                    count={
+                      prefs.group === "focus" && section.key === "done"
+                        ? filteredResolved.length
+                        : section.threads.length
+                    }
                   />
                 ))}
-            {showResolved && (
+            {showResolved && prefs.group !== "focus" && (
               <ResolvedThreadGroup
                 threads={filteredResolved}
                 hasMore={resolvedHasMore}
@@ -647,6 +661,8 @@ function ThreadGroup({
   onNavigate,
   defaultCollapsed = false,
   compact = false,
+  hasMore = false,
+  count = threads.length,
 }: {
   label: string
   threads: Array<AgentThread>
@@ -654,6 +670,8 @@ function ThreadGroup({
   onNavigate?: () => void
   defaultCollapsed?: boolean
   compact?: boolean
+  hasMore?: boolean
+  count?: number
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   if (threads.length === 0) return null
@@ -670,18 +688,25 @@ function ThreadGroup({
       >
         <ToggleIcon className="size-3" />
         <span className="min-w-0 flex-1 truncate">{label}</span>
-        <span>{threads.length}</span>
+        <span>
+          {count}
+          {hasMore ? "+" : ""}
+        </span>
       </button>
-      {!collapsed &&
-        threads.map((thread) => (
-          <ThreadRow
-            key={thread.id}
-            thread={thread}
-            isActive={thread.id === activeThreadId}
-            onNavigate={onNavigate}
-            compact={compact}
-          />
-        ))}
+      {!collapsed && (
+        <>
+          {threads.map((thread) => (
+            <ThreadRow
+              key={thread.id}
+              thread={thread}
+              isActive={thread.id === activeThreadId}
+              onNavigate={onNavigate}
+              compact={compact}
+            />
+          ))}
+          {hasMore && <ShowAllResolvedLink onNavigate={onNavigate} />}
+        </>
+      )}
     </div>
   )
 }
@@ -731,24 +756,28 @@ function ResolvedThreadGroup({
               compact={compact}
             />
           ))}
-          {hasMore && (
-            <Link
-              to="/agents/threads"
-              search={{
-                resolved: true,
-                page: 1,
-                layout: "board",
-                group: "focus",
-              }}
-              onClick={onNavigate}
-              className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-            >
-              Show all
-            </Link>
-          )}
+          {hasMore && <ShowAllResolvedLink onNavigate={onNavigate} />}
         </>
       )}
     </div>
+  )
+}
+
+function ShowAllResolvedLink({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <Link
+      to="/agents/threads"
+      search={{
+        resolved: true,
+        page: 1,
+        layout: "board",
+        group: "focus",
+      }}
+      onClick={onNavigate}
+      className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+    >
+      Show all
+    </Link>
   )
 }
 
