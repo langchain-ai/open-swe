@@ -1,3 +1,5 @@
+import { proxyRequest } from "h3"
+
 // Read per request, not at build time: which backend an instance fronts is a
 // property of the deployment, so it lives in the pod's environment.
 function backendOrigin(): string {
@@ -11,36 +13,14 @@ function backendOrigin(): string {
   return configured
 }
 
-export default async function backendProxy(event: {
-  req: Request
-}): Promise<Response> {
+export default async function backendProxy(
+  event: Parameters<typeof proxyRequest>[0]
+) {
   const url = new URL(event.req.url)
 
   // `redirect: "manual"` keeps the OAuth 3xx hops intact — following them here
-  // would leave the browser's address bar where it started. The body is passed
-  // through as a stream, which is what keeps webhook signatures verifiable.
-  const upstream = await fetch(
-    `${backendOrigin()}${url.pathname}${url.search}`,
-    {
-      method: event.req.method,
-      headers: event.req.headers,
-      body: event.req.body,
-      redirect: "manual",
-      // @ts-expect-error -- required by undici to stream a request body
-      duplex: "half",
-    }
-  )
-
-  // undici decompresses the body but leaves the upstream framing headers on it,
-  // so forwarding them makes the browser decode an already-decoded body.
-  const headers = new Headers(upstream.headers)
-  headers.delete("content-encoding")
-  headers.delete("content-length")
-  headers.delete("transfer-encoding")
-
-  return new Response(upstream.body, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers,
+  // would leave the browser's address bar where it started.
+  return proxyRequest(event, `${backendOrigin()}${url.pathname}${url.search}`, {
+    fetchOptions: { redirect: "manual" },
   })
 }
