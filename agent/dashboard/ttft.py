@@ -2,13 +2,18 @@
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-STARTED_AT_MS_KEY = "dashboard_ttft_started_at_ms"
-RECORDED_RUN_ID_KEY = "dashboard_ttft_recorded_run_id"
 _DASHBOARD_THREAD_TTFT: Any | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AssistantTextObservation:
+    run_id: str
+    event_timestamp_ms: int
 
 
 class AssistantTextEventDetector:
@@ -17,19 +22,24 @@ class AssistantTextEventDetector:
     def __init__(self) -> None:
         self._buffer = bytearray()
         self._run_id: str | None = None
+        self._terminated_run_ids: set[str] = set()
         self._ai_namespaces: set[tuple[str, ...]] = set()
         self._observed_namespaces: set[tuple[str, ...]] = set()
 
-    def feed(self, chunk: bytes) -> list[str]:
+    @property
+    def run_terminated(self) -> frozenset[str]:
+        return frozenset(self._terminated_run_ids)
+
+    def feed(self, chunk: bytes) -> list[AssistantTextObservation]:
         self._buffer.extend(chunk)
-        observations: list[str] = []
+        observations: list[AssistantTextObservation] = []
         while True:
             frame = self._pop_frame()
             if frame is None:
                 return observations
             payload = self._payload(frame)
-            if payload is not None and (run_id := self._observe(payload)) is not None:
-                observations.append(run_id)
+            if payload is not None and (observation := self._observe(payload)) is not None:
+                observations.append(observation)
 
     def _pop_frame(self) -> bytes | None:
         separators = ((self._buffer.find(b"\r\n\r\n"), 4), (self._buffer.find(b"\n\n"), 2))
@@ -55,7 +65,7 @@ class AssistantTextEventDetector:
             return None
         return payload if isinstance(payload, dict) else None
 
-    def _observe(self, payload: dict[str, Any]) -> str | None:
+    def _observe(self, payload: dict[str, Any]) -> AssistantTextObservation | None:
         params = payload.get("params")
         if not isinstance(params, dict):
             return None
@@ -96,18 +106,29 @@ class AssistantTextEventDetector:
             or self._run_id is None
         ):
             return None
+        timestamp = params.get("timestamp")
+        if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
+            return None
         self._observed_namespaces.add(namespace)
-        return self._run_id
+        return AssistantTextObservation(
+            run_id=self._run_id,
+            event_timestamp_ms=int(timestamp),
+        )
 
     def _observe_lifecycle(self, payload: dict[str, Any], data: dict[str, Any]) -> None:
         event_id = payload.get("event_id")
-        if data.get("event") != "running" or not isinstance(event_id, str):
+        if not isinstance(event_id, str):
             return
         parts = event_id.split(":", 2)
-        if len(parts) == 3 and parts[0] == "synth" and parts[1]:
+        if len(parts) != 3 or parts[0] != "synth" or not parts[1]:
+            return
+        event = data.get("event")
+        if event == "running":
             self._run_id = parts[1]
             self._ai_namespaces.clear()
             self._observed_namespaces.clear()
+        elif event in {"completed", "failed", "interrupted"}:
+            self._terminated_run_ids.add(parts[1])
 
 
 def _record_ttft_histogram(duration_seconds: float) -> None:
@@ -127,19 +148,23 @@ def _record_ttft_histogram(duration_seconds: float) -> None:
     )
 
 
-def record_dashboard_thread_ttft(
-    duration_seconds: float,
+async def record_dashboard_thread_ttft(
+    observation: AssistantTextObservation,
     *,
     thread_id: str,
-    run_id: str | None,
+    started_at_ms: int,
 ) -> None:
     try:
+        if observation.event_timestamp_ms < started_at_ms:
+            return
+        duration_seconds = (observation.event_timestamp_ms - started_at_ms) / 1000
         _record_ttft_histogram(duration_seconds)
     except Exception:
         logger.warning("Failed to record dashboard thread TTFT histogram", exc_info=True)
+        return
     logger.info(
         "Dashboard thread TTFT %.1f ms (thread=%s, run=%s)",
         duration_seconds * 1000,
         thread_id,
-        run_id or "unknown",
+        observation.run_id,
     )

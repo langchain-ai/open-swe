@@ -15,7 +15,7 @@ def _event(
         "type": "event",
         "event_id": event_id,
         "method": method,
-        "params": {"namespace": namespace, "data": data},
+        "params": {"namespace": namespace, "timestamp": 2_250, "data": data},
     }
     return f"event: {method}\r\ndata: {json.dumps(payload)}\r\n\r\n".encode()
 
@@ -56,7 +56,9 @@ def test_detector_handles_fragmented_ai_text_events() -> None:
 
     assert detector.feed(lifecycle + start[:12]) == []
     assert detector.feed(start[12:] + empty + text[:20]) == []
-    assert detector.feed(text[20:]) == ["run-1"]
+    assert detector.feed(text[20:]) == [
+        ttft.AssistantTextObservation(run_id="run-1", event_timestamp_ms=2_250)
+    ]
     assert detector.feed(text) == []
 
 
@@ -72,22 +74,31 @@ def test_detector_ignores_non_ai_and_correlates_later_runs() -> None:
     assert detector.feed(_message({"event": "message-start", "role": "human"})) == []
     assert detector.feed(_message(text_delta)) == []
     assert detector.feed(_message({"event": "message-start", "role": "ai"})) == []
-    assert detector.feed(_message(text_delta)) == ["run-1"]
+    assert detector.feed(_message(text_delta)) == [
+        ttft.AssistantTextObservation(run_id="run-1", event_timestamp_ms=2_250)
+    ]
     assert detector.feed(_message({"event": "message-finish"})) == []
     assert detector.feed(_lifecycle("run-2")) == []
     assert detector.feed(_message({"event": "message-start", "role": "ai"})) == []
-    assert detector.feed(_message(text_delta)) == ["run-2"]
+    assert detector.feed(_message(text_delta, "2-0")) == [
+        ttft.AssistantTextObservation(run_id="run-2", event_timestamp_ms=2_250)
+    ]
 
 
-def test_record_dashboard_thread_ttft_emits_histogram_and_info_log(
+async def test_record_dashboard_thread_ttft_emits_histogram_and_log(
     monkeypatch,
     caplog,
 ) -> None:
+    observation = ttft.AssistantTextObservation(run_id="run-1", event_timestamp_ms=2_250)
     histogram_values: list[float] = []
     monkeypatch.setattr(ttft, "_record_ttft_histogram", histogram_values.append)
 
     with caplog.at_level(logging.INFO, logger=ttft.__name__):
-        ttft.record_dashboard_thread_ttft(1.25, thread_id="thread-1", run_id="run-1")
+        await ttft.record_dashboard_thread_ttft(
+            observation,
+            thread_id="thread-1",
+            started_at_ms=1_000,
+        )
 
     assert histogram_values == [1.25]
     assert "Dashboard thread TTFT 1250.0 ms (thread=thread-1, run=run-1)" in caplog.text

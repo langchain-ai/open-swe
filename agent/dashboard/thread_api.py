@@ -51,16 +51,12 @@ from .options import (
 from .pr_diff import build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
 from .team_settings import get_team_default_model, get_team_fable_enabled
-from .ttft import (
-    RECORDED_RUN_ID_KEY,
-    STARTED_AT_MS_KEY,
-    AssistantTextEventDetector,
-    record_dashboard_thread_ttft,
-)
+from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from .user_mappings import email_for_login
 
 logger = logging.getLogger(__name__)
 
+_TTFT_OBSERVER_TASKS: set[asyncio.Task[None]] = set()
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 # Modes required for the v2 event-stream protocol (`POST …/stream/events`).
@@ -2180,94 +2176,16 @@ async def proxy_dashboard_thread_stream_events(
     # surface as real HTTP errors before the SSE response starts streaming.
     _require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
-    return _stream_thread_events(thread_id, body, content_type, track_dashboard_ttft=True)
-
-
-_TTFT_RECORDINGS_IN_PROGRESS: set[tuple[str, str]] = set()
-
-
-async def _record_dashboard_thread_ttft(
-    thread_id: str,
-    run_id: str,
-    observed_at_ms: int,
-) -> None:
-    key = (thread_id, run_id)
-    if key in _TTFT_RECORDINGS_IN_PROGRESS:
-        return
-    _TTFT_RECORDINGS_IN_PROGRESS.add(key)
-    try:
-        await _record_dashboard_thread_ttft_once(thread_id, run_id, observed_at_ms)
-    finally:
-        _TTFT_RECORDINGS_IN_PROGRESS.discard(key)
-
-
-async def _record_dashboard_thread_ttft_once(
-    thread_id: str,
-    run_id: str,
-    observed_at_ms: int,
-) -> None:
-    client = langgraph_client()
-    metadata: dict[str, Any] = {}
-    started_at_ms: float | None = None
-    for attempt in range(20):
-        try:
-            metadata = thread_metadata(await client.threads.get(thread_id))
-        except Exception:
-            if attempt == 19:
-                logger.warning(
-                    "Failed to load TTFT metadata for thread %s", thread_id, exc_info=True
-                )
-                return
-            await asyncio.sleep(0.05)
-            continue
-        started_at_ms_value = metadata.get(STARTED_AT_MS_KEY)
-        if isinstance(started_at_ms_value, bool) or not isinstance(
-            started_at_ms_value, (int, float)
-        ):
-            candidate_started_at_ms = None
-        else:
-            candidate_started_at_ms = float(started_at_ms_value)
-        if (
-            candidate_started_at_ms is not None
-            and candidate_started_at_ms <= observed_at_ms
-            and metadata.get("latest_run_id") == run_id
-            and metadata.get(RECORDED_RUN_ID_KEY) != run_id
-        ):
-            started_at_ms = candidate_started_at_ms
-            break
-        if metadata.get(RECORDED_RUN_ID_KEY) == run_id or attempt == 19:
-            return
-        await asyncio.sleep(0.05)
-
-    if started_at_ms is None:
-        return
-    duration_seconds = (observed_at_ms - started_at_ms) / 1000
-    try:
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={RECORDED_RUN_ID_KEY: run_id},
-        )
-    except Exception:
-        logger.warning("Failed to mark TTFT recorded for thread %s", thread_id, exc_info=True)
-        return
-    record_dashboard_thread_ttft(
-        duration_seconds,
-        thread_id=thread_id,
-        run_id=run_id,
-    )
+    return _stream_thread_events(thread_id, body, content_type)
 
 
 async def _stream_thread_events(
     thread_id: str,
     body: bytes,
     content_type: str,
-    *,
-    track_dashboard_ttft: bool = False,
 ) -> AsyncIterator[bytes]:
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/stream/events"
     headers = _langgraph_proxy_headers(content_type=content_type, accept="text/event-stream")
-    detector = AssistantTextEventDetector() if track_dashboard_ttft else None
-    ttft_tasks: set[asyncio.Task[None]] = set()
 
     try:
         async with httpx.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
@@ -2281,20 +2199,46 @@ async def _stream_thread_events(
                     yield f"event: error\ndata: {json.dumps(payload)}\n\n".encode()
                     return
                 async for chunk in response.aiter_bytes():
-                    if detector is not None:
-                        observed_run_ids = detector.feed(chunk)
-                        observed_at_ms = _now_ms()
-                        for run_id in observed_run_ids:
-                            task = asyncio.create_task(
-                                _record_dashboard_thread_ttft(thread_id, run_id, observed_at_ms)
-                            )
-                            ttft_tasks.add(task)
                     yield chunk
     except Exception:
         logger.warning("LangGraph stream/events proxy closed for %s", thread_id, exc_info=True)
-    finally:
-        if ttft_tasks:
-            await asyncio.gather(*ttft_tasks, return_exceptions=True)
+
+
+async def _observe_dashboard_run_ttft(
+    thread_id: str,
+    run_id: str,
+    started_at_ms: int,
+) -> None:
+    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/stream/events"
+    headers = _langgraph_proxy_headers(
+        content_type="application/json",
+        accept="text/event-stream",
+    )
+    body = json.dumps({"channels": ["lifecycle", "messages"]}).encode()
+    detector = AssistantTextEventDetector()
+    try:
+        async with httpx.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
+            async with client.stream("POST", url, content=body, headers=headers) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
+                    for observation in detector.feed(chunk):
+                        if observation.run_id != run_id:
+                            continue
+                        await record_dashboard_thread_ttft(
+                            observation,
+                            thread_id=thread_id,
+                            started_at_ms=started_at_ms,
+                        )
+                        return
+                    if run_id in detector.run_terminated:
+                        return
+    except Exception:
+        logger.warning(
+            "Dashboard TTFT observer closed for run %s on thread %s",
+            run_id,
+            thread_id,
+            exc_info=True,
+        )
 
 
 async def proxy_dashboard_thread_commands(
@@ -2359,21 +2303,14 @@ async def proxy_dashboard_thread_commands(
     outgoing = json.dumps(enriched).encode()
 
     if method == "run.start":
-        try:
-            await langgraph_client().threads.update(
-                thread_id=thread_id,
-                metadata={
-                    STARTED_AT_MS_KEY: received_at_ms,
-                    RECORDED_RUN_ID_KEY: None,
-                    "latest_run_id": None,
-                },
-            )
-        except Exception:
-            logger.warning(
-                "Failed to persist dashboard TTFT start for thread %s",
-                thread_id,
-                exc_info=True,
-            )
+        params = enriched.get("params")
+        if isinstance(params, dict):
+            run_metadata = params.get("metadata")
+            if not isinstance(run_metadata, dict):
+                run_metadata = {}
+                params["metadata"] = run_metadata
+            run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
+            outgoing = json.dumps(enriched).encode()
 
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=outgoing, headers=headers)
@@ -2398,7 +2335,16 @@ async def proxy_dashboard_thread_commands(
                 "Failed to update Slack message for dashboard handoff on %s", thread_id
             )
 
-    if run_start_succeeded:
+    if run_start_succeeded and run_id is not None:
+        task = asyncio.create_task(
+            _observe_dashboard_run_ttft(
+                thread_id,
+                run_id,
+                received_at_ms,
+            )
+        )
+        _TTFT_OBSERVER_TASKS.add(task)
+        task.add_done_callback(_TTFT_OBSERVER_TASKS.discard)
         try:
             await langgraph_client().threads.update(
                 thread_id=thread_id,
@@ -2415,23 +2361,6 @@ async def proxy_dashboard_thread_commands(
                 thread_id,
                 exc_info=True,
             )
-    elif method == "run.start":
-        try:
-            await langgraph_client().threads.update(
-                thread_id=thread_id,
-                metadata={
-                    STARTED_AT_MS_KEY: metadata.get(STARTED_AT_MS_KEY),
-                    RECORDED_RUN_ID_KEY: metadata.get(RECORDED_RUN_ID_KEY),
-                    "latest_run_id": metadata.get("latest_run_id"),
-                },
-            )
-        except Exception:
-            logger.warning(
-                "Failed to restore dashboard TTFT metadata for thread %s",
-                thread_id,
-                exc_info=True,
-            )
-
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 

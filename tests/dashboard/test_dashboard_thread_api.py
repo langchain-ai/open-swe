@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from agent.dashboard import routes, thread_api
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
+from agent.dashboard.ttft import AssistantTextObservation
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
@@ -917,13 +918,10 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
         "message_ts": "123.46",
         "thread_id": "tid",
     }
+    outgoing_params = outgoing["params"]
+    assert outgoing_params["metadata"]["dashboard_ttft_started_at_ms"] == 123_456
     updates = captured["updates"]
     assert isinstance(updates, list)
-    assert updates[-2] == {
-        thread_api.STARTED_AT_MS_KEY: 123_456,
-        thread_api.RECORDED_RUN_ID_KEY: None,
-        "latest_run_id": None,
-    }
     assert updates[-1] == {
         "latest_run_id": "run-1",
         "latest_run_status": "pending",
@@ -931,42 +929,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     }
 
 
-async def test_record_dashboard_thread_ttft_uses_shared_metadata_once(monkeypatch) -> None:
-    stored_metadata: dict[str, object] = {
-        thread_api.STARTED_AT_MS_KEY: 1_000,
-        thread_api.RECORDED_RUN_ID_KEY: None,
-        "latest_run_id": "run-1",
-    }
-    recordings: list[tuple[float, str, str | None]] = []
-
-    class FakeThreads:
-        async def get(self, thread_id: str) -> dict[str, object]:
-            assert thread_id == "thread-1"
-            return {"thread_id": thread_id, "metadata": dict(stored_metadata)}
-
-        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
-            assert thread_id == "thread-1"
-            stored_metadata.update(metadata)
-
-    class FakeClient:
-        threads = FakeThreads()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr(thread_api.asyncio, "sleep", AsyncMock())
-    monkeypatch.setattr(
-        thread_api,
-        "record_dashboard_thread_ttft",
-        lambda duration, *, thread_id, run_id: recordings.append((duration, thread_id, run_id)),
-    )
-
-    await thread_api._record_dashboard_thread_ttft("thread-1", "run-1", 2_250)
-    await thread_api._record_dashboard_thread_ttft("thread-1", "run-1", 2_500)
-
-    assert recordings == [(1.25, "thread-1", "run-1")]
-    assert stored_metadata[thread_api.RECORDED_RUN_ID_KEY] == "run-1"
-
-
-async def test_stream_proxy_records_first_assistant_text_without_changing_chunks(
+async def test_run_ttft_observer_records_first_assistant_text(
     monkeypatch,
 ) -> None:
     def event(
@@ -980,7 +943,7 @@ async def test_stream_proxy_records_first_assistant_text_without_changing_chunks
             "type": "event",
             "event_id": event_id,
             "method": method,
-            "params": {"namespace": namespace, "data": data},
+            "params": {"namespace": namespace, "timestamp": 2_250, "data": data},
         }
         return f"event: {method}\r\ndata: {json.dumps(payload)}\r\n\r\n".encode()
 
@@ -1012,6 +975,9 @@ async def test_stream_proxy_records_first_assistant_text_without_changing_chunks
     class FakeResponse:
         status_code = 200
 
+        def raise_for_status(self) -> None:
+            pass
+
         async def aiter_bytes(self):
             for chunk in chunks:
                 yield chunk
@@ -1038,18 +1004,15 @@ async def test_stream_proxy_records_first_assistant_text_without_changing_chunks
 
     record = AsyncMock()
     monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
-    monkeypatch.setattr(thread_api, "_record_dashboard_thread_ttft", record)
-    monkeypatch.setattr(thread_api, "_now_ms", lambda: 2_250)
+    monkeypatch.setattr(thread_api, "record_dashboard_thread_ttft", record)
 
-    result = [
-        chunk
-        async for chunk in thread_api._stream_thread_events(
-            "thread-1", b"{}", "application/json", track_dashboard_ttft=True
-        )
-    ]
+    await thread_api._observe_dashboard_run_ttft("thread-1", "run-1", 1_000)
 
-    assert result == chunks
-    record.assert_awaited_once_with("thread-1", "run-1", 2_250)
+    record.assert_awaited_once_with(
+        AssistantTextObservation(run_id="run-1", event_timestamp_ms=2_250),
+        thread_id="thread-1",
+        started_at_ms=1_000,
+    )
 
 
 async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:
