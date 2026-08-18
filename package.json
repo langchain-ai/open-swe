@@ -12,6 +12,7 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "test:e2e": "npm --prefix tests/e2e run test",
+    "test:e2e:desktop": "npm --prefix tests/e2e run test:desktop",
     "test:e2e:install": "npm --prefix tests/e2e ci && npm --prefix tests/e2e exec -- playwright install --with-deps chromium",
     "typecheck": "turbo run typecheck"
   },

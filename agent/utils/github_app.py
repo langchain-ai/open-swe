@@ -1,7 +1,5 @@
 """GitHub App installation token generation."""
 
-from __future__ import annotations
-
 import logging
 import os
 import time
@@ -33,6 +31,7 @@ ScopeKey = tuple[str, tuple[int, ...], tuple[str, ...], PermissionKey]
 
 # scope key -> (token, expires_at, good_until). In-process only; never persisted.
 _TOKEN_CACHE: dict[ScopeKey, tuple[str, str | None, datetime]] = {}
+_APP_SLUG: str | None = None
 
 
 def normalize_permissions(permissions: PermissionMap | None) -> PermissionKey:
@@ -83,7 +82,9 @@ def _cached_token(key: ScopeKey, *, now: datetime) -> tuple[str, str | None] | N
 
 def clear_app_token_cache() -> None:
     """Drop all cached installation tokens (test/maintenance hook)."""
+    global _APP_SLUG
     _TOKEN_CACHE.clear()
+    _APP_SLUG = None
 
 
 def _generate_app_jwt() -> str:
@@ -96,6 +97,34 @@ def _generate_app_jwt() -> str:
     }
     private_key = GITHUB_APP_PRIVATE_KEY.replace("\\n", "\n")
     return jwt.encode(payload, private_key, algorithm="RS256")
+
+
+async def get_github_app_slug() -> str | None:
+    """Return the configured GitHub App slug, failing closed on lookup errors."""
+    global _APP_SLUG
+    if _APP_SLUG:
+        return _APP_SLUG
+    if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+            response = await client.get(
+                "https://api.github.com/app",
+                headers={
+                    "Authorization": f"Bearer {_generate_app_jwt()}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+        response.raise_for_status()
+        data = response.json()
+        slug = data.get("slug") if isinstance(data, dict) else None
+        if isinstance(slug, str) and slug:
+            _APP_SLUG = slug
+            return slug
+    except Exception:
+        logger.warning("Failed to resolve GitHub App slug", exc_info=True)
+    return None
 
 
 async def get_github_app_installation_id_for_org(org: str) -> int | None:

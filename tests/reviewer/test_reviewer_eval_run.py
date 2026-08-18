@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 from unittest.mock import patch
 
@@ -149,7 +147,7 @@ def test_resolve_config_prefers_cli_then_env_then_toml() -> None:
         patch.dict(
             os.environ,
             {
-                "REVIEWER_EVAL_MODEL_ID": "google_genai:gemini-3.6-flash",
+                "REVIEWER_EVAL_MODEL_ID": "google_genai:gemini-3.7-flash",
                 "REVIEWER_EVAL_REASONING_EFFORT": "medium",
                 "LANGSMITH_PROJECT": "project-env",
             },

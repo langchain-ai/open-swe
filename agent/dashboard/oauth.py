@@ -1,7 +1,5 @@
 """GitHub App OAuth code-exchange and signed-JWT session cookie."""
 
-from __future__ import annotations
-
 import base64
 import hashlib
 import hmac
@@ -32,7 +30,44 @@ _DESKTOP_APP_ORIGIN = "open-swe://app"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 STATE_TTL_SECONDS = 600
 HANDOFF_TTL_SECONDS = 120
+TERMINAL_TICKET_TTL_SECONDS = 60
+TERMINAL_TICKET_AUDIENCE = "open-swe-cloud-terminal"
 JWT_ALG = "HS256"
+
+
+def issue_terminal_ticket(*, login: str, email: str | None, thread_id: str) -> str:
+    now = int(time.time())
+    payload = {
+        "aud": TERMINAL_TICKET_AUDIENCE,
+        "sub": login,
+        "email": email,
+        "thread_id": thread_id,
+        "iat": now,
+        "exp": now + TERMINAL_TICKET_TTL_SECONDS,
+    }
+    return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+
+
+def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
+    try:
+        payload = jwt.decode(
+            token,
+            _secret(),
+            algorithms=[JWT_ALG],
+            audience=TERMINAL_TICKET_AUDIENCE,
+            options={"require": ["aud", "sub", "thread_id", "iat", "exp"]},
+        )
+    except jwt.PyJWTError as exc:
+        raise HTTPException(401, "invalid terminal ticket") from exc
+    login = payload.get("sub")
+    ticket_thread_id = payload.get("thread_id")
+    if not isinstance(login, str) or not login or not isinstance(ticket_thread_id, str):
+        raise HTTPException(401, "invalid terminal ticket")
+    if not hmac.compare_digest(ticket_thread_id, thread_id):
+        raise HTTPException(401, "invalid terminal ticket")
+    email = payload.get("email")
+    return {"sub": login, "email": email if isinstance(email, str) else None}
+
 
 GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "")
 GITHUB_APP_CLIENT_SECRET = os.environ.get("GITHUB_APP_CLIENT_SECRET", "")

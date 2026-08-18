@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import cast
 
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol

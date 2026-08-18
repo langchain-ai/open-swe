@@ -1,7 +1,5 @@
 """Unit tests for GitHub CI read helpers used by the auto-fix flow."""
 
-from __future__ import annotations
-
 from typing import Any
 
 import httpx
@@ -31,7 +29,7 @@ class _FakeClient:
     def __init__(self, **kwargs: Any) -> None:
         pass
 
-    async def __aenter__(self) -> _FakeClient:
+    async def __aenter__(self) -> "_FakeClient":
         return self
 
     async def __aexit__(self, *_: object) -> None:

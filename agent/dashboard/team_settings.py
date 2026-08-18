@@ -5,8 +5,6 @@ configuration in one place. Per-repo style prompts live in
 :mod:`agent.dashboard.review_styles`.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 import re
@@ -58,6 +56,8 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
     review_draft_prs: bool = False
     pr_summaries: bool = True
     review_trace_links: bool = True
+    auto_approve_enabled: bool = False
+    auto_approve_default_threshold: int = 90
     # Tri-state LLM Gateway toggle: True/False is authoritative, None inherits the
     # LANGSMITH_GATEWAY_ENABLED deployment default.
     gateway_enabled: bool | None = None
@@ -80,6 +80,13 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
     default_chat_reasoning_effort: str | None = None
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
+
+    @field_validator("auto_approve_default_threshold", mode="before")
+    @classmethod
+    def _validate_auto_approve_default_threshold(cls, v: object) -> int:
+        if type(v) is not int or not 0 <= v <= 100:
+            raise ValueError("auto_approve_default_threshold must be an integer between 0 and 100")
+        return v
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -115,7 +122,7 @@ class TeamSettingsUpdate(TranscriptionSettingsUpdate):
         return text
 
     @model_validator(mode="after")
-    def _validate_model_pairs(self) -> TeamSettingsUpdate:
+    def _validate_model_pairs(self) -> "TeamSettingsUpdate":
         self.default_agent_model, self.default_agent_reasoning_effort = _normalize_stale_model_pair(
             self.default_agent_model,
             self.default_agent_reasoning_effort,
@@ -279,6 +286,8 @@ def _default_settings() -> dict[str, Any]:
         "review_draft_prs": False,
         "pr_summaries": True,
         "review_trace_links": True,
+        "auto_approve_enabled": False,
+        "auto_approve_default_threshold": 90,
         "gateway_enabled": None,
         "transcription_model": DEFAULT_TRANSCRIPTION_MODEL,
         "fable_enabled": False,
@@ -338,6 +347,8 @@ async def upsert_team_settings(update: TeamSettingsUpdate) -> dict[str, Any]:
         "review_draft_prs": update.review_draft_prs,
         "pr_summaries": update.pr_summaries,
         "review_trace_links": update.review_trace_links,
+        "auto_approve_enabled": update.auto_approve_enabled,
+        "auto_approve_default_threshold": update.auto_approve_default_threshold,
         "gateway_enabled": update.gateway_enabled,
         "transcription_model": update.transcription_model,
         "fable_enabled": update.fable_enabled,

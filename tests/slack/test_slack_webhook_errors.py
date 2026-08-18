@@ -34,7 +34,7 @@ async def test_slack_processing_error_posts_dashboard_link(
 
     monkeypatch.setattr(slack_webhook, "_process_slack_mention_impl", fail_processing)
     monkeypatch.setattr(
-        slack_webhook.common, "generate_thread_id_from_slack_thread", lambda *_: "t1"
+        slack_webhook.common, "lookup_slack_thread_id", AsyncMock(return_value="t1")
     )
     monkeypatch.setattr(
         slack_webhook.common, "strip_bot_mention", lambda text, *_args, **_kwargs: text
@@ -266,12 +266,6 @@ class _FakeStatusClient:
 
 
 @pytest.mark.asyncio
-async def test_slack_thread_is_busy_reflects_status() -> None:
-    assert await slack_webhook._slack_thread_is_busy(_FakeStatusClient("busy"), "t1") is True
-    assert await slack_webhook._slack_thread_is_busy(_FakeStatusClient("idle"), "t1") is False
-
-
-@pytest.mark.asyncio
 async def test_dispatch_or_queue_dispatches_when_idle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -283,7 +277,6 @@ async def test_dispatch_or_queue_dispatches_when_idle(
     monkeypatch.setattr(slack_webhook.common, "_thread_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(slack_webhook.common, "upsert_agent_thread_owner_metadata", AsyncMock())
     monkeypatch.setattr(slack_webhook.common, "get_client", lambda *, url: _FakeClient())
-    monkeypatch.setattr(slack_webhook, "_slack_thread_is_busy", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_webhook.common, "dispatch_agent_run", dispatch)
     monkeypatch.setattr(slack_webhook.common, "queue_message_for_thread", queue)
 
@@ -329,7 +322,7 @@ async def test_dispatch_or_queue_dispatches_on_first_mention_without_status_chec
 
 
 @pytest.mark.asyncio
-async def test_dispatch_or_queue_coalesces_untagged_follow_up_when_busy(
+async def test_dispatch_or_queue_dispatches_untagged_follow_up_when_busy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
@@ -347,10 +340,9 @@ async def test_dispatch_or_queue_coalesces_untagged_follow_up_when_busy(
         explicitly_tagged=False,
     )
 
-    # Untagged + busy → parked on the queue for the active run to drain.
-    assert run is None
-    dispatch.assert_not_awaited()
-    queue.assert_awaited_once_with("t1", blocks)
+    assert run == {"run_id": "run-1"}
+    dispatch.assert_awaited_once()
+    queue.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -6,8 +6,6 @@ record so a settings read never surfaces a secret. They feed the server-side
 Datadog MCP tools and LangSmith read tools — the sandbox never sees these keys.
 """
 
-from __future__ import annotations
-
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime

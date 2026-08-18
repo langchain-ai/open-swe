@@ -10,8 +10,6 @@ and sign in. Endpoints other than /auth/* and /me need a real backend and will
 error; login is what this harness covers.
 """
 
-from __future__ import annotations
-
 import os
 from html import escape
 from typing import Any

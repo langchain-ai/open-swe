@@ -6,8 +6,6 @@ yet — git can only describe edits that already landed (see
 ``utils/turn_checkpoint.py`` for the post-hoc side).
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Any
 

@@ -5,8 +5,6 @@ dismissed (false positive / 👎), so the analyzer can promote the bug patterns
 this team actually fixes and add the noisy ones to a skip-list.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from langgraph.config import get_config

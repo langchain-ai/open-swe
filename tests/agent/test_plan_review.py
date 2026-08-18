@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any, cast
 
 import pytest
@@ -410,7 +408,7 @@ class _FakeReq:
         self.tools = tools
         self.state = state
 
-    def override(self, **kw: Any) -> _FakeReq:
+    def override(self, **kw: Any) -> "_FakeReq":
         return _FakeReq(kw.get("tools", self.tools), self.state)
 
 
@@ -755,8 +753,15 @@ async def test_approve_plan_posts_slack_approval_notice(
         text: str,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> bool:
-        posted.update(channel_id=channel_id, thread_ts=thread_ts, text=text, blocks=blocks)
+        posted.update(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            text=text,
+            blocks=blocks,
+            **kwargs,
+        )
         return True
 
     async def fake_dispatch(
@@ -793,6 +798,7 @@ async def test_approve_plan_posts_slack_approval_notice(
                 ],
             }
         ],
+        "agent_thread_id": "t1",
     }
     assert dispatched["plan_mode"] is False
 

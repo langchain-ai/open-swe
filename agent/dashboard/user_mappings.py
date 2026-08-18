@@ -21,8 +21,6 @@ call sites degrade to "unmapped" (the same conservative behavior as a missing
 dict entry).
 """
 
-from __future__ import annotations
-
 import logging
 import threading
 from datetime import UTC, datetime

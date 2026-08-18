@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -17,10 +15,10 @@ from agent.dashboard.team_settings import (
         ({}, (DEFAULT_THREAD_TITLE_MODEL, DEFAULT_THREAD_TITLE_REASONING_EFFORT)),
         (
             {
-                "default_thread_title_model": "google_genai:gemini-3.6-flash",
+                "default_thread_title_model": "google_genai:gemini-3.7-flash",
                 "default_thread_title_reasoning_effort": "minimal",
             },
-            ("google_genai:gemini-3.6-flash", "minimal"),
+            ("google_genai:gemini-3.7-flash", "minimal"),
         ),
     ],
 )

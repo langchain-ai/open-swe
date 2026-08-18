@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import contextvars
 from typing import Any, cast
@@ -58,12 +56,12 @@ class _Threads:
     [
         (
             {
-                "source": "dashboard",
+                "source": "slack",
                 "title": "please review title generation",
                 "title_seed": "please review title generation",
             },
             {
-                "source": "dashboard",
+                "source": "slack",
                 "title": "Review thread title generation",
                 "title_seed": None,
             },

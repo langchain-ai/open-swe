@@ -1,8 +1,9 @@
 from typing import Any
 
 from langgraph.config import get_config
+from langgraph_sdk import get_client
 
-from ..utils.slack import add_slack_reaction
+from ..utils.slack import LANGGRAPH_URL, add_slack_reaction, get_active_slack_thread
 
 
 async def slack_add_reaction(
@@ -12,21 +13,27 @@ async def slack_add_reaction(
     """Add a context-appropriate reaction to a Slack message in the current thread.
 
     Prefer `saluting_face` for taking ownership, `eyes` for active review,
-    `thinking_face` for investigation, `white_check_mark` for handled work, and
-    `tada` for genuine wins. Never use `white_check_mark` on a root-level Slack post
-    containing a pull request link; use a neutral reaction instead. If `message_ts`
-    is omitted, this reacts to the latest message that triggered the run. Pass
-    emoji names without surrounding colons.
+    `thinking_face` for investigation, and `tada` for genuine wins. Never use
+    `white_check_mark`, because teams use it to indicate that a pull request is approved.
+    If `message_ts` is omitted, this reacts to the latest message that triggered the run.
+    Pass emoji names without surrounding colons.
     """
     config = get_config()
     configurable = config.get("configurable", {})
     slack_thread = configurable.get("slack_thread", {})
+    thread_id = configurable.get("thread_id")
+    active = await get_active_slack_thread(
+        get_client(url=LANGGRAPH_URL),
+        thread_id if isinstance(thread_id, str) else None,
+        slack_thread if isinstance(slack_thread, dict) else None,
+    )
+    active = active or {}
 
-    channel_id = slack_thread.get("channel_id")
+    channel_id = active.get("channel_id")
     if not channel_id:
         return {"success": False, "error": "Missing slack_thread.channel_id in config"}
 
-    target_ts = (message_ts or slack_thread.get("triggering_event_ts") or "").strip()
+    target_ts = (message_ts or active.get("triggering_event_ts") or "").strip()
     if not target_ts:
         return {
             "success": False,
@@ -36,6 +43,11 @@ async def slack_add_reaction(
     reaction = emoji.strip().strip(":")
     if not reaction:
         return {"success": False, "error": "emoji is required"}
+    if reaction == "white_check_mark":
+        return {
+            "success": False,
+            "error": "white_check_mark is not allowed because it can imply PR approval",
+        }
     if any(char.isspace() for char in reaction):
         return {
             "success": False,

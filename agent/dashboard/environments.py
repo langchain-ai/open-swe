@@ -20,8 +20,6 @@ whose snapshot is not ready, runs fall back to the per-repo snapshot and then to
 the configured base snapshot.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 import re

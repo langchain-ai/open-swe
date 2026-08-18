@@ -1,7 +1,5 @@
 """GitHub webhook comment utilities."""
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import hmac
@@ -23,6 +21,7 @@ __all__ = [
     "build_pr_prompt",
     "describe_open_swe_tags",
     "extract_pr_context",
+    "fetch_github_thread_participants",
     "fetch_issue_comments",
     "fetch_pr_branch",
     "fetch_pr_comments_since_last_tag",
@@ -259,6 +258,66 @@ async def post_github_comment(
         except httpx.HTTPError:
             logger.exception("Failed to post comment to GitHub issue/PR #%s", issue_number)
             return False
+
+
+async def fetch_github_thread_participants(
+    repo_config: dict[str, str], issue_number: int, *, token: str
+) -> set[str] | None:
+    """Return mapped-candidate GitHub logins that authored an issue or PR thread."""
+    owner = repo_config.get("owner", "")
+    repo = repo_config.get("name", "")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+            issue_response = await http_client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}",
+                headers=headers,
+            )
+            if issue_response.status_code == 401:
+                raise GitHubAuthError(f"GitHub returned 401 fetching issue {issue_number}")
+            if issue_response.status_code != 200:  # noqa: PLR2004
+                return None
+            issue = issue_response.json()
+            comments, review_comments, reviews = await asyncio.gather(
+                _fetch_paginated(
+                    http_client,
+                    f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments",
+                    headers,
+                ),
+                _fetch_paginated(
+                    http_client,
+                    f"https://api.github.com/repos/{owner}/{repo}/pulls/{issue_number}/comments",
+                    headers,
+                ),
+                _fetch_paginated(
+                    http_client,
+                    f"https://api.github.com/repos/{owner}/{repo}/pulls/{issue_number}/reviews",
+                    headers,
+                ),
+            )
+    except GitHubAuthError:
+        return None
+    except Exception:
+        logger.exception(
+            "Failed to fetch GitHub participants for %s/%s#%s", owner, repo, issue_number
+        )
+        return None
+
+    users = [issue.get("user")]
+    users.extend(item.get("user") for item in [*comments, *review_comments, *reviews])
+    return {
+        login.strip()
+        for user in users
+        if isinstance(user, dict)
+        and user.get("type") != "Bot"
+        and isinstance(login := user.get("login"), str)
+        and login.strip()
+        and not login.lower().endswith("[bot]")
+    }
 
 
 async def fetch_issue_comments(

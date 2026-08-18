@@ -19,8 +19,6 @@ busy-check and the custom store-queue) with one function that uses:
   until it happened to emit its next event.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 import uuid

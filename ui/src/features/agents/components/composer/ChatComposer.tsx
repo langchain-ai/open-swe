@@ -4,6 +4,7 @@ import {
   LoaderCircle,
   Map as MapIcon,
   Mic,
+  Plus,
   ServerCog as ServerCogIcon,
   Square,
   X,
@@ -38,7 +39,7 @@ import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import { Kbd } from "@/components/ui/kbd"
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { transcribeAudio } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -123,7 +124,6 @@ export interface ChatComposerProps {
   contextUsage?: {
     usedTokens?: number | null
     contextWindow?: number | null
-    hasMessages?: boolean
   }
 }
 
@@ -245,6 +245,7 @@ export const ChatComposer = memo(function ChatComposer({
     null
   )
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  const [extrasMenuOpen, setExtrasMenuOpen] = useState(false)
   const [dictationState, setDictationState] = useState<
     "idle" | "recording" | "transcribing"
   >("idle")
@@ -745,7 +746,42 @@ export const ChatComposer = memo(function ChatComposer({
           value={value}
         />
 
-        <div className="mt-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-xs text-muted-foreground">
+        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-xs text-muted-foreground">
+          <Menu onOpenChange={setExtrasMenuOpen}>
+            <MenuTrigger
+              render={
+                <ComposerControl
+                  aria-label="More composer options"
+                  className="size-7 px-0"
+                  type="button"
+                />
+              }
+            >
+              <Plus className="size-4" />
+            </MenuTrigger>
+            <MenuPopup align="start" className="w-44" side="top" sideOffset={7}>
+              <MenuItem
+                disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <ImagePlus />
+                Attach images
+              </MenuItem>
+              {onPlanModeChange && (
+                <MenuItem onClick={() => onPlanModeChange(!planMode)}>
+                  <MapIcon />
+                  {planMode ? "Disable plan mode" : "Enable plan mode"}
+                </MenuItem>
+              )}
+              {onAdminThreadChange && (
+                <MenuItem onClick={() => onAdminThreadChange(!adminThread)}>
+                  <ServerCogIcon />
+                  {adminThread ? "Disable admin mode" : "Enable admin mode"}
+                </MenuItem>
+              )}
+            </MenuPopup>
+          </Menu>
+
           <div className="flex min-w-0 flex-wrap items-center gap-1">
             {models.length > 0 && (
               <ModelPicker
@@ -759,17 +795,15 @@ export const ChatComposer = memo(function ChatComposer({
               />
             )}
 
-            {onPlanModeChange && (
+            {planMode && onPlanModeChange && (
               <Tooltip>
                 <TooltipTrigger
                   render={
                     <ComposerControl
-                      aria-pressed={planMode}
-                      className={cn(
-                        planMode &&
-                          "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                      )}
-                      onClick={() => onPlanModeChange(!planMode)}
+                      aria-label="Exit plan mode"
+                      aria-pressed
+                      className="bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                      onClick={() => onPlanModeChange(false)}
                       type="button"
                     />
                   }
@@ -777,114 +811,63 @@ export const ChatComposer = memo(function ChatComposer({
                   <ComposerControlIcon icon={MapIcon} />
                   <span>Plan</span>
                 </TooltipTrigger>
-                <TooltipPopup
-                  className="max-w-[18rem] whitespace-normal"
-                  side="top"
-                >
-                  Research read-only and propose a plan before editing{" "}
-                  <Kbd>⇧</Kbd>
-                  <Kbd>Tab</Kbd>
-                </TooltipPopup>
+                <TooltipPopup side="top">Exit plan mode</TooltipPopup>
               </Tooltip>
             )}
-
-            {onAdminThreadChange && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <ComposerControl
-                      aria-pressed={adminThread}
-                      className={cn(
-                        adminThread &&
-                          "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                      )}
-                      onClick={() => onAdminThreadChange(!adminThread)}
-                      type="button"
-                    />
-                  }
-                >
-                  <ComposerControlIcon icon={ServerCogIcon} />
-                  <span>Admin</span>
-                </TooltipTrigger>
-                <TooltipPopup
-                  className="max-w-[18rem] whitespace-normal"
-                  side="top"
-                >
-                  Provision this sandbox and capture it as an environment
-                  snapshot
-                </TooltipPopup>
-              </Tooltip>
-            )}
-
-            <ContextWindowMeter
-              contextWindow={contextUsage?.contextWindow}
-              hasMessages={contextUsage?.hasMessages}
-              usedTokens={contextUsage?.usedTokens}
-            />
           </div>
 
-          {typeof navigator !== "undefined" &&
-            "mediaDevices" in navigator &&
-            typeof MediaRecorder !== "undefined" && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <ComposerControl
-                      aria-label={
-                        dictationState === "recording"
-                          ? "Stop dictation"
-                          : "Start dictation"
-                      }
-                      aria-pressed={dictationState === "recording"}
-                      className={cn(
-                        "size-7 px-0",
-                        dictationState === "recording" && "text-destructive"
-                      )}
-                      disabled={disabled || dictationState === "transcribing"}
-                      onClick={() => void handleDictation()}
-                      type="button"
-                    />
-                  }
-                >
-                  {dictationState === "transcribing" ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : dictationState === "recording" ? (
-                    <Square className="size-3 fill-current" />
-                  ) : (
-                    <Mic className="size-4" />
-                  )}
-                </TooltipTrigger>
-                <TooltipPopup side="top">
-                  {dictationState === "recording"
-                    ? "Stop dictation"
-                    : "Dictate message"}
-                </TooltipPopup>
-              </Tooltip>
-            )}
+          <div className="flex items-center gap-1">
+            <ContextWindowMeter
+              contextWindow={contextUsage?.contextWindow}
+              usedTokens={contextUsage?.usedTokens}
+            />
 
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <ComposerControl
-                  aria-label="Attach images"
-                  className="size-7 px-0"
-                  disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
-                  onClick={() => fileInputRef.current?.click()}
-                  type="button"
-                />
-              }
-            >
-              <ComposerControlIcon icon={ImagePlus} className="size-4" />
-            </TooltipTrigger>
-            <TooltipPopup side="top">Attach images</TooltipPopup>
-          </Tooltip>
+            {typeof navigator !== "undefined" &&
+              "mediaDevices" in navigator &&
+              typeof MediaRecorder !== "undefined" && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <ComposerControl
+                        aria-label={
+                          dictationState === "recording"
+                            ? "Stop dictation"
+                            : "Start dictation"
+                        }
+                        aria-pressed={dictationState === "recording"}
+                        className={cn(
+                          "size-7 px-0",
+                          dictationState === "recording" && "text-destructive"
+                        )}
+                        disabled={disabled || dictationState === "transcribing"}
+                        onClick={() => void handleDictation()}
+                        type="button"
+                      />
+                    }
+                  >
+                    {dictationState === "transcribing" ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : dictationState === "recording" ? (
+                      <Square className="size-3 fill-current" />
+                    ) : (
+                      <Mic className="size-4" />
+                    )}
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">
+                    {dictationState === "recording"
+                      ? "Stop dictation"
+                      : "Dictate message"}
+                  </TooltipPopup>
+                </Tooltip>
+              )}
+          </div>
 
           <ComposerPrimaryActions
             activeRun={activeRun}
             canSubmit={canSubmit}
             onSubmit={() => void handleSubmit()}
             onStop={onStop}
-            stopOnEscape={!menuOpen && !modelPickerOpen}
+            stopOnEscape={!menuOpen && !modelPickerOpen && !extrasMenuOpen}
             submitting={isSubmitting}
           />
         </div>

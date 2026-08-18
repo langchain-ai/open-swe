@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
@@ -16,6 +14,14 @@ def test_construct_system_prompt_gates_active_plan_mode(enabled: bool) -> None:
     prompt = construct_system_prompt(working_dir="/work", plan_mode=enabled)
 
     assert ("### Plan Mode (ACTIVE)" in prompt) is enabled
+
+
+def test_dashboard_only_enters_plan_mode_on_explicit_request() -> None:
+    dashboard_prompt = construct_system_prompt(working_dir="/work", source="dashboard")
+    slack_prompt = construct_system_prompt(working_dir="/work", source="slack", slack_context=True)
+
+    assert "call `enter_plan_mode` only when the user explicitly asks" in dashboard_prompt
+    assert "If a task would genuinely benefit from a structured plan" in slack_prompt
 
 
 def test_plan_mode_prompt_requests_slack_approval_options() -> None:
@@ -37,6 +43,7 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
         "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
+        "slack_move_thread",
         "slack_start_new_thread",
         "linear_create_issue",
         "linear_update_issue",

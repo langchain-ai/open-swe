@@ -12,8 +12,6 @@ The ``files`` channel is seeded at invoke time (see the launchers). Because
 address them under ``/skills/...``.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any
 

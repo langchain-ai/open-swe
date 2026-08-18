@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,7 +8,7 @@ from evals.reviewer.store_reporter import StoreReporter, github_run_url, is_enab
 _CONFIG = {
     "experiment_prefix": "openswe-review-confidence",
     "langsmith_project": "open-swe-evals",
-    "model_id": "google_genai:gemini-3.6-flash",
+    "model_id": "google_genai:gemini-3.7-flash",
 }
 
 

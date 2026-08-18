@@ -9,8 +9,6 @@ permission, and a missing permission or transient error must never break
 webhook handling.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

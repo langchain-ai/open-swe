@@ -74,7 +74,7 @@ Write this down. You'll use it in the callback URL below and again in step 4 whe
 3. Set permissions:
    - **Repository permissions**:
      - Contents: Read & write
-     - Pull requests: Read & write
+     - Pull requests: Read & write — required to publish review comments and, when an admin explicitly enables the disabled-by-default policy, submit approvals. Bot approvals may not satisfy CODEOWNERS or repository rules that exclude the App identity.
      - Issues: Read & write
      - Checks: Read & write — reports an "Open SWE Review" check run on PRs while an auto-review runs and lets `/baby-sit` read third-party CI conclusions. Without it, check-run creation fails (logged, best-effort), reviews still work, and `/baby-sit` fails closed when it cannot read the complete check set.
      - Commit statuses: Read-only — required for `/baby-sit` to evaluate the complete PR status set, including integrations that report via legacy commit statuses instead of check runs.
