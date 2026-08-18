@@ -19,12 +19,28 @@ export default async function backendProxy(event: {
   // `redirect: "manual"` keeps the OAuth 3xx hops intact — following them here
   // would leave the browser's address bar where it started. The body is passed
   // through as a stream, which is what keeps webhook signatures verifiable.
-  return fetch(`${backendOrigin()}${url.pathname}${url.search}`, {
-    method: event.req.method,
-    headers: event.req.headers,
-    body: event.req.body,
-    redirect: "manual",
-    // @ts-expect-error -- required by undici to stream a request body
-    duplex: "half",
+  const upstream = await fetch(
+    `${backendOrigin()}${url.pathname}${url.search}`,
+    {
+      method: event.req.method,
+      headers: event.req.headers,
+      body: event.req.body,
+      redirect: "manual",
+      // @ts-expect-error -- required by undici to stream a request body
+      duplex: "half",
+    }
+  )
+
+  // undici decompresses the body but leaves the upstream framing headers on it,
+  // so forwarding them makes the browser decode an already-decoded body.
+  const headers = new Headers(upstream.headers)
+  headers.delete("content-encoding")
+  headers.delete("content-length")
+  headers.delete("transfer-encoding")
+
+  return new Response(upstream.body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers,
   })
 }
