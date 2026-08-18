@@ -161,8 +161,12 @@ export function AgentsSidebar({
   const facets = availableFacets(visibleThreads)
   const filteredActive = filterThreads(activeThreads, prefs.filters)
   const filteredResolved = filterThreads(resolvedThreads, prefs.filters)
-  const sections = groupThreadsByMode(filteredActive, prefs.group)
   const showResolved = prefs.filters.includeResolved
+  const groupedThreads =
+    prefs.group === "focus" && showResolved
+      ? [...filteredActive, ...filteredResolved]
+      : filteredActive
+  const sections = groupThreadsByMode(groupedThreads, prefs.group)
   const isEmpty =
     localGroups.length === 0 &&
     sections.length === 0 &&
@@ -308,7 +312,7 @@ export function AgentsSidebar({
                     compact={prefs.compact}
                   />
                 ))}
-            {showResolved && (
+            {showResolved && prefs.group !== "focus" && (
               <ResolvedThreadGroup
                 threads={filteredResolved}
                 hasMore={resolvedHasMore}
