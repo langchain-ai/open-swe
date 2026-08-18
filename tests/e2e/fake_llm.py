@@ -482,23 +482,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_reply_step),
     ),
-    "move": (
-        _tool_step(
-            "Moving the current Open SWE thread to another Slack channel.",
-            "slack_move_thread",
-            {
-                "message": "Continue the existing Open SWE task in this thread.",
-                "channel_id": "C_TARGET",
-            },
-            "call-move",
-        ),
-        _tool_step(
-            "Confirming the moved thread in its new location.",
-            "slack_thread_reply",
-            {"message": "Moved this Open SWE thread and preserved its state."},
-            "call-move-reply",
-        ),
-    ),
     "breakout": (
         _tool_step(
             "Starting a separate Slack thread for the breakout task.",
@@ -514,6 +497,17 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_thread_reply",
             {"message": "I started a separate Open SWE thread for that aspect."},
             "call-breakout-reply",
+        ),
+    ),
+    "move": (
+        _tool_step(
+            "Moving the Slack thread to its destination channel.",
+            "slack_move_thread",
+            {
+                "message": "Continue the existing Open SWE task in this channel.",
+                "channel_id": "C_TARGET",
+            },
+            "call-move",
         ),
     ),
     "plan": (
@@ -556,6 +550,10 @@ def _is_breakout_request(text: str) -> bool:
     return "break out" in t or "separate thread" in t or "split out" in t
 
 
+def _is_move_request(text: str) -> bool:
+    return "E2E_MOVE_THREAD" in text
+
+
 def _is_approval(text: str) -> bool:
     t = text.lower()
     return "approved" in t and "implement" in t
@@ -579,6 +577,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "many_files", lambda ctx: ctx.human_count <= 1 and "E2E_MANY_FILES" in ctx.first_text
     ),
+    ScriptRule("move", lambda ctx: ctx.human_count <= 1 and _is_move_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: ctx.human_count <= 1),
     ScriptRule("followup", lambda _ctx: True),
 )
