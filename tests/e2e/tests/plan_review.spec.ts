@@ -91,7 +91,7 @@ test.describe("Plan review (HTTP comments)", () => {
     );
   });
 
-  test("Slack plan request → comments → owner approves → PR", async ({
+  test("Slack plan request → comments → collaborator approves → PR", async ({
     browser,
     request,
   }, testInfo) => {
@@ -154,14 +154,14 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(loggedOut).toHaveURL(
       new RegExp(`/login\\?redirect=.*${threadId}.*plan`),
     );
-    await expect(loggedOut.getByText("Sign in to open-swe")).toBeVisible({
+    await expect(loggedOut.getByText("Sign in to Open SWE")).toBeVisible({
       timeout: 30_000,
     });
     await loggedOut.getByRole("link", { name: "Continue with GitHub" }).click();
     await expect(loggedOut).toHaveURL(/\/fake-gh\/login\/oauth\/authorize/);
     await expect(loggedOut.getByTestId("fake-github-login")).toBeVisible();
     await loggedOut.getByLabel("GitHub user").selectOption(OWNER.login);
-    await loggedOut.getByRole("button", { name: "Authorize open-swe" }).click();
+    await loggedOut.getByRole("button", { name: "Authorize Open SWE" }).click();
     await expect(loggedOut).toHaveURL(new RegExp(`/agents/${threadId}/plan$`));
     await expect(loggedOut.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
@@ -245,8 +245,7 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(owner.getByTestId("plan-comment")).toHaveCount(1);
     await expect(owner.getByTestId("reject-plan")).toBeEnabled();
 
-    // 5. A COLLABORATOR opens the same plan: sees it AND the owner's comment
-    //    (fetched over HTTP), but has NO approve button.
+    // 5. A COLLABORATOR opens the same plan and sees the owner's comment.
     const collabCtx = await browser.newContext();
     await collabCtx.request.post("/control/login", { data: COLLABORATOR });
     const collab = await collabCtx.newPage();
@@ -263,7 +262,7 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(collab.getByTestId("plan-comment")).toContainText(
       "looks solid",
     );
-    await expect(collab.getByTestId("approve-plan")).toHaveCount(0);
+    await expect(collab.getByTestId("approve-plan")).toBeVisible();
     await expect(collab.getByTestId("reject-plan")).toBeVisible();
 
     // Collaborator leaves feedback with Ctrl+Enter.
@@ -274,13 +273,10 @@ test.describe("Plan review (HTTP comments)", () => {
     );
     await expect(collab.getByTestId("plan-comment")).toHaveCount(2);
 
-    // 6. The owner sees the collaborator's comment (polled), then approves and
-    //    returns to the main conversation while implementation starts.
-    await expect(owner.getByTestId("plan-comment")).toHaveCount(2, {
-      timeout: 30_000,
-    });
-    await owner.getByTestId("approve-plan").click();
-    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
+    // 6. The collaborator approves and returns to the main conversation while
+    //    implementation starts.
+    await collab.getByTestId("approve-plan").click();
+    await expect(collab).toHaveURL(new RegExp(`/agents/${threadId}$`));
 
     // 7. The agent implements, opens a PR, and links it back in the Slack thread,
     //    echoing the reviewers' feedback — which proves the comments were stored

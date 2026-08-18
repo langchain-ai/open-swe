@@ -24,7 +24,7 @@ import {
 } from "@phosphor-icons/react"
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import type { ComponentType, ReactNode, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
@@ -118,6 +118,13 @@ export function AgentsSidebar({
   activeLocalSessionId,
   layout,
 }: AgentsSidebarProps) {
+  const navigate = useNavigate()
+  const openThread = useCallback(
+    (threadId: string) => {
+      void navigate({ to: "/agents/$threadId", params: { threadId } })
+    },
+    [navigate]
+  )
   const {
     prefs,
     setGroup,
@@ -147,7 +154,7 @@ export function AgentsSidebar({
   const resolvedHasMore = sidebar.data?.resolved.hasMore ?? false
   const visibleThreads = [...activeThreads, ...resolvedThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
-  useRunCompletionNotifier(visibleThreads, activeThreadId)
+  useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
   const facets = availableFacets(visibleThreads)
   const filteredActive = filterThreads(activeThreads, prefs.filters)
@@ -190,7 +197,7 @@ export function AgentsSidebar({
           className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
         >
           <PlusIcon className="size-4" />
-          New Agent
+          New Thread
         </Link>
       </div>
 
