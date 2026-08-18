@@ -1,12 +1,11 @@
 /**
- * Trigger parsing for the composer's autocomplete: `@path` file mentions,
- * `/command` slash commands, and `$skill` skill commands. The prompt stays a
- * plain string end to end — the Lexical editor only renders chips over it — so
- * everything here operates on
+ * Trigger parsing for the composer's autocomplete: `@path` file mentions and
+ * `/command` slash commands. The prompt stays a plain string end to end — the
+ * Lexical editor only renders chips over it — so everything here operates on
  * text plus a cursor offset rather than on editor nodes.
  */
 
-export type ComposerTriggerKind = "path" | "slash-command" | "skill-command"
+export type ComposerTriggerKind = "path" | "slash-command"
 
 /** Slash commands open-swe understands. `model` opens the picker rather than editing the prompt. */
 export type ComposerSlashCommand = "plan" | "default" | "model"
@@ -78,19 +77,10 @@ export function detectComposerTrigger(
   while (tokenIdx >= 0 && !isWhitespace(text[tokenIdx] ?? "")) tokenIdx -= 1
   const tokenStart = tokenIdx + 1
   const token = text.slice(tokenStart, cursor)
-  if (
-    !token.startsWith("@") &&
-    !token.startsWith("/") &&
-    !token.startsWith("$")
-  )
-    return null
+  if (!token.startsWith("@") && !token.startsWith("/")) return null
 
   return {
-    kind: token.startsWith("@")
-      ? "path"
-      : token.startsWith("$")
-        ? "skill-command"
-        : "slash-command",
+    kind: token.startsWith("/") ? "slash-command" : "path",
     query: token.slice(1),
     rangeStart: tokenStart,
     rangeEnd: cursor,
