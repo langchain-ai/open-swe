@@ -159,6 +159,29 @@ function workspaceThreads(): Array<ThreadSeed> {
   ];
 }
 
+function resolvedOverflowThreads(): Array<ThreadSeed> {
+  const now = Date.now();
+  return Array.from({ length: 21 }, (_, index) => {
+    const number = index + 1;
+    return {
+      id: `74000000-0000-4000-8000-${String(number).padStart(12, "0")}`,
+      metadata: baseMetadata(
+        now,
+        `E2E Workspace Resolved overflow ${String(number).padStart(2, "0")}`,
+        100 + index * 100,
+        {
+          latest_run_id: `e2e-run-resolved-overflow-${number}`,
+          latest_run_status: "success",
+          last_viewed_run_id: `e2e-run-resolved-overflow-${number}`,
+          last_viewed_at_ms: now - (50 + index * 100),
+          resolved: true,
+          resolved_at_ms: now - (25 + index * 100),
+        },
+      ),
+    };
+  });
+}
+
 function automationThreads(): Array<ThreadSeed> {
   const now = Date.now();
   return [
@@ -533,7 +556,10 @@ test.describe("threads workspace", () => {
     page,
     request,
   }, testInfo) => {
-    await seedThreads(request, workspaceThreads());
+    await seedThreads(request, [
+      ...workspaceThreads(),
+      ...resolvedOverflowThreads(),
+    ]);
     await loginAs(page);
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/agents/threads");
@@ -565,8 +591,14 @@ test.describe("threads workspace", () => {
     await expect(progress.locator("> button > span").last()).toHaveText("1");
     await expect(ready).toContainText(TITLES.ready);
     await expect(ready.locator("> button > span").last()).toHaveText("1");
-    await expect(done).toContainText(TITLES.done);
-    await expect(done.locator("> button > span").last()).toHaveText("1");
+    await expect(done).toContainText("E2E Workspace Resolved overflow 01");
+    await expect(done.locator("> button > span").last()).toHaveText("20+");
+    const showAll = done.getByRole("link", { name: "Show all" });
+    await expect(showAll).toBeVisible();
+    await expect(showAll).toHaveAttribute(
+      "href",
+      /\/agents\/threads\?.*resolved=true.*group=focus/,
+    );
 
     const screenshotPath = testInfo.outputPath("focus-grouping-sidebar.png");
     await sidebar.screenshot({ path: screenshotPath });
