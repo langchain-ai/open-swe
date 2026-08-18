@@ -33,11 +33,6 @@ jobs:
             echo "the open_swe_ci outputs in langchain-ai/deployments." >&2
             exit 1
           }
-          test -n "${{ vars.PREVIEW_DASHBOARD_API_URL }}" || {
-            echo "PREVIEW_DASHBOARD_API_URL is unset. It is the preview backend this" >&2
-            echo "image belongs to, and ui/Dockerfile has no default on purpose." >&2
-            exit 1
-          }
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3.0.0
@@ -57,7 +52,6 @@ jobs:
         with:
           context: .
           file: ui/Dockerfile
-          build-args: DASHBOARD_API_URL=${{ vars.PREVIEW_DASHBOARD_API_URL }}
           # The commit tag is what makes a rollback a tag swap rather than a rebuild.
           tags: |
             ${{ env.IMAGE }}:preview
