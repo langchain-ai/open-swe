@@ -1,7 +1,8 @@
 import { groupThreads } from "./api"
+import { groupThreadsForView } from "./threadViews"
 import type { AgentSource, AgentStatus, AgentThread } from "./types"
 
-export type SidebarGroupMode = "none" | "date" | "status" | "repo"
+export type SidebarGroupMode = "none" | "focus" | "date" | "status" | "repo"
 
 export type SidebarOwnership = "all" | "mine" | "shared"
 
@@ -33,6 +34,7 @@ export const GROUP_MODE_OPTIONS: Array<{
   value: SidebarGroupMode
   label: string
 }> = [
+  { value: "focus", label: "Focus" },
   { value: "repo", label: "Project" },
   { value: "date", label: "Date" },
   { value: "status", label: "Status" },
@@ -198,6 +200,13 @@ export function groupThreadsByMode(
         defaultCollapsed: false,
       },
     ]
+  }
+
+  if (mode === "focus") {
+    return groupThreadsForView(threads, "focus").map((group) => ({
+      ...group,
+      defaultCollapsed: false,
+    }))
   }
 
   if (mode === "date") {
