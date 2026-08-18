@@ -1,7 +1,5 @@
 """Tool for managing durable `/baby-sit` PR watches."""
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Any, Literal
 
