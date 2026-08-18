@@ -80,6 +80,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
     comments = full_issue.get("comments", {}).get("nodes", [])
     included_comments: list[dict[str, Any]] = []
+    image_urls_by_comment_id: dict[str, list[str]] = {}
     triggering_comment = issue_data.get("triggering_comment", "")
     triggering_comment_id = issue_data.get("triggering_comment_id", "")
 
@@ -123,6 +124,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                 body_image_urls = common.extract_image_urls(body)
                 if body_image_urls:
                     image_urls.extend(body_image_urls)
+                    image_urls_by_comment_id[str(comment.get("id", ""))] = body_image_urls
                     common.logger.debug(
                         "Found %d image URL(s) in comment by %s",
                         len(body_image_urls),
@@ -138,6 +140,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         trigger_image_urls = common.extract_image_urls(trigger_body)
         if trigger_image_urls:
             image_urls.extend(trigger_image_urls)
+            image_urls_by_comment_id[str(triggering_comment_id)] = trigger_image_urls
             common.logger.debug(
                 "Found %d image URL(s) in triggering comment by %s",
                 len(trigger_image_urls),
@@ -180,7 +183,8 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         ".changelog/README.md, and nearby docs before choosing the PR title/body format. "
         f"When you're done, commit and push your changes. {tag_instruction}"
     )
-    content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
+    description_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
+    image_blocks_by_url: dict[str, dict[str, Any]] = {}
 
     # Resolve the GitHub login from the Linear email via the same user-mapping
     # store Slack uses, so PRs open *as the triggering user* and the thread is
@@ -209,8 +213,13 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             for image_url in image_urls:
                 image_block = await common.fetch_image_block(image_url, client)
                 if image_block:
-                    content_blocks.append(cast(dict[str, Any], image_block))
-        common.logger.info("Built %d content block(s) for prompt", len(content_blocks))
+                    image_blocks_by_url[image_url] = cast(dict[str, Any], image_block)
+        description_blocks.extend(
+            image_blocks_by_url[url]
+            for url in common.dedupe_urls(description_image_urls)
+            if url in image_blocks_by_url
+        )
+        common.logger.info("Built %d description content block(s)", len(description_blocks))
 
     linear_project_id = ""
     linear_issue_number = ""
@@ -254,7 +263,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             {"id": "system:linear-issue", "display_name": "Linear issue", "platform": "linear"}
         ),
         system_input(
-            prompt,
+            description_blocks if len(description_blocks) > 1 else prompt,
             {
                 "sender_id": "system:linear-issue",
                 "surface": "linear",
@@ -284,11 +293,19 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         if sender_id not in introduced:
             run_messages.append(person_introduction(person))
             introduced.add(sender_id)
-        blocks: str | list[dict[str, Any]] = str(comment.get("body", ""))
-        if comment is included_comments[-1] and content_blocks[1:]:
+        body = str(comment.get("body", ""))
+        comment_image_blocks = [
+            image_blocks_by_url[url]
+            for url in common.dedupe_urls(
+                image_urls_by_comment_id.get(str(comment.get("id", "")), [])
+            )
+            if url in image_blocks_by_url
+        ]
+        blocks: str | list[dict[str, Any]] = body
+        if comment_image_blocks:
             blocks = [
-                cast(dict[str, Any], create_text_block(str(comment.get("body", "")))),
-                *content_blocks[1:],
+                cast(dict[str, Any], create_text_block(body)),
+                *comment_image_blocks,
             ]
         run_messages.append(
             human_input(

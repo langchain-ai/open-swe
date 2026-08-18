@@ -238,10 +238,10 @@ def human_input(content: str | list[dict[str, Any]], context: InputMessageContex
     return {"role": "user", "content": _structured_content(content, context)}
 
 
-def system_input(text: str, context: InputMessageContext) -> RunMessage:
+def system_input(content: str | list[dict[str, Any]], context: InputMessageContext) -> RunMessage:
     if context["kind"] != "system":
         raise ValueError("system_input requires kind='system'")
-    return {"role": "user", "content": _serialize_message(text, context)}
+    return {"role": "user", "content": _structured_content(content, context)}
 
 
 def filter_new_dynamic_contexts(
@@ -291,8 +291,6 @@ def build_input_messages(
     if context["kind"] == "human":
         messages.append(human_input(content, context))
     else:
-        if not isinstance(content, str):
-            raise ValueError("system inputs must contain text")
         messages.append(system_input(content, context))
     return messages
 

@@ -50,9 +50,13 @@ def test_resolve_absolute_url_with_existing_query_left_as_is() -> None:
 class _FakeRuns:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
+        self.fail_next = False
 
     async def create(self, thread_id: str, assistant_id: str, **kwargs: Any) -> dict[str, str]:
         self.created.append({"thread_id": thread_id, "assistant_id": assistant_id, **kwargs})
+        if self.fail_next:
+            self.fail_next = False
+            raise RuntimeError("dispatch failed")
         return {"run_id": "run-1"}
 
 
@@ -156,6 +160,28 @@ async def test_create_durable_run_persists_and_filters_entity_introductions() ->
     hashes = client.threads.metadata["injected_dynamic_context_hashes"]
     assert len(hashes) == 1
     assert len(hashes[0]) == 64
+
+
+@pytest.mark.asyncio
+async def test_create_durable_run_persists_introductions_only_after_dispatch() -> None:
+    client = _FakeClient()
+    entity = {
+        "role": "user",
+        "content": '<dynamic-context kind="person" id="github:octocat"></dynamic-context>',
+    }
+    client.runs.fail_next = True
+
+    with pytest.raises(RuntimeError, match="dispatch failed"):
+        await dispatch.create_durable_run(
+            "thread-1", "agent", input={"messages": [entity]}, source="web", client=client
+        )
+
+    assert client.threads.metadata == {}
+    await dispatch.create_durable_run(
+        "thread-1", "agent", input={"messages": [entity]}, source="web", client=client
+    )
+    assert client.runs.created[1]["input"]["messages"] == [entity]
+    assert len(client.threads.metadata["injected_dynamic_context_hashes"]) == 1
 
 
 def test_dispatch_slack_identity_includes_verified_context() -> None:

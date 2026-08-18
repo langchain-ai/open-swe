@@ -27,7 +27,10 @@ def _issue_data(*, user_email: str | None, user_name: str = "Zhen") -> dict:
 
 
 def _run_process(
-    issue_data: dict, repo_config: dict[str, str]
+    issue_data: dict,
+    repo_config: dict[str, str],
+    *,
+    full_issue: dict[str, Any] | None = None,
 ) -> tuple[dict, dict, str | None, object]:
     captured: dict[str, Any] = {}
 
@@ -64,7 +67,8 @@ def _run_process(
             linear_webhook.common,
             "fetch_linear_issue_details",
             new_callable=AsyncMock,
-            return_value=_full_issue(user_email=issue_data.get("comment_author", {}).get("email")),
+            return_value=full_issue
+            or _full_issue(user_email=issue_data.get("comment_author", {}).get("email")),
         ),
         patch.object(
             linear_webhook.common, "resolve_login_from_email_async", side_effect=fake_resolve_login
@@ -74,6 +78,14 @@ def _run_process(
             linear_webhook.common, "upsert_agent_thread_owner_metadata", side_effect=fake_upsert
         ),
         patch.object(linear_webhook.common, "post_linear_trace_comment", new_callable=AsyncMock),
+        patch.object(linear_webhook.common, "resolve_agent_model_id", new_callable=AsyncMock),
+        patch.object(linear_webhook.common, "model_supports_images", return_value=True),
+        patch.object(
+            linear_webhook.common,
+            "fetch_image_block",
+            new_callable=AsyncMock,
+            side_effect=lambda url, _client: {"type": "image_url", "image_url": {"url": url}},
+        ),
     ):
         asyncio.run(linear_webhook.process_linear_issue(issue_data, repo_config))
 
@@ -116,3 +128,47 @@ def test_linear_omits_login_when_unmapped() -> None:
     assert resolved_email == "nobody@example.com"
     assert "github_login" not in configurable
     assert upsert["github_login"] == ""
+
+
+def test_linear_description_images_stay_with_issue_without_comments() -> None:
+    issue = _full_issue()
+    issue["description"] = "See ![issue](https://example.com/issue.png)"
+    _configurable, _upsert, _email, content = _run_process(
+        _issue_data(user_email="zhen@example.com"),
+        {"owner": "langchain-ai", "name": "open-swe"},
+        full_issue=issue,
+    )
+
+    assert isinstance(content, dict)
+    messages = content["messages"]
+    assert messages[1]["content"][1]["image_url"]["url"] == "https://example.com/issue.png"
+
+
+def test_linear_comment_images_stay_with_their_comments() -> None:
+    issue = _full_issue()
+    issue["comments"]["nodes"] = [
+        {
+            "id": "comment-1",
+            "body": "First ![one](https://example.com/one.png)",
+            "user": {"id": "one", "name": "One"},
+        },
+        {
+            "id": "comment-2",
+            "body": "Second ![two](https://example.com/two.png)",
+            "user": {"id": "two", "name": "Two"},
+        },
+    ]
+    data = _issue_data(user_email="zhen@example.com")
+    data["triggering_comment_id"] = "comment-1"
+    _configurable, _upsert, _email, content = _run_process(
+        data,
+        {"owner": "langchain-ai", "name": "open-swe"},
+        full_issue=issue,
+    )
+
+    assert isinstance(content, dict)
+    human_messages = [
+        message for message in content["messages"] if isinstance(message["content"], list)
+    ]
+    assert human_messages[0]["content"][1]["image_url"]["url"].endswith("one.png")
+    assert human_messages[1]["content"][1]["image_url"]["url"].endswith("two.png")
