@@ -1,5 +1,6 @@
 import json
 import os
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 from langgraph.config import get_config
@@ -54,6 +55,7 @@ async def slack_thread_reply(
     Example: <@U06KD8BFY95> will tag that user in the message."""
     config = get_config()
     configurable = config.get("configurable", {})
+    run_id = _current_run_id(config)
     slack_thread = configurable.get("slack_thread", {})
     thread_id = configurable.get("thread_id")
     langgraph_client = get_client(url=LANGGRAPH_URL)
@@ -86,6 +88,8 @@ async def slack_thread_reply(
         usage=usage,
         agent_thread_id=thread_id if isinstance(thread_id, str) else None,
         langgraph_client=langgraph_client,
+        run_id=run_id,
+        triggering_user_id=_triggering_user_id(configurable),
     )
     if message_ts is None:
         return {
@@ -96,6 +100,24 @@ async def slack_thread_reply(
             "hint": _slack_reply_failure_hint(slack_error),
         }
     return {"success": True}
+
+
+def _current_run_id(config: Mapping[str, Any]) -> str | None:
+    candidates = [config.get("run_id")]
+    configurable = config.get("configurable")
+    if isinstance(configurable, dict):
+        candidates.append(configurable.get("run_id"))
+    return next((str(candidate) for candidate in candidates if candidate), None)
+
+
+def _triggering_user_id(configurable: object) -> str | None:
+    if not isinstance(configurable, dict):
+        return None
+    slack_thread = configurable.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return None
+    user_id = slack_thread.get("triggering_user_id")
+    return user_id if isinstance(user_id, str) and user_id else None
 
 
 def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]] | None:
@@ -184,6 +206,8 @@ async def _post_and_store_mapping(
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
     langgraph_client: Any | None = None,
+    run_id: str | None = None,
+    triggering_user_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -195,5 +219,12 @@ async def _post_and_store_mapping(
     )
     if message_ts:
         resolved_client = langgraph_client or get_client(url=LANGGRAPH_URL)
-        await store_slack_message_run_mapping(resolved_client, channel_id, thread_ts, message_ts)
+        await store_slack_message_run_mapping(
+            resolved_client,
+            channel_id,
+            thread_ts,
+            message_ts,
+            run_id=run_id,
+            triggering_user_id=triggering_user_id,
+        )
     return message_ts, slack_error

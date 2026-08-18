@@ -22,7 +22,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 
 from ..utils.thread_ops import langgraph_url
 from .admin import is_admin
@@ -136,10 +136,6 @@ from .review_api import (
     list_reviews,
     proxy_pr_image,
     trigger_re_review,
-)
-from .review_approval_policies import (
-    list_review_approval_policies,
-    set_review_approval_policy,
 )
 from .review_chat_api import (
     delete_review_chat_thread,
@@ -936,41 +932,6 @@ async def api_set_enabled_review_repo(
 ) -> dict[str, list[str]]:
     repos = await set_review_repo_enabled(update.full_name, update.enabled)
     return {"repos": repos}
-
-
-class ReviewApprovalPolicyUpdate(BaseModel):
-    full_name: str
-    enabled: bool
-    threshold: int | None = None
-
-    @field_validator("threshold", mode="before")
-    @classmethod
-    def _validate_threshold(cls, value: object) -> int | None:
-        if value is None:
-            return None
-        if type(value) is not int or not 0 <= value <= 100:
-            raise ValueError("threshold must be an integer between 0 and 100")
-        return value
-
-
-@router.get("/review-approval-policies")
-async def api_list_review_approval_policies(
-    _session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    return {"policies": await list_review_approval_policies()}
-
-
-@router.put("/review-approval-policies")
-async def api_set_review_approval_policy(
-    update: ReviewApprovalPolicyUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    policy = await set_review_approval_policy(
-        update.full_name,
-        enabled=update.enabled,
-        threshold=update.threshold,
-    )
-    return {"policy": policy}
 
 
 @router.get("/sandbox-settings")
