@@ -62,7 +62,7 @@
       function render(messages) {
         const html = messages
           .map((m, index) => {
-            const who = m.is_bot ? "open-swe (bot)" : userNames[m.user] || m.user;
+            const who = m.is_bot ? "Open SWE (bot)" : userNames[m.user] || m.user;
             const linked = m.text.replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '<a href="$1">$2</a>');
             return `<div class="msg ${m.is_bot ? "bot" : ""}" data-bot="${m.is_bot}" data-thread-ts="${m.thread_ts || ""}" data-message-index="${index}"><div class="who">${who}</div><div class="text">${linked}</div><div class="contexts"></div><div class="actions"></div></div>`;
           })

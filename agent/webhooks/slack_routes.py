@@ -367,41 +367,30 @@ async def slack_interactivity(
             return {"status": "accepted", "message": "Plan cancelled"}
 
         if plan_action == "approve":
-            if not await common._slack_user_is_thread_owner(thread_id, user_id):
-                await common.post_slack_thread_reply(
-                    channel_id=channel_id,
-                    thread_ts=thread_ts,
-                    text="Only the person who requested this plan can approve it. Anyone can reply with feedback or use *Revise Plan*.",
-                    agent_thread_id=thread_id,
-                )
-                return {"status": "ignored", "reason": "approver is not the thread owner"}
-            await common._set_thread_plan_mode(thread_id, False)
+            user_name = str(user.get("name") or user.get("username") or user_id)
             background_tasks.add_task(
                 _update_selected_option_message, payload, action, "Approve plan"
             )
             channel_context = await common._get_slack_channel_context(channel_id)
             repo_config = await common.get_slack_repo_config(
-                channel_id,
-                thread_ts,
-                slack_user_id=user_id,
-                channel_context=channel_context,
-                thread_id=thread_id,
+                channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
             )
             background_tasks.add_task(
-                service.process_slack_mention,
+                service.process_slack_plan_approval,
                 {
+                    "thread_id": thread_id,
                     "channel_id": channel_id,
                     "channel_context": channel_context,
                     "thread_ts": thread_ts,
                     "event_ts": str(message.get("ts") or ""),
                     "user_id": user_id,
-                    "text": "Proceed with the approved plan. Implement the changes as described in the plan.",
+                    "user_name": user_name,
+                    "text": "approve",
                     "bot_user_id": common.SLACK_BOT_USER_ID,
-                    "thread_id": thread_id,
                 },
                 repo_config,
             )
-            return {"status": "accepted", "message": "Plan approved, starting implementation"}
+            return {"status": "accepted", "message": "Plan approval queued"}
 
         background_tasks.add_task(
             _update_selected_option_message, payload, action, "Request plan changes"

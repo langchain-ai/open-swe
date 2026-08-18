@@ -4,7 +4,6 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
-import asyncio
 import re
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -65,7 +64,6 @@ _PLAN_APPROVAL_NEGATIONS = {
     "stop",
     "wait",
 }
-_plan_approval_locks: dict[str, asyncio.Lock] = {}
 
 
 def _is_natural_language_plan_approval(text: str) -> bool:
@@ -203,11 +201,7 @@ async def _slack_user_can_reply_to_ready_plan(
         # A brand-new thread has no metadata (_thread_metadata raises 404); an
         # untagged message there simply isn't a plan reply — don't abort the gate.
         return False
-    return (
-        metadata.get("plan_mode") is True
-        and metadata.get("plan_status") == "ready"
-        and await common._slack_user_is_thread_owner(thread_id, slack_user_id)
-    )
+    return metadata.get("plan_mode") is True and metadata.get("plan_status") == "ready"
 
 
 def _format_slack_thread_section(
@@ -273,22 +267,42 @@ async def _maybe_approve_ready_plan_reply(
 ) -> bool:
     if not _is_natural_language_plan_approval(text):
         return False
-    if not await common._slack_user_is_thread_owner(thread_id, user_id):
-        return False
 
     from agent.dashboard.plan_api import _thread_metadata, approve_plan_for_thread
+    from agent.dashboard.plan_store import make_plan_approver
 
-    lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
-    async with lock:
+    try:
         metadata = await _thread_metadata(thread_id)
-        if metadata.get("plan_mode") is not True or metadata.get("plan_status") != "ready":
-            return False
-        await approve_plan_for_thread(
-            thread_id,
-            metadata=metadata,
-            actor=user_name or user_id or "Slack user",
+    except Exception:  # noqa: BLE001
+        return False
+    if metadata.get("plan_mode") is not True or metadata.get("plan_status") != "ready":
+        return False
+    result = await approve_plan_for_thread(
+        thread_id,
+        approver=make_plan_approver(
+            actor_id=user_id,
+            name=user_name or user_id or "Slack user",
+            source="slack",
+        ),
+    )
+    return result.get("already_approved") is not True
+
+
+async def process_slack_plan_approval(
+    event_data: dict[str, Any], repo_config: dict[str, str]
+) -> None:
+    try:
+        await _maybe_approve_ready_plan_reply(
+            str(event_data.get("thread_id") or ""),
+            str(event_data.get("channel_id") or ""),
+            str(event_data.get("thread_ts") or ""),
+            str(event_data.get("user_id") or ""),
+            str(event_data.get("user_name") or ""),
+            "approve",
         )
-    return True
+    except Exception:  # noqa: BLE001
+        common.logger.exception("Unexpected error while processing Slack plan approval")
+        await _notify_slack_processing_error(event_data, repo_config)
 
 
 async def _notify_slack_processing_error(
@@ -473,6 +487,10 @@ async def _process_slack_mention_impl(
         common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
         or "(no text in mention)"
     )
+    if await _maybe_approve_ready_plan_reply(
+        thread_id, channel_id, thread_ts, user_id, user_name, clean_text
+    ):
+        return
     is_first_mention = not await common._thread_exists(thread_id)
     # `env:<name>` on the message that opens a thread picks the environment its
     # sandbox boots from. Only the opening message can: the sandbox is created
@@ -604,11 +622,6 @@ async def _process_slack_mention_impl(
                 reason=reason,
                 agent_thread_id=thread_id,
             )
-        return
-
-    if await _maybe_approve_ready_plan_reply(
-        thread_id, channel_id, thread_ts, user_id, user_name, clean_text
-    ):
         return
 
     slack_thread_context: dict[str, Any] = {

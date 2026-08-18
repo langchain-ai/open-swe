@@ -368,17 +368,17 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
             for u in TEST_USERS
         )
         return HTMLResponse(
-            f"""<!doctype html><meta charset=utf-8><title>GitHub · Authorize open-swe</title>
+            f"""<!doctype html><meta charset=utf-8><title>GitHub · Authorize Open SWE</title>
             <body style="font-family:system-ui;max-width:420px;margin:3rem auto;padding:0 1rem">
             <main data-testid="fake-github-login">
-              <h1 style="font-size:1.1rem">Authorize open-swe</h1>
+              <h1 style="font-size:1.1rem">Authorize Open SWE</h1>
               <p style="color:#888;font-size:0.9rem">Pick a fake GitHub account to continue.</p>
               <form method=get action=/fake-gh/login/oauth/authorize>
                 <input type=hidden name=redirect_to value="{escape(dest, quote=True)}">
                 <label>GitHub user
                   <select name=login style="font:inherit;padding:0.4rem">{options}</select>
                 </label>
-                <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Authorize open-swe</button>
+                <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Authorize Open SWE</button>
               </form>
             </main>
             </body>"""
