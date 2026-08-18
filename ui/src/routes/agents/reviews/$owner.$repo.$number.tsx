@@ -28,6 +28,10 @@ function ReviewDetailPage() {
     null
   )
   const closeActiveComment = useCallback(() => setActiveComment(null), [])
+  const updateActiveComment = useCallback(
+    (comment: PrReviewComment) => setActiveComment(comment),
+    []
+  )
 
   // Collapse the global nav by default while viewing a review (roomy diff),
   // restoring the prior preference on leave. Runs once for the page's lifetime.
@@ -127,6 +131,7 @@ function ReviewDetailPage() {
           detail={detail.data}
           diffFiles={diff.data?.files ?? null}
           openComment={activeComment}
+          onUpdateOpenComment={updateActiveComment}
           onCloseOpenComment={closeActiveComment}
         />
       )}

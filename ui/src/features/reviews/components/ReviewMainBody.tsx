@@ -558,6 +558,7 @@ export interface ReviewMainBodyProps {
   onExpand?: () => void
   // A PR comment opened from the comments dropdown: shown inline at its line.
   openComment?: PrReviewComment | null
+  onUpdateOpenComment?: (comment: PrReviewComment) => void
   onCloseOpenComment?: () => void
 }
 
@@ -567,6 +568,7 @@ export function ReviewMainBody({
   variant = "full",
   onExpand,
   openComment,
+  onUpdateOpenComment,
   onCloseOpenComment,
 }: ReviewMainBodyProps) {
   // The composer provider lives here so it remounts in lockstep with the
@@ -589,6 +591,7 @@ export function ReviewMainBody({
         diffFiles={diffFiles}
         variant="full"
         openComment={openComment ?? null}
+        onUpdateOpenComment={onUpdateOpenComment}
         onCloseOpenComment={onCloseOpenComment}
       />
     </ReviewChatComposerProvider>
@@ -601,6 +604,7 @@ function ReviewBodyInner({
   variant,
   onExpand,
   openComment = null,
+  onUpdateOpenComment,
   onCloseOpenComment,
 }: {
   detail: ReviewDetail
@@ -608,6 +612,7 @@ function ReviewBodyInner({
   variant: ReviewMainBodyVariant
   onExpand?: () => void
   openComment?: PrReviewComment | null
+  onUpdateOpenComment?: (comment: PrReviewComment) => void
   onCloseOpenComment?: () => void
 }) {
   const embedded = variant === "embedded"
@@ -1164,6 +1169,7 @@ function ReviewBodyInner({
         onStartComment={embedded ? undefined : startComment}
         onCloseComment={closeComment}
         openComment={openComment?.path === file.path ? openComment : null}
+        onUpdateOpenComment={onUpdateOpenComment}
         onCloseOpenComment={onCloseOpenComment}
       />
     )
@@ -1484,6 +1490,7 @@ const FileDiffCard = memo(function FileDiffCard({
   onStartComment,
   onCloseComment,
   openComment,
+  onUpdateOpenComment,
   onCloseOpenComment,
 }: {
   file: ReviewDiffFile
@@ -1508,6 +1515,7 @@ const FileDiffCard = memo(function FileDiffCard({
   onStartComment?: (path: string, range: SelectedLineRange) => void
   onCloseComment: () => void
   openComment: PrReviewComment | null
+  onUpdateOpenComment?: (comment: PrReviewComment) => void
   onCloseOpenComment?: () => void
 }) {
   // No chat means no line-selection → "Add to Chat" affordance (embedded view).
@@ -1682,6 +1690,7 @@ const FileDiffCard = memo(function FileDiffCard({
             repo={repo}
             prNumber={prNumber}
             comment={meta.comment}
+            onUpdate={onUpdateOpenComment}
             onClose={onCloseOpenComment ?? (() => undefined)}
           />
         )
@@ -1696,7 +1705,14 @@ const FileDiffCard = memo(function FileDiffCard({
         />
       )
     },
-    [owner, repo, prNumber, onCloseComment, onCloseOpenComment]
+    [
+      owner,
+      repo,
+      prNumber,
+      onCloseComment,
+      onUpdateOpenComment,
+      onCloseOpenComment,
+    ]
   )
 
   return (
@@ -2163,12 +2179,14 @@ function InlineComment({
   repo,
   prNumber,
   comment,
+  onUpdate,
   onClose,
 }: {
   owner: string
   repo: string
   prNumber: number
   comment: PrReviewComment
+  onUpdate?: (comment: PrReviewComment) => void
   onClose: () => void
 }) {
   const { registerAnnotation } = useExpandedFinding()
@@ -2187,6 +2205,7 @@ function InlineComment({
       setBody(next)
       setDraft(next)
       setEditing(false)
+      onUpdate?.({ ...comment, body: next })
       void queryClient.invalidateQueries({
         queryKey: ["reviewComments", owner, repo, prNumber],
       })
