@@ -2,16 +2,13 @@ import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import { messageArrivalTimestamp } from "./messageTimestamps"
 import { humanizeToolName } from "./toolNames"
 import type { BaseMessage, ContentBlock } from "@langchain/core/messages"
-import type {
-  AssembledToolCall,
-  SubagentDiscoverySnapshot,
-} from "@langchain/react"
+import type { AssembledToolCall } from "@langchain/react"
 
 import type {
   Chunk,
   DiffData,
   Message,
-  SubagentInfo,
+  OutputIframeDisplay,
   ToolExecutionChunk,
 } from "./types"
 
@@ -33,8 +30,6 @@ type ToolKind = ToolExecutionChunk["toolKind"]
 
 function toolKind(name: string): ToolKind {
   const lowered = name.toLowerCase()
-  // deepagents' subagent spawner — surfaced as a subagent card in Messages.
-  if (lowered === "task") return "task"
   if (lowered === "slack_thread_reply") return "slack"
   if (lowered === "linear_comment") return "linear"
   if (lowered === "write_todos") return "other"
@@ -52,7 +47,7 @@ function toolKind(name: string): ToolKind {
   return "other"
 }
 
-export function toolTitle(name: string, args: Record<string, unknown>): string {
+function toolTitle(name: string, args: Record<string, unknown>): string {
   const path = args.path ?? args.file_path ?? args.target_file
   if (typeof path === "string" && path.trim()) return `${name} ${path.trim()}`
   const command = args.command
@@ -235,76 +230,6 @@ function toolStatus(
   return "in_progress"
 }
 
-/** Flatten a {@link SubagentDiscoverySnapshot} onto the chunk model. */
-function subagentInfo(snapshot: SubagentDiscoverySnapshot): SubagentInfo {
-  const info: SubagentInfo = {
-    namespace: [...snapshot.namespace],
-    name: snapshot.name,
-    depth: snapshot.depth,
-    parentId: snapshot.parentId,
-  }
-  const startedAt = isoOrUndefined(snapshot.startedAt)
-  if (startedAt) info.startedAt = startedAt
-  const completedAt = isoOrUndefined(snapshot.completedAt)
-  if (completedAt) info.completedAt = completedAt
-  const result = subagentResultText(snapshot.output)
-  if (result) info.result = result
-  const error = snapshot.error?.trim()
-  if (error) info.error = error
-  return info
-}
-
-function isoOrUndefined(value: Date | null | undefined): string | undefined {
-  if (!(value instanceof Date) || Number.isNaN(value.getTime()))
-    return undefined
-  return value.toISOString()
-}
-
-function subagentResultText(output: unknown): string | undefined {
-  if (output == null) return undefined
-  if (typeof output === "string") return output.trim() || undefined
-  const content = messageContent(output)
-  if (content != null) return content.trim() || undefined
-  try {
-    return JSON.stringify(output)
-  } catch {
-    return String(output)
-  }
-}
-
-function messageContent(value: unknown): string | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    return undefined
-  const record = value as Record<string, unknown>
-  for (const source of [record, record.kwargs, record.lc_kwargs]) {
-    if (!source || typeof source !== "object") continue
-    const content = (source as Record<string, unknown>).content
-    if (typeof content === "string") return content
-    if (Array.isArray(content)) {
-      return content
-        .map((block) =>
-          block &&
-          typeof block === "object" &&
-          "text" in block &&
-          typeof block.text === "string"
-            ? block.text
-            : ""
-        )
-        .join("")
-    }
-  }
-  return undefined
-}
-
-/** Map a {@link SubagentDiscoverySnapshot}'s lifecycle to the UI tool status. */
-function subagentStatus(
-  snapshot: SubagentDiscoverySnapshot
-): ToolExecutionChunk["status"] {
-  if (snapshot.status === "complete") return "completed"
-  if (snapshot.status === "error") return "error"
-  return "in_progress"
-}
-
 function toolOutputText(
   assembled: AssembledToolCall | undefined,
   toolMessage: ToolMessage | undefined
@@ -322,6 +247,30 @@ function toolOutputText(
   return text || undefined
 }
 
+function outputIframeDisplay(
+  toolMessage: ToolMessage | undefined
+): OutputIframeDisplay | undefined {
+  const artifact = toolMessage?.artifact
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return undefined
+  }
+  const value = artifact as Record<string, unknown>
+  if (
+    value.type !== "output_iframe" ||
+    typeof value.html !== "string" ||
+    typeof value.title !== "string" ||
+    typeof value.filename !== "string"
+  ) {
+    return undefined
+  }
+  return {
+    type: "output_iframe",
+    html: value.html,
+    title: value.title,
+    filename: value.filename,
+  }
+}
+
 /**
  * Convert the SDK's live projections into the dashboard chunk model so the
  * transcript streams (and hydrates) directly from the SDK instead of a
@@ -335,29 +284,16 @@ function toolOutputText(
  * - `diffData` is derived from the call's own args, which is all that is
  *   available before an edit is applied (what a pending approval renders). What
  *   a turn actually changed comes from git, via the turn-diff endpoint.
- * - `subagents` ({@link SubagentDiscoverySnapshot}[], i.e. `stream.subagents`)
- *   authoritatively identifies `task` calls that spawned a subagent (matched by
- *   `snapshot.id === toolCallId`) and supplies their lifecycle status + the
- *   namespace Messages uses to subscribe to nested activity.
  */
 export function streamMessagesToUi(
   messages: Array<BaseMessage>,
   toolCalls: ReadonlyArray<AssembledToolCall> = [],
-  subagents: ReadonlyMap<string, SubagentDiscoverySnapshot> = new Map(),
   resolveCreatedAt?: (messageId: string) => string | undefined
 ): Array<Message> {
   const toolCallsById = new Map<string, AssembledToolCall>()
   for (const toolCall of toolCalls) {
     const id = toolCall.id || toolCall.callId
     if (id) toolCallsById.set(id, toolCall)
-  }
-
-  // The discovery map is keyed by subagent name (one entry per name), but each
-  // snapshot records the `task` tool-call id that spawned it — so re-index by
-  // that id to correlate a snapshot to the exact `task` chunk that created it.
-  const subagentsByCallId = new Map<string, SubagentDiscoverySnapshot>()
-  for (const snapshot of subagents.values()) {
-    if (snapshot.id) subagentsByCallId.set(snapshot.id, snapshot)
   }
 
   const toolMessagesById = new Map<string, ToolMessage>()
@@ -449,15 +385,10 @@ export function streamMessagesToUi(
         }
         const output = toolOutputText(assembled, toolMessage)
         if (output) chunk.output = output
+        const display = outputIframeDisplay(toolMessage)
+        if (display) chunk.display = display
         const diffData = maybeDiffFromArgs(args)
         if (diffData) chunk.diffData = diffData
-        // When the SDK has discovered the subagent this `task` call spawned, take
-        // its namespace (for scoped nested activity) and authoritative status.
-        const subagent = subagentsByCallId.get(toolCallId)
-        if (subagent) {
-          chunk.subagent = subagentInfo(subagent)
-          chunk.status = subagentStatus(subagent)
-        }
         chunks.push(chunk)
       }
 

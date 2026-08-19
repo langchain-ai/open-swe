@@ -18,7 +18,6 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..dispatch import DASHBOARD_STREAM_MODES
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_INSTRUCTION
 from ..utils.json_types import (
     JsonObject,
@@ -54,14 +53,26 @@ from .options import (
 from .pr_diff import build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
 from .team_settings import get_team_default_model, get_team_fable_enabled
+from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from .user_mappings import email_for_login
 
 logger = logging.getLogger(__name__)
 
+_TTFT_OBSERVER_TASKS: set[asyncio.Task[None]] = set()
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 # Modes required for the v2 event-stream protocol (`POST …/stream/events`).
-_DASHBOARD_STREAM_MODES = DASHBOARD_STREAM_MODES
+# `@langchain/react` subscribes to `messages`, `tools`, `lifecycle`, etc.;
+# legacy `messages-tuple`-only runs emit almost nothing on those channels.
+_DASHBOARD_STREAM_MODES: tuple[str, ...] = (
+    "values",
+    "updates",
+    "messages",
+    "messages-tuple",
+    "tools",
+    "checkpoints",
+    "events",
+)
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
@@ -671,6 +682,7 @@ _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+_DISCOVERY_HISTORY_LIMIT = 5
 
 
 def _thread_id(thread: ThreadLike) -> str | None:
@@ -1626,9 +1638,6 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
-    # Subagents run as subgraphs; without this the server streams only the top
-    # graph and their nested tool calls never reach the transcript.
-    params.setdefault("stream_subgraphs", True)
     params["config"] = {**client_config, "configurable": merged_configurable}
     params["metadata"] = run_metadata
     command["params"] = params
@@ -2308,6 +2317,41 @@ async def _stream_thread_events(
         logger.warning("LangGraph stream/events proxy closed for %s", thread_id, exc_info=True)
 
 
+async def _observe_dashboard_run_ttft(
+    thread_id: str,
+    run_id: str,
+    started_at_ms: int,
+) -> None:
+    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/stream"
+    headers = _langgraph_proxy_headers(accept="text/event-stream")
+    headers["Last-Event-ID"] = "-1"
+    detector = AssistantTextEventDetector(run_id)
+    try:
+        async with httpx.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
+            async with client.stream(
+                "GET",
+                url,
+                headers=headers,
+                params={"stream_mode": "messages"},
+            ) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
+                    for observation in detector.feed(chunk):
+                        await record_dashboard_thread_ttft(
+                            observation,
+                            thread_id=thread_id,
+                            started_at_ms=started_at_ms,
+                        )
+                        return
+    except Exception:
+        logger.warning(
+            "Dashboard TTFT observer closed for run %s on thread %s",
+            run_id,
+            thread_id,
+            exc_info=True,
+        )
+
+
 async def proxy_dashboard_thread_commands(
     thread_id: str,
     login: str,
@@ -2316,6 +2360,7 @@ async def proxy_dashboard_thread_commands(
     email: str | None = None,
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
+    received_at_ms = _now_ms()
     _require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
@@ -2368,14 +2413,31 @@ async def proxy_dashboard_thread_commands(
     )
     outgoing = json.dumps(enriched).encode()
 
+    if method == "run.start":
+        params = enriched.get("params")
+        if isinstance(params, dict):
+            run_metadata = params.get("metadata")
+            if not isinstance(run_metadata, dict):
+                run_metadata = {}
+                params["metadata"] = run_metadata
+            run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
+            outgoing = json.dumps(enriched).encode()
+
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=outgoing, headers=headers)
 
-    run_start_succeeded = parsed.get("method") == "run.start" and response.status_code in {
-        200,
-        202,
-        204,
-    }
+    try:
+        response_payload = json.loads(response.content) if response.content else None
+    except json.JSONDecodeError:
+        response_payload = None
+    run_id = _extract_run_id_from_command_response(response_payload)
+    run_start_succeeded = (
+        parsed.get("method") == "run.start"
+        and response.status_code in {200, 202, 204}
+        and isinstance(response_payload, dict)
+        and response_payload.get("type") == "success"
+        and run_id is not None
+    )
     if run_start_succeeded and not creating:
         try:
             await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
@@ -2384,13 +2446,17 @@ async def proxy_dashboard_thread_commands(
                 "Failed to update Slack message for dashboard handoff on %s", thread_id
             )
 
-    if run_start_succeeded and response.content:
+    if run_start_succeeded and run_id is not None:
+        task = asyncio.create_task(
+            _observe_dashboard_run_ttft(
+                thread_id,
+                run_id,
+                received_at_ms,
+            )
+        )
+        _TTFT_OBSERVER_TASKS.add(task)
+        task.add_done_callback(_TTFT_OBSERVER_TASKS.discard)
         try:
-            payload = json.loads(response.content)
-        except json.JSONDecodeError:
-            payload = None
-        run_id = _extract_run_id_from_command_response(payload)
-        if run_id:
             await langgraph_client().threads.update(
                 thread_id=thread_id,
                 metadata={
@@ -2399,7 +2465,13 @@ async def proxy_dashboard_thread_commands(
                     "updated_at_ms": _now_ms(),
                 },
             )
-
+        except Exception:
+            logger.warning(
+                "Failed to persist started dashboard run %s on thread %s",
+                run_id,
+                thread_id,
+                exc_info=True,
+            )
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 
@@ -2414,10 +2486,21 @@ async def proxy_dashboard_thread_history(
 ) -> tuple[int, bytes, str | None]:
     _require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
+    try:
+        payload = json.loads(body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(400, "history body must be a JSON object") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "history body must be a JSON object")
+    limit = payload.get("limit", _DISCOVERY_HISTORY_LIMIT)
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise HTTPException(400, "history limit must be a positive integer")
+    if not any(payload.get(key) for key in ("before", "checkpoint", "metadata")):
+        payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = _langgraph_proxy_headers(content_type=content_type)
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
-        response = await client.post(url, content=body or b"{}", headers=headers)
+        response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 

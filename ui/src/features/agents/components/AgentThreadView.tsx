@@ -165,7 +165,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     const live = streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
-      stream.subagents,
       messageArrivalTimestamp
     )
     if (live.length > 0) return live
@@ -175,7 +174,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     // lands in `stream.messages`.
     if (thread.messages.length > 0) return thread.messages
     return live
-  }, [stream.messages, stream.toolCalls, stream.subagents, thread.messages])
+  }, [stream.messages, stream.toolCalls, thread.messages])
 
   const isStreaming = thread.status === "running" || stream.isLoading
   const activeRun = useMemo(

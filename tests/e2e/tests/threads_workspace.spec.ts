@@ -6,7 +6,10 @@ import {
   type Page,
 } from "@playwright/test";
 
-const USER = { login: "alice", email: "alice@example.com" };
+const USER = {
+  login: "threads-workspace-e2e",
+  email: "threads-workspace-e2e@example.com",
+};
 const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 const SAME_ORIGIN_HEADERS = { origin: BASE_URL, referer: `${BASE_URL}/` };
 const WORKSPACE_QUERY = "E2E Workspace";
@@ -159,6 +162,29 @@ function workspaceThreads(): Array<ThreadSeed> {
   ];
 }
 
+function resolvedOverflowThreads(): Array<ThreadSeed> {
+  const now = Date.now();
+  return Array.from({ length: 21 }, (_, index) => {
+    const number = index + 1;
+    return {
+      id: `74000000-0000-4000-8000-${String(number).padStart(12, "0")}`,
+      metadata: baseMetadata(
+        now,
+        `E2E Workspace Resolved overflow ${String(number).padStart(2, "0")}`,
+        100 + index * 100,
+        {
+          latest_run_id: `e2e-run-resolved-overflow-${number}`,
+          latest_run_status: "success",
+          last_viewed_run_id: `e2e-run-resolved-overflow-${number}`,
+          last_viewed_at_ms: now - (50 + index * 100),
+          resolved: true,
+          resolved_at_ms: now - (25 + index * 100),
+        },
+      ),
+    };
+  });
+}
+
 function automationThreads(): Array<ThreadSeed> {
   const now = Date.now();
   return [
@@ -227,10 +253,35 @@ function paginationThreads(): Array<ThreadSeed> {
   });
 }
 
+// Earlier specs leave their own threads behind for this user, and the sidebar
+// counts every one of them — so start from an empty workspace.
+async function purgeOwnedThreads(request: APIRequestContext) {
+  for (const owner of [
+    { github_login: USER.login },
+    { triggering_user_email: USER.email },
+  ]) {
+    for (let page = 0; page < 20; page += 1) {
+      const searchResponse = await request.post("/threads/search", {
+        data: { metadata: owner, limit: 100, offset: 0 },
+      });
+      expect(searchResponse.ok(), await searchResponse.text()).toBeTruthy();
+      const threads = (await searchResponse.json()) as Array<{
+        thread_id: string;
+      }>;
+      if (threads.length === 0) break;
+      for (const thread of threads) {
+        const response = await request.delete(`/threads/${thread.thread_id}`);
+        expect([200, 204, 404]).toContain(response.status());
+      }
+    }
+  }
+}
+
 async function seedThreads(
   request: APIRequestContext,
   threads: Array<ThreadSeed>,
 ) {
+  await purgeOwnedThreads(request);
   for (const thread of threads) {
     const resetResponse = await request.delete(`/threads/${thread.id}`);
     expect([200, 204, 404]).toContain(resetResponse.status());
@@ -348,6 +399,10 @@ function waitForThreadsPage(page: Page, expected: Record<string, string>) {
 
 function boardColumn(main: Locator, name: string): Locator {
   return main.locator(`section:has(h2:text-is("${name}"))`);
+}
+
+function sidebarGroup(sidebar: Locator, name: string): Locator {
+  return sidebar.locator(`div:has(> button > span:text-is("${name}"))`);
 }
 
 function sourceFilter(main: Locator): Locator {
@@ -525,6 +580,62 @@ test.describe("threads workspace", () => {
     await expect(main).not.toContainText(TITLES.running);
   });
 
+  test("shows the board focus groups in the sidebar", async ({
+    page,
+    request,
+  }, testInfo) => {
+    await seedThreads(request, [
+      ...workspaceThreads(),
+      ...resolvedOverflowThreads(),
+    ]);
+    await loginAs(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/agents/threads");
+
+    const sidebar = page.locator("[data-sidebar-frame]");
+    await sidebar
+      .getByRole("button", { name: "Group and filter threads" })
+      .click();
+    await page
+      .getByRole("menuitemradio", { name: "Focus", exact: true })
+      .click();
+    await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+    await page
+      .getByRole("menuitemcheckbox", { name: "Include resolved", exact: true })
+      .click();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+
+    const attention = sidebarGroup(sidebar, "Needs attention");
+    const progress = sidebarGroup(sidebar, "In progress");
+    const ready = sidebarGroup(sidebar, "Ready");
+    const done = sidebarGroup(sidebar, "Done");
+
+    await expect(attention).toContainText(TITLES.attention);
+    await expect(attention).toContainText(TITLES.error);
+    await expect(attention).toContainText(TITLES.interrupted);
+    await expect(attention.locator("> button > span").last()).toHaveText("3");
+    await expect(progress).toContainText(TITLES.running);
+    await expect(progress.locator("> button > span").last()).toHaveText("1");
+    await expect(ready).toContainText(TITLES.ready);
+    await expect(ready.locator("> button > span").last()).toHaveText("1");
+    await expect(done).toContainText("E2E Workspace Resolved overflow 01");
+    await expect(done.locator("> button > span").last()).toHaveText("20+");
+    const showAll = done.getByRole("link", { name: "Show all" });
+    await expect(showAll).toBeVisible();
+    await expect(showAll).toHaveAttribute(
+      "href",
+      /\/agents\/threads\?.*resolved=true.*group=focus/,
+    );
+
+    const screenshotPath = testInfo.outputPath("focus-grouping-sidebar.png");
+    await sidebar.screenshot({ path: screenshotPath });
+    await testInfo.attach("focus-grouping-sidebar", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
+  });
+
   test("persists layout and column order and resolves threads", async ({
     page,
     request,
@@ -569,7 +680,19 @@ test.describe("threads workspace", () => {
     await expect(slackGroup).not.toContainText(TITLES.attention);
 
     await main.getByRole("button", { name: "Board" }).click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("layout"))
+      .toBe("board");
     await main.getByLabel("Group by").selectOption("focus");
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("group"))
+      .toBe("focus");
+    await expectBoardOrder(main, [
+      "Needs attention",
+      "In progress",
+      "Ready",
+      "Done",
+    ]);
     await main
       .getByRole("button", { name: "Move Needs attention right" })
       .click();

@@ -78,6 +78,8 @@ test.describe("Plan review (HTTP comments)", () => {
     ).toBeVisible();
 
     await approve.click();
+    await expect(ready).toContainText("Selected: Approve & implement");
+    await expect(ready.getByRole("button")).toHaveCount(0);
 
     const reply = page
       .locator(".msg.bot")

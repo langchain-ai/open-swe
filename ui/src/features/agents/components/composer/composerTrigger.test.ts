@@ -44,6 +44,15 @@ describe("detectComposerTrigger", () => {
     expect(detectComposerTrigger("see src/a/b", 11)).toBeNull()
   })
 
+  it("treats a whitespace-delimited dollar token as a skill picker", () => {
+    expect(detectComposerTrigger("use $baby-sit", 13)).toEqual({
+      kind: "skill-command",
+      query: "baby-sit",
+      rangeStart: 4,
+      rangeEnd: 13,
+    })
+  })
+
   it("closes the trigger once the cursor moves off the token", () => {
     expect(detectComposerTrigger("@src/app.tsx done", 17)).toBeNull()
   })

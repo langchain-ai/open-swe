@@ -330,7 +330,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .toBeGreaterThan(2);
   });
 
-  test("streams after thread navigation and foreground recovery", async ({
+  test("keeps the transcript mounted after navigation and refocus", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -347,17 +347,28 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       page.getByRole("link", { name: "Add greet() helper" }).first(),
     ).toBeVisible();
 
-    const hydrated = page.waitForResponse((response) => {
-      const path = new URL(response.url()).pathname;
-      return (
-        response.request().method() === "GET" &&
-        path === `/dashboard/api/threads/${threadId}/state`
+    const foregroundHydration = page
+      .waitForRequest(
+        (request) => {
+          const path = new URL(request.url()).pathname;
+          return (
+            request.method() === "GET" &&
+            path === `/dashboard/api/threads/${threadId}/state`
+          );
+        },
+        { timeout: 1_000 },
+      )
+      .then(
+        () => true,
+        () => false,
       );
-    });
     await page.evaluate(() =>
       document.dispatchEvent(new Event("visibilitychange")),
     );
-    expect((await hydrated).ok()).toBeTruthy();
+    expect(await foregroundHydration).toBe(false);
+    await expect(
+      page.getByRole("link", { name: "Add greet() helper" }).first(),
+    ).toBeVisible();
 
     await typeIntoComposer(page, "Can you also add a docstring?");
     await expect(

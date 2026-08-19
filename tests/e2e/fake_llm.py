@@ -17,6 +17,7 @@ from typing import Any
 
 from e2e_env import (
     BASE_BRANCH,
+    FAKE_GITHUB_API,
     FEATURE_BRANCH,
     FEATURE_FILE,
     OWNER,
@@ -98,6 +99,27 @@ git push origin {SECOND_FEATURE_BRANCH}
 echo BOTH_PUSHED_OK
 """.strip()
 
+_IFRAME_HTML_PATH = "/workspace/iframe-output.html"
+_IFRAME_DATA_PATH = "/workspace/iframe-data.json"
+_IFRAME_CSS_PATH = "/workspace/iframe-theme.css"
+_IFRAME_HTML = """<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Iframe E2E Preview</title></head>
+<body>
+  <main>
+    <h1>Iframe preview</h1>
+    <p id="output-data">Loading bundled data...</p>
+  </main>
+  <script>
+    const data = JSON.parse(window.__FILES__["data.json"]);
+    document.getElementById("output-data").textContent = data.label;
+  </script>
+</body>
+</html>
+"""
+_IFRAME_DATA = '{"label":"Bundled data loaded"}'
+_IFRAME_CSS = "body { min-height: 420px; margin: 0; color: rebeccapurple; }"
+
 _DESKTOP_PR_PAYLOAD = json.dumps(
     {
         "head": FEATURE_BRANCH,
@@ -121,7 +143,7 @@ curl --fail --silent --show-error \
   --request POST \
   --header 'content-type: application/json' \
   --data '{_DESKTOP_PR_PAYLOAD}' \
-  "$E2E_FAKE_GITHUB_API/repos/{OWNER}/{REPO}/pulls"
+  "{FAKE_GITHUB_API}/repos/{OWNER}/{REPO}/pulls"
 """.strip()
 
 # The system prompt of the most recent model call, so specs can assert what the
@@ -174,10 +196,6 @@ def _tool_step(content: str, name: str, args: ToolArgs, call_id: str) -> StepSpe
 
 def _dynamic_step(factory: StepFactory) -> StepSpec:
     return StepSpec(factory=factory)
-
-
-def _parallel_tool_step(content: str, calls: tuple[ToolCallSpec, ...]) -> StepSpec:
-    return StepSpec(content=content, tool_calls=calls)
 
 
 def _render_step(step: StepSpec, messages: list[BaseMessage]) -> AIMessage:
@@ -399,88 +417,43 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
 
 
-SUBAGENT_TASKS: dict[str, str] = {
-    "scout": "Scout the repository layout and report which files define the greet helper.",
-    "auditor": "Audit the repository for missing tests and report what is uncovered.",
-}
-
-SCOUT_RESULT = "Scout done: greet() lives in the feature module; no other definitions found."
-AUDITOR_RESULT = "Audit done: the greet() helper has no test coverage."
-
-# Each nested `execute` sleeps so the parent's card is observably `running`
-# before it settles — the transition is what the E2E asserts on.
-_SCOUT_SCRIPT = """
-set -e
-sleep 15
-echo SCOUTED
-""".strip()
-
-_AUDIT_SCRIPT = """
-set -e
-sleep 25
-echo AUDITED
-""".strip()
-
-
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
-    "subagents": (
+    "iframe": (
         _tool_step(
-            "Acknowledging before fanning out.",
+            "Acknowledging the iframe preview request.",
             "slack_thread_reply",
-            {"message": "On it — fanning out to a couple of subagents."},
-            "call-subagents-ack",
-        ),
-        _parallel_tool_step(
-            "Delegating the scouting and the audit in parallel.",
-            (
-                _tool_call(
-                    "task",
-                    {
-                        "subagent_type": "general-purpose",
-                        "description": SUBAGENT_TASKS["scout"],
-                    },
-                    "call-task-scout",
-                ),
-                _tool_call(
-                    "task",
-                    {
-                        "subagent_type": "general-purpose",
-                        "description": SUBAGENT_TASKS["auditor"],
-                    },
-                    "call-task-auditor",
-                ),
-            ),
+            {"message": "Preparing the iframe preview now."},
+            "call-iframe-ack",
         ),
         _tool_step(
-            "Reporting what the subagents found.",
-            "slack_thread_reply",
-            {"message": "Both subagents finished — the greet() helper is untested."},
-            "call-subagents-reply",
-        ),
-    ),
-    "subagent:scout": (
-        _tool_step(
-            "Listing the repository.",
-            "execute",
-            {"command": _SCOUT_SCRIPT},
-            "call-scout-ls",
+            "Writing the iframe HTML.",
+            "write_file",
+            {"file_path": _IFRAME_HTML_PATH, "content": _IFRAME_HTML},
+            "call-iframe-html",
         ),
         _tool_step(
-            "Grepping for the helper.",
-            "execute",
-            {"command": "grep -r greet . || true"},
-            "call-scout-grep",
+            "Writing the iframe data.",
+            "write_file",
+            {"file_path": _IFRAME_DATA_PATH, "content": _IFRAME_DATA},
+            "call-iframe-data",
         ),
-        StepSpec(content=SCOUT_RESULT),
-    ),
-    "subagent:auditor": (
         _tool_step(
-            "Looking for tests.",
-            "execute",
-            {"command": _AUDIT_SCRIPT},
-            "call-audit-find",
+            "Writing the iframe stylesheet.",
+            "write_file",
+            {"file_path": _IFRAME_CSS_PATH, "content": _IFRAME_CSS},
+            "call-iframe-css",
         ),
-        StepSpec(content=AUDITOR_RESULT),
+        _tool_step(
+            "Rendering the iframe preview.",
+            "output_iframe",
+            {
+                "path": _IFRAME_HTML_PATH,
+                "title": "Iframe E2E Preview",
+                "files": {"data.json": _IFRAME_DATA_PATH, "theme.css": _IFRAME_CSS_PATH},
+            },
+            "call-output-iframe",
+        ),
+        StepSpec(content="Rendered the iframe preview."),
     ),
     "desktop": (
         _tool_step(
@@ -579,23 +552,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_multi_pr_reply_step),
     ),
-    "move": (
-        _tool_step(
-            "Moving the current Open SWE thread to another Slack channel.",
-            "slack_move_thread",
-            {
-                "message": "Continue the existing Open SWE task in this thread.",
-                "channel_id": "C_TARGET",
-            },
-            "call-move",
-        ),
-        _tool_step(
-            "Confirming the moved thread in its new location.",
-            "slack_thread_reply",
-            {"message": "Moved this Open SWE thread and preserved its state."},
-            "call-move-reply",
-        ),
-    ),
     "breakout": (
         _tool_step(
             "Starting a separate Slack thread for the breakout task.",
@@ -611,6 +567,17 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_thread_reply",
             {"message": "I started a separate Open SWE thread for that aspect."},
             "call-breakout-reply",
+        ),
+    ),
+    "move": (
+        _tool_step(
+            "Moving the Slack thread to its destination channel.",
+            "slack_move_thread",
+            {
+                "message": "Continue the existing Open SWE task in this channel.",
+                "channel_id": "C_TARGET",
+            },
+            "call-move",
         ),
     ),
     "plan": (
@@ -656,17 +623,8 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
 }
 
 
-def _subagent_script_name(first_text: str) -> str | None:
-    """Route a nested loop to its script by the task description it was handed."""
-    for name, description in SUBAGENT_TASKS.items():
-        if description in first_text:
-            return f"subagent:{name}"
-    return None
-
-
-def _is_subagent_request(text: str) -> bool:
-    t = text.lower()
-    return "fan out" in t or "subagent" in t
+def _is_iframe_request(text: str) -> bool:
+    return "E2E_IFRAME" in text
 
 
 def _is_plan_request(text: str) -> bool:
@@ -701,9 +659,7 @@ def _is_revision(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
-    ScriptRule(
-        "subagents", lambda ctx: ctx.human_count <= 1 and _is_subagent_request(ctx.first_text)
-    ),
+    ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(
         "desktop",
         lambda ctx: ctx.human_count <= 1 and "E2E_DESKTOP_LOCAL" in ctx.first_text,
@@ -723,15 +679,13 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         "multi_pr",
         lambda ctx: ctx.human_count <= 1 and "E2E_MULTI_PR" in f"{ctx.first_text}\n{ctx.last_text}",
     ),
+    ScriptRule("move", lambda ctx: ctx.human_count <= 1 and _is_move_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: ctx.human_count <= 1),
     ScriptRule("followup", lambda _ctx: True),
 )
 
 
 def _script_for(context: ScriptContext) -> tuple[StepSpec, ...]:
-    nested = _subagent_script_name(context.first_text)
-    if nested is not None:
-        return SCRIPT_LIBRARY[nested]
     for rule in SCRIPT_RULES:
         if rule.predicate(context):
             return SCRIPT_LIBRARY[rule.name]
