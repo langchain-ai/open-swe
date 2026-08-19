@@ -147,7 +147,36 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       await maybeLater.click();
     }
 
+    const cloudSource = page.getByRole("button", {
+      name: /Cloud threads, \d+/,
+    });
+    const localSource = page.getByRole("button", {
+      name: /This Mac threads, \d+/,
+    });
+    await expect(localSource).toHaveAttribute("aria-pressed", "true");
+
+    await cloudSource.click();
+    await expect(cloudSource).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      page.getByRole("button", { name: "Cloud", exact: true }),
+    ).toBeVisible();
+    const cloudScreenshot = testInfo.outputPath("desktop-cloud-threads.png");
+    await page.screenshot({ path: cloudScreenshot, fullPage: true });
+    await testInfo.attach("desktop-cloud-threads", {
+      path: cloudScreenshot,
+      contentType: "image/png",
+    });
+
+    await localSource.click();
+    await expect(localSource).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByText(/This Mac · demo/)).toBeVisible();
+    const localScreenshot = testInfo.outputPath("desktop-local-threads.png");
+    await page.screenshot({ path: localScreenshot, fullPage: true });
+    await testInfo.attach("desktop-local-threads", {
+      path: localScreenshot,
+      contentType: "image/png",
+    });
+
     await typeIntoComposer(
       page,
       "E2E_DESKTOP_LOCAL please add a greet() helper and open a PR",
