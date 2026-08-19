@@ -137,6 +137,18 @@ export function useAgentSkills() {
     ...personal,
     personal: personal.data ?? [],
     organization: organization.data ?? [],
+    refetch: async () => {
+      const [personalResult, organizationResult] = await Promise.all([
+        personal.refetch(),
+        organization.refetch(),
+      ])
+      if (personalResult.error) throw personalResult.error
+      if (organizationResult.error) throw organizationResult.error
+      return {
+        personal: personalResult.data ?? [],
+        organization: organizationResult.data ?? [],
+      }
+    },
     data: [
       ...new Map(
         [
