@@ -97,6 +97,7 @@ from .middleware import (
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
+    WorkflowPushGuardMiddleware,
     WorkingRepoMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
@@ -1482,7 +1483,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         **subagent_model_kwargs,
     )
     subagent_tools = [
-        tool for tool in static_tools if tool not in {background_execute, background_task}
+        tool
+        for tool in static_tools
+        if tool is not background_execute and tool is not background_task
     ]
     title_model = _make_model_or_defer(
         title_model_id,
@@ -1546,6 +1549,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     max_delay=10.0,
                 ),
                 PullRequestCreationGuardMiddleware(),
+                WorkflowPushGuardMiddleware(),
                 refresh_github_proxy_before_model,
                 *([] if stop_summary_mode else [check_message_queue_before_model]),
                 TimeoutWrapupMiddleware(),

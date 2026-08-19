@@ -46,9 +46,29 @@ def test_background_command_returns_while_running_then_caps_output() -> None:
         assert state["exit_code"] == 0
         assert "bytes omitted" in state["output"]
         assert state["output"].endswith("done\n")
-        assert len(state["output"].encode()) < 1_049_000
+        assert len(state["output"].encode()) < 65_600
     finally:
         shutil.rmtree(task_dir, ignore_errors=True)
+
+
+def test_background_command_active_limit() -> None:
+    task_ids = [f"test-{uuid.uuid4().hex}" for _ in range(4)]
+    try:
+        for task_id in task_ids:
+            task_dir = Path(TASK_ROOT, task_id)
+            task_dir.mkdir(parents=True)
+            task_dir.joinpath("state.json").write_text('{"status": "running"}')
+        result = subprocess.run(
+            ["/bin/sh", "-c", _launch_command(f"test-{uuid.uuid4().hex}", "true", 10)],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        assert result.returncode == 72
+        assert "active task limit reached" in result.stderr
+    finally:
+        for task_id in task_ids:
+            shutil.rmtree(Path(TASK_ROOT, task_id), ignore_errors=True)
 
 
 def test_background_command_timeout_and_stop() -> None:
@@ -84,15 +104,17 @@ async def test_monitor_queues_one_claimed_completion_for_busy_thread() -> None:
         "notification": "pending",
     }
     backend = AsyncMock()
-    backend.aexecute.return_value = SimpleNamespace(
-        output=json.dumps({"tasks": [task]}), exit_code=0
-    )
+    backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     client = AsyncMock()
     client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-1"}}
 
     with (
         patch("agent.background_tasks._client", return_value=client),
         patch("agent.background_tasks.create_sandbox", AsyncMock(return_value=backend)),
+        patch(
+            "agent.background_tasks._list_tasks",
+            AsyncMock(side_effect=[[task], [{**task, "notification": "done"}]]),
+        ),
         patch("agent.background_tasks._claim", AsyncMock(return_value=True)),
         patch("agent.background_tasks._mark_delivered", AsyncMock()),
         patch("agent.background_tasks.get_thread_active_status", AsyncMock(return_value=True)),

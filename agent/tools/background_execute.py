@@ -15,6 +15,7 @@ from ..utils.sandbox_state import SANDBOX_BACKENDS
 logger = logging.getLogger(__name__)
 
 TASK_ROOT = "/tmp/open-swe-background-tasks"
+LAUNCH_LOCK = f"{TASK_ROOT}/.launch-lock"
 DEFAULT_TIMEOUT_SECONDS = 3600
 MAX_TIMEOUT_SECONDS = 86_400
 MAX_ACTIVE_TASKS = 4
@@ -45,7 +46,8 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
             pass
         limit = {MAX_OUTPUT_BYTES}
         timeout = {timeout}
-        started = time.time()
+        started_at = time.time()
+        started = time.monotonic()
         head = bytearray()
         tail = bytearray()
         omitted = 0
@@ -57,7 +59,7 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
                 "pid": pid,
                 "runner_pid": os.getpid(),
                 "exit_code": exit_code,
-                "started_at": started,
+                "started_at": started_at,
                 "finished_at": time.time() if status != "running" else None,
                 "output_path": output_path,
             }}
@@ -111,21 +113,27 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
                 last_flush = time.time()
             if os.path.exists(stop_path):
                 status = "stopped"
-            elif time.time() - started >= timeout:
+            elif time.monotonic() - started >= timeout:
                 status = "timed_out"
             elif process.poll() is not None:
                 status = "completed" if process.returncode == 0 else "failed"
-            if status in {{"stopped", "timed_out"}} and process.poll() is None:
+            if status in {{"stopped", "timed_out"}}:
                 try:
                     os.killpg(process.pid, signal.SIGTERM)
                     process.wait(2)
-                except subprocess.TimeoutExpired:
+                except (subprocess.TimeoutExpired, ProcessLookupError):
+                    pass
+                try:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
         if process.stdout:
-            while chunk := process.stdout.read(65536):
-                capture(chunk)
+            os.set_blocking(process.stdout.fileno(), False)
+            try:
+                while chunk := os.read(process.stdout.fileno(), 65536):
+                    capture(chunk)
+            except BlockingIOError:
+                pass
         exit_code = process.wait()
         flush()
         write_state(status, process.pid, exit_code)
@@ -136,15 +144,21 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
 def _launch_command(task_id: str, command: str, timeout: int) -> str:
     task_dir = f"{TASK_ROOT}/{task_id}"
     runner = _encoded(_runner(task_id, command, timeout))
+    lock = shlex.quote(LAUNCH_LOCK)
     return (
         "command -v setsid >/dev/null || { echo 'background execution requires setsid' >&2; exit 69; }; "
         f"mkdir -p {shlex.quote(TASK_ROOT)}; "
+        f"acquired=; for _ in 1 2 3 4 5 6 7 8 9 10; do mkdir {lock} 2>/dev/null && acquired=1 && break; sleep .1; done; "
+        "[ \"$acquired\" ] || { echo 'background launch is busy' >&2; exit 71; }; "
+        f"trap 'rmdir {lock}' 0; active=0; "
+        f'for state in {shlex.quote(TASK_ROOT)}/*/state.json; do [ -f "$state" ] || continue; grep -q \'"status": "running"\' "$state" && active=$((active + 1)); done; '
+        f"[ \"$active\" -lt {MAX_ACTIVE_TASKS} ] || {{ echo 'active task limit reached' >&2; exit 72; }}; "
         f"mkdir {shlex.quote(task_dir)} || exit 73; "
         f"printf %s {shlex.quote(runner)} | base64 -d > {shlex.quote(task_dir + '/runner.py')}; "
         f"setsid python3 {shlex.quote(task_dir + '/runner.py')} </dev/null >/dev/null 2>&1 & "
         f"for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f {shlex.quote(task_dir + '/state.json')} ] && break; sleep .1; done; "
         f"[ -f {shlex.quote(task_dir + '/state.json')} ] || {{ echo 'background runner did not start' >&2; exit 70; }}; "
-        f"cat {shlex.quote(task_dir + '/state.json')}"
+        f"rmdir {lock}; trap - 0; cat {shlex.quote(task_dir + '/state.json')}"
     )
 
 
@@ -164,21 +178,20 @@ def _control_script(action: str, task_id: str | None) -> str:
             except (FileNotFoundError, json.JSONDecodeError):
                 return None
             if state.get("status") == "running":
-                pid = state.get("pid")
                 try:
                     os.kill(state.get("runner_pid"), 0)
-                    os.killpg(pid, 0)
                 except (ProcessLookupError, PermissionError, TypeError):
-                    try:
-                        os.killpg(pid, signal.SIGTERM)
-                    except (ProcessLookupError, PermissionError, TypeError):
-                        pass
-                    state["status"] = "lost"
-                    state["finished_at"] = time.time()
-                    tmp = path + ".tmp"
-                    with open(tmp, "w") as handle:
-                        json.dump(state, handle)
-                    os.replace(tmp, path)
+                    if time.time() - os.path.getmtime(path) >= 5:
+                        try:
+                            os.killpg(state.get("pid"), signal.SIGTERM)
+                        except (ProcessLookupError, PermissionError, TypeError):
+                            pass
+                        state["status"] = "lost"
+                        state["finished_at"] = time.time()
+                        tmp = path + ".tmp"
+                        with open(tmp, "w") as handle:
+                            json.dump(state, handle)
+                        os.replace(tmp, path)
             state["duration_seconds"] = round(
                 (state.get("finished_at") or time.time()) - state.get("started_at", time.time()), 2
             )
@@ -190,7 +203,7 @@ def _control_script(action: str, task_id: str | None) -> str:
                     data = handle.read()
                 if len(data) > {MAX_INLINE_OUTPUT_BYTES}:
                     half = {MAX_INLINE_OUTPUT_BYTES} // 2
-                    data = data[:half] + f"\n[{{len(data) - half * 2}} inline bytes omitted]\n".encode() + data[-half:]
+                    data = data[:half] + f"\\n[{{len(data) - half * 2}} inline bytes omitted]\\n".encode() + data[-half:]
                 state["output"] = data.decode(errors="replace")
             except (FileNotFoundError, KeyError):
                 state["output"] = ""
@@ -199,6 +212,10 @@ def _control_script(action: str, task_id: str | None) -> str:
         if action == "list":
             states = []
             if os.path.isdir(root):
+                for lock, stale_after in ((".launch-lock", 30), ("monitor.lock", 300)):
+                    path = os.path.join(root, lock)
+                    if os.path.isdir(path) and time.time() - os.path.getmtime(path) > stale_after:
+                        shutil.rmtree(path, ignore_errors=True)
                 for name in sorted(os.listdir(root)):
                     task_dir = os.path.join(root, name)
                     state = load(os.path.join(task_dir, "state.json"))
@@ -212,6 +229,7 @@ def _control_script(action: str, task_id: str | None) -> str:
                             shutil.rmtree(claim, ignore_errors=True)
                         state["notification"] = "done" if os.path.isdir(done) else "claimed" if os.path.isdir(claim) else "pending"
                         state.pop("pid", None)
+                        state.pop("runner_pid", None)
                         states.append(state)
             print(json.dumps({{"tasks": states}}))
             sys.exit()
@@ -231,8 +249,14 @@ def _control_script(action: str, task_id: str | None) -> str:
                 os.killpg(state["pid"], signal.SIGTERM)
             except (ProcessLookupError, PermissionError, KeyError, TypeError):
                 pass
-            state["status"] = "stopped"
+            deadline = time.time() + 3
+            while state.get("status") == "running" and time.time() < deadline:
+                time.sleep(.1)
+                state = load(state_path) or state
+            if state.get("status") == "running":
+                state["status"] = "stop_requested"
         state.pop("pid", None)
+        state.pop("runner_pid", None)
         print(json.dumps(output(state)))
         """
     ).strip()
@@ -281,15 +305,23 @@ async def background_execute(
         active = sum(task.get("status") == "running" for task in current.get("tasks", []))
         if active >= MAX_ACTIVE_TASKS:
             return {"success": False, "error": "active task limit reached"}
+        from ..background_tasks import MONITOR_LOCK, ensure_background_task_cron
+
+        wait_for_monitor = f"while [ -d {shlex.quote(MONITOR_LOCK)} ]; do sleep .1; done"
+        wait = await backend.aexecute(wait_for_monitor, timeout=15)
+        if getattr(wait, "exit_code", None) != 0:
+            raise RuntimeError("background-task monitor is busy")
         task_id = str(uuid.uuid4())
         state = await _execute(backend, _launch_command(task_id, command, timeout))
-        from ..background_tasks import ensure_background_task_cron
-
-        try:
-            await ensure_background_task_cron(thread_id)
-        except Exception:
-            logger.warning("Failed to schedule background-task monitor", exc_info=True)
-            state["warning"] = "automatic completion monitoring could not be scheduled"
+        wait = await backend.aexecute(wait_for_monitor, timeout=15)
+        if getattr(wait, "exit_code", None) != 0:
+            state["warning"] = "automatic completion monitoring is busy"
+        else:
+            try:
+                await ensure_background_task_cron(thread_id)
+            except Exception:
+                logger.warning("Failed to schedule background-task monitor", exc_info=True)
+                state["warning"] = "automatic completion monitoring could not be scheduled"
         return {"success": True, **state}
     except Exception as exc:
         logger.exception("Failed to start background command")

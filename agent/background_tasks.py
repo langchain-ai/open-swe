@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 CRON_KIND = "background_tasks"
 CRON_SCHEDULE = "* * * * *"
 TERMINAL_STATES = {"completed", "failed", "timed_out", "stopped", "lost"}
+MONITOR_LOCK = f"{TASK_ROOT}/monitor.lock"
 
 
 def _client():
@@ -94,7 +95,7 @@ def _dispatch_config(metadata: dict[str, Any], thread_id: str) -> dict[str, Any]
 async def _claim(backend: Any, task_id: str) -> bool:
     claim = f"{TASK_ROOT}/{task_id}/notify.claim"
     response = await backend.aexecute(f"mkdir {shlex.quote(claim)} 2>/dev/null", timeout=10)
-    return getattr(response, "exit_code", None) in (0, None)
+    return getattr(response, "exit_code", None) == 0
 
 
 async def _unclaim(backend: Any, task_id: str) -> None:
@@ -110,8 +111,17 @@ async def _mark_delivered(backend: Any, task_id: str) -> None:
         f"mv {shlex.quote(task_dir + '/notify.claim')} {shlex.quote(task_dir + '/notify.done')}",
         timeout=10,
     )
-    if getattr(response, "exit_code", None) not in (0, None):
+    if getattr(response, "exit_code", None) != 0:
         raise RuntimeError("failed to persist background-task notification")
+
+
+async def _list_tasks(backend: Any) -> list[dict[str, Any]]:
+    script = _control_script("list", None)
+    result = await _execute(
+        backend, f"printf %s {shlex.quote(_encoded(script))} | base64 -d | python3"
+    )
+    tasks = result.get("tasks") if isinstance(result, dict) else []
+    return tasks if isinstance(tasks, list) else []
 
 
 async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
@@ -124,12 +134,7 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
         await _delete_crons(thread_id)
         return {"status": "missing_sandbox"}
     backend = await create_sandbox(sandbox_id)
-    script = _control_script("list", None)
-    result = await _execute(
-        backend, f"printf %s {shlex.quote(_encoded(script))} | base64 -d | python3"
-    )
-    tasks = result.get("tasks") if isinstance(result, dict) else []
-    tasks = tasks if isinstance(tasks, list) else []
+    tasks = await _list_tasks(backend)
     running = [task for task in tasks if task.get("status") == "running"]
     terminal = [task for task in tasks if task.get("status") in TERMINAL_STATES]
     delivered = 0
@@ -169,5 +174,23 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
             logger.warning("Failed to deliver background task %s", task_id, exc_info=True)
     pending = any(task.get("notification") != "done" for task in terminal)
     if not running and not pending:
-        await _delete_crons(thread_id)
+        lock = await backend.aexecute(
+            f"mkdir -p {shlex.quote(TASK_ROOT)} && mkdir {shlex.quote(MONITOR_LOCK)} 2>/dev/null",
+            timeout=10,
+        )
+        if getattr(lock, "exit_code", None) == 0:
+            try:
+                fresh = await _list_tasks(backend)
+                if not any(
+                    task.get("status") == "running"
+                    or (
+                        task.get("status") in TERMINAL_STATES and task.get("notification") != "done"
+                    )
+                    for task in fresh
+                ):
+                    await _delete_crons(thread_id)
+            finally:
+                await backend.aexecute(
+                    f"rmdir {shlex.quote(MONITOR_LOCK)} 2>/dev/null || true", timeout=10
+                )
     return {"status": "running" if running or pending else "idle", "delivered": delivered}
