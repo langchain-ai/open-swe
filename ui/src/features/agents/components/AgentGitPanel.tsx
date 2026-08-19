@@ -34,6 +34,7 @@ import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
 import { usePanelTabs } from "@/features/agents/lib/panelTabs"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
+import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
 
 export type AgentPanelTab = "git"
@@ -98,6 +99,55 @@ export function AgentGitPanel({
     },
     [onCollapsedChange, panel, terminals]
   )
+  const terminalAvailable =
+    thread.isOwner !== false && Boolean(thread.sandboxId)
+  const toggleTerminal = useCallback(() => {
+    if (!collapsed && panel.activeTab?.kind === "terminal") {
+      onCollapsedChange(true)
+      return
+    }
+    onCollapsedChange(false)
+    onTabChange("git")
+    const existing = panel.tabs.find(
+      (candidate) => candidate.kind === "terminal"
+    )
+    if (existing) handleSelectTab(existing.id)
+    else handleOpenKind("terminal")
+  }, [
+    collapsed,
+    handleOpenKind,
+    handleSelectTab,
+    onCollapsedChange,
+    onTabChange,
+    panel.activeTab?.kind,
+    panel.tabs,
+  ])
+  const panelCommands = useMemo(
+    () => [
+      {
+        id: "toggle-work-panel",
+        label: "Toggle work panel",
+        aliases: ["show panel", "hide panel", "review panel"],
+        shortcuts: ["mod+alt+b"],
+        group: "Workspace",
+        run: () => onCollapsedChange(!collapsed),
+      },
+      ...(terminalAvailable
+        ? [
+            {
+              id: "toggle-terminal",
+              label: "Toggle terminal",
+              aliases: ["open terminal", "hide terminal"],
+              shortcuts: ["ctrl+`"],
+              group: "Workspace",
+              run: toggleTerminal,
+            },
+          ]
+        : []),
+    ],
+    [collapsed, onCollapsedChange, terminalAvailable, toggleTerminal]
+  )
+  useRegisterAppCommands(panelCommands)
   const terminalGroupIds = terminals.state.terminalGroups
     .map((group) => group.id)
     .join(",")

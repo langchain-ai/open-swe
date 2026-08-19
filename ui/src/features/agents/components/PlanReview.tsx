@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import type { KeyboardEvent } from "react"
 
@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { useRegisterAppCommands } from "@/lib/appCommands"
 
 const POLL_MS = 4000
 
@@ -65,10 +66,23 @@ export function PlanReview({
   const [editing, setEditing] = useState(false)
   const [editDraft, setEditDraft] = useState(planContent)
   const [saving, setSaving] = useState(false)
+  const planShortcuts = useMemo(
+    () => [
+      {
+        id: "plan-submit-comment",
+        label: "Submit plan comment",
+        shortcuts: ["mod+enter"],
+        group: "Plan review",
+        showInPalette: false,
+      },
+    ],
+    []
+  )
+  useRegisterAppCommands(planShortcuts)
 
   useEffect(() => {
-    setContent(planContent)
-  }, [planContent])
+    if (!editing) setContent(planContent)
+  }, [editing, planContent])
 
   const isShared = plan.status === "shared"
   const canApprove = plan.status === "ready"

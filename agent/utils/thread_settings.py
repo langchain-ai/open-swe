@@ -1,10 +1,9 @@
 """Per-thread snapshot of the profile settings a conversation runs under.
 
 Threads are multi-party and long-lived: anyone can reply, and the owner can edit
-their dashboard profile at any time. Both would otherwise change how an
-in-flight conversation behaves — swapping the model mid-history, or rewriting
-the standing instructions the earlier turns were produced under. Settings are
-therefore resolved once, on the thread's first run, and stored on the thread.
+their dashboard profile at any time. Thread-level model and repository settings
+are therefore resolved once on the first run and stored on the thread. Sender
+identity, personal instructions, and PR preferences remain per-message context.
 
 Later changes reach a thread only when something explicitly rewrites the
 snapshot, which today means a per-run model override.
@@ -28,19 +27,23 @@ class ThreadSettings(TypedDict, total=False):
     effort: str | None
     subagent_model_id: str
     subagent_effort: str | None
-    draft_prs: bool
-    user_instructions: str | None
     repo_instructions: str | None
-    commit_name: str | None
-    commit_email: str | None
-    display_name: str | None
 
 
 def normalize_thread_settings(settings: Mapping[str, Any]) -> tuple[ThreadSettings, bool]:
-    """Remove settings that are no longer supported."""
+    """Remove participant settings that are now resolved for each message."""
     value = dict(settings)
-    changed = "create_prs" in value
-    value.pop("create_prs", None)
+    removed = {
+        "create_prs",
+        "draft_prs",
+        "user_instructions",
+        "commit_name",
+        "commit_email",
+        "display_name",
+    }
+    changed = not removed.isdisjoint(value)
+    for key in removed:
+        value.pop(key, None)
     return cast(ThreadSettings, value), changed
 
 

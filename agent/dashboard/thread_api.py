@@ -450,9 +450,6 @@ async def _thread_summary(
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
-    working_repo = metadata.get("working_repo_full_name")
-    if not isinstance(working_repo, str) or working_repo.count("/") != 1:
-        working_repo = None
     created_at = metadata.get("created_at_ms")
     updated_at = metadata.get("updated_at_ms")
     title = metadata.get("title") if isinstance(metadata.get("title"), str) else "Untitled agent"
@@ -488,7 +485,6 @@ async def _thread_summary(
         "title": title,
         "repo": name,
         "repoFullName": full_name,
-        "workingRepoFullName": working_repo,
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
@@ -2098,15 +2094,17 @@ async def _github_token_for_login(login: str) -> str:
 
 
 async def get_dashboard_thread_turn_diff(
-    thread_id: str, login: str, *, turn_key: str | None = None, email: str | None = None
+    thread_id: str,
+    login: str,
+    *,
+    turn_key: str | None = None,
+    max_files: int = 200,
+    include_content: bool = True,
+    email: str | None = None,
 ) -> dict[str, Any]:
-    """What one turn (or the whole thread) changed, straight from git.
-
-    ``turn_key`` is the id of the user message that opened the turn. Omit it for
-    the cumulative thread diff. The head is the next turn's checkpoint, or the
-    live worktree for the most recent turn.
-    """
+    """Return a persisted run diff, with sandbox checkpoints as a legacy fallback."""
     from ..utils.turn_checkpoint import read_turn_diff
+    from .run_diffs import THREAD_DIFF_KEY, get_run_diff, project_run_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     checkpoints = metadata.get("turn_checkpoints")
@@ -2122,16 +2120,35 @@ async def get_dashboard_thread_turn_diff(
     )
     sandbox_id = metadata.get("sandbox_id")
     if index < 0 or not checkpoints or not isinstance(sandbox_id, str) or not sandbox_id:
-        return {"status": "missing", "files": [], "truncated": False}
+        return {
+            "status": "missing",
+            "files": [],
+            "truncated": False,
+            "summary": {"files": 0, "additions": 0, "deletions": 0},
+        }
 
     checkpoint = checkpoints[index]
+    if turn_key is not None:
+        stored = await get_run_diff(thread_id, turn_key)
+        if stored is not None:
+            return project_run_diff(stored, max_files=max_files, include_content=include_content)
+    else:
+        stored = await get_run_diff(thread_id, THREAD_DIFF_KEY)
+        if stored is not None:
+            return project_run_diff(stored, max_files=max_files, include_content=include_content)
+
     plan_ref = checkpoint.get("plan_ref")
     if (
         turn_key is not None
         and checkpoint.get("plan_mode") is True
         and (not isinstance(plan_ref, str) or plan_ref == checkpoint.get("ref"))
     ):
-        return {"status": "ready", "files": [], "truncated": False}
+        return {
+            "status": "ready",
+            "files": [],
+            "truncated": False,
+            "summary": {"files": 0, "additions": 0, "deletions": 0},
+        }
 
     head = plan_ref if turn_key is not None and isinstance(plan_ref, str) else None
     if head is None and turn_key and index + 1 < len(checkpoints):
@@ -2143,14 +2160,24 @@ async def get_dashboard_thread_turn_diff(
             and isinstance(next_repo_path, str)
             and repo_path != next_repo_path
         ):
-            return {"status": "missing", "files": [], "truncated": False}
+            return {
+                "status": "missing",
+                "files": [],
+                "truncated": False,
+                "summary": {"files": 0, "additions": 0, "deletions": 0},
+            }
         head = next_checkpoint["ref"]
 
     try:
         sandbox = await create_sandbox(sandbox_id)
     except Exception:  # noqa: BLE001
         logger.debug("Could not connect to sandbox %s for turn diff", sandbox_id, exc_info=True)
-        return {"status": "missing", "files": [], "truncated": False}
+        return {
+            "status": "missing",
+            "files": [],
+            "truncated": False,
+            "summary": {"files": 0, "additions": 0, "deletions": 0},
+        }
 
     repo_path = checkpoint.get("repo_path")
     return await read_turn_diff(
@@ -2158,6 +2185,8 @@ async def get_dashboard_thread_turn_diff(
         None,
         str(checkpoint["ref"]),
         head,
+        max_files=max_files,
+        include_content=include_content,
         repo_path=repo_path if isinstance(repo_path, str) else None,
     )
 

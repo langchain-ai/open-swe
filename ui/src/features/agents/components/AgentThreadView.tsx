@@ -168,7 +168,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   // this thread. Those are also the paths a follow-up is most likely about.
   const mentionPaths = useMemo(() => editedPaths(baseMessages), [baseMessages])
   const isThinking = stream.isLoading
-  const displayRepo = thread.workingRepoFullName || thread.repoFullName
   const settingUpSandbox = isThinking && baseMessages.length === 0
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
   // Show a loading state during that one-time fetch instead of the empty state.
@@ -206,11 +205,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               panelCollapsed && "pr-14"
             )}
           >
-            {displayRepo && (
+            {thread.repoFullName && (
               <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
                 <FolderOpen className="size-3.5 shrink-0" />
-                <span className="truncate" title={displayRepo}>
-                  {displayRepo}
+                <span className="truncate" title={thread.repoFullName}>
+                  {thread.repoFullName}
                 </span>
               </span>
             )}
