@@ -81,7 +81,7 @@ export interface ThreadPrDiff {
   files: Array<ThreadPrDiffFile>
 }
 
-/** Files a turn changed, read from the sandbox's git checkpoints. */
+/** Files changed by a thread run. */
 export interface ThreadTurnDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
