@@ -586,6 +586,37 @@ def test_format_slack_web_link_footer_includes_run_usage() -> None:
     )
 
 
+def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:
+    text = "Done <https://app.example/agents/t1|Open in Web> • model-a • 110 main-agent tokens"
+    blocks = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
+        {"type": "actions", "elements": [{"type": "button", "action_id": "approve"}]},
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": (
+                        "<https://app.example/agents/t1|Open in Web> • model-a • "
+                        "110 main-agent tokens"
+                    ),
+                }
+            ],
+        },
+    ]
+
+    updated_text, updated_blocks = slack_utils.with_slack_session_cost(text, blocks, 0.42)
+    repeated = slack_utils.with_slack_session_cost(updated_text, updated_blocks, 0.42)
+
+    assert repeated == (updated_text, updated_blocks)
+    assert updated_text.endswith("110 main-agent tokens • $0.42 session cost")
+    assert updated_blocks is not None
+    assert updated_blocks[1] == blocks[1]
+    assert updated_blocks[2]["elements"][0]["text"].endswith(
+        "110 main-agent tokens • $0.42 session cost"
+    )
+
+
 def test_post_slack_trace_reply_has_no_tip(monkeypatch: pytest.MonkeyPatch) -> None:
     posted: list[dict] = []
 

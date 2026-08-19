@@ -114,10 +114,47 @@ jobs:
       - name: Run desktop checks
         run: pnpm run check
 
-  e2e:
-    name: Playwright E2E
+  browser-e2e:
+    name: Browser E2E (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+      - name: Install Python deps (langgraph dev runtime)
+        run: uv sync --locked
+      - run: corepack enable
+      - name: Install workspace dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
+      - name: Install Playwright + Chromium
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.list /etc/apt/sources.list.d/microsoft-prod.list
+          pnpm run test:e2e:install
+      - name: Run browser E2E
+        run: pnpm run test:e2e -- --shard=${{ matrix.shard }}/3
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-${{ matrix.shard }}
+          path: |
+            tests/e2e/playwright-report
+            tests/e2e/test-results
+          retention-days: 7
+
+  desktop-e2e:
+    name: Desktop E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -129,23 +166,27 @@ jobs:
       - run: corepack enable
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
-      - name: Install Playwright + Chromium
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/azure-cli.list /etc/apt/sources.list.d/microsoft-prod.list
-          pnpm run test:e2e:install
-      # Playwright's webServer boots `langgraph dev`; globalSetup builds the real
-      # ui/ app and runs its server so the specs hit real server rendering. The
-      # fake LLM/GitHub/Slack boundaries need no secrets.
-      - name: Run browser E2E
-        run: pnpm run test:e2e
+      - name: Install Playwright
+        run: npm --prefix tests/e2e ci
       - name: Run Desktop E2E
         run: xvfb-run --auto-servernum pnpm run test:e2e:desktop
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-desktop
           path: |
             tests/e2e/playwright-report
             tests/e2e/test-results
           retention-days: 7
+
+  e2e:
+    name: Playwright E2E
+    if: ${{ always() }}
+    needs: [browser-e2e, desktop-e2e]
+    runs-on: ubuntu-latest
+    env:
+      BROWSER_RESULT: ${{ needs.browser-e2e.result }}
+      DESKTOP_RESULT: ${{ needs.desktop-e2e.result }}
+    steps:
+      - run: test "$BROWSER_RESULT" = success && test "$DESKTOP_RESULT" = success

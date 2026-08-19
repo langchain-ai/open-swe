@@ -17,6 +17,7 @@ from typing import Any
 
 from e2e_env import (
     BASE_BRANCH,
+    FAKE_GITHUB_API,
     FEATURE_BRANCH,
     FEATURE_FILE,
     OWNER,
@@ -107,7 +108,7 @@ curl --fail --silent --show-error \
   --request POST \
   --header 'content-type: application/json' \
   --data '{_DESKTOP_PR_PAYLOAD}' \
-  "$E2E_FAKE_GITHUB_API/repos/{OWNER}/{REPO}/pulls"
+  "{FAKE_GITHUB_API}/repos/{OWNER}/{REPO}/pulls"
 """.strip()
 
 # The system prompt of the most recent model call, so specs can assert what the

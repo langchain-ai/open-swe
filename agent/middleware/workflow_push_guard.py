@@ -529,7 +529,7 @@ class WorkflowPushGuardMiddleware(AgentMiddleware):
     state_schema = AgentState
 
     async def _change_for_request(self, request: ToolCallRequest) -> WorkflowPushChange | None:
-        if _tool_name(request) != "execute":
+        if _tool_name(request) not in {"execute", "background_execute"}:
             return None
         command = _tool_args(request).get("command")
         if not isinstance(command, str):

@@ -1,9 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef } from "react"
-import {
-  STREAM_CONTROLLER,
-  StreamProvider,
-  useStreamContext,
-} from "@langchain/react"
+import { useCallback, useMemo, useRef } from "react"
+import { StreamProvider } from "@langchain/react"
 import { Client, overrideFetchImplementation } from "@langchain/langgraph-sdk"
 import { useQueryClient } from "@tanstack/react-query"
 
@@ -41,42 +37,9 @@ function toAbsoluteApiUrl(url: string): string {
 
 const agentStreamApiUrl = toAbsoluteApiUrl(agentsApi.langGraphApiUrl)
 
-function ActiveThreadRecovery({ threadId }: { threadId: string | null }) {
-  const stream = useStreamContext()
-  const controller = stream[STREAM_CONTROLLER]
-  const threadIdRef = useRef(threadId)
-  const recoveringRef = useRef(false)
-  threadIdRef.current = threadId
-
-  useEffect(() => {
-    if (!threadId) return
-    const recover = async () => {
-      if (
-        document.visibilityState !== "visible" ||
-        recoveringRef.current ||
-        threadIdRef.current !== threadId
-      ) {
-        return
-      }
-      recoveringRef.current = true
-      try {
-        await controller.hydrate(null)
-        if (threadIdRef.current === threadId) await controller.hydrate(threadId)
-      } finally {
-        recoveringRef.current = false
-      }
-    }
-    document.addEventListener("visibilitychange", recover)
-    return () => document.removeEventListener("visibilitychange", recover)
-  }, [controller, threadId])
-
-  return null
-}
-
 /**
  * One persistent stream controller for the whole `/agents` subtree. The SDK
- * owns each thread's transport so switching threads or recovering a suspended
- * tab closes the old transport and creates a fresh one.
+ * owns each thread's transport and reconnect lifecycle.
  */
 export function AgentThreadStreamProvider({
   threadId,
@@ -139,7 +102,6 @@ export function AgentThreadStreamProvider({
       onCreated={onCreated}
       onCompleted={onCompleted}
     >
-      <ActiveThreadRecovery threadId={threadId} />
       {children}
     </StreamProvider>
   )
