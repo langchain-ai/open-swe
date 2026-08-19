@@ -95,6 +95,10 @@ WORKING_ENV_SECTION = """### Working Environment
 
 You are operating in a remote Linux sandbox at `{working_dir}` — use it as your working directory for all operations. The sandbox starts clean; no repo is pre-cloned."""
 
+DESKTOP_WORKING_ENV_SECTION = """### Working Environment
+
+You are operating directly in the selected project at `{working_dir}` on the user's local machine. The project is already available and is your filesystem root. Do not clone it or change its git identity."""
+
 
 DASHBOARD_CONTEXT_SECTION = """---
 
@@ -477,7 +481,7 @@ def construct_sender_context(
 # Per-thread, main-agent prompt layered in front of OPEN_SWE_SHARED_BASE. Holds
 # thread and environment context only; participant context belongs on user messages.
 SYSTEM_PROMPT_TEMPLATE = (
-    WORKING_ENV_SECTION
+    "{working_environment_section}"
     + DASHBOARD_CONTEXT_SECTION
     + SOURCE_GUIDANCE_SECTION
     + PLAN_MODE_GUIDANCE_SECTION
@@ -521,8 +525,11 @@ def construct_system_prompt(
             f"`{default_repo['owner']}/{default_repo['name']}`."
         )
         default_prompt_section += f"\n\n{repo_line}"
-    return SYSTEM_PROMPT_TEMPLATE.format(
+    prompt = SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
+        working_environment_section=(
+            DESKTOP_WORKING_ENV_SECTION if source == "desktop" else WORKING_ENV_SECTION
+        ),
         dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
         source_guidance=_render_source_guidance(source, slack_context),
         linear_project_id=linear_project_id or "<PROJECT_ID>",
@@ -548,3 +555,4 @@ def construct_system_prompt(
         admin_environment_section=ADMIN_ENVIRONMENT_SECTION if admin_environments else "",
         shared_base_section=OPEN_SWE_SHARED_BASE,
     )
+    return prompt

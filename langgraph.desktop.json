@@ -1,0 +1,18 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "python_version": "3.12",
+  "api_version": "0.10.0rc3",
+  "graphs": {
+    "agent": "agent.graphs.agent:traced_agent"
+  },
+  "dependencies": [
+    "."
+  ],
+  "auth": {
+    "path": "agent.local_auth:auth",
+    "disable_studio_auth": true
+  },
+  "http": {
+    "disable_ui": true
+  }
+}

@@ -35,27 +35,6 @@ ContentBlocks = str | list[dict[str, Any]]
 RunInput = dict[str, Any]
 RunConfig = dict[str, Any]
 
-# `@langchain/react` subscribes to `messages`, `tools`, `lifecycle`, etc.;
-# legacy `messages-tuple`-only runs emit almost nothing on those channels. Every
-# run the dashboard can render must therefore carry the full set, whether it was
-# started from the UI or from a webhook.
-DASHBOARD_STREAM_MODES: tuple[str, ...] = (
-    "values",
-    "updates",
-    "messages",
-    "messages-tuple",
-    "tools",
-    "checkpoints",
-    "events",
-)
-
-# `runs.create` validates against a narrower enum than the streaming endpoints:
-# it has no `tools` mode (the client assembles tool calls from `messages`), and
-# passing it 422s the whole run.
-RUN_CREATE_STREAM_MODES: tuple[str, ...] = tuple(
-    mode for mode in DASHBOARD_STREAM_MODES if mode != "tools"
-)
-
 # FastAPI route the platform POSTs run completion/failure to. The platform
 # rejects loopback webhooks (relative URLs / localhost) — they bypass auth via
 # the in-process ASGI transport — so a loopback URL would 422 *every* run at
@@ -115,7 +94,7 @@ def dispatch_client() -> LangGraphClient:
     return get_client(url=_langgraph_url())
 
 
-def _config_with_prepare_run_id(
+def prepare_run_config(
     config: RunConfig | None,
     metadata: dict[str, Any] | None,
 ) -> RunConfig:
@@ -124,8 +103,12 @@ def _config_with_prepare_run_id(
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
     configurable.setdefault("prepare_run_id", str(uuid.uuid4()))
     run_config["configurable"] = configurable
+    existing_metadata = run_config.get("metadata")
+    merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
     if metadata is not None:
-        run_config["metadata"] = metadata
+        merged_metadata.update(metadata)
+    merged_metadata["prepare_run_id"] = configurable["prepare_run_id"]
+    run_config["metadata"] = merged_metadata
     return run_config
 
 
@@ -143,26 +126,24 @@ async def create_durable_run(
     if_not_exists: str = "create",
     stream_mode: Any | None = None,
     stream_resumable: bool = True,
-    stream_subgraphs: bool = True,
     after_seconds: int | float | None = None,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
     client = client or dispatch_client()
+    run_config = prepare_run_config(config, metadata)
     create_kwargs: dict[str, Any] = {
         "input": input,
-        "config": _config_with_prepare_run_id(config, metadata),
+        "config": run_config,
+        "metadata": run_config["metadata"],
         "multitask_strategy": multitask_strategy,
         "durability": durability,
         "if_not_exists": if_not_exists,
         "stream_resumable": stream_resumable,
-        # Subagents run as subgraphs, and the server streams only the top graph
-        # by default — without this their tool calls never reach the dashboard,
-        # so a subagent card can show that it is running but never what it did.
-        "stream_subgraphs": stream_subgraphs,
     }
-    create_kwargs["stream_mode"] = list(stream_mode or RUN_CREATE_STREAM_MODES)
     if COMPLETION_WEBHOOK_URL:
         create_kwargs["webhook"] = COMPLETION_WEBHOOK_URL
+    if stream_mode is not None:
+        create_kwargs["stream_mode"] = stream_mode
     if after_seconds is not None:
         create_kwargs["after_seconds"] = after_seconds
 

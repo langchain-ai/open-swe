@@ -1,5 +1,6 @@
 const fs = require("node:fs")
 const path = require("node:path")
+const { randomUUID } = require("node:crypto")
 
 function projectName(cwd) {
   return path.basename(cwd) || cwd
@@ -42,9 +43,13 @@ function readProjects(filePath) {
 
 function writeProjects(filePath, projects) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true })
-  fs.writeFileSync(filePath, `${JSON.stringify(projects, null, 2)}\n`, {
-    mode: 0o600,
-  })
+  const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    fs.writeFileSync(temporary, `${JSON.stringify(projects, null, 2)}\n`, { mode: 0o600 })
+    fs.renameSync(temporary, filePath)
+  } finally {
+    fs.rmSync(temporary, { force: true })
+  }
 }
 
 function addProject(filePath, cwd, now = Date.now()) {
