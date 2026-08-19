@@ -313,10 +313,19 @@ async def test_read_repo_file_lists_directory(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_repo_file_missing_context(monkeypatch) -> None:
+async def test_repo_tools_require_context_and_token(monkeypatch) -> None:
     monkeypatch.setattr(read_repo_file, "get_config", lambda: {"configurable": {}})
     result = await read_repo_file.read_repo_file("src/app.py")
     assert result["success"] is False
+
+    config = {"configurable": {"chat_repo_owner": "acme", "chat_repo_name": "repo"}}
+    for module, tool, args in (
+        (read_repo_file, read_repo_file.read_repo_file, ("src/app.py",)),
+        (search_repo_code, search_repo_code.search_repo_code, ("foo",)),
+    ):
+        monkeypatch.setattr(module, "get_config", lambda: config)
+        result = await tool(*args)
+        assert result["error"] == "GitHub credentials unavailable; repository source was not read"
 
 
 @pytest.mark.asyncio
