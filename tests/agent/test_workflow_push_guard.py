@@ -64,9 +64,11 @@ class _Runtime:
 class _Request:
     runtime = _Runtime()
 
-    def __init__(self, command: str = "git -C /repo push origin feature") -> None:
+    def __init__(
+        self, command: str = "git -C /repo push origin feature", name: str = "execute"
+    ) -> None:
         self.tool_call = {
-            "name": "execute",
+            "name": name,
             "args": {"command": command},
             "id": "call-1",
         }
@@ -180,8 +182,9 @@ async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
     )
 
 
+@pytest.mark.parametrize("tool_name", ["execute", "background_execute"])
 async def test_unapproved_workflow_push_blocks_and_posts_slack(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tool_name: str
 ) -> None:
     guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend()), thread_id="thread-1"
@@ -221,7 +224,7 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
         return ToolMessage(content="pushed", tool_call_id="call-1")
 
     result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
-        cast(ToolCallRequest, _Request()), handler
+        cast(ToolCallRequest, _Request(name=tool_name)), handler
     )
 
     assert called is False
