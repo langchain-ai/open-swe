@@ -1,5 +1,15 @@
 const { contextBridge, ipcRenderer } = require("electron")
-const { isDesktopCommandId } = require("./commands.cjs")
+const desktopCommandIds = new Set([
+  "new-thread",
+  "show-command-palette",
+  "open-settings",
+  "show-keyboard-shortcuts",
+  "toggle-sidebar",
+])
+
+function isDesktopCommandId(value) {
+  return typeof value === "string" && desktopCommandIds.has(value)
+}
 
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
