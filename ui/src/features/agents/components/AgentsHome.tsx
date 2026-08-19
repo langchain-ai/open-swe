@@ -225,10 +225,9 @@ export function AgentsHome() {
           images,
           skills: [
             ...new Map(
-              [
-                ...managedSkills.personal,
-                ...managedSkills.organization,
-              ].map((skill) => [skill.name, skill])
+              [...managedSkills.personal, ...managedSkills.organization].map(
+                (skill) => [skill.name, skill]
+              )
             ).values(),
           ],
           modelId: activeSelection?.modelId,
