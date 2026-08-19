@@ -8,7 +8,9 @@ const path = require("node:path")
 const {
   captureCheckpoint,
   checkpointRef,
+  checkoutBranch,
   currentBranch,
+  localBranches,
   parsePullRequest,
   readDiff,
   repoRoot,
@@ -67,6 +69,11 @@ test("diffs the worktree against a session checkpoint", async (t) => {
   git(dir, ["commit", "-qm", "init"])
 
   const repo = await repoRoot(dir)
+  assert.equal(await currentBranch(dir), "main")
+  await checkoutBranch(dir, "feature", true)
+  assert.equal(await currentBranch(dir), "feature")
+  assert.deepEqual(await localBranches(dir), ["feature", "main"])
+  await checkoutBranch(dir, "main")
   assert.equal(await currentBranch(dir), "main")
   const ref = checkpointRef("session-id")
   await captureCheckpoint(repo, ref)
