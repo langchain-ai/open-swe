@@ -71,6 +71,7 @@ class SandboxBackendProxy(BaseSandbox):
         self._reconnect = reconnect
         self._startup_task: asyncio.Task[SandboxBackendProtocol] | None = None
         self._lock: asyncio.Lock | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def current(self) -> SandboxBackendProtocol:
@@ -132,11 +133,25 @@ class SandboxBackendProxy(BaseSandbox):
         return self._backend
 
     def _get_lock(self) -> asyncio.Lock:
-        if self._lock is None:
+        loop = asyncio.get_running_loop()
+        if self._lock is None or self._loop is not loop:
             self._lock = asyncio.Lock()
+            self._loop = loop
         return self._lock
 
+    def _bind_loop(self) -> None:
+        loop = asyncio.get_running_loop()
+        if self._loop is not None and self._loop is not loop:
+            logger.warning(
+                "Resetting loop-bound sandbox state for thread %s",
+                self._thread_id,
+            )
+            self._startup_task = None
+            self._lock = None
+        self._loop = loop
+
     async def _aget_backend(self) -> SandboxBackendProtocol:
+        self._bind_loop()
         if self._backend is not None and self._startup_task is None:
             return self._backend
         if not self._thread_id:
@@ -167,8 +182,10 @@ class SandboxBackendProxy(BaseSandbox):
 
         try:
             sandbox_backend = await asyncio.shield(startup_task)
-        except BaseException:
-            if startup_task.done():
+        except BaseException as exc:
+            if startup_task.done() or (
+                isinstance(exc, asyncio.CancelledError) and not startup_task.done()
+            ):
                 async with self._get_lock():
                     if self._startup_task is startup_task:
                         self._startup_task = None
@@ -360,6 +377,12 @@ def get_or_create_sandbox_backend_proxy(
 
 def clear_sandbox_backend(thread_id: str) -> None:
     sandbox_backend = SANDBOX_BACKENDS.pop(thread_id, None)
+    if sandbox_backend is not None:
+        sandbox_backend.cancel_startup()
+
+
+def cancel_sandbox_startup(thread_id: str) -> None:
+    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     if sandbox_backend is not None:
         sandbox_backend.cancel_startup()
 

@@ -265,7 +265,52 @@ async def test_sandbox_proxy_startup_survives_waiter_cancellation() -> None:
     backend = await proxy.ready()
 
     assert backend.id == "sandbox-1"
-    assert calls == 1
+    assert calls == 2
+
+
+def test_sandbox_proxy_reconnects_after_loop_switch() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def reconnect():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            started.set()
+            await release.wait()
+        return _FakeSandboxBackend()
+
+    proxy = SandboxBackendProxy(
+        thread_id="thread-1",
+        reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
+    )
+
+    async def interrupt() -> None:
+        waiter = asyncio.create_task(proxy.ready())
+        await started.wait()
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+
+    asyncio.run(interrupt())
+    backend = asyncio.run(proxy.ready())
+
+    assert backend.id == "sandbox-1"
+    assert calls == 2
+
+
+def test_sandbox_proxy_recreates_lock_after_loop_switch() -> None:
+    proxy = SandboxBackendProxy(thread_id="thread-1")
+
+    first_lock = asyncio.run(_get_proxy_lock(proxy))
+    second_lock = asyncio.run(_get_proxy_lock(proxy))
+
+    assert second_lock is not first_lock
+
+
+async def _get_proxy_lock(proxy: SandboxBackendProxy) -> asyncio.Lock:
+    return proxy._get_lock()
 
 
 @pytest.mark.asyncio

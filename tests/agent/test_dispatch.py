@@ -1,5 +1,6 @@
 import importlib
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -64,6 +65,8 @@ class _FakeClient:
 async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeClient()
     monkeypatch.setattr(dispatch, "COMPLETION_WEBHOOK_URL", "https://app/webhooks/run-complete")
+    cancel_startup = Mock(wraps=dispatch.cancel_sandbox_startup)
+    monkeypatch.setattr(dispatch, "cancel_sandbox_startup", cancel_startup)
 
     run = await dispatch.create_durable_run(
         "thread-1",
@@ -90,6 +93,7 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["metadata"] == created["config"]["metadata"]
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
     assert isinstance(prepare_run_id, str)
+    cancel_startup.assert_called_once_with("thread-1")
 
 
 @pytest.mark.asyncio

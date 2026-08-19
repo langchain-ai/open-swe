@@ -29,6 +29,8 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 
+from .utils.sandbox_state import cancel_sandbox_startup
+
 logger = logging.getLogger(__name__)
 
 ContentBlocks = str | list[dict[str, Any]]
@@ -130,6 +132,8 @@ async def create_durable_run(
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
     client = client or dispatch_client()
+    if multitask_strategy == "interrupt":
+        cancel_sandbox_startup(thread_id)
     run_config = prepare_run_config(config, metadata)
     create_kwargs: dict[str, Any] = {
         "input": input,
