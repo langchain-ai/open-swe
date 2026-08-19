@@ -17,7 +17,6 @@ import { agentsApi } from "@/features/agents/lib/api"
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
-  useAgentThreadPrDiff,
   useAgentThreadTurnDiff,
 } from "@/features/agents/lib/queries"
 import { ReviewTab } from "@/features/reviews/components/ReviewTab"
@@ -39,6 +38,7 @@ import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
 import { usePanelTabs } from "@/features/agents/lib/panelTabs"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
+import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
 
 export type AgentPanelTab = "git" | "plan"
@@ -115,6 +115,55 @@ export function AgentGitPanel({
     },
     [onCollapsedChange, panel, terminals]
   )
+  const terminalAvailable =
+    thread.isOwner !== false && Boolean(thread.sandboxId)
+  const toggleTerminal = useCallback(() => {
+    if (!collapsed && panel.activeTab?.kind === "terminal") {
+      onCollapsedChange(true)
+      return
+    }
+    onCollapsedChange(false)
+    onTabChange("git")
+    const existing = panel.tabs.find(
+      (candidate) => candidate.kind === "terminal"
+    )
+    if (existing) handleSelectTab(existing.id)
+    else handleOpenKind("terminal")
+  }, [
+    collapsed,
+    handleOpenKind,
+    handleSelectTab,
+    onCollapsedChange,
+    onTabChange,
+    panel.activeTab?.kind,
+    panel.tabs,
+  ])
+  const panelCommands = useMemo(
+    () => [
+      {
+        id: "toggle-work-panel",
+        label: "Toggle work panel",
+        aliases: ["show panel", "hide panel", "review panel"],
+        shortcuts: ["mod+alt+b"],
+        group: "Workspace",
+        run: () => onCollapsedChange(!collapsed),
+      },
+      ...(terminalAvailable
+        ? [
+            {
+              id: "toggle-terminal",
+              label: "Toggle terminal",
+              aliases: ["open terminal", "hide terminal"],
+              shortcuts: ["ctrl+`"],
+              group: "Workspace",
+              run: toggleTerminal,
+            },
+          ]
+        : []),
+    ],
+    [collapsed, onCollapsedChange, terminalAvailable, toggleTerminal]
+  )
+  useRegisterAppCommands(panelCommands)
   const terminalGroupIds = terminals.state.terminalGroups
     .map((group) => group.id)
     .join(",")
@@ -162,10 +211,7 @@ export function AgentGitPanel({
     setCollapsed(false)
   }
 
-  const prDiff = useAgentThreadPrDiff(thread.id, Boolean(pr))
-  // Without a PR the sandbox's git checkpoints are the only source of truth for
-  // what this thread changed.
-  const turnDiff = useAgentThreadTurnDiff(thread.id, null, !pr && !collapsed)
+  const turnDiff = useAgentThreadTurnDiff(thread.id, null, !collapsed)
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const canDownloadRecovery =
@@ -196,8 +242,8 @@ export function AgentGitPanel({
   }, [thread.id])
 
   const files = useMemo(
-    () => toPanelFiles(prDiff.data?.files ?? turnDiff.data?.files ?? []),
-    [prDiff.data, turnDiff.data]
+    () => toPanelFiles(turnDiff.data?.files ?? []),
+    [turnDiff.data]
   )
 
   const totals = useMemo(
@@ -211,9 +257,9 @@ export function AgentGitPanel({
       ),
     [files]
   )
-  const truncated = prDiff.data?.truncated ?? turnDiff.data?.truncated
-  const tabLabels = { diff: "Branch", review: "Review", commits: "Committed" }
-  const refreshDiff = () => void (pr ? prDiff.refetch() : turnDiff.refetch())
+  const truncated = turnDiff.data?.truncated
+  const tabLabels = { diff: "Thread", review: "Review", commits: "Committed" }
+  const refreshDiff = () => void turnDiff.refetch()
 
   const reviewHeader = (
     <div className="shrink-0 px-3 pb-2">
@@ -348,7 +394,9 @@ export function AgentGitPanel({
                   fullScreen={fullScreen}
                   hideHeader
                   emptyLabel={
-                    prDiff.isLoading ? "Loading PR diff…" : "No diff available."
+                    turnDiff.isLoading
+                      ? "Loading thread diff…"
+                      : "No diff available."
                   }
                   truncated={truncated}
                 />

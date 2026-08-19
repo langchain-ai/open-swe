@@ -12,6 +12,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
 import type { QueryClient } from "@tanstack/react-query"
 
 import appCss from "../styles.css?url"
+import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
 
 const themeInitScript = `(function(){try{var t=localStorage.getItem("open-swe-theme");var d=t==="dark"||((!t||t==="system")&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}})();`
@@ -59,7 +60,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         <QueryClientProvider client={queryClient}>
-          {children ?? <Outlet />}
+          <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
           {import.meta.env.VITE_DEVTOOLS !== "false" && (
             <>
               <TanStackDevtools

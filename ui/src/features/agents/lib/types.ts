@@ -155,11 +155,7 @@ export interface Message {
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
   structuredSenderName?: string
-  /**
-   * Id of the user message that opened this agent turn. Matches the key the
-   * agent stamps on its git checkpoint, so the turn's changed files can be read
-   * back from the sandbox.
-   */
+  /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
   startedAt?: string

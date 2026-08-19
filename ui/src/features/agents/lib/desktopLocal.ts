@@ -45,11 +45,12 @@ export function useDesktopLocalThread(threadId: string) {
   })
 }
 
-export function useDesktopLocalThreads() {
+export function useDesktopLocalThreads(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: localThreadKeys.all,
     queryFn: () => window.openSweDesktop?.listLocalThreads() ?? [],
-    refetchInterval: 1000,
+    enabled: options.enabled,
+    refetchInterval: options.enabled === false ? false : 1000,
   })
 }
 

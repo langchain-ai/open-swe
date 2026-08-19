@@ -87,6 +87,9 @@ export function AgentsHome() {
   const [localProjectBranch, setLocalProjectBranch] = useState<string | null>(
     null
   )
+  const [localProjectBranches, setLocalProjectBranches] = useState<
+    Array<string>
+  >([])
   const [localError, setLocalError] = useState<string | null>(null)
   const {
     projects: localProjects,
@@ -133,10 +136,13 @@ export function AgentsHome() {
 
   const refreshLocalProjectBranch = useCallback(async () => {
     const cwd = localProjectPathRef.current
-    const branch = cwd
-      ? ((await window.openSweDesktop?.getProjectBranch(cwd)) ?? null)
-      : null
-    if (localProjectPathRef.current === cwd) setLocalProjectBranch(branch)
+    const result = cwd
+      ? await window.openSweDesktop?.getProjectBranches(cwd)
+      : undefined
+    if (localProjectPathRef.current === cwd) {
+      setLocalProjectBranch(result?.current ?? null)
+      setLocalProjectBranches(result?.branches ?? [])
+    }
   }, [])
 
   useEffect(() => {
@@ -158,6 +164,23 @@ export function AgentsHome() {
     window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, cwd)
     setDesktopThreadSource("local")
     setLocalError(null)
+  }
+
+  const checkoutLocalProjectBranch = async (branch: string, create = false) => {
+    if (!localProjectPath) return
+    setLocalError(null)
+    try {
+      await window.openSweDesktop?.checkoutProjectBranch({
+        cwd: localProjectPath,
+        branch,
+        create,
+      })
+      await refreshLocalProjectBranch()
+    } catch (error) {
+      setLocalError(
+        error instanceof Error ? error.message : "Could not checkout branch"
+      )
+    }
   }
 
   const handleAddLocalProject = async () => {
@@ -291,10 +314,17 @@ export function AgentsHome() {
             localProjects={localProjects}
             selectedLocalProjectPath={localProjectPath}
             selectedLocalProjectBranch={localProjectBranch}
+            localProjectBranches={localProjectBranches}
             onSelectLocalProject={handleSelectLocalProject}
             onAddLocalProject={() => void handleAddLocalProject()}
             onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
             onRefreshLocalProjectBranch={() => void refreshLocalProjectBranch()}
+            onSelectLocalProjectBranch={(branch) =>
+              void checkoutLocalProjectBranch(branch)
+            }
+            onCreateLocalProjectBranch={(branch) =>
+              void checkoutLocalProjectBranch(branch, true)
+            }
             planMode={planMode}
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
             environments={environments}

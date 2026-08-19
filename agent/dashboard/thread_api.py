@@ -2160,13 +2160,9 @@ async def get_dashboard_thread_turn_diff(
     include_content: bool = True,
     email: str | None = None,
 ) -> dict[str, Any]:
-    """What one turn (or the whole thread) changed, straight from git.
-
-    ``turn_key`` is the id of the user message that opened the turn. Omit it for
-    the cumulative thread diff. The head is the next turn's checkpoint, or the
-    live worktree for the most recent turn.
-    """
+    """Return a persisted run diff, with sandbox checkpoints as a legacy fallback."""
     from ..utils.turn_checkpoint import read_turn_diff
+    from .run_diffs import THREAD_DIFF_KEY, get_run_diff, project_run_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     checkpoints = metadata.get("turn_checkpoints")
@@ -2190,6 +2186,15 @@ async def get_dashboard_thread_turn_diff(
         }
 
     checkpoint = checkpoints[index]
+    if turn_key is not None:
+        stored = await get_run_diff(thread_id, turn_key)
+        if stored is not None:
+            return project_run_diff(stored, max_files=max_files, include_content=include_content)
+    else:
+        stored = await get_run_diff(thread_id, THREAD_DIFF_KEY)
+        if stored is not None:
+            return project_run_diff(stored, max_files=max_files, include_content=include_content)
+
     plan_ref = checkpoint.get("plan_ref")
     if (
         turn_key is not None

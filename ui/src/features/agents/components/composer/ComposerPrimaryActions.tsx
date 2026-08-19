@@ -182,33 +182,33 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
     }
   }
 
+  const running = stream.isLoading || props.activeRun?.running
+  useEscapeToStop(
+    Boolean(running && props.canSubmit && props.stopOnEscape !== false),
+    () => void handleStop()
+  )
+
   // Server truth (`activeRun.running`) matters as much as the client stream:
   // this browser only sees `isLoading` once it observes a lifecycle event, so a
   // run it never joined would otherwise render an unusable send button.
-  if (!stream.isLoading && !props.activeRun?.running)
-    return <SendButton {...props} />
+  if (!running) return <SendButton {...props} />
 
-  return (
-    <div className="flex gap-1">
-      <SendButton
-        {...props}
-        canSubmit={props.canSubmit && !stopping}
-        label="Steer agent"
-      />
-      <StopButton
-        disabled={stopping}
-        onStop={() => void handleStop()}
-        stopOnEscape={props.stopOnEscape}
-      />
-    </div>
+  return props.canSubmit ? (
+    <SendButton {...props} canSubmit={!stopping} label="Steer agent" />
+  ) : (
+    <StopButton
+      disabled={stopping}
+      onStop={() => void handleStop()}
+      stopOnEscape={props.stopOnEscape}
+    />
   )
 }
 
 function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
   const [stopping, setStopping] = useState(false)
-  if (!props.activeRun?.running || !props.onStop)
-    return <SendButton {...props} />
+  const running = Boolean(props.activeRun?.running && props.onStop)
   const stop = async () => {
+    if (stopping) return
     setStopping(true)
     try {
       await props.onStop?.()
@@ -216,7 +216,14 @@ function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
       setStopping(false)
     }
   }
-  return (
+  useEscapeToStop(
+    Boolean(running && props.canSubmit && props.stopOnEscape !== false),
+    () => void stop()
+  )
+  if (!running) return <SendButton {...props} />
+  return props.canSubmit ? (
+    <SendButton {...props} canSubmit={!stopping} label="Steer agent" />
+  ) : (
     <StopButton
       disabled={stopping}
       onStop={() => void stop()}
