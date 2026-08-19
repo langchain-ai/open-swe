@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatComposer, buildCommandItems } from "./ChatComposer"
+import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import { replaceTextRange } from "./composerTrigger"
 import type { ChatComposerProps } from "./ChatComposer"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
@@ -123,11 +124,11 @@ describe("ChatComposer stop button", () => {
     expect(cancelThread).not.toHaveBeenCalled()
   })
 
-  it("shows steer and stop actions while a run is live", () => {
+  it("shows only the stop action while a live run has no queued message", () => {
     renderComposer(true)
 
-    expect(screen.getByRole("button", { name: "Steer agent" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Steer agent" })).toBeNull()
   })
 
   it("shows the send button when no run is live", () => {
@@ -136,6 +137,24 @@ describe("ChatComposer stop button", () => {
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Steer agent" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
+  })
+
+  it("stops a direct run on Escape while steer is shown", () => {
+    const onStop = vi.fn()
+    render(
+      <ComposerPrimaryActions
+        activeRun={{ threadId: "thread-1", running: true }}
+        canSubmit
+        onStop={onStop}
+        onSubmit={vi.fn()}
+        submitting={false}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Steer agent" })).toBeTruthy()
+    fireEvent.keyDown(document.body, { key: "Escape" })
+
+    expect(onStop).toHaveBeenCalledOnce()
   })
 })
 
