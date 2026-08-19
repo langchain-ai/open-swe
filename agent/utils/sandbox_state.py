@@ -112,10 +112,14 @@ class SandboxBackendProxy(BaseSandbox):
 
     def _startup_completed(self, task: asyncio.Task[SandboxBackendProtocol]) -> None:
         if task.cancelled():
+            if self._startup_task is task:
+                self._startup_task = None
             logger.warning("Sandbox startup was cancelled for thread %s", self._thread_id)
             return
         exception = task.exception()
         if exception is not None:
+            if self._startup_task is task:
+                self._startup_task = None
             logger.warning(
                 "Sandbox startup failed for thread %s: %s",
                 self._thread_id,
