@@ -17,7 +17,9 @@ const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
   captureCheckpoint,
   checkpointRef,
+  checkoutBranch,
   currentBranch,
+  localBranches,
   deleteRefs,
   readDiff,
   repoRoot,
@@ -165,10 +167,25 @@ function configureDesktopIpc() {
     return listProjects();
   });
 
-  ipcMain.handle("desktop:project-branch", async (event, cwd) => {
+  ipcMain.handle("desktop:project-branches", async (event, cwd) => {
     requireTrustedDesktopIpc(event);
     const project = typeof cwd === "string" ? registeredProject(cwd) : null;
-    return project ? currentBranch(project) : null;
+    if (!project) return { current: null, branches: [] };
+    const [current, branches] = await Promise.all([
+      currentBranch(project),
+      localBranches(project),
+    ]);
+    return { current, branches };
+  });
+
+  ipcMain.handle("desktop:checkout-project-branch", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    const project =
+      input && typeof input.cwd === "string"
+        ? registeredProject(input.cwd)
+        : null;
+    if (!project) throw new Error("Project is not registered");
+    return checkoutBranch(project, input.branch, input.create === true);
   });
 
   ipcMain.handle("desktop:add-project", async (event) => {

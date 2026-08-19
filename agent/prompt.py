@@ -358,6 +358,9 @@ Steps, in order:
 - If `git push`, `open_pull_request`, or `gh pr edit` fails with an infrastructure/permission/access error — including "403", "404"/"Not Found" from `open_pull_request`, "GitHub App not installed/access denied", or "Permission denied" — do not retry via `gh pr create`, `gh api repos/.../pulls`, direct REST `POST /repos/.../pulls`, or any other substitute PR creation mechanism. Report the failure to the user and end the task. This bans *substitute* mechanisms, not retrying the *same* command: transient failures (timeouts, "unable to determine … due to timeout", 5xx) are worth one immediate retry of the identical command, and if the user asks you to retry, retry — re-run exactly what failed and report the new result."""
 
 
+DESKTOP_PR_SECTION = "\n\nFor desktop runs, open new PRs with `gh pr create`; `open_pull_request` is unavailable, and `gh` uses the local developer's GitHub identity. This overrides the hosted-only PR creation and fallback rules above."
+
+
 COLLABORATION_TEMPLATE = """---
 
 ### Collaborative Attribution
@@ -495,7 +498,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     + "{corridor_prompt_section}"
     + DEPENDENCY_SECTION
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
-    + COMMIT_PR_SECTION
+    + "{commit_pr_section}"
     + "{repo_instructions_section}"
     + "{environment_section}"
     + "{admin_environment_section}"
@@ -551,6 +554,7 @@ def construct_system_prompt(
             _render_repository_scope_section() if source in {"dashboard", "slack"} else ""
         ),
         corridor_prompt_section=CORRIDOR_PROMPT if corridor_enabled else "",
+        commit_pr_section=COMMIT_PR_SECTION + (DESKTOP_PR_SECTION if source == "desktop" else ""),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         environment_section=_render_environment_section(environment_name, environment_instructions),
         admin_environment_section=ADMIN_ENVIRONMENT_SECTION if admin_environments else "",

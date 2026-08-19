@@ -36,6 +36,30 @@ function git(
   })
 }
 
+async function localBranches(cwd) {
+  try {
+    const output = text(
+      await git(
+        cwd,
+        ["for-each-ref", "--format=%(refname:short)", "--sort=-committerdate", "refs/heads"],
+        null,
+        5_000
+      )
+    )
+    return output ? output.split("\n") : []
+  } catch {
+    return []
+  }
+}
+
+async function checkoutBranch(cwd, branch, create = false) {
+  if (typeof branch !== "string" || !branch.trim()) throw new Error("Branch name is required")
+  const name = branch.trim()
+  await git(cwd, ["check-ref-format", "--branch", name], null, 5_000)
+  await git(cwd, create ? ["switch", "-c", name] : ["switch", name], null, 30_000)
+  return name
+}
+
 async function currentBranch(cwd) {
   try {
     return text(await git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], null, 5_000)) || null
@@ -329,7 +353,9 @@ async function readDiff(repo, base) {
 module.exports = {
   captureCheckpoint,
   checkpointRef,
+  checkoutBranch,
   currentBranch,
+  localBranches,
   deleteRefs,
   parsePullRequest,
   readDiff,
