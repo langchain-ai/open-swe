@@ -15,6 +15,9 @@ const PROVIDER_KEYS = {
 }
 
 function devBackendTarget({ repoRoot, port, env = process.env }) {
+  const config = env.OPEN_SWE_LOCAL_BACKEND_CONFIG
+    ? path.resolve(repoRoot, env.OPEN_SWE_LOCAL_BACKEND_CONFIG)
+    : path.join(repoRoot, "langgraph.desktop.json")
   return {
     command: env.OPEN_SWE_LOCAL_BACKEND_COMMAND || env.OPEN_SWE_UV_COMMAND || "uv",
     args: [
@@ -28,7 +31,7 @@ function devBackendTarget({ repoRoot, port, env = process.env }) {
       "--port",
       String(port),
       "--config",
-      path.join(repoRoot, "langgraph.desktop.json"),
+      config,
     ],
     cwd: repoRoot,
   }

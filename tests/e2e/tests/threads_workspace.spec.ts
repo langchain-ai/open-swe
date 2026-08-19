@@ -655,7 +655,19 @@ test.describe("threads workspace", () => {
     await expect(slackGroup).not.toContainText(TITLES.attention);
 
     await main.getByRole("button", { name: "Board" }).click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("layout"))
+      .toBe("board");
     await main.getByLabel("Group by").selectOption("focus");
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("group"))
+      .toBe("focus");
+    await expectBoardOrder(main, [
+      "Needs attention",
+      "In progress",
+      "Ready",
+      "Done",
+    ]);
     await main
       .getByRole("button", { name: "Move Needs attention right" })
       .click();
