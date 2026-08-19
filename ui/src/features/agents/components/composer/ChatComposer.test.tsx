@@ -123,11 +123,11 @@ describe("ChatComposer stop button", () => {
     expect(cancelThread).not.toHaveBeenCalled()
   })
 
-  it("shows steer and stop actions while a run is live", () => {
+  it("shows only the stop action while a live run has no queued message", () => {
     renderComposer(true)
 
-    expect(screen.getByRole("button", { name: "Steer agent" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Steer agent" })).toBeNull()
   })
 
   it("shows the send button when no run is live", () => {
