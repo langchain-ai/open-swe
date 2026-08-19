@@ -184,7 +184,7 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
 
   const running = stream.isLoading || props.activeRun?.running
   useEscapeToStop(
-    Boolean(running && props.canSubmit && props.stopOnEscape),
+    Boolean(running && props.canSubmit && props.stopOnEscape !== false),
     () => void handleStop()
   )
 
@@ -206,9 +206,9 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
 
 function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
   const [stopping, setStopping] = useState(false)
-  if (!props.activeRun?.running || !props.onStop)
-    return <SendButton {...props} />
+  const running = Boolean(props.activeRun?.running && props.onStop)
   const stop = async () => {
+    if (stopping) return
     setStopping(true)
     try {
       await props.onStop?.()
@@ -216,6 +216,11 @@ function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
       setStopping(false)
     }
   }
+  useEscapeToStop(
+    Boolean(running && props.canSubmit && props.stopOnEscape !== false),
+    () => void stop()
+  )
+  if (!running) return <SendButton {...props} />
   return props.canSubmit ? (
     <SendButton {...props} canSubmit={!stopping} label="Steer agent" />
   ) : (
