@@ -60,8 +60,38 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The dashboard runs behind a private API server this runner cannot reach, so
+      # it restarts itself: `imagePullPolicy: Always` re-resolves the tag when the
+      # kubelet launches the replacement container. The token this mints can do
+      # nothing but restart that one service.
+      - name: Restart the preview dashboard
+        if: vars.PREVIEW_DASHBOARD_URL != ''
+        env:
+          SECRET: ${{ secrets.OPERATIONS_API_JWT_SECRET }}
+          URL: ${{ vars.PREVIEW_DASHBOARD_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$SECRET" || { echo "OPERATIONS_API_JWT_SECRET is unset" >&2; exit 1; }
+
+          token=$(python3 - <<'PY'
+          import base64, hashlib, hmac, json, os, time
+
+          def b64(raw: bytes) -> str:
+              return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+          header = b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+          claims = b64(json.dumps({"act": "restart", "exp": int(time.time()) + 120}, separators=(",", ":")).encode())
+          signed = f"{header}.{claims}"
+          signature = b64(hmac.new(os.environ["SECRET"].encode(), signed.encode(), hashlib.sha256).digest())
+          print(f"{signed}.{signature}")
+          PY
+          )
+
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $token" "$URL/operations/restart")
+          test "$code" = "202" || { echo "restart returned $code" >&2; exit 1; }
+          echo "restart accepted"
+
       - name: Summary
         run: |
           echo "Pushed \`${IMAGE}:preview\` (${GITHUB_SHA})." >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo 'Roll it: `kubectl rollout restart deployment/open-swe-dashboard -n open-swe-dev`' >> "$GITHUB_STEP_SUMMARY"
