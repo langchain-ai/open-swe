@@ -2,7 +2,10 @@ import { useNavigate } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 
 import type { SessionUser } from "@/lib/api"
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import {
+  SettingsRow,
+  SettingsSection,
+} from "@/features/settings/components/SettingsPrimitives"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import { clearCachedRepos } from "@/lib/repoCache"

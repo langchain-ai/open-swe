@@ -1,7 +1,10 @@
 import { useState } from "react"
 
 import type { Theme } from "@/lib/theme"
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import {
+  SettingsRow,
+  SettingsSection,
+} from "@/features/settings/components/SettingsPrimitives"
 import {
   Select,
   SelectContent,

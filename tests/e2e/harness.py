@@ -516,6 +516,11 @@ async def ui_login(request: Request) -> Response:
     return await _render_app_route(request)
 
 
+@app.get("/my-settings", response_class=HTMLResponse)
+async def ui_my_settings(request: Request) -> Response:
+    return await _render_app_route(request)
+
+
 # Server functions and the SSR data stream the rendered pages fetch after load.
 @app.api_route("/_serverFn/{fn_path:path}", methods=["GET", "POST"])
 async def ui_server_fn(request: Request, fn_path: str) -> Response:  # noqa: ARG001

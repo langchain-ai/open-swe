@@ -4,26 +4,22 @@ import { IoLogoSlack } from "react-icons/io5"
 import { SiNotion } from "react-icons/si"
 
 import type { ApiKeyCredentialStatus, SessionUser } from "@/lib/api"
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { Badge } from "@/components/langsmith"
+import {
+  SettingsRow,
+  SettingsSection,
+} from "@/features/settings/components/SettingsPrimitives"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { api, notionConnectUrl, slackConnectUrl } from "@/lib/api"
-import { cn } from "@/lib/utils"
 
 type SetError = (message: string | null) => void
 
 function StatusPill({ connected }: { connected: boolean }) {
   return (
-    <span
-      className={cn(
-        "rounded-full px-2 py-0.5 text-[10px] font-medium",
-        connected
-          ? "bg-primary/10 text-primary"
-          : "bg-muted text-muted-foreground"
-      )}
-    >
+    <Badge color={connected ? "success" : "secondary"} size="xxs">
       {connected ? "Connected" : "Not connected"}
-    </span>
+    </Badge>
   )
 }
 

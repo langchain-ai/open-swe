@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
-import { SettingsPanel, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@/components/langsmith"
+import { Button } from "@/components/ui/button"
+import {
+  SettingsPanel,
+  SettingsSection,
+} from "@/features/settings/components/SettingsPrimitives"
 import { api } from "@/lib/api"
 
 export function PersonalInstructionsSection() {

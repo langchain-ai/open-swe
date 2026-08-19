@@ -6,8 +6,8 @@ import { ConnectionsSection } from "@/features/settings/components/ConnectionsSe
 import { PersonalInstructionsSection } from "@/features/settings/components/PersonalInstructionsSection"
 import { PreferencesSection } from "@/features/settings/components/PreferencesSection"
 import { PullRequestsSection } from "@/features/settings/components/PullRequestsSection"
+import { Skeleton } from "@/components/langsmith"
 import { RequireLogin } from "@/lib/auth-redirect"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/my-settings")({
@@ -19,7 +19,7 @@ function MySettingsPage() {
 
   if (session.isLoading) {
     return (
-      <main className="p-6">
+      <main className="langsmith-settings p-space-6">
         <Skeleton className="h-40 w-full" />
       </main>
     )
@@ -32,11 +32,13 @@ function MySettingsPage() {
       title="Settings"
       description="Personal preferences, connected accounts, and instructions that apply to every run you trigger."
     >
-      <AccountSection user={session.data} />
-      <PreferencesSection />
-      <PullRequestsSection />
-      <ConnectionsSection user={session.data} />
-      <PersonalInstructionsSection />
+      <div className="langsmith-settings flex flex-col gap-space-6">
+        <AccountSection user={session.data} />
+        <PreferencesSection />
+        <PullRequestsSection />
+        <ConnectionsSection user={session.data} />
+        <PersonalInstructionsSection />
+      </div>
     </AppShell>
   )
 }

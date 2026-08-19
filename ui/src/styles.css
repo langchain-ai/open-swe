@@ -11,6 +11,53 @@
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Inter Variable', sans-serif;
+    --color-ls-surface-level-1: var(--ls-bg-surface-level-1);
+    --color-ls-surface-level-1-hover: var(--ls-bg-surface-level-1-hover);
+    --color-ls-surface-level-2: var(--ls-bg-surface-level-2);
+    --color-ls-surface-level-3: var(--ls-bg-surface-level-3);
+    --color-ls-surface-level-4: var(--ls-bg-surface-level-4);
+    --color-ls-elevated: var(--ls-bg-elevated);
+    --color-ls-selected: var(--ls-bg-selected);
+    --color-ls-brand-surface: var(--ls-bg-brand-subtle);
+    --color-ls-success-surface: var(--ls-bg-success);
+    --color-ls-error-surface: var(--ls-bg-error);
+    --color-ls-warning-surface: var(--ls-bg-warning);
+    --color-ls-special-surface: var(--ls-bg-special);
+    --color-ls-primary: var(--ls-text-primary);
+    --color-ls-secondary: var(--ls-text-secondary);
+    --color-ls-tertiary: var(--ls-text-tertiary);
+    --color-ls-quaternary: var(--ls-text-quaternary);
+    --color-ls-placeholder: var(--ls-text-placeholder);
+    --color-ls-brand-primary: var(--ls-text-brand-primary);
+    --color-ls-success: var(--ls-text-success);
+    --color-ls-error: var(--ls-text-error);
+    --color-ls-warning: var(--ls-text-warning);
+    --color-ls-special: var(--ls-text-special);
+    --color-ls-default: var(--ls-border-default);
+    --color-ls-subtle: var(--ls-border-subtle);
+    --color-ls-muted: var(--ls-border-muted);
+    --color-ls-border-brand-subtle: var(--ls-border-brand-subtle);
+    --spacing-space-1: 0.25rem;
+    --spacing-space-2: 0.5rem;
+    --spacing-space-3: 0.75rem;
+    --spacing-space-4: 1rem;
+    --spacing-space-5: 1.5rem;
+    --spacing-space-6: 2rem;
+    --spacing-space-7: 2.5rem;
+    --spacing-space-8: 3rem;
+    --spacing-space-9: 4rem;
+    --radius-ls-xs: 0.1875rem;
+    --radius-ls-sm: 0.25rem;
+    --radius-ls-md: 0.375rem;
+    --radius-ls-lg: 0.5rem;
+    --radius-ls-xl: 0.75rem;
+    --shadow-ls-sm: var(--ls-shadow-sm);
+    --shadow-ls-md: var(--ls-shadow-md);
+    --shadow-ls-lg: var(--ls-shadow-lg);
+    --duration-ls-fast: 100ms;
+    --duration-ls-normal: 200ms;
+    --duration-ls-slow: 300ms;
+    --duration-ls-slower: 500ms;
     /* Duty-cycled indicator animation: long holds with stepped ramps, so the
        compositor updates discrete frames instead of every vsync. */
     --animate-status-pulse: status-pulse 2s infinite;
@@ -182,6 +229,44 @@
     --sidebar-row-hover: var(--accent);
     --sidebar-row-active: var(--accent);
     --sidebar-row-selected: var(--accent);
+}
+
+.langsmith-settings {
+  --ls-bg-surface-level-1: var(--background);
+  --ls-bg-surface-level-1-hover: color-mix(in srgb, var(--background) 80%, var(--muted));
+  --ls-bg-surface-level-2: var(--card);
+  --ls-bg-surface-level-3: var(--muted);
+  --ls-bg-surface-level-4: var(--accent);
+  --ls-bg-elevated: var(--popover);
+  --ls-bg-selected: color-mix(in srgb, var(--primary) 8%, var(--card));
+  --ls-bg-brand-subtle: color-mix(in srgb, var(--info) 12%, var(--card));
+  --ls-bg-success: color-mix(in srgb, var(--success) 14%, var(--card));
+  --ls-bg-error: color-mix(in srgb, var(--destructive) 12%, var(--card));
+  --ls-bg-warning: color-mix(in srgb, var(--warning) 14%, var(--card));
+  --ls-bg-special: color-mix(in srgb, var(--info) 10%, var(--card));
+  --ls-text-primary: var(--foreground);
+  --ls-text-secondary: var(--muted-foreground);
+  --ls-text-tertiary: color-mix(in srgb, var(--muted-foreground) 82%, transparent);
+  --ls-text-quaternary: color-mix(in srgb, var(--muted-foreground) 62%, transparent);
+  --ls-text-placeholder: color-mix(in srgb, var(--muted-foreground) 76%, transparent);
+  --ls-text-brand-primary: var(--info-foreground);
+  --ls-text-success: var(--success-foreground);
+  --ls-text-error: var(--destructive-foreground);
+  --ls-text-warning: var(--warning-foreground);
+  --ls-text-special: var(--info-foreground);
+  --ls-border-default: var(--border);
+  --ls-border-subtle: color-mix(in srgb, var(--border) 76%, transparent);
+  --ls-border-muted: color-mix(in srgb, var(--border) 58%, transparent);
+  --ls-border-brand-subtle: color-mix(in srgb, var(--info) 24%, var(--border));
+  --ls-shadow-sm: 0 1px 2px rgb(0 0 0 / 6%);
+  --ls-shadow-md: 0 8px 24px -12px rgb(0 0 0 / 24%);
+  --ls-shadow-lg: 0 24px 48px -20px rgb(0 0 0 / 36%);
+}
+
+.dark .langsmith-settings {
+  --ls-shadow-sm: 0 1px 2px rgb(0 0 0 / 28%);
+  --ls-shadow-md: 0 10px 28px -12px rgb(0 0 0 / 62%);
+  --ls-shadow-lg: 0 28px 52px -20px rgb(0 0 0 / 78%);
 }
 
 @layer utilities {
