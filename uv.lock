@@ -1758,7 +1758,7 @@ wheels = [
 
 [[package]]
 name = "langsmith"
-version = "0.11.0"
+version = "0.11.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1776,9 +1776,9 @@ dependencies = [
     { name = "xxhash" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5b/62/a917e87073767db8ca335c3f5a42fb4c5336509b8d5b03e165e46da47e70/langsmith-0.11.0.tar.gz", hash = "sha256:7339f90e6fd9a1a009445b5084a7a0e56a8b6f17305ee5d7e8c5e7582217854f", size = 4805612, upload-time = "2026-08-14T12:56:55.409Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cc/57/7b6c11080c9e082ebf1456a2e2372fae8f23a85a5ae2869bdd5ab9a6507d/langsmith-0.11.1.tar.gz", hash = "sha256:47998977366acb3ba3093881fd465cbf11a5f8c2f4e87e40a17dda203f6dedf4", size = 4814724, upload-time = "2026-08-19T15:47:44.116Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/aa/18d334f04c12bb9154568747539a1143a93d0c34b894662c065454f396c8/langsmith-0.11.0-py3-none-any.whl", hash = "sha256:e87a3929915936c066b3fa3283ec3f3f0013e2ef7f98a443a7fbe3fab8e784a3", size = 737950, upload-time = "2026-08-14T12:56:53.014Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/85/0ad6df25588122760b2b40ec182eafc55532c9e66015c83e16675bd34a29/langsmith-0.11.1-py3-none-any.whl", hash = "sha256:cfc3437a9cf27440cd0095c24df945edbceb6df10b579bc8b3980b4ad367835f", size = 744589, upload-time = "2026-08-19T15:47:42.043Z" },
 ]
 
 [package.optional-dependencies]
@@ -2112,7 +2112,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.10" },
     { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.31" },
     { name = "langgraph-sdk", specifier = ">=0.4.2" },
-    { name = "langsmith", specifier = ">=0.11.0" },
+    { name = "langsmith", specifier = ">=0.11.1" },
     { name = "markdownify", specifier = ">=1.2.3" },
     { name = "pygments", marker = "extra == 'dev'", specifier = ">=2.20.0" },
     { name = "pyjwt", specifier = ">=2.12.1" },

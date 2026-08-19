@@ -101,6 +101,19 @@ Application-owned model input uses an XML-like convention:
 IMPORTANT: You must ALWAYS call a tool in EVERY SINGLE TURN. If you don't call a tool, the session will end and you won't be able to resume without the user manually restarting you.
 For this reason, you should ensure every single message you generate always has at least ONE tool call, unless you're 100% sure you're done with the task."""
 
+SANDBOX_FILE_DOWNLOAD_GUIDANCE = """### Large File Sharing
+
+Use `create_sandbox_file_download_url` to share large binary artifacts such as videos, images,
+archives, or PDFs instead of pasting their contents into a response. Never create download links
+for secrets or credentials."""
+
+
+def render_open_swe_shared_base(*, sandbox_file_downloads: bool) -> str:
+    """Render shared guidance for the tools available to this agent."""
+    if not sandbox_file_downloads:
+        return OPEN_SWE_SHARED_BASE
+    return f"{OPEN_SWE_SHARED_BASE}\n\n{SANDBOX_FILE_DOWNLOAD_GUIDANCE}"
+
 
 WORKING_ENV_SECTION = """### Working Environment
 
@@ -523,6 +536,7 @@ def construct_system_prompt(
     admin_environments: bool = False,
     source: str = "dashboard",
     slack_context: bool = False,
+    sandbox_file_downloads: bool = False,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
@@ -560,6 +574,8 @@ def construct_system_prompt(
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         environment_section=_render_environment_section(environment_name, environment_instructions),
         admin_environment_section=ADMIN_ENVIRONMENT_SECTION if admin_environments else "",
-        shared_base_section=OPEN_SWE_SHARED_BASE,
+        shared_base_section=render_open_swe_shared_base(
+            sandbox_file_downloads=sandbox_file_downloads
+        ),
     )
     return prompt
