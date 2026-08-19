@@ -18,6 +18,7 @@
 # production
 /build
 /desktop/build
+/desktop/resources/local-backend/
 /dist
 **/dist
 .turbo/

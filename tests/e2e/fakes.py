@@ -19,6 +19,7 @@ from e2e_env import (
     SECOND_BARE_REMOTE,
     SECOND_OWNER,
     SECOND_REPO,
+    TMP,
 )
 
 # --- Slack -----------------------------------------------------------------
@@ -136,6 +137,13 @@ def seed_bare_remotes() -> None:
         _git("remote", "add", "origin", str(remote), cwd=seed_work)
         _git("push", "origin", BASE_BRANCH, cwd=seed_work)
         shutil.rmtree(seed_work)
+
+
+def seed_sandbox_repo() -> None:
+    repo = TMP / "work" / "repo"
+    if repo.exists():
+        shutil.rmtree(repo)
+    _git("clone", str(BARE_REMOTE), str(repo))
 
 
 def _diff_files(owner: str, repo: str, base: str, head: str) -> list[dict[str, Any]]:

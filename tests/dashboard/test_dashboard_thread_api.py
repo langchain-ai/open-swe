@@ -2177,7 +2177,12 @@ async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
 
     result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
 
-    assert result == {"status": "ready", "files": [], "truncated": False}
+    assert result == {
+        "status": "ready",
+        "files": [],
+        "truncated": False,
+        "summary": {"files": 0, "additions": 0, "deletions": 0},
+    }
     create_sandbox.assert_not_awaited()
 
 
@@ -2208,6 +2213,8 @@ async def test_turn_diff_preserves_changes_before_mid_run_plan_mode(monkeypatch)
         None,
         "refs/open-swe/turns/msg-1",
         "refs/open-swe/turns/msg-1-plan",
+        max_files=200,
+        include_content=True,
         repo_path="/workspace/repo",
     )
 
@@ -2243,6 +2250,8 @@ async def test_turn_diff_reads_the_checkpoint_repository(monkeypatch) -> None:
         None,
         "refs/open-swe/turns/msg-1",
         "refs/open-swe/turns/msg-2",
+        max_files=200,
+        include_content=True,
         repo_path="/workspace/repo",
     )
 
@@ -2271,7 +2280,12 @@ async def test_turn_diff_rejects_checkpoints_from_different_repositories(monkeyp
 
     result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
 
-    assert result == {"status": "missing", "files": [], "truncated": False}
+    assert result == {
+        "status": "missing",
+        "files": [],
+        "truncated": False,
+        "summary": {"files": 0, "additions": 0, "deletions": 0},
+    }
     create_sandbox.assert_not_awaited()
 
 

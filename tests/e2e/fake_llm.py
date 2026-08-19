@@ -99,6 +99,21 @@ git push origin {SECOND_FEATURE_BRANCH}
 echo BOTH_PUSHED_OK
 """.strip()
 
+_MANY_FILES_IMPLEMENT_SCRIPT = f"""
+set -e
+cd repo
+git config user.email "dev@example.com"
+git config user.name "Dev User"
+git checkout -b {FEATURE_BRANCH}
+for index in $(seq -w 1 15); do
+  printf 'change %s\n' "$index" > "change-$index.txt"
+done
+git add -A
+git commit -m "{PR_TITLE}"
+git push origin {FEATURE_BRANCH}
+echo PUSHED_OK
+""".strip()
+
 _IFRAME_HTML_PATH = "/workspace/iframe-output.html"
 _IFRAME_DATA_PATH = "/workspace/iframe-data.json"
 _IFRAME_CSS_PATH = "/workspace/iframe-theme.css"
@@ -552,6 +567,35 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_multi_pr_reply_step),
     ),
+    "many_files": (
+        _tool_step(
+            "Acknowledging the Slack request before starting work.",
+            "slack_thread_reply",
+            {"message": "On it!"},
+            "call-ack",
+        ),
+        _tool_step(
+            "Setting up the repo and implementing the change.",
+            "execute",
+            {"command": _MANY_FILES_IMPLEMENT_SCRIPT},
+            "call-impl",
+        ),
+        _tool_step(
+            "Opening a pull request.",
+            "open_pull_request",
+            {
+                "owner": OWNER,
+                "repo": REPO,
+                "head": FEATURE_BRANCH,
+                "base": BASE_BRANCH,
+                "title": PR_TITLE,
+                "body": "Adds multiple files for changed-file coverage.",
+                "draft": True,
+            },
+            "call-pr",
+        ),
+        _dynamic_step(_reply_step),
+    ),
     "breakout": (
         _tool_step(
             "Starting a separate Slack thread for the breakout task.",
@@ -678,6 +722,9 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "multi_pr",
         lambda ctx: ctx.human_count <= 1 and "E2E_MULTI_PR" in f"{ctx.first_text}\n{ctx.last_text}",
+    ),
+    ScriptRule(
+        "many_files", lambda ctx: ctx.human_count <= 1 and "E2E_MANY_FILES" in ctx.first_text
     ),
     ScriptRule("move", lambda ctx: ctx.human_count <= 1 and _is_move_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: ctx.human_count <= 1),
