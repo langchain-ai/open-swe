@@ -135,6 +135,8 @@ export function useAgentSkills() {
   const organization = useOrganizationAgentSkills()
   return {
     ...personal,
+    personal: personal.data ?? [],
+    organization: organization.data ?? [],
     data: [
       ...new Map(
         [

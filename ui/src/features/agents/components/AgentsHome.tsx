@@ -222,6 +222,14 @@ export function AgentsHome() {
           cwd: localProjectPath,
           prompt,
           images,
+          skills: [
+            ...new Map(
+              [...skills.personal, ...skills.organization].map((skill) => [
+                skill.name,
+                skill,
+              ])
+            ).values(),
+          ],
           modelId: activeSelection?.modelId,
           effort: activeSelection?.effort,
         })
