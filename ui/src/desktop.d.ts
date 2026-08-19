@@ -168,6 +168,8 @@ declare global {
       updateLocalThread: (input: {
         threadId: string
         status: DesktopLocalThreadSummary["status"]
+        modelId?: string
+        effort?: string
       }) => Promise<DesktopLocalThreadSummary | null>
       deleteLocalThread: (threadId: string) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>

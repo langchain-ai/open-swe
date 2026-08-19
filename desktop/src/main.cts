@@ -289,7 +289,11 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:update-local-thread", (event, input) => {
     requireTrustedDesktopIpc(event);
-    return localThreadStore.update(input?.threadId, { status: input?.status });
+    return localThreadStore.update(input?.threadId, {
+      status: input?.status,
+      ...(typeof input?.modelId === "string" ? { modelId: input.modelId } : {}),
+      ...(typeof input?.effort === "string" ? { effort: input.effort } : {}),
+    });
   });
   ipcMain.handle("desktop:delete-local-thread", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
