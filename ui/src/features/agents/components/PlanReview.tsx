@@ -71,6 +71,7 @@ export function PlanReview({
   }, [planContent])
 
   const isShared = plan.status === "shared"
+  const canApprove = plan.status === "ready"
   const canEdit =
     plan.isOwner &&
     !isShared &&
@@ -195,10 +196,10 @@ export function PlanReview({
   return (
     <main
       data-testid="plan-review"
-      className="min-h-0 flex-1 overflow-y-auto bg-background text-foreground"
+      className="@container min-h-0 flex-1 overflow-y-auto bg-background text-foreground"
     >
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-4 md:px-8 md:py-6">
-        <header className="flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-center lg:justify-between">
+        <header className="flex flex-col gap-3 border-b border-border pb-4 @3xl:flex-row @3xl:items-center @3xl:justify-between">
           <div data-testid="plan-summary" className="min-w-0">
             <h1 className="text-lg font-semibold text-foreground">
               {isShared ? "Shared response" : "Implementation plan"}
@@ -268,7 +269,7 @@ export function PlanReview({
                     ? "Copied!"
                     : `Copy ${format === "html" ? "HTML" : "Markdown"}`}
                 </Button>
-                {!isShared && plan.isOwner && (
+                {canApprove && (
                   <Button
                     data-testid="approve-plan"
                     disabled={busy !== null}

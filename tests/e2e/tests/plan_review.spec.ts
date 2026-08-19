@@ -277,8 +277,10 @@ test.describe("Plan review (HTTP comments)", () => {
       .boundingBox();
     expect(embeddedSummaryBox).not.toBeNull();
     expect(embeddedActionsBox).not.toBeNull();
-    expect(embeddedActionsBox!.y).toBeGreaterThanOrEqual(
-      embeddedSummaryBox!.y + embeddedSummaryBox!.height,
+    // At the plan page's full width the header runs as a row, so the actions
+    // sit to the right of the summary instead of stacking under it.
+    expect(embeddedActionsBox!.x).toBeGreaterThanOrEqual(
+      embeddedSummaryBox!.x + embeddedSummaryBox!.width,
     );
     await expect(owner.getByTestId("approve-plan")).toBeVisible();
     // "Request changes" is meaningless with no feedback → disabled until a
@@ -404,9 +406,9 @@ test.describe("Plan review (HTTP comments)", () => {
         "I'll wait for your review and approval before implementing.",
       ),
     ).toHaveCount(2, { timeout: 60_000 });
-    await expect(
-      owner.getByText("A plan is ready for your review."),
-    ).toBeVisible({ timeout: 60_000 });
+    await expect(owner.getByTestId("inline-plan-artifact")).toBeVisible({
+      timeout: 60_000,
+    });
 
     await owner.goto(planPath);
     await expect(owner.getByTestId("approve-plan")).toBeVisible({
