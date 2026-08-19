@@ -38,10 +38,10 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
   {
     heading: "Workspace",
     items: [
-      { to: "/cloud-agents", label: "Open SWE Agent", icon: IoCloudOutline },
+      { to: "/cloud-agents", label: "Jarvis Agent", icon: IoCloudOutline },
       {
         to: "/review",
-        label: "Open SWE Review",
+        label: "Jarvis Review",
         icon: IoGitPullRequestOutline,
       },
       {

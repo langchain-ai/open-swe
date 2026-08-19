@@ -140,7 +140,7 @@ async def register_notion_oauth_client(
         raise NotionOAuthError(502, "Notion OAuth metadata missing registration endpoint")
     _require_notion_https_url(registration_endpoint, "registration endpoint")
     body: dict[str, Any] = {
-        "client_name": os.environ.get("NOTION_MCP_CLIENT_NAME", "Open SWE"),
+        "client_name": os.environ.get("NOTION_MCP_CLIENT_NAME", "Jarvis"),
         "redirect_uris": [redirect_uri],
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],

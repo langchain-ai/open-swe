@@ -24,12 +24,11 @@ def reload_tags(monkeypatch):
 @pytest.mark.parametrize(
     "body",
     [
-        "@openswe please fix this",
-        "hey @open-swe, take a look",
-        "@OpenSWE ping",
-        "cc @openswe-dev",
-        "@openswe: do the thing",
-        "(@openswe)",
+        "@jarvis-aeteq please fix this",
+        "hey @jarvis-aeteq, take a look",
+        "@Jarvis-Aeteq ping",
+        "@jarvis-aeteq: do the thing",
+        "(@jarvis-aeteq)",
     ],
 )
 def test_matches_configured_handles(body: str) -> None:
@@ -39,8 +38,8 @@ def test_matches_configured_handles(body: str) -> None:
 @pytest.mark.parametrize(
     "body",
     [
-        "@openswe-preview please fix this",
-        "@openswefoo",
+        "@jarvis-aeteq-preview please fix this",
+        "@jarvis-aeteqfoo",
         "no mention here",
         "",
         None,

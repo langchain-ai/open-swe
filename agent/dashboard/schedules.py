@@ -453,7 +453,7 @@ def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> st
     repo_line = f"\n*Repository:* `{repo}`" if repo else ""
     run_kind = "test" if test_run else "scheduled"
     return (
-        f"*Open SWE automation:* {record.get('name') or 'Scheduled agent'}{repo_line}\n\n"
+        f"*Jarvis automation:* {record.get('name') or 'Scheduled agent'}{repo_line}\n\n"
         f"A {run_kind} run started. Reply in this thread to follow up with the agent."
     )
 

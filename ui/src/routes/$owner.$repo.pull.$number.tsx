@@ -116,12 +116,12 @@ function PullRequestReviewLinkPage() {
       title={
         isCheckingExistingReview
           ? "Checking review status"
-          : "Starting Open SWE review"
+          : "Starting Jarvis review"
       }
       description={
         isCheckingExistingReview
-          ? "This PR link was recognized. Open SWE is checking whether a review is already running."
-          : "Open SWE is starting a review and will redirect you to the stable review page."
+          ? "This PR link was recognized. Jarvis is checking whether a review is already running."
+          : "Jarvis is starting a review and will redirect you to the stable review page."
       }
       owner={owner}
       repo={repo}

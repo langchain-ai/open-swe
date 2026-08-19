@@ -34,7 +34,7 @@ __all__ = [
     "verify_github_signature",
 ]
 
-_DEFAULT_OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
+_DEFAULT_OPEN_SWE_TAGS = ("@jarvis-aeteq",)
 
 
 def _load_open_swe_tags() -> tuple[str, ...]:

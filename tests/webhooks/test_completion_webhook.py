@@ -51,7 +51,7 @@ async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.Monkey
     args = await_args.args
     assert args[0] == "C1"
     assert args[1] == "123.45"
-    assert "<https://ui/t1|Open SWE Web>" in args[2]
+    assert "<https://ui/t1|Jarvis Web>" in args[2]
     assert client.threads.updates == [
         {"failure_reply_posted_run_id": "run-1", "failure_reply_posted_run_ids": ["run-1"]}
     ]
@@ -86,7 +86,7 @@ async def test_reviewer_error_settles_tracked_check(monkeypatch: pytest.MonkeyPa
         conclusion="neutral",
         title="Review did not complete",
         summary=(
-            "The Open SWE review run ended without publishing a review. "
+            "The Jarvis review run ended without publishing a review. "
             "Re-trigger the review by pushing a commit or re-requesting it."
         ),
     )

@@ -48,13 +48,13 @@ def sandbox_unreachable_message(
     which = f" ({', '.join(identifiers)})" if identifiers else ""
     if replacement_attempted:
         return warning(
-            f"This thread's sandbox{which} stopped responding and Open SWE could "
+            f"This thread's sandbox{which} stopped responding and Jarvis could "
             "not provision a replacement, so this run had nowhere to work. "
             "Retrigger this thread to try again."
         )
     return warning(
-        f"This thread's sandbox{which} stopped responding, and Open SWE can't tell "
-        "whether it will come back. Open SWE will not start a replacement on its "
+        f"This thread's sandbox{which} stopped responding, and Jarvis can't tell "
+        "whether it will come back. Jarvis will not start a replacement on its "
         "own: a new sandbox is empty, so swapping one in would throw away anything "
         "not yet committed and pushed while still looking like a recovery. "
         "Retrigger this thread to try the same sandbox again, or start a new thread "
