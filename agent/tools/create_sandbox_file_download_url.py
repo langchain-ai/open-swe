@@ -1,23 +1,27 @@
 import posixpath
 from typing import Any, Literal
 
-from langchain_core.tools import tool
 from langgraph.config import get_config
 
 from ..integrations.langsmith import get_async_sandbox_client
 from ..utils.sandbox_paths import aresolve_sandbox_work_dir
 from ..utils.sandbox_state import get_sandbox_backend, unwrap_sandbox_backend
 
-_DEFAULT_EXPIRY_SECONDS = 24 * 60 * 60
 
-
-async def _create_sandbox_file_download_url(
+async def create_sandbox_file_download_url(
     file_path: str,
-    expires_in_seconds: int | None = _DEFAULT_EXPIRY_SECONDS,
+    expires_in_seconds: int | None = None,
     content_type: str | None = None,
     content_disposition: Literal["attachment", "inline"] = "attachment",
 ) -> dict[str, Any]:
-    """Create a bearer download URL for one file in the active sandbox."""
+    """Create a bearer download URL for one file in the active LangSmith sandbox.
+
+    Use this to share large binary artifacts such as videos, images, archives, or PDFs instead of
+    pasting their contents into a response. Anyone with the URL can download the file, so never use
+    it for secrets or credentials. Links do not expire by default; pass `expires_in_seconds` only
+    when a link should stop working after a set time. Set `content_disposition` to `inline` and
+    provide an appropriate `content_type` when the browser should preview an image, video, or PDF.
+    """
     if not isinstance(file_path, str) or not file_path.strip() or "\x00" in file_path:
         raise ValueError("file_path must be a non-empty sandbox path")
     if expires_in_seconds is not None and expires_in_seconds < 1:
@@ -59,15 +63,3 @@ async def _create_sandbox_file_download_url(
         "file_path": path,
         "expires_at": download.expires_at,
     }
-
-
-create_sandbox_file_download_url = tool(
-    "create_sandbox_file_download_url",
-    description="""Create a bearer download URL for one file in the active LangSmith sandbox.
-
-Use this to share large binary artifacts such as videos, images, archives, or PDFs instead of
-pasting their contents into a response. Anyone with the URL can download the file, so never use it
-for secrets or credentials. Links expire after 24 hours by default; pass null only when a
-non-expiring link is deliberately required. Set `content_disposition` to `inline` and provide an
-appropriate `content_type` when the browser should preview an image, video, or PDF.""",
-)(_create_sandbox_file_download_url)

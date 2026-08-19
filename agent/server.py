@@ -899,9 +899,11 @@ async def _cached_profile(profile_login: str | None):
 
 def _sandbox_file_downloads_enabled(configurable: dict[str, Any] | None = None) -> bool:
     """Return whether signed sandbox file downloads are available for this run."""
+    resolved = configurable or {}
     return (
         os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
-        and (configurable or {}).get("stop_summary") is not True
+        and resolved.get("stop_summary") is not True
+        and not is_desktop_run(resolved)
     )
 
 
@@ -1408,7 +1410,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Admin thread %s: adding environment management tools", thread_id)
 
     stop_summary_mode = configurable.get("stop_summary") is True
-    sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable) and not local_run
+    sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable)
     observability_tools: list[Any] = []
     corridor_tools: list[Any] = []
     browser_tools: list[Any] = []

@@ -56,7 +56,7 @@ async def test_create_download_url_for_relative_path(monkeypatch: pytest.MonkeyP
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    result = await download_tool._create_sandbox_file_download_url(
+    result = await download_tool.create_sandbox_file_download_url(
         "artifacts/demo.mp4",
         expires_in_seconds=3600,
         content_type="video/mp4",
@@ -83,18 +83,20 @@ async def test_create_download_url_for_relative_path(monkeypatch: pytest.MonkeyP
     ]
 
 
-async def test_create_download_url_uses_secure_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_create_download_url_defaults_to_a_non_expiring_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    await download_tool._create_sandbox_file_download_url("/tmp/result.zip")
+    await download_tool.create_sandbox_file_download_url("/tmp/result.zip")
 
     assert client.calls == [
         (
             "sandbox-1",
             "/tmp/result.zip",
             {
-                "expires_in_seconds": 86400,
+                "expires_in_seconds": None,
                 "content_type": None,
                 "content_disposition": "attachment",
             },
@@ -111,6 +113,6 @@ async def test_create_download_url_rejects_invalid_expiry(
     _configure(monkeypatch, backend)
 
     with pytest.raises(ValueError, match="must be positive"):
-        await download_tool._create_sandbox_file_download_url(
+        await download_tool.create_sandbox_file_download_url(
             "result.bin", expires_in_seconds=expires_in_seconds
         )
