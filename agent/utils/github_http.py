@@ -45,11 +45,13 @@ _JITTER_FACTOR = 0.25
 
 def github_headers(token: str) -> dict[str, str]:
     """Standard GitHub API headers for a bearer token."""
-    return {
-        "Authorization": f"Bearer {token}",
+    headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": GITHUB_HEADERS_VERSION,
     }
+    if token.strip():
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def _is_secondary_rate_limit(response: httpx.Response) -> bool:

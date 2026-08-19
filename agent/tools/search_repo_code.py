@@ -44,6 +44,12 @@ async def search_repo_code(query: str, max_results: int = 20) -> dict[str, Any]:
     owner, repo, token = _chat_repo_context()
     if not owner or not repo:
         return {"success": False, "error": "repository context unavailable"}
+    if not token:
+        return {
+            "success": False,
+            "error": f"repository context unavailable: no GitHub token for {owner}/{repo}; "
+            "repo-wide source inspection is not available for this PR",
+        }
 
     capped = max(1, min(max_results, 50))
     headers = github_headers(token or "")

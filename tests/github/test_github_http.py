@@ -25,6 +25,11 @@ def test_github_headers_returns_standard_headers() -> None:
     assert headers["X-GitHub-Api-Version"] == "2022-11-28"
 
 
+def test_github_headers_omits_empty_authorization() -> None:
+    assert "Authorization" not in github_headers("")
+    assert github_headers("  ") == github_headers("")
+
+
 def test_github_constants() -> None:
     assert GITHUB_API_BASE == "https://api.github.com"
     assert GITHUB_GRAPHQL == "https://api.github.com/graphql"

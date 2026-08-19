@@ -55,6 +55,12 @@ async def read_repo_file(path: str, ref: str | None = None) -> dict[str, Any]:
     owner, repo, token, head_sha = _chat_repo_context()
     if not owner or not repo:
         return {"success": False, "error": "repository context unavailable"}
+    if not token:
+        return {
+            "success": False,
+            "error": f"repository context unavailable: no GitHub token for {owner}/{repo}; "
+            "repo-wide source inspection is not available for this PR",
+        }
 
     clean_path = path.strip().lstrip("/")
     resolved_ref = (ref or head_sha or "").strip()

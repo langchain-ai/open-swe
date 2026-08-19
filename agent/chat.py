@@ -125,8 +125,12 @@ with severity, confidence, and resolution notes.
 Guidance:
 - Be concrete and cite specific files and line numbers from the diff.
 - Ground claims about the review in the actual findings; don't invent issues.
+- Never issue an unqualified verdict such as "no breaking changes", "no security
+  issues", or "no regressions" when a `read_repo_file` or `search_repo_code` call
+  in this turn returned `success: false`; state the limitation in the answer.
 - When you propose a change, describe it precisely — you cannot apply it yourself.
 - Keep answers focused and skimmable. Match the depth of the question.
+{repo_access_reminder}
 """
 
 
@@ -183,13 +187,24 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
         token = await get_github_app_installation_token(
             repositories=[repo_name] if repo_name else None
         )
-        if isinstance(token, str) and token:
+        token_available = isinstance(token, str) and bool(token.strip())
+        if token_available:
             configurable["chat_github_token"] = token
+        repo_access_reminder = ""
+        if not token_available:
+            repo_access_reminder = (
+                "\nSystem reminder: repo-wide source inspection is unavailable this turn. "
+                "Base conclusions only on `/pr/diff.patch`, `/pr/overview.md`, and "
+                "`/pr/findings.md`. If the user asks a question that requires reading "
+                "files outside the diff, say plainly that the file could not be "
+                "retrieved rather than answering as if it had been read."
+            )
         return {
             "rendered_system_prompt": CHAT_PROMPT.format(
                 repo_owner=repo_owner or "<owner>",
                 repo_name=repo_name or "<repo>",
                 pr_number=pr_number if isinstance(pr_number, int) else "?",
+                repo_access_reminder=repo_access_reminder,
             )
         }
 

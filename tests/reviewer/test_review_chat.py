@@ -320,6 +320,34 @@ async def test_read_repo_file_missing_context(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_repo_tools_without_token_do_not_make_http_requests(monkeypatch) -> None:
+    config = {
+        "configurable": {
+            "chat_repo_owner": "acme",
+            "chat_repo_name": "repo",
+        }
+    }
+    monkeypatch.setattr(read_repo_file, "get_config", lambda: config)
+    monkeypatch.setattr(search_repo_code, "get_config", lambda: config)
+
+    class _UnexpectedAsyncClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("HTTP request was attempted without a GitHub token")
+
+    monkeypatch.setattr(read_repo_file.httpx, "AsyncClient", _UnexpectedAsyncClient)
+    monkeypatch.setattr(search_repo_code.httpx, "AsyncClient", _UnexpectedAsyncClient)
+
+    expected = (
+        "repository context unavailable: no GitHub token for acme/repo; "
+        "repo-wide source inspection is not available for this PR"
+    )
+    read_result = await read_repo_file.read_repo_file("src/app.py")
+    search_result = await search_repo_code.search_repo_code("foo")
+    assert read_result == {"success": False, "error": expected}
+    assert search_result == {"success": False, "error": expected}
+
+
+@pytest.mark.asyncio
 async def test_search_repo_code_scopes_to_repo(monkeypatch) -> None:
     monkeypatch.setattr(
         search_repo_code,
