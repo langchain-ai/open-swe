@@ -1,6 +1,13 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
 
+export type DesktopCommandId =
+  | "new-thread"
+  | "show-command-palette"
+  | "open-settings"
+  | "show-keyboard-shortcuts"
+  | "toggle-sidebar"
+
 export interface DesktopProject {
   cwd: string
   name: string
@@ -125,6 +132,7 @@ declare global {
   interface Window {
     openSweDesktop?: {
       isDesktop: true
+      onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
       listProjects: () => Promise<Array<DesktopProject>>
       getProjectBranch: (cwd: string) => Promise<string | null>
       addProject: () => Promise<DesktopProject | null>

@@ -1,7 +1,15 @@
 const { contextBridge, ipcRenderer } = require("electron")
+const { isDesktopCommandId } = require("./commands.cjs")
 
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
+  onCommand: (callback) => {
+    const listener = (_event, commandId) => {
+      if (isDesktopCommandId(commandId)) callback(commandId)
+    }
+    ipcRenderer.on("desktop:command", listener)
+    return () => ipcRenderer.removeListener("desktop:command", listener)
+  },
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
   getProjectBranch: (cwd) => ipcRenderer.invoke("desktop:project-branch", cwd),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),

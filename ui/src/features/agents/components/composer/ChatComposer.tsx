@@ -41,6 +41,7 @@ import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { useRegisterAppCommands } from "@/lib/appCommands"
 import { transcribeAudio } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -254,6 +255,37 @@ export const ChatComposer = memo(function ChatComposer({
     "idle" | "recording" | "transcribing"
   >("idle")
   const [dictationError, setDictationError] = useState<string | null>(null)
+  const composerShortcuts = useMemo(
+    () => [
+      {
+        id: "composer-send",
+        label: "Send message",
+        shortcuts: ["enter"],
+        group: "Composer",
+        showInPalette: false,
+      },
+      {
+        id: "composer-new-line",
+        label: "New line",
+        shortcuts: ["shift+enter"],
+        group: "Composer",
+        showInPalette: false,
+      },
+      ...(activeRun?.running
+        ? [
+            {
+              id: "composer-stop-run",
+              label: "Stop active run",
+              shortcuts: ["escape"],
+              group: "Composer",
+              showInPalette: false,
+            },
+          ]
+        : []),
+    ],
+    [activeRun?.running]
+  )
+  useRegisterAppCommands(composerShortcuts)
 
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)

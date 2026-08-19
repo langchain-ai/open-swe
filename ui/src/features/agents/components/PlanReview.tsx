@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import type { KeyboardEvent } from "react"
 
@@ -13,6 +13,7 @@ import {
 } from "@/lib/plan"
 import { Button } from "@/components/ui/button"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { useRegisterAppCommands } from "@/lib/appCommands"
 import { useResolvedTheme } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
@@ -74,6 +75,19 @@ export function PlanReview({
   const [editing, setEditing] = useState(false)
   const [editDraft, setEditDraft] = useState(plan.markdown)
   const [saving, setSaving] = useState(false)
+  const planShortcuts = useMemo(
+    () => [
+      {
+        id: "plan-submit-comment",
+        label: "Submit plan comment",
+        shortcuts: ["mod+enter"],
+        group: "Plan review",
+        showInPalette: false,
+      },
+    ],
+    []
+  )
+  useRegisterAppCommands(planShortcuts)
 
   // Reflect external plan updates (e.g. an agent revision) while not editing.
   useEffect(() => {

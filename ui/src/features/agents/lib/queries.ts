@@ -501,11 +501,12 @@ export function useResolveAgentThread() {
 
 export function useThreadsPage(
   params: ThreadsPageParams,
-  options: { staleWhileRevalidate?: boolean } = {}
+  options: { enabled?: boolean; staleWhileRevalidate?: boolean } = {}
 ) {
   return useQuery({
     queryKey: agentThreadKeys.page(params),
     queryFn: () => agentsApi.listThreadsPage(params),
+    enabled: options.enabled,
     placeholderData: (prev) => prev,
     ...(options.staleWhileRevalidate
       ? {
