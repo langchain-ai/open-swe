@@ -226,7 +226,21 @@ export function AgentsSidebar({
           <img src="/logo-mark.png" alt="" className="size-5" />
           Open SWE
         </Link>
-        <SidebarCollapseButton onToggle={layout.toggle} />
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            aria-label="Search"
+            title="Search"
+            onClick={() => {
+              layout.closeOnMobile()
+              openPalette()
+            }}
+            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <MagnifyingGlassIcon className="size-4" />
+          </button>
+          <SidebarCollapseButton onToggle={layout.toggle} />
+        </div>
       </div>
 
       <div className="flex flex-col gap-0.5 px-2 pb-1">
@@ -239,18 +253,6 @@ export function AgentsSidebar({
           New Thread
           <SidebarShortcut commandId="new-thread" />
         </Link>
-        <button
-          type="button"
-          onClick={() => {
-            layout.closeOnMobile()
-            openPalette()
-          }}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-        >
-          <MagnifyingGlassIcon className="size-4" />
-          Search
-          <SidebarShortcut commandId="search-commands" />
-        </button>
       </div>
 
       <nav className="flex flex-col gap-0.5 px-2 pb-4">
