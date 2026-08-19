@@ -100,7 +100,6 @@ from .middleware import (
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     WorkflowPushGuardMiddleware,
-    WorkingRepoMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
     refresh_github_proxy_before_model,
@@ -1621,7 +1620,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     if stop_summary_mode
                     else []
                 ),
-                WorkingRepoMiddleware(thread_id=thread_id, backend=backend, thread_client=client),
                 SubdirAgentsReadMiddleware(),
                 ToolRetryMiddleware(
                     max_retries=2,

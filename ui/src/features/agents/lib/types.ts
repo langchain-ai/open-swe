@@ -236,7 +236,6 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
-  workingRepoFullName?: string | null
   branch: string
   model: string
   effort?: string | null
