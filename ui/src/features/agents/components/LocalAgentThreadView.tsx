@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   CircleAlert,
   FolderOpen,
@@ -9,6 +10,7 @@ import {
 } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
+import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
@@ -27,11 +29,12 @@ import {
 import { Messages } from "@/features/agents/components/messages"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
 import { usePanelTabs } from "@/features/agents/lib/panelTabs"
+import { useAgentSkills } from "@/features/agents/lib/queries"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
+  localThreadKeys,
   useDesktopLocalThread,
   useLocalThreadDiff,
-  useRefreshLocalThreads,
 } from "@/features/agents/lib/desktopLocal"
 import {
   readStoredPanelCollapsed,
@@ -68,7 +71,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const stream = useAgentThreadStream()
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
-  const refreshThreads = useRefreshLocalThreads()
+  const queryClient = useQueryClient()
+  const skills = useAgentSkills()
   const initialPromptRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isMobile = useIsMobile()
@@ -188,13 +192,19 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
 
   const updateStatus = useCallback(
     async (status: "idle" | "running" | "error") => {
-      await window.openSweDesktop?.updateLocalThread({
+      const updated = await window.openSweDesktop?.updateLocalThread({
         threadId: sessionId,
         status,
       })
-      refreshThreads(sessionId)
+      if (!updated) return
+      queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+      queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
+        localThreadKeys.all,
+        (threads = []) =>
+          threads.map((thread) => (thread.id === sessionId ? updated : thread))
+      )
     },
-    [refreshThreads, sessionId]
+    [queryClient, sessionId]
   )
 
   const submit = useCallback(
@@ -375,6 +385,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   )
                 }}
                 placeholder="Add a follow up"
+                skills={skills.data}
               />
             </div>
           </div>

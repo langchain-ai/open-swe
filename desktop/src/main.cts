@@ -721,7 +721,7 @@ function createWindow() {
     title: appRuntime.name,
     width: 1440,
     height: 900,
-    minWidth: 900,
+    minWidth: 480,
     minHeight: 600,
     backgroundColor: "#ffffff",
     icon: iconPath(),
