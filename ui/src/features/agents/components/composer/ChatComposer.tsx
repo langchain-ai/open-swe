@@ -630,6 +630,9 @@ export const ChatComposer = memo(function ChatComposer({
     >
       {(onRepoChange || onRunTargetChange || onEnvironmentChange) && (
         <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 px-1 text-xs">
+          {runTarget && onRunTargetChange && (
+            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
+          )}
           {runTarget !== "local" && onRepoChange && (
             <RepoSelector
               repos={repos}
@@ -643,9 +646,6 @@ export const ChatComposer = memo(function ChatComposer({
               selectedSlug={selectedEnvironment}
               onChange={onEnvironmentChange}
             />
-          )}
-          {runTarget && onRunTargetChange && (
-            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
           )}
           {runTarget === "local" &&
             onSelectLocalProject &&
