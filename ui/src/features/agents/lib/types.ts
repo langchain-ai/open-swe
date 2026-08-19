@@ -152,6 +152,9 @@ export interface Message {
   id: string
   author: Author
   timestamp: string
+  structuredSenderId?: string
+  structuredSenderKind?: "person" | "system"
+  structuredSenderName?: string
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
   /** Timestamp of the first message in an agent turn; used to derive work duration. */

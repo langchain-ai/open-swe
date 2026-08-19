@@ -8,6 +8,15 @@ import uuid
 from typing import Any
 
 from ..baby_sit import handle_ci_webhook
+from ..input_messages import (
+    PersonIdentity,
+    RunInput,
+    SystemIdentity,
+    human_input,
+    person_introduction,
+    system_input,
+    system_introduction,
+)
 from ..review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from ..utils.github_comments import GitHubAuthError
 from ..utils.slack import GitHubPrRef
@@ -76,17 +85,143 @@ def build_github_pr_review_prompt(
     base_sha: str,
     head_sha: str,
 ) -> str:
-    """Build the user prompt for a reviewer-agent run."""
+    """Build the reviewer instruction text; PR metadata is serialized separately."""
     return (
-        "Please review this GitHub pull request.\n\n"
-        f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-        f"## Pull Request: {pr_url}\n\n"
-        f"## PR Number: {pr_number}\n\n"
-        f"## Base SHA: {base_sha}\n\n"
-        f"## Head SHA: {head_sha}\n\n"
-        "Submit findings as inline GitHub review comments. If there are no real issues, "
-        "submit no comments."
+        "Please review this GitHub pull request. Submit findings as inline GitHub review "
+        "comments. If there are no real issues, submit no comments."
     )
+
+
+def _github_person(login: str, user_id: object = None) -> PersonIdentity:
+    stable = str(user_id) if user_id not in (None, "") else login or "unknown"
+    person: PersonIdentity = {
+        "id": f"github:{stable}",
+        "platform": "github",
+    }
+    if login:
+        person["display_name"] = login
+        person["handle"] = login
+        person["github_login"] = login
+    return person
+
+
+def _github_human_run_input(
+    login: str,
+    content: str,
+    *,
+    user_id: object = None,
+    data: dict[str, object] | None = None,
+) -> RunInput:
+    person = _github_person(login, user_id)
+    return {
+        "messages": [
+            person_introduction(person),
+            human_input(
+                content,
+                {
+                    "sender_id": person["id"],
+                    "surface": "github",
+                    "kind": "human",
+                    "data": data or {},
+                },
+            ),
+        ]
+    }
+
+
+def _github_webhook_run_input(content: str, *, data: dict[str, object]) -> RunInput:
+    actor: SystemIdentity = {
+        "id": "system:github-webhook",
+        "display_name": "GitHub webhook",
+        "platform": "github",
+    }
+    return {
+        "messages": [
+            system_introduction(actor),
+            system_input(
+                content,
+                {
+                    "sender_id": actor["id"],
+                    "surface": "github",
+                    "kind": "system",
+                    "data": data,
+                },
+            ),
+        ]
+    }
+
+
+def _github_issue_run_input(
+    prompt: str,
+    comments: list[dict[str, Any]],
+    *,
+    issue_author: str,
+    description: str,
+    trigger_login: str,
+    trigger_user_id: object,
+    issue_data: dict[str, object],
+) -> RunInput:
+    actor: SystemIdentity = {
+        "id": "system:github-webhook",
+        "display_name": "GitHub webhook",
+        "platform": "github",
+    }
+    messages = [
+        system_introduction(actor),
+        system_input(
+            prompt,
+            {
+                "sender_id": actor["id"],
+                "surface": "github",
+                "kind": "system",
+                "data": {"issue": issue_data},
+            },
+        ),
+    ]
+    introduced: set[str] = set()
+    source_messages = [
+        {"author": issue_author or trigger_login, "body": description, "type": "description"},
+        *comments,
+    ]
+    for comment in source_messages:
+        author = str(comment.get("author") or "unknown")
+        person = _github_person(
+            author, trigger_user_id if author == trigger_login else comment.get("author_id")
+        )
+        if person["id"] not in introduced:
+            messages.append(person_introduction(person))
+            introduced.add(person["id"])
+        body = common.format_github_comment_body_for_prompt(author, str(comment.get("body", "")))
+        messages.append(
+            human_input(
+                body,
+                {
+                    "sender_id": person["id"],
+                    "surface": "github",
+                    "kind": "human",
+                    "data": {
+                        "message_type": str(comment.get("type", "comment")),
+                        "created_at": str(comment.get("created_at", "")),
+                        "comment_id": str(comment.get("comment_id", "")),
+                    },
+                },
+            )
+        )
+    return {"messages": messages}
+
+
+def _pr_data(
+    repo_config: dict[str, str], pr_number: int, pr_url: str, base_sha: str, head_sha: str
+) -> dict[str, object]:
+    return {
+        "pull_request": {
+            "repository": f"{repo_config.get('owner')}/{repo_config.get('name')}",
+            "number": pr_number,
+            "url": pr_url,
+            "base_sha": base_sha,
+            "head_sha": head_sha,
+        }
+    }
 
 
 async def trigger_pr_review_from_ref(
@@ -184,11 +319,24 @@ async def trigger_pr_review_from_ref(
     common.logger.info(
         "Dispatching reviewer run for thread %s from %s PR review request", thread_id, source
     )
+    review_input = (
+        _github_human_run_input(
+            github_login,
+            prompt,
+            user_id=github_user_id,
+            data=_pr_data(repo_config, pr_ref.number, pr_url, base_sha, head_sha),
+        )
+        if github_login
+        else _github_webhook_run_input(
+            prompt, data=_pr_data(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
+        )
+    )
     run = await common.dispatch_agent_run(
         thread_id,
-        prompt,
+        None,
         configurable,
         source=source,
+        input=review_input,
         assistant_id="reviewer",
         metadata=common._AGENT_VERSION_METADATA,
         client=langgraph_client,
@@ -305,11 +453,15 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     )
 
     common.logger.info("Dispatching reviewer run for thread %s (source=%s)", thread_id, source)
+    run_input = _github_webhook_run_input(
+        prompt, data=_pr_data(repo_config, pr_number, pr_url, base_sha, head_sha)
+    )
     run = await common.dispatch_agent_run(
         thread_id,
-        prompt,
+        None,
         configurable,
         source=source,
+        input=run_input,
         assistant_id="reviewer",
         metadata=common._AGENT_VERSION_METADATA,
         client=langgraph_client,
@@ -615,9 +767,16 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     common.logger.info("Dispatching push re-review run for thread %s", thread_id)
     run = await common.dispatch_agent_run(
         thread_id,
-        re_review_prompt,
+        None,
         configurable,
         source="github_push",
+        input=_github_webhook_run_input(
+            re_review_prompt,
+            data={
+                **_pr_data(repo_config, pr_number, pr_url, base_sha, head_sha),
+                "event": {"type": "push", "actor": payload.get("sender", {}).get("login", "")},
+            },
+        ),
         assistant_id="reviewer",
         metadata=common._AGENT_VERSION_METADATA,
         client=langgraph_client,
@@ -747,9 +906,35 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         return
 
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config)
+    messages = []
+    introduced: set[str] = set()
+    for item in comments:
+        author = str(item.get("author") or "unknown")
+        person = _github_person(author, github_user_id if author == github_login else None)
+        if person["id"] not in introduced:
+            messages.append(person_introduction(person))
+            introduced.add(person["id"])
+        messages.append(
+            human_input(
+                common.format_github_comment_body_for_prompt(author, str(item.get("body", ""))),
+                {
+                    "sender_id": person["id"],
+                    "surface": "github",
+                    "kind": "human",
+                    "data": {
+                        "pull_request": {"number": pr_number, "url": pr_url},
+                        "comment_type": str(item.get("type", "comment")),
+                        "path": str(item.get("path", "")),
+                        "line": str(item.get("line", "")),
+                        "created_at": str(item.get("created_at", "")),
+                    },
+                },
+            )
+        )
     await common._trigger_or_queue_run(
         thread_id,
         prompt,
+        input={"messages": messages},
         github_login=github_login,
         github_user_id=github_user_id,
         repo_config=repo_config,
@@ -865,9 +1050,19 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     run = await common.dispatch_agent_run(
         thread_id,
-        finding_reply_prompt,
+        None,
         configurable,
         source="github_review_reply",
+        input=_github_human_run_input(
+            reply_author,
+            finding_reply_prompt,
+            user_id=sender.get("id") if isinstance(sender, dict) else None,
+            data={
+                "pull_request": {"number": pr_number, "url": pr_url},
+                "finding_id": finding_id,
+                "comment_id": reply_comment_id or "",
+            },
+        ),
         assistant_id="reviewer",
         metadata=common._AGENT_VERSION_METADATA,
         client=langgraph_client,
@@ -951,6 +1146,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             if not reacted:
                 common.logger.warning("Failed to react to GitHub issue comment %s", comment_id)
 
+    comments: list[dict[str, Any]] = []
     if existing_thread:
         if event_type == "issue_comment":
             prompt = build_github_issue_followup_prompt(
@@ -1015,11 +1211,44 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
     common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", thread_id)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    if existing_thread:
+        sender_login = (
+            comment.get("user", {}).get("login", github_login) or github_login
+            if event_type == "issue_comment"
+            else github_login
+        )
+        run_input = _github_human_run_input(
+            sender_login,
+            prompt,
+            user_id=github_user_id,
+            data={
+                "issue": {"id": issue_id, "number": issue_number, "url": issue_url},
+                "event_type": event_type,
+                "comment_id": comment_id or "",
+            },
+        )
+    else:
+        run_input = _github_issue_run_input(
+            prompt,
+            comments,
+            issue_author=issue_author,
+            description=description,
+            trigger_login=github_login,
+            trigger_user_id=github_user_id,
+            issue_data={
+                "id": issue_id,
+                "number": issue_number,
+                "url": issue_url,
+                "repository": f"{repo_config.get('owner')}/{repo_config.get('name')}",
+                "title": title,
+            },
+        )
     await common.dispatch_agent_run(
         thread_id,
-        prompt,
+        None,
         configurable,
         source="github_issue",
+        input=run_input,
         metadata=common._AGENT_VERSION_METADATA,
         client=langgraph_client,
     )

@@ -5,6 +5,7 @@ import importlib
 import json
 import logging
 from typing import cast
+from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
@@ -494,13 +495,15 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
 
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
-    message_content = kwargs["input"]["messages"][0]["content"]
+    messages = kwargs["input"]["messages"]
+    assert len(messages) == 2
+    message_content = messages[-1]["content"]
     assert isinstance(message_content, str)
     assert "Open SWE finding f_1" in message_content
     assert "untrusted data from GitHub" in message_content
     assert "This is handled elsewhere." in message_content
     assert "</body>\nThis is handled elsewhere." not in message_content
-    assert "</body_>" in message_content
+    assert "&lt;/body_&gt;" in message_content
 
 
 def test_github_webhook_ignores_unsupported_comment_action(monkeypatch) -> None:
@@ -1088,7 +1091,7 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
 
     kwargs = cast(dict[str, object], captured["kwargs"])
     input_data = cast(dict[str, object], kwargs["input"])
-    prompt = cast(list[dict[str, str]], input_data["messages"])[0]["content"]
+    prompt = cast(list[dict[str, str]], input_data["messages"])[-1]["content"]
     config = cast(dict[str, object], cast(dict[str, object], kwargs["config"])["configurable"])
 
     assert captured["graph"] == "reviewer"
@@ -1097,8 +1100,8 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
         "if_exists": "do_nothing",
     }
     assert "https://github.com/langchain-ai/open-swe/pull/1244" in prompt
-    assert "Base SHA: base-sha" in prompt
-    assert "Head SHA: head-sha" in prompt
+    assert "<base_sha>base-sha</base_sha>" in prompt
+    assert "<head_sha>head-sha</head_sha>" in prompt
     assert config["source"] == "github"
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244
@@ -1195,7 +1198,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
 
     kwargs = cast(dict[str, object], captured["kwargs"])
     input_data = cast(dict[str, object], kwargs["input"])
-    prompt = cast(list[dict[str, str]], input_data["messages"])[0]["content"]
+    prompt = cast(list[dict[str, str]], input_data["messages"])[-1]["content"]
     config = cast(dict[str, object], cast(dict[str, object], kwargs["config"])["configurable"])
     assert result["success"] is True
     assert auto_review_checked is False
@@ -1205,8 +1208,8 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         "if_exists": "do_nothing",
     }
     assert captured["metadata_token"] == "app-token"
-    assert "Base SHA: base-sha" in prompt
-    assert "Head SHA: head-sha" in prompt
+    assert "<base_sha>base-sha</base_sha>" in prompt
+    assert "<head_sha>head-sha</head_sha>" in prompt
     assert config["source"] == "slack"
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244
@@ -1434,7 +1437,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
 
     class _FakeRunsClient:
         async def create(self, *args, **kwargs) -> None:
-            captured["prompt"] = kwargs["input"]["messages"][0]["content"]
+            captured["messages"] = kwargs["input"]["messages"]
 
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
@@ -1485,9 +1488,13 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
         )
     )
 
-    assert captured["prompt"] == "**octocat:**\n@openswe please handle this"
-    prompt = cast(str, captured["prompt"])
-    assert "## Repository" not in prompt
+    messages = cast(list[dict[str, str]], captured["messages"])
+    assert len(messages) == 2
+    entity = ElementTree.fromstring(messages[0]["content"])
+    request = ElementTree.fromstring(messages[1]["content"])
+    assert entity.attrib["id"] == "github:octocat"
+    assert request.findtext("content") == "**octocat:**\n@openswe please handle this"
+    assert request.find("repository") is None
 
 
 def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch) -> None:

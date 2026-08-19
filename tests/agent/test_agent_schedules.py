@@ -1,5 +1,6 @@
 import uuid
 from typing import Any
+from xml.etree import ElementTree
 
 import pytest
 from fastapi import HTTPException
@@ -574,7 +575,10 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client,
     run = fake_client.runs.created[0]
     assert run["thread_id"] == thread_id
     assert run["assistant_id"] == "agent"
-    assert run["input"]["messages"][0]["content"] == record["prompt"]
+    messages = run["input"]["messages"]
+    assert ElementTree.fromstring(messages[0]["content"]).attrib["kind"] == "system"
+    prompt = ElementTree.fromstring(messages[-1]["content"])
+    assert prompt.findtext("content") == record["prompt"]
     assert run["durability"] == "sync"
     assert run["multitask_strategy"] == "interrupt"
     assert run["if_not_exists"] == "create"
@@ -629,7 +633,8 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
     assert slack_thread["triggering_user_id"] == "UALICE"
     run = fake_client.runs.created[0]
     assert run["config"]["configurable"]["slack_thread"] == slack_thread
-    assert "slack_thread_reply" in run["input"]["messages"][0]["content"]
+    prompt = ElementTree.fromstring(run["input"]["messages"][-1]["content"])
+    assert "slack_thread_reply" in (prompt.findtext("content") or "")
     association = fake_client.store.items[
         (("slack_thread_map", "C0123456789"), "1784302353.900029")
     ]
@@ -681,9 +686,9 @@ async def test_launch_conditional_slack_schedule_starts_silently(
         "schedule_id": "sched_1",
         "schedule_name": "Dependency check",
     }
-    prompt = run["input"]["messages"][0]["content"]
-    assert "notify_automation_channel" in prompt
-    assert "read-only checks" in prompt
+    prompt = ElementTree.fromstring(run["input"]["messages"][-1]["content"])
+    assert "notify_automation_channel" in (prompt.findtext("content") or "")
+    assert "read-only checks" in (prompt.findtext("content") or "")
     metadata = fake_client.threads.created[0]["metadata"]
     assert "source_context" not in metadata
 

@@ -1,10 +1,10 @@
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
+from xml.etree import ElementTree
 
 import pytest
 
 from agent.middleware.check_message_queue import (
-    DASHBOARD_HANDOFF_MARKER,
     LinearNotifyState,
     _build_blocks_from_payload,
     check_message_queue_before_model,
@@ -30,13 +30,31 @@ class _FakeStore:
         self.deleted.append((namespace, key))
 
 
+def _envelope(message: dict) -> str:
+    """The message's envelope text, whether its content is a string or blocks."""
+    content = message["content"]
+    if isinstance(content, str):
+        return content
+    return "".join(block["text"] for block in content if block.get("type") == "text")
+
+
 @pytest.mark.asyncio
 async def test_check_message_queue_injects_dashboard_handoff_instruction() -> None:
     store = _FakeStore(
         {
             (("queue", "thread-1"), "pending_messages"): {
                 "messages": [
-                    {"content": {"text": "continue in web", "source": "dashboard"}},
+                    {
+                        "content": {
+                            "text": "continue in web",
+                            "source": "dashboard",
+                            "sender": {
+                                "id": "github:octocat",
+                                "platform": "github",
+                                "github_login": "octocat",
+                            },
+                        }
+                    },
                 ]
             }
         }
@@ -61,23 +79,43 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
         )
 
     assert result is not None
-    message = result["messages"][0]
-    assert message["role"] == "user"
-    assert DASHBOARD_HANDOFF_MARKER in message["content"][0]["text"]
-    assert message["content"][1] == {"type": "text", "text": "continue in web"}
-    assert "plan_approver" not in result
+    messages = result["messages"]
+    # One envelope per message: the transcript parses them individually, so a
+    # concatenation would render as raw XML.
+    assert [message["role"] for message in messages] == ["user"] * 4
+    handoff_entity = ElementTree.fromstring(_envelope(messages[0]))
+    handoff_message = ElementTree.fromstring(_envelope(messages[1]))
+    user_entity = ElementTree.fromstring(_envelope(messages[2]))
+    user_message = ElementTree.fromstring(_envelope(messages[3]))
+    assert handoff_entity.attrib["id"] == "system:dashboard-handoff"
+    assert handoff_message.attrib["kind"] == "system"
+    assert "conversation has moved to Web" in (handoff_message.findtext("content") or "")
+    assert user_entity.attrib["id"] == "github:octocat"
+    assert user_message.findtext("content") == "continue in web"
+    assert result["plan_approval_blocked"] is True
     assert "dashboard/Web UI" in result["rendered_system_prompt"]
     assert "Make `slack_thread_reply` your first tool call" not in result["rendered_system_prompt"]
     assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
 
 
 @pytest.mark.asyncio
-async def test_check_message_queue_does_not_persist_dashboard_approver() -> None:
+async def test_check_message_queue_allows_owner_dashboard_approval() -> None:
     store = _FakeStore(
         {
             (("queue", "thread-1"), "pending_messages"): {
                 "messages": [
-                    {"content": {"text": "go ahead", "source": "dashboard"}},
+                    {
+                        "content": {
+                            "text": "go ahead",
+                            "source": "dashboard",
+                            "from_owner": True,
+                            "sender": {
+                                "id": "github:owner",
+                                "platform": "github",
+                                "github_login": "owner",
+                            },
+                        }
+                    },
                 ]
             }
         }
@@ -95,8 +133,9 @@ async def test_check_message_queue_does_not_persist_dashboard_approver() -> None
         )
 
     assert result is not None
-    assert "plan_approver" not in result
-    assert result["messages"][0]["content"][1] == {"type": "text", "text": "go ahead"}
+    assert result["plan_approval_blocked"] is False
+    user_message = ElementTree.fromstring(_envelope(result["messages"][-1]))
+    assert user_message.findtext("content") == "go ahead"
 
 
 @pytest.mark.asyncio

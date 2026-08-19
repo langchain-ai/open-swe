@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any, cast
 from unittest.mock import MagicMock
+from xml.etree import ElementTree
 
 import pytest
 from langchain.agents.middleware import AgentState
@@ -90,7 +91,14 @@ async def test_prepare_prompt_injection():
         },
     )()
     await middleware.awrap_model_call(cast(ModelRequest[None], request), handler)
-    assert seen["system_prompt"] == "prepared prompt"
+    prompt = ElementTree.fromstring(seen["system_prompt"])
+    assert prompt.tag == "system-instructions"
+    entity = prompt.find("dynamic-context")
+    message = prompt.find("input-message")
+    assert entity is not None
+    assert message is not None
+    assert entity.attrib["id"] == "system:open-swe"
+    assert message.findtext("content") == "prepared prompt"
 
 
 def test_sender_context_updates_only_latest_human_message():
