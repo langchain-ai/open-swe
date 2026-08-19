@@ -616,10 +616,7 @@ function ThreadCard({
   onDragStart: (event: React.DragEvent<HTMLElement>) => void
   onDragEnd: () => void
 }) {
-  const resolveThread = useResolveAgentThread()
   const isResolved = thread.resolved === true
-  const isResolving =
-    resolveThread.isPending && resolveThread.variables.threadId === thread.id
 
   return (
     <article
@@ -676,27 +673,8 @@ function ThreadCard({
           )}
         </div>
       </Link>
-      <div className="flex items-center justify-between border-t border-border/70 px-3 py-1.5">
-        <span className="text-[10px] text-muted-foreground/70">
-          {formatRelativeTime(thread.updatedAt)}
-        </span>
-        <button
-          type="button"
-          aria-label={isResolved ? "Reopen thread" : "Resolve thread"}
-          title={isResolved ? "Reopen thread" : "Resolve thread"}
-          disabled={isResolving || isMoving}
-          onClick={() =>
-            resolveThread.mutate({ threadId: thread.id, resolved: !isResolved })
-          }
-          className="flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-        >
-          {isResolved ? (
-            <ArrowCounterClockwiseIcon className="size-3" />
-          ) : (
-            <CheckCircleIcon className="size-3" />
-          )}
-          {isResolved ? "Reopen" : "Resolve"}
-        </button>
+      <div className="border-t border-border/70 px-3 py-2 text-[10px] text-muted-foreground/70">
+        {formatRelativeTime(thread.updatedAt)}
       </div>
     </article>
   )
