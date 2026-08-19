@@ -562,8 +562,6 @@ async def ensure_sandbox_for_thread(
                 ) from create_exc
             logger.info("Replacement sandbox created: %s", sandbox_backend.id)
 
-    sandbox_backend = set_sandbox_backend(thread_id, sandbox_backend)
-
     await _configure_git_identity(sandbox_backend)
 
     # Bind the thread only once the sandbox is created and initialized: a run
@@ -574,7 +572,11 @@ async def ensure_sandbox_for_thread(
             thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id}
         )
 
-    return sandbox_backend
+    # Publishing last is what makes a failure above visible. Callers reach the
+    # proxy's cached backend without awaiting the startup task that produced it,
+    # so a backend published before this point would be used by the rest of the
+    # run while the initialization that failed is only logged.
+    return set_sandbox_backend(thread_id, sandbox_backend)
 
 
 async def recreate_sandbox_for_thread(
