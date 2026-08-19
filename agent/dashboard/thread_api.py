@@ -9,7 +9,7 @@ import os
 import posixpath
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import HTTPException
@@ -595,6 +595,7 @@ _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+_DISCOVERY_HISTORY_LIMIT = 5
 
 
 def _thread_id(thread: ThreadLike) -> str | None:
@@ -618,13 +619,19 @@ def _owner_search_filters(
 
 
 def _search_metadata_filter(
-    owner_filter: dict[str, Any], *, resolved: bool | None = None, source: str | None = None
+    owner_filter: dict[str, Any],
+    *,
+    resolved: bool | None = None,
+    source: str | None = None,
+    automation_id: str | None = None,
 ) -> dict[str, Any]:
     metadata = dict(owner_filter)
     if resolved is True:
         metadata["resolved"] = True
     if source and source != _DASHBOARD_SOURCE:
         metadata["source"] = source
+    if automation_id:
+        metadata["schedule_id"] = automation_id
     return metadata
 
 
@@ -663,8 +670,17 @@ def _metadata_matches_filters(
     resolved: bool | None,
     source: str | None,
     query: str | None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
+    is_automation = _is_automation_thread(metadata)
+    if scope == "interactive" and is_automation:
+        return False
+    if scope == "automation" and not is_automation:
+        return False
+    if automation_id and _metadata_string(metadata, "schedule_id") != automation_id:
+        return False
     if resolved is not None and _is_thread_resolved(metadata) is not resolved:
         return False
     if source and _thread_source(metadata) != source:
@@ -773,13 +789,20 @@ async def _collect_thread_candidates(
     resolved: bool | None = None,
     source: str | None = None,
     query: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
     target_per_search: int | None = None,
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     for owner_filter in searches:
         matched_for_search = 0
         offset = 0
-        metadata_filter = _search_metadata_filter(owner_filter, resolved=resolved, source=source)
+        metadata_filter = _search_metadata_filter(
+            owner_filter,
+            resolved=resolved,
+            source=source,
+            automation_id=automation_id,
+        )
         while offset < _THREADS_PAGE_SCAN_CAP:
             batch = await _search_threads_batch(
                 client,
@@ -798,6 +821,8 @@ async def _collect_thread_candidates(
                     resolved=resolved,
                     source=source,
                     query=query,
+                    scope=scope,
+                    automation_id=automation_id,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -998,6 +1023,8 @@ async def list_dashboard_threads_page(
     source: str | None = None,
     status: str | None = None,
     query: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
 ) -> dict[str, Any]:
     client = langgraph_client()
     searches = _owner_search_filters(login, email=email, include_all=include_all)
@@ -1015,6 +1042,8 @@ async def list_dashboard_threads_page(
         resolved=resolved,
         source=source,
         query=query,
+        scope=scope,
+        automation_id=automation_id,
         target_per_search=target,
     )
 
@@ -1613,7 +1642,6 @@ async def send_dashboard_message(
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
-        "from_owner": _user_owns_thread(metadata, login, email),
     }
     if isinstance(content, list):
         queue_payload["images"] = [
@@ -2308,10 +2336,21 @@ async def proxy_dashboard_thread_history(
 ) -> tuple[int, bytes, str | None]:
     _require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
+    try:
+        payload = json.loads(body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(400, "history body must be a JSON object") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "history body must be a JSON object")
+    limit = payload.get("limit", _DISCOVERY_HISTORY_LIMIT)
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise HTTPException(400, "history limit must be a positive integer")
+    if not any(payload.get(key) for key in ("before", "checkpoint", "metadata")):
+        payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = _langgraph_proxy_headers(content_type=content_type)
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
-        response = await client.post(url, content=body or b"{}", headers=headers)
+        response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 

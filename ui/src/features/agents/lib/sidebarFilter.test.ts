@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   DEFAULT_SIDEBAR_FILTERS,
+  GROUP_MODE_OPTIONS,
   availableFacets,
   filterThreads,
   groupThreadsByMode,
@@ -148,6 +149,13 @@ describe("availableFacets", () => {
 })
 
 describe("groupThreadsByMode", () => {
+  it("offers focus grouping in the sidebar", () => {
+    expect(GROUP_MODE_OPTIONS).toContainEqual({
+      value: "focus",
+      label: "Focus",
+    })
+  })
+
   it("returns an empty array for no threads", () => {
     expect(groupThreadsByMode([], "date")).toEqual([])
   })
@@ -157,6 +165,49 @@ describe("groupThreadsByMode", () => {
     expect(sections).toHaveLength(1)
     expect(sections[0]?.key).toBe("all")
     expect(sections[0]?.threads).toHaveLength(2)
+  })
+
+  it("uses the board focus definitions", () => {
+    const sections = groupThreadsByMode(
+      [
+        makeThread({ id: "resolved", resolved: true, status: "running" }),
+        makeThread({ id: "running", status: "running" }),
+        makeThread({ id: "error", status: "error" }),
+        makeThread({ id: "interrupted", status: "interrupted" }),
+        makeThread({ id: "plan-ready", planStatus: "ready" }),
+        makeThread({ id: "plan-shared", planStatus: "shared" }),
+        makeThread({ id: "unread", status: "finished", viewed: false }),
+        makeThread({ id: "finished", status: "finished" }),
+        makeThread({ id: "idle", status: "idle" }),
+      ],
+      "focus"
+    )
+
+    expect(sections.map((section) => section.key)).toEqual([
+      "attention",
+      "progress",
+      "ready",
+      "done",
+    ])
+    expect(
+      Object.fromEntries(
+        sections.map((section) => [
+          section.key,
+          section.threads.map((thread) => thread.id).sort(),
+        ])
+      )
+    ).toEqual({
+      attention: [
+        "error",
+        "interrupted",
+        "plan-ready",
+        "plan-shared",
+        "unread",
+      ],
+      progress: ["running"],
+      ready: ["finished", "idle"],
+      done: ["resolved"],
+    })
   })
 
   it("buckets by date and drops empty buckets", () => {

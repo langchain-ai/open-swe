@@ -177,7 +177,7 @@ export function AgentGitPanel({
 
   const reviewHeader = (
     <div className="shrink-0 px-3 pb-2">
-      <div className="flex min-h-9 items-center gap-2">
+      <div className="@container flex min-h-9 items-center gap-2">
         <Menu>
           <MenuTrigger className="flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-foreground transition-colors hover:bg-accent">
             {tabLabels[tab]}
@@ -225,10 +225,11 @@ export function AgentGitPanel({
               href={pr.url}
               target="_blank"
               rel="noreferrer"
-              className="flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+              aria-label="View PR"
+              className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent"
             >
               <GitPullRequestIcon className="size-3.5" />
-              View PR
+              <span className="hidden @[700px]:inline">View PR</span>
             </a>
           )}
           <Menu>

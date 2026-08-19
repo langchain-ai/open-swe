@@ -24,11 +24,19 @@ export interface PlanUser {
 export type PlanStatus =
   "planning" | "ready" | "shared" | "revising" | "approved" | "cancelled"
 
+export interface PlanApprover {
+  id: string
+  name: string
+  source: string
+}
+
 export interface PlanData {
   threadId: string
   status: PlanStatus
   html: string
   isOwner: boolean
+  approvedBy: PlanApprover | null
+  approvedAt: string | null
   user: PlanUser
 }
 

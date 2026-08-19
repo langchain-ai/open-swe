@@ -12,6 +12,7 @@ store operations (no CRDT/WebSocket).
 import logging
 import re
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -32,6 +33,17 @@ PLAN_STATUS_SHARED = "shared"
 PLAN_STATUS_REVISING = "revising"
 PLAN_STATUS_APPROVED = "approved"
 PLAN_STATUS_CANCELLED = "cancelled"
+
+
+def make_plan_approver(*, actor_id: str, name: str, source: str) -> dict[str, str]:
+    actor_id = actor_id.strip()
+    name = name.strip()
+    source = source.strip()
+    return {
+        "id": actor_id or name or "unknown",
+        "name": name or actor_id or "Unknown user",
+        "source": source or "unknown",
+    }
 
 
 def plan_file_path_for_thread(thread_id: str) -> str:
@@ -136,7 +148,13 @@ async def get_plan_content(
     return _item_value(item)
 
 
-async def set_plan_status(thread_id: str, status: str, *, plan_mode: bool | None = None) -> None:
+async def set_plan_status(
+    thread_id: str,
+    status: str,
+    *,
+    plan_mode: bool | None = None,
+    approved_by: Mapping[str, str] | None = None,
+) -> None:
     """Update the plan lifecycle status on both the content record and metadata."""
     existing = await get_plan_content(thread_id) or {}
     entering_plan_after_share = (
@@ -150,12 +168,21 @@ async def set_plan_status(thread_id: str, status: str, *, plan_mode: bool | None
     plan_file_path = existing.get("plan_file_path")
     if not entering_plan_after_share and isinstance(plan_file_path, str) and plan_file_path:
         record["plan_file_path"] = plan_file_path
+    metadata: dict[str, Any] = {"plan_status": status}
+    if status == PLAN_STATUS_APPROVED and approved_by is not None:
+        approver = make_plan_approver(
+            actor_id=str(approved_by.get("id") or ""),
+            name=str(approved_by.get("name") or ""),
+            source=str(approved_by.get("source") or ""),
+        )
+        approved_at = datetime.now(UTC).isoformat()
+        record.update(approved_by=approver, approved_at=approved_at)
+        metadata.update(plan_approved_by=approver, plan_approved_at=approved_at)
     await client.store.put_item(
         PLAN_CONTENT_NAMESPACE,
         thread_id,
         record,
     )
-    metadata: dict[str, Any] = {"plan_status": status}
     if plan_mode is not None:
         metadata["plan_mode"] = plan_mode
     await _merge_thread_metadata(thread_id, metadata)

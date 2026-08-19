@@ -14,7 +14,7 @@ import pytest
 from deepagents.backends.composite import CompositeBackend
 from langgraph.graph.state import RunnableConfig
 
-from agent.server import get_agent
+from agent.server import _registered_tool_name, get_agent
 from agent.utils.read_only_backend import ReadOnlyBackend
 from agent.utils.sandbox_state import SandboxBackendProxy, clear_sandbox_backend
 
@@ -135,9 +135,9 @@ async def test_agent_is_built_with_a_backend_for_eviction_and_summarization() ->
 
 
 @pytest.mark.asyncio
-async def test_agent_wires_user_and_organization_skills_into_agents() -> None:
+async def test_agent_wires_user_organization_and_bundled_skills_into_agents() -> None:
     captured = await _capture_create_deep_agent_kwargs()
-    sources = ["/skills/", "/organization-skills/"]
+    sources = ["/skills/", "/organization-skills/", "/bundled-skills/"]
     assert captured["skills"] == sources
     backend = captured["backend"]
     assert isinstance(backend, CompositeBackend)
@@ -145,6 +145,8 @@ async def test_agent_wires_user_and_organization_skills_into_agents() -> None:
         assert isinstance(backend.routes[route], ReadOnlyBackend)
         with pytest.raises(NotImplementedError):
             backend.write(f"{route}poison/SKILL.md", "malicious")
+    skill = await backend.aread("/bundled-skills/baby-sit/SKILL.md")
+    assert skill.file_data and "name: baby-sit" in skill.file_data["content"]
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
@@ -332,8 +334,8 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
 
     gp = next(s for s in subagents if s["name"] == "general-purpose")
     assert "cannot access Slack tools" in gp["description"]
-    parent_names = {tool.__name__ for tool in parent_tools}
-    subagent_names = {tool.__name__ for tool in gp["tools"]}
+    parent_names = {_registered_tool_name(tool) for tool in parent_tools}
+    subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
     slack_names = {
         "notify_automation_channel",
         "slack_add_reaction",

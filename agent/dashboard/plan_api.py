@@ -1,5 +1,6 @@
 """REST API for HTML plan artifacts, comments, approval, and change requests."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -21,6 +22,7 @@ from .plan_store import (
     delete_plan_comment,
     get_plan_content,
     list_plan_comments,
+    make_plan_approver,
     plan_file_path_for_thread,
     save_plan_content,
     set_plan_status,
@@ -34,6 +36,7 @@ from .thread_api import (
 )
 
 logger = logging.getLogger(__name__)
+_plan_approval_locks: dict[str, asyncio.Lock] = {}
 
 plan_router = APIRouter(
     prefix="/dashboard/api/plan",
@@ -71,11 +74,23 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
     login = session["sub"]
     email = session.get("email")
     content = await get_plan_content(thread_id) or {}
+    approved_by = content.get("approved_by") or metadata.get("plan_approved_by")
+    if isinstance(approved_by, dict):
+        approved_by = make_plan_approver(
+            actor_id=str(approved_by.get("id") or ""),
+            name=str(approved_by.get("name") or ""),
+            source=str(approved_by.get("source") or ""),
+        )
+    else:
+        approved_by = None
+    approved_at = content.get("approved_at") or metadata.get("plan_approved_at")
     return {
         "threadId": thread_id,
         "status": content.get("status") or metadata.get("plan_status") or "planning",
         "html": content.get("html", ""),
         "isOwner": _user_owns_thread(metadata, login, email),
+        "approvedBy": approved_by,
+        "approvedAt": approved_at if isinstance(approved_at, str) else None,
         "user": {
             "id": login,
             "login": login,
@@ -166,40 +181,70 @@ async def remove_plan_comment(
 @plan_router.post("/{thread_id}/approve")
 async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
     metadata = await _thread_metadata(thread_id)
-    if not _user_owns_thread(metadata, session["sub"], session.get("email")):
-        raise HTTPException(403, "only the plan owner can approve")
+    if not _thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
+    actor_id = str(session.get("sub") or "").strip()
     return await approve_plan_for_thread(
-        thread_id, metadata=metadata, actor=_approval_actor_name(session)
+        thread_id,
+        approver=make_plan_approver(
+            actor_id=actor_id,
+            name=_approval_actor_name(session),
+            source="dashboard",
+        ),
     )
 
 
-async def approve_plan_for_thread(
-    thread_id: str, *, metadata: dict[str, Any], actor: str
-) -> dict[str, Any]:
-    content = await get_plan_content(thread_id, raise_on_error=True) or {}
-    _reject_shared_content(content)
-    plan_html = str(content.get("html", "")).strip()
-    comments = await list_plan_comments(thread_id, raise_on_error=True)
-    feedback = _format_comments(comments)
-    await set_plan_status(thread_id, PLAN_STATUS_APPROVED, plan_mode=False)
-    if plan_html:
-        text = (
-            "The plan has been approved. Use the reviewed self-contained HTML artifact below "
-            "as the implementation guide. Apply reasonable engineering judgment where details "
-            f"need adjustment while preserving its goals and reviewer edits:\n\n{plan_html}"
+async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -> dict[str, Any]:
+    approver = make_plan_approver(
+        actor_id=str(approver.get("id") or ""),
+        name=str(approver.get("name") or ""),
+        source=str(approver.get("source") or ""),
+    )
+    lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
+    async with lock:
+        metadata = await _thread_metadata(thread_id)
+        content = await get_plan_content(thread_id, raise_on_error=True) or {}
+        _reject_shared_content(content)
+        if (
+            metadata.get("plan_mode") is not True
+            or metadata.get("plan_status") != PLAN_STATUS_READY
+            or content.get("status") != PLAN_STATUS_READY
+        ):
+            return {
+                "status": str(content.get("status") or metadata.get("plan_status") or "planning"),
+                "already_approved": True,
+            }
+        plan_html = str(content.get("html", "")).strip()
+        comments = await list_plan_comments(thread_id, raise_on_error=True)
+        feedback = _format_comments(comments)
+        await set_plan_status(
+            thread_id,
+            PLAN_STATUS_APPROVED,
+            plan_mode=False,
+            approved_by=approver,
         )
-    else:
-        text = "The plan has been approved. Implement it now as described in the plan."
-    if feedback:
-        text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
-    run = await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
-    await _maybe_post_plan_approved_to_slack(
-        metadata,
-        thread_id=thread_id,
-        comment_count=len(comments),
-        actor=actor,
-    )
-    return {"status": PLAN_STATUS_APPROVED, "run_id": run["run_id"]}
+        if plan_html:
+            text = (
+                "The plan has been approved. Use the reviewed self-contained HTML artifact below "
+                "as the implementation guide. Apply reasonable engineering judgment where details "
+                f"need adjustment while preserving its goals and reviewer edits:\n\n{plan_html}"
+            )
+        else:
+            text = "The plan has been approved. Implement it now as described in the plan."
+        if feedback:
+            text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
+        try:
+            run = await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
+        except Exception:
+            await set_plan_status(thread_id, PLAN_STATUS_READY, plan_mode=True)
+            raise
+        await _maybe_post_plan_approved_to_slack(
+            metadata,
+            thread_id=thread_id,
+            comment_count=len(comments),
+            actor=approver["name"],
+        )
+        return {"status": PLAN_STATUS_APPROVED, "run_id": run["run_id"]}
 
 
 @plan_router.post("/{thread_id}/reject")
