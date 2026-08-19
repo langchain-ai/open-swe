@@ -71,14 +71,14 @@ async def test_set_agent_instructions_updates_store() -> None:
     mock_put.assert_awaited_once()
 
 
-def test_construct_system_prompt_interpolates_custom_instructions() -> None:
+def test_construct_system_prompt_contains_only_repository_instructions() -> None:
     prompt = construct_system_prompt(
         working_dir="/work",
         repo_custom_instructions="Repository rule sentinel.",
-        user_custom_instructions="User rule sentinel.",
     )
 
-    assert prompt.index("Repository rule sentinel.") < prompt.index("User rule sentinel.")
+    assert "Repository rule sentinel." in prompt
+    assert "Sender's Custom Instructions" not in prompt
 
 
 def test_resolve_repo_custom_instructions_returns_none_without_repo() -> None:

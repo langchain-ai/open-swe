@@ -648,7 +648,7 @@ class FakeScriptedChatModel(BaseChatModel):
     model: str = "fake"
     profile: ModelProfile | None = {
         "tool_calling": True,
-        "max_input_tokens": 8_000,
+        "max_input_tokens": 128_000,
     }
     script: list[Any] = []
 
