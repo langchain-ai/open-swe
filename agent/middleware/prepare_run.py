@@ -12,12 +12,15 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
+from ..utils.workspace_repositories import WorkspaceRepository
+
 
 class PrepareRunState(AgentState):
     run_prepared: NotRequired[bool]
     run_prepared_for: NotRequired[str]
     work_dir: NotRequired[str | None]
     rendered_system_prompt: NotRequired[str | None]
+    workspace_repositories: NotRequired[list[WorkspaceRepository]]
 
 
 def _latest_message_fingerprint(state: Mapping[str, Any]) -> str | None:

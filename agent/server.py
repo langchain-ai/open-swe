@@ -198,6 +198,7 @@ from .utils.thread_settings import (
 )
 from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 from .utils.turn_checkpoint import merge_checkpoint, read_turn_diff, record_turn_checkpoint
+from .utils.workspace_repositories import WorkspaceRepository, discover_workspace_repositories
 
 client = get_client()
 
@@ -906,6 +907,17 @@ def _make_model_or_defer(
         return make_deferred_error_model(e, model_id=model_id)
 
 
+async def _initial_workspace_repositories(
+    state: PrepareRunState,
+    sandbox_backend: SandboxBackendProtocol,
+    work_dir: str,
+) -> list[WorkspaceRepository]:
+    existing = state.get("workspace_repositories")
+    if isinstance(existing, list):
+        return existing
+    return await discover_workspace_repositories(sandbox_backend, work_dir)
+
+
 class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     def __init__(
         self,
@@ -1110,6 +1122,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             raise
         del github_token
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        workspace_repositories = await _initial_workspace_repositories(
+            state, sandbox_backend, work_dir
+        )
         environment = await resolve_environment(_environment_slug(configurable))
         sender_instructions = await _resolve_user_custom_instructions(self._profile_login)
         sender_context = construct_sender_context(
@@ -1154,9 +1169,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
         return {
             "work_dir": work_dir,
+            "workspace_repositories": workspace_repositories,
             **({"messages": [sender_message]} if sender_message else {}),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
+                workspace_repositories=workspace_repositories,
                 dashboard_base_url=dashboard_base_url(),
                 linear_project_id=self._linear_project_id,
                 linear_issue_number=self._linear_issue_number,
