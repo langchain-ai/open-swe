@@ -28,7 +28,7 @@ function devBackendTarget({ repoRoot, port, env = process.env }) {
       "--port",
       String(port),
       "--config",
-      path.join(repoRoot, "langgraph.desktop.json"),
+      env.OPEN_SWE_LOCAL_BACKEND_CONFIG || path.join(repoRoot, "langgraph.desktop.json"),
     ],
     cwd: repoRoot,
   }
