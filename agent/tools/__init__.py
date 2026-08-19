@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Any
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "approve_plan": ".approve_plan",
+    "background_execute": ".background_execute",
+    "background_task": ".background_execute",
     "capture_environment_snapshot": ".environments",
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
@@ -53,6 +55,8 @@ _TOOL_MODULES = {
 __all__ = [
     "add_finding",
     "approve_plan",
+    "background_execute",
+    "background_task",
     "capture_environment_snapshot",
     "delete_environment",
     "enter_plan_mode",
@@ -101,6 +105,7 @@ __all__ = [
 if TYPE_CHECKING:
     from .add_finding import add_finding
     from .approve_plan import approve_plan
+    from .background_execute import background_execute, background_task
     from .enter_plan_mode import enter_plan_mode
     from .environments import (
         capture_environment_snapshot,

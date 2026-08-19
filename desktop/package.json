@@ -5,7 +5,7 @@
   "description": "Experimental Open SWE desktop client",
   "main": "build/main.cjs",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build-main.cjs",
     "build:ui": "pnpm --filter open-swe-dashboard run build",
     "dev": "pnpm run build:ui && pnpm run build && electron . --dev",
     "start": "pnpm run build:ui && pnpm run build && electron .",
@@ -13,8 +13,9 @@
     "test": "pnpm run build && pnpm run test:run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build:ui",
-    "pack": "pnpm run build:ui && pnpm run build && electron-builder --dir",
-    "dist": "pnpm run build:ui && pnpm run build && electron-builder"
+    "pack": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend && electron-builder --dir",
+    "dist": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend && electron-builder",
+    "build:local-backend": "node scripts/build-local-backend.cjs"
   },
   "build": {
     "appId": "com.langchain.openswe",
@@ -57,6 +58,13 @@
       {
         "from": "../ui/native/libghostty-vt/LICENSE",
         "to": "ui/licenses/libghostty-vt.LICENSE"
+      },
+      {
+        "from": "resources/local-backend",
+        "to": "local-backend",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {

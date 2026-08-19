@@ -20,6 +20,8 @@ _GATEWAY_ENV_VARS = (
     "LANGSMITH_GATEWAY_ENABLED",
     "LANGSMITH_GATEWAY_BASE_URL",
     "LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES",
+    "OPENAI_API_BASE",
+    "OPENAI_BASE_URL",
 )
 
 
@@ -337,6 +339,37 @@ def test_make_model_direct_openai_uses_responses_websocket() -> None:
     assert captured["store"] is False
     assert captured["include"] == ["reasoning.encrypted_content"]
     assert captured["output_version"] == "responses/v1"
+
+
+def test_make_model_openai_honors_configured_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://gateway.smith.langchain.com/openai/v1")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model("openai:gpt-5.6-sol", use_gateway=False)
+    assert captured["base_url"] == "https://gateway.smith.langchain.com/openai/v1"
+
+
+def test_make_model_openai_falls_back_to_legacy_api_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_BASE", "https://openai-proxy.example/v1")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model("openai:gpt-5.6-sol", use_gateway=False)
+    assert captured["base_url"] == "https://openai-proxy.example/v1"
+
+
+def test_make_model_openai_base_url_precedes_legacy_api_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://primary-proxy.example/v1")
+    monkeypatch.setenv("OPENAI_API_BASE", "https://legacy-proxy.example/v1")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model("openai:gpt-5.6-sol", use_gateway=False)
+    assert captured["base_url"] == "https://primary-proxy.example/v1"
 
 
 def test_make_model_gateway_openai_replaces_websocket(

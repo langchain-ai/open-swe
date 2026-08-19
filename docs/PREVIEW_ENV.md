@@ -62,6 +62,15 @@ the dashboard runs (the pod environment on Kubernetes, the project settings on V
 It has no default: a fallback would be production's backend, and preview would inherit it
 and drive production's agents, threads, and sandboxes.
 
+The preview image workflow also needs these repository settings:
+
+- Variable `PREVIEW_DASHBOARD_URL` — the preview dashboard's public URL.
+- Actions secret `OPERATIONS_API_JWT_SECRET` — the restart signing secret.
+
+Set `OPERATIONS_API_JWT_SECRET` to the same value in the preview dashboard deployment. The
+workflow signs a short-lived restart token with it after publishing an image, and the dashboard
+uses its deployment secret to verify that token.
+
 Requests stay same-origin — the server proxies `/dashboard/api/*` and `/webhooks/*` to
 that backend — so `DASHBOARD_API_BASE_URL`, the GitHub App callback URL, and the
 `DASHBOARD_ALLOWED_ORIGINS` entry must all point at the dashboard's own domain, not the
