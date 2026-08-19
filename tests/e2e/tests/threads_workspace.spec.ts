@@ -253,10 +253,35 @@ function paginationThreads(): Array<ThreadSeed> {
   });
 }
 
+// Earlier specs leave their own threads behind for this user, and the sidebar
+// counts every one of them — so start from an empty workspace.
+async function purgeOwnedThreads(request: APIRequestContext) {
+  for (const owner of [
+    { github_login: USER.login },
+    { triggering_user_email: USER.email },
+  ]) {
+    for (let page = 0; page < 20; page += 1) {
+      const searchResponse = await request.post("/threads/search", {
+        data: { metadata: owner, limit: 100, offset: 0 },
+      });
+      expect(searchResponse.ok(), await searchResponse.text()).toBeTruthy();
+      const threads = (await searchResponse.json()) as Array<{
+        thread_id: string;
+      }>;
+      if (threads.length === 0) break;
+      for (const thread of threads) {
+        const response = await request.delete(`/threads/${thread.thread_id}`);
+        expect([200, 204, 404]).toContain(response.status());
+      }
+    }
+  }
+}
+
 async function seedThreads(
   request: APIRequestContext,
   threads: Array<ThreadSeed>,
 ) {
+  await purgeOwnedThreads(request);
   for (const thread of threads) {
     const resetResponse = await request.delete(`/threads/${thread.id}`);
     expect([200, 204, 404]).toContain(resetResponse.status());

@@ -40,7 +40,7 @@ async function typeIntoComposer(
   await editor.press("Enter");
 }
 
-test("Desktop runs the local Open SWE graph against the shared fakes", async ({
+test("Desktop runs a local thread on the Open SWE graph against the shared fakes", async ({
   request,
 }, testInfo) => {
   mkdirSync(e2eTmp, { recursive: true });
@@ -82,13 +82,13 @@ test("Desktop runs the local Open SWE graph against the shared fakes", async ({
       XDG_CONFIG_HOME: join(stateRoot, "xdg-config"),
       APPDATA: join(stateRoot, "app-data"),
       OPEN_SWE_BACKEND_URL: baseURL,
-      OPENAI_API_KEY: "test-openai-key",
-      OPEN_SWE_LOCAL_BACKEND_CONFIG: join(
-        e2eRoot,
-        "langgraph.desktop.e2e.json",
-      ),
-      DEEPAGENTS_CODE_AUTO_UPDATE: "0",
+      // The local backend runs the real graph with the scripted fake model, so
+      // the provider keys only have to satisfy the composer's credential gate.
+      OPEN_SWE_LOCAL_BACKEND_CONFIG: join(e2eRoot, "langgraph.desktop.json"),
+      ANTHROPIC_API_KEY: "e2e-fake-key",
+      OPENAI_API_KEY: "e2e-fake-key",
       E2E_BASE: baseURL,
+      E2E_FAKE_GITHUB_API: `${baseURL}/fake-gh`,
       E2E_REMOTE: fakeRemote,
       E2E_TMP: e2eTmp,
       GIT_CONFIG_GLOBAL: gitConfig,
