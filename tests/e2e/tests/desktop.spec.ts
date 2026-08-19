@@ -169,7 +169,12 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
 
     await localSource.click();
     await expect(localSource).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByText(/This Mac · demo/)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "demo", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "main", exact: true }),
+    ).toBeVisible();
     const localScreenshot = testInfo.outputPath("desktop-local-threads.png");
     await page.screenshot({ path: localScreenshot, fullPage: true });
     await testInfo.attach("desktop-local-threads", {
