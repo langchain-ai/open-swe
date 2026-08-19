@@ -95,6 +95,10 @@ WORKING_ENV_SECTION = """### Working Environment
 
 You are operating in a remote Linux sandbox at `{working_dir}` — use it as your working directory for all operations. The sandbox starts clean; no repo is pre-cloned."""
 
+DESKTOP_WORKING_ENV_SECTION = """### Working Environment
+
+You are operating directly in the selected project at `{working_dir}` on the user's local machine. The project is already available and is your filesystem root. Do not clone it or change its git identity."""
+
 
 DASHBOARD_CONTEXT_SECTION = """---
 
@@ -353,6 +357,7 @@ Steps, in order:
 - **Never claim a PR was opened/updated** unless the operation returned success and you have the PR URL (from `open_pull_request`'s returned `url`, `gh` output, or `gh pr view --json url --jq .url`). If push or PR creation fails, or there are no changes, say so explicitly. If you committed via `git commit`/`git revert`, you MUST push — never report work as done without pushing.
 - **Never force-push.** Never run `git push --force` or `git push --force-with-lease`, and never amend or rebase commits already on the remote — reviewers rely on inter-commit diffs; add follow-up work as new commits. If a normal push is rejected because the remote has new commits, run `git pull --rebase origin <branch>` and push again; if that conflicts, report it and stop.
 - **Workflow files** (`.github/workflows/`) may be changed only when explicitly requested.
+- Do not add the `preview-fe` label based on a pull request's changed files. Preview labels are opt-in: add one only when the user explicitly requests that exact label.
 - If `git push`, `open_pull_request`, or `gh pr edit` fails with an infrastructure/permission/access error — including "403", "404"/"Not Found" from `open_pull_request`, "GitHub App not installed/access denied", or "Permission denied" — do not retry via `gh pr create`, `gh api repos/.../pulls`, direct REST `POST /repos/.../pulls`, or any other substitute PR creation mechanism. Report the failure to the user and end the task. This bans *substitute* mechanisms, not retrying the *same* command: transient failures (timeouts, "unable to determine … due to timeout", 5xx) are worth one immediate retry of the identical command, and if the user asks you to retry, retry — re-run exactly what failed and report the new result."""
 
 
@@ -460,7 +465,7 @@ def _render_user_instructions_section(instructions: str | None) -> str:
 # only run-specific content (working dir, commit identity, plan/collaboration/
 # PR defaults); standing guidance lives in the shared base above.
 SYSTEM_PROMPT_TEMPLATE = (
-    WORKING_ENV_SECTION
+    "{working_environment_section}"
     + DASHBOARD_CONTEXT_SECTION
     + SOURCE_GUIDANCE_SECTION
     + PLAN_MODE_GUIDANCE_SECTION
@@ -519,8 +524,11 @@ def construct_system_prompt(
     else:
         commit_identity_name = shlex.quote(OPEN_SWE_BOT_NAME)
         commit_identity_email = shlex.quote(OPEN_SWE_BOT_EMAIL)
-    return SYSTEM_PROMPT_TEMPLATE.format(
+    prompt = SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
+        working_environment_section=(
+            DESKTOP_WORKING_ENV_SECTION if source == "desktop" else WORKING_ENV_SECTION
+        ),
         dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
         source_guidance=_render_source_guidance(source, slack_context),
         linear_project_id=linear_project_id or "<PROJECT_ID>",
@@ -553,3 +561,4 @@ def construct_system_prompt(
         commit_identity_name=commit_identity_name,
         commit_identity_email=commit_identity_email,
     )
+    return prompt

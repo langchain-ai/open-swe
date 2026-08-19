@@ -71,7 +71,6 @@ import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
-import { ReviewApprovalSummary } from "@/features/reviews/components/ReviewApprovalSummary"
 import {
   ReviewChat,
   ReviewChatComposerProvider,
@@ -1271,9 +1270,6 @@ function ReviewBodyInner({
                     additions: detail.pr.additions,
                     deletions: detail.pr.deletions,
                   }}
-                />
-                <ReviewApprovalSummary
-                  assessment={detail.approval_assessment}
                 />
                 <div
                   className={cn(

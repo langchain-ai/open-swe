@@ -16,7 +16,6 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..dispatch import DASHBOARD_STREAM_MODES
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_INSTRUCTION
 from ..utils.json_types import (
     JsonObject,
@@ -59,7 +58,17 @@ logger = logging.getLogger(__name__)
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 # Modes required for the v2 event-stream protocol (`POST …/stream/events`).
-_DASHBOARD_STREAM_MODES = DASHBOARD_STREAM_MODES
+# `@langchain/react` subscribes to `messages`, `tools`, `lifecycle`, etc.;
+# legacy `messages-tuple`-only runs emit almost nothing on those channels.
+_DASHBOARD_STREAM_MODES: tuple[str, ...] = (
+    "values",
+    "updates",
+    "messages",
+    "messages-tuple",
+    "tools",
+    "checkpoints",
+    "events",
+)
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
@@ -586,6 +595,7 @@ _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+_DISCOVERY_HISTORY_LIMIT = 5
 
 
 def _thread_id(thread: ThreadLike) -> str | None:
@@ -1541,9 +1551,6 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
-    # Subagents run as subgraphs; without this the server streams only the top
-    # graph and their nested tool calls never reach the transcript.
-    params.setdefault("stream_subgraphs", True)
     params["config"] = {**client_config, "configurable": merged_configurable}
     params["metadata"] = run_metadata
     command["params"] = params
@@ -2329,10 +2336,21 @@ async def proxy_dashboard_thread_history(
 ) -> tuple[int, bytes, str | None]:
     _require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
+    try:
+        payload = json.loads(body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(400, "history body must be a JSON object") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "history body must be a JSON object")
+    limit = payload.get("limit", _DISCOVERY_HISTORY_LIMIT)
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise HTTPException(400, "history limit must be a positive integer")
+    if not any(payload.get(key) for key in ("before", "checkpoint", "metadata")):
+        payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = _langgraph_proxy_headers(content_type=content_type)
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
-        response = await client.post(url, content=body or b"{}", headers=headers)
+        response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 

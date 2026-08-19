@@ -162,6 +162,46 @@ describe("ChatComposer skill autocomplete", () => {
     expect(items).toEqual([])
   })
 
+  it("shows only skills for the dollar picker while slash keeps both", () => {
+    const skills = [
+      {
+        name: "baby-sit",
+        description: "Monitor a pull request",
+        instructions: "",
+      },
+    ]
+    const dollarItems = buildCommandItems(
+      {
+        kind: "skill-command",
+        query: "baby",
+        rangeStart: 0,
+        rangeEnd: 5,
+      },
+      [],
+      skills
+    )
+    const slashItems = buildCommandItems(
+      {
+        kind: "slash-command",
+        query: "",
+        rangeStart: 0,
+        rangeEnd: 1,
+      },
+      [],
+      skills
+    )
+
+    expect(dollarItems).toEqual([
+      expect.objectContaining({
+        type: "skill",
+        name: "baby-sit",
+        label: "/baby-sit",
+      }),
+    ])
+    expect(slashItems.some((item) => item.type === "slash-command")).toBe(true)
+    expect(slashItems.some((item) => item.type === "skill")).toBe(true)
+  })
+
   it("prefers a colliding skill and preserves surrounding prompt text", () => {
     const trigger = {
       kind: "slash-command" as const,
