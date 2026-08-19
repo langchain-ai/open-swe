@@ -55,11 +55,11 @@ class _Threads:
 @pytest.mark.parametrize(
     ("title", "expected"),
     [
-        ("Review Devin comments on pull request 34300", "Review Devin comments on pull request"),
-        ("Fix review comments for pull request 32722", "Fix review comments for pull request"),
-        ("Review PR 33627 feedback", "Review PR feedback"),
-        ("Fix issue 39727 with co-authored changes", "Fix issue with co-authored changes"),
-        ("Spawn review run for PR 675", "Spawn review run for PR"),
+        ("Review Devin comments on pull request 34300", "Review Devin comments"),
+        ("Fix review comments for pull request 32722", "Fix review comments"),
+        ("Review PR 33627 feedback", "Review feedback"),
+        ("Fix issue 39727 with co-authored changes", "Fix with co-authored changes"),
+        ("Spawn review run for PR 675", "Spawn review run"),
         ("Address review comments on pull request", "Address review comments on pull request"),
     ],
 )

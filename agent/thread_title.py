@@ -18,7 +18,7 @@ TITLE_GENERATION_TIMEOUT_SECONDS = 10
 _background_tasks: set[asyncio.Task[None]] = set()
 _inflight_thread_ids: set[str] = set()
 _PR_ISSUE_NUMBER_RE = re.compile(
-    r"(?P<reference>\b(?:pull request|pr|issue))\s*#?\s*\d{2,6}\b",
+    r"\s*(?:for|on|in)?\s*\b(?:pull request|pr|issue)\s*#?\s*\d{2,6}\b",
     re.IGNORECASE,
 )
 _GENERIC_TITLE_WORDS = {
@@ -71,11 +71,14 @@ def _first_user_message(messages: Sequence[BaseMessage]) -> str | None:
 
 def _normalize_title(title: str) -> str:
     original = " ".join(title.strip().strip("`\"'").split())
-    stripped = _PR_ISSUE_NUMBER_RE.sub(r"\g<reference>", original)
+    stripped = _PR_ISSUE_NUMBER_RE.sub(" ", original)
     stripped = " ".join(stripped.split())
     stripped_words = stripped.split()
-    if len(stripped_words) < 3 or not any(
+    stripped_is_generic = not any(
         word.casefold().strip(".,;:!?()[]{}") not in _GENERIC_TITLE_WORDS for word in stripped_words
+    )
+    if (len(stripped_words) < 3 or stripped_is_generic) and not _PR_ISSUE_NUMBER_RE.search(
+        original
     ):
         normalized = original
     else:
