@@ -23,11 +23,6 @@ class _Sandbox:
 class _Backend:
     def __init__(self, sandbox: Any) -> None:
         self.sandbox = sandbox
-        self.commands: list[str] = []
-
-    async def aexecute(self, command: str) -> Any:
-        self.commands.append(command)
-        return SimpleNamespace(exit_code=0)
 
 
 def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> None:
@@ -66,7 +61,6 @@ async def test_create_download_url_for_relative_path(monkeypatch: pytest.MonkeyP
         "expires_at": "2026-08-20T12:00:00Z",
     }
     assert "token" not in result
-    assert backend.commands == ["test -f /workspace/project/artifacts/demo.mp4"]
     assert sandbox.calls == [
         (
             "/workspace/project/artifacts/demo.mp4",
@@ -96,22 +90,6 @@ async def test_create_download_url_uses_secure_defaults(monkeypatch: pytest.Monk
             },
         )
     ]
-
-
-async def test_create_download_url_rejects_missing_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    sandbox = _Sandbox()
-    backend = _Backend(sandbox)
-    _configure(monkeypatch, backend)
-
-    async def missing(_command: str) -> Any:
-        return SimpleNamespace(exit_code=1)
-
-    monkeypatch.setattr(backend, "aexecute", missing)
-
-    with pytest.raises(ValueError, match="does not exist"):
-        await download_tool._create_sandbox_file_download_url("missing.bin")
-
-    assert sandbox.calls == []
 
 
 async def test_create_download_url_rejects_unsupported_provider(

@@ -1,6 +1,5 @@
 import asyncio
 import posixpath
-import shlex
 from typing import Any, Literal
 
 from langchain_core.tools import tool
@@ -41,10 +40,6 @@ async def _create_sandbox_file_download_url(
         if file_path.strip().startswith("/")
         else posixpath.join(work_dir, file_path.strip())
     )
-    exists = await backend_proxy.aexecute(f"test -f {shlex.quote(path)}")
-    if exists.exit_code != 0:
-        raise ValueError(f"file does not exist or is not a regular file: {path}")
-
     backend = unwrap_sandbox_backend(backend_proxy)
     sandbox = getattr(backend, "sandbox", None)
     generate_download_url = getattr(sandbox, "generate_download_url", None)
