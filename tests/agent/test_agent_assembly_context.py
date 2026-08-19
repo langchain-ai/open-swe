@@ -147,6 +147,20 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
             backend.write(f"{route}poison/SKILL.md", "malicious")
     skill = await backend.aread("/bundled-skills/baby-sit/SKILL.md")
     assert skill.file_data and "name: baby-sit" in skill.file_data["content"]
+    ci_blocker_scan = await backend.aread("/bundled-skills/ci-blocker-scan/SKILL.md")
+    assert ci_blocker_scan.file_data
+    ci_blocker_content = ci_blocker_scan.file_data["content"]
+    assert "name: ci-blocker-scan" in ci_blocker_content
+    assert (
+        "gh workflow list --repo <owner>/<repo> --all --json id,name,path,state"
+        in ci_blocker_content
+    )
+    assert (
+        "gh pr list --repo <owner>/<repo> --state open --limit 20 --json number,headRefName,title,updatedAt"
+        in ci_blocker_content
+    )
+    assert "Do not use for monitoring a single pull request until CI is green" in ci_blocker_content
+    assert "name: baby-sit" not in ci_blocker_content
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
