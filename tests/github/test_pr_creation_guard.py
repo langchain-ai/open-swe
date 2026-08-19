@@ -11,9 +11,9 @@ from agent.middleware.pr_creation_guard import (
 
 
 class _Request:
-    def __init__(self, command: str) -> None:
+    def __init__(self, command: str, name: str = "execute") -> None:
         self.tool_call = {
-            "name": "execute",
+            "name": name,
             "args": {"command": command},
             "id": "call-1",
         }
@@ -81,6 +81,15 @@ async def test_middleware_blocks_execute_pr_creation_fallbacks() -> None:
         assert payload["recoverable_by_agent"] is False
         assert "open_pull_request" in payload["error"]
         assert payload["blocked_command"] == command
+
+
+async def test_middleware_blocks_background_pr_creation_fallback() -> None:
+    result = await PullRequestCreationGuardMiddleware().awrap_tool_call(
+        cast(ToolCallRequest, _Request("gh pr create --draft", "background_execute")), _handler
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
 
 
 async def test_middleware_allows_safe_pr_view() -> None:

@@ -136,6 +136,7 @@ from .review_api import (
     list_reviews,
     proxy_pr_image,
     trigger_re_review,
+    update_review_comment,
 )
 from .review_chat_api import (
     delete_review_chat_thread,
@@ -1470,6 +1471,37 @@ async def api_create_review_comment(
         body=body,
         start_line=comment.start_line,
         start_side=comment.start_side,
+    )
+
+
+class ReviewCommentUpdate(BaseModel):
+    body: str
+
+
+@router.patch("/reviews/{owner}/{repo}/{pr_number}/comments/{comment_id}")
+async def api_update_review_comment(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    comment_id: int,
+    comment: ReviewCommentUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    body = comment.body.strip()
+    if not body:
+        raise HTTPException(422, "comment body is required")
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub re-auth required")
+    return await update_review_comment(
+        owner,
+        repo,
+        pr_number,
+        comment_id,
+        token=token,
+        viewer_login=session["sub"],
+        body=body,
     )
 
 

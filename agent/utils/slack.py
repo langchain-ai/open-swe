@@ -417,26 +417,30 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     if len(labels) > 3:
         model_text = f"{model_text} +{len(labels) - 3}"
     parts = [model_text] if model_text else []
-    if usage.main_agent_tokens is not None:
-        parts.append(f"{_format_token_count(usage.main_agent_tokens)} main-agent tokens")
     if usage.session_cost_usd is not None:
         parts.append(format_slack_session_cost(usage.session_cost_usd))
+    elif usage.main_agent_tokens is not None:
+        parts.append(f"{_format_token_count(usage.main_agent_tokens)} main-agent tokens")
     return " • ".join(parts)
 
 
-_SESSION_COST_LABEL_RE = re.compile(r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?) session cost$")
+_SESSION_COST_LABEL_RE = re.compile(
+    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)(?: session cost)?$"
+)
+_MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
 
 def format_slack_session_cost(cost: float) -> str:
     if 0 < cost < 0.01:
-        return "<$0.01 session cost"
-    return f"${cost:.2f} session cost"
+        return "<$0.01"
+    return f"${cost:.2f}"
 
 
 def _replace_slack_session_cost(text: str, cost: float, *, require_web_link: bool) -> str:
     if require_web_link and SLACK_WEB_LINK_FOOTER_LABEL not in text:
         return text
     cleaned = _SESSION_COST_LABEL_RE.sub("", text).rstrip()
+    cleaned = _MAIN_AGENT_TOKEN_LABEL_RE.sub("", cleaned).rstrip()
     return f"{cleaned} • {format_slack_session_cost(cost)}"
 
 
