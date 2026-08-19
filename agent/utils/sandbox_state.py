@@ -3,6 +3,8 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from weakref import WeakKeyDictionary
 
 from deepagents.backends.protocol import (
     DeleteResult,
@@ -49,6 +51,21 @@ class SandboxUnreachableError(RuntimeError):
 _SYNC_UNSUPPORTED = "SandboxBackendProxy is async-only; use the a-prefixed method instead."
 
 
+@dataclass
+class _LoopState:
+    """Startup state owned by one event loop.
+
+    A proxy is cached per thread and outlives every run, but a task and a lock
+    belong to the loop that made them: awaiting either from another loop raises
+    "attached to a different loop". Keeping them here, keyed by loop, means a
+    run only ever sees its own — an interrupted run's leftovers are unreachable
+    rather than poisonous, and go away with the loop that owns them.
+    """
+
+    lock: asyncio.Lock
+    startup_task: asyncio.Task[SandboxBackendProtocol] | None = None
+
+
 class SandboxBackendProxy(BaseSandbox):
     """Stable per-thread backend handle whose target can be replaced.
 
@@ -69,8 +86,9 @@ class SandboxBackendProxy(BaseSandbox):
         self._backend = backend
         self._thread_id = thread_id
         self._reconnect = reconnect
-        self._startup_task: asyncio.Task[SandboxBackendProtocol] | None = None
-        self._lock: asyncio.Lock | None = None
+        self._loop_state: WeakKeyDictionary[asyncio.AbstractEventLoop, _LoopState] = (
+            WeakKeyDictionary()
+        )
 
     @property
     def current(self) -> SandboxBackendProtocol:
@@ -82,15 +100,23 @@ class SandboxBackendProxy(BaseSandbox):
 
     def replace_backend(self, backend: SandboxBackendProtocol) -> None:
         self._backend = backend
-        self._startup_task = None
+        for state in self._loop_state.values():
+            state.startup_task = None
 
     @property
     def has_backend(self) -> bool:
         return self._backend is not None
 
     def cancel_startup(self) -> None:
-        if self._startup_task is not None:
-            self._startup_task.cancel()
+        # Only this loop's task: each loop runs on its own thread, so cancelling
+        # a task owned by another one is not thread-safe.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        state = self._loop_state.get(loop)
+        if state is not None and state.startup_task is not None:
+            state.startup_task.cancel()
 
     def set_reconnect(
         self,
@@ -99,16 +125,17 @@ class SandboxBackendProxy(BaseSandbox):
         self._reconnect = reconnect
 
     def start(self) -> None:
-        if self._startup_task is not None:
-            if not self._startup_task.cancelled():
+        state = self._state()
+        if state.startup_task is not None:
+            if not state.startup_task.cancelled():
                 return
-            self._startup_task = None
+            state.startup_task = None
         if self._reconnect is None:
             if self._backend is not None:
                 return
             raise RuntimeError("Cannot start sandbox without a reconnect callback")
-        self._startup_task = asyncio.ensure_future(self._reconnect())
-        self._startup_task.add_done_callback(self._startup_completed)
+        state.startup_task = asyncio.ensure_future(self._reconnect())
+        state.startup_task.add_done_callback(self._startup_completed)
 
     def _startup_completed(self, task: asyncio.Task[SandboxBackendProtocol]) -> None:
         if task.cancelled():
@@ -131,21 +158,25 @@ class SandboxBackendProxy(BaseSandbox):
             raise RuntimeError(f"No sandbox backend cached{suffix}")
         return self._backend
 
-    def _get_lock(self) -> asyncio.Lock:
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
+    def _state(self) -> _LoopState:
+        loop = asyncio.get_running_loop()
+        state = self._loop_state.get(loop)
+        if state is None:
+            state = _LoopState(lock=asyncio.Lock())
+            self._loop_state[loop] = state
+        return state
 
     async def _aget_backend(self) -> SandboxBackendProtocol:
-        if self._backend is not None and self._startup_task is None:
+        state = self._state()
+        if self._backend is not None and state.startup_task is None:
             return self._backend
         if not self._thread_id:
             raise RuntimeError("No sandbox backend cached")
 
-        async with self._get_lock():
-            if self._backend is not None and self._startup_task is None:
+        async with state.lock:
+            if self._backend is not None and state.startup_task is None:
                 return self._backend
-            if self._startup_task is None:
+            if state.startup_task is None:
                 if self._reconnect is not None:
                     logger.info("Reconnecting sandbox backend for thread %s", self._thread_id)
                     self.start()
@@ -159,9 +190,9 @@ class SandboxBackendProxy(BaseSandbox):
                     logger.info(
                         "Reconnecting sandbox backend for thread %s from metadata", self._thread_id
                     )
-                    self._startup_task = asyncio.create_task(create_sandbox(sandbox_id))
-                    self._startup_task.add_done_callback(self._startup_completed)
-            startup_task = self._startup_task
+                    state.startup_task = asyncio.create_task(create_sandbox(sandbox_id))
+                    state.startup_task.add_done_callback(self._startup_completed)
+            startup_task = state.startup_task
             if startup_task is None:
                 raise RuntimeError(f"Sandbox startup task missing for thread {self._thread_id}")
 
@@ -169,15 +200,15 @@ class SandboxBackendProxy(BaseSandbox):
             sandbox_backend = await asyncio.shield(startup_task)
         except BaseException:
             if startup_task.done():
-                async with self._get_lock():
-                    if self._startup_task is startup_task:
-                        self._startup_task = None
+                async with state.lock:
+                    if state.startup_task is startup_task:
+                        state.startup_task = None
             raise
 
-        async with self._get_lock():
-            if self._startup_task is startup_task:
+        async with state.lock:
+            if state.startup_task is startup_task:
                 self._backend = unwrap_sandbox_backend(sandbox_backend)
-                self._startup_task = None
+                state.startup_task = None
                 SANDBOX_BACKENDS[self._thread_id] = self
             backend = self._backend
             if backend is None:
