@@ -2209,28 +2209,26 @@ async def _observe_dashboard_run_ttft(
     run_id: str,
     started_at_ms: int,
 ) -> None:
-    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/stream/events"
-    headers = _langgraph_proxy_headers(
-        content_type="application/json",
-        accept="text/event-stream",
-    )
-    body = json.dumps({"channels": ["lifecycle", "messages"]}).encode()
-    detector = AssistantTextEventDetector()
+    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/stream"
+    headers = _langgraph_proxy_headers(accept="text/event-stream")
+    headers["Last-Event-ID"] = "-1"
+    detector = AssistantTextEventDetector(run_id)
     try:
         async with httpx.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
-            async with client.stream("POST", url, content=body, headers=headers) as response:
+            async with client.stream(
+                "GET",
+                url,
+                headers=headers,
+                params={"stream_mode": "messages"},
+            ) as response:
                 response.raise_for_status()
                 async for chunk in response.aiter_bytes():
                     for observation in detector.feed(chunk):
-                        if observation.run_id != run_id:
-                            continue
                         await record_dashboard_thread_ttft(
                             observation,
                             thread_id=thread_id,
                             started_at_ms=started_at_ms,
                         )
-                        return
-                    if run_id in detector.run_terminated:
                         return
     except Exception:
         logger.warning(

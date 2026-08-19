@@ -19,16 +19,11 @@ class AssistantTextObservation:
 class AssistantTextEventDetector:
     """Detect each run's first non-empty streamed AI text delta."""
 
-    def __init__(self) -> None:
+    def __init__(self, run_id: str | None = None) -> None:
         self._buffer = bytearray()
-        self._run_id: str | None = None
-        self._terminated_run_ids: set[str] = set()
+        self._run_id = run_id
         self._ai_namespaces: set[tuple[str, ...]] = set()
         self._observed_namespaces: set[tuple[str, ...]] = set()
-
-    @property
-    def run_terminated(self) -> frozenset[str]:
-        return frozenset(self._terminated_run_ids)
 
     def feed(self, chunk: bytes) -> list[AssistantTextObservation]:
         self._buffer.extend(chunk)
@@ -127,8 +122,6 @@ class AssistantTextEventDetector:
             self._run_id = parts[1]
             self._ai_namespaces.clear()
             self._observed_namespaces.clear()
-        elif event in {"completed", "failed", "interrupted"}:
-            self._terminated_run_ids.add(parts[1])
 
 
 def _record_ttft_histogram(duration_seconds: float) -> None:

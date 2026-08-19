@@ -947,28 +947,19 @@ async def test_run_ttft_observer_records_first_assistant_text(
         }
         return f"event: {method}\r\ndata: {json.dumps(payload)}\r\n\r\n".encode()
 
-    stream_bytes = (
-        event(
-            "lifecycle",
-            {"event": "running"},
-            namespace=[],
-            event_id="synth:run-1:lc::running",
-        )
-        + event(
-            "messages",
-            {"event": "message-start", "role": "ai"},
-            namespace=["agent"],
-            event_id="1-0",
-        )
-        + event(
-            "messages",
-            {
-                "event": "content-block-delta",
-                "delta": {"type": "text-delta", "text": "Hello"},
-            },
-            namespace=["agent"],
-            event_id="2-0",
-        )
+    stream_bytes = event(
+        "messages",
+        {"event": "message-start", "role": "ai"},
+        namespace=["agent"],
+        event_id="1-0",
+    ) + event(
+        "messages",
+        {
+            "event": "content-block-delta",
+            "delta": {"type": "text-delta", "text": "Hello"},
+        },
+        namespace=["agent"],
+        event_id="2-0",
     )
     chunks = [stream_bytes[:35], stream_bytes[35:]]
 
@@ -999,7 +990,15 @@ async def test_run_ttft_observer_records_first_assistant_text(
         async def __aexit__(self, *args: object) -> None:
             pass
 
-        def stream(self, *args: object, **kwargs: object) -> FakeStreamContext:
+        def stream(self, method: str, url: str, **kwargs: object) -> FakeStreamContext:
+            assert method == "GET"
+            assert url.endswith("/threads/thread-1/runs/run-1/stream")
+            assert kwargs["headers"] == {
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+                "Last-Event-ID": "-1",
+            }
+            assert kwargs["params"] == {"stream_mode": "messages"}
             return FakeStreamContext()
 
     record = AsyncMock()
