@@ -75,7 +75,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const thread = threadQuery.data
   const queryClient = useQueryClient()
   const skills = useAgentSkills()
-  const { models, defaultSelection } = useModelOptions()
+  const {
+    models,
+    defaultSelection,
+    isLoading: modelsLoading,
+  } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   useEffect(() => setSelection(null), [sessionId])
   const threadSelection = useMemo<ModelSelection | null>(() => {
@@ -274,7 +278,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
 
   useEffect(() => {
-    if (!thread || initialPromptRef.current === sessionId) return
+    if (modelsLoading || !thread || initialPromptRef.current === sessionId)
+      return
     initialPromptRef.current = sessionId
     void stream.hydrationPromise
       .then(() => window.openSweDesktop?.getLocalPrompt(sessionId))
@@ -291,7 +296,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         setError(errorMessage(cause))
         void updateStatus("error")
       })
-  }, [sessionId, stream.hydrationPromise, submit, thread, updateStatus])
+  }, [
+    modelsLoading,
+    sessionId,
+    stream.hydrationPromise,
+    submit,
+    thread,
+    updateStatus,
+  ])
 
   useEffect(() => {
     if (!stream.error) return
