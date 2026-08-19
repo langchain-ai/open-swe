@@ -89,6 +89,12 @@ async def control_reset() -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+@app.post("/control/prepare-sandbox-repo")
+async def control_prepare_sandbox_repo() -> JSONResponse:
+    fakes.seed_sandbox_repo()
+    return JSONResponse({"ok": True})
+
+
 @app.get("/control/state")
 async def control_state() -> JSONResponse:
     return JSONResponse(

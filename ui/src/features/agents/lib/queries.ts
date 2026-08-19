@@ -7,6 +7,7 @@ import type { QueryClient } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
   SidebarThreads,
+  ThreadTurnDiffOptions,
   ThreadsPageParams,
 } from "./api"
 import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
@@ -23,8 +24,11 @@ export const agentThreadKeys = {
   }) => ["agent-threads", "lists", "sidebar", params] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
-  turnDiff: (threadId: string, turnKey: string | null) =>
-    ["agent-threads", threadId, "turn-diff", turnKey] as const,
+  turnDiff: (
+    threadId: string,
+    turnKey: string | null,
+    options: ThreadTurnDiffOptions = {}
+  ) => ["agent-threads", threadId, "turn-diff", turnKey, options] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
   page: (params: ThreadsPageParams) =>
@@ -285,11 +289,12 @@ export function useAgentThreadPrDiff(threadId: string, enabled: boolean) {
 export function useAgentThreadTurnDiff(
   threadId: string,
   turnKey: string | null,
-  enabled: boolean
+  enabled: boolean,
+  options: ThreadTurnDiffOptions = {}
 ) {
   return useQuery({
-    queryKey: agentThreadKeys.turnDiff(threadId, turnKey),
-    queryFn: () => agentsApi.getThreadTurnDiff(threadId, turnKey),
+    queryKey: agentThreadKeys.turnDiff(threadId, turnKey, options),
+    queryFn: () => agentsApi.getThreadTurnDiff(threadId, turnKey, options),
     enabled: enabled && Boolean(threadId),
     staleTime: 30_000,
     retry: false,
