@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from deepagents.backends.composite import CompositeBackend
+from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
 from agent.server import _registered_tool_name, get_agent
@@ -151,6 +152,22 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
     assert gp["skills"] == sources
+
+
+@pytest.mark.asyncio
+async def test_desktop_agent_loads_snapshotted_and_bundled_skills() -> None:
+    config = _base_config()
+    config.setdefault("configurable", {}).update(
+        {"source": "desktop", "local_project_path": "/tmp"}
+    )
+    with patch("agent.server.create_desktop_backend", return_value=MagicMock()):
+        captured = await _capture_create_deep_agent_kwargs(config)
+
+    assert captured["skills"] == ["/skills/", "/bundled-skills/"]
+    backend = captured["backend"]
+    assert isinstance(backend, CompositeBackend)
+    assert isinstance(backend.routes["/skills/"], ReadOnlyBackend)
+    assert isinstance(backend.routes["/skills/"]._backend, StateBackend)
 
 
 @pytest.mark.asyncio

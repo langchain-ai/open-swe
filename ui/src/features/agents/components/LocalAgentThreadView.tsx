@@ -10,7 +10,10 @@ import {
 } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
-import type { DesktopLocalThreadSummary } from "@/desktop"
+import type {
+  DesktopLocalPromptInput,
+  DesktopLocalThreadSummary,
+} from "@/desktop"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -64,6 +67,18 @@ function promptContent(text: string, images: Array<ImageChunk>) {
     ...(image.fileName ? { file_name: image.fileName } : {}),
   }))
   return [...imageBlocks, ...(trimmed ? [{ type: "text", text: trimmed }] : [])]
+}
+
+function skillFiles(skills: DesktopLocalPromptInput["skills"]) {
+  return Object.fromEntries(
+    skills.map(({ name, description, instructions }) => [
+      `/${name}/SKILL.md`,
+      {
+        content: `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n---\n\n${instructions.trim()}\n`,
+        encoding: "utf-8",
+      },
+    ])
+  )
 }
 
 function errorMessage(error: unknown): string {
@@ -277,7 +292,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
 
   const submit = useCallback(
-    async (prompt: string, images: Array<ImageChunk>) => {
+    async (
+      prompt: string,
+      images: Array<ImageChunk>,
+      skills: DesktopLocalPromptInput["skills"] = []
+    ) => {
       if (!thread) return false
       setError(null)
       const credential =
@@ -297,6 +316,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             messages: [
               { type: "human", content: promptContent(prompt, images) },
             ],
+            ...(skills.length ? { files: skillFiles(skills) } : {}),
           },
           {
             config: {
@@ -330,7 +350,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       .then(() => window.openSweDesktop?.getLocalPrompt(sessionId))
       .then(async (pending) => {
         if (!pending) return
-        if (await submit(pending.prompt, pending.images)) {
+        if (await submit(pending.prompt, pending.images, pending.skills)) {
           await window.openSweDesktop?.clearLocalPrompt(sessionId)
         } else {
           initialPromptRef.current = null

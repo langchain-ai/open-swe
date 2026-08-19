@@ -1,5 +1,6 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
+import type { Skill } from "@/lib/api"
 
 export type DesktopCommandId =
   | "new-thread"
@@ -35,6 +36,7 @@ export interface DesktopLocalDiff {
 export interface DesktopLocalPromptInput {
   prompt: string
   images: Array<ImageChunk>
+  skills: Array<Skill>
 }
 
 export type DesktopTerminalStatus = "starting" | "running" | "exited" | "error"

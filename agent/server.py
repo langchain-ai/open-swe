@@ -36,6 +36,7 @@ from deepagents import create_deep_agent
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
+from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
@@ -1544,19 +1545,25 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
     skill_routes: dict[str, BackendProtocol] = {
-        ORGANIZATION_SKILLS_ROUTE: ReadOnlyBackend(
-            StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
-        ),
         BUNDLED_SKILLS_ROUTE: ReadOnlyBackend(
             FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
         ),
     }
-    skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
-    if profile_login:
-        skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
-            StoreBackend(namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login))
+    if is_desktop_run(configurable):
+        skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(StateBackend())
+        skill_sources = [USER_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
+    else:
+        skill_routes[ORGANIZATION_SKILLS_ROUTE] = ReadOnlyBackend(
+            StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
         )
-        skill_sources.insert(0, USER_SKILLS_ROUTE)
+        skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
+        if profile_login:
+            skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
+                StoreBackend(
+                    namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login)
+                )
+            )
+            skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     subagent_model = _make_model_or_defer(
