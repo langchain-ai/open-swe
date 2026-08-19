@@ -6,7 +6,10 @@ import {
   type Page,
 } from "@playwright/test";
 
-const USER = { login: "alice", email: "alice@example.com" };
+const USER = {
+  login: "threads-workspace-e2e",
+  email: "threads-workspace-e2e@example.com",
+};
 const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 const SAME_ORIGIN_HEADERS = { origin: BASE_URL, referer: `${BASE_URL}/` };
 const WORKSPACE_QUERY = "E2E Workspace";
