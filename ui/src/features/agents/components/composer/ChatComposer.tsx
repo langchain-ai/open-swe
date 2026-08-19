@@ -19,7 +19,11 @@ import {
 } from "./ComposerPromptEditor"
 import { ContextWindowMeter } from "./ContextWindowMeter"
 import { EnvironmentSelector } from "./EnvironmentSelector"
-import { RunTargetSelector } from "./RunTargetSelector"
+import {
+  LocalBranchSelector,
+  LocalProjectSelector,
+  RunTargetSelector,
+} from "./RunTargetSelector"
 import {
   COMPOSER_PATH_DRAG_MIME,
   detectComposerTrigger,
@@ -104,10 +108,13 @@ export interface ChatComposerProps {
   localProjects?: Array<DesktopProject>
   selectedLocalProjectPath?: string | null
   selectedLocalProjectBranch?: string | null
+  localProjectBranches?: Array<string>
   onSelectLocalProject?: (cwd: string) => void
   onAddLocalProject?: () => void
   onRemoveLocalProject?: (cwd: string) => void
   onRefreshLocalProjectBranch?: () => void
+  onSelectLocalProjectBranch?: (branch: string) => void
+  onCreateLocalProjectBranch?: (branch: string) => void
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
@@ -224,10 +231,13 @@ export const ChatComposer = memo(function ChatComposer({
   localProjects = [],
   selectedLocalProjectPath = null,
   selectedLocalProjectBranch = null,
+  localProjectBranches = [],
   onSelectLocalProject,
   onAddLocalProject,
   onRemoveLocalProject,
   onRefreshLocalProjectBranch,
+  onSelectLocalProjectBranch,
+  onCreateLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
   adminThread = false,
@@ -634,23 +644,32 @@ export const ChatComposer = memo(function ChatComposer({
               onChange={onEnvironmentChange}
             />
           )}
-          {runTarget &&
-            onRunTargetChange &&
+          {runTarget && onRunTargetChange && (
+            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
+          )}
+          {runTarget === "local" &&
             onSelectLocalProject &&
             onAddLocalProject &&
-            onRemoveLocalProject &&
-            onRefreshLocalProjectBranch && (
-              <RunTargetSelector
-                localEnabled={Boolean(window.openSweDesktop)}
-                onChange={onRunTargetChange}
+            onRemoveLocalProject && (
+              <LocalProjectSelector
                 onAddProject={onAddLocalProject}
                 onRemoveProject={onRemoveLocalProject}
-                onRefreshBranch={onRefreshLocalProjectBranch}
                 onSelectProject={onSelectLocalProject}
                 projects={localProjects}
                 selectedProjectPath={selectedLocalProjectPath}
-                selectedProjectBranch={selectedLocalProjectBranch}
-                value={runTarget}
+              />
+            )}
+          {runTarget === "local" &&
+            onRefreshLocalProjectBranch &&
+            onSelectLocalProjectBranch &&
+            onCreateLocalProjectBranch && (
+              <LocalBranchSelector
+                branches={localProjectBranches}
+                disabled={!selectedLocalProjectPath}
+                onCreateBranch={onCreateLocalProjectBranch}
+                onRefresh={onRefreshLocalProjectBranch}
+                onSelectBranch={onSelectLocalProjectBranch}
+                selectedBranch={selectedLocalProjectBranch}
               />
             )}
         </div>
