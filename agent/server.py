@@ -43,7 +43,6 @@ from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddl
 from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
-from langsmith.sandbox import SandboxClientError
 
 from .dashboard.admin import is_admin, is_observability_authorized
 from .dashboard.agent_overrides import (
@@ -436,19 +435,6 @@ async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> No
     )
 
 
-async def check_sandbox_reachable(
-    sandbox_backend: SandboxBackendProtocol,
-    thread_id: str,
-) -> SandboxBackendProtocol:
-    """Ping a cached sandbox; an unreachable one fails the run, never gets replaced."""
-    try:
-        await sandbox_backend.aexecute("echo ok")
-    except SandboxClientError as exc:
-        logger.warning("Cached sandbox is no longer reachable for thread %s", thread_id)
-        raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
-    return sandbox_backend
-
-
 async def _connect_existing_sandbox(
     thread_id: str,
     *,
@@ -459,11 +445,13 @@ async def _connect_existing_sandbox(
 ) -> SandboxBackendProtocol:
     """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
 
-    A ``SandboxGoneError`` propagates untouched so the caller recreates.
+    A ``SandboxGoneError`` propagates untouched so the caller recreates. Nothing
+    pings the box first: refreshing the proxy below has to reach it anyway, and
+    raises the same unreachable error when it cannot.
     """
     if cached is not None:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
-        sandbox_backend = await check_sandbox_reachable(cached, thread_id)
+        sandbox_backend = cached
     else:
         logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
@@ -473,7 +461,6 @@ async def _connect_existing_sandbox(
         except Exception as exc:
             logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
             raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
-        sandbox_backend = await check_sandbox_reachable(sandbox_backend, thread_id)
     return await _refresh_github_proxy_or_fail(
         sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
     )
@@ -1263,7 +1250,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
 
     backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-    backend.mark_stale()
+    backend.start()
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization and credentialed integrations, which stay personal to them.

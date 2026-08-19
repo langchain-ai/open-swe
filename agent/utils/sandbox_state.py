@@ -23,7 +23,6 @@ from deepagents.backends.sandbox import BaseSandbox
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from .event_loop import ISOLATED_LOOPS_ENV
 from .sandbox import create_sandbox
 
 logger = logging.getLogger(__name__)
@@ -70,9 +69,8 @@ class SandboxBackendProxy(BaseSandbox):
         self._backend = backend
         self._thread_id = thread_id
         self._reconnect = reconnect
+        self._startup_task: asyncio.Task[SandboxBackendProtocol] | None = None
         self._lock: asyncio.Lock | None = None
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._stale = False
 
     @property
     def current(self) -> SandboxBackendProtocol:
@@ -84,26 +82,45 @@ class SandboxBackendProxy(BaseSandbox):
 
     def replace_backend(self, backend: SandboxBackendProtocol) -> None:
         self._backend = backend
-        self._stale = False
-
-    def mark_stale(self) -> None:
-        """Force one reconnect on next access, even though a backend is cached.
-
-        Every run re-resolves its sandbox once: the reconnect pings the box and
-        refreshes the GitHub proxy token, which expires well inside a thread's
-        lifetime. Tool calls after that hit the cached backend.
-        """
-        self._stale = True
+        self._startup_task = None
 
     @property
     def has_backend(self) -> bool:
         return self._backend is not None
+
+    def cancel_startup(self) -> None:
+        if self._startup_task is not None:
+            self._startup_task.cancel()
 
     def set_reconnect(
         self,
         reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None,
     ) -> None:
         self._reconnect = reconnect
+
+    def start(self) -> None:
+        if self._startup_task is not None:
+            if not self._startup_task.cancelled():
+                return
+            self._startup_task = None
+        if self._reconnect is None:
+            if self._backend is not None:
+                return
+            raise RuntimeError("Cannot start sandbox without a reconnect callback")
+        self._startup_task = asyncio.ensure_future(self._reconnect())
+        self._startup_task.add_done_callback(self._startup_completed)
+
+    def _startup_completed(self, task: asyncio.Task[SandboxBackendProtocol]) -> None:
+        if task.cancelled():
+            logger.warning("Sandbox startup was cancelled for thread %s", self._thread_id)
+            return
+        exception = task.exception()
+        if exception is not None:
+            logger.warning(
+                "Sandbox startup failed for thread %s: %s",
+                self._thread_id,
+                exception,
+            )
 
     async def ready(self) -> SandboxBackendProtocol:
         return await self._aget_backend()
@@ -115,50 +132,57 @@ class SandboxBackendProxy(BaseSandbox):
         return self._backend
 
     def _get_lock(self) -> asyncio.Lock:
-        loop = asyncio.get_running_loop()
-        if self._loop is None:
-            self._loop = loop
-        elif self._loop is not loop:
-            # Everything cached here is loop-affine. Recovering silently is how a
-            # thread ends up permanently unusable, so refuse loudly instead: the
-            # process was supposed to have one loop (see pin_single_event_loop).
-            msg = (
-                f"Sandbox proxy for thread {self._thread_id} was created on event loop "
-                f"{self._loop!r} and is now being used from {loop!r}. Open SWE requires "
-                f"one event loop per process; check {ISOLATED_LOOPS_ENV}."
-            )
-            logger.error(msg)
-            raise RuntimeError(msg)
         if self._lock is None:
             self._lock = asyncio.Lock()
         return self._lock
 
     async def _aget_backend(self) -> SandboxBackendProtocol:
-        if self._backend is not None and not self._stale:
+        if self._backend is not None and self._startup_task is None:
             return self._backend
         if not self._thread_id:
             raise RuntimeError("No sandbox backend cached")
 
         async with self._get_lock():
-            if self._backend is not None and not self._stale:
+            if self._backend is not None and self._startup_task is None:
                 return self._backend
+            if self._startup_task is None:
+                if self._reconnect is not None:
+                    logger.info("Reconnecting sandbox backend for thread %s", self._thread_id)
+                    self.start()
+                else:
+                    sandbox_id = await get_sandbox_id_from_metadata(self._thread_id)
+                    if not sandbox_id:
+                        raise ValueError(
+                            f"Missing sandbox_id in thread metadata for {self._thread_id}"
+                        )
 
-            if self._reconnect is not None:
-                logger.info("Reconnecting sandbox backend for thread %s", self._thread_id)
-                backend = await self._reconnect()
-            else:
-                sandbox_id = await get_sandbox_id_from_metadata(self._thread_id)
-                if not sandbox_id:
-                    raise ValueError(f"Missing sandbox_id in thread metadata for {self._thread_id}")
-                logger.info(
-                    "Reconnecting sandbox backend for thread %s from metadata", self._thread_id
-                )
-                backend = await create_sandbox(sandbox_id)
+                    logger.info(
+                        "Reconnecting sandbox backend for thread %s from metadata", self._thread_id
+                    )
+                    self._startup_task = asyncio.create_task(create_sandbox(sandbox_id))
+                    self._startup_task.add_done_callback(self._startup_completed)
+            startup_task = self._startup_task
+            if startup_task is None:
+                raise RuntimeError(f"Sandbox startup task missing for thread {self._thread_id}")
 
-            self._backend = unwrap_sandbox_backend(backend)
-            self._stale = False
-            SANDBOX_BACKENDS[self._thread_id] = self
-            return self._backend
+        try:
+            sandbox_backend = await asyncio.shield(startup_task)
+        except BaseException:
+            if startup_task.done():
+                async with self._get_lock():
+                    if self._startup_task is startup_task:
+                        self._startup_task = None
+            raise
+
+        async with self._get_lock():
+            if self._startup_task is startup_task:
+                self._backend = unwrap_sandbox_backend(sandbox_backend)
+                self._startup_task = None
+                SANDBOX_BACKENDS[self._thread_id] = self
+            backend = self._backend
+            if backend is None:
+                raise RuntimeError(f"No sandbox backend cached for thread {self._thread_id}")
+            return backend
 
     def ls(self, path: str) -> LsResult:
         raise NotImplementedError(_SYNC_UNSUPPORTED)
@@ -338,7 +362,9 @@ def get_or_create_sandbox_backend_proxy(
 
 
 def clear_sandbox_backend(thread_id: str) -> None:
-    SANDBOX_BACKENDS.pop(thread_id, None)
+    sandbox_backend = SANDBOX_BACKENDS.pop(thread_id, None)
+    if sandbox_backend is not None:
+        sandbox_backend.cancel_startup()
 
 
 async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
