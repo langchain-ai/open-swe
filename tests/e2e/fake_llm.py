@@ -336,6 +336,12 @@ def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+ENVIRONMENT_NAME = "default"
+ENVIRONMENT_PROMPT = (
+    "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`."
+)
+ENVIRONMENT_PROVISION_SCRIPT = "mkdir -p repos && echo provisioned > repos/.provisioned && ls repos"
+
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
 
 
@@ -580,6 +586,31 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_save_plan_step),
         _dynamic_step(_plan_complete_step),
         StepSpec(content="I'll wait for your review and approval before implementing."),
+    ),
+    "environment": (
+        _tool_step(
+            "Provisioning this sandbox before capturing it.",
+            "execute",
+            {"command": ENVIRONMENT_PROVISION_SCRIPT},
+            "call-env-provision",
+        ),
+        _tool_step(
+            "Saving the environment record.",
+            "save_environment",
+            {
+                "name": ENVIRONMENT_NAME,
+                "prompt": ENVIRONMENT_PROMPT,
+                "repos": [f"{OWNER}/{REPO}"],
+            },
+            "call-env-save",
+        ),
+        _tool_step(
+            "Capturing this sandbox as the environment snapshot.",
+            "capture_environment_snapshot",
+            {"name": ENVIRONMENT_NAME},
+            "call-env-capture",
+        ),
+        StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
     ),
     "followup": (_dynamic_step(_followup_step),),
 }
