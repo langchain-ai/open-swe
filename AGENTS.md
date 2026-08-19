@@ -106,7 +106,7 @@ Model + reasoning effort are resolved per run in this precedence (highest wins):
 2. Per-user dashboard profile override (`agent/dashboard/agent_overrides.py:load_profile`), keyed by resolved GitHub login.
 3. Team default model (`agent/dashboard/team_settings.py:get_team_default_model("agent")`).
 
-Custom instructions are layered into the system prompt from two stores: per-repo (`agent/dashboard/agent_instructions.py`, edited on the Repository Instructions page) and per-user (`agent/dashboard/user_instructions.py`, edited in the dashboard Profile tab or by the agent itself via `save_user_instructions`). Repo instructions and `AGENTS.md` win over user-level ones on conflict.
+Custom instructions come from two stores: per-repo instructions (`agent/dashboard/agent_instructions.py`) are layered into the system prompt, while per-user instructions (`agent/dashboard/user_instructions.py`) are attached to each triggering user's message so multi-party threads do not inherit another participant's preferences. Repo instructions and `AGENTS.md` win over user-level ones on conflict.
 
 Supported model IDs and per-model effort/reasoning rules live in `agent/dashboard/options.py`. Profile preferences also control draft PRs and CI automation. Model construction goes through `agent/utils/model.py` (`make_model`, `provider_model_kwargs`, `fallback_model_id_for`).
 
