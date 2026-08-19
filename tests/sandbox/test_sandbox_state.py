@@ -351,3 +351,50 @@ async def test_sandbox_id_metadata_falls_back_to_live_thread(
 
     assert await get_sandbox_id_from_metadata("thread-1") == "sandbox-live"
     threads.get.assert_awaited_once_with("thread-1")
+
+
+def test_sandbox_proxy_recovers_when_the_next_run_runs_on_another_loop() -> None:
+    """The queue hands consecutive runs to different loops; the cache spans both.
+
+    An interrupted run leaves a shielded startup task behind. Awaiting that task
+    from the next run's loop raises "attached to a different loop" and locks the
+    thread out of every later run, so the next loop must start its own.
+    """
+    calls = 0
+
+    async def reconnect():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await asyncio.Event().wait()
+        return _FakeSandboxBackend()
+
+    proxy = SandboxBackendProxy(
+        thread_id="thread-1",
+        reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
+    )
+
+    async def interrupted_run() -> None:
+        proxy.start()
+        waiter = asyncio.create_task(proxy.ready())
+        await asyncio.sleep(0)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+
+    async def next_run() -> SandboxBackendProtocol:
+        proxy.start()
+        return await proxy.ready()
+
+    # Both runners stay open: a queue runner's loop outlives the job it ran, so
+    # the abandoned startup task is still pending on a live, idle loop.
+    first_loop, second_loop = asyncio.Runner(), asyncio.Runner()
+    try:
+        first_loop.run(interrupted_run())
+        backend = second_loop.run(next_run())
+    finally:
+        first_loop.close()
+        second_loop.close()
+
+    assert backend.id == "sandbox-1"
+    assert calls == 2
