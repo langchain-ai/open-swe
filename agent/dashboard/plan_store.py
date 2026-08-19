@@ -75,7 +75,8 @@ async def _stored_plan_file_path(client: Any, thread_id: str) -> str | None:
 async def save_plan_content(
     thread_id: str,
     *,
-    html: str,
+    html: str | None = None,
+    markdown: str | None = None,
     status: str = PLAN_STATUS_READY,
     clear_comments: bool = True,
     plan_file_path: str | None = None,
@@ -90,7 +91,11 @@ async def save_plan_content(
     client = _client()
     if plan_file_path is None:
         plan_file_path = await _stored_plan_file_path(client, thread_id)
-    record = {"html": html, "status": status}
+    record: dict[str, Any] = {"status": status}
+    if html is not None:
+        record["html"] = html
+    if markdown is not None:
+        record["markdown"] = markdown
     if plan_file_path:
         record["plan_file_path"] = plan_file_path
     await client.store.put_item(
@@ -161,10 +166,14 @@ async def set_plan_status(
         existing.get("status") == PLAN_STATUS_SHARED and status == PLAN_STATUS_PLANNING
     )
     client = _client()
-    record: dict[str, Any] = {
-        "html": "" if entering_plan_after_share else existing.get("html", ""),
-        "status": status,
-    }
+    record: dict[str, Any] = {"status": status}
+    if not entering_plan_after_share:
+        for field in ("html", "markdown"):
+            value = existing.get(field)
+            if isinstance(value, str):
+                record[field] = value
+    else:
+        record["html"] = ""
     plan_file_path = existing.get("plan_file_path")
     if not entering_plan_after_share and isinstance(plan_file_path, str) and plan_file_path:
         record["plan_file_path"] = plan_file_path

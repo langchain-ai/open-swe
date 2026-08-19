@@ -34,6 +34,7 @@ export interface PlanData {
   threadId: string
   status: PlanStatus
   html: string
+  markdown: string
   isOwner: boolean
   approvedBy: PlanApprover | null
   approvedAt: string | null
@@ -121,11 +122,12 @@ export function deletePlanComment(
 
 export function updatePlan(
   threadId: string,
-  html: string
-): Promise<{ status: PlanStatus; html: string }> {
+  content: string,
+  format: "html" | "markdown"
+): Promise<{ status: PlanStatus; html?: string; markdown?: string }> {
   return req(`/plan/${encodeURIComponent(threadId)}`, {
     method: "PUT",
-    body: JSON.stringify({ html }),
+    body: JSON.stringify({ [format]: content }),
   })
 }
 

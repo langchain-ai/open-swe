@@ -51,7 +51,8 @@ class CommentBody(BaseModel):
 
 
 class PlanUpdate(BaseModel):
-    html: str
+    html: str | None = None
+    markdown: str | None = None
 
 
 async def _thread_metadata(thread_id: str) -> dict[str, Any]:
@@ -88,6 +89,7 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
         "threadId": thread_id,
         "status": content.get("status") or metadata.get("plan_status") or "planning",
         "html": content.get("html", ""),
+        "markdown": content.get("markdown", ""),
         "isOwner": _user_owns_thread(metadata, login, email),
         "approvedBy": approved_by,
         "approvedAt": approved_at if isinstance(approved_at, str) else None,
@@ -108,11 +110,14 @@ async def update_plan(
     metadata = await _thread_metadata(thread_id)
     if not _user_owns_thread(metadata, session["sub"], session.get("email")):
         raise HTTPException(403, "only the plan owner can edit the plan")
-    html = body.html.strip()
-    if not html:
-        raise HTTPException(422, "plan HTML cannot be empty")
     content = await get_plan_content(thread_id) or {}
     _reject_shared_content(content)
+    legacy_markdown = isinstance(content.get("markdown"), str) and not content.get("html")
+    field = "markdown" if legacy_markdown else "html"
+    value = getattr(body, field)
+    value = value.strip() if isinstance(value, str) else ""
+    if not value:
+        raise HTTPException(422, f"plan {field} cannot be empty")
     status = content.get("status") or metadata.get("plan_status") or "planning"
     if status in (PLAN_STATUS_APPROVED, PLAN_STATUS_CANCELLED):
         raise HTTPException(409, f"cannot edit a {status} plan")
@@ -120,15 +125,24 @@ async def update_plan(
     plan_file_path = (
         plan_file_path if isinstance(plan_file_path, str) else plan_file_path_for_thread(thread_id)
     )
-    await save_plan_content(
-        thread_id,
-        html=html,
-        status=PLAN_STATUS_READY,
-        clear_comments=False,
-        plan_file_path=plan_file_path,
-    )
-    await write_plan_to_sandbox(thread_id, html, plan_file_path=plan_file_path)
-    return {"status": PLAN_STATUS_READY, "html": html}
+    if legacy_markdown:
+        await save_plan_content(
+            thread_id,
+            markdown=value,
+            status=PLAN_STATUS_READY,
+            clear_comments=False,
+            plan_file_path=plan_file_path,
+        )
+    else:
+        await save_plan_content(
+            thread_id,
+            html=value,
+            status=PLAN_STATUS_READY,
+            clear_comments=False,
+            plan_file_path=plan_file_path,
+        )
+    await write_plan_to_sandbox(thread_id, value, plan_file_path=plan_file_path)
+    return {"status": PLAN_STATUS_READY, field: value}
 
 
 @plan_router.get("/{thread_id}/comments")
@@ -215,6 +229,7 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
                 "already_approved": True,
             }
         plan_html = str(content.get("html", "")).strip()
+        plan_markdown = str(content.get("markdown", "")).strip()
         comments = await list_plan_comments(thread_id, raise_on_error=True)
         feedback = _format_comments(comments)
         await set_plan_status(
@@ -228,6 +243,12 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
                 "The plan has been approved. Use the reviewed self-contained HTML artifact below "
                 "as the implementation guide. Apply reasonable engineering judgment where details "
                 f"need adjustment while preserving its goals and reviewer edits:\n\n{plan_html}"
+            )
+        elif plan_markdown:
+            text = (
+                "The plan has been approved. Use the reviewed Markdown plan below as the "
+                "implementation guide. Apply reasonable engineering judgment where details need "
+                f"adjustment while preserving its goals and reviewer edits:\n\n{plan_markdown}"
             )
         else:
             text = "The plan has been approved. Implement it now as described in the plan."

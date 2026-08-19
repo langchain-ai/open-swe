@@ -13,6 +13,7 @@ import {
 } from "@/lib/plan"
 import { Button } from "@/components/ui/button"
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
+import { Markdown } from "@/features/agents/components/chat/Markdown"
 
 const POLL_MS = 4000
 
@@ -58,14 +59,16 @@ export function PlanReview({
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [html, setHtml] = useState(plan.html)
+  const format = plan.html.trim() ? "html" : "markdown"
+  const planContent = format === "html" ? plan.html : plan.markdown
+  const [content, setContent] = useState(planContent)
   const [editing, setEditing] = useState(false)
-  const [editDraft, setEditDraft] = useState(plan.html)
+  const [editDraft, setEditDraft] = useState(planContent)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (!editing) setHtml(plan.html)
-  }, [plan.html, editing])
+    if (!editing) setContent(planContent)
+  }, [planContent, editing])
 
   const isShared = plan.status === "shared"
   const canEdit =
@@ -102,15 +105,15 @@ export function PlanReview({
     setSaving(true)
     setError(null)
     try {
-      const result = await updatePlan(plan.threadId, next)
-      setHtml(result.html)
+      await updatePlan(plan.threadId, next, format)
+      setContent(next)
       setEditing(false)
     } catch (editError) {
       setError((editError as Error).message)
     } finally {
       setSaving(false)
     }
-  }, [editDraft, plan.threadId])
+  }, [editDraft, format, plan.threadId])
 
   const submitComment = useCallback(async () => {
     const body = draft.trim()
@@ -181,13 +184,13 @@ export function PlanReview({
 
   const copyPlan = useCallback(async () => {
     setError(null)
-    if (await copyToClipboard(html)) {
+    if (await copyToClipboard(content)) {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     } else {
-      setError("Couldn't copy the plan HTML to the clipboard.")
+      setError(`Couldn't copy the plan ${format} to the clipboard.`)
     }
-  }, [html])
+  }, [content, format])
 
   return (
     <main
@@ -247,21 +250,23 @@ export function PlanReview({
                     variant="secondary"
                     disabled={busy !== null}
                     onClick={() => {
-                      setEditDraft(html)
+                      setEditDraft(content)
                       setEditing(true)
                       setError(null)
                     }}
                   >
-                    Edit HTML
+                    Edit {format === "html" ? "HTML" : "Markdown"}
                   </Button>
                 )}
                 <Button
                   data-testid="copy-plan"
                   variant="secondary"
-                  disabled={!html.trim()}
+                  disabled={!content.trim()}
                   onClick={() => void copyPlan()}
                 >
-                  {copied ? "Copied!" : "Copy HTML"}
+                  {copied
+                    ? "Copied!"
+                    : `Copy ${format === "html" ? "HTML" : "Markdown"}`}
                 </Button>
                 {!isShared && plan.isOwner && (
                   <Button
@@ -304,8 +309,14 @@ export function PlanReview({
               spellCheck={false}
               className="min-h-[70vh] w-full resize-y bg-background px-4 py-3 font-mono text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
-          ) : html.trim() ? (
-            <PlanArtifactFrame html={html} className="min-h-[70vh]" />
+          ) : content.trim() ? (
+            format === "html" ? (
+              <PlanArtifactFrame html={content} className="min-h-[70vh]" />
+            ) : (
+              <div data-testid="plan-markdown" className="min-h-[70vh] p-6">
+                <Markdown content={content} />
+              </div>
+            )
           ) : (
             <p className="p-6 text-sm text-muted-foreground/70">
               The plan hasn't been written yet.

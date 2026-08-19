@@ -518,6 +518,34 @@ async def test_set_plan_status_preserves_plan_file_path(monkeypatch: pytest.Monk
     assert saved["status"] == plan_store.PLAN_STATUS_REVISING
 
 
+async def test_set_plan_status_preserves_legacy_markdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.dashboard import plan_store
+
+    saved: dict[str, Any] = {}
+
+    class _Store:
+        async def get_item(self, *a: Any, **k: Any) -> Any:
+            return {
+                "value": {
+                    "markdown": "# Legacy plan",
+                    "status": "ready",
+                    "plan_file_path": "/workspace/plans/legacy.md",
+                }
+            }
+
+        async def put_item(self, namespace: Any, key: str, value: Any, *a: Any, **k: Any) -> None:
+            saved.update(value)
+
+    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
+    monkeypatch.setattr(plan_store, "_merge_thread_metadata", AsyncMock())
+
+    await plan_store.set_plan_status("t", plan_store.PLAN_STATUS_APPROVED, plan_mode=False)
+
+    assert saved["markdown"] == "# Legacy plan"
+    assert "html" not in saved
+    assert saved["plan_file_path"] == "/workspace/plans/legacy.md"
+
+
 async def test_set_plan_status_records_approver_audit(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent.dashboard import plan_store
 
