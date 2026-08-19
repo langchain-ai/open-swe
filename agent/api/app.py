@@ -10,10 +10,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from ..dashboard import router as dashboard_router
 from ..dashboard.plan_api import plan_router
 from ..dashboard.workflow_approval_api import workflow_approval_router
+from ..utils.event_loop import pin_single_event_loop
 from ..webhooks.github_routes import router as github_webhook_router
 from ..webhooks.linear_routes import router as linear_webhook_router
 from ..webhooks.slack_routes import router as slack_webhook_router
 from .health import router as health_router
+
+# Before the queue starts: it reads this when it builds its workers, and Open SWE
+# cannot survive them landing on different loops.
+pin_single_event_loop()
 
 
 @asynccontextmanager
@@ -21,6 +26,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from ..utils.model import close_cached_models, validate_local_dev_llm_config
     from ..utils.sandbox import validate_sandbox_startup_config
 
+    pin_single_event_loop()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
     try:

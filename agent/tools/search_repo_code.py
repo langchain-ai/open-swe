@@ -44,9 +44,14 @@ async def search_repo_code(query: str, max_results: int = 20) -> dict[str, Any]:
     owner, repo, token = _chat_repo_context()
     if not owner or not repo:
         return {"success": False, "error": "repository context unavailable"}
+    if not token:
+        return {
+            "success": False,
+            "error": "GitHub credentials unavailable; repository source was not read",
+        }
 
     capped = max(1, min(max_results, 50))
-    headers = github_headers(token or "")
+    headers = github_headers(token)
     headers["Accept"] = "application/vnd.github.text-match+json"
     params = {"q": f"{query} repo:{owner}/{repo}", "per_page": capped}
     try:

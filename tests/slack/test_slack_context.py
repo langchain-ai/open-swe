@@ -254,13 +254,18 @@ def test_parse_github_pr_url_slack_formatted_link() -> None:
     assert pr_ref.number == 1244
 
 
-def test_format_slack_messages_for_prompt_uses_name_and_id() -> None:
+def test_format_slack_messages_for_prompt_includes_ids_for_each_message() -> None:
     formatted = format_slack_messages_for_prompt(
-        [{"ts": "1.0", "text": "hello", "user": "U123"}],
-        {"U123": "alice"},
+        [
+            {"ts": "1.0", "text": "hello", "user": "U123"},
+            {"ts": "1.1", "text": "follow up", "user": "U456"},
+        ],
+        {"U123": "alice", "U456": "bob"},
     )
 
-    assert formatted == "@alice(U123): hello"
+    assert formatted == (
+        "@alice(U123) [message_ts=1.0]: hello\n@bob(U456) [message_ts=1.1]: follow up"
+    )
 
 
 def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> None:
@@ -271,7 +276,7 @@ def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> N
         bot_username="open-swe",
     )
 
-    assert formatted == "@alice(U123): @open-swe status update?"
+    assert formatted == "@alice(U123) [message_ts=1.0]: @open-swe status update?"
 
 
 def test_format_slack_messages_for_prompt_includes_forwarded_attachment() -> None:
@@ -295,7 +300,7 @@ def test_format_slack_messages_for_prompt_includes_forwarded_attachment() -> Non
     )
 
     assert formatted == (
-        "@alice(U123): please handle this\n"
+        "@alice(U123) [message_ts=1.0]: please handle this\n"
         "[Forwarded Slack message from Bob]\n"
         "The forwarded request\n"
         "Source: https://example.slack.com/archives/C123/p123"
@@ -322,7 +327,7 @@ def test_format_slack_messages_for_prompt_uses_forwarded_fallback() -> None:
     )
 
     assert formatted == (
-        "@alice(U123): [forwarded message]\n"
+        "@alice(U123) [message_ts=1.0]: [forwarded message]\n"
         "[Forwarded Slack message from Bob]\n"
         "Fallback forwarded text"
     )
@@ -362,7 +367,7 @@ def test_format_slack_messages_for_prompt_includes_nested_forwarded_attachments(
     )
 
     assert formatted == (
-        "@alice(U123): nested context\n"
+        "@alice(U123) [message_ts=1.0]: nested context\n"
         "[Forwarded Slack message from Bob]\n"
         "First level\n"
         "  [Forwarded Slack message from Carol]\n"
@@ -408,7 +413,7 @@ def test_format_slack_messages_for_prompt_ignores_regular_unfurl_attachment() ->
         {"U123": "alice"},
     )
 
-    assert formatted == "@alice(U123): look at this link"
+    assert formatted == "@alice(U123) [message_ts=1.0]: look at this link"
 
 
 def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.MonkeyPatch) -> None:

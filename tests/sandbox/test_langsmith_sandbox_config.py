@@ -1,13 +1,11 @@
 """Tests for LangSmith sandbox env-var configuration parsing."""
 
-import base64
-import uuid
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from langsmith.sandbox import AsyncSandboxClient
+from langsmith.sandbox import AsyncSandboxClient, ResourceNotFoundError
 
 from agent.integrations.langsmith import (
     DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS,
@@ -21,9 +19,9 @@ from agent.integrations.langsmith import (
     _get_sandbox_create_extra_fields,
     _get_sandbox_snapshot_config,
     _install_create_extra_fields,
-    _is_sandbox_name_taken_error,
-    _sandbox_name_for_thread,
+    _reuse_existing_sandbox,
 )
+from agent.utils.sandbox import SandboxGoneError
 
 
 def test_sandbox_api_endpoint_appends_v2_sandboxes() -> None:
@@ -39,33 +37,13 @@ def test_sandbox_api_endpoint_no_double_suffix() -> None:
         assert _get_sandbox_api_endpoint() == "https://x.smith.langchain.com/v2/sandboxes"
 
 
-def test_sandbox_name_for_thread_encodes_uuid() -> None:
-    thread_id = "12345678-1234-5678-1234-567812345678"
-    name = _sandbox_name_for_thread(thread_id)
-    assert name is not None
-    prefix, _, encoded = name.partition("-")
-    assert prefix == "openswe"
-    assert encoded == encoded.lower()
-    assert "=" not in encoded and "-" not in encoded
-    # Round-trips back to the original UUID.
-    padded = encoded.upper() + "=" * (-len(encoded) % 8)
-    assert uuid.UUID(bytes=base64.b32decode(padded)) == uuid.UUID(thread_id)
-
-
-def test_sandbox_name_for_thread_none_or_invalid() -> None:
-    assert _sandbox_name_for_thread(None) is None
-    assert _sandbox_name_for_thread("not-a-uuid") is None
-
-
 def test_nothing_deletes_sandboxes() -> None:
     """No code path may delete a sandbox.
 
-    A sandbox holds the agent's only copy of its working tree, and callers can't
-    tell a free name from one held by a live box: both the metadata read
-    (``get_sandbox_id_from_metadata``) and write (``_update_thread_sandbox_metadata``)
-    fail open to "this thread has no sandbox". A delete keyed off that guess
-    destroys a running box. Reclamation belongs to the platform's idle TTL and
-    delete-after-stop.
+    A sandbox holds the agent's only copy of its working tree, and the metadata
+    read (``get_sandbox_id_from_metadata``) fails open to "this thread has no
+    sandbox". A delete keyed off that guess destroys a running box. Reclamation
+    belongs to the platform's idle TTL and delete-after-stop.
     """
     agent_root = Path(__file__).resolve().parents[2] / "agent"
     offenders = [
@@ -179,11 +157,6 @@ class _FakeSandboxClient:
         return {"sandbox": kwargs["snapshot_id"]}
 
 
-class _FakeStatusSandbox:
-    def __init__(self, status: str) -> None:
-        self.status = status
-
-
 @pytest.mark.asyncio
 async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -> None:  # noqa: ANN001
     client = _FakeSandboxClient(failures=2)
@@ -192,7 +165,6 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
     result = await _create_sandbox_with_retry(
         cast(AsyncSandboxClient, client),
         snapshot_id="snap-1",
-        name="openswe-abc",
         fs_capacity_bytes=None,
         vcpus=None,
         mem_bytes=None,
@@ -203,7 +175,7 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
 
     assert result == {"sandbox": "snap-1"}
     assert client.calls == 3
-    assert client.last_kwargs["name"] == "openswe-abc"
+    assert "name" not in client.last_kwargs
 
 
 def test_extra_fields_unset_is_empty() -> None:
@@ -274,40 +246,26 @@ async def test_install_create_extra_fields_noop_when_empty() -> None:
     assert client._http.post == "sentinel"
 
 
-class _NameTakenClient:
-    """create_sandbox always collides; get_sandbox returns the orphan by that name."""
+class _MissingSandboxClient:
+    """get_sandbox raises instead of returning a sandbox."""
 
-    def __init__(self, status: str = "running") -> None:
-        self.create_calls = 0
-        self.status = status
-        self.requested: list[str] = []
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
 
-    async def create_sandbox(self, **kwargs):  # noqa: ANN003, ANN202
-        self.create_calls += 1
-        raise RuntimeError(f"Sandbox '{kwargs['name']}' already exists")
-
-    async def get_sandbox(self, *, name: str) -> _FakeStatusSandbox:
-        self.requested.append(name)
-        return _FakeStatusSandbox(self.status)
+    async def get_sandbox(self, *, name: str) -> None:
+        raise self.exc
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["running", "creating", "stopped"])
-async def test_name_collision_adopts_the_orphaned_sandbox(status: str) -> None:
-    from agent.integrations.langsmith import _reuse_existing_sandbox
-
-    client = _NameTakenClient(status=status)
-    try:
-        await client.create_sandbox(name="openswe-abc", snapshot_id="snap-1")
-    except RuntimeError as exc:
-        assert _is_sandbox_name_taken_error(exc)
-        adopted = await _reuse_existing_sandbox(cast(AsyncSandboxClient, client), "openswe-abc")
-        assert adopted.status == status
-        assert client.requested == ["openswe-abc"]
-    else:  # pragma: no cover
-        pytest.fail("expected a name collision")
+async def test_reuse_reports_a_deleted_sandbox_as_gone() -> None:
+    client = _MissingSandboxClient(ResourceNotFoundError("Sandbox 'openswe-abc' not found"))
+    with pytest.raises(SandboxGoneError):
+        await _reuse_existing_sandbox(cast(AsyncSandboxClient, client), "openswe-abc")
 
 
-def test_unrelated_create_errors_are_not_treated_as_collisions() -> None:
-    assert not _is_sandbox_name_taken_error(RuntimeError("snapshot not found"))
-    assert _is_sandbox_name_taken_error(RuntimeError("Sandbox 'x' already exists"))
+@pytest.mark.asyncio
+async def test_reuse_keeps_other_failures_untyped() -> None:
+    client = _MissingSandboxClient(RuntimeError("boom"))
+    with pytest.raises(RuntimeError) as excinfo:
+        await _reuse_existing_sandbox(cast(AsyncSandboxClient, client), "openswe-abc")
+    assert not isinstance(excinfo.value, SandboxGoneError)

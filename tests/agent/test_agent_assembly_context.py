@@ -7,11 +7,11 @@ is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction a
 `PatchToolCallsMiddleware` that `create_deep_agent` adds covers it.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from deepagents.backends.composite import CompositeBackend
+from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
 from agent.server import _registered_tool_name, get_agent
@@ -110,25 +110,16 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config()
 
 
 @pytest.mark.asyncio
-async def test_agent_starts_sandbox_while_loading_settings() -> None:
-    started = asyncio.Event()
-    release = asyncio.Event()
+async def test_agent_assembly_does_not_touch_the_sandbox() -> None:
+    """Assembly only registers how to reconnect; the run resolves the sandbox."""
 
     async def ensure_sandbox(*args: object, **kwargs: object) -> MagicMock:
         del args, kwargs
-        started.set()
-        await release.wait()
-        return MagicMock()
-
-    async def load_defaults(*args: object) -> tuple[tuple[str, str], tuple[str, str]]:
-        del args
-        await started.wait()
-        return (("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low"))
+        raise AssertionError("sandbox resolved during agent assembly")
 
     clear_sandbox_backend("thread-ctx")
     with (
         patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
-        patch("agent.server._cached_team_default_model_pair", side_effect=load_defaults),
         patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
         patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
@@ -140,11 +131,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
     ):
-        agent_task = asyncio.create_task(get_agent(_base_config()))
-        await asyncio.wait_for(started.wait(), timeout=1)
-        assert not agent_task.done()
-        release.set()
-        await agent_task
+        await get_agent(_base_config())
 
     clear_sandbox_backend("thread-ctx")
 
@@ -178,6 +165,22 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
     assert gp["skills"] == sources
+
+
+@pytest.mark.asyncio
+async def test_desktop_agent_loads_snapshotted_and_bundled_skills() -> None:
+    config = _base_config()
+    config.setdefault("configurable", {}).update(
+        {"source": "desktop", "local_project_path": "/tmp"}
+    )
+    with patch("agent.server.create_desktop_backend", return_value=MagicMock()):
+        captured = await _capture_create_deep_agent_kwargs(config)
+
+    assert captured["skills"] == ["/skills/", "/bundled-skills/"]
+    backend = captured["backend"]
+    assert isinstance(backend, CompositeBackend)
+    assert isinstance(backend.routes["/skills/"], ReadOnlyBackend)
+    assert isinstance(backend.routes["/skills/"]._backend, StateBackend)
 
 
 @pytest.mark.asyncio

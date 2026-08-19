@@ -325,7 +325,7 @@ async def test_thread_summary_includes_pr_and_diff_stats() -> None:
     assert summary["diffStats"] == {"files": 3, "additions": 10, "deletions": 2}
 
 
-async def test_thread_summary_uses_working_repo_for_display_only() -> None:
+async def test_thread_summary_uses_configured_repo_for_display() -> None:
     metadata = {
         "repo": {"owner": "trusted", "name": "default"},
         "working_repo_full_name": "observed/checkout",
@@ -335,7 +335,7 @@ async def test_thread_summary_uses_working_repo_for_display_only() -> None:
 
     assert summary["repo"] == "default"
     assert summary["repoFullName"] == "trusted/default"
-    assert summary["workingRepoFullName"] == "observed/checkout"
+    assert "workingRepoFullName" not in summary
     assert metadata["repo"] == {"owner": "trusted", "name": "default"}
 
 
@@ -2060,6 +2060,46 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     assert payload["default_agent_subagent_model"] != _FABLE
     assert payload["default_agent_model"] in model_ids
     assert payload["default_agent_subagent_model"] in model_ids
+
+
+async def test_turn_diff_prefers_persisted_run_artifact(monkeypatch) -> None:
+    metadata = {
+        "sandbox_id": "sandbox-1",
+        "turn_checkpoints": [
+            {"key": "msg-1", "ref": "refs/open-swe/turns/msg-1", "started_at": "t0"}
+        ],
+    }
+    stored = {
+        "status": "ready",
+        "files": [
+            {
+                "path": f"{index}.py",
+                "originalContent": "before",
+                "modifiedContent": "after",
+            }
+            for index in range(3)
+        ],
+        "truncated": False,
+        "summary": {"files": 3, "additions": 3, "deletions": 0},
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    monkeypatch.setattr("agent.dashboard.run_diffs.get_run_diff", AsyncMock(return_value=stored))
+    create_sandbox = AsyncMock()
+    monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
+
+    result = await thread_api.get_dashboard_thread_turn_diff(
+        "thread-1", "owner", turn_key="msg-1", max_files=2, include_content=False
+    )
+
+    assert result == {
+        **stored,
+        "files": [
+            {**file, "originalContent": None, "modifiedContent": None}
+            for file in stored["files"][:2]
+        ],
+        "truncated": True,
+    }
+    create_sandbox.assert_not_awaited()
 
 
 async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
