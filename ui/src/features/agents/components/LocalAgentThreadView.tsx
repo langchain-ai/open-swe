@@ -13,6 +13,7 @@ import { Link } from "@tanstack/react-router"
 import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
+import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
@@ -30,6 +31,7 @@ import { Messages } from "@/features/agents/components/messages"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
 import { usePanelTabs } from "@/features/agents/lib/panelTabs"
 import { useAgentSkills } from "@/features/agents/lib/queries"
+import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
   localThreadKeys,
@@ -73,6 +75,20 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const thread = threadQuery.data
   const queryClient = useQueryClient()
   const skills = useAgentSkills()
+  const { models, defaultSelection } = useModelOptions()
+  const [selection, setSelection] = useState<ModelSelection | null>(null)
+  useEffect(() => setSelection(null), [sessionId])
+  const threadSelection = useMemo<ModelSelection | null>(() => {
+    if (!thread?.modelId || !thread.effort) return null
+    return models.some(
+      (model) =>
+        model.id === thread.modelId &&
+        model.efforts.includes(thread.effort ?? "")
+    )
+      ? { modelId: thread.modelId, effort: thread.effort }
+      : null
+  }, [models, thread?.effort, thread?.modelId])
+  const activeSelection = selection ?? threadSelection ?? defaultSelection
   const initialPromptRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isMobile = useIsMobile()
@@ -191,10 +207,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
 
   const updateStatus = useCallback(
-    async (status: "idle" | "running" | "error") => {
+    async (
+      status: "idle" | "running" | "error",
+      model?: ModelSelection | null
+    ) => {
       const updated = await window.openSweDesktop?.updateLocalThread({
         threadId: sessionId,
         status,
+        ...(model && { modelId: model.modelId, effort: model.effort }),
       })
       if (!updated) return
       queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
@@ -211,8 +231,18 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     async (prompt: string, images: Array<ImageChunk>) => {
       if (!thread) return false
       setError(null)
-      await updateStatus("running")
+      const credential =
+        await window.openSweDesktop?.localModelCredentialStatus(
+          activeSelection?.modelId
+        )
+      if (credential && !credential.available) {
+        setError(
+          `Set ${credential.variable} in the environment before starting Open SWE.`
+        )
+        return false
+      }
       try {
+        await updateStatus("running", activeSelection)
         await stream.submit(
           {
             messages: [
@@ -224,8 +254,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               configurable: {
                 source: "desktop",
                 local_project_path: thread.cwd,
-                ...(thread.modelId ? { agent_model_id: thread.modelId } : {}),
-                ...(thread.effort ? { agent_effort: thread.effort } : {}),
+                ...(activeSelection && {
+                  agent_model_id: activeSelection.modelId,
+                  agent_effort: activeSelection.effort,
+                }),
               },
             },
           }
@@ -238,7 +270,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         return false
       }
     },
-    [stream, thread, updateStatus]
+    [activeSelection, stream, thread, updateStatus]
   )
 
   useEffect(() => {
@@ -365,6 +397,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 activeRun={{ threadId: thread.id, running: isRunning }}
                 busy={isRunning}
                 compact
+                models={models}
+                selection={activeSelection}
+                onSelectionChange={setSelection}
                 onStop={async () => {
                   try {
                     await stream.stop()
