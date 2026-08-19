@@ -10,6 +10,7 @@ import {
 import { ChevronDown } from "lucide-react"
 
 import { AgentTurn } from "./timeline/AgentTurn"
+import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { UserMessage } from "./UserMessage"
 import type { MessagesProps } from "./types"
@@ -249,6 +250,12 @@ export const Messages = memo(function MessagesComponent({
   const lastAgentIndex = visibleMessages.findLastIndex(
     (message) => message.author === "agent"
   )
+  const activityLabel = useMemo(() => {
+    if (!isStreaming) return undefined
+    const lastMessage = visibleMessages.at(-1)
+    if (!lastMessage || lastMessage.author !== "agent") return undefined
+    return liveActivityLabel(lastMessage.chunks, projectPath)
+  }, [isStreaming, projectPath, visibleMessages])
 
   return (
     <TooltipProvider delay={250} closeDelay={0}>
@@ -291,8 +298,9 @@ export const Messages = memo(function MessagesComponent({
             })}
             <QueuedMessages queuedMessages={queuedMessages} />
             <ThinkingSpinner
-              isActive={isThinking ?? streamIsLoading ?? isStreaming}
+              isActive={!!(isThinking || streamIsLoading || isStreaming)}
               settingUpSandbox={settingUpSandbox}
+              label={activityLabel}
             />
           </div>
         </div>
