@@ -82,9 +82,14 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["webhook"] == "https://app/webhooks/run-complete"
     # Resumable by default so the dashboard can join (and stop) a run it did not start.
     assert created["stream_resumable"] is True
-    assert created["config"]["metadata"] == {"kind": "test"}
+    prepare_run_id = created["config"]["configurable"]["prepare_run_id"]
+    assert created["config"]["metadata"] == {
+        "kind": "test",
+        "prepare_run_id": prepare_run_id,
+    }
+    assert created["metadata"] == created["config"]["metadata"]
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
-    assert isinstance(created["config"]["configurable"]["prepare_run_id"], str)
+    assert isinstance(prepare_run_id, str)
 
 
 @pytest.mark.asyncio
@@ -110,3 +115,22 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_stream_kwarg
     assert created["stream_mode"] == ["values"]
     assert created["stream_resumable"] is False
     assert created["config"]["configurable"]["prepare_run_id"] == "existing"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_agent_run_forwards_multitask_strategy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient()
+    monkeypatch.setattr(dispatch, "COMPLETION_WEBHOOK_URL", None)
+
+    await dispatch.dispatch_agent_run(
+        "thread-1",
+        "check CI",
+        {"thread_id": "thread-1"},
+        source="slack",
+        client=client,
+        multitask_strategy="enqueue",
+    )
+
+    assert client.runs.created[0]["multitask_strategy"] == "enqueue"

@@ -156,7 +156,18 @@ export function buildCommandItems(
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase()
 
-  if (trigger.kind === "slash-command") {
+  if (trigger.kind === "slash-command" || trigger.kind === "skill-command") {
+    const skillItems = skills
+      .filter((skill) => skill.name.startsWith(query))
+      .map((skill) => ({
+        id: `skill:${skill.name}`,
+        type: "skill" as const,
+        name: skill.name,
+        label: `/${skill.name}`,
+        description: skill.description,
+      }))
+    if (trigger.kind === "skill-command") return skillItems
+
     const skillNames = new Set(skills.map((skill) => skill.name))
     return [
       ...SLASH_COMMANDS.filter(
@@ -171,15 +182,7 @@ export function buildCommandItems(
         label: spec.label,
         description: spec.description,
       })),
-      ...skills
-        .filter((skill) => skill.name.startsWith(query))
-        .map((skill) => ({
-          id: `skill:${skill.name}`,
-          type: "skill" as const,
-          name: skill.name,
-          label: `/${skill.name}`,
-          description: skill.description,
-        })),
+      ...skillItems,
     ]
   }
 
@@ -196,8 +199,9 @@ export function buildCommandItems(
 }
 
 /**
- * The prompt composer: a Lexical editor with `@file` chips and `/command`
- * autocomplete, plus the control row (model, plan mode, attachments, context)
+ * The prompt composer: a Lexical editor with `@file` chips, `/command`
+ * autocomplete, and `$skill` autocomplete, plus the control row (model, plan
+ * mode, attachments, context)
  * and the send/stop button.
  */
 export const ChatComposer = memo(function ChatComposer({
@@ -752,7 +756,11 @@ export const ChatComposer = memo(function ChatComposer({
               render={
                 <ComposerControl
                   aria-label="More composer options"
-                  className="size-7 px-0"
+                  className={cn(
+                    "size-7 px-0",
+                    adminThread &&
+                      "bg-destructive/10 text-foreground hover:bg-destructive/10 hover:text-foreground"
+                  )}
                   type="button"
                 />
               }

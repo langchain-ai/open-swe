@@ -1,12 +1,12 @@
 """Single durable dispatch contract behind every agent/reviewer run trigger.
 
 Replaces the per-site ``runs.create`` calls (plus the ``is_thread_active``
-busy-check and the custom store-queue) with one function that always uses:
+busy-check and the custom store-queue) with one function that uses:
 
-- ``multitask_strategy="interrupt"`` — a follow-up halts the active run
+- ``multitask_strategy="interrupt"`` by default — a follow-up halts the active run
   (progress preserved by the sync checkpoint) and resumes the agent with full
-  history + the new message; on an idle thread it just starts. This is the
-  platform-native, cross-process replacement for the racy busy-check + queue.
+  history + the new message; on an idle thread it just starts. Background
+  follow-ups such as `/baby-sit` can opt into ``enqueue`` instead.
 - ``durability="sync"`` — checkpoint before each step so a crash/recycle
   resumes from the last checkpoint instead of losing all work.
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
@@ -94,7 +94,7 @@ def dispatch_client() -> LangGraphClient:
     return get_client(url=_langgraph_url())
 
 
-def _config_with_prepare_run_id(
+def prepare_run_config(
     config: RunConfig | None,
     metadata: dict[str, Any] | None,
 ) -> RunConfig:
@@ -103,8 +103,12 @@ def _config_with_prepare_run_id(
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
     configurable.setdefault("prepare_run_id", str(uuid.uuid4()))
     run_config["configurable"] = configurable
+    existing_metadata = run_config.get("metadata")
+    merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
     if metadata is not None:
-        run_config["metadata"] = metadata
+        merged_metadata.update(metadata)
+    merged_metadata["prepare_run_id"] = configurable["prepare_run_id"]
+    run_config["metadata"] = merged_metadata
     return run_config
 
 
@@ -126,9 +130,11 @@ async def create_durable_run(
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
     client = client or dispatch_client()
+    run_config = prepare_run_config(config, metadata)
     create_kwargs: dict[str, Any] = {
         "input": input,
-        "config": _config_with_prepare_run_id(config, metadata),
+        "config": run_config,
+        "metadata": run_config["metadata"],
         "multitask_strategy": multitask_strategy,
         "durability": durability,
         "if_not_exists": if_not_exists,
@@ -161,8 +167,9 @@ async def dispatch_agent_run(
     assistant_id: str = "agent",
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
+    multitask_strategy: str = "interrupt",
 ) -> Run:
-    """Create (or interrupt-and-resume) a run for ``thread_id``.
+    """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
     Routes every Slack / Linear / GitHub / dashboard trigger through one
     contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
@@ -176,4 +183,5 @@ async def dispatch_agent_run(
         metadata=metadata or {},
         source=source,
         client=client or dispatch_client(),
+        multitask_strategy=multitask_strategy,
     )

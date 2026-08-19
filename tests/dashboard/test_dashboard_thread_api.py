@@ -1122,11 +1122,25 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
         async def __aexit__(self, *a: object) -> None:
             pass
 
-        async def post(self, *a: object, **kw: object) -> FakeResponse:
+        async def post(
+            self, url: str, *, json: dict[str, object], headers: dict[str, str]
+        ) -> FakeResponse:
+            posted.append(json)
             return FakeResponse()
 
+    posted: list[dict[str, object]] = []
     monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
-    await thread_api.proxy_dashboard_thread_history("tid", "teammate", b"{}")
+    await thread_api.proxy_dashboard_thread_history("tid", "teammate", b'{"limit": 20}')
+    await thread_api.proxy_dashboard_thread_history(
+        "tid", "teammate", b'{"limit": 20, "metadata": {"run_id": "run-1"}}'
+    )
+    assert posted == [
+        {"limit": thread_api._DISCOVERY_HISTORY_LIMIT},
+        {"limit": 20, "metadata": {"run_id": "run-1"}},
+    ]
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_history("tid", "teammate", b"\xff")
+    assert exc_info.value.status_code == 400
 
 
 async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(monkeypatch) -> None:
@@ -1499,6 +1513,11 @@ def test_summary_matches_filters() -> None:
 
 def test_metadata_matches_filters() -> None:
     metadata = {"source": "dashboard", "title": "Fix login bug", "resolved": True}
+    automation = {
+        "source": "schedule",
+        "schedule_id": "schedule-1",
+        "title": "Scheduled cleanup",
+    }
 
     assert thread_api._metadata_matches_filters(metadata, resolved=True, source=None, query=None)
     assert not thread_api._metadata_matches_filters(
@@ -1509,6 +1528,28 @@ def test_metadata_matches_filters() -> None:
     )
     assert not thread_api._metadata_matches_filters(
         metadata, resolved=None, source="github", query=None
+    )
+    assert thread_api._metadata_matches_filters(
+        metadata, resolved=None, source=None, query=None, scope="interactive"
+    )
+    assert not thread_api._metadata_matches_filters(
+        automation, resolved=None, source=None, query=None, scope="interactive"
+    )
+    assert thread_api._metadata_matches_filters(
+        automation,
+        resolved=None,
+        source=None,
+        query=None,
+        scope="automation",
+        automation_id="schedule-1",
+    )
+    assert not thread_api._metadata_matches_filters(
+        automation,
+        resolved=None,
+        source=None,
+        query=None,
+        scope="automation",
+        automation_id="schedule-2",
     )
 
 
@@ -1568,6 +1609,56 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     assert all(item["resolved"] is False for item in result["items"])
     assert page_size in offsets
     assert run_list_calls == 0
+
+
+async def test_list_dashboard_threads_page_scopes_automation_runs(monkeypatch) -> None:
+    threads = _make_threads(3, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    first = cast(dict[str, object], threads[0]["metadata"])
+    first.update({"source": "schedule", "schedule_id": "schedule-1"})
+    second = cast(dict[str, object], threads[1]["metadata"])
+    second.update({"source": "schedule", "schedule_id": "schedule-2"})
+    threads.append(
+        {
+            "thread_id": "other-owner",
+            "metadata": {
+                "source": "schedule",
+                "github_login": "someone-else",
+                "schedule_id": "schedule-1",
+                "latest_run_status": "success",
+                "updated_at_ms": 10,
+            },
+        }
+    )
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    interactive = await thread_api.list_dashboard_threads_page(
+        "octocat", email=None, scope="interactive"
+    )
+    automation = await thread_api.list_dashboard_threads_page(
+        "octocat", email=None, scope="automation", automation_id="schedule-1"
+    )
+
+    assert [item["id"] for item in interactive["items"]] == ["t2"]
+    assert [item["id"] for item in automation["items"]] == ["t0"]
+    assert automation["items"][0]["automationId"] == "schedule-1"
 
 
 async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(monkeypatch) -> None:

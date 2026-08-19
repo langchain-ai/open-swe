@@ -122,43 +122,24 @@ const SHIKI_LANGS = [
 
 // Browser `/dashboard/api/*` calls are proxied to the Python backend by the
 // server rather than sent cross-origin, so the session cookie stays same-origin.
-// On Vercel this route rule compiles to a platform rewrite, keeping streaming
-// responses out of the serverless function.
 const IS_PRODUCTION = process.env.NODE_ENV === "production"
 
-// No default on a hosted build. A fallback here would be a production backend
-// URL, which the preview deployment would silently inherit — pointing preview's
-// dashboard at production's agents, threads, and sandboxes. Failing the build is
-// the recoverable outcome.
-if (process.env.VERCEL && !process.env.DASHBOARD_API_URL) {
-  throw new Error(
-    "DASHBOARD_API_URL is required for a hosted build: it becomes the platform " +
-      "rewrite for /dashboard/api/* and the backend that server renders call. " +
-      "Set it in the Vercel project to this deployment's own backend URL."
-  )
-}
-
-const DASHBOARD_API_URL =
-  process.env.DASHBOARD_API_URL ?? "http://localhost:2024"
-
-// A deployed dashboard only fronts the API; dev fronts every backend path so a
-// local mock backend's login redirects resolve on this origin.
-const PROXIED_PREFIXES = IS_PRODUCTION ? ["/dashboard/api"] : BACKEND_PREFIXES
-
-// Nitro's proxy follows redirects itself, which swallows the OAuth 3xx hops: the
-// browser's address bar never moves and login dies at the first hop. Vercel's
-// rewrite passes 3xx through on its own, and any fetchOptions here would push
-// these requests through the serverless function instead of that rewrite.
-const PROXY_OPTIONS = process.env.VERCEL
+// Dev proxies every backend path in-process so a local mock backend's login
+// redirects resolve on this origin. A deployed build proxies at runtime instead,
+// in server/middleware/backend-proxy.ts, so one image can front any backend.
+const devRouteRules = IS_PRODUCTION
   ? {}
-  : { fetchOptions: { redirect: "manual" as const } }
-
-const backendRouteRules = Object.fromEntries(
-  PROXIED_PREFIXES.map((prefix) => [
-    `${prefix}/**`,
-    { proxy: { to: `${DASHBOARD_API_URL}${prefix}/**`, ...PROXY_OPTIONS } },
-  ])
-)
+  : Object.fromEntries(
+      BACKEND_PREFIXES.map((prefix) => [
+        `${prefix}/**`,
+        {
+          proxy: {
+            to: `${process.env.DASHBOARD_API_URL ?? "http://localhost:2024"}${prefix}/**`,
+            fetchOptions: { redirect: "manual" as const },
+          },
+        },
+      ])
+    )
 
 // The Electron app and the service worker's offline navigation both load a
 // client-only `_shell.html`. SSR alone doesn't emit one, so prerender `/` with
@@ -177,11 +158,6 @@ const SHELL_PAGE = {
 
 const config = defineConfig({
   base: "/",
-  // Server renders read the same resolved target as the proxy route rule, so the
-  // two can't disagree about which backend the app is talking to.
-  define: {
-    "process.env.DASHBOARD_API_URL": JSON.stringify(DASHBOARD_API_URL),
-  },
   optimizeDeps: {
     include: [
       "streamdown",
@@ -200,7 +176,26 @@ const config = defineConfig({
     mockHarnessProxy(),
     devtools(),
     nitro({
-      routeRules: backendRouteRules,
+      routeRules: devRouteRules,
+      // Registered explicitly: nitro's convention scan does not reach this
+      // directory under the vite plugin. Deployed builds only — dev proxies the
+      // same prefixes through devRouteRules, which has a localhost default the
+      // handler deliberately refuses to have. Only the two prefixes a deployed
+      // dashboard fronts, since proxying `/static` would shadow nitro's assets.
+      handlers: [
+        ...(IS_PRODUCTION
+          ? ["/dashboard/api", "/webhooks"].map((prefix) => ({
+              route: `${prefix}/**`,
+              handler: "./server/backend-proxy.ts",
+            }))
+          : []),
+        // Deliberately outside the proxied prefixes: this one is answered by this
+        // server, not forwarded to the backend.
+        {
+          route: "/operations/restart",
+          handler: "./server/operations-restart.ts",
+        },
+      ],
       // Nitro gives every node_modules package its own server chunk. The
       // LangGraph SDK reaches CJS-only `eventemitter3` through `p-queue`, and
       // splitting that cycle puts the CommonJS interop helper in the SDK's chunk

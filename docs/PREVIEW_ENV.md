@@ -54,27 +54,31 @@ copy across by mistake:
 Scope preview with its own `ALLOWED_GITHUB_ORGS` / `ALLOWED_GITHUB_REPOS` and install its
 GitHub App only on the repositories it should touch.
 
-## Vercel
+## Dashboard
 
-Root directory `ui/`, production branch `preview`, and `DASHBOARD_API_URL` set to the
-preview LangGraph deployment URL. Requests stay same-origin — the build turns that
-variable into the platform rewrite for `/dashboard/api/*` — so `DASHBOARD_API_BASE_URL`,
-the GitHub App callback URL, and the `DASHBOARD_ALLOWED_ORIGINS` entry must all point at
-the preview Vercel domain. That allowlist is the backend's CSRF gate as well as its CORS
-config, so a missing entry leaves the preview dashboard readable but unable to save.
+The dashboard reads `DASHBOARD_API_URL` — the backend it fronts — from its own
+environment at request time, so one built image serves any deployment. Set it wherever
+the dashboard runs (the pod environment on Kubernetes, the project settings on Vercel).
+It has no default: a fallback would be production's backend, and preview would inherit it
+and drive production's agents, threads, and sandboxes.
 
-`ui/vercel.json` limits git deployments to `main` and `preview`, the two projects'
-production branches, so feature branches no longer build. Both projects read that one file
-(same root directory), so each still preview-deploys the other's production branch — to
-stop the preview project building anything but `preview`, set its Ignored Build Step to
-`[ "$VERCEL_ENV" != "production" ]` in the Vercel dashboard.
+The preview image workflow also needs these repository settings:
 
-> The build **fails** if `DASHBOARD_API_URL` is unset on Vercel, rather than falling back
-> to a default — a default would be production's backend, and preview would inherit it
-> and drive production's agents, threads, and sandboxes from the preview dashboard.
->
-> `DASHBOARD_API_URL` is read at build time. A change to it only takes effect on the next
-> deployment, not on redeploy of an existing build.
+- Variable `PREVIEW_DASHBOARD_URL` — the preview dashboard's public URL.
+- Actions secret `OPERATIONS_API_JWT_SECRET` — the restart signing secret.
+
+Set `OPERATIONS_API_JWT_SECRET` to the same value in the preview dashboard deployment. The
+workflow signs a short-lived restart token with it after publishing an image, and the dashboard
+uses its deployment secret to verify that token.
+
+Requests stay same-origin — the server proxies `/dashboard/api/*` and `/webhooks/*` to
+that backend — so `DASHBOARD_API_BASE_URL`, the GitHub App callback URL, and the
+`DASHBOARD_ALLOWED_ORIGINS` entry must all point at the dashboard's own domain, not the
+backend's. That allowlist is the backend's CSRF gate as well as its CORS config, so a
+missing entry leaves the dashboard readable but unable to save.
+
+Webhook senders get the dashboard's domain too: `/webhooks/*` is proxied for exactly this
+reason, so each instance publishes one hostname rather than leaking its LangGraph URL.
 
 ## Verifying isolation
 
