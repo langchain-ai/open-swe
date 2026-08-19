@@ -453,7 +453,7 @@ Build one by provisioning this sandbox and capturing it:
 
 Two things do not belong in a snapshot: secrets (they would be readable by every run) and credentials from the GitHub proxy (the proxy re-injects them per run, so nothing needs to be written to disk). Never `git config` a token, write one to a file, or export one into a shell profile.
 
-The environment prompt is appended verbatim to every run's system prompt. Keep it about how to work in this environment — where checkouts live, how to build and test, what is pre-installed — not about a single task.
+The environment prompt is appended verbatim to every run's system prompt. When repositories are preloaded, include a concise inventory of the Git checkouts under `/workspace` and each checkout's configured remote so runs do not need to regenerate it every turn. Keep the prompt about how to work in this environment — where checkouts live, how to build and test, what is pre-installed — not about a single task.
 
 Confirm the name, prompt, and provisioning steps with the user before capturing into `default`: it changes how everyone's runs start."""
 
