@@ -297,18 +297,15 @@ async def test_sandbox_id_metadata_falls_back_to_live_thread(
     threads.get.assert_awaited_once_with("thread-1")
 
 
-def test_sandbox_proxy_recovers_when_the_next_run_runs_on_another_loop() -> None:
-    """The queue hands consecutive runs to different loops; the cache spans both.
+def test_sandbox_proxy_refuses_a_second_event_loop() -> None:
+    """One loop per process is an invariant, so a second one is a hard failure.
 
-    Concurrent callers queue on the proxy's lock, which binds it to the loop
-    that ran them. Reusing that lock from the next run's loop raises "attached
-    to a different loop" and locks the thread out of every later run.
+    Everything the proxy caches is loop-affine. Papering over a second loop is
+    what left threads permanently unusable, so it raises instead — loudly, where
+    the cause is still visible.
     """
-    calls = 0
 
     async def reconnect():
-        nonlocal calls
-        calls += 1
         await asyncio.sleep(0)
         return _FakeSandboxBackend()
 
@@ -317,20 +314,15 @@ def test_sandbox_proxy_recovers_when_the_next_run_runs_on_another_loop() -> None
         reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
     )
 
-    async def contended_run() -> list[object]:
-        # Two callers so one waits on the lock: an uncontended lock never binds.
+    async def run() -> object:
         proxy.mark_stale()
-        return await asyncio.gather(proxy.ready(), proxy.ready(), return_exceptions=True)
+        return await proxy.ready()
 
-    # Both runners stay open: a queue runner's loop outlives the job it ran.
     first_loop, second_loop = asyncio.Runner(), asyncio.Runner()
     try:
-        first = first_loop.run(contended_run())
-        second = second_loop.run(contended_run())
+        assert first_loop.run(run()).id == "sandbox-1"
+        with pytest.raises(RuntimeError, match="one event loop per process"):
+            second_loop.run(run())
     finally:
         first_loop.close()
         second_loop.close()
-
-    assert all(getattr(result, "id", None) == "sandbox-1" for result in first + second)
-    # One resolve per run, not one per caller.
-    assert calls == 2

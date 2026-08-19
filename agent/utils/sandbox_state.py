@@ -23,6 +23,7 @@ from deepagents.backends.sandbox import BaseSandbox
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from .event_loop import ISOLATED_LOOPS_ENV
 from .sandbox import create_sandbox
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ class SandboxBackendProxy(BaseSandbox):
         self._thread_id = thread_id
         self._reconnect = reconnect
         self._lock: asyncio.Lock | None = None
-        self._lock_loop: asyncio.AbstractEventLoop | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._stale = False
 
     @property
@@ -114,12 +115,22 @@ class SandboxBackendProxy(BaseSandbox):
         return self._backend
 
     def _get_lock(self) -> asyncio.Lock:
-        # A lock binds to the loop that first awaits it, and this proxy is cached
-        # across runs that do not share one, so it belongs to a single loop only.
         loop = asyncio.get_running_loop()
-        if self._lock is None or self._lock_loop is not loop:
+        if self._loop is None:
+            self._loop = loop
+        elif self._loop is not loop:
+            # Everything cached here is loop-affine. Recovering silently is how a
+            # thread ends up permanently unusable, so refuse loudly instead: the
+            # process was supposed to have one loop (see pin_single_event_loop).
+            msg = (
+                f"Sandbox proxy for thread {self._thread_id} was created on event loop "
+                f"{self._loop!r} and is now being used from {loop!r}. Open SWE requires "
+                f"one event loop per process; check {ISOLATED_LOOPS_ENV}."
+            )
+            logger.error(msg)
+            raise RuntimeError(msg)
+        if self._lock is None:
             self._lock = asyncio.Lock()
-            self._lock_loop = loop
         return self._lock
 
     async def _aget_backend(self) -> SandboxBackendProtocol:
