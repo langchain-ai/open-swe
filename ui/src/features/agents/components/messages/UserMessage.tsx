@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 
+import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
 import type { Message } from "@/features/agents/lib/types"
 
@@ -78,7 +79,7 @@ export function UserMessage({ message }: { message: Message }) {
                   WebkitMaskImage: textEdgeMask,
                 }}
               >
-                {text}
+                <SkillPromptText text={text} />
               </div>
             )}
           </div>

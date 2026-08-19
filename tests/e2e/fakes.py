@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from e2e_env import BARE_REMOTE, BASE_BRANCH, OWNER, REPO
+from e2e_env import BARE_REMOTE, BASE_BRANCH, OWNER, REPO, TMP
 
 # --- Slack -----------------------------------------------------------------
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
@@ -123,6 +123,13 @@ def seed_bare_remote() -> None:
     _git("remote", "add", "origin", str(BARE_REMOTE), cwd=seed_work)
     _git("push", "origin", BASE_BRANCH, cwd=seed_work)
     shutil.rmtree(seed_work)
+
+
+def seed_sandbox_repo() -> None:
+    repo = TMP / "work" / "repo"
+    if repo.exists():
+        shutil.rmtree(repo)
+    _git("clone", str(BARE_REMOTE), str(repo))
 
 
 def _diff_files(base: str, head: str) -> list[dict[str, Any]]:

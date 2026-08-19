@@ -131,7 +131,8 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
     args = update.await_args
     assert args is not None
     assert args.args[:2] == ("C1", "1.1")
-    assert args.args[2].endswith("10 main-agent tokens • $0.42 session cost")
+    assert args.args[2].endswith("model-a • $0.42")
+    assert "main-agent tokens" not in args.args[2]
     assert args.kwargs["blocks"][1] == blocks[1]
 
 

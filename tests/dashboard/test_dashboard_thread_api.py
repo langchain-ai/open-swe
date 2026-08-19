@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from agent.dashboard import routes, thread_api
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
+from agent.dashboard.ttft import AssistantTextObservation
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
@@ -865,7 +866,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
 
     class FakeResponse:
         status_code = 200
-        content = b'{"run_id":"run-1"}'
+        content = b'{"type":"success","id":1,"result":{"run_id":"run-1"}}'
         headers = {"content-type": "application/json"}
 
     class FakeAsyncClient:
@@ -904,6 +905,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    monkeypatch.setattr(thread_api, "_now_ms", lambda: 123_456)
     monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(
         thread_api, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
@@ -916,7 +918,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     )
 
     assert status == 200
-    assert body == b'{"run_id":"run-1"}'
+    assert body == b'{"type":"success","id":1,"result":{"run_id":"run-1"}}'
     outgoing = captured["outgoing"]
     assert isinstance(outgoing, dict)
     messages = outgoing["params"]["input"]["messages"]
@@ -929,6 +931,100 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
         "message_ts": "123.46",
         "thread_id": "tid",
     }
+    outgoing_params = outgoing["params"]
+    assert outgoing_params["metadata"]["dashboard_ttft_started_at_ms"] == 123_456
+    updates = captured["updates"]
+    assert isinstance(updates, list)
+    assert updates[-1] == {
+        "latest_run_id": "run-1",
+        "latest_run_status": "pending",
+        "updated_at_ms": 123_456,
+    }
+
+
+async def test_run_ttft_observer_records_first_assistant_text(
+    monkeypatch,
+) -> None:
+    def event(
+        method: str,
+        data: dict[str, object],
+        *,
+        namespace: list[str],
+        event_id: str,
+    ) -> bytes:
+        payload = {
+            "type": "event",
+            "event_id": event_id,
+            "method": method,
+            "params": {"namespace": namespace, "timestamp": 2_250, "data": data},
+        }
+        return f"event: {method}\r\ndata: {json.dumps(payload)}\r\n\r\n".encode()
+
+    stream_bytes = event(
+        "messages",
+        {"event": "message-start", "role": "ai"},
+        namespace=["agent"],
+        event_id="1-0",
+    ) + event(
+        "messages",
+        {
+            "event": "content-block-delta",
+            "delta": {"type": "text-delta", "text": "Hello"},
+        },
+        namespace=["agent"],
+        event_id="2-0",
+    )
+    chunks = [stream_bytes[:35], stream_bytes[35:]]
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            pass
+
+        async def aiter_bytes(self):
+            for chunk in chunks:
+                yield chunk
+
+    class FakeStreamContext:
+        async def __aenter__(self) -> FakeResponse:
+            return FakeResponse()
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        def stream(self, method: str, url: str, **kwargs: object) -> FakeStreamContext:
+            assert method == "GET"
+            assert url.endswith("/threads/thread-1/runs/run-1/stream")
+            assert kwargs["headers"] == {
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+                "Last-Event-ID": "-1",
+            }
+            assert kwargs["params"] == {"stream_mode": "messages"}
+            return FakeStreamContext()
+
+    record = AsyncMock()
+    monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(thread_api, "record_dashboard_thread_ttft", record)
+
+    await thread_api._observe_dashboard_run_ttft("thread-1", "run-1", 1_000)
+
+    record.assert_awaited_once_with(
+        AssistantTextObservation(run_id="run-1", event_timestamp_ms=2_250),
+        thread_id="thread-1",
+        started_at_ms=1_000,
+    )
 
 
 async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:
@@ -2000,7 +2096,12 @@ async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
 
     result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
 
-    assert result == {"status": "ready", "files": [], "truncated": False}
+    assert result == {
+        "status": "ready",
+        "files": [],
+        "truncated": False,
+        "summary": {"files": 0, "additions": 0, "deletions": 0},
+    }
     create_sandbox.assert_not_awaited()
 
 
@@ -2031,6 +2132,8 @@ async def test_turn_diff_preserves_changes_before_mid_run_plan_mode(monkeypatch)
         None,
         "refs/open-swe/turns/msg-1",
         "refs/open-swe/turns/msg-1-plan",
+        max_files=200,
+        include_content=True,
         repo_path="/workspace/repo",
     )
 
@@ -2066,6 +2169,8 @@ async def test_turn_diff_reads_the_checkpoint_repository(monkeypatch) -> None:
         None,
         "refs/open-swe/turns/msg-1",
         "refs/open-swe/turns/msg-2",
+        max_files=200,
+        include_content=True,
         repo_path="/workspace/repo",
     )
 
@@ -2094,7 +2199,12 @@ async def test_turn_diff_rejects_checkpoints_from_different_repositories(monkeyp
 
     result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
 
-    assert result == {"status": "missing", "files": [], "truncated": False}
+    assert result == {
+        "status": "missing",
+        "files": [],
+        "truncated": False,
+        "summary": {"files": 0, "additions": 0, "deletions": 0},
+    }
     create_sandbox.assert_not_awaited()
 
 
