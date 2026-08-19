@@ -60,6 +60,7 @@ async def _capture_create_deep_agent_kwargs(
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
+        patch("agent.server.create_desktop_backend", return_value=MagicMock()),
         patch(
             "agent.server.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
@@ -151,6 +152,17 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
     assert gp["skills"] == sources
+
+
+@pytest.mark.asyncio
+async def test_desktop_agent_allows_local_pr_creation() -> None:
+    config = _base_config()
+    config["configurable"]["source"] = "desktop"
+    config["configurable"]["local_project_path"] = "/workspace"
+    middleware = (await _capture_create_deep_agent_kwargs(config))["middleware"]
+
+    assert isinstance(middleware, list)
+    assert "PullRequestCreationGuardMiddleware" not in {type(item).__name__ for item in middleware}
 
 
 @pytest.mark.asyncio

@@ -129,6 +129,14 @@ def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
     assert "validated Slack destination" in scheduled_slack
 
 
+def test_desktop_prompt_uses_local_gh_for_new_prs() -> None:
+    prompt = construct_system_prompt(working_dir="/workspace", source="desktop")
+
+    assert "with `gh pr create`" in prompt
+    assert "hosted `open_pull_request` tool is unavailable" in prompt
+    assert "NOT `gh pr create`" not in prompt
+
+
 def test_construct_system_prompt_includes_shared_base_explicitly() -> None:
     from agent.prompt import OPEN_SWE_SHARED_BASE
 

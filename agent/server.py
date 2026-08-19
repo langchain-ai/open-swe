@@ -1576,7 +1576,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     initial_delay=1.0,
                     max_delay=10.0,
                 ),
-                PullRequestCreationGuardMiddleware(),
+                *([] if local_run else [PullRequestCreationGuardMiddleware()]),
                 WorkflowPushGuardMiddleware(),
                 refresh_github_proxy_before_model,
                 *([] if stop_summary_mode else [check_message_queue_before_model]),
