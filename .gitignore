@@ -17,6 +17,8 @@
 
 # production
 /build
+/desktop/build
+/desktop/resources/local-backend/
 /dist
 **/dist
 .turbo/
@@ -36,6 +38,9 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# local sandbox git identity (never the developer's ~/.gitconfig)
+.gitconfig-sandbox
 
 # local env files
 .env*.local
@@ -70,5 +75,5 @@ __pycache__/
 *.egg-info/
 .eggs/
 
-# Local E2E artifacts: harness logs, screenshots, and Playwright videos.
+#
 logs/

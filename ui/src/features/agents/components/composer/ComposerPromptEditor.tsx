@@ -36,8 +36,9 @@ import {
 } from "lexical"
 import { File as FileIcon } from "lucide-react"
 
-import { basenameOfPath, serializeComposerFileLink } from "./composerTrigger"
+import { SkillBadge } from "../SkillBadge"
 import { splitPromptIntoSegments } from "./composerMentions"
+import { basenameOfPath, serializeComposerFileLink } from "./composerTrigger"
 import type { InitialConfigType } from "@lexical/react/LexicalComposer"
 import type {
   EditorState,
@@ -59,11 +60,17 @@ export interface ComposerPromptEditorHandle {
   readSnapshot: () => { value: string; cursor: number }
 }
 
+const EMPTY_SKILL_NAMES = new Set<string>()
 const MENTION_CHIP_CLASS_NAME =
   "inline-flex max-w-full select-none items-center gap-1 rounded-md border border-border/70 bg-accent/40 px-1.5 py-px align-middle text-[12px] font-medium leading-[1.1] text-foreground"
 
 type SerializedComposerMentionNode = Spread<
   { path: string; source: string; type: "composer-mention"; version: 1 },
+  SerializedLexicalNode
+>
+
+type SerializedComposerSkillNode = Spread<
+  { name: string; source: string; type: "composer-skill"; version: 1 },
   SerializedLexicalNode
 >
 
@@ -166,12 +173,83 @@ function $createComposerMentionNode(
   return $applyNodeReplacement(new ComposerMentionNode(path, source))
 }
 
-function isMentionNode(node: unknown): node is ComposerMentionNode {
-  return node instanceof ComposerMentionNode
+class ComposerSkillNode extends DecoratorNode<React.ReactElement> {
+  __name: string
+  __source: string
+
+  static override getType(): string {
+    return "composer-skill"
+  }
+
+  static override clone(node: ComposerSkillNode): ComposerSkillNode {
+    return new ComposerSkillNode(node.__name, node.__source, node.__key)
+  }
+
+  static override importJSON(
+    serialized: SerializedComposerSkillNode
+  ): ComposerSkillNode {
+    return $createComposerSkillNode(
+      serialized.name,
+      serialized.source
+    ).updateFromJSON(serialized)
+  }
+
+  constructor(name: string, source: string, key?: NodeKey) {
+    super(key)
+    this.__name = name
+    this.__source = source
+  }
+
+  override exportJSON(): SerializedComposerSkillNode {
+    return {
+      ...super.exportJSON(),
+      name: this.__name,
+      source: this.__source,
+      type: "composer-skill",
+      version: 1,
+    }
+  }
+
+  override createDOM(): HTMLElement {
+    const dom = document.createElement("span")
+    dom.className = "relative inline-flex align-middle leading-none"
+    return dom
+  }
+
+  override updateDOM(): false {
+    return false
+  }
+
+  override getTextContent(): string {
+    return this.__source
+  }
+
+  override isInline(): true {
+    return true
+  }
+
+  override decorate(): React.ReactElement {
+    return <SkillBadge name={this.__name} />
+  }
+}
+
+function $createComposerSkillNode(
+  name: string,
+  source: string
+): ComposerSkillNode {
+  return $applyNodeReplacement(new ComposerSkillNode(name, source))
+}
+
+function isDecoratorNode(
+  node: unknown
+): node is ComposerMentionNode | ComposerSkillNode {
+  return (
+    node instanceof ComposerMentionNode || node instanceof ComposerSkillNode
+  )
 }
 
 function nodeTextLength(node: LexicalNode): number {
-  if (isMentionNode(node)) return node.getTextContent().length
+  if (isDecoratorNode(node)) return node.getTextContent().length
   if ($isTextNode(node)) return node.getTextContentSize()
   if ($isLineBreakNode(node)) return 1
   if ($isElementNode(node)) {
@@ -249,7 +327,7 @@ function findPointAtOffset(
   node: LexicalNode,
   remaining: { value: number }
 ): SelectionPoint | null {
-  if (isMentionNode(node)) {
+  if (isDecoratorNode(node)) {
     const size = nodeTextLength(node)
     const parent = node.getParent()
     if (!parent) return null
@@ -337,16 +415,21 @@ function $appendTextWithLineBreaks(
   })
 }
 
-/** Rewrites the editor to match `value`, turning every mention it contains into a chip. */
-function $setComposerPrompt(value: string): void {
+/** Rewrites the editor to match `value`, turning recognized tokens into chips. */
+function $setComposerPrompt(
+  value: string,
+  skillNames: ReadonlySet<string>
+): void {
   const root = $getRoot()
   root.clear()
   const paragraph = $createParagraphNode()
-  for (const segment of splitPromptIntoSegments(value)) {
+  for (const segment of splitPromptIntoSegments(value, skillNames)) {
     if (segment.type === "text") {
       $appendTextWithLineBreaks(paragraph, segment.text)
-    } else {
+    } else if (segment.type === "mention") {
       paragraph.append($createComposerMentionNode(segment.path, segment.source))
+    } else {
+      paragraph.append($createComposerSkillNode(segment.name, segment.source))
     }
   }
   root.append(paragraph)
@@ -427,6 +510,7 @@ interface ComposerPromptEditorProps {
    */
   cursor?: number
   disabled?: boolean
+  skillNames?: ReadonlySet<string>
   placeholder: string
   className?: string
   editorRef: React.RefObject<ComposerPromptEditorHandle | null>
@@ -439,6 +523,7 @@ function ComposerPromptEditorInner({
   value,
   cursor,
   disabled = false,
+  skillNames = EMPTY_SKILL_NAMES,
   placeholder,
   className,
   editorRef,
@@ -448,7 +533,8 @@ function ComposerPromptEditorInner({
 }: ComposerPromptEditorProps) {
   const [editor] = useLexicalComposerContext()
   const onChangeRef = useRef(onChange)
-  const snapshotRef = useRef({ value, cursor: value.length })
+  const skillNamesKey = [...skillNames].sort().join("\0")
+  const snapshotRef = useRef({ value, cursor: value.length, skillNamesKey })
   // Set while a controlled `value` change is being written into the editor, so
   // the resulting OnChange doesn't echo back to the parent as a user edit.
   const applyingControlledUpdateRef = useRef(false)
@@ -462,21 +548,25 @@ function ComposerPromptEditorInner({
   }, [disabled, editor])
 
   useLayoutEffect(() => {
-    if (snapshotRef.current.value === value) return
+    if (
+      snapshotRef.current.value === value &&
+      snapshotRef.current.skillNamesKey === skillNamesKey
+    )
+      return
     const nextCursor = Math.max(
       0,
       Math.min(cursor ?? value.length, value.length)
     )
-    snapshotRef.current = { value, cursor: nextCursor }
+    snapshotRef.current = { value, cursor: nextCursor, skillNamesKey }
     applyingControlledUpdateRef.current = true
     editor.update(() => {
-      $setComposerPrompt(value)
+      $setComposerPrompt(value, skillNames)
       $setSelectionAtOffset(nextCursor)
     })
     queueMicrotask(() => {
       applyingControlledUpdateRef.current = false
     })
-  }, [cursor, editor, value])
+  }, [cursor, editor, skillNames, skillNamesKey, value])
 
   const readSnapshot = useCallback(() => {
     let snapshot = snapshotRef.current
@@ -488,11 +578,12 @@ function ComposerPromptEditorInner({
           $readSelectionOffset(snapshotRef.current.cursor),
           nextValue.length
         ),
+        skillNamesKey,
       }
     })
     snapshotRef.current = snapshot
     return snapshot
-  }, [editor])
+  }, [editor, skillNamesKey])
 
   const focusAt = useCallback(
     (cursor: number) => {
@@ -516,20 +607,28 @@ function ComposerPromptEditorInner({
     [focusAt, readSnapshot]
   )
 
-  const handleEditorChange = useCallback((editorState: EditorState) => {
-    editorState.read(() => {
-      const nextValue = $getRoot().getTextContent()
-      const nextCursor = Math.min(
-        $readSelectionOffset(snapshotRef.current.cursor),
-        nextValue.length
-      )
-      const previous = snapshotRef.current
-      if (previous.value === nextValue && previous.cursor === nextCursor) return
-      snapshotRef.current = { value: nextValue, cursor: nextCursor }
-      if (applyingControlledUpdateRef.current) return
-      onChangeRef.current(nextValue, nextCursor)
-    })
-  }, [])
+  const handleEditorChange = useCallback(
+    (editorState: EditorState) => {
+      editorState.read(() => {
+        const nextValue = $getRoot().getTextContent()
+        const nextCursor = Math.min(
+          $readSelectionOffset(snapshotRef.current.cursor),
+          nextValue.length
+        )
+        const previous = snapshotRef.current
+        if (previous.value === nextValue && previous.cursor === nextCursor)
+          return
+        snapshotRef.current = {
+          value: nextValue,
+          cursor: nextCursor,
+          skillNamesKey,
+        }
+        if (applyingControlledUpdateRef.current) return
+        onChangeRef.current(nextValue, nextCursor)
+      })
+    },
+    [skillNamesKey]
+  )
 
   return (
     <div className="relative">
@@ -563,13 +662,17 @@ function ComposerPromptEditorInner({
 
 export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
   const initialValueRef = useRef(props.value)
+  const initialSkillNamesRef = useRef(props.skillNames ?? new Set<string>())
   const initialConfig = useMemo<InitialConfigType>(
     () => ({
       namespace: "open-swe-composer",
       editable: true,
-      nodes: [ComposerMentionNode],
+      nodes: [ComposerMentionNode, ComposerSkillNode],
       editorState: () => {
-        $setComposerPrompt(initialValueRef.current)
+        $setComposerPrompt(
+          initialValueRef.current,
+          initialSkillNamesRef.current
+        )
       },
       onError: (error: Error) => {
         throw error

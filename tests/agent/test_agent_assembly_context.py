@@ -14,7 +14,7 @@ import pytest
 from deepagents.backends.composite import CompositeBackend
 from langgraph.graph.state import RunnableConfig
 
-from agent.server import get_agent
+from agent.server import _registered_tool_name, get_agent
 from agent.utils.read_only_backend import ReadOnlyBackend
 from agent.utils.sandbox_state import SandboxBackendProxy, clear_sandbox_backend
 
@@ -334,8 +334,8 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
 
     gp = next(s for s in subagents if s["name"] == "general-purpose")
     assert "cannot access Slack tools" in gp["description"]
-    parent_names = {tool.__name__ for tool in parent_tools}
-    subagent_names = {tool.__name__ for tool in gp["tools"]}
+    parent_names = {_registered_tool_name(tool) for tool in parent_tools}
+    subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
     slack_names = {
         "notify_automation_channel",
         "slack_add_reaction",
@@ -345,7 +345,12 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_thread_reply",
     }
 
-    parent_only_names = {*slack_names, "read_user_settings"}
+    parent_only_names = {
+        *slack_names,
+        "background_execute",
+        "background_task",
+        "read_user_settings",
+    }
     assert parent_only_names <= parent_names
     assert parent_only_names.isdisjoint(subagent_names)
     assert subagent_names == parent_names - parent_only_names
