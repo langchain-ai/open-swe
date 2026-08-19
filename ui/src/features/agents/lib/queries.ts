@@ -297,6 +297,8 @@ export function useAgentThreadTurnDiff(
     queryFn: () => agentsApi.getThreadTurnDiff(threadId, turnKey, options),
     enabled: enabled && Boolean(threadId),
     staleTime: 30_000,
+    refetchInterval: (query) =>
+      query.state.data?.status === "ready" ? false : 3000,
     retry: false,
   })
 }
