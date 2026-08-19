@@ -54,6 +54,52 @@ async function addComment(
 }
 
 test.describe("Plan review (HTTP comments)", () => {
+  test("preserves and renders an existing Markdown plan", async ({
+    page,
+    request,
+  }) => {
+    const markdown =
+      "# Legacy rollout plan\n\nKeep **existing Markdown** intact.\n\n- Verify compatibility";
+    const seeded = await request.post("/control/legacy-markdown-plan", {
+      data: { markdown },
+    });
+    const seed = (await seeded.json()) as {
+      thread_id: string;
+      plan: { markdown: string };
+    };
+    const threadId = seed.thread_id;
+    expect(seed.plan.markdown).toBe(markdown);
+    await page.request.post("/control/login", { data: OWNER });
+
+    const apiPlan = await page.request.get(`/dashboard/api/plan/${threadId}`);
+    expect(apiPlan.status()).toBe(200);
+    expect(((await apiPlan.json()) as { markdown: string }).markdown).toBe(
+      markdown,
+    );
+
+    await page.goto(`/agents/${threadId}/plan`);
+    await expect(page.getByTestId("plan-markdown")).toContainText(
+      "Legacy rollout plan",
+    );
+    await expect(page.getByTestId("plan-artifact-frame")).toHaveCount(0);
+    await expect(page.getByTestId("edit-plan")).toContainText("Edit Markdown");
+
+    await page.getByTestId("edit-plan").click();
+    await expect(page.getByTestId("plan-editor")).toHaveValue(markdown);
+    await page
+      .getByTestId("plan-editor")
+      .fill(`${markdown}\n\nPreserved after editing.`);
+    await page.getByTestId("save-plan").click();
+    await expect(page.getByTestId("plan-markdown")).toContainText(
+      "Preserved after editing.",
+    );
+
+    const stored = await page.request.get(`/dashboard/api/plan/${threadId}`);
+    const plan = (await stored.json()) as { html: string; markdown: string };
+    expect(plan.html ?? "").toBe("");
+    expect(plan.markdown).toContain("Preserved after editing.");
+  });
+
   test("Slack plan approval button starts implementation", async ({ page }) => {
     test.setTimeout(180_000);
     await page.goto("/mock/slack");

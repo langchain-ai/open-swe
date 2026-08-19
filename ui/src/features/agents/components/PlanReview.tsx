@@ -67,8 +67,8 @@ export function PlanReview({
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (!editing) setContent(planContent)
-  }, [planContent, editing])
+    setContent(planContent)
+  }, [planContent])
 
   const isShared = plan.status === "shared"
   const canEdit =

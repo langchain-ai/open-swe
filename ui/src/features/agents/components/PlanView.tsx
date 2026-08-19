@@ -70,7 +70,8 @@ export function PlanView({
   const query = useQuery({
     queryKey: ["plan", threadId],
     queryFn: () => getPlan(threadId),
-    refetchInterval: (q) => (q.state.data?.html ? false : 2000),
+    refetchInterval: (q) =>
+      q.state.data?.html || q.state.data?.markdown ? false : 2000,
     retry: (count, error) =>
       !(
         error instanceof PlanApiError &&
@@ -105,7 +106,7 @@ export function PlanView({
   }
 
   const plan = query.data
-  if (!plan?.html.trim()) {
+  if (!plan?.html.trim() && !plan?.markdown.trim()) {
     return (
       <Centered standalone={standalone}>
         <div className="space-y-3 text-center text-sm text-muted-foreground/70">
