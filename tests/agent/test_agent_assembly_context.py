@@ -372,7 +372,12 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_thread_reply",
     }
 
-    parent_only_names = {*slack_names, "read_user_settings"}
+    parent_only_names = {
+        *slack_names,
+        "background_execute",
+        "background_task",
+        "read_user_settings",
+    }
     assert parent_only_names <= parent_names
     assert parent_only_names.isdisjoint(subagent_names)
     assert subagent_names == parent_names - parent_only_names

@@ -285,6 +285,10 @@ export const ChatComposer = memo(function ChatComposer({
     [cursor, value]
   )
   const triggerKey = trigger ? `${trigger.kind}:${trigger.rangeStart}` : null
+  const skillNames = useMemo(
+    () => new Set(skills.map((skill) => skill.name)),
+    [skills]
+  )
   const commandItems = useMemo(
     () =>
       trigger
@@ -747,6 +751,7 @@ export const ChatComposer = memo(function ChatComposer({
           onCommandKeyDown={handleCommandKeyDown}
           onPaste={handlePaste}
           placeholder={busy ? "Send a message to queue next..." : placeholder}
+          skillNames={skillNames}
           value={value}
         />
 
