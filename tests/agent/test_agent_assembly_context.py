@@ -8,6 +8,7 @@ is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction a
 """
 
 import asyncio
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -93,7 +94,8 @@ async def _capture_create_deep_agent_kwargs(
 @pytest.mark.asyncio
 async def test_existing_thread_reloads_sender_draft_preference_into_run_config() -> None:
     config = _base_config()
-    config["configurable"]["github_login"] = "draft-preference-owner"
+    configurable = cast(dict[str, Any], config["configurable"])
+    configurable["github_login"] = "draft-preference-owner"
 
     await _capture_create_deep_agent_kwargs(
         config,
@@ -104,7 +106,7 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config()
         },
     )
 
-    assert config["configurable"]["draft_prs"] is False
+    assert configurable["draft_prs"] is False
 
 
 @pytest.mark.asyncio

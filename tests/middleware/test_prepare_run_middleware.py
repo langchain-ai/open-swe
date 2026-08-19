@@ -8,7 +8,7 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.middleware.prepare_run import BasePrepareRunMiddleware
+from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
 from agent.server import PrepareAgentRunMiddleware
 from agent.utils import ttl_cache
 
@@ -102,7 +102,8 @@ def test_sender_context_updates_only_latest_human_message():
     )
 
     updated = PrepareAgentRunMiddleware._sender_context_message(
-        cast(AgentState, {"messages": [first, latest]}), "<sender_context>sender</sender_context>"
+        cast(PrepareRunState, {"messages": [first, latest]}),
+        "<sender_context>sender</sender_context>",
     )
 
     assert updated is not None
