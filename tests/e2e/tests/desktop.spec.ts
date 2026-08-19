@@ -10,7 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { _electron as electron } from "playwright";
 
 const repoRoot = resolve(__dirname, "..", "..", "..");
@@ -30,15 +30,6 @@ function sessionCookie(setCookie: string): string {
   return match[1];
 }
 
-function writeDcodeModelConfig(home: string) {
-  const configPath = join(home, ".deepagents", "config.toml");
-  mkdirSync(dirname(configPath), { recursive: true });
-  writeFileSync(
-    configPath,
-    '[models.providers.e2e]\nclass_path = "fake_llm:FakeScriptedChatModel"\nmodels = ["fake"]\n',
-  );
-}
-
 async function typeIntoComposer(
   page: import("@playwright/test").Page,
   text: string,
@@ -49,7 +40,7 @@ async function typeIntoComposer(
   await editor.press("Enter");
 }
 
-test("Desktop runs the pinned uv dcode ACP loop against the shared fakes", async ({
+test("Desktop runs a local thread on the Open SWE graph against the shared fakes", async ({
   request,
 }, testInfo) => {
   mkdirSync(e2eTmp, { recursive: true });
@@ -59,7 +50,6 @@ test("Desktop runs the pinned uv dcode ACP loop against the shared fakes", async
   const gitConfig = join(stateRoot, "gitconfig");
   mkdirSync(home, { recursive: true });
   writeFileSync(gitConfig, "");
-  writeDcodeModelConfig(home);
 
   const reset = await request.post("/control/reset");
   expect(reset.ok()).toBeTruthy();
@@ -92,8 +82,11 @@ test("Desktop runs the pinned uv dcode ACP loop against the shared fakes", async
       XDG_CONFIG_HOME: join(stateRoot, "xdg-config"),
       APPDATA: join(stateRoot, "app-data"),
       OPEN_SWE_BACKEND_URL: baseURL,
-      OPEN_SWE_DCODE_MODEL: "e2e:fake",
-      DEEPAGENTS_CODE_AUTO_UPDATE: "0",
+      // The local backend runs the real graph with the scripted fake model, so
+      // the provider keys only have to satisfy the composer's credential gate.
+      OPEN_SWE_LOCAL_BACKEND_CONFIG: join(e2eRoot, "langgraph.desktop.json"),
+      ANTHROPIC_API_KEY: "e2e-fake-key",
+      OPENAI_API_KEY: "e2e-fake-key",
       E2E_BASE: baseURL,
       E2E_FAKE_GITHUB_API: `${baseURL}/fake-gh`,
       E2E_REMOTE: fakeRemote,

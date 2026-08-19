@@ -11,6 +11,7 @@ from .background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
 from .background_tasks import monitor_background_tasks
 from .dashboard.schedules import launch_scheduled_agent_run
 from .reconcile import reconcile_stale_runs
+from .session_cost import run_session_cost_refresh
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,12 @@ class SchedulerState(TypedDict, total=False):
     task: str
     watch_key: str
     thread_id: str
+    agent_thread_id: str
+    run_id: str
+    prepare_run_id: str
+    channel_id: str
+    thread_ts: str
+    attempt: int
     result: dict[str, Any]
 
 
@@ -38,6 +45,8 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         if not isinstance(thread_id, str) or not thread_id:
             return {"result": {"status": "missing_thread_id"}}
         return {"result": await monitor_background_tasks(thread_id)}
+    if task == "session_cost":
+        return {"result": await run_session_cost_refresh(state)}
     schedule_id = state.get("schedule_id") or configurable.get("schedule_id")
     if not isinstance(schedule_id, str) or not schedule_id:
         logger.warning("Scheduled agent tick missing schedule_id")

@@ -96,6 +96,10 @@ WORKING_ENV_SECTION = """### Working Environment
 
 You are operating in a remote Linux sandbox at `{working_dir}` — use it as your working directory for all operations. The sandbox starts clean; no repo is pre-cloned."""
 
+DESKTOP_WORKING_ENV_SECTION = """### Working Environment
+
+You are operating directly in the selected project at `{working_dir}` on the user's local machine. The project is already available and is your filesystem root. Do not clone it or change its git identity."""
+
 
 DASHBOARD_CONTEXT_SECTION = """---
 
@@ -462,7 +466,7 @@ def _render_user_instructions_section(instructions: str | None) -> str:
 # only run-specific content (working dir, commit identity, plan/collaboration/
 # PR defaults); standing guidance lives in the shared base above.
 SYSTEM_PROMPT_TEMPLATE = (
-    WORKING_ENV_SECTION
+    "{working_environment_section}"
     + DASHBOARD_CONTEXT_SECTION
     + SOURCE_GUIDANCE_SECTION
     + PLAN_MODE_GUIDANCE_SECTION
@@ -521,8 +525,11 @@ def construct_system_prompt(
     else:
         commit_identity_name = shlex.quote(OPEN_SWE_BOT_NAME)
         commit_identity_email = shlex.quote(OPEN_SWE_BOT_EMAIL)
-    return SYSTEM_PROMPT_TEMPLATE.format(
+    prompt = SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
+        working_environment_section=(
+            DESKTOP_WORKING_ENV_SECTION if source == "desktop" else WORKING_ENV_SECTION
+        ),
         dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
         source_guidance=_render_source_guidance(source, slack_context),
         linear_project_id=linear_project_id or "<PROJECT_ID>",
@@ -555,3 +562,4 @@ def construct_system_prompt(
         commit_identity_name=commit_identity_name,
         commit_identity_email=commit_identity_email,
     )
+    return prompt

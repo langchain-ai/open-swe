@@ -12,6 +12,7 @@ import { agentThreadKeys, invalidateAgentThreadLists } from "./queries"
 import type { ReactNode } from "react"
 
 const AGENT_ASSISTANT_ID = "agent"
+const LOCAL_AGENT_ASSISTANT_ID = "agent"
 
 const dashboardFetch: typeof fetch = (input, init) =>
   fetch(input, { ...init, credentials: "include" })
@@ -80,6 +81,7 @@ function ActiveThreadRecovery({ threadId }: { threadId: string | null }) {
 export function AgentThreadStreamProvider({
   threadId,
   children,
+  transport = "cloud",
 }: {
   /**
    * The active thread, or `null` on routes without one (the Agents home,
@@ -90,16 +92,21 @@ export function AgentThreadStreamProvider({
    */
   threadId: string | null
   children: ReactNode
+  transport?: "cloud" | "local"
 }) {
   const queryClient = useQueryClient()
+  const apiUrl =
+    transport === "local" ? toAbsoluteApiUrl("/local-graph") : agentStreamApiUrl
+  const assistantId =
+    transport === "local" ? LOCAL_AGENT_ASSISTANT_ID : AGENT_ASSISTANT_ID
   const client = useMemo(
     () =>
       new Client({
-        apiUrl: agentStreamApiUrl,
+        apiUrl,
         apiKey: null,
-        onRequest: dashboardRequest,
+        ...(transport === "cloud" ? { onRequest: dashboardRequest } : {}),
       }),
-    []
+    [apiUrl, transport]
   )
 
   // The SDK captures the lifecycle callbacks once at controller creation, so
@@ -109,10 +116,11 @@ export function AgentThreadStreamProvider({
   threadIdRef.current = threadId
 
   const onCreated = useCallback(() => {
-    invalidateAgentThreadLists(queryClient)
-  }, [queryClient])
+    if (transport === "cloud") invalidateAgentThreadLists(queryClient)
+  }, [queryClient, transport])
 
   const onCompleted = useCallback(() => {
+    if (transport !== "cloud") return
     const id = threadIdRef.current
     if (id) {
       void queryClient.invalidateQueries({
@@ -120,12 +128,12 @@ export function AgentThreadStreamProvider({
       })
     }
     invalidateAgentThreadLists(queryClient)
-  }, [queryClient])
+  }, [queryClient, transport])
 
   return (
     <StreamProvider
-      apiUrl={agentStreamApiUrl}
-      assistantId={AGENT_ASSISTANT_ID}
+      apiUrl={apiUrl}
+      assistantId={assistantId}
       client={client}
       threadId={threadId ?? undefined}
       onCreated={onCreated}

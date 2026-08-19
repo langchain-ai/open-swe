@@ -166,6 +166,36 @@ async def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPat
     assert captured["fire_time"].microsecond == 0
 
 
+async def test_wakeup_cron_includes_trace_correlation_and_completion_webhook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class _Crons:
+        async def create_for_thread(
+            self, thread_id: str, assistant_id: str, **kwargs: Any
+        ) -> dict[str, str]:
+            captured.update(thread_id=thread_id, assistant_id=assistant_id, **kwargs)
+            return {"cron_id": "cron-1"}
+
+    client = type("Client", (), {"crons": _Crons()})()
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+    monkeypatch.setattr(wakeup_tool, "COMPLETION_WEBHOOK_URL", "https://app/webhooks/run-complete")
+
+    result = await wakeup_tool._create_wakeup_cron(
+        thread_id="thread-1",
+        fire_time=datetime(2026, 8, 18, 22, 0, tzinfo=UTC),
+        prompt="check",
+        configurable={"thread_id": "thread-1"},
+    )
+
+    prepare_run_id = captured["config"]["configurable"]["prepare_run_id"]
+    assert result["success"] is True
+    assert captured["metadata"]["prepare_run_id"] == prepare_run_id
+    assert captured["config"]["metadata"] == captured["metadata"]
+    assert captured["webhook"] == "https://app/webhooks/run-complete"
+
+
 async def test_schedule_thread_wakeup_returns_error_on_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
