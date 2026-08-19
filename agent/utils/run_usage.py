@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 class RunUsageSummary:
     models: tuple[str, ...]
     main_agent_tokens: int | None
+    session_cost_usd: float | None = None
 
 
 def _number(value: Any) -> int | None:

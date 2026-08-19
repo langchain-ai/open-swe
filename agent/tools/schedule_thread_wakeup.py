@@ -6,8 +6,8 @@ from typing import Any
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
-from langgraph_sdk.schema import Config
 
+from ..dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
 from ..utils.slack import get_active_slack_thread
 from ..utils.thread_ops import langgraph_url
 
@@ -124,19 +124,24 @@ async def _create_wakeup_cron(
     client = get_client(url=langgraph_url())
     schedule = _build_one_shot_cron(fire_time)
     end_time = fire_time + timedelta(seconds=_END_TIME_PADDING_SECONDS)
-    run_config: Config = {"configurable": configurable}
+    run_config = prepare_run_config(
+        {"configurable": configurable},
+        {"kind": "thread_wakeup", "thread_id": thread_id},
+    )
+    kwargs: dict[str, Any] = {
+        "schedule": schedule,
+        "input": {"messages": [{"role": "user", "content": prompt}]},
+        "config": run_config,
+        "end_time": end_time,
+        "timezone": "UTC",
+        "metadata": run_config["metadata"],
+    }
+    if COMPLETION_WEBHOOK_URL:
+        kwargs["webhook"] = COMPLETION_WEBHOOK_URL
     cron = await client.crons.create_for_thread(
         thread_id,
         _AGENT_ASSISTANT_ID,
-        schedule=schedule,
-        input={"messages": [{"role": "user", "content": prompt}]},
-        config=run_config,
-        end_time=end_time,
-        timezone="UTC",
-        metadata={
-            "kind": "thread_wakeup",
-            "thread_id": thread_id,
-        },
+        **kwargs,
     )
     cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
     return {

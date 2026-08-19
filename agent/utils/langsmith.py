@@ -2,8 +2,11 @@
 
 import asyncio
 import logging
+import math
 import os
 import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from langsmith import AsyncClient as AsyncLangSmithClient
@@ -17,6 +20,17 @@ logger = logging.getLogger(__name__)
 _PROJECT_ID_CACHE: dict[str, str] = {}
 _ASYNC_CLIENTS: dict[tuple[str, str], AsyncLangSmithClient] = {}
 _SYNC_CLIENTS: dict[tuple[str, str], LangSmithClient] = {}
+
+
+@dataclass(frozen=True)
+class LangSmithThreadCost:
+    total_cost: float
+    last_end_time: datetime
+    target_end_time: datetime
+
+
+class LangSmithCostUnavailable(RuntimeError):
+    pass
 
 
 def async_langsmith_client(api_key: str, api_url: str) -> AsyncLangSmithClient:
@@ -58,8 +72,7 @@ def _build_prod_langsmith_client() -> AsyncLangSmithClient | None:
 
 
 async def _resolve_project_id_by_name(project_name: str) -> str | None:
-    """Resolve a LangSmith project id from its name, caching both successful and
-    failed lookups so an unconfigured/unauthorized tenant isn't re-queried per call."""
+    """Resolve a LangSmith project id from its name, caching definitive results."""
     if project_name in _PROJECT_ID_CACHE:
         return _PROJECT_ID_CACHE[project_name] or None
     client = _build_prod_langsmith_client()
@@ -71,8 +84,7 @@ async def _resolve_project_id_by_name(project_name: str) -> str | None:
         _PROJECT_ID_CACHE[project_name] = ""
         return None
     except Exception:  # noqa: BLE001
-        logger.debug("Could not resolve LangSmith project id for %s", project_name)
-        _PROJECT_ID_CACHE[project_name] = ""
+        logger.debug("Could not resolve LangSmith project id for %s", project_name, exc_info=True)
         return None
     project_id = getattr(project, "id", None)
     resolved = str(project_id) if project_id else ""
@@ -102,6 +114,94 @@ async def get_langsmith_trace_url(
     isn't configured. This is a best-effort convenience link, not an error path."""
     project_url = await _compose_langsmith_project_url(project_name)
     return f"{project_url}/t/{thread_id}" if project_url else None
+
+
+def _langsmith_value(value: Any, name: str) -> Any:
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+
+def _parse_langsmith_time(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _langsmith_metadata_filter(key: str, value: str) -> str:
+    escaped_key = key.replace("\\", "\\\\").replace('"', '\\"')
+    escaped_value = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'and(eq(metadata_key, "{escaped_key}"), eq(metadata_value, "{escaped_value}"))'
+
+
+async def get_langsmith_thread_cost(
+    thread_id: str,
+    prepare_run_id: str,
+    project_name: str = AGENT_TRACING_PROJECT,
+) -> LangSmithThreadCost | None:
+    """Return a cumulative thread cost correlated to a completed agent run."""
+    client = _build_prod_langsmith_client()
+    if client is None:
+        raise LangSmithCostUnavailable("LangSmith credentials are not configured")
+    project_id = await _resolve_project_id_by_name(project_name) or os.environ.get(
+        "LANGSMITH_TRACING_PROJECT_ID_PROD"
+    )
+    if not project_id:
+        raise LangSmithCostUnavailable("LangSmith tracing project is unavailable")
+    try:
+        roots = client.list_runs(
+            project_id=project_id,
+            is_root=True,
+            filter=_langsmith_metadata_filter("prepare_run_id", prepare_run_id),
+            select=["end_time"],
+            limit=20,
+        )
+        target_times = [
+            parsed
+            async for run in roots
+            if (parsed := _parse_langsmith_time(_langsmith_value(run, "end_time"))) is not None
+        ]
+        if not target_times:
+            return None
+        stats = await client.threads.stats(
+            thread_id,
+            session_id=project_id,
+            selects=["TOTAL_COST", "LAST_END_TIME"],
+        )
+    except LangSmithNotFoundError as exc:
+        raise LangSmithCostUnavailable("LangSmith thread stats are unsupported") from exc
+    except Exception as exc:  # noqa: BLE001
+        status_code = getattr(exc, "status_code", None)
+        if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
+            raise LangSmithCostUnavailable("LangSmith thread stats are unsupported") from exc
+        logger.debug("Could not load LangSmith cost for thread %s", thread_id, exc_info=True)
+        return None
+
+    raw_cost = _langsmith_value(stats, "total_cost")
+    if isinstance(raw_cost, bool):
+        return None
+    try:
+        total_cost = float(raw_cost)
+    except (TypeError, ValueError):
+        return None
+    last_end_time = _parse_langsmith_time(_langsmith_value(stats, "last_end_time"))
+    target_end_time = max(target_times)
+    if (
+        not math.isfinite(total_cost)
+        or total_cost < 0
+        or last_end_time is None
+        or last_end_time < target_end_time
+    ):
+        return None
+    return LangSmithThreadCost(
+        total_cost=total_cost,
+        last_end_time=last_end_time,
+        target_end_time=target_end_time,
+    )
 
 
 def _build_langsmith_feedback_clients() -> tuple[tuple[str, str], ...]:

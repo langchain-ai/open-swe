@@ -81,7 +81,9 @@ async def test_resolve_project_id_caches_success(monkeypatch: pytest.MonkeyPatch
     assert calls == [AGENT_TRACING_PROJECT]
 
 
-async def test_resolve_project_id_caches_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_project_id_retries_transient_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[str] = []
 
     class _FakeClient:
@@ -99,7 +101,7 @@ async def test_resolve_project_id_caches_failure(monkeypatch: pytest.MonkeyPatch
 
     assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
     assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
-    assert calls == [AGENT_TRACING_PROJECT]
+    assert calls == [AGENT_TRACING_PROJECT, AGENT_TRACING_PROJECT]
 
 
 async def test_trace_url_none_when_tenant_unset(monkeypatch: pytest.MonkeyPatch) -> None:
