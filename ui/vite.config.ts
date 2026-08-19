@@ -182,12 +182,20 @@ const config = defineConfig({
       // same prefixes through devRouteRules, which has a localhost default the
       // handler deliberately refuses to have. Only the two prefixes a deployed
       // dashboard fronts, since proxying `/static` would shadow nitro's assets.
-      handlers: IS_PRODUCTION
-        ? ["/dashboard/api", "/webhooks"].map((prefix) => ({
-            route: `${prefix}/**`,
-            handler: "./server/backend-proxy.ts",
-          }))
-        : [],
+      handlers: [
+        ...(IS_PRODUCTION
+          ? ["/dashboard/api", "/webhooks"].map((prefix) => ({
+              route: `${prefix}/**`,
+              handler: "./server/backend-proxy.ts",
+            }))
+          : []),
+        // Deliberately outside the proxied prefixes: this one is answered by this
+        // server, not forwarded to the backend.
+        {
+          route: "/operations/restart",
+          handler: "./server/operations-restart.ts",
+        },
+      ],
       // Nitro gives every node_modules package its own server chunk. The
       // LangGraph SDK reaches CJS-only `eventemitter3` through `p-queue`, and
       // splitting that cycle puts the CommonJS interop helper in the SDK's chunk
