@@ -9,7 +9,7 @@ from langgraph_sdk import get_client
 from .dispatch import dispatch_agent_run
 from .tools.background_execute import TASK_ROOT, _control_script, _encoded, _execute
 from .utils.sandbox import create_sandbox
-from .utils.thread_ops import get_thread_active_status, langgraph_url, queue_message_for_thread
+from .utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
 
@@ -146,29 +146,18 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
             continue
         message = _notification(task)
         try:
-            active = await get_thread_active_status(thread_id)
-            if active is None:
-                await _unclaim(backend, task_id)
-                continue
-            if active:
-                delivered_ok = await queue_message_for_thread(thread_id, message)
-            else:
-                configurable = _dispatch_config(metadata, thread_id)
-                await dispatch_agent_run(
-                    thread_id,
-                    message,
-                    configurable,
-                    source=str(configurable.get("source") or "dashboard"),
-                    metadata={},
-                    multitask_strategy="enqueue",
-                )
-                delivered_ok = True
-            if delivered_ok:
-                await _mark_delivered(backend, task_id)
-                task["notification"] = "done"
-                delivered += 1
-            else:
-                await _unclaim(backend, task_id)
+            configurable = _dispatch_config(metadata, thread_id)
+            await dispatch_agent_run(
+                thread_id,
+                message,
+                configurable,
+                source=str(configurable.get("source") or "dashboard"),
+                metadata={},
+                multitask_strategy="enqueue",
+            )
+            await _mark_delivered(backend, task_id)
+            task["notification"] = "done"
+            delivered += 1
         except Exception:
             await _unclaim(backend, task_id)
             logger.warning("Failed to deliver background task %s", task_id, exc_info=True)
