@@ -3,6 +3,7 @@
 import os
 import sys
 import types
+from typing import cast
 
 import pytest
 
@@ -20,8 +21,7 @@ def test_pin_clears_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_pin_overrides_config_the_server_already_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = types.ModuleType("langgraph_api.config")
-    module.BG_JOB_ISOLATED_LOOPS = True
+    module = cast(types.ModuleType, types.SimpleNamespace(BG_JOB_ISOLATED_LOOPS=True))
     monkeypatch.setitem(sys.modules, "langgraph_api.config", module)
     monkeypatch.setenv(ISOLATED_LOOPS_ENV, "true")
 

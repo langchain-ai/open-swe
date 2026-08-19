@@ -314,7 +314,7 @@ def test_sandbox_proxy_refuses_a_second_event_loop() -> None:
         reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
     )
 
-    async def run() -> object:
+    async def run() -> SandboxBackendProtocol:
         proxy.mark_stale()
         return await proxy.ready()
 
