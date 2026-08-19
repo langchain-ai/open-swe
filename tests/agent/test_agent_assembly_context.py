@@ -211,6 +211,16 @@ async def test_agent_includes_recreate_sandbox_tool() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_includes_sandbox_file_download_url_tool() -> None:
+    from agent.tools import create_sandbox_file_download_url
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert create_sandbox_file_download_url in tools
+
+
+@pytest.mark.asyncio
 async def test_dashboard_agent_excludes_slack_tools() -> None:
     config = _base_config()
     configurable = config.get("configurable")
