@@ -34,78 +34,115 @@ class FailingCheck(dict):
     """A failing check run: ``name``, ``conclusion``, ``details_url``."""
 
 
-async def list_failing_check_runs(
+async def list_check_runs(
     *, owner: str, repo: str, ref: str, token: str
 ) -> list[dict[str, Any]] | None:
-    """Return failing check runs on ``ref`` (commit SHA or branch).
-
-    Returns ``None`` when the lookup fails (e.g. missing permission) so callers
-    can distinguish "couldn't tell" from "nothing failing".
-    """
+    """Return the complete latest check-run set for ``ref``."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{ref}/check-runs"
-    params = {"per_page": "100", "filter": "latest"}
+    collected: list[dict[str, Any]] = []
+    page = 1
     try:
         async with github_client(token=token) as client:
-            response = await github_request(client, "GET", url, params=params)
-            response.raise_for_status()
+            while True:
+                response = await github_request(
+                    client,
+                    "GET",
+                    url,
+                    params={"per_page": "100", "page": str(page), "filter": "latest"},
+                )
+                response.raise_for_status()
+                data = response.json()
+                runs = data.get("check_runs") if isinstance(data, dict) else None
+                if not isinstance(runs, list):
+                    break
+                page_runs = [run for run in runs if isinstance(run, dict)]
+                collected.extend(page_runs)
+                if len(runs) < 100:
+                    break
+                page += 1
     except httpx.HTTPError:
         logger.warning(
             "Failed to list check runs for %s/%s@%s (Checks: Read missing?)", owner, repo, ref
         )
         return None
-    data = response.json()
-    runs = data.get("check_runs") if isinstance(data, dict) else None
-    if not isinstance(runs, list):
-        return []
-    failing: list[dict[str, Any]] = []
-    for run in runs:
-        if not isinstance(run, dict):
+    return [run for run in collected if run.get("name") not in _OPEN_SWE_CHECK_NAMES]
+
+
+async def list_commit_statuses(
+    *, owner: str, repo: str, ref: str, token: str
+) -> list[dict[str, Any]] | None:
+    """Return the complete legacy commit-status set for ``ref``."""
+    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{ref}/status"
+    collected: list[dict[str, Any]] = []
+    page = 1
+    try:
+        async with github_client(token=token) as client:
+            while True:
+                response = await github_request(
+                    client,
+                    "GET",
+                    url,
+                    params={"per_page": "100", "page": str(page)},
+                )
+                response.raise_for_status()
+                data = response.json()
+                statuses = data.get("statuses") if isinstance(data, dict) else None
+                if not isinstance(statuses, list):
+                    break
+                page_statuses = [status for status in statuses if isinstance(status, dict)]
+                collected.extend(page_statuses)
+                if len(statuses) < 100:
+                    break
+                page += 1
+    except httpx.HTTPError:
+        logger.warning("Failed to read combined status for %s/%s@%s", owner, repo, ref)
+        return None
+    latest: list[dict[str, Any]] = []
+    seen_contexts: set[str] = set()
+    for status in collected:
+        context = status.get("context")
+        key = context if isinstance(context, str) else ""
+        if key in seen_contexts:
             continue
-        name = run.get("name") or ""
-        if name in _OPEN_SWE_CHECK_NAMES:
-            continue
-        if run.get("status") != "completed":
-            continue
-        if run.get("conclusion") in FAILING_CONCLUSIONS:
-            failing.append(
-                {
-                    "name": name,
-                    "conclusion": run.get("conclusion"),
-                    "details_url": run.get("details_url") or run.get("html_url") or "",
-                }
-            )
-    return failing
+        seen_contexts.add(key)
+        latest.append(status)
+    return latest
+
+
+async def list_failing_check_runs(
+    *, owner: str, repo: str, ref: str, token: str
+) -> list[dict[str, Any]] | None:
+    """Return failing check runs on ``ref`` (commit SHA or branch)."""
+    runs = await list_check_runs(owner=owner, repo=repo, ref=ref, token=token)
+    if runs is None:
+        return None
+    return [
+        {
+            "name": run.get("name") or "",
+            "conclusion": run.get("conclusion"),
+            "details_url": run.get("details_url") or run.get("html_url") or "",
+        }
+        for run in runs
+        if run.get("status") == "completed" and run.get("conclusion") in FAILING_CONCLUSIONS
+    ]
 
 
 async def list_failing_statuses(
     *, owner: str, repo: str, ref: str, token: str
 ) -> list[dict[str, Any]] | None:
     """Return failing legacy commit statuses on ``ref`` (the ``status`` API)."""
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{ref}/status"
-    try:
-        async with github_client(token=token) as client:
-            response = await github_request(client, "GET", url)
-            response.raise_for_status()
-    except httpx.HTTPError:
-        logger.warning("Failed to read combined status for %s/%s@%s", owner, repo, ref)
+    statuses = await list_commit_statuses(owner=owner, repo=repo, ref=ref, token=token)
+    if statuses is None:
         return None
-    data = response.json()
-    statuses = data.get("statuses") if isinstance(data, dict) else None
-    if not isinstance(statuses, list):
-        return []
-    failing: list[dict[str, Any]] = []
-    for status in statuses:
-        if not isinstance(status, dict):
-            continue
-        if status.get("state") in {"failure", "error"}:
-            failing.append(
-                {
-                    "name": status.get("context") or "",
-                    "conclusion": status.get("state"),
-                    "details_url": status.get("target_url") or "",
-                }
-            )
-    return failing
+    return [
+        {
+            "name": status.get("context") or "",
+            "conclusion": status.get("state"),
+            "details_url": status.get("target_url") or "",
+        }
+        for status in statuses
+        if status.get("state") in {"failure", "error"}
+    ]
 
 
 def _failing_names(checks: list[dict[str, Any]] | None) -> set[str]:

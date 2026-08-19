@@ -7,55 +7,34 @@ export interface DesktopProject {
   addedAt: number
 }
 
-export interface DesktopAcpEvent {
-  sequence: number
-  timestamp: string
-  type: string
-  [key: string]: unknown
-}
-
-export interface DesktopAcpSessionSummary {
+export interface DesktopLocalThreadSummary {
   id: string
   cwd: string
   title: string
   status: "starting" | "idle" | "running" | "error"
   createdAt: number
   updatedAt: number
-  modelId?: string
-  effort?: string
+  modelId: string | null
+  effort: string | null
 }
 
-export interface DesktopAcpSession extends DesktopAcpSessionSummary {
-  events: Array<DesktopAcpEvent>
-}
-
-export interface DesktopAcpDraftSession {
-  id: string
-  cwd: string
-}
-
-export interface DesktopAcpDiff {
+export interface DesktopLocalDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
   files: Array<ThreadPrDiffFile>
-  repository?: {
-    branch: string | null
-    pr: AgentThread["pr"] | null
-  }
+  repository?: { branch: string | null; pr: AgentThread["pr"] | null }
 }
 
-export interface DesktopAcpPromptInput {
+export interface DesktopLocalPromptInput {
   prompt: string
   images: Array<ImageChunk>
 }
 
 export type DesktopTerminalStatus = "starting" | "running" | "exited" | "error"
-
 export interface DesktopTerminalTarget {
   localSessionId: string
   terminalId: string
 }
-
 export interface DesktopTerminalSessionSnapshot extends DesktopTerminalTarget {
   cwd: string
   status: DesktopTerminalStatus
@@ -68,7 +47,6 @@ export interface DesktopTerminalSessionSnapshot extends DesktopTerminalTarget {
   updatedAt: string
   sequence: number
 }
-
 export interface DesktopTerminalSummary extends DesktopTerminalTarget {
   cwd: string
   status: DesktopTerminalStatus
@@ -79,28 +57,20 @@ export interface DesktopTerminalSummary extends DesktopTerminalTarget {
   label: string
   updatedAt: string
 }
-
 export type DesktopTerminalAttachEvent =
   | (DesktopTerminalTarget & {
       type: "started" | "restarted"
       snapshot: DesktopTerminalSessionSnapshot
       sequence: number
     })
-  | (DesktopTerminalTarget & {
-      type: "output"
-      data: string
-      sequence: number
-    })
+  | (DesktopTerminalTarget & { type: "output"; data: string; sequence: number })
   | (DesktopTerminalTarget & {
       type: "exited"
       exitCode: number | null
       exitSignal: number | null
       sequence: number
     })
-  | (DesktopTerminalTarget & {
-      type: "closed" | "cleared"
-      sequence: number
-    })
+  | (DesktopTerminalTarget & { type: "closed" | "cleared"; sequence: number })
   | (DesktopTerminalTarget & {
       type: "error"
       message: string
@@ -112,7 +82,6 @@ export type DesktopTerminalAttachEvent =
       label: string
       sequence: number
     })
-
 export type DesktopTerminalMetadataEvent =
   | { type: "upsert"; terminal: DesktopTerminalSummary }
   | (DesktopTerminalTarget & { type: "remove" })
@@ -127,11 +96,7 @@ export interface DesktopTerminalBridge {
     }
   ) => Promise<DesktopTerminalSessionSnapshot>
   open: (
-    input: DesktopTerminalTarget & {
-      cwd: string
-      cols?: number
-      rows?: number
-    }
+    input: DesktopTerminalTarget & { cwd: string; cols?: number; rows?: number }
   ) => Promise<DesktopTerminalSessionSnapshot>
   write: (input: DesktopTerminalTarget & { data: string }) => Promise<void>
   resize: (
@@ -161,46 +126,51 @@ declare global {
     openSweDesktop?: {
       isDesktop: true
       listProjects: () => Promise<Array<DesktopProject>>
-      getProjectBranch: (cwd: string) => Promise<string | null>
+      getProjectBranches: (cwd: string) => Promise<{
+        current: string | null
+        branches: Array<string>
+      }>
+      checkoutProjectBranch: (input: {
+        cwd: string
+        branch: string
+        create?: boolean
+      }) => Promise<string>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
       onProjectsChanged: (
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void
       openExternal: (url: string) => Promise<boolean>
-      resolveAcpProjectPath: (input: {
+      resolveLocalProjectPath: (input: {
         localSessionId: string
         path: string
       }) => Promise<string | null>
-      createAcpDraftSession?: (cwd: string) => Promise<DesktopAcpDraftSession>
-      deleteAcpDraftSession?: (sessionId: string) => Promise<boolean>
-      startAcpSession: (
-        input: DesktopAcpPromptInput & {
+      localModelCredentialStatus: (
+        modelId?: string
+      ) => Promise<{ available: boolean; variable: string | null }>
+      startLocalThread: (
+        input: DesktopLocalPromptInput & {
           cwd: string
-          draftSessionId?: string
           modelId?: string
           effort?: string
         }
-      ) => Promise<DesktopAcpSession>
-      promptAcpSession: (
-        input: DesktopAcpPromptInput & {
-          sessionId: string
-          modelId?: string
-          effort?: string
-        }
-      ) => Promise<DesktopAcpSession>
-      cancelAcpSession: (sessionId: string) => Promise<void>
-      deleteAcpSession: (sessionId: string) => Promise<boolean>
-      getAcpSession: (sessionId: string) => Promise<DesktopAcpSession | null>
-      listAcpSessions: () => Promise<Array<DesktopAcpSessionSummary>>
-      getAcpDiff: (sessionId: string) => Promise<DesktopAcpDiff>
-      onAcpEvent: (
-        callback: (payload: {
-          sessionId: string
-          event?: DesktopAcpEvent
-          session: DesktopAcpSessionSummary
-        }) => void
-      ) => () => void
+      ) => Promise<DesktopLocalThreadSummary>
+      getLocalPrompt: (
+        threadId: string
+      ) => Promise<DesktopLocalPromptInput | null>
+      clearLocalPrompt: (
+        threadId: string
+      ) => Promise<DesktopLocalThreadSummary | null>
+      getLocalThread: (
+        threadId: string
+      ) => Promise<DesktopLocalThreadSummary | null>
+      listLocalThreads: () => Promise<Array<DesktopLocalThreadSummary>>
+      updateLocalThread: (input: {
+        threadId: string
+        status: DesktopLocalThreadSummary["status"]
+      }) => Promise<DesktopLocalThreadSummary | null>
+      deleteLocalThread: (threadId: string) => Promise<boolean>
+      getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
       terminal: DesktopTerminalBridge
     }
   }

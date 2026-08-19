@@ -124,7 +124,7 @@ function TerminalViewport({
         if (target.kind !== "local" || !onOpenFile) return
         const path = text.replace(/:\d+(?::\d+)?$/, "")
         void window.openSweDesktop
-          ?.resolveAcpProjectPath({ localSessionId: target.sessionId, path })
+          ?.resolveLocalProjectPath({ localSessionId: target.sessionId, path })
           .then((relativePath) => {
             if (relativePath) onOpenFile(relativePath)
           })

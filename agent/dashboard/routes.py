@@ -22,7 +22,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 
 from ..utils.thread_ops import langgraph_url
 from .admin import is_admin
@@ -136,10 +136,7 @@ from .review_api import (
     list_reviews,
     proxy_pr_image,
     trigger_re_review,
-)
-from .review_approval_policies import (
-    list_review_approval_policies,
-    set_review_approval_policy,
+    update_review_comment,
 )
 from .review_chat_api import (
     delete_review_chat_thread,
@@ -938,41 +935,6 @@ async def api_set_enabled_review_repo(
     return {"repos": repos}
 
 
-class ReviewApprovalPolicyUpdate(BaseModel):
-    full_name: str
-    enabled: bool
-    threshold: int | None = None
-
-    @field_validator("threshold", mode="before")
-    @classmethod
-    def _validate_threshold(cls, value: object) -> int | None:
-        if value is None:
-            return None
-        if type(value) is not int or not 0 <= value <= 100:
-            raise ValueError("threshold must be an integer between 0 and 100")
-        return value
-
-
-@router.get("/review-approval-policies")
-async def api_list_review_approval_policies(
-    _session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    return {"policies": await list_review_approval_policies()}
-
-
-@router.put("/review-approval-policies")
-async def api_set_review_approval_policy(
-    update: ReviewApprovalPolicyUpdate,
-    _admin: dict[str, Any] = _ADMIN_DEP,
-) -> dict[str, Any]:
-    policy = await set_review_approval_policy(
-        update.full_name,
-        enabled=update.enabled,
-        threshold=update.threshold,
-    )
-    return {"policy": policy}
-
-
 @router.get("/sandbox-settings")
 async def api_get_sandbox_settings(
     _admin: dict[str, Any] = _ADMIN_OR_TOKEN_DEP,
@@ -1348,7 +1310,7 @@ async def list_repos(
     refresh: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    """List repos where open-swe is installed and the user has access.
+    """List repos where Open SWE is installed and the user has access.
 
     Served from the per-login cache (stale-while-revalidate) unless
     ``refresh=true``, because the fan-out over every installation takes 10s+
@@ -1509,6 +1471,37 @@ async def api_create_review_comment(
         body=body,
         start_line=comment.start_line,
         start_side=comment.start_side,
+    )
+
+
+class ReviewCommentUpdate(BaseModel):
+    body: str
+
+
+@router.patch("/reviews/{owner}/{repo}/{pr_number}/comments/{comment_id}")
+async def api_update_review_comment(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    comment_id: int,
+    comment: ReviewCommentUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    body = comment.body.strip()
+    if not body:
+        raise HTTPException(422, "comment body is required")
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub re-auth required")
+    return await update_review_comment(
+        owner,
+        repo,
+        pr_number,
+        comment_id,
+        token=token,
+        viewer_login=session["sub"],
+        body=body,
     )
 
 
@@ -1961,6 +1954,8 @@ async def api_list_threads_page(
     source: str | None = None,
     status: str | None = None,
     q: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not _session_is_admin(session):
@@ -1976,6 +1971,8 @@ async def api_list_threads_page(
         source=source,
         status=status,
         query=q,
+        scope=scope,
+        automation_id=automation_id,
     )
 
 
@@ -2162,12 +2159,16 @@ async def api_get_thread_recovery_patch(
 async def api_get_thread_turn_diff(
     thread_id: str,
     turn_key: str | None = None,
+    max_files: int = Query(200, ge=1, le=200),
+    include_content: bool = True,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_dashboard_thread_turn_diff(
         thread_id,
         session["sub"],
         turn_key=turn_key,
+        max_files=max_files,
+        include_content=include_content,
         email=session.get("email"),
     )
 

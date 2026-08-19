@@ -9,7 +9,7 @@ import os
 import posixpath
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import HTTPException
@@ -51,10 +51,12 @@ from .options import (
 from .pr_diff import build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
 from .team_settings import get_team_default_model, get_team_fable_enabled
+from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from .user_mappings import email_for_login
 
 logger = logging.getLogger(__name__)
 
+_TTFT_OBSERVER_TASKS: set[asyncio.Task[None]] = set()
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 # Modes required for the v2 event-stream protocol (`POST …/stream/events`).
@@ -595,6 +597,7 @@ _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+_DISCOVERY_HISTORY_LIMIT = 5
 
 
 def _thread_id(thread: ThreadLike) -> str | None:
@@ -618,13 +621,19 @@ def _owner_search_filters(
 
 
 def _search_metadata_filter(
-    owner_filter: dict[str, Any], *, resolved: bool | None = None, source: str | None = None
+    owner_filter: dict[str, Any],
+    *,
+    resolved: bool | None = None,
+    source: str | None = None,
+    automation_id: str | None = None,
 ) -> dict[str, Any]:
     metadata = dict(owner_filter)
     if resolved is True:
         metadata["resolved"] = True
     if source and source != _DASHBOARD_SOURCE:
         metadata["source"] = source
+    if automation_id:
+        metadata["schedule_id"] = automation_id
     return metadata
 
 
@@ -663,8 +672,17 @@ def _metadata_matches_filters(
     resolved: bool | None,
     source: str | None,
     query: str | None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
+    is_automation = _is_automation_thread(metadata)
+    if scope == "interactive" and is_automation:
+        return False
+    if scope == "automation" and not is_automation:
+        return False
+    if automation_id and _metadata_string(metadata, "schedule_id") != automation_id:
+        return False
     if resolved is not None and _is_thread_resolved(metadata) is not resolved:
         return False
     if source and _thread_source(metadata) != source:
@@ -773,13 +791,20 @@ async def _collect_thread_candidates(
     resolved: bool | None = None,
     source: str | None = None,
     query: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
     target_per_search: int | None = None,
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     for owner_filter in searches:
         matched_for_search = 0
         offset = 0
-        metadata_filter = _search_metadata_filter(owner_filter, resolved=resolved, source=source)
+        metadata_filter = _search_metadata_filter(
+            owner_filter,
+            resolved=resolved,
+            source=source,
+            automation_id=automation_id,
+        )
         while offset < _THREADS_PAGE_SCAN_CAP:
             batch = await _search_threads_batch(
                 client,
@@ -798,6 +823,8 @@ async def _collect_thread_candidates(
                     resolved=resolved,
                     source=source,
                     query=query,
+                    scope=scope,
+                    automation_id=automation_id,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -998,6 +1025,8 @@ async def list_dashboard_threads_page(
     source: str | None = None,
     status: str | None = None,
     query: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
 ) -> dict[str, Any]:
     client = langgraph_client()
     searches = _owner_search_filters(login, email=email, include_all=include_all)
@@ -1015,6 +1044,8 @@ async def list_dashboard_threads_page(
         resolved=resolved,
         source=source,
         query=query,
+        scope=scope,
+        automation_id=automation_id,
         target_per_search=target,
     )
 
@@ -1613,7 +1644,6 @@ async def send_dashboard_message(
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
-        "from_owner": _user_owns_thread(metadata, login, email),
     }
     if isinstance(content, list):
         queue_payload["images"] = [
@@ -2068,7 +2098,13 @@ async def _github_token_for_login(login: str) -> str:
 
 
 async def get_dashboard_thread_turn_diff(
-    thread_id: str, login: str, *, turn_key: str | None = None, email: str | None = None
+    thread_id: str,
+    login: str,
+    *,
+    turn_key: str | None = None,
+    max_files: int = 200,
+    include_content: bool = True,
+    email: str | None = None,
 ) -> dict[str, Any]:
     """Return a persisted run diff, with sandbox checkpoints as a legacy fallback."""
     from ..utils.turn_checkpoint import read_turn_diff
@@ -2088,7 +2124,12 @@ async def get_dashboard_thread_turn_diff(
     )
     sandbox_id = metadata.get("sandbox_id")
     if index < 0 or not checkpoints or not isinstance(sandbox_id, str) or not sandbox_id:
-        return {"status": "missing", "files": [], "truncated": False}
+        return {
+            "status": "missing",
+            "files": [],
+            "truncated": False,
+            "summary": {"files": 0, "additions": 0, "deletions": 0},
+        }
 
     checkpoint = checkpoints[index]
     if turn_key is not None:
@@ -2106,7 +2147,12 @@ async def get_dashboard_thread_turn_diff(
         and checkpoint.get("plan_mode") is True
         and (not isinstance(plan_ref, str) or plan_ref == checkpoint.get("ref"))
     ):
-        return {"status": "ready", "files": [], "truncated": False}
+        return {
+            "status": "ready",
+            "files": [],
+            "truncated": False,
+            "summary": {"files": 0, "additions": 0, "deletions": 0},
+        }
 
     head = plan_ref if turn_key is not None and isinstance(plan_ref, str) else None
     if head is None and turn_key and index + 1 < len(checkpoints):
@@ -2118,14 +2164,24 @@ async def get_dashboard_thread_turn_diff(
             and isinstance(next_repo_path, str)
             and repo_path != next_repo_path
         ):
-            return {"status": "missing", "files": [], "truncated": False}
+            return {
+                "status": "missing",
+                "files": [],
+                "truncated": False,
+                "summary": {"files": 0, "additions": 0, "deletions": 0},
+            }
         head = next_checkpoint["ref"]
 
     try:
         sandbox = await create_sandbox(sandbox_id)
     except Exception:  # noqa: BLE001
         logger.debug("Could not connect to sandbox %s for turn diff", sandbox_id, exc_info=True)
-        return {"status": "missing", "files": [], "truncated": False}
+        return {
+            "status": "missing",
+            "files": [],
+            "truncated": False,
+            "summary": {"files": 0, "additions": 0, "deletions": 0},
+        }
 
     repo_path = checkpoint.get("repo_path")
     return await read_turn_diff(
@@ -2133,6 +2189,8 @@ async def get_dashboard_thread_turn_diff(
         None,
         str(checkpoint["ref"]),
         head,
+        max_files=max_files,
+        include_content=include_content,
         repo_path=repo_path if isinstance(repo_path, str) else None,
     )
 
@@ -2207,6 +2265,41 @@ async def _stream_thread_events(
         logger.warning("LangGraph stream/events proxy closed for %s", thread_id, exc_info=True)
 
 
+async def _observe_dashboard_run_ttft(
+    thread_id: str,
+    run_id: str,
+    started_at_ms: int,
+) -> None:
+    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/stream"
+    headers = _langgraph_proxy_headers(accept="text/event-stream")
+    headers["Last-Event-ID"] = "-1"
+    detector = AssistantTextEventDetector(run_id)
+    try:
+        async with httpx.AsyncClient(timeout=_PROXY_STREAM_TIMEOUT) as client:
+            async with client.stream(
+                "GET",
+                url,
+                headers=headers,
+                params={"stream_mode": "messages"},
+            ) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
+                    for observation in detector.feed(chunk):
+                        await record_dashboard_thread_ttft(
+                            observation,
+                            thread_id=thread_id,
+                            started_at_ms=started_at_ms,
+                        )
+                        return
+    except Exception:
+        logger.warning(
+            "Dashboard TTFT observer closed for run %s on thread %s",
+            run_id,
+            thread_id,
+            exc_info=True,
+        )
+
+
 async def proxy_dashboard_thread_commands(
     thread_id: str,
     login: str,
@@ -2215,6 +2308,7 @@ async def proxy_dashboard_thread_commands(
     email: str | None = None,
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
+    received_at_ms = _now_ms()
     _require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
@@ -2267,14 +2361,31 @@ async def proxy_dashboard_thread_commands(
     )
     outgoing = json.dumps(enriched).encode()
 
+    if method == "run.start":
+        params = enriched.get("params")
+        if isinstance(params, dict):
+            run_metadata = params.get("metadata")
+            if not isinstance(run_metadata, dict):
+                run_metadata = {}
+                params["metadata"] = run_metadata
+            run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
+            outgoing = json.dumps(enriched).encode()
+
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
         response = await client.post(url, content=outgoing, headers=headers)
 
-    run_start_succeeded = parsed.get("method") == "run.start" and response.status_code in {
-        200,
-        202,
-        204,
-    }
+    try:
+        response_payload = json.loads(response.content) if response.content else None
+    except json.JSONDecodeError:
+        response_payload = None
+    run_id = _extract_run_id_from_command_response(response_payload)
+    run_start_succeeded = (
+        parsed.get("method") == "run.start"
+        and response.status_code in {200, 202, 204}
+        and isinstance(response_payload, dict)
+        and response_payload.get("type") == "success"
+        and run_id is not None
+    )
     if run_start_succeeded and not creating:
         try:
             await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
@@ -2283,13 +2394,17 @@ async def proxy_dashboard_thread_commands(
                 "Failed to update Slack message for dashboard handoff on %s", thread_id
             )
 
-    if run_start_succeeded and response.content:
+    if run_start_succeeded and run_id is not None:
+        task = asyncio.create_task(
+            _observe_dashboard_run_ttft(
+                thread_id,
+                run_id,
+                received_at_ms,
+            )
+        )
+        _TTFT_OBSERVER_TASKS.add(task)
+        task.add_done_callback(_TTFT_OBSERVER_TASKS.discard)
         try:
-            payload = json.loads(response.content)
-        except json.JSONDecodeError:
-            payload = None
-        run_id = _extract_run_id_from_command_response(payload)
-        if run_id:
             await langgraph_client().threads.update(
                 thread_id=thread_id,
                 metadata={
@@ -2298,7 +2413,13 @@ async def proxy_dashboard_thread_commands(
                     "updated_at_ms": _now_ms(),
                 },
             )
-
+        except Exception:
+            logger.warning(
+                "Failed to persist started dashboard run %s on thread %s",
+                run_id,
+                thread_id,
+                exc_info=True,
+            )
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 
@@ -2313,10 +2434,21 @@ async def proxy_dashboard_thread_history(
 ) -> tuple[int, bytes, str | None]:
     _require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
+    try:
+        payload = json.loads(body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(400, "history body must be a JSON object") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "history body must be a JSON object")
+    limit = payload.get("limit", _DISCOVERY_HISTORY_LIMIT)
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise HTTPException(400, "history limit must be a positive integer")
+    if not any(payload.get(key) for key in ("before", "checkpoint", "metadata")):
+        payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = _langgraph_proxy_headers(content_type=content_type)
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
-        response = await client.post(url, content=body or b"{}", headers=headers)
+        response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 

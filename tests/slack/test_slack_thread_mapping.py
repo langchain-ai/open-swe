@@ -6,8 +6,10 @@ from agent.utils.slack import (
     SlackThreadMappingError,
     bind_slack_thread_id,
     delete_slack_thread_associations,
+    lookup_slack_run_message_mapping,
     lookup_slack_thread_id,
     resolve_slack_thread_id,
+    store_slack_message_run_mapping,
     store_slack_run_mapping,
 )
 
@@ -114,6 +116,35 @@ async def test_binding_refuses_to_overwrite_another_thread() -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_mapping_uses_executing_run_without_replacing_thread_mapping() -> None:
+    client: Any = _Client()
+    await store_slack_run_mapping(
+        client,
+        "C1",
+        "1.0",
+        "queued-run",
+        triggering_user_id="U1",
+        agent_thread_id="thread-one",
+    )
+
+    await store_slack_message_run_mapping(
+        client,
+        "C1",
+        "1.0",
+        "1.1",
+        run_id="active-run",
+        triggering_user_id="active-user",
+    )
+
+    namespace = ("slack_run_map", "C1")
+    assert client.store.items[(namespace, "thread:1.0")]["value"]["run_id"] == "queued-run"
+    message = client.store.items[(namespace, "message:1.1")]["value"]
+    assert message["run_id"] == "active-run"
+    assert message["triggering_user_id"] == "active-user"
+    assert message["agent_thread_id"] == "thread-one"
+
+
+@pytest.mark.asyncio
 async def test_delete_does_not_remove_a_location_reassigned_to_another_thread() -> None:
     client: Any = _Client()
     await bind_slack_thread_id(client, "C1", "1.0", "new-thread")
@@ -146,3 +177,25 @@ async def test_delete_removes_only_exact_slack_location_associations() -> None:
     remaining = [item["value"] for item in client.store.items.values()]
     assert all(item.get("run_id") != "run-one" for item in remaining)
     assert any(item.get("run_id") == "run-two" for item in remaining)
+
+
+@pytest.mark.asyncio
+async def test_exact_run_mapping_survives_overlapping_thread_runs() -> None:
+    client: Any = _Client()
+    await store_slack_run_mapping(client, "C1", "1.0", "run-one")
+    await store_slack_run_mapping(client, "C1", "1.0", "run-two")
+
+    await store_slack_message_run_mapping(client, "C1", "1.0", "1.1", run_id="run-one")
+    await store_slack_message_run_mapping(client, "C1", "1.0", "1.2", run_id="run-two")
+    await store_slack_message_run_mapping(client, "C1", "1.0", "1.3", run_id="run-one")
+
+    assert await lookup_slack_run_message_mapping(client, "C1", "run-one") == {
+        "run_id": "run-one",
+        "thread_ts": "1.0",
+        "message_ts": "1.3",
+    }
+    assert await lookup_slack_run_message_mapping(client, "C1", "run-two") == {
+        "run_id": "run-two",
+        "thread_ts": "1.0",
+        "message_ts": "1.2",
+    }

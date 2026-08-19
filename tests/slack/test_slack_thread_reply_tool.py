@@ -1,5 +1,6 @@
 import importlib
 from typing import Any
+from uuid import UUID
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -145,6 +146,33 @@ async def test_slack_thread_reply_uses_post_failed_without_slack_error(
     assert result["message_chars"] == 5
 
 
+async def test_slack_thread_reply_passes_executing_run_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_post_and_store_mapping(
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        **kwargs: Any,
+    ) -> tuple[str | None, str | None]:
+        captured.update(kwargs)
+        return "2.0", None
+
+    config = _config()
+    config["run_id"] = UUID("12345678-1234-5678-1234-567812345678")
+    config["configurable"]["slack_thread"]["triggering_user_id"] = "active-user"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+
+    result = await slack_reply_tool.slack_thread_reply("hello")
+
+    assert result == {"success": True}
+    assert captured["run_id"] == "12345678-1234-5678-1234-567812345678"
+    assert captured["triggering_user_id"] == "active-user"
+
+
 async def test_slack_thread_reply_posts_plain_text_without_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -215,6 +243,30 @@ def test_slack_action_ids_are_unique_and_recognized() -> None:
     legacy = {"action_id": "open_swe_option_select"}
     assert slack_routes._first_open_swe_option_action([legacy]) is legacy
     assert slack_routes._first_open_swe_option_action([{"action_id": "unrelated"}]) is None
+
+
+async def test_slack_thread_reply_passes_live_run_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_post_and_store_mapping(
+        channel_id: str,
+        thread_ts: str,
+        message: str,
+        **kwargs: Any,
+    ) -> tuple[str | None, str | None]:
+        captured.update(kwargs)
+        return "2.0", None
+
+    run_id = UUID("35d1f7e7-c811-43f2-91a6-9d729430b4ea")
+    config = _config()
+    config["run_id"] = run_id
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
+
+    assert await slack_reply_tool.slack_thread_reply("Done") == {"success": True}
+    assert captured["run_id"] == str(run_id)
 
 
 async def test_slack_thread_reply_passes_model_reported_usage(

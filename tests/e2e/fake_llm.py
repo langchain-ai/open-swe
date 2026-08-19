@@ -17,6 +17,7 @@ from typing import Any
 
 from e2e_env import (
     BASE_BRANCH,
+    FAKE_GITHUB_API,
     FEATURE_BRANCH,
     FEATURE_FILE,
     OWNER,
@@ -63,6 +64,42 @@ git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
 """.strip()
 
+_MANY_FILES_IMPLEMENT_SCRIPT = f"""
+set -e
+cd repo
+git config user.email "dev@example.com"
+git config user.name "Dev User"
+git checkout -b {FEATURE_BRANCH}
+for index in $(seq -w 1 15); do
+  printf 'change %s\n' "$index" > "change-$index.txt"
+done
+git add -A
+git commit -m "{PR_TITLE}"
+git push origin {FEATURE_BRANCH}
+echo PUSHED_OK
+""".strip()
+
+_IFRAME_HTML_PATH = "/workspace/iframe-output.html"
+_IFRAME_DATA_PATH = "/workspace/iframe-data.json"
+_IFRAME_CSS_PATH = "/workspace/iframe-theme.css"
+_IFRAME_HTML = """<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Iframe E2E Preview</title></head>
+<body>
+  <main>
+    <h1>Iframe preview</h1>
+    <p id="output-data">Loading bundled data...</p>
+  </main>
+  <script>
+    const data = JSON.parse(window.__FILES__["data.json"]);
+    document.getElementById("output-data").textContent = data.label;
+  </script>
+</body>
+</html>
+"""
+_IFRAME_DATA = '{"label":"Bundled data loaded"}'
+_IFRAME_CSS = "body { min-height: 420px; margin: 0; color: rebeccapurple; }"
+
 _DESKTOP_PR_PAYLOAD = json.dumps(
     {
         "head": FEATURE_BRANCH,
@@ -86,7 +123,7 @@ curl --fail --silent --show-error \
   --request POST \
   --header 'content-type: application/json' \
   --data '{_DESKTOP_PR_PAYLOAD}' \
-  "$E2E_FAKE_GITHUB_API/repos/{OWNER}/{REPO}/pulls"
+  "{FAKE_GITHUB_API}/repos/{OWNER}/{REPO}/pulls"
 """.strip()
 
 # The system prompt of the most recent model call, so specs can assert what the
@@ -342,6 +379,43 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
 
 
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    "iframe": (
+        _tool_step(
+            "Acknowledging the iframe preview request.",
+            "slack_thread_reply",
+            {"message": "Preparing the iframe preview now."},
+            "call-iframe-ack",
+        ),
+        _tool_step(
+            "Writing the iframe HTML.",
+            "write_file",
+            {"file_path": _IFRAME_HTML_PATH, "content": _IFRAME_HTML},
+            "call-iframe-html",
+        ),
+        _tool_step(
+            "Writing the iframe data.",
+            "write_file",
+            {"file_path": _IFRAME_DATA_PATH, "content": _IFRAME_DATA},
+            "call-iframe-data",
+        ),
+        _tool_step(
+            "Writing the iframe stylesheet.",
+            "write_file",
+            {"file_path": _IFRAME_CSS_PATH, "content": _IFRAME_CSS},
+            "call-iframe-css",
+        ),
+        _tool_step(
+            "Rendering the iframe preview.",
+            "output_iframe",
+            {
+                "path": _IFRAME_HTML_PATH,
+                "title": "Iframe E2E Preview",
+                "files": {"data.json": _IFRAME_DATA_PATH, "theme.css": _IFRAME_CSS_PATH},
+            },
+            "call-output-iframe",
+        ),
+        StepSpec(content="Rendered the iframe preview."),
+    ),
     "desktop": (
         _tool_step(
             "Implementing the change in the selected local project.",
@@ -396,22 +470,34 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_reply_step),
     ),
-    "move": (
+    "many_files": (
         _tool_step(
-            "Moving the current Open SWE thread to another Slack channel.",
-            "slack_move_thread",
-            {
-                "message": "Continue the existing Open SWE task in this thread.",
-                "channel_id": "C_TARGET",
-            },
-            "call-move",
-        ),
-        _tool_step(
-            "Confirming the moved thread in its new location.",
+            "Acknowledging the Slack request before starting work.",
             "slack_thread_reply",
-            {"message": "Moved this Open SWE thread and preserved its state."},
-            "call-move-reply",
+            {"message": "On it!"},
+            "call-ack",
         ),
+        _tool_step(
+            "Setting up the repo and implementing the change.",
+            "execute",
+            {"command": _MANY_FILES_IMPLEMENT_SCRIPT},
+            "call-impl",
+        ),
+        _tool_step(
+            "Opening a pull request.",
+            "open_pull_request",
+            {
+                "owner": OWNER,
+                "repo": REPO,
+                "head": FEATURE_BRANCH,
+                "base": BASE_BRANCH,
+                "title": PR_TITLE,
+                "body": "Adds multiple files for changed-file coverage.",
+                "draft": True,
+            },
+            "call-pr",
+        ),
+        _dynamic_step(_reply_step),
     ),
     "breakout": (
         _tool_step(
@@ -428,6 +514,17 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "slack_thread_reply",
             {"message": "I started a separate Open SWE thread for that aspect."},
             "call-breakout-reply",
+        ),
+    ),
+    "move": (
+        _tool_step(
+            "Moving the Slack thread to its destination channel.",
+            "slack_move_thread",
+            {
+                "message": "Continue the existing Open SWE task in this channel.",
+                "channel_id": "C_TARGET",
+            },
+            "call-move",
         ),
     ),
     "plan": (
@@ -473,6 +570,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
 }
 
 
+def _is_iframe_request(text: str) -> bool:
+    return "E2E_IFRAME" in text
+
+
 def _is_plan_request(text: str) -> bool:
     return "plan" in text.lower()
 
@@ -505,6 +606,7 @@ def _is_revision(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(
         "desktop",
         lambda ctx: ctx.human_count <= 1 and "E2E_DESKTOP_LOCAL" in ctx.first_text,
@@ -520,6 +622,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "breakout", lambda ctx: ctx.human_count <= 1 and _is_breakout_request(ctx.first_text)
     ),
+    ScriptRule(
+        "many_files", lambda ctx: ctx.human_count <= 1 and "E2E_MANY_FILES" in ctx.first_text
+    ),
+    ScriptRule("move", lambda ctx: ctx.human_count <= 1 and _is_move_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: ctx.human_count <= 1),
     ScriptRule("followup", lambda _ctx: True),
 )

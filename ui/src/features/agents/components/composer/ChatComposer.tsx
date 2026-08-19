@@ -19,7 +19,11 @@ import {
 } from "./ComposerPromptEditor"
 import { ContextWindowMeter } from "./ContextWindowMeter"
 import { EnvironmentSelector } from "./EnvironmentSelector"
-import { RunTargetSelector } from "./RunTargetSelector"
+import {
+  LocalBranchSelector,
+  LocalProjectSelector,
+  RunTargetSelector,
+} from "./RunTargetSelector"
 import {
   COMPOSER_PATH_DRAG_MIME,
   detectComposerTrigger,
@@ -104,10 +108,13 @@ export interface ChatComposerProps {
   localProjects?: Array<DesktopProject>
   selectedLocalProjectPath?: string | null
   selectedLocalProjectBranch?: string | null
+  localProjectBranches?: Array<string>
   onSelectLocalProject?: (cwd: string) => void
   onAddLocalProject?: () => void
   onRemoveLocalProject?: (cwd: string) => void
   onRefreshLocalProjectBranch?: () => void
+  onSelectLocalProjectBranch?: (branch: string) => void
+  onCreateLocalProjectBranch?: (branch: string) => void
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
@@ -156,7 +163,18 @@ export function buildCommandItems(
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase()
 
-  if (trigger.kind === "slash-command") {
+  if (trigger.kind === "slash-command" || trigger.kind === "skill-command") {
+    const skillItems = skills
+      .filter((skill) => skill.name.startsWith(query))
+      .map((skill) => ({
+        id: `skill:${skill.name}`,
+        type: "skill" as const,
+        name: skill.name,
+        label: `/${skill.name}`,
+        description: skill.description,
+      }))
+    if (trigger.kind === "skill-command") return skillItems
+
     const skillNames = new Set(skills.map((skill) => skill.name))
     return [
       ...SLASH_COMMANDS.filter(
@@ -171,15 +189,7 @@ export function buildCommandItems(
         label: spec.label,
         description: spec.description,
       })),
-      ...skills
-        .filter((skill) => skill.name.startsWith(query))
-        .map((skill) => ({
-          id: `skill:${skill.name}`,
-          type: "skill" as const,
-          name: skill.name,
-          label: `/${skill.name}`,
-          description: skill.description,
-        })),
+      ...skillItems,
     ]
   }
 
@@ -196,8 +206,9 @@ export function buildCommandItems(
 }
 
 /**
- * The prompt composer: a Lexical editor with `@file` chips and `/command`
- * autocomplete, plus the control row (model, plan mode, attachments, context)
+ * The prompt composer: a Lexical editor with `@file` chips, `/command`
+ * autocomplete, and `$skill` autocomplete, plus the control row (model, plan
+ * mode, attachments, context)
  * and the send/stop button.
  */
 export const ChatComposer = memo(function ChatComposer({
@@ -220,10 +231,13 @@ export const ChatComposer = memo(function ChatComposer({
   localProjects = [],
   selectedLocalProjectPath = null,
   selectedLocalProjectBranch = null,
+  localProjectBranches = [],
   onSelectLocalProject,
   onAddLocalProject,
   onRemoveLocalProject,
   onRefreshLocalProjectBranch,
+  onSelectLocalProjectBranch,
+  onCreateLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
   adminThread = false,
@@ -281,6 +295,10 @@ export const ChatComposer = memo(function ChatComposer({
     [cursor, value]
   )
   const triggerKey = trigger ? `${trigger.kind}:${trigger.rangeStart}` : null
+  const skillNames = useMemo(
+    () => new Set(skills.map((skill) => skill.name)),
+    [skills]
+  )
   const commandItems = useMemo(
     () =>
       trigger
@@ -612,6 +630,9 @@ export const ChatComposer = memo(function ChatComposer({
     >
       {(onRepoChange || onRunTargetChange || onEnvironmentChange) && (
         <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 px-1 text-xs">
+          {runTarget && onRunTargetChange && (
+            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
+          )}
           {runTarget !== "local" && onRepoChange && (
             <RepoSelector
               repos={repos}
@@ -626,23 +647,29 @@ export const ChatComposer = memo(function ChatComposer({
               onChange={onEnvironmentChange}
             />
           )}
-          {runTarget &&
-            onRunTargetChange &&
+          {runTarget === "local" &&
             onSelectLocalProject &&
             onAddLocalProject &&
-            onRemoveLocalProject &&
-            onRefreshLocalProjectBranch && (
-              <RunTargetSelector
-                localEnabled={Boolean(window.openSweDesktop)}
-                onChange={onRunTargetChange}
+            onRemoveLocalProject && (
+              <LocalProjectSelector
                 onAddProject={onAddLocalProject}
                 onRemoveProject={onRemoveLocalProject}
-                onRefreshBranch={onRefreshLocalProjectBranch}
                 onSelectProject={onSelectLocalProject}
                 projects={localProjects}
                 selectedProjectPath={selectedLocalProjectPath}
-                selectedProjectBranch={selectedLocalProjectBranch}
-                value={runTarget}
+              />
+            )}
+          {runTarget === "local" &&
+            onRefreshLocalProjectBranch &&
+            onSelectLocalProjectBranch &&
+            onCreateLocalProjectBranch && (
+              <LocalBranchSelector
+                branches={localProjectBranches}
+                disabled={!selectedLocalProjectPath}
+                onCreateBranch={onCreateLocalProjectBranch}
+                onRefresh={onRefreshLocalProjectBranch}
+                onSelectBranch={onSelectLocalProjectBranch}
+                selectedBranch={selectedLocalProjectBranch}
               />
             )}
         </div>
@@ -743,6 +770,7 @@ export const ChatComposer = memo(function ChatComposer({
           onCommandKeyDown={handleCommandKeyDown}
           onPaste={handlePaste}
           placeholder={busy ? "Send a message to queue next..." : placeholder}
+          skillNames={skillNames}
           value={value}
         />
 
@@ -752,7 +780,11 @@ export const ChatComposer = memo(function ChatComposer({
               render={
                 <ComposerControl
                   aria-label="More composer options"
-                  className="size-7 px-0"
+                  className={cn(
+                    "size-7 px-0",
+                    adminThread &&
+                      "bg-destructive/10 text-foreground hover:bg-destructive/10 hover:text-foreground"
+                  )}
                   type="button"
                 />
               }

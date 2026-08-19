@@ -27,6 +27,7 @@ import {
   ListBulletsIcon,
   ListChecksIcon,
   ListNumbersIcon,
+  PencilSimpleIcon,
   QuotesIcon,
   RowsIcon,
   SquareSplitHorizontalIcon,
@@ -70,7 +71,6 @@ import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
-import { ReviewApprovalSummary } from "@/features/reviews/components/ReviewApprovalSummary"
 import {
   ReviewChat,
   ReviewChatComposerProvider,
@@ -93,6 +93,7 @@ import { IconButton } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
+import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 type SideTab = "info" | "chat"
@@ -556,6 +557,7 @@ export interface ReviewMainBodyProps {
   onExpand?: () => void
   // A PR comment opened from the comments dropdown: shown inline at its line.
   openComment?: PrReviewComment | null
+  onUpdateOpenComment?: (comment: PrReviewComment) => void
   onCloseOpenComment?: () => void
 }
 
@@ -565,6 +567,7 @@ export function ReviewMainBody({
   variant = "full",
   onExpand,
   openComment,
+  onUpdateOpenComment,
   onCloseOpenComment,
 }: ReviewMainBodyProps) {
   // The composer provider lives here so it remounts in lockstep with the
@@ -587,6 +590,7 @@ export function ReviewMainBody({
         diffFiles={diffFiles}
         variant="full"
         openComment={openComment ?? null}
+        onUpdateOpenComment={onUpdateOpenComment}
         onCloseOpenComment={onCloseOpenComment}
       />
     </ReviewChatComposerProvider>
@@ -599,6 +603,7 @@ function ReviewBodyInner({
   variant,
   onExpand,
   openComment = null,
+  onUpdateOpenComment,
   onCloseOpenComment,
 }: {
   detail: ReviewDetail
@@ -606,6 +611,7 @@ function ReviewBodyInner({
   variant: ReviewMainBodyVariant
   onExpand?: () => void
   openComment?: PrReviewComment | null
+  onUpdateOpenComment?: (comment: PrReviewComment) => void
   onCloseOpenComment?: () => void
 }) {
   const embedded = variant === "embedded"
@@ -1162,6 +1168,7 @@ function ReviewBodyInner({
         onStartComment={embedded ? undefined : startComment}
         onCloseComment={closeComment}
         openComment={openComment?.path === file.path ? openComment : null}
+        onUpdateOpenComment={onUpdateOpenComment}
         onCloseOpenComment={onCloseOpenComment}
       />
     )
@@ -1263,9 +1270,6 @@ function ReviewBodyInner({
                     additions: detail.pr.additions,
                     deletions: detail.pr.deletions,
                   }}
-                />
-                <ReviewApprovalSummary
-                  assessment={detail.approval_assessment}
                 />
                 <div
                   className={cn(
@@ -1482,6 +1486,7 @@ const FileDiffCard = memo(function FileDiffCard({
   onStartComment,
   onCloseComment,
   openComment,
+  onUpdateOpenComment,
   onCloseOpenComment,
 }: {
   file: ReviewDiffFile
@@ -1506,6 +1511,7 @@ const FileDiffCard = memo(function FileDiffCard({
   onStartComment?: (path: string, range: SelectedLineRange) => void
   onCloseComment: () => void
   openComment: PrReviewComment | null
+  onUpdateOpenComment?: (comment: PrReviewComment) => void
   onCloseOpenComment?: () => void
 }) {
   // No chat means no line-selection → "Add to Chat" affordance (embedded view).
@@ -1676,7 +1682,11 @@ const FileDiffCard = memo(function FileDiffCard({
       if (meta.kind === "comment")
         return (
           <InlineComment
+            owner={owner}
+            repo={repo}
+            prNumber={prNumber}
             comment={meta.comment}
+            onUpdate={onUpdateOpenComment}
             onClose={onCloseOpenComment ?? (() => undefined)}
           />
         )
@@ -1691,7 +1701,14 @@ const FileDiffCard = memo(function FileDiffCard({
         />
       )
     },
-    [owner, repo, prNumber, onCloseComment, onCloseOpenComment]
+    [
+      owner,
+      repo,
+      prNumber,
+      onCloseComment,
+      onUpdateOpenComment,
+      onCloseOpenComment,
+    ]
   )
 
   return (
@@ -1961,6 +1978,7 @@ function CommentComposer({
   const [value, setValue] = useState("")
   const [mode, setMode] = useState<"write" | "preview">("write")
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const queryClient = useQueryClient()
   useEffect(() => {
     textareaRef.current?.focus()
   }, [])
@@ -1972,6 +1990,10 @@ function CommentComposer({
         prNumber,
         buildCommentPayload(path, range, body)
       ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: ["reviewComments", owner, repo, prNumber],
+      }),
   })
   const submit = () => {
     const body = value.trim()
@@ -2149,14 +2171,56 @@ function CommentComposer({
 // node is registered so the dropdown can scroll it into view. Links to the
 // full thread on GitHub.
 function InlineComment({
+  owner,
+  repo,
+  prNumber,
   comment,
+  onUpdate,
   onClose,
 }: {
+  owner: string
+  repo: string
+  prNumber: number
   comment: PrReviewComment
+  onUpdate?: (comment: PrReviewComment) => void
   onClose: () => void
 }) {
   const { registerAnnotation } = useExpandedFinding()
+  const session = useSession()
+  const queryClient = useQueryClient()
+  const [body, setBody] = useState(comment.body)
+  const [draft, setDraft] = useState(comment.body)
+  const [editing, setEditing] = useState(false)
   const sideLabel = comment.side === "LEFT" ? "L" : "R"
+  const editable =
+    session.data?.login.toLowerCase() === comment.author.toLowerCase()
+  const mutation = useMutation({
+    mutationFn: (next: string) =>
+      api.updateReviewComment(owner, repo, prNumber, comment.id, next),
+    onSuccess: (_, next) => {
+      setBody(next)
+      setDraft(next)
+      setEditing(false)
+      onUpdate?.({ ...comment, body: next })
+      void queryClient.invalidateQueries({
+        queryKey: ["reviewComments", owner, repo, prNumber],
+      })
+    },
+  })
+  useEffect(() => {
+    setBody(comment.body)
+    setDraft(comment.body)
+    setEditing(false)
+  }, [comment.id, comment.body])
+  const submit = () => {
+    const next = draft.trim()
+    if (next && next !== body && !mutation.isPending) mutation.mutate(next)
+  }
+  const cancel = () => {
+    setDraft(body)
+    setEditing(false)
+    mutation.reset()
+  }
   return (
     <div
       ref={(node) => registerAnnotation(`comment:${comment.id}`, node)}
@@ -2181,6 +2245,17 @@ function InlineComment({
             </span>
           )}
           <div className="ml-auto flex items-center gap-0.5">
+            {editable && !editing && (
+              <IconButton
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Edit comment"
+                onClick={() => setEditing(true)}
+              >
+                <PencilSimpleIcon />
+              </IconButton>
+            )}
             <a
               href={comment.html_url}
               target="_blank"
@@ -2202,9 +2277,56 @@ function InlineComment({
             </IconButton>
           </div>
         </div>
-        <div className="px-3 py-2.5 text-xs text-muted-foreground">
-          <Markdown content={comment.body} />
-        </div>
+        {editing ? (
+          <div className="p-2">
+            <Textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  event.preventDefault()
+                  submit()
+                } else if (event.key === "Escape") {
+                  event.preventDefault()
+                  cancel()
+                }
+              }}
+              rows={3}
+              className="resize-y text-xs"
+              autoFocus
+            />
+            {mutation.isError && (
+              <p className="mt-1.5 text-[11px] text-destructive">
+                {mutation.error instanceof Error
+                  ? mutation.error.message
+                  : "Failed to update comment"}
+              </p>
+            )}
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancel}
+                className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={
+                  !draft.trim() || draft.trim() === body || mutation.isPending
+                }
+                className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
+              >
+                {mutation.isPending ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="px-3 py-2.5 text-xs text-muted-foreground">
+            <Markdown content={body} />
+          </div>
+        )}
       </div>
     </div>
   )

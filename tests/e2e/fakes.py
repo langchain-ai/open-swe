@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from e2e_env import BARE_REMOTE, BASE_BRANCH, OWNER, REPO
+from e2e_env import BARE_REMOTE, BASE_BRANCH, OWNER, REPO, TMP
 
 # --- Slack -----------------------------------------------------------------
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
@@ -65,6 +65,29 @@ def slack_messages(channel: str) -> list[dict[str, Any]]:
     return sorted(messages, key=lambda message: message["ts"])
 
 
+def slack_message(channel: str, thread_ts: str, message_ts: str) -> dict[str, Any] | None:
+    return next(
+        (message for message in slack_thread(channel, thread_ts) if message["ts"] == message_ts),
+        None,
+    )
+
+
+def update_slack_message(
+    channel: str, message_ts: str, *, text: str, blocks: Any = None
+) -> dict[str, Any] | None:
+    for (message_channel, _thread_ts), thread_messages in SLACK_MESSAGES.items():
+        if message_channel != channel:
+            continue
+        for message in thread_messages:
+            if message["ts"] != message_ts:
+                continue
+            message["text"] = text
+            if blocks is not None:
+                message["blocks"] = blocks
+            return message
+    return None
+
+
 # --- GitHub ----------------------------------------------------------------
 PULLS: list[dict[str, Any]] = []
 REPO_PRIVATE = [False]
@@ -100,6 +123,13 @@ def seed_bare_remote() -> None:
     _git("remote", "add", "origin", str(BARE_REMOTE), cwd=seed_work)
     _git("push", "origin", BASE_BRANCH, cwd=seed_work)
     shutil.rmtree(seed_work)
+
+
+def seed_sandbox_repo() -> None:
+    repo = TMP / "work" / "repo"
+    if repo.exists():
+        shutil.rmtree(repo)
+    _git("clone", str(BARE_REMOTE), str(repo))
 
 
 def _diff_files(base: str, head: str) -> list[dict[str, Any]]:

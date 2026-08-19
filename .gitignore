@@ -18,12 +18,14 @@
 # production
 /build
 /desktop/build
+/desktop/resources/local-backend/
 /dist
 **/dist
 .turbo/
 
 # misc
 .DS_Store
+node_modules/
 .vscode/
 *.pem
 *.key

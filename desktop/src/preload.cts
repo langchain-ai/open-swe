@@ -3,32 +3,28 @@ const { contextBridge, ipcRenderer } = require("electron")
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
-  getProjectBranch: (cwd) => ipcRenderer.invoke("desktop:project-branch", cwd),
+  getProjectBranches: (cwd) => ipcRenderer.invoke("desktop:project-branches", cwd),
+  checkoutProjectBranch: (input) =>
+    ipcRenderer.invoke("desktop:checkout-project-branch", { ...input }),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
-  resolveAcpProjectPath: (input) =>
-    ipcRenderer.invoke("desktop:resolve-acp-project-path", { ...input }),
+  resolveLocalProjectPath: (input) =>
+    ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
+  localModelCredentialStatus: (modelId) =>
+    ipcRenderer.invoke("desktop:local-model-credential-status", modelId),
+  startLocalThread: (input) => ipcRenderer.invoke("desktop:start-local-thread", input),
+  getLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:get-local-prompt", threadId),
+  clearLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:clear-local-prompt", threadId),
+  getLocalThread: (threadId) => ipcRenderer.invoke("desktop:get-local-thread", threadId),
+  listLocalThreads: () => ipcRenderer.invoke("desktop:list-local-threads"),
+  updateLocalThread: (input) => ipcRenderer.invoke("desktop:update-local-thread", input),
+  deleteLocalThread: (threadId) => ipcRenderer.invoke("desktop:delete-local-thread", threadId),
+  getLocalDiff: (threadId) => ipcRenderer.invoke("desktop:get-local-diff", threadId),
   onProjectsChanged: (callback) => {
     const listener = (_event, projects) => callback(projects)
     ipcRenderer.on("desktop:projects-changed", listener)
     return () => ipcRenderer.removeListener("desktop:projects-changed", listener)
-  },
-  createAcpDraftSession: (cwd) =>
-    ipcRenderer.invoke("desktop:acp-draft-create", cwd),
-  deleteAcpDraftSession: (sessionId) =>
-    ipcRenderer.invoke("desktop:acp-draft-delete", sessionId),
-  startAcpSession: (input) => ipcRenderer.invoke("desktop:acp-start", input),
-  promptAcpSession: (input) => ipcRenderer.invoke("desktop:acp-prompt", input),
-  cancelAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-cancel", sessionId),
-  deleteAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-delete", sessionId),
-  getAcpSession: (sessionId) => ipcRenderer.invoke("desktop:acp-session", sessionId),
-  listAcpSessions: () => ipcRenderer.invoke("desktop:acp-sessions"),
-  getAcpDiff: (sessionId) => ipcRenderer.invoke("desktop:acp-diff", sessionId),
-  onAcpEvent: (callback) => {
-    const listener = (_event, payload) => callback(payload)
-    ipcRenderer.on("desktop:acp-event", listener)
-    return () => ipcRenderer.removeListener("desktop:acp-event", listener)
   },
   terminal: {
     attach: (input) => ipcRenderer.invoke("desktop:terminal-attach", { ...input }),
@@ -62,8 +58,6 @@ const DRAG_REGION_ID = "open-swe-desktop-drag-region"
 window.addEventListener("DOMContentLoaded", () => {
   if (process.platform !== "darwin") return
 
-  // Keep draggable space beside the native controls and above the sidebar
-  // content without forcing that content into the titlebar row.
   const style = document.createElement("style")
   style.textContent = `
     #${DRAG_REGION_ID} {

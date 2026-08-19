@@ -149,7 +149,6 @@ export interface Profile {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  create_prs?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   updated_at?: string
@@ -164,7 +163,6 @@ export interface ProfileUpdate {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  create_prs?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
 }
@@ -173,8 +171,6 @@ export interface TeamSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
-  auto_approve_enabled: boolean
-  auto_approve_default_threshold: number
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
   transcription_model?: string
@@ -545,37 +541,6 @@ export interface ReviewCounts {
   flags: number
 }
 
-export interface ReviewApprovalPolicy {
-  full_name: string
-  enabled: boolean
-  threshold: number | null
-  updated_at: string | null
-}
-
-export interface ReviewApprovalAssessment {
-  rubric_version: string
-  assessed_sha: string
-  raw_score: number | null
-  score: number | null
-  reasons: Array<string>
-  risks: Array<string>
-  valid: boolean
-  policy: {
-    team_enabled?: boolean
-    team_threshold?: number
-    repo_enabled?: boolean
-    repo_threshold?: number | null
-    effective_enabled?: boolean
-    effective_threshold?: number
-  }
-  decision: string
-  blockers: Array<string>
-  github_review_id: number | null
-  github_review_event: "COMMENT" | "APPROVE"
-  recorded_at: string
-  stale: boolean
-}
-
 export interface ReviewSummary {
   thread_id: string
   owner: string
@@ -590,10 +555,6 @@ export interface ReviewSummary {
   watch: boolean
   status: "running" | "error" | "idle"
   counts: ReviewCounts
-  approval_score: number | null
-  approval_decision: string | null
-  approval_event: "COMMENT" | "APPROVE" | null
-  approval_stale: boolean
   updated_at: string | null
   full_name?: string
 }
@@ -644,7 +605,6 @@ export interface ReviewDetail extends ReviewSummary {
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
-  approval_assessment: ReviewApprovalAssessment | null
   diff_groups: Array<ReviewDiffGroup>
   diff_groups_stale: boolean
 }
@@ -952,19 +912,6 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
-  listReviewApprovalPolicies: () =>
-    request<{ policies: Array<ReviewApprovalPolicy> }>(
-      "/review-approval-policies"
-    ),
-  setReviewApprovalPolicy: (
-    full_name: string,
-    enabled: boolean,
-    threshold: number | null
-  ) =>
-    request<{ policy: ReviewApprovalPolicy }>("/review-approval-policies", {
-      method: "PUT",
-      body: JSON.stringify({ full_name, enabled, threshold }),
-    }),
   usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
     request<UsageLeaderboardPayload>(
       `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
@@ -1035,6 +982,17 @@ export const api = {
   listReviewComments: (owner: string, repo: string, number: number) =>
     request<ReviewCommentsPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
+    ),
+  updateReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    commentId: number,
+    body: string
+  ) =>
+    request<ReviewCommentResult>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments/${commentId}`,
+      { method: "PATCH", body: JSON.stringify({ body }) }
     ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),

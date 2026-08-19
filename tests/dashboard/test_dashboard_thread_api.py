@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from agent.dashboard import routes, thread_api
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
+from agent.dashboard.ttft import AssistantTextObservation
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
@@ -854,7 +855,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
 
     class FakeResponse:
         status_code = 200
-        content = b'{"run_id":"run-1"}'
+        content = b'{"type":"success","id":1,"result":{"run_id":"run-1"}}'
         headers = {"content-type": "application/json"}
 
     class FakeAsyncClient:
@@ -893,6 +894,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    monkeypatch.setattr(thread_api, "_now_ms", lambda: 123_456)
     monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(
         thread_api, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
@@ -905,7 +907,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     )
 
     assert status == 200
-    assert body == b'{"run_id":"run-1"}'
+    assert body == b'{"type":"success","id":1,"result":{"run_id":"run-1"}}'
     outgoing = captured["outgoing"]
     assert isinstance(outgoing, dict)
     content = outgoing["params"]["input"]["messages"][-1]["content"]
@@ -916,6 +918,100 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
         "message_ts": "123.46",
         "thread_id": "tid",
     }
+    outgoing_params = outgoing["params"]
+    assert outgoing_params["metadata"]["dashboard_ttft_started_at_ms"] == 123_456
+    updates = captured["updates"]
+    assert isinstance(updates, list)
+    assert updates[-1] == {
+        "latest_run_id": "run-1",
+        "latest_run_status": "pending",
+        "updated_at_ms": 123_456,
+    }
+
+
+async def test_run_ttft_observer_records_first_assistant_text(
+    monkeypatch,
+) -> None:
+    def event(
+        method: str,
+        data: dict[str, object],
+        *,
+        namespace: list[str],
+        event_id: str,
+    ) -> bytes:
+        payload = {
+            "type": "event",
+            "event_id": event_id,
+            "method": method,
+            "params": {"namespace": namespace, "timestamp": 2_250, "data": data},
+        }
+        return f"event: {method}\r\ndata: {json.dumps(payload)}\r\n\r\n".encode()
+
+    stream_bytes = event(
+        "messages",
+        {"event": "message-start", "role": "ai"},
+        namespace=["agent"],
+        event_id="1-0",
+    ) + event(
+        "messages",
+        {
+            "event": "content-block-delta",
+            "delta": {"type": "text-delta", "text": "Hello"},
+        },
+        namespace=["agent"],
+        event_id="2-0",
+    )
+    chunks = [stream_bytes[:35], stream_bytes[35:]]
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            pass
+
+        async def aiter_bytes(self):
+            for chunk in chunks:
+                yield chunk
+
+    class FakeStreamContext:
+        async def __aenter__(self) -> FakeResponse:
+            return FakeResponse()
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        def stream(self, method: str, url: str, **kwargs: object) -> FakeStreamContext:
+            assert method == "GET"
+            assert url.endswith("/threads/thread-1/runs/run-1/stream")
+            assert kwargs["headers"] == {
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+                "Last-Event-ID": "-1",
+            }
+            assert kwargs["params"] == {"stream_mode": "messages"}
+            return FakeStreamContext()
+
+    record = AsyncMock()
+    monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(thread_api, "record_dashboard_thread_ttft", record)
+
+    await thread_api._observe_dashboard_run_ttft("thread-1", "run-1", 1_000)
+
+    record.assert_awaited_once_with(
+        AssistantTextObservation(run_id="run-1", event_timestamp_ms=2_250),
+        thread_id="thread-1",
+        started_at_ms=1_000,
+    )
 
 
 async def test_proxy_commands_rejects_non_object_body(monkeypatch) -> None:
@@ -1026,11 +1122,25 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
         async def __aexit__(self, *a: object) -> None:
             pass
 
-        async def post(self, *a: object, **kw: object) -> FakeResponse:
+        async def post(
+            self, url: str, *, json: dict[str, object], headers: dict[str, str]
+        ) -> FakeResponse:
+            posted.append(json)
             return FakeResponse()
 
+    posted: list[dict[str, object]] = []
     monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
-    await thread_api.proxy_dashboard_thread_history("tid", "teammate", b"{}")
+    await thread_api.proxy_dashboard_thread_history("tid", "teammate", b'{"limit": 20}')
+    await thread_api.proxy_dashboard_thread_history(
+        "tid", "teammate", b'{"limit": 20, "metadata": {"run_id": "run-1"}}'
+    )
+    assert posted == [
+        {"limit": thread_api._DISCOVERY_HISTORY_LIMIT},
+        {"limit": 20, "metadata": {"run_id": "run-1"}},
+    ]
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_history("tid", "teammate", b"\xff")
+    assert exc_info.value.status_code == 400
 
 
 async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(monkeypatch) -> None:
@@ -1403,6 +1513,11 @@ def test_summary_matches_filters() -> None:
 
 def test_metadata_matches_filters() -> None:
     metadata = {"source": "dashboard", "title": "Fix login bug", "resolved": True}
+    automation = {
+        "source": "schedule",
+        "schedule_id": "schedule-1",
+        "title": "Scheduled cleanup",
+    }
 
     assert thread_api._metadata_matches_filters(metadata, resolved=True, source=None, query=None)
     assert not thread_api._metadata_matches_filters(
@@ -1413,6 +1528,28 @@ def test_metadata_matches_filters() -> None:
     )
     assert not thread_api._metadata_matches_filters(
         metadata, resolved=None, source="github", query=None
+    )
+    assert thread_api._metadata_matches_filters(
+        metadata, resolved=None, source=None, query=None, scope="interactive"
+    )
+    assert not thread_api._metadata_matches_filters(
+        automation, resolved=None, source=None, query=None, scope="interactive"
+    )
+    assert thread_api._metadata_matches_filters(
+        automation,
+        resolved=None,
+        source=None,
+        query=None,
+        scope="automation",
+        automation_id="schedule-1",
+    )
+    assert not thread_api._metadata_matches_filters(
+        automation,
+        resolved=None,
+        source=None,
+        query=None,
+        scope="automation",
+        automation_id="schedule-2",
     )
 
 
@@ -1472,6 +1609,56 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     assert all(item["resolved"] is False for item in result["items"])
     assert page_size in offsets
     assert run_list_calls == 0
+
+
+async def test_list_dashboard_threads_page_scopes_automation_runs(monkeypatch) -> None:
+    threads = _make_threads(3, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    first = cast(dict[str, object], threads[0]["metadata"])
+    first.update({"source": "schedule", "schedule_id": "schedule-1"})
+    second = cast(dict[str, object], threads[1]["metadata"])
+    second.update({"source": "schedule", "schedule_id": "schedule-2"})
+    threads.append(
+        {
+            "thread_id": "other-owner",
+            "metadata": {
+                "source": "schedule",
+                "github_login": "someone-else",
+                "schedule_id": "schedule-1",
+                "latest_run_status": "success",
+                "updated_at_ms": 10,
+            },
+        }
+    )
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    interactive = await thread_api.list_dashboard_threads_page(
+        "octocat", email=None, scope="interactive"
+    )
+    automation = await thread_api.list_dashboard_threads_page(
+        "octocat", email=None, scope="automation", automation_id="schedule-1"
+    )
+
+    assert [item["id"] for item in interactive["items"]] == ["t2"]
+    assert [item["id"] for item in automation["items"]] == ["t0"]
+    assert automation["items"][0]["automationId"] == "schedule-1"
 
 
 async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(monkeypatch) -> None:
@@ -1914,7 +2101,12 @@ async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
 
     result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
 
-    assert result == {"status": "ready", "files": [], "truncated": False}
+    assert result == {
+        "status": "ready",
+        "files": [],
+        "truncated": False,
+        "summary": {"files": 0, "additions": 0, "deletions": 0},
+    }
     create_sandbox.assert_not_awaited()
 
 
@@ -1945,6 +2137,8 @@ async def test_turn_diff_preserves_changes_before_mid_run_plan_mode(monkeypatch)
         None,
         "refs/open-swe/turns/msg-1",
         "refs/open-swe/turns/msg-1-plan",
+        max_files=200,
+        include_content=True,
         repo_path="/workspace/repo",
     )
 
@@ -1980,6 +2174,8 @@ async def test_turn_diff_reads_the_checkpoint_repository(monkeypatch) -> None:
         None,
         "refs/open-swe/turns/msg-1",
         "refs/open-swe/turns/msg-2",
+        max_files=200,
+        include_content=True,
         repo_path="/workspace/repo",
     )
 
@@ -2008,7 +2204,12 @@ async def test_turn_diff_rejects_checkpoints_from_different_repositories(monkeyp
 
     result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
 
-    assert result == {"status": "missing", "files": [], "truncated": False}
+    assert result == {
+        "status": "missing",
+        "files": [],
+        "truncated": False,
+        "summary": {"files": 0, "additions": 0, "deletions": 0},
+    }
     create_sandbox.assert_not_awaited()
 
 
