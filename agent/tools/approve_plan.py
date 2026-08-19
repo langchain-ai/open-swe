@@ -53,7 +53,7 @@ async def approve_plan(
         content = await get_plan_content(str(thread_id), raise_on_error=True) or {}
         if content.get("status") == PLAN_STATUS_SHARED:
             return {"success": False, "error": "shared content is not an implementation plan"}
-        plan_html = str(content.get("html", "")).strip()
+        plan = str(content.get("html") or content.get("markdown") or "").strip()
         comments = await list_plan_comments(str(thread_id), raise_on_error=True)
         feedback = _format_comments(comments)
         await set_plan_status(
@@ -71,7 +71,7 @@ async def approve_plan(
             "plan_mode": False,
             "messages": [
                 ToolMessage(
-                    content=_approved_message(plan_html, feedback),
+                    content=_approved_message(plan, feedback),
                     tool_call_id=tool_call_id,
                 )
             ],
@@ -127,13 +127,13 @@ def _format_comments(comments: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _approved_message(plan_html: str, feedback: str) -> str:
-    if plan_html:
+def _approved_message(plan: str, feedback: str) -> str:
+    if plan:
         message = (
-            "Plan mode is now inactive because the plan was approved. Use the reviewed HTML "
-            "artifact below as the implementation guide. Apply reasonable engineering judgment "
-            "where details need adjustment while preserving its goals and reviewer edits:\n\n"
-            f"{plan_html}"
+            "Plan mode is now inactive because the plan was approved. Use the reviewed plan "
+            "below as the implementation guide. Apply reasonable engineering judgment where "
+            "details need adjustment while preserving its goals and reviewer edits:\n\n"
+            f"{plan}"
         )
     else:
         message = (

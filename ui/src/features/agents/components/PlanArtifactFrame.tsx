@@ -15,10 +15,7 @@ const ARTIFACT_CSP = [
   "connect-src 'none'",
 ].join("; ")
 
-export function withViewerPolicy(
-  html: string,
-  theme: "light" | "dark"
-): string {
+function withViewerPolicy(html: string, theme: "light" | "dark"): string {
   const policy = `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}">`
   const themed = html.replace(
     /<html(?=\s|>)/i,

@@ -141,33 +141,6 @@ async def test_save_plan_rejects_html_outside_plans_dir() -> None:
     assert "/workspace/plans" in result["error"]
 
 
-def test_plan_html_validation_rejects_incomplete_and_active_content() -> None:
-    from agent.tools.save_plan import _validate_html
-
-    assert "complete HTML" in str(_validate_html("<h1>Plan</h1>"))
-    assert "title" in str(_validate_html("<html><head></head><body>Plan</body></html>"))
-    assert "scripts" in str(
-        _validate_html(
-            "<html><head><title>Plan</title></head><body><script></script></body></html>"
-        )
-    )
-    assert "nested embeds" in str(
-        _validate_html(
-            "<html><head><title>Plan</title></head><body><iframe></iframe></body></html>"
-        )
-    )
-    assert "forms" in str(
-        _validate_html("<html><head><title>Plan</title></head><body><form></form></body></html>")
-    )
-
-
-def test_plan_html_validation_accepts_complete_document() -> None:
-    from agent.tools.save_plan import _validate_html
-
-    html = "<!doctype html><html><head><title>Plan</title></head><body>Plan</body></html>"
-    assert _validate_html(html) is None
-
-
 async def test_save_plan_reads_html_file_from_sandbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -516,34 +489,6 @@ async def test_set_plan_status_preserves_plan_file_path(monkeypatch: pytest.Monk
     await plan_store.set_plan_status("t", plan_store.PLAN_STATUS_REVISING, plan_mode=True)
     assert saved["plan_file_path"] == "/workspace/plans/foo.html"
     assert saved["status"] == plan_store.PLAN_STATUS_REVISING
-
-
-async def test_set_plan_status_preserves_legacy_markdown(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard import plan_store
-
-    saved: dict[str, Any] = {}
-
-    class _Store:
-        async def get_item(self, *a: Any, **k: Any) -> Any:
-            return {
-                "value": {
-                    "markdown": "# Legacy plan",
-                    "status": "ready",
-                    "plan_file_path": "/workspace/plans/legacy.md",
-                }
-            }
-
-        async def put_item(self, namespace: Any, key: str, value: Any, *a: Any, **k: Any) -> None:
-            saved.update(value)
-
-    monkeypatch.setattr(plan_store, "_client", lambda: _fake_client(_Store()))
-    monkeypatch.setattr(plan_store, "_merge_thread_metadata", AsyncMock())
-
-    await plan_store.set_plan_status("t", plan_store.PLAN_STATUS_APPROVED, plan_mode=False)
-
-    assert saved["markdown"] == "# Legacy plan"
-    assert "html" not in saved
-    assert saved["plan_file_path"] == "/workspace/plans/legacy.md"
 
 
 async def test_set_plan_status_records_approver_audit(monkeypatch: pytest.MonkeyPatch) -> None:

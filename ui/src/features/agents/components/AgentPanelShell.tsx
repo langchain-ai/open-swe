@@ -20,8 +20,8 @@ const PANEL_TAB_META: Record<
 > = {
   review: { label: "Review", hint: "⌃⇧G", Icon: FileDiff },
   terminal: { label: "Terminal", Icon: SquareTerminal },
-  browser: { label: "Browser", hint: "⌘T", Icon: Globe },
-  files: { label: "Files", hint: "⌘P", Icon: Folder },
+  browser: { label: "Browser", Icon: Globe },
+  files: { label: "Files", Icon: Folder },
 }
 
 const PANEL_STORAGE_WIDTH = "open-swe.gitpanel.width"

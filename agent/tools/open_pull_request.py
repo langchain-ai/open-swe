@@ -540,7 +540,7 @@ async def _plan_reference_line(configurable: dict[str, Any]) -> str | None:
     except Exception:
         logger.debug("Failed to look up plan content for %s", thread_id, exc_info=True)
         return None
-    if not plan or not str(plan.get("html", "")).strip():
+    if not plan or not str(plan.get("html") or plan.get("markdown") or "").strip():
         return None
     plan_url = dashboard_plan_url(thread_id)
     if not plan_url:

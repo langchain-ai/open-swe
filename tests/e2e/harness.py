@@ -102,35 +102,6 @@ async def control_state() -> JSONResponse:
     )
 
 
-@app.post("/control/legacy-markdown-plan")
-async def control_legacy_markdown_plan(request: Request) -> JSONResponse:
-    from langgraph_sdk import get_client
-
-    from agent.dashboard.plan_store import get_plan_content, save_plan_content
-
-    body = await request.json()
-    thread_id = str(body.get("thread_id") or uuid.uuid4())
-    markdown = str(body.get("markdown") or "# Legacy plan\n\nPreserved Markdown content.")
-    client = get_client(url=os.environ["LANGGRAPH_URL"])
-    await client.threads.create(
-        thread_id=thread_id,
-        metadata={
-            "source": "dashboard",
-            "github_login": "alice",
-            "triggering_user_email": "alice@example.com",
-            "plan_mode": True,
-            "plan_status": "ready",
-        },
-    )
-    await save_plan_content(
-        thread_id,
-        markdown=markdown,
-        status="ready",
-        plan_file_path="/workspace/plans/legacy-plan.md",
-    )
-    return JSONResponse({"thread_id": thread_id, "plan": await get_plan_content(thread_id)})
-
-
 @app.get("/control/snapshots")
 async def control_snapshots() -> JSONResponse:
     """Snapshot captures/deletes the environment tools asked the platform for."""

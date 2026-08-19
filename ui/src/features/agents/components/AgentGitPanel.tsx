@@ -12,10 +12,7 @@ import {
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
 import { agentsApi } from "@/features/agents/lib/api"
-import {
-  useAgentThreadPrDiff,
-  useAgentThreadTurnDiff,
-} from "@/features/agents/lib/queries"
+import { useAgentThreadTurnDiff } from "@/features/agents/lib/queries"
 import { ReviewTab } from "@/features/reviews/components/ReviewTab"
 import { AgentPanelShell } from "@/features/agents/components/AgentPanelShell"
 import {
@@ -172,10 +169,7 @@ export function AgentGitPanel({
     setCollapsed(false)
   }
 
-  const prDiff = useAgentThreadPrDiff(thread.id, Boolean(pr))
-  // Without a PR the sandbox's git checkpoints are the only source of truth for
-  // what this thread changed.
-  const turnDiff = useAgentThreadTurnDiff(thread.id, null, !pr && !collapsed)
+  const turnDiff = useAgentThreadTurnDiff(thread.id, null, !collapsed)
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const canDownloadRecovery =
@@ -206,8 +200,8 @@ export function AgentGitPanel({
   }, [thread.id])
 
   const files = useMemo(
-    () => toPanelFiles(prDiff.data?.files ?? turnDiff.data?.files ?? []),
-    [prDiff.data, turnDiff.data]
+    () => toPanelFiles(turnDiff.data?.files ?? []),
+    [turnDiff.data]
   )
 
   const totals = useMemo(
@@ -221,9 +215,9 @@ export function AgentGitPanel({
       ),
     [files]
   )
-  const truncated = prDiff.data?.truncated ?? turnDiff.data?.truncated
-  const tabLabels = { diff: "Branch", review: "Review", commits: "Committed" }
-  const refreshDiff = () => void (pr ? prDiff.refetch() : turnDiff.refetch())
+  const truncated = turnDiff.data?.truncated
+  const tabLabels = { diff: "Thread", review: "Review", commits: "Committed" }
+  const refreshDiff = () => void turnDiff.refetch()
 
   const reviewHeader = (
     <div className="shrink-0 px-3 pb-2">
@@ -353,7 +347,9 @@ export function AgentGitPanel({
                   fullScreen={fullScreen}
                   hideHeader
                   emptyLabel={
-                    prDiff.isLoading ? "Loading PR diff…" : "No diff available."
+                    turnDiff.isLoading
+                      ? "Loading thread diff…"
+                      : "No diff available."
                   }
                   truncated={truncated}
                 />
