@@ -20,7 +20,7 @@ Always resolve the target to a canonical `https://github.com/<owner>/<repo>/pull
 
 1. Read the repository's `AGENTS.md` and check the worktree before any possible code change.
 2. Fetch fresh PR state with `gh pr view` and the complete attached check set with `gh pr checks --json name,bucket,state,workflow,link`.
-3. On local/desktop runs, do not call `manage_baby_sit`. For `stop`, end the local workflow. Otherwise, when checks are pending, run `timeout 55m gh pr checks <PR URL> --watch --interval 60` with an execution timeout of at least 60 minutes, then re-fetch the complete PR and check state. This bounded foreground watch is the only allowed local polling loop.
+3. On local/desktop runs, do not call `manage_baby_sit`. For `stop`, end the local workflow. Otherwise, when checks are pending, run `gh pr checks <PR URL> --watch --interval 60` with the `execute` tool's timeout set to 3300 seconds, then re-fetch the complete PR and check state. This bounded foreground watch is the only allowed local polling loop.
 4. For cloud `stop`, call `manage_baby_sit` with action `stop`, report the result in the source thread, and end.
 5. If the PR is closed or all checks are already terminal and non-failing, report that no watch is needed.
 6. Otherwise, on cloud runs call `manage_baby_sit` with action `start`. The watch reacts immediately to failing GitHub webhooks and uses a deterministic 10-minute fallback that consumes no model tokens while state is unchanged.
