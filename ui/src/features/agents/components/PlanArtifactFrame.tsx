@@ -1,5 +1,6 @@
 import { useMemo } from "react"
 
+import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
 import { useResolvedTheme } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
@@ -42,13 +43,11 @@ export function PlanArtifactFrame({
   const srcDoc = useMemo(() => withViewerPolicy(html, theme), [html, theme])
 
   return (
-    <iframe
-      data-testid="plan-artifact-frame"
+    <SandboxedHtmlFrame
+      testId="plan-artifact-frame"
       title={title}
-      sandbox=""
-      referrerPolicy="no-referrer"
-      srcDoc={srcDoc}
-      className={cn("block w-full border-0 bg-background", className)}
+      html={srcDoc}
+      className={cn("bg-background", className)}
     />
   )
 }
