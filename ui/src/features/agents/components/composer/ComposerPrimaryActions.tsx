@@ -190,7 +190,11 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
 
   return (
     <div className="flex gap-1">
-      <SendButton {...props} label="Steer agent" />
+      <SendButton
+        {...props}
+        canSubmit={props.canSubmit && !stopping}
+        label="Steer agent"
+      />
       <StopButton
         disabled={stopping}
         onStop={() => void handleStop()}
