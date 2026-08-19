@@ -9,6 +9,7 @@ import {
 } from "react"
 import { ChevronDown } from "lucide-react"
 
+import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { UserMessage } from "./UserMessage"
@@ -46,7 +47,7 @@ function QueuedMessages({
             </div>
             {message.content && (
               <div className="break-words whitespace-pre-wrap">
-                {message.content}
+                <SkillPromptText text={message.content} />
               </div>
             )}
             {imageCount > 0 && (

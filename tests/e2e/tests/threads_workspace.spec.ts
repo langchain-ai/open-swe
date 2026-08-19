@@ -6,7 +6,10 @@ import {
   type Page,
 } from "@playwright/test";
 
-const USER = { login: "alice", email: "alice@example.com" };
+const USER = {
+  login: "threads-workspace-e2e",
+  email: "threads-workspace-e2e@example.com",
+};
 const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 const SAME_ORIGIN_HEADERS = { origin: BASE_URL, referer: `${BASE_URL}/` };
 const WORKSPACE_QUERY = "E2E Workspace";
@@ -677,7 +680,19 @@ test.describe("threads workspace", () => {
     await expect(slackGroup).not.toContainText(TITLES.attention);
 
     await main.getByRole("button", { name: "Board" }).click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("layout"))
+      .toBe("board");
     await main.getByLabel("Group by").selectOption("focus");
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("group"))
+      .toBe("focus");
+    await expectBoardOrder(main, [
+      "Needs attention",
+      "In progress",
+      "Ready",
+      "Done",
+    ]);
     await main
       .getByRole("button", { name: "Move Needs attention right" })
       .click();

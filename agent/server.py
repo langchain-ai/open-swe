@@ -98,6 +98,7 @@ from .middleware import (
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
+    WorkflowPushGuardMiddleware,
     WorkingRepoMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
@@ -120,6 +121,8 @@ from .runtime.execution import graph_loaded_for_execution
 from .thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from .tools import (
     approve_plan,
+    background_execute,
+    background_task,
     capture_environment_snapshot,
     delete_environment,
     delete_user_skill,
@@ -626,6 +629,8 @@ async def recreate_sandbox_for_thread(
 PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
         "task",
+        "background_execute",
+        "background_task",
         "http_request",
         "manage_baby_sit",
         "open_pull_request",
@@ -1431,6 +1436,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         fetch_url,
         web_search,
         approve_plan,
+        background_execute,
+        background_task,
         enter_plan_mode,
         save_plan,
         save_user_instructions,
@@ -1503,6 +1510,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         use_gateway=use_gateway,
         **subagent_model_kwargs,
     )
+    subagent_tools = [
+        tool
+        for tool in static_tools
+        if tool is not background_execute and tool is not background_task
+    ]
     title_model = _make_model_or_defer(
         title_model_id,
         use_gateway=use_gateway,
@@ -1515,7 +1527,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagents=[
             _general_purpose_subagent(
                 subagent_model,
-                tools=static_tools,
+                tools=subagent_tools,
                 skills=skill_sources,
                 dynamic_tools=dynamic_tool_middleware,
             ),
@@ -1565,6 +1577,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     max_delay=10.0,
                 ),
                 PullRequestCreationGuardMiddleware(),
+                WorkflowPushGuardMiddleware(),
                 refresh_github_proxy_before_model,
                 *([] if stop_summary_mode else [check_message_queue_before_model]),
                 TimeoutWrapupMiddleware(),
