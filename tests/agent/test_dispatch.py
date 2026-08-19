@@ -139,54 +139,20 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_stream_kwarg
 
 
 @pytest.mark.asyncio
-async def test_create_durable_run_persists_and_filters_entity_introductions() -> None:
+async def test_dispatch_accepts_prebuilt_input(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeClient()
-    entity = {
-        "role": "user",
-        "content": '<dynamic-context kind="person" id="github:octocat"></dynamic-context>',
-    }
-    actual = {
-        "role": "user",
-        "content": (
-            '<input-message sender="github:octocat" surface="web" kind="human">'
-            "<content>keep me</content></input-message>"
-        ),
-    }
+    run_input = {"messages": [{"role": "user", "content": "structured"}]}
 
-    await dispatch.create_durable_run(
-        "thread-1", "agent", input={"messages": [entity, actual]}, source="web", client=client
-    )
-    await dispatch.create_durable_run(
-        "thread-1", "agent", input={"messages": [entity, actual]}, source="web", client=client
+    await dispatch.dispatch_agent_run(
+        "thread-1",
+        None,
+        {},
+        source="github",
+        input=run_input,
+        client=client,
     )
 
-    assert client.runs.created[0]["input"]["messages"] == [entity, actual]
-    assert client.runs.created[1]["input"]["messages"] == [actual]
-    hashes = client.threads.metadata["injected_dynamic_context_hashes"]
-    assert len(hashes) == 1
-    assert len(hashes[0]) == 64
-
-
-@pytest.mark.asyncio
-async def test_create_durable_run_persists_introductions_only_after_dispatch() -> None:
-    client = _FakeClient()
-    entity = {
-        "role": "user",
-        "content": '<dynamic-context kind="person" id="github:octocat"></dynamic-context>',
-    }
-    client.runs.fail_next = True
-
-    with pytest.raises(RuntimeError, match="dispatch failed"):
-        await dispatch.create_durable_run(
-            "thread-1", "agent", input={"messages": [entity]}, source="web", client=client
-        )
-
-    assert client.threads.metadata == {}
-    await dispatch.create_durable_run(
-        "thread-1", "agent", input={"messages": [entity]}, source="web", client=client
-    )
-    assert client.runs.created[1]["input"]["messages"] == [entity]
-    assert len(client.threads.metadata["injected_dynamic_context_hashes"]) == 1
+    assert client.runs.created[0]["input"] == run_input
 
 
 def test_dispatch_slack_identity_includes_verified_context() -> None:

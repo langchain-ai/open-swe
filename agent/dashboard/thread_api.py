@@ -16,7 +16,6 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..dispatch import DASHBOARD_STREAM_MODES
 from ..input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -67,7 +66,15 @@ _TTFT_OBSERVER_TASKS: set[asyncio.Task[None]] = set()
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 # Modes required for the v2 event-stream protocol (`POST …/stream/events`).
-_DASHBOARD_STREAM_MODES = DASHBOARD_STREAM_MODES
+_DASHBOARD_STREAM_MODES: tuple[str, ...] = (
+    "values",
+    "updates",
+    "messages",
+    "messages-tuple",
+    "tools",
+    "checkpoints",
+    "events",
+)
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
@@ -1596,9 +1603,6 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
-    # Subagents run as subgraphs; without this the server streams only the top
-    # graph and their nested tool calls never reach the transcript.
-    params.setdefault("stream_subgraphs", True)
     params["config"] = {**client_config, "configurable": merged_configurable}
     params["metadata"] = run_metadata
     command["params"] = params

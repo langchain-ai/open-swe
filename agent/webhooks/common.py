@@ -1169,7 +1169,7 @@ async def _trigger_or_queue_run(
     logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
     await dispatch_agent_run(
         thread_id,
-        prompt,
+        None if input is not None else prompt,
         {
             "source": "github",
             "github_login": github_login,

@@ -50,11 +50,6 @@ class InputMessageContext(TypedDict):
     data: NotRequired[dict[str, object]]
 
 
-class TextContentBlock(TypedDict):
-    type: Literal["text"]
-    text: str
-
-
 class RunMessage(TypedDict):
     role: Literal["user", "system"]
     content: str | list[dict[str, Any]]

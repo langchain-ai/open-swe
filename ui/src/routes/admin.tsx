@@ -793,7 +793,7 @@ function DictationSection() {
               if (model === null) return
               if (model === "custom")
                 setCustomModel(preset ? "" : selectedModel)
-              else if (model) {
+              else {
                 setCustomModel(null)
                 save.mutate(model)
               }

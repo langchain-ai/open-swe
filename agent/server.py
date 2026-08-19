@@ -86,6 +86,7 @@ from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
+    DynamicContextMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
@@ -1627,6 +1628,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 refresh_github_proxy_before_model,
                 *([] if stop_summary_mode else [check_message_queue_before_model]),
                 TimeoutWrapupMiddleware(),
+                DynamicContextMiddleware(),
                 notify_step_limit_reached,
                 *fallback_middleware,
                 *plan_mode_middleware,

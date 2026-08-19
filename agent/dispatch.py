@@ -37,9 +37,6 @@ from .input_messages import (
     Surface,
     SystemIdentity,
     build_run_input,
-    dynamic_context_hashes_from_messages,
-    filter_new_dynamic_contexts,
-    injected_dynamic_context_hashes_from_metadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,27 +129,6 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
     )
 
 
-# `@langchain/react` subscribes to `messages`, `tools`, `lifecycle`, etc.;
-# legacy `messages-tuple`-only runs emit almost nothing on those channels. Every
-# run the dashboard can render must therefore carry the full set, whether it was
-# started from the UI or from a webhook.
-DASHBOARD_STREAM_MODES: tuple[str, ...] = (
-    "values",
-    "updates",
-    "messages",
-    "messages-tuple",
-    "tools",
-    "checkpoints",
-    "events",
-)
-
-# `runs.create` validates against a narrower enum than the streaming endpoints:
-# it has no `tools` mode (the client assembles tool calls from `messages`), and
-# passing it 422s the whole run.
-RUN_CREATE_STREAM_MODES: tuple[str, ...] = tuple(
-    mode for mode in DASHBOARD_STREAM_MODES if mode != "tools"
-)
-
 # FastAPI route the platform POSTs run completion/failure to. The platform
 # rejects loopback webhooks (relative URLs / localhost) — they bypass auth via
 # the in-process ASGI transport — so a loopback URL would 422 *every* run at
@@ -230,45 +206,6 @@ def prepare_run_config(
     return run_config
 
 
-async def _filter_first_seen_entities(
-    client: LangGraphClient,
-    thread_id: str,
-    input: RunInput,
-    metadata: dict[str, Any] | None,
-) -> tuple[RunInput, dict[str, Any] | None]:
-    thread_metadata: dict[str, Any] = {}
-    history_context_hashes: set[str] = set()
-    try:
-        thread = await client.threads.get(thread_id)
-        stored = thread.get("metadata") if isinstance(thread, dict) else None
-        if isinstance(stored, dict):
-            thread_metadata = stored
-        state = await client.threads.get_state(thread_id)
-        values = state.get("values") if isinstance(state, dict) else None
-        if isinstance(values, dict):
-            history_context_hashes = dynamic_context_hashes_from_messages(values.get("messages"))
-    except Exception:
-        logger.debug("Could not load prior entity state for thread %s", thread_id, exc_info=True)
-
-    injected = (
-        injected_dynamic_context_hashes_from_metadata(thread_metadata) | history_context_hashes
-    )
-    filtered_messages, newly_injected = filter_new_dynamic_contexts(
-        input.get("messages", []), injected
-    )
-    filtered_input: RunInput = {**input, "messages": filtered_messages}
-    all_injected = injected | newly_injected
-    if not all_injected:
-        return filtered_input, metadata
-
-    merged_metadata = {
-        **thread_metadata,
-        **(metadata or {}),
-        "injected_dynamic_context_hashes": sorted(all_injected),
-    }
-    return filtered_input, merged_metadata
-
-
 async def create_durable_run(
     thread_id: str,
     assistant_id: str,
@@ -283,12 +220,10 @@ async def create_durable_run(
     if_not_exists: str = "create",
     stream_mode: Any | None = None,
     stream_resumable: bool = True,
-    stream_subgraphs: bool = True,
     after_seconds: int | float | None = None,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
     client = client or dispatch_client()
-    input, metadata = await _filter_first_seen_entities(client, thread_id, input, metadata)
     run_config = prepare_run_config(config, metadata)
     create_kwargs: dict[str, Any] = {
         "input": input,
@@ -298,24 +233,15 @@ async def create_durable_run(
         "durability": durability,
         "if_not_exists": if_not_exists,
         "stream_resumable": stream_resumable,
-        # Subagents run as subgraphs, and the server streams only the top graph
-        # by default — without this their tool calls never reach the dashboard,
-        # so a subagent card can show that it is running but never what it did.
-        "stream_subgraphs": stream_subgraphs,
     }
-    create_kwargs["stream_mode"] = list(stream_mode or RUN_CREATE_STREAM_MODES)
     if COMPLETION_WEBHOOK_URL:
         create_kwargs["webhook"] = COMPLETION_WEBHOOK_URL
+    if stream_mode is not None:
+        create_kwargs["stream_mode"] = stream_mode
     if after_seconds is not None:
         create_kwargs["after_seconds"] = after_seconds
 
     run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
-    injected = injected_dynamic_context_hashes_from_metadata(metadata)
-    if injected:
-        try:
-            await client.threads.update(thread_id=thread_id, metadata=metadata or {})
-        except Exception:
-            logger.debug("Could not persist entity state for thread %s", thread_id, exc_info=True)
     logger.info(
         "Dispatched %s run on thread %s (source=%s, run=%s)",
         assistant_id,
