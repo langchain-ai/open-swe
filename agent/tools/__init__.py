@@ -25,6 +25,7 @@ _TOOL_MODULES = {
     "manage_baby_sit": ".manage_baby_sit",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
+    "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
     "read_repo_file": ".read_repo_file",
     "read_user_settings": ".read_user_settings",
@@ -72,6 +73,7 @@ __all__ = [
     "manage_baby_sit",
     "notify_automation_channel",
     "open_pull_request",
+    "output_iframe",
     "publish_review",
     "read_repo_file",
     "read_user_settings",
@@ -122,6 +124,7 @@ if TYPE_CHECKING:
     from .manage_baby_sit import manage_baby_sit
     from .notify_automation_channel import notify_automation_channel
     from .open_pull_request import open_pull_request
+    from .output_iframe import output_iframe
     from .publish_review import publish_review
     from .read_repo_file import read_repo_file
     from .read_user_settings import read_user_settings

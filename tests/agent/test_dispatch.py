@@ -82,9 +82,14 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["webhook"] == "https://app/webhooks/run-complete"
     # Resumable by default so the dashboard can join (and stop) a run it did not start.
     assert created["stream_resumable"] is True
-    assert created["config"]["metadata"] == {"kind": "test"}
+    prepare_run_id = created["config"]["configurable"]["prepare_run_id"]
+    assert created["config"]["metadata"] == {
+        "kind": "test",
+        "prepare_run_id": prepare_run_id,
+    }
+    assert created["metadata"] == created["config"]["metadata"]
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
-    assert isinstance(created["config"]["configurable"]["prepare_run_id"], str)
+    assert isinstance(prepare_run_id, str)
 
 
 @pytest.mark.asyncio

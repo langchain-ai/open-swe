@@ -7,6 +7,7 @@ const STORAGE_KEY = "open-swe.agents.sidebar-prefs"
 
 const GROUP_MODES: ReadonlyArray<SidebarGroupMode> = [
   "none",
+  "focus",
   "date",
   "status",
   "repo",

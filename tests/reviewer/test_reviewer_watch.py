@@ -243,10 +243,8 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
     assert configurable["re_review"] is True
     assert configurable["last_reviewed_sha"] == "oldsha"
     assert configurable["head_sha"] == "newsha"
-    assert kwargs["multitask_strategy"] == "interrupt"
-    # The interrupted follow-up run receives the new SHA in its own config; the
-    # prior run must not rebind its assessment or publication to this metadata.
-    # The live head is still persisted for watch state and other head-sensitive tools.
+    # The live head is persisted to thread metadata so a re-review queued into
+    # an in-flight run can resolve it despite the run's frozen config.
     head_sha_writes = [
         c.kwargs.get("head_sha")
         for c in set_meta.await_args_list

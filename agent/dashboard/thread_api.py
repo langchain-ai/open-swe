@@ -595,6 +595,7 @@ _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+_DISCOVERY_HISTORY_LIMIT = 5
 
 
 def _thread_id(thread: ThreadLike) -> str | None:
@@ -2335,10 +2336,21 @@ async def proxy_dashboard_thread_history(
 ) -> tuple[int, bytes, str | None]:
     _require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
+    try:
+        payload = json.loads(body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(400, "history body must be a JSON object") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "history body must be a JSON object")
+    limit = payload.get("limit", _DISCOVERY_HISTORY_LIMIT)
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise HTTPException(400, "history limit must be a positive integer")
+    if not any(payload.get(key) for key in ("before", "checkpoint", "metadata")):
+        payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = _langgraph_proxy_headers(content_type=content_type)
     async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
-        response = await client.post(url, content=body or b"{}", headers=headers)
+        response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 
