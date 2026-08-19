@@ -50,7 +50,9 @@ export function UserMessage({ message }: { message: Message }) {
         {(text || images.length > 0) && (
           <div
             className={`relative overflow-hidden rounded-2xl p-3 ${
-              isSystem ? "border border-border bg-muted/50" : "bg-accent"
+              isSystem
+                ? "border border-border bg-muted/50"
+                : "bg-primary text-primary-foreground shadow-sm shadow-primary/25"
             }`}
           >
             {images.length > 0 && (
@@ -73,7 +75,11 @@ export function UserMessage({ message }: { message: Message }) {
               <div
                 ref={textRef}
                 onScroll={updateScrollIndicators}
-                className="max-h-[250px] overflow-auto text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-accent-foreground"
+                className={`max-h-[250px] overflow-auto text-[14px] leading-[1.6] break-words whitespace-pre-wrap ${
+                  isSystem
+                    ? "text-accent-foreground"
+                    : "text-primary-foreground"
+                }`}
                 style={{
                   maskImage: textEdgeMask,
                   WebkitMaskImage: textEdgeMask,
