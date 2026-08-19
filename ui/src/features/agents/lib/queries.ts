@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect } from "react"
 
@@ -33,6 +38,8 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "workflow-approvals"] as const,
   page: (params: ThreadsPageParams) =>
     ["agent-threads", "lists", "page", params] as const,
+  infinitePages: (params: Omit<ThreadsPageParams, "offset">) =>
+    ["agent-threads", "lists", "infinite-pages", params] as const,
 }
 
 export function invalidateAgentThreadLists(queryClient: QueryClient): void {
@@ -509,6 +516,28 @@ export function useResolveAgentThread() {
       queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
       invalidateAgentThreadLists(queryClient)
     },
+  })
+}
+
+export function useInfiniteThreadsPages(
+  params: Omit<ThreadsPageParams, "offset">,
+  options: { enabled?: boolean; staleWhileRevalidate?: boolean } = {}
+) {
+  return useInfiniteQuery({
+    queryKey: agentThreadKeys.infinitePages(params),
+    queryFn: ({ pageParam }) =>
+      agentsApi.listThreadsPage({ ...params, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (page) =>
+      page.hasMore ? page.offset + page.items.length : undefined,
+    enabled: options.enabled,
+    ...(options.staleWhileRevalidate
+      ? {
+          staleTime: 30_000,
+          gcTime: Infinity,
+          refetchOnWindowFocus: true,
+        }
+      : {}),
   })
 }
 

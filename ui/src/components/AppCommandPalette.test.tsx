@@ -10,6 +10,7 @@ import { AppCommandPalette } from "./AppCommandPalette"
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
+  fetchNextPage: vi.fn(),
   cloudThread: { id: "cloud-1", title: "Cloud result" } as AgentThread,
   localThread: {
     id: "local-1",
@@ -27,10 +28,13 @@ vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mocks.navigate,
 }))
 vi.mock("@/features/agents/lib/queries", () => ({
-  useThreadsPage: () => ({
-    data: { items: [mocks.cloudThread] },
+  useInfiniteThreadsPages: () => ({
+    data: { pages: [{ items: [mocks.cloudThread] }] },
     isFetching: false,
     isError: false,
+    hasNextPage: true,
+    isFetchingNextPage: false,
+    fetchNextPage: mocks.fetchNextPage,
   }),
 }))
 vi.mock("@/features/agents/lib/desktopLocal", () => ({
@@ -82,6 +86,16 @@ describe("AppCommandPalette", () => {
       to: "/agents/local/$sessionId",
       params: { sessionId: "local-1" },
     })
+  })
+
+  it("loads additional cloud thread pages", () => {
+    render(
+      <AppCommandPalette commands={commands} open onOpenChange={vi.fn()} />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Load more threads" }))
+
+    expect(mocks.fetchNextPage).toHaveBeenCalledOnce()
   })
 
   it("closes on Escape", () => {

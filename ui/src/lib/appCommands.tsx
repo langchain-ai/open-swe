@@ -13,12 +13,7 @@ import type { DesktopCommandId } from "@/desktop"
 import { AppCommandPalette } from "@/components/AppCommandPalette"
 import { AppShortcutReference } from "@/components/AppShortcutReference"
 import { useSession } from "@/lib/session"
-import {
-  eventMatchesShortcut,
-  isHotkeySuppressed,
-  isTypingContext,
-  shouldIgnoreHotkey,
-} from "@/lib/hotkeys"
+import { eventMatchesShortcut, shouldIgnoreHotkey } from "@/lib/hotkeys"
 
 export interface AppCommand {
   id: string
@@ -173,12 +168,7 @@ export function AppCommandProvider({
     const desktop = window.openSweDesktop
     if (!desktop) return
     return desktop.onCommand((commandId) => {
-      if (
-        !enabledRef.current ||
-        isTypingContext(document.activeElement) ||
-        isHotkeySuppressed(document.activeElement)
-      )
-        return
+      if (!enabledRef.current) return
       const command = commandsRef.current.find(
         (candidate) =>
           candidate.desktopId === commandId && candidate.run !== undefined

@@ -13,7 +13,7 @@ import type { AppCommand } from "@/lib/appCommands"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { DesktopLocalThreadSummary } from "@/desktop"
 import { Kbd } from "@/components/ui/kbd"
-import { useThreadsPage } from "@/features/agents/lib/queries"
+import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { useDesktopLocalThreads } from "@/features/agents/lib/desktopLocal"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
@@ -124,10 +124,9 @@ export function AppCommandPalette({
     return () => window.clearTimeout(timer)
   }, [open, query])
 
-  const cloudThreads = useThreadsPage(
+  const cloudThreads = useInfiniteThreadsPages(
     {
       limit: 20,
-      offset: 0,
       q: debouncedQuery || undefined,
       scope: "interactive",
     },
@@ -138,11 +137,11 @@ export function AppCommandPalette({
     () =>
       buildPaletteResults(
         commands,
-        cloudThreads.data?.items ?? [],
+        cloudThreads.data?.pages.flatMap((page) => page.items) ?? [],
         localThreads.data ?? [],
         query
       ),
-    [cloudThreads.data?.items, commands, localThreads.data, query]
+    [cloudThreads.data?.pages, commands, localThreads.data, query]
   )
   const resultGroups = useMemo(() => {
     const grouped = new Map<string, Array<PaletteResult>>()
@@ -256,49 +255,64 @@ export function AppCommandPalette({
                 No commands or threads found.
               </p>
             ) : (
-              resultGroups.map(([group, groupResults]) => (
-                <div aria-label={group} key={group} role="group">
-                  <div className="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
-                    {group}
+              <>
+                {resultGroups.map(([group, groupResults]) => (
+                  <div aria-label={group} key={group} role="group">
+                    <div className="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                      {group}
+                    </div>
+                    {groupResults.map((result) => {
+                      const index = results.indexOf(result)
+                      const command =
+                        result.kind === "command" ? result.command : null
+                      const Icon =
+                        result.kind === "command"
+                          ? CommandIcon
+                          : result.kind === "local-thread"
+                            ? Laptop
+                            : MessageSquare
+                      return (
+                        <button
+                          aria-selected={index === activeIndex}
+                          className={cn(
+                            "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm",
+                            index === activeIndex
+                              ? "bg-accent text-accent-foreground"
+                              : "text-foreground"
+                          )}
+                          id={result.id}
+                          key={result.id}
+                          onClick={() => runResult(result)}
+                          onMouseEnter={() => setActiveIndex(index)}
+                          role="option"
+                          type="button"
+                        >
+                          <Icon className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 truncate">
+                            {result.label}
+                          </span>
+                          {command?.shortcuts?.[0] && (
+                            <ShortcutHint shortcut={command.shortcuts[0]} />
+                          )}
+                        </button>
+                      )
+                    })}
                   </div>
-                  {groupResults.map((result) => {
-                    const index = results.indexOf(result)
-                    const command =
-                      result.kind === "command" ? result.command : null
-                    const Icon =
-                      result.kind === "command"
-                        ? CommandIcon
-                        : result.kind === "local-thread"
-                          ? Laptop
-                          : MessageSquare
-                    return (
-                      <button
-                        aria-selected={index === activeIndex}
-                        className={cn(
-                          "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm",
-                          index === activeIndex
-                            ? "bg-accent text-accent-foreground"
-                            : "text-foreground"
-                        )}
-                        id={result.id}
-                        key={result.id}
-                        onClick={() => runResult(result)}
-                        onMouseEnter={() => setActiveIndex(index)}
-                        role="option"
-                        type="button"
-                      >
-                        <Icon className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1 truncate">
-                          {result.label}
-                        </span>
-                        {command?.shortcuts?.[0] && (
-                          <ShortcutHint shortcut={command.shortcuts[0]} />
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              ))
+                ))}
+                {cloudThreads.hasNextPage && (
+                  <button
+                    className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                    disabled={cloudThreads.isFetchingNextPage}
+                    onClick={() => void cloudThreads.fetchNextPage()}
+                    type="button"
+                  >
+                    {cloudThreads.isFetchingNextPage && (
+                      <LoaderCircle className="size-3.5 animate-spin" />
+                    )}
+                    Load more threads
+                  </button>
+                )}
+              </>
             )}
           </div>
         </Dialog.Popup>
