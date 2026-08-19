@@ -112,8 +112,8 @@ function consumeDataElements(source: string): boolean {
   }
 }
 
-// `<content>` is serialized last, so anchor on the final one: a data field can
-// never contribute markup of its own (its text is escaped).
+// Anchor on the final `<content>`: data fields can surround it but never
+// contribute markup of their own, since their text is escaped.
 function splitContent(
   body: string
 ): { content: string; remainder: string } | null {
