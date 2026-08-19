@@ -1349,6 +1349,124 @@ async def test_resolve_dashboard_thread_enforces_ownership(monkeypatch) -> None:
     assert exc_info.value.status_code == 404
 
 
+def test_thread_focus_state_body_rejects_unknown_state() -> None:
+    with pytest.raises(ValueError):
+        thread_api.ThreadFocusStateBody.model_validate({"focus_state": "blocked"})
+
+
+async def test_thread_summary_exposes_valid_manual_focus_state() -> None:
+    summary = await thread_api._thread_summary(
+        {
+            "thread_id": "tid",
+            "metadata": {
+                "source": "dashboard",
+                "github_login": "octocat",
+                "board_focus_state": "progress",
+            },
+        }
+    )
+    invalid = await thread_api._thread_summary(
+        {
+            "thread_id": "invalid",
+            "metadata": {
+                "source": "dashboard",
+                "github_login": "octocat",
+                "board_focus_state": "blocked",
+            },
+        }
+    )
+
+    assert summary["boardFocusState"] == "progress"
+    assert invalid["boardFocusState"] is None
+
+
+@pytest.mark.parametrize(
+    ("focus_state", "expected_state", "expected_resolved"),
+    [
+        ("attention", "attention", False),
+        ("progress", "progress", False),
+        ("ready", "ready", False),
+        ("done", None, True),
+    ],
+)
+async def test_set_dashboard_thread_focus_state(
+    monkeypatch,
+    focus_state: thread_api.ThreadFocusColumn,
+    expected_state: str | None,
+    expected_resolved: bool,
+) -> None:
+    updates: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "dashboard", "github_login": "octocat"},
+            }
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            updates.append(dict(metadata))
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    summary = await thread_api.set_dashboard_thread_focus_state(
+        "tid", "octocat", focus_state=focus_state
+    )
+
+    assert updates[-1]["board_focus_state"] == expected_state
+    assert updates[-1]["resolved"] is expected_resolved
+    assert summary["boardFocusState"] == expected_state
+    assert summary["resolved"] is expected_resolved
+    if expected_resolved:
+        assert isinstance(updates[-1]["resolved_at_ms"], int)
+    else:
+        assert updates[-1]["resolved_at_ms"] is None
+
+
+async def test_set_dashboard_thread_focus_state_enforces_ownership(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "dashboard", "github_login": "owner"},
+            }
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.set_dashboard_thread_focus_state("tid", "intruder", focus_state="ready")
+
+    assert exc_info.value.status_code == 404
+
+
+async def test_set_dashboard_thread_focus_state_surfaces_update_failure(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "dashboard", "github_login": "octocat"},
+            }
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            raise RuntimeError("store unavailable")
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.set_dashboard_thread_focus_state("tid", "octocat", focus_state="attention")
+
+    assert exc_info.value.status_code == 502
+
+
 async def test_enrich_run_start_command_unresolves_thread(monkeypatch) -> None:
     updates: list[dict[str, object]] = []
 

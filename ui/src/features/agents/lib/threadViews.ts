@@ -1,4 +1,9 @@
-import type { AgentSource, AgentStatus, AgentThread } from "./types"
+import type {
+  AgentSource,
+  AgentStatus,
+  AgentThread,
+  ThreadFocusColumn,
+} from "./types"
 
 export type ThreadsLayout = "board" | "list"
 export type ThreadGrouping =
@@ -8,6 +13,11 @@ export interface ThreadViewGroup {
   key: string
   label: string
   threads: Array<AgentThread>
+}
+
+interface ThreadGroupDefinition {
+  key: string
+  label: string
 }
 
 export const THREAD_GROUPING_OPTIONS: Array<{
@@ -22,7 +32,10 @@ export const THREAD_GROUPING_OPTIONS: Array<{
   { value: "none", label: "None" },
 ]
 
-const FOCUS_GROUPS = [
+export const THREAD_FOCUS_GROUPS: Array<{
+  key: ThreadFocusColumn
+  label: string
+}> = [
   { key: "attention", label: "Needs attention" },
   { key: "progress", label: "In progress" },
   { key: "ready", label: "Ready" },
@@ -69,8 +82,9 @@ const PR_GROUPS = [
   { key: "closed", label: "Closed" },
 ]
 
-function focusKey(thread: AgentThread): string {
+function focusKey(thread: AgentThread): ThreadFocusColumn {
   if (thread.resolved) return "done"
+  if (thread.boardFocusState) return thread.boardFocusState
   if (thread.status === "running") return "progress"
   if (
     thread.status === "error" ||
@@ -89,9 +103,10 @@ function sortThreads(threads: Array<AgentThread>): Array<AgentThread> {
 }
 
 function buildGroups(
-  definitions: Array<{ key: string; label: string }>,
+  definitions: Array<ThreadGroupDefinition>,
   threads: Array<AgentThread>,
-  keyFor: (thread: AgentThread) => string
+  keyFor: (thread: AgentThread) => string,
+  includeEmpty: boolean
 ): Array<ThreadViewGroup> {
   const grouped = new Map<string, Array<AgentThread>>()
   for (const thread of threads) {
@@ -99,7 +114,7 @@ function buildGroups(
     grouped.set(key, [...(grouped.get(key) ?? []), thread])
   }
   return definitions
-    .filter(({ key }) => grouped.has(key))
+    .filter(({ key }) => includeEmpty || grouped.has(key))
     .map(({ key, label }) => ({
       key,
       label,
@@ -107,48 +122,73 @@ function buildGroups(
     }))
 }
 
-export function groupThreadsForView(
+export function threadGroupDefinitions(
   threads: Array<AgentThread>,
   grouping: ThreadGrouping
+): Array<ThreadGroupDefinition> {
+  if (grouping === "focus") return THREAD_FOCUS_GROUPS
+  if (grouping === "status") {
+    return STATUS_ORDER.map((key) => ({ key, label: STATUS_LABELS[key] }))
+  }
+  if (grouping === "source") {
+    return SOURCE_ORDER.map((key) => ({ key, label: SOURCE_LABELS[key] }))
+  }
+  if (grouping === "pr") return PR_GROUPS
+  if (grouping === "none") return [{ key: "all", label: "All threads" }]
+  return [
+    ...new Set(threads.map((thread) => thread.repoFullName || "No repository")),
+  ]
+    .sort((left, right) => left.localeCompare(right))
+    .map((label) => ({ key: label, label }))
+}
+
+export function groupThreadsForView(
+  threads: Array<AgentThread>,
+  grouping: ThreadGrouping,
+  options: { includeEmpty?: boolean } = {}
 ): Array<ThreadViewGroup> {
-  if (threads.length === 0) return []
+  if (threads.length === 0 && !options.includeEmpty) return []
+  const definitions = threadGroupDefinitions(threads, grouping)
   if (grouping === "none") {
     return [{ key: "all", label: "All threads", threads: sortThreads(threads) }]
   }
   if (grouping === "focus") {
-    return buildGroups(FOCUS_GROUPS, threads, focusKey)
+    return buildGroups(
+      definitions,
+      threads,
+      focusKey,
+      options.includeEmpty === true
+    )
   }
   if (grouping === "status") {
     return buildGroups(
-      STATUS_ORDER.map((key) => ({ key, label: STATUS_LABELS[key] })),
+      definitions,
       threads,
-      (thread) => thread.status
+      (thread) => thread.status,
+      options.includeEmpty === true
     )
   }
   if (grouping === "source") {
     return buildGroups(
-      SOURCE_ORDER.map((key) => ({ key, label: SOURCE_LABELS[key] })),
+      definitions,
       threads,
-      (thread) => thread.source ?? "dashboard"
+      (thread) => thread.source ?? "dashboard",
+      options.includeEmpty === true
     )
   }
   if (grouping === "pr") {
     return buildGroups(
-      PR_GROUPS,
+      definitions,
       threads,
-      (thread) => thread.pr?.state ?? "none"
+      (thread) => thread.pr?.state ?? "none",
+      options.includeEmpty === true
     )
   }
-  const labels = new Set(
-    threads.map((thread) => thread.repoFullName || "No repository")
-  )
-  const definitions = [...labels]
-    .sort((left, right) => left.localeCompare(right))
-    .map((label) => ({ key: label, label }))
   return buildGroups(
     definitions,
     threads,
-    (thread) => thread.repoFullName || "No repository"
+    (thread) => thread.repoFullName || "No repository",
+    options.includeEmpty === true
   )
 }
 
@@ -168,6 +208,23 @@ export function reconcileColumnOrder(
     return true
   })
   return [...saved, ...defaultKeys.filter((key) => !seen.has(key))]
+}
+
+export function parseHiddenColumns(value?: string): Array<string> {
+  return value?.split("|").filter(Boolean) ?? []
+}
+
+export function reconcileHiddenColumns(
+  availableKeys: Array<string>,
+  savedKeys: Array<string>
+): Array<string> {
+  const available = new Set(availableKeys)
+  const seen = new Set<string>()
+  return savedKeys.filter((key) => {
+    if (!available.has(key) || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 export function moveColumn(

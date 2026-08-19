@@ -7,9 +7,16 @@ import type { QueryClient } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
   SidebarThreads,
+  ThreadsPage,
   ThreadsPageParams,
 } from "./api"
-import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
+import type {
+  AgentThread,
+  Chunk,
+  ImageChunk,
+  Message,
+  ThreadFocusColumn,
+} from "./types"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
 
@@ -494,6 +501,97 @@ export function useResolveAgentThread() {
       agentsApi.resolveThread(vars.threadId, vars.resolved),
     onSuccess: (thread, vars) => {
       queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
+      invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
+function replaceThreadInPage(
+  page: ThreadsPage | undefined,
+  thread: AgentThread
+): ThreadsPage | undefined {
+  if (!page?.items.some((item) => item.id === thread.id)) return page
+  return {
+    ...page,
+    items: page.items.map((item) => (item.id === thread.id ? thread : item)),
+  }
+}
+
+export function useSetAgentThreadFocusState() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: { threadId: string; focusState: ThreadFocusColumn }) =>
+      agentsApi.setThreadFocusState(vars.threadId, vars.focusState),
+    onMutate: async (vars) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: agentThreadKeys.lists }),
+        queryClient.cancelQueries({
+          queryKey: agentThreadKeys.detail(vars.threadId),
+        }),
+      ])
+      const previousPages = queryClient.getQueriesData<ThreadsPage>({
+        queryKey: ["agent-threads", "lists", "page"],
+      })
+      const previousDetail = queryClient.getQueryData<AgentThread>(
+        agentThreadKeys.detail(vars.threadId)
+      )
+      const pageThread = previousPages
+        .flatMap(([, page]) => page?.items ?? [])
+        .find((thread) => thread.id === vars.threadId)
+      const current = previousDetail ?? pageThread
+      if (current) {
+        const resolved = vars.focusState === "done"
+        const optimistic: AgentThread = {
+          ...current,
+          boardFocusState: vars.focusState === "done" ? null : vars.focusState,
+          resolved,
+          resolvedAt: resolved ? Date.now() : null,
+        }
+        queryClient.setQueryData(
+          agentThreadKeys.detail(vars.threadId),
+          optimistic
+        )
+        queryClient.setQueriesData<ThreadsPage>(
+          { queryKey: ["agent-threads", "lists", "page"] },
+          (page) => replaceThreadInPage(page, optimistic)
+        )
+      }
+      return { previousDetail, previousPages }
+    },
+    onError: (_error, vars, context) => {
+      if (context?.previousDetail) {
+        queryClient.setQueryData(
+          agentThreadKeys.detail(vars.threadId),
+          context.previousDetail
+        )
+      } else {
+        queryClient.removeQueries({
+          queryKey: agentThreadKeys.detail(vars.threadId),
+        })
+      }
+      for (const [queryKey, page] of context?.previousPages ?? []) {
+        const previousThread = page?.items.find(
+          (thread) => thread.id === vars.threadId
+        )
+        if (previousThread) {
+          queryClient.setQueryData<ThreadsPage>(queryKey, (current) =>
+            replaceThreadInPage(current, previousThread)
+          )
+        }
+      }
+    },
+    onSuccess: (thread) => {
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
+      queryClient.setQueriesData<ThreadsPage>(
+        { queryKey: ["agent-threads", "lists", "page"] },
+        (page) => replaceThreadInPage(page, thread)
+      )
+    },
+    onSettled: (_thread, _error, vars) => {
+      void queryClient.invalidateQueries({
+        queryKey: agentThreadKeys.detail(vars.threadId),
+      })
       invalidateAgentThreadLists(queryClient)
     },
   })

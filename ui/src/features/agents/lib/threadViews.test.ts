@@ -5,7 +5,9 @@ import {
   moveColumn,
   moveColumnBefore,
   parseColumnOrder,
+  parseHiddenColumns,
   reconcileColumnOrder,
+  reconcileHiddenColumns,
 } from "./threadViews"
 import type { AgentThread } from "./types"
 
@@ -49,6 +51,49 @@ describe("groupThreadsForView", () => {
     expect(
       groups.flatMap((group) => group.threads.map((item) => item.id)).sort()
     ).toEqual(threads.map((item) => item.id).sort())
+  })
+
+  it("prefers a manual focus state while resolved remains terminal", () => {
+    const groups = groupThreadsForView(
+      [
+        thread({
+          id: "manual",
+          status: "running",
+          boardFocusState: "ready",
+        }),
+        thread({
+          id: "resolved",
+          resolved: true,
+          boardFocusState: "attention",
+        }),
+      ],
+      "focus"
+    )
+
+    expect(groups.find((group) => group.key === "ready")?.threads[0]?.id).toBe(
+      "manual"
+    )
+    expect(groups.find((group) => group.key === "done")?.threads[0]?.id).toBe(
+      "resolved"
+    )
+  })
+
+  it("keeps empty focus columns available as board drop targets", () => {
+    const groups = groupThreadsForView(
+      [thread({ id: "ready", status: "idle" })],
+      "focus",
+      { includeEmpty: true }
+    )
+
+    expect(groups.map((group) => group.key)).toEqual([
+      "attention",
+      "progress",
+      "ready",
+      "done",
+    ])
+    expect(groups.find((group) => group.key === "attention")?.threads).toEqual(
+      []
+    )
   })
 
   it("uses the canonical status order without treating resolved as a status", () => {
@@ -128,5 +173,21 @@ describe("column ordering", () => {
       "done",
     ])
     expect(moveColumnBefore(order, "attention", "progress")).toEqual(order)
+  })
+})
+
+describe("column visibility", () => {
+  it("drops stale and duplicate hidden keys without hiding new columns", () => {
+    expect(parseHiddenColumns("ready|stale|ready")).toEqual([
+      "ready",
+      "stale",
+      "ready",
+    ])
+    expect(
+      reconcileHiddenColumns(
+        ["attention", "progress", "ready", "done", "review"],
+        parseHiddenColumns("ready|stale|ready")
+      )
+    ).toEqual(["ready"])
   })
 })
