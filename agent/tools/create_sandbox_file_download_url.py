@@ -41,18 +41,9 @@ async def _create_sandbox_file_download_url(
         else posixpath.join(work_dir, file_path.strip())
     )
     backend = unwrap_sandbox_backend(backend_proxy)
-    sandbox = getattr(backend, "sandbox", None)
-    generate_download_url = getattr(sandbox, "generate_download_url", None)
-    if not callable(generate_download_url):
-        raise RuntimeError("download URLs are only available for LangSmith sandboxes")
-
-    sandbox_name = getattr(backend, "id", None)
-    if not isinstance(sandbox_name, str) or not sandbox_name:
-        raise RuntimeError("LangSmith sandbox does not have an ID")
-
     async with get_async_sandbox_client() as client:
         download = await client.generate_download_url(
-            sandbox_name,
+            backend.id,
             path,
             expires_in_seconds=expires_in_seconds,
             content_type=content_type,
@@ -61,11 +52,13 @@ async def _create_sandbox_file_download_url(
     if unwrap_sandbox_backend(backend_proxy) is not backend:
         raise RuntimeError("sandbox changed while creating the download URL; retry")
 
-    url = getattr(download, "download_url", None)
-    if not isinstance(url, str) or not url:
+    if not download.download_url:
         raise RuntimeError("LangSmith did not return a download URL")
-    expires_at = getattr(download, "expires_at", None)
-    return {"url": url, "file_path": path, "expires_at": expires_at}
+    return {
+        "url": download.download_url,
+        "file_path": path,
+        "expires_at": download.expires_at,
+    }
 
 
 create_sandbox_file_download_url = tool(

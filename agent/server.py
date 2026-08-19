@@ -108,7 +108,7 @@ from .middleware import (
 )
 from .middleware.prepare_run import PrepareRunState
 from .middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from .prompt import OPEN_SWE_SHARED_BASE, construct_system_prompt
+from .prompt import construct_system_prompt, render_open_swe_shared_base
 from .runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
@@ -676,6 +676,8 @@ def _general_purpose_subagent(
     tools: Sequence[Any],
     skills: list[str] | None = None,
     dynamic_tools: DynamicToolMiddleware | None = None,
+    *,
+    sandbox_file_downloads: bool = False,
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -686,7 +688,9 @@ def _general_purpose_subagent(
         # Deep Agents' default GP prompt covers only task mechanics; the shared
         # base carries the Open SWE identity and conventions (gh proxy usage,
         # tool-call cadence) that delegated work also needs.
-        "system_prompt": OPEN_SWE_SHARED_BASE + "\n\n" + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        "system_prompt": render_open_swe_shared_base(sandbox_file_downloads=sandbox_file_downloads)
+        + "\n\n"
+        + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
         "middleware": [
@@ -890,6 +894,14 @@ async def _cached_profile(profile_login: str | None):
         return None
     return await ttl_cache.cached(
         f"profile:{profile_login}", 30, lambda: load_profile(profile_login)
+    )
+
+
+def _sandbox_file_downloads_enabled(configurable: dict[str, Any] | None = None) -> bool:
+    """Return whether signed sandbox file downloads are available for this run."""
+    return (
+        os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
+        and (configurable or {}).get("stop_summary") is not True
     )
 
 
@@ -1177,6 +1189,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 admin_environments=self._admin_environments,
                 source=self._source,
                 slack_context=_slack_tools_enabled(configurable),
+                sandbox_file_downloads=_sandbox_file_downloads_enabled(configurable),
             ),
         }
 
@@ -1395,6 +1408,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Admin thread %s: adding environment management tools", thread_id)
 
     stop_summary_mode = configurable.get("stop_summary") is True
+    sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable) and not local_run
     observability_tools: list[Any] = []
     corridor_tools: list[Any] = []
     browser_tools: list[Any] = []
@@ -1456,7 +1470,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         notify_automation_channel,
         open_pull_request,
         output_iframe,
-        create_sandbox_file_download_url,
+        *((create_sandbox_file_download_url,) if sandbox_file_downloads else ()),
         read_user_settings,
         request_pr_review,
         recreate_sandbox,
@@ -1532,6 +1546,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 tools=subagent_tools,
                 skills=skill_sources,
                 dynamic_tools=dynamic_tool_middleware,
+                sandbox_file_downloads=sandbox_file_downloads,
             ),
             *([_browser_subagent(subagent_model, browser_tools)] if browser_tools else []),
         ],

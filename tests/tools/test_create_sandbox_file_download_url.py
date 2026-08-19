@@ -7,11 +7,6 @@ import pytest
 download_tool = importlib.import_module("agent.tools.create_sandbox_file_download_url")
 
 
-class _Sandbox:
-    def generate_download_url(self, path: str, **kwargs: Any) -> Any:
-        raise AssertionError("sync download URL API must not be called")
-
-
 class _AsyncClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
@@ -33,9 +28,7 @@ class _AsyncClient:
 
 
 class _Backend:
-    def __init__(self, sandbox: Any) -> None:
-        self.id = "sandbox-1"
-        self.sandbox = sandbox
+    id = "sandbox-1"
 
 
 def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClient:
@@ -60,8 +53,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClie
 
 
 async def test_create_download_url_for_relative_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    sandbox = _Sandbox()
-    backend = _Backend(sandbox)
+    backend = _Backend()
     client = _configure(monkeypatch, backend)
 
     result = await download_tool._create_sandbox_file_download_url(
@@ -92,8 +84,7 @@ async def test_create_download_url_for_relative_path(monkeypatch: pytest.MonkeyP
 
 
 async def test_create_download_url_uses_secure_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    sandbox = _Sandbox()
-    backend = _Backend(sandbox)
+    backend = _Backend()
     client = _configure(monkeypatch, backend)
 
     await download_tool._create_sandbox_file_download_url("/tmp/result.zip")
@@ -111,22 +102,12 @@ async def test_create_download_url_uses_secure_defaults(monkeypatch: pytest.Monk
     ]
 
 
-async def test_create_download_url_rejects_unsupported_provider(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend = _Backend(SimpleNamespace())
-    _configure(monkeypatch, backend)
-
-    with pytest.raises(RuntimeError, match="only available for LangSmith"):
-        await download_tool._create_sandbox_file_download_url("report.pdf")
-
-
 @pytest.mark.parametrize("expires_in_seconds", [0, -1])
 async def test_create_download_url_rejects_invalid_expiry(
     monkeypatch: pytest.MonkeyPatch,
     expires_in_seconds: int,
 ) -> None:
-    backend = _Backend(_Sandbox())
+    backend = _Backend()
     _configure(monkeypatch, backend)
 
     with pytest.raises(ValueError, match="must be positive"):
