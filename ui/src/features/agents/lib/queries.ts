@@ -68,6 +68,15 @@ export const agentSkillKeys = {
   organization: ["agent-skills", "organization"] as const,
 }
 
+const BUNDLED_SKILLS: Array<Skill> = [
+  {
+    name: "baby-sit",
+    description:
+      "Monitor a GitHub pull request until CI is green, diagnose failures, and rerun only evidence-backed flaky GitHub Actions jobs.",
+    instructions: "",
+  },
+]
+
 export const environmentOptionKeys = {
   all: ["environment-options"] as const,
 }
@@ -122,16 +131,15 @@ export function useAgentSkills() {
   const organization = useOrganizationAgentSkills()
   return {
     ...personal,
-    data:
-      personal.data || organization.data
-        ? [
-            ...new Map(
-              [...(personal.data ?? []), ...(organization.data ?? [])].map(
-                (skill) => [skill.name, skill]
-              )
-            ).values(),
-          ]
-        : undefined,
+    data: [
+      ...new Map(
+        [
+          ...BUNDLED_SKILLS,
+          ...(personal.data ?? []),
+          ...(organization.data ?? []),
+        ].map((skill) => [skill.name, skill])
+      ).values(),
+    ],
     error: personal.error ?? organization.error,
     isError: personal.isError || organization.isError,
     isLoading: personal.isLoading || organization.isLoading,

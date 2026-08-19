@@ -5,7 +5,7 @@ description: Monitor a GitHub pull request until CI is green, diagnose failures,
 
 # Baby-sit a pull request
 
-Use this skill only when the user invokes `/baby-sit` or when a baby-sit failure wakeup invokes `/baby-sit --continue`.
+Use this skill when the user invokes `/baby-sit`, asks in natural language to monitor, unblock, or fix CI on a pull request, or when a baby-sit failure wakeup invokes `/baby-sit --continue`.
 
 ## Inputs
 
