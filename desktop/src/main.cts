@@ -37,6 +37,7 @@ const {
   removeProject,
 } = require("./project-store.cjs");
 const { beginLogin } = require("./login-server.cjs");
+const { isDesktopCommandId } = require("./commands.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
@@ -90,6 +91,12 @@ let loginFlow = null;
 let quitting = false;
 let localThreadStore = null;
 let backendSupervisor = null;
+
+function sendDesktopCommand(commandId) {
+  if (!isDesktopCommandId(commandId) || !mainWindow || mainWindow.isDestroyed())
+    return;
+  mainWindow.webContents.send("desktop:command", commandId);
+}
 
 function requireTrustedDesktopIpc(event) {
   const senderUrl = event.senderFrame?.url || event.sender.getURL();
@@ -556,6 +563,12 @@ function createMenu() {
     label: "Backend URL…",
     click: () => createSetupWindow(),
   };
+  const settingsItem = {
+    id: "open-settings",
+    label: "Settings…",
+    accelerator: "CmdOrCtrl+,",
+    click: () => sendDesktopCommand("open-settings"),
+  };
   const template = [
     ...(process.platform === "darwin"
       ? [
@@ -563,6 +576,7 @@ function createMenu() {
             label: app.name,
             submenu: [
               { role: "about" },
+              settingsItem,
               backendSettingsItem,
               { type: "separator" },
               { role: "services" },
@@ -576,18 +590,28 @@ function createMenu() {
           },
         ]
       : []),
-    ...(process.platform === "darwin"
-      ? []
-      : [
-          {
-            label: "File",
-            submenu: [
-              backendSettingsItem,
-              { type: "separator" },
-              { role: "quit" },
-            ],
-          },
-        ]),
+    {
+      label: "File",
+      submenu: [
+        {
+          id: "new-thread",
+          label: "New Thread",
+          accelerator: "CmdOrCtrl+N",
+          click: () => sendDesktopCommand("new-thread"),
+        },
+        {
+          id: "show-command-palette",
+          label: "Search Commands and Threads…",
+          accelerator: "CmdOrCtrl+K",
+          click: () => sendDesktopCommand("show-command-palette"),
+        },
+        ...(process.platform === "darwin"
+          ? []
+          : [{ type: "separator" }, settingsItem, backendSettingsItem]),
+        { type: "separator" },
+        { role: process.platform === "darwin" ? "close" : "quit" },
+      ],
+    },
     {
       label: "Edit",
       submenu: [
@@ -603,6 +627,13 @@ function createMenu() {
     {
       label: "View",
       submenu: [
+        {
+          id: "toggle-sidebar",
+          label: "Toggle Sidebar",
+          accelerator: "CmdOrCtrl+B",
+          click: () => sendDesktopCommand("toggle-sidebar"),
+        },
+        { type: "separator" },
         {
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
@@ -626,6 +657,13 @@ function createMenu() {
     {
       role: "help",
       submenu: [
+        {
+          id: "show-keyboard-shortcuts",
+          label: "Keyboard Shortcuts",
+          accelerator: "CmdOrCtrl+/",
+          click: () => sendDesktopCommand("show-keyboard-shortcuts"),
+        },
+        { type: "separator" },
         {
           label: "Open SWE on GitHub",
           click: () =>

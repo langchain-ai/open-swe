@@ -44,6 +44,7 @@ import {
 } from "@/features/agents/lib/gitPanelPreferences"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
+import { useRegisterAppCommands } from "@/lib/appCommands"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -155,6 +156,50 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     },
     [panel, terminals]
   )
+  const toggleTerminal = useCallback(() => {
+    if (!panelCollapsed && panel.activeTab?.kind === "terminal") {
+      handlePanelCollapsedChange(true)
+      return
+    }
+    handlePanelCollapsedChange(false)
+    const existing = panel.tabs.find(
+      (candidate) => candidate.kind === "terminal"
+    )
+    if (existing) handleSelectTab(existing.id)
+    else handleOpenKind("terminal")
+  }, [
+    handleOpenKind,
+    handlePanelCollapsedChange,
+    handleSelectTab,
+    panel.activeTab?.kind,
+    panel.tabs,
+    panelCollapsed,
+  ])
+  const threadCommands = useMemo(
+    () =>
+      thread
+        ? [
+            {
+              id: "toggle-terminal",
+              label: "Toggle terminal",
+              aliases: ["open terminal", "hide terminal"],
+              shortcuts: ["ctrl+`"],
+              group: "Workspace",
+              run: toggleTerminal,
+            },
+            {
+              id: "toggle-work-panel",
+              label: "Toggle work panel",
+              aliases: ["show panel", "hide panel", "review panel"],
+              shortcuts: ["mod+alt+b"],
+              group: "Workspace",
+              run: () => handlePanelCollapsedChange(!panelCollapsed),
+            },
+          ]
+        : [],
+    [handlePanelCollapsedChange, panelCollapsed, thread, toggleTerminal]
+  )
+  useRegisterAppCommands(threadCommands)
 
   const terminalGroupIds = terminals.state.terminalGroups
     .map((group) => group.id)

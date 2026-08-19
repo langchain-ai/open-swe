@@ -1,7 +1,25 @@
 const { contextBridge, ipcRenderer } = require("electron")
+const desktopCommandIds = new Set([
+  "new-thread",
+  "show-command-palette",
+  "open-settings",
+  "show-keyboard-shortcuts",
+  "toggle-sidebar",
+])
+
+function isDesktopCommandId(value) {
+  return typeof value === "string" && desktopCommandIds.has(value)
+}
 
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
+  onCommand: (callback) => {
+    const listener = (_event, commandId) => {
+      if (isDesktopCommandId(commandId)) callback(commandId)
+    }
+    ipcRenderer.on("desktop:command", listener)
+    return () => ipcRenderer.removeListener("desktop:command", listener)
+  },
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
   getProjectBranches: (cwd) => ipcRenderer.invoke("desktop:project-branches", cwd),
   checkoutProjectBranch: (input) =>
