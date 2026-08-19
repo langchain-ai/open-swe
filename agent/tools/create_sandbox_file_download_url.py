@@ -1,10 +1,10 @@
-import asyncio
 import posixpath
 from typing import Any, Literal
 
 from langchain_core.tools import tool
 from langgraph.config import get_config
 
+from ..integrations.langsmith import get_async_sandbox_client
 from ..utils.sandbox_paths import aresolve_sandbox_work_dir
 from ..utils.sandbox_state import get_sandbox_backend, unwrap_sandbox_backend
 
@@ -46,13 +46,18 @@ async def _create_sandbox_file_download_url(
     if not callable(generate_download_url):
         raise RuntimeError("download URLs are only available for LangSmith sandboxes")
 
-    download = await asyncio.to_thread(
-        generate_download_url,
-        path,
-        expires_in_seconds=expires_in_seconds,
-        content_type=content_type,
-        content_disposition=content_disposition,
-    )
+    sandbox_name = getattr(backend, "id", None)
+    if not isinstance(sandbox_name, str) or not sandbox_name:
+        raise RuntimeError("LangSmith sandbox does not have an ID")
+
+    async with get_async_sandbox_client() as client:
+        download = await client.generate_download_url(
+            sandbox_name,
+            path,
+            expires_in_seconds=expires_in_seconds,
+            content_type=content_type,
+            content_disposition=content_disposition,
+        )
     if unwrap_sandbox_backend(backend_proxy) is not backend:
         raise RuntimeError("sandbox changed while creating the download URL; retry")
 
