@@ -96,21 +96,30 @@ def _dashboard_queued_message_from_owner(content: object) -> bool:
     return isinstance(content, dict) and content.get("from_owner") is True
 
 
+# Each structured envelope has to arrive as its own message: the transcript
+# parses one envelope per message, so packing several into one message's blocks
+# renders the concatenation as raw XML.
+def _flush_blocks(messages: list[dict[str, Any]], blocks: list[dict[str, Any]]) -> None:
+    if blocks:
+        messages.append({"role": "user", "content": list(blocks)})
+        blocks.clear()
+
+
 def _message_update(
-    content_blocks: list[dict[str, Any]],
+    queued: list[dict[str, Any]],
     thread_id: str,
     *,
     plan_approval_blocked: bool | None = None,
     rendered_system_prompt: str | None = None,
 ) -> dict[str, Any] | None:
-    if not content_blocks:
+    if not queued:
         return None
     logger.info(
-        "Injected %d queued message block(s) into state for thread %s",
-        len(content_blocks),
+        "Injected %d queued message(s) into state for thread %s",
+        len(queued),
         thread_id,
     )
-    update: dict[str, Any] = {"messages": [{"role": "user", "content": content_blocks}]}
+    update: dict[str, Any] = {"messages": queued}
     if plan_approval_blocked is not None:
         update["plan_approval_blocked"] = plan_approval_blocked
     if rendered_system_prompt is not None:
@@ -181,6 +190,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         if store is None:
             return None
 
+        queued_updates: list[dict[str, Any]] = []
         content_blocks: list[dict[str, Any]] = []
         injected = dynamic_context_hashes_from_messages(state.get("messages"))
         plan_approval_blocked: bool | None = None
@@ -195,10 +205,12 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             queued_item = await store.aget(namespace, "pending_messages")
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to get queued item: %s", e)
-            return _message_update(content_blocks, thread_id)
+            _flush_blocks(queued_updates, content_blocks)
+            return _message_update(queued_updates, thread_id)
 
         if queued_item is None:
-            return _message_update(content_blocks, thread_id)
+            _flush_blocks(queued_updates, content_blocks)
+            return _message_update(queued_updates, thread_id)
 
         queued_value = queued_item.value
         queued_messages = queued_value.get("messages", [])
@@ -207,7 +219,8 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         await store.adelete(namespace, "pending_messages")
 
         if not queued_messages:
-            return _message_update(content_blocks, thread_id)
+            _flush_blocks(queued_updates, content_blocks)
+            return _message_update(queued_updates, thread_id)
 
         logger.info(
             "Found %d queued message(s) for thread %s, injecting into state",
@@ -244,8 +257,11 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                     ],
                     injected_dynamic_context_hashes=injected,
                 )
-                for handoff_message in handoff:
-                    content_blocks.append({"type": "text", "text": handoff_message["content"]})
+                _flush_blocks(queued_updates, content_blocks)
+                queued_updates.extend(
+                    {"role": "user", "content": handoff_message["content"]}
+                    for handoff_message in handoff
+                )
                 if _dashboard_queued_message_from_owner(content):
                     plan_approval_blocked = False
                 elif plan_approval_blocked is None:
@@ -275,12 +291,11 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                         people=[person],
                         injected_dynamic_context_hashes=injected,
                     )
-                    for structured_message in structured:
-                        structured_content = structured_message["content"]
-                        if isinstance(structured_content, str):
-                            content_blocks.append({"type": "text", "text": structured_content})
-                        else:
-                            content_blocks.extend(structured_content)
+                    _flush_blocks(queued_updates, content_blocks)
+                    queued_updates.extend(
+                        {"role": "user", "content": structured_message["content"]}
+                        for structured_message in structured
+                    )
                 else:
                     content_blocks.extend(blocks)
                 continue
@@ -297,8 +312,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             rendered_prompt = replace_source_guidance(rendered_prompt, "dashboard")
         else:
             rendered_prompt = None
+        _flush_blocks(queued_updates, content_blocks)
         return _message_update(
-            content_blocks,
+            queued_updates,
             thread_id,
             plan_approval_blocked=plan_approval_blocked,
             rendered_system_prompt=rendered_prompt,

@@ -201,6 +201,13 @@ def _text(content: Any) -> str:
 
 
 def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
+    """The user turns a script routes on, recovered from the structured stream.
+
+    A Slack dispatch replays the thread's earlier messages as context before the
+    system block that frames the mention, so only the message after that block is
+    the turn. An instruction Open SWE dispatches to itself — a plan decision, a
+    scheduled wake-up — carries no Slack timestamp and is always a turn.
+    """
     selected: list[HumanMessage] = []
     slack_request_pending = False
     for message in messages:
@@ -214,7 +221,7 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
             if 'kind="system"' in header:
                 slack_request_pending = 'surface="slack"' in header
                 continue
-            if 'surface="slack"' in header:
+            if 'surface="slack"' in header and "<timestamp>" in text:
                 if slack_request_pending:
                     selected.append(message)
                     slack_request_pending = False

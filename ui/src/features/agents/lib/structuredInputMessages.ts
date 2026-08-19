@@ -1,7 +1,13 @@
 export type StructuredSenderKind = "person" | "system"
 
 export type ParsedStructuredInput =
-  | { type: "entity"; id: string; kind: string; displayName?: string }
+  | {
+      type: "entity"
+      id: string
+      kind: string
+      displayName?: string
+      handle?: string
+    }
   | {
       type: "message"
       content: string
@@ -13,13 +19,14 @@ export type ParsedStructuredInput =
 export interface StructuredEntity {
   kind: string
   displayName?: string
+  handle?: string
 }
 
 const ENTITY_PATTERN =
   /^\s*<dynamic-context\b([^>]*)>([\s\S]*?)<\/dynamic-context>\s*$/
 const MESSAGE_PATTERN =
   /^\s*<input-message\b([^>]*)>([\s\S]*?)<\/input-message>\s*$/
-const CONTENT_PATTERN = /<content>([\s\S]*?)<\/content>/
+const OPEN_TAG_PATTERN = /^\s*<([A-Za-z_][\w:.-]*)>/
 const ATTRIBUTE_PATTERN = /([A-Za-z_][\w:.-]*)\s*=\s*("[^"]*"|'[^']*')/g
 
 export function decodeXmlText(value: string): string {
@@ -74,6 +81,52 @@ function parseAttributes(source: string): Record<string, string> | null {
   return source.slice(cursor).trim() ? null : attributes
 }
 
+// A real envelope carries the context's data fields — `<timestamp>`, `<comment_id>`,
+// nested dicts and lists — as siblings of `<content>`. Consume them so their text
+// never reaches the transcript, and refuse anything that is not a balanced element
+// so unrecognized markup still falls back to legacy rendering.
+function consumeDataElements(source: string): boolean {
+  let rest = source
+  for (;;) {
+    if (!rest.trim()) return true
+    const open = OPEN_TAG_PATTERN.exec(rest)
+    const name = open?.[1]
+    if (!open || !name) return false
+    const openTag = `<${name}>`
+    const closeTag = `</${name}>`
+    let cursor = open[0].length
+    let depth = 1
+    while (depth > 0) {
+      const nextClose = rest.indexOf(closeTag, cursor)
+      if (nextClose === -1) return false
+      const nextOpen = rest.indexOf(openTag, cursor)
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth += 1
+        cursor = nextOpen + openTag.length
+      } else {
+        depth -= 1
+        cursor = nextClose + closeTag.length
+      }
+    }
+    rest = rest.slice(cursor)
+  }
+}
+
+// `<content>` is serialized last, so anchor on the final one: a data field can
+// never contribute markup of its own (its text is escaped).
+function splitContent(
+  body: string
+): { content: string; remainder: string } | null {
+  const start = body.lastIndexOf("<content>")
+  if (start === -1) return null
+  const end = body.indexOf("</content>", start)
+  if (end === -1) return null
+  return {
+    content: body.slice(start + "<content>".length, end),
+    remainder: `${body.slice(0, start)}${body.slice(end + "</content>".length)}`,
+  }
+}
+
 function childText(body: string, tag: string): string | undefined {
   const match = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`).exec(body)
   return match ? decodeXmlText(match[1] ?? "") : undefined
@@ -101,11 +154,13 @@ export function parseStructuredInput(
     const id = attributes?.id
     const kind = attributes?.kind
     if (id && kind) {
+      const body = entityMatch[2] ?? ""
       return {
         type: "entity",
         id,
         kind: kind.toLowerCase(),
-        displayName: childText(entityMatch[2] ?? "", "display_name"),
+        displayName: childText(body, "display_name"),
+        handle: childText(body, "handle") ?? childText(body, "github_login"),
       }
     }
   }
@@ -113,17 +168,11 @@ export function parseStructuredInput(
   const messageMatch = MESSAGE_PATTERN.exec(content)
   if (messageMatch) {
     const attributes = parseAttributes(messageMatch[1] ?? "")
-    const body = messageMatch[2] ?? ""
-    const contentMatch = CONTENT_PATTERN.exec(body)
-    const remainder = contentMatch
-      ? `${body.slice(0, contentMatch.index)}${body.slice(
-          contentMatch.index + contentMatch[0].length
-        )}`
-      : body
-    if (attributes?.sender && contentMatch && !remainder.trim()) {
+    const split = splitContent(messageMatch[2] ?? "")
+    if (attributes?.sender && split && consumeDataElements(split.remainder)) {
       return {
         type: "message",
-        content: decodeXmlText(contentMatch[1] ?? ""),
+        content: decodeXmlText(split.content),
         sender: attributes.sender,
         senderKind: senderKind(attributes, entities),
       }
@@ -143,6 +192,7 @@ export function collectStructuredEntities(
     entities.set(parsed.id, {
       kind: parsed.kind,
       displayName: parsed.displayName,
+      handle: parsed.handle,
     })
   }
   return entities
