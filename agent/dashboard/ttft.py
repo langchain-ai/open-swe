@@ -132,7 +132,7 @@ class AssistantTextEventDetector:
 
 
 def _record_ttft_histogram(duration_seconds: float) -> None:
-    from langgraph_api.metrics_datadog import (
+    from langgraph_api.metrics_datadog import (  # pyright: ignore[reportMissingImports]
         METRIC_TIER_INFO,
         def_latency,
         get_datadog_metrics_reporter,
