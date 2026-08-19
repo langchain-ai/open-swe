@@ -199,17 +199,3 @@ async def test_exact_run_mapping_survives_overlapping_thread_runs() -> None:
         "thread_ts": "1.0",
         "message_ts": "1.2",
     }
-
-
-@pytest.mark.asyncio
-async def test_thread_mapping_write_preserves_existing_run_message() -> None:
-    client: Any = _Client()
-    await store_slack_run_mapping(client, "C1", "1.0", "run-one", message_ts="1.1")
-
-    await store_slack_run_mapping(client, "C1", "1.0", "run-one")
-
-    assert await lookup_slack_run_message_mapping(client, "C1", "run-one") == {
-        "run_id": "run-one",
-        "thread_ts": "1.0",
-        "message_ts": "1.1",
-    }

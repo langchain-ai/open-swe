@@ -994,8 +994,52 @@ async def fetch_slack_thread_message_by_ts(
     channel_id: str, thread_ts: str, message_ts: str
 ) -> dict[str, Any] | None:
     """Fetch an exact reply from a Slack thread."""
-    messages = await fetch_slack_thread_messages(channel_id, thread_ts)
-    return next((message for message in messages if message.get("ts") == message_ts), None)
+    if not SLACK_BOT_TOKEN:
+        return None
+
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.get(
+                f"{SLACK_API_BASE_URL}/conversations.replies",
+                headers=_slack_headers(),
+                params={
+                    "channel": channel_id,
+                    "ts": thread_ts,
+                    "oldest": message_ts,
+                    "latest": message_ts,
+                    "inclusive": "true",
+                    "limit": 1,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPError:
+            logger.exception(
+                "Slack conversations.replies request failed for channel=%s thread=%s ts=%s",
+                channel_id,
+                thread_ts,
+                message_ts,
+            )
+            return None
+
+    if not payload.get("ok"):
+        logger.warning(
+            "Slack conversations.replies failed for channel=%s thread=%s ts=%s: %s",
+            channel_id,
+            thread_ts,
+            message_ts,
+            payload.get("error"),
+        )
+        return None
+    messages = payload.get("messages", [])
+    return next(
+        (
+            message
+            for message in messages
+            if isinstance(message, dict) and message.get("ts") == message_ts
+        ),
+        None,
+    )
 
 
 SLACK_MESSAGE_URL_RE = re.compile(

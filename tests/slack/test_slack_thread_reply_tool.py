@@ -259,13 +259,14 @@ async def test_slack_thread_reply_passes_live_run_id(
         captured.update(kwargs)
         return "2.0", None
 
+    run_id = UUID("35d1f7e7-c811-43f2-91a6-9d729430b4ea")
     config = _config()
-    config["run_id"] = "run-live"
+    config["run_id"] = run_id
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
     assert await slack_reply_tool.slack_thread_reply("Done") == {"success": True}
-    assert captured["run_id"] == "run-live"
+    assert captured["run_id"] == str(run_id)
 
 
 async def test_slack_thread_reply_passes_model_reported_usage(

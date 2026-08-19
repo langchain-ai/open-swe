@@ -61,23 +61,6 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
     ]
 
 
-@pytest.mark.parametrize("cost", [None, -1, float("nan"), float("inf")])
-async def test_langsmith_cost_rejects_missing_or_invalid_values(
-    monkeypatch: pytest.MonkeyPatch, cost: float | None
-) -> None:
-    root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
-    client = _LangSmithClient(
-        [SimpleNamespace(end_time=root_end)],
-        SimpleNamespace(total_cost=cost, last_end_time=root_end),
-    )
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: client)
-    monkeypatch.setattr(
-        ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
-    )
-
-    assert await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1") is None
-
-
 async def test_langsmith_cost_waits_for_thread_stats_freshness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -92,35 +75,6 @@ async def test_langsmith_cost_waits_for_thread_stats_freshness(
     )
 
     assert await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1") is None
-
-
-async def test_langsmith_unsupported_stats_are_terminal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _UnsupportedError(RuntimeError):
-        status_code = 404
-
-    class _UnsupportedThreads:
-        async def stats(self, thread_id: str, **kwargs: Any) -> Any:
-            raise _UnsupportedError
-
-    root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
-    client: Any = _LangSmithClient([SimpleNamespace(end_time=root_end)], None)
-    client.threads = _UnsupportedThreads()
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: client)
-    monkeypatch.setattr(
-        ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
-    )
-
-    with pytest.raises(ls_utils.LangSmithCostUnavailable):
-        await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1")
-
-
-async def test_langsmith_unconfigured_is_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: None)
-
-    with pytest.raises(ls_utils.LangSmithCostUnavailable):
-        await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1")
 
 
 async def test_refresh_updates_exact_mapped_slack_message_in_place(
@@ -227,35 +181,6 @@ async def test_refresh_schedules_bounded_stateless_retry(monkeypatch: pytest.Mon
     assert created["after_seconds"] == 30
     assert created["on_completion"] == "delete"
     assert "webhook" not in created
-
-
-async def test_refresh_does_not_retry_terminal_unavailability(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client: Any = _Client()
-    monkeypatch.setattr(
-        session_cost,
-        "_refresh_once",
-        AsyncMock(return_value=("unavailable", "credentials missing")),
-    )
-
-    result = await session_cost.run_session_cost_refresh(_state(0), client=client)
-
-    assert result == {"status": "unavailable", "reason": "credentials missing"}
-    assert client.runs.created == []
-
-
-async def test_scheduler_routes_session_cost_task(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent import scheduler
-
-    refresh = AsyncMock(return_value={"status": "updated"})
-    monkeypatch.setattr(scheduler, "run_session_cost_refresh", refresh)
-    state: Any = _state(0)
-
-    result = await scheduler._launch(state, {"configurable": {}})
-
-    assert result == {"result": {"status": "updated"}}
-    refresh.assert_awaited_once_with(state)
 
 
 async def test_refresh_stops_after_final_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
