@@ -999,9 +999,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     metadata_update = captured["metadata_update"]
     assert isinstance(metadata_update, dict)
     assert metadata_update["thread_id"] == expected_thread_id
-    hashes = metadata_update["metadata"]["injected_dynamic_context_hashes"]
-    assert len(hashes) == 4
-    assert all(len(value) == 64 for value in hashes)
+    assert "injected_dynamic_context_hashes" not in metadata_update["metadata"]
     assert "trace_reply" not in captured
 
     run_create = captured["run_create"]

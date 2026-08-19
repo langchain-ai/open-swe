@@ -358,8 +358,8 @@ export function streamMessagesToUi(
       const chunks = imageChunks(content)
       const parsed = parseStructuredInput(raw.text, structuredEntities)
       if (parsed.type === "entity") return
-      const text = parsed.content.trim()
-      if (text) chunks.push({ kind: "text", text })
+      const text = parsed.content
+      if (text.trim()) chunks.push({ kind: "text", text })
       if (!chunks.length) return
       const entity =
         parsed.type === "message"

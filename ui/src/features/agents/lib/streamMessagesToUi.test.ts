@@ -49,6 +49,20 @@ describe("streamMessagesToUi", () => {
     })
   })
 
+  it("preserves structured message whitespace", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "structured",
+        content:
+          '<input-message sender="github:alice" surface="web" kind="human"><content>  indented\n</content></input-message>',
+      }),
+    ])
+
+    expect(messages[0]?.chunks).toEqual([
+      { kind: "text", text: "  indented\n" },
+    ])
+  })
+
   it("keys each agent turn by the user message that opened it", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({ id: "user-1", content: "first" }),
