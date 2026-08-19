@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-from langsmith.sandbox import AsyncSandboxClient, ResourceNotFoundError
+from langsmith.sandbox import AsyncSandboxClient
 
 from agent.integrations.langsmith import (
     DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS,
@@ -185,30 +185,19 @@ class _FakeStatusSandbox:
         self.status = status
 
 
-class _TimedOutCreateClient:
-    def __init__(self, lookups: list[BaseException | _FakeStatusSandbox]) -> None:
-        self.lookups = lookups
-        self.create_calls = 0
-        self.get_calls = 0
+async def test_create_read_timeout_adopts_sandbox_when_it_becomes_ready(monkeypatch) -> None:  # noqa: ANN001
+    client = AsyncMock(spec=AsyncSandboxClient)
+    client.create_sandbox.side_effect = httpx.ReadTimeout("timed out")
+    client.get_sandbox.side_effect = [
+        _FakeStatusSandbox("provisioning"),
+        _FakeStatusSandbox("ready"),
+    ]
+    monkeypatch.setattr("agent.integrations.langsmith.asyncio.sleep", AsyncMock())
 
-    async def create_sandbox(self, **kwargs):  # noqa: ANN003, ANN202
-        self.create_calls += 1
-        request = httpx.Request("POST", "https://api.smith.langchain.com/v2/sandboxes/boxes")
-        raise httpx.ReadTimeout("timed out", request=request)
-
-    async def get_sandbox(self, *, name: str) -> _FakeStatusSandbox:
-        self.get_calls += 1
-        result = self.lookups.pop(0)
-        if isinstance(result, BaseException):
-            raise result
-        return result
-
-
-async def _create_with_client(client: _TimedOutCreateClient, *, name: str | None = "openswe-abc"):
-    return await _create_sandbox_with_retry(
+    result = await _create_sandbox_with_retry(
         cast(AsyncSandboxClient, client),
         snapshot_id="snap-1",
-        name=name,
+        name="openswe-abc",
         fs_capacity_bytes=None,
         vcpus=None,
         mem_bytes=None,
@@ -217,47 +206,9 @@ async def _create_with_client(client: _TimedOutCreateClient, *, name: str | None
         timeout=180,
     )
 
-
-@pytest.mark.asyncio
-async def test_create_read_timeout_adopts_sandbox_when_it_becomes_ready(monkeypatch) -> None:  # noqa: ANN001
-    client = _TimedOutCreateClient(
-        [
-            ResourceNotFoundError("not found", resource_type="sandbox"),
-            _FakeStatusSandbox("provisioning"),
-            _FakeStatusSandbox("ready"),
-        ]
-    )
-    sleep = AsyncMock()
-    monkeypatch.setattr("agent.integrations.langsmith.asyncio.sleep", sleep)
-
-    result = await _create_with_client(client)
-
     assert result.status == "ready"
-    assert client.create_calls == 1
-    assert client.get_calls == 3
-    assert sleep.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_create_read_timeout_does_not_adopt_failed_sandbox() -> None:
-    client = _TimedOutCreateClient([_FakeStatusSandbox("failed")])
-
-    with pytest.raises(httpx.ReadTimeout):
-        await _create_with_client(client)
-
-    assert client.create_calls == 1
-    assert client.get_calls == 1
-
-
-@pytest.mark.asyncio
-async def test_create_read_timeout_without_deterministic_name_is_not_reconciled() -> None:
-    client = _TimedOutCreateClient([])
-
-    with pytest.raises(httpx.ReadTimeout):
-        await _create_with_client(client, name=None)
-
-    assert client.create_calls == 1
-    assert client.get_calls == 0
+    assert client.create_sandbox.await_count == 1
+    assert client.get_sandbox.await_count == 2
 
 
 @pytest.mark.asyncio

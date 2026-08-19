@@ -37,8 +37,6 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 30 * 24 * 60 * 60  # 30 days
 SANDBOX_CREATE_MAX_ATTEMPTS = 3
 SANDBOX_CREATE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 SANDBOX_CREATE_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
-SANDBOX_CREATE_RECONCILE_MAX_ATTEMPTS = 30
-SANDBOX_CREATE_RECONCILE_DELAY_SECONDS = 2.0
 PROXY_CONFIG_MAX_ATTEMPTS = 3
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
@@ -273,23 +271,6 @@ async def _reuse_existing_sandbox(client: AsyncSandboxClient, sandbox_id: str) -
         raise RuntimeError(msg) from e
 
 
-async def _reconcile_timed_out_sandbox(client: AsyncSandboxClient, name: str) -> Any | None:
-    """Wait for an ambiguously timed-out create request to finish server-side."""
-    for attempt in range(SANDBOX_CREATE_RECONCILE_MAX_ATTEMPTS):
-        try:
-            sandbox = await client.get_sandbox(name=name)
-        except ResourceNotFoundError:
-            sandbox = None
-        if sandbox is not None:
-            if sandbox.status == "ready":
-                return sandbox
-            if sandbox.status == "failed":
-                return None
-        if attempt < SANDBOX_CREATE_RECONCILE_MAX_ATTEMPTS - 1:
-            await asyncio.sleep(SANDBOX_CREATE_RECONCILE_DELAY_SECONDS)
-    return None
-
-
 async def _create_sandbox_with_retry(
     client: AsyncSandboxClient,
     *,
@@ -316,12 +297,18 @@ async def _create_sandbox_with_retry(
             )
         except Exception as exc:
             if name and isinstance(exc, httpx.ReadTimeout):
-                sandbox = await _reconcile_timed_out_sandbox(client, name)
-                if sandbox is not None:
-                    logger.warning(
-                        "Sandbox create response timed out; adopted ready sandbox %s", name
-                    )
-                    return sandbox
+                for reconcile_attempt in range(30):
+                    try:
+                        sandbox = await client.get_sandbox(name=name)
+                    except ResourceNotFoundError:
+                        pass
+                    else:
+                        if sandbox.status == "ready":
+                            return sandbox
+                        if sandbox.status == "failed":
+                            break
+                    if reconcile_attempt < 29:
+                        await asyncio.sleep(2)
             if attempt == SANDBOX_CREATE_MAX_ATTEMPTS - 1 or not _is_retryable_sandbox_create_error(
                 exc
             ):
