@@ -1039,11 +1039,25 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
         async def __aexit__(self, *a: object) -> None:
             pass
 
-        async def post(self, *a: object, **kw: object) -> FakeResponse:
+        async def post(
+            self, url: str, *, json: dict[str, object], headers: dict[str, str]
+        ) -> FakeResponse:
+            posted.append(json)
             return FakeResponse()
 
+    posted: list[dict[str, object]] = []
     monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
-    await thread_api.proxy_dashboard_thread_history("tid", "teammate", b"{}")
+    await thread_api.proxy_dashboard_thread_history("tid", "teammate", b'{"limit": 20}')
+    await thread_api.proxy_dashboard_thread_history(
+        "tid", "teammate", b'{"limit": 20, "metadata": {"run_id": "run-1"}}'
+    )
+    assert posted == [
+        {"limit": thread_api._DISCOVERY_HISTORY_LIMIT},
+        {"limit": 20, "metadata": {"run_id": "run-1"}},
+    ]
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_history("tid", "teammate", b"\xff")
+    assert exc_info.value.status_code == 400
 
 
 async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(monkeypatch) -> None:

@@ -75,7 +75,7 @@ from .dashboard.team_settings import (
     get_team_fable_enabled,
 )
 from .dashboard.user_mappings import email_for_login
-from .input_messages import build_input_messages
+from .desktop import create_desktop_backend, is_desktop_run
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
@@ -85,7 +85,6 @@ from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
 from .middleware import (
     BasePrepareRunMiddleware,
-    DynamicContextMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
@@ -139,6 +138,7 @@ from .tools import (
     manage_baby_sit,
     notify_automation_channel,
     open_pull_request,
+    output_iframe,
     read_user_settings,
     recreate_sandbox,
     report_platform_issue,
@@ -216,6 +216,13 @@ DEEP_AGENT_TOOL_NAMES = {
     "write_file",
 }
 STOP_SUMMARY_EXCLUDED_TOOLS = frozenset({"delete", "edit_file", "execute", "task", "write_file"})
+
+
+def _registered_tool_name(value: Any) -> str:
+    name = getattr(value, "name", None) or getattr(value, "__name__", None)
+    if not isinstance(name, str) or not name:
+        raise TypeError(f"tool has no registered name: {value!r}")
+    return name
 
 
 def _tool_loader_timeout_seconds() -> float:
@@ -1065,9 +1072,20 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             model=self._title_model,
             client=client,
         )
-        github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
+        if is_desktop_run(configurable):
+            sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
+            work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+            return {
+                "work_dir": work_dir,
+                "rendered_system_prompt": construct_system_prompt(
+                    working_dir=work_dir,
+                    draft_prs=self._draft_prs,
+                    source="desktop",
+                ),
+            }
+        github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         prompt_default_repo = await _resolve_prompt_default_repo(configurable)
         triggering_user_identity_task = asyncio.create_task(
             asyncio.to_thread(
@@ -1131,39 +1149,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 "Failed to record agent usage for thread %s", self._thread_id, exc_info=True
             )
 
-        joined_messages = (
-            build_input_messages(
-                joined_reminder,
-                {
-                    "sender_id": f"github:{self._profile_login}",
-                    "surface": "automation",
-                    "kind": "system",
-                },
-                people=[
-                    {
-                        "id": f"github:{self._profile_login}",
-                        "platform": "github",
-                        "github_login": self._profile_login,
-                    }
-                ],
-            )
-            if joined_reminder and self._profile_login
-            else []
-        )
         return {
             "work_dir": work_dir,
-            **(
-                {
-                    "messages": [
-                        HumanMessage(
-                            content=cast(str | list[str | dict[Any, Any]], item["content"])
-                        )
-                        for item in joined_messages
-                    ]
-                }
-                if joined_messages
-                else {}
-            ),
+            **({"messages": [HumanMessage(content=joined_reminder)]} if joined_reminder else {}),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
                 dashboard_base_url=dashboard_base_url(),
@@ -1205,6 +1193,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         _thread_id: str = thread_id,
         _configurable: dict[str, Any] = configurable,
     ) -> SandboxBackendProtocol:
+        if is_desktop_run(_configurable):
+            return create_desktop_backend(_configurable)
         prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
         return await ensure_sandbox_for_thread(
             _thread_id,
@@ -1219,20 +1209,30 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # authorization and credentialed integrations, which stay personal to them.
     # Everything else comes from the thread's own settings, resolved from the
     # owner's profile on the first run and frozen there afterwards.
+    local_run = is_desktop_run(configurable)
     profile_login = resolve_github_login(as_json_object(config))
     thread_settings, has_legacy_create_prs = normalize_thread_settings(
-        await load_thread_settings(client, thread_id)
+        {} if local_run else await load_thread_settings(client, thread_id)
     )
     settings_login = thread_settings.get("owner_login") or profile_login
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
-    team_defaults, title_defaults, use_gateway, profile, fable_enabled = await asyncio.gather(
-        _cached_team_default_model_pair("agent"),
-        _cached_thread_title_model(),
-        _cached_gateway_enabled(),
-        _cached_profile(None if thread_settings.get("model_id") else settings_login),
-        _cached_fable_enabled(),
-    )
+    if local_run:
+        from .dashboard.options import default_model_pair
+
+        team_defaults = (default_model_pair(), default_model_pair())
+        title_defaults = team_defaults[0]
+        use_gateway = False
+        profile = None
+        fable_enabled = False
+    else:
+        team_defaults, title_defaults, use_gateway, profile, fable_enabled = await asyncio.gather(
+            _cached_team_default_model_pair("agent"),
+            _cached_thread_title_model(),
+            _cached_gateway_enabled(),
+            _cached_profile(None if thread_settings.get("model_id") else settings_login),
+            _cached_fable_enabled(),
+        )
 
     linear_issue = as_json_object(configurable.get("linear_issue"))
     linear_project_id = linear_issue.get("linear_project_id", "")
@@ -1322,7 +1322,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "user_instructions": user_instructions,
         "repo_instructions": repo_instructions,
     }
-    if has_legacy_create_prs or {**thread_settings, **resolved_settings} != thread_settings:
+    if not local_run and (
+        has_legacy_create_prs or {**thread_settings, **resolved_settings} != thread_settings
+    ):
         await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
 
     model_id, profile_effort = gate_fable_model(
@@ -1392,7 +1394,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     browser_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
-    if not stop_summary_mode:
+    if not stop_summary_mode and not local_run:
         observability_authorized = await _observability_authorized(config, profile_login)
         if observability_authorized:
             observability_tools = await _load_observability_tools(True, profile_login)
@@ -1445,6 +1447,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         manage_baby_sit,
         notify_automation_channel,
         open_pull_request,
+        output_iframe,
         read_user_settings,
         request_pr_review,
         recreate_sandbox,
@@ -1457,9 +1460,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
         *(ENVIRONMENT_TOOLS if admin_environments else ()),
     ]
-    if stop_summary_mode:
+    if local_run:
+        static_tools = [http_request, fetch_url, web_search]
+    elif stop_summary_mode:
         static_tools = [slack_read_thread_messages, slack_thread_reply]
-    reserved_tool_names = {tool.__name__ for tool in static_tools}
+    reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     if not _slack_tools_enabled(configurable):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
@@ -1521,7 +1526,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
-                DynamicContextMiddleware(),
                 PrepareAgentRunMiddleware(
                     thread_id=thread_id,
                     config=config,

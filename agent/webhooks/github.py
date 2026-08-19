@@ -7,6 +7,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 import uuid
 from typing import Any
 
+from ..baby_sit import handle_ci_webhook
 from ..input_messages import (
     PersonIdentity,
     RunInput,
@@ -781,6 +782,13 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         client=langgraph_client,
     )
     await common._store_current_reviewer_run_id(thread_id, run)
+
+
+async def process_github_ci_event(
+    payload: dict[str, Any], event_type: str, delivery_id: str | None = None
+) -> None:
+    """Evaluate active baby-sit watches for a signed GitHub CI event."""
+    await handle_ci_webhook(payload, event_type, delivery_id=delivery_id)
 
 
 async def process_github_pr_comment(payload: dict[str, Any], event_type: str) -> None:

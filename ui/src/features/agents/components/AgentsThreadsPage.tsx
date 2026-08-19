@@ -117,16 +117,19 @@ export function AgentsThreadsPage({
   const [personalOrder, setPersonalOrder] = useState(filters.order)
   const pageSize = filters.layout === "board" ? BOARD_PAGE_SIZE : LIST_PAGE_SIZE
   const offset = (filters.page - 1) * pageSize
-  const query = useThreadsPage({
-    limit: pageSize,
-    offset,
-    resolved: filters.resolved,
-    viewed: filters.viewed,
-    source: filters.source,
-    status: filters.status,
-    q: filters.q,
-    scope: "interactive",
-  })
+  const query = useThreadsPage(
+    {
+      limit: pageSize,
+      offset,
+      resolved: filters.resolved,
+      viewed: filters.viewed,
+      source: filters.source,
+      status: filters.status,
+      q: filters.q,
+      scope: "interactive",
+    },
+    { staleWhileRevalidate: true }
+  )
 
   useEffect(() => setSearch(filters.q ?? ""), [filters.q])
   useEffect(() => {
