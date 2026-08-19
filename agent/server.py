@@ -39,7 +39,7 @@ from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
-from langchain.agents.middleware.types import AgentMiddleware
+from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langsmith.sandbox import SandboxClientError
@@ -983,7 +983,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             None,
         )
 
-    async def aafter_agent(self, state: PrepareRunState, runtime: Runtime) -> None:  # noqa: ARG002
+    async def aafter_agent(self, state: AgentState, runtime: Runtime) -> None:  # noqa: ARG002
         turn_key = self._turn_key(state)
         if not turn_key:
             return None
@@ -1000,20 +1000,26 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 return None
             backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
             plan_ref = checkpoint.get("plan_ref")
-            base = str(first["ref"])
-            diff = await read_turn_diff(
-                backend,
-                None,
-                base,
-                plan_ref if isinstance(plan_ref, str) else None,
-                repo_path=(
-                    checkpoint.get("repo_path")
-                    if isinstance(checkpoint.get("repo_path"), str)
-                    else None
-                ),
+            head = plan_ref if isinstance(plan_ref, str) else None
+            repo_path = (
+                checkpoint.get("repo_path")
+                if isinstance(checkpoint.get("repo_path"), str)
+                else None
             )
-            await save_run_diff(self._thread_id, turn_key, diff)
-            await save_run_diff(self._thread_id, THREAD_DIFF_KEY, diff)
+            diff = await read_turn_diff(
+                backend, None, str(checkpoint["ref"]), head, repo_path=repo_path
+            )
+            cumulative = (
+                diff
+                if first["ref"] == checkpoint["ref"]
+                else await read_turn_diff(
+                    backend, None, str(first["ref"]), head, repo_path=repo_path
+                )
+            )
+            if diff.get("status") == "ready":
+                await save_run_diff(self._thread_id, turn_key, diff)
+            if cumulative.get("status") == "ready":
+                await save_run_diff(self._thread_id, THREAD_DIFF_KEY, cumulative)
         except Exception:
             logger.debug("Could not persist run diff for %s", self._thread_id, exc_info=True)
         return None

@@ -20,6 +20,7 @@ def _bounded(diff: Mapping[str, Any]) -> dict[str, Any]:
     result = {
         "status": diff.get("status", "error"),
         "truncated": bool(diff.get("truncated")),
+        "summary": diff.get("summary", {"files": 0, "additions": 0, "deletions": 0}),
         "files": [],
     }
     size = 0
@@ -33,6 +34,24 @@ def _bounded(diff: Mapping[str, Any]) -> dict[str, Any]:
             file.update(originalContent=None, modifiedContent=None, unrenderable=True)
             result["truncated"] = True
         result["files"].append(file)
+    return result
+
+
+def project_run_diff(
+    diff: Mapping[str, Any], *, max_files: int, include_content: bool
+) -> dict[str, Any]:
+    result = dict(diff)
+    files = diff.get("files", [])
+    files = (
+        [dict(file) for file in files if isinstance(file, Mapping)]
+        if isinstance(files, list)
+        else []
+    )
+    result["files"] = files[:max_files]
+    result["truncated"] = bool(diff.get("truncated")) or len(files) > max_files
+    if not include_content:
+        for file in result["files"]:
+            file.update(originalContent=None, modifiedContent=None)
     return result
 
 
