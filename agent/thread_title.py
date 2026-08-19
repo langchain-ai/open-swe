@@ -8,6 +8,8 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from .input_messages import human_input, wrap_system_prompt
+
 logger = logging.getLogger(__name__)
 
 MAX_THREAD_TITLE_CHARS = 80
@@ -80,11 +82,21 @@ async def generate_and_store_thread_title(
         return
 
     structured = model.with_structured_output(_ThreadTitle)
+    title_input = human_input(
+        user_message,
+        {
+            "sender_id": "person:title-subject",
+            "surface": "automation",
+            "kind": "human",
+        },
+    )["content"]
+    if not isinstance(title_input, str):
+        return
     async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
         result = await structured.ainvoke(
             [
-                SystemMessage(content=_TITLE_SYSTEM_PROMPT),
-                HumanMessage(content=user_message),
+                SystemMessage(content=wrap_system_prompt(_TITLE_SYSTEM_PROMPT)),
+                HumanMessage(content=title_input),
             ],
             # Empty callbacks, so this call cannot inherit the run's handlers and
             # stream its tokens into the thread the user is watching.

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 from langchain.agents.middleware import AgentState
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 
-from agent.middleware.check_message_queue import DASHBOARD_HANDOFF_INSTRUCTION
+from agent.input_messages import system_input
 from agent.middleware.ensure_no_empty_msg import (
     check_if_confirming_completion,
     check_if_model_messaged_user,
@@ -211,14 +211,18 @@ class TestEnsureNoEmptyMsgNotify:
 
     def test_skips_confirming_completion_for_dashboard_handoff(self) -> None:
         ai = AIMessage(content="Done in web.")
+        handoff = system_input(
+            "Continue responses in Web.",
+            {
+                "sender_id": "system:dashboard-handoff",
+                "surface": "automation",
+                "kind": "system",
+            },
+        )["content"]
+        assert isinstance(handoff, str)
         state: AgentState[Any] = {
             "messages": [
-                HumanMessage(
-                    content=[
-                        {"type": "text", "text": DASHBOARD_HANDOFF_INSTRUCTION},
-                        {"type": "text", "text": "continue in web"},
-                    ]
-                ),
+                HumanMessage(content=handoff),
                 ai,
             ]
         }

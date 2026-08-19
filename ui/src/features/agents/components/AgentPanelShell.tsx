@@ -4,15 +4,7 @@ import {
   ArrowsOutIcon,
   SidebarSimpleIcon,
 } from "@phosphor-icons/react"
-import {
-  FileDiff,
-  Folder,
-  Globe,
-  ListChecks,
-  Plus,
-  SquareTerminal,
-  X,
-} from "lucide-react"
+import { FileDiff, Folder, Globe, Plus, SquareTerminal, X } from "lucide-react"
 
 import type { PanelTab, PanelTabKind } from "@/features/agents/lib/panelTabs"
 import { isMultiInstanceKind } from "@/features/agents/lib/panelTabs"
@@ -30,7 +22,6 @@ const PANEL_TAB_META: Record<
   terminal: { label: "Terminal", Icon: SquareTerminal },
   browser: { label: "Browser", Icon: Globe },
   files: { label: "Files", Icon: Folder },
-  plan: { label: "Plan", Icon: ListChecks },
 }
 
 const PANEL_STORAGE_WIDTH = "open-swe.gitpanel.width"
