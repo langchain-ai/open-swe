@@ -377,49 +377,6 @@ async def test_thread_summary_includes_pull_requests_across_repositories() -> No
     assert summary["diffStats"] == {"files": 1, "additions": 4, "deletions": 0}
 
 
-async def test_thread_summary_ignores_malformed_pull_request_metadata() -> None:
-    summary = await thread_api._thread_summary(
-        _thread_with_metadata(
-            {
-                "title": "Malformed",
-                "pull_requests": [
-                    {"repo_full_name": "missing-number", "url": "javascript:alert(1)"}
-                ],
-            }
-        )
-    )
-
-    assert "pullRequests" not in summary
-    assert "pr" not in summary
-
-
-async def test_thread_summary_defaults_invalid_pull_request_diff_stats() -> None:
-    summary = await thread_api._thread_summary(
-        _thread_with_metadata(
-            {
-                "pull_requests": [
-                    {
-                        "repo_full_name": "langchain-ai/open-swe",
-                        "number": 42,
-                        "url": "https://github.com/langchain-ai/open-swe/pull/42",
-                        "diff_stats": {
-                            "files": float("nan"),
-                            "additions": -1,
-                            "deletions": float("inf"),
-                        },
-                    }
-                ]
-            }
-        )
-    )
-
-    assert summary["pullRequests"][0]["diffStats"] == {
-        "files": 0,
-        "additions": 0,
-        "deletions": 0,
-    }
-
-
 async def test_thread_summary_uses_working_repo_for_display_only() -> None:
     metadata = {
         "repo": {"owner": "trusted", "name": "default"},

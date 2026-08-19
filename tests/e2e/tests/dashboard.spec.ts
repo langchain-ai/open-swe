@@ -189,7 +189,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
   test("keeps pull requests from multiple repositories above the composer", async ({
     page,
-  }, testInfo) => {
+  }) => {
     await loginAs(page, SAME_USER);
     await openMultiRepoPrThreadViaSlackLink(page);
 
@@ -212,13 +212,6 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       page.getByRole("button", { name: "Show 1 more" }),
     ).toBeVisible();
 
-    const restingPath = testInfo.outputPath("thread-pr-links-resting.png");
-    await page.screenshot({ path: restingPath, fullPage: true });
-    await testInfo.attach("thread-pr-links-resting", {
-      path: restingPath,
-      contentType: "image/png",
-    });
-
     await companionLink.hover();
     const hoverCard = page.getByTestId("pr-hover-card-anotherorg/companion-2");
     await expect(hoverCard).toBeVisible();
@@ -228,13 +221,6 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(hoverCard).toContainText("main");
     await expect(hoverCard).toContainText("add-integration");
     await expect(hoverCard).toContainText("1 file");
-
-    const hoverPath = testInfo.outputPath("thread-pr-links-hover.png");
-    await page.screenshot({ path: hoverPath, fullPage: true });
-    await testInfo.attach("thread-pr-links-hover", {
-      path: hoverPath,
-      contentType: "image/png",
-    });
 
     await page.getByRole("button", { name: "Show 1 more" }).click();
     await expect(

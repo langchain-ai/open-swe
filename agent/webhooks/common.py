@@ -1422,24 +1422,6 @@ def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
     )
 
 
-def _pull_requests_with_state(
-    records: object, pr_url: str, new_state: str
-) -> tuple[list[dict[str, Any]] | None, bool]:
-    if not isinstance(records, list):
-        return None, False
-    changed = False
-    updated: list[dict[str, Any]] = []
-    for record in records:
-        if not isinstance(record, dict):
-            continue
-        if record.get("url") == pr_url and record.get("state") != new_state:
-            updated.append({**record, "state": new_state})
-            changed = True
-        else:
-            updated.append(record)
-    return updated, changed
-
-
 async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     """Keep an agent thread's tracked PR state in sync with PR lifecycle events.
 
@@ -1486,12 +1468,16 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         metadata = thread.get("metadata")
         if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
             continue
-        pull_requests, collection_changed = _pull_requests_with_state(
-            metadata.get("pull_requests"), pr_url, new_state
-        )
         metadata_update: dict[str, Any] = {}
-        if collection_changed and pull_requests is not None:
-            metadata_update["pull_requests"] = pull_requests
+        pull_requests = metadata.get("pull_requests")
+        if isinstance(pull_requests, list):
+            updated = [
+                {**record, "state": new_state} if record.get("url") == pr_url else record
+                for record in pull_requests
+                if isinstance(record, dict)
+            ]
+            if updated != pull_requests:
+                metadata_update["pull_requests"] = updated
         if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
             metadata_update["pr_state"] = new_state
         if not metadata_update:

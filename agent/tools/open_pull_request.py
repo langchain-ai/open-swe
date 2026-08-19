@@ -451,35 +451,21 @@ async def _fetch_pr_details(
     return data if isinstance(data, dict) else {}
 
 
-def _pull_request_key(record: dict[str, Any]) -> tuple[str, str] | None:
-    repo_full_name = record.get("repo_full_name")
-    number = record.get("number")
-    if isinstance(repo_full_name, str) and repo_full_name and isinstance(number, int):
-        return "repo", f"{repo_full_name.casefold()}#{number}"
-    url = record.get("url")
-    if isinstance(url, str) and url:
-        return "url", url.rstrip("/").casefold()
-    return None
-
-
 def _upsert_pull_request(records: object, record: dict[str, Any]) -> list[dict[str, Any]]:
-    existing = (
-        [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
-    )
-    key = _pull_request_key(record)
+    existing = records if isinstance(records, list) else []
+    repo = record.get("repo_full_name")
+    number = record.get("number")
     url = record.get("url")
-    normalized_url = url.rstrip("/").casefold() if isinstance(url, str) else ""
-    retained = []
-    for item in existing:
-        item_url = item.get("url")
-        same_url = (
-            normalized_url
-            and isinstance(item_url, str)
-            and item_url.rstrip("/").casefold() == normalized_url
+    return [
+        item
+        for item in existing
+        if isinstance(item, dict)
+        and not (
+            item.get("repo_full_name") == repo
+            and item.get("number") == number
+            or item.get("url") == url
         )
-        if not same_url and (key is None or _pull_request_key(item) != key):
-            retained.append(item)
-    return [*retained, record]
+    ] + [record]
 
 
 async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:

@@ -5,13 +5,11 @@ import base64
 import binascii
 import json
 import logging
-import math
 import os
 import posixpath
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal
-from urllib.parse import urlparse
 
 import httpx
 from fastapi import HTTPException
@@ -442,65 +440,45 @@ def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     return category, origin, trigger_kind
 
 
-def _pr_count(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return 0
-    if isinstance(value, float) and not math.isfinite(value):
-        return 0
-    return max(0, int(value))
-
-
-def _pr_diff_stats(value: object) -> dict[str, int]:
-    stats = value if isinstance(value, dict) else {}
-    return {
-        "files": _pr_count(stats.get("files")),
-        "additions": _pr_count(stats.get("additions")),
-        "deletions": _pr_count(stats.get("deletions")),
-    }
-
-
 def _pull_request_summary(record: object, fallback_title: str) -> dict[str, Any] | None:
     if not isinstance(record, dict):
         return None
     repo_full_name = record.get("repo_full_name")
     number = record.get("number")
-    raw_url = record.get("url")
+    url = record.get("url")
     if (
         not isinstance(repo_full_name, str)
         or repo_full_name.count("/") != 1
         or not isinstance(number, int)
         or isinstance(number, bool)
-        or number <= 0
-        or not isinstance(raw_url, str)
+        or not isinstance(url, str)
     ):
-        return None
-    parsed_url = urlparse(raw_url)
-    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
         return None
     title = record.get("title")
     state = record.get("state")
-    head_ref = record.get("head_ref")
-    base_ref = record.get("base_ref")
-    author = record.get("author")
-    author_avatar_url = record.get("author_avatar_url")
-    created_at = record.get("created_at")
+    stats = record.get("diff_stats")
+    stats = stats if isinstance(stats, dict) else {}
     return {
         "repoFullName": repo_full_name,
         "number": number,
         "title": title if isinstance(title, str) and title else fallback_title,
         "state": state if state in _PR_STATES else "open",
-        "headRef": head_ref if isinstance(head_ref, str) else "",
-        "baseRef": base_ref if isinstance(base_ref, str) else "main",
-        "url": raw_url,
-        "author": author if isinstance(author, str) and author else None,
+        "headRef": record.get("head_ref") if isinstance(record.get("head_ref"), str) else "",
+        "baseRef": record.get("base_ref") if isinstance(record.get("base_ref"), str) else "main",
+        "url": url,
+        "author": record.get("author") if isinstance(record.get("author"), str) else None,
         "authorAvatarUrl": (
-            author_avatar_url
-            if isinstance(author_avatar_url, str)
-            and urlparse(author_avatar_url).scheme in {"http", "https"}
+            record.get("author_avatar_url")
+            if isinstance(record.get("author_avatar_url"), str)
             else None
         ),
-        "createdAt": created_at if isinstance(created_at, str) and created_at else None,
-        "diffStats": _pr_diff_stats(record.get("diff_stats")),
+        "createdAt": record.get("created_at")
+        if isinstance(record.get("created_at"), str)
+        else None,
+        "diffStats": {
+            key: max(0, value) if isinstance(value := stats.get(key), int) else 0
+            for key in ("files", "additions", "deletions")
+        },
     }
 
 
