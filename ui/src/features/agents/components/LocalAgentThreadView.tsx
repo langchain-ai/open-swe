@@ -29,6 +29,7 @@ import {
 import { Messages } from "@/features/agents/components/messages"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
 import { usePanelTabs } from "@/features/agents/lib/panelTabs"
+import { useAgentSkills } from "@/features/agents/lib/queries"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
   localThreadKeys,
@@ -71,6 +72,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
   const queryClient = useQueryClient()
+  const skills = useAgentSkills()
   const initialPromptRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isMobile = useIsMobile()
@@ -383,6 +385,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   )
                 }}
                 placeholder="Add a follow up"
+                skills={skills.data}
               />
             </div>
           </div>
