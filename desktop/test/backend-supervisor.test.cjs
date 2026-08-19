@@ -31,6 +31,18 @@ test("development target runs the repository LangGraph app through uv", () => {
   })
 })
 
+test("development target accepts an explicit LangGraph config", () => {
+  const repoRoot = path.resolve("/work/open-swe")
+  const config = path.resolve("/work/e2e/langgraph.json")
+  const target = devBackendTarget({
+    repoRoot,
+    port: 49152,
+    env: { OPEN_SWE_LOCAL_BACKEND_CONFIG: config },
+  })
+
+  assert.equal(target.args.at(-1), config)
+})
+
 test("reports whether the selected provider is configured", () => {
   assert.deepEqual(modelCredentialStatus("openai:gpt-test", {}), {
     available: false,
