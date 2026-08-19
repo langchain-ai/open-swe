@@ -16,7 +16,13 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_INSTRUCTION
+from ..input_messages import (
+    PersonIdentity,
+    build_input_messages,
+    dynamic_context_hashes_from_messages,
+    injected_dynamic_context_hashes_from_metadata,
+)
+from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from ..utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -60,8 +66,6 @@ _TTFT_OBSERVER_TASKS: set[asyncio.Task[None]] = set()
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 # Modes required for the v2 event-stream protocol (`POST …/stream/events`).
-# `@langchain/react` subscribes to `messages`, `tools`, `lifecycle`, etc.;
-# legacy `messages-tuple`-only runs emit almost nothing on those channels.
 _DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "values",
     "updates",
@@ -75,6 +79,7 @@ _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif",
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 _PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+_DISCOVERY_HISTORY_LIMIT = 5
 _PROXY_STREAM_TIMEOUT = httpx.Timeout(None)
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
@@ -450,9 +455,6 @@ async def _thread_summary(
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
-    working_repo = metadata.get("working_repo_full_name")
-    if not isinstance(working_repo, str) or working_repo.count("/") != 1:
-        working_repo = None
     created_at = metadata.get("created_at_ms")
     updated_at = metadata.get("updated_at_ms")
     title = metadata.get("title") if isinstance(metadata.get("title"), str) else "Untitled agent"
@@ -488,7 +490,6 @@ async def _thread_summary(
         "title": title,
         "repo": name,
         "repoFullName": full_name,
-        "workingRepoFullName": working_repo,
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
@@ -597,7 +598,6 @@ _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
-_DISCOVERY_HISTORY_LIMIT = 5
 
 
 def _thread_id(thread: ThreadLike) -> str | None:
@@ -1505,18 +1505,64 @@ async def _enrich_run_start_command(
         if command_images and run_model and run_effort:
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
         _validate_command_images(content, model_id=run_model)
-        prefix = _attribution_prefix(metadata, login, email)
-        if prefix:
-            content = _prefix_message_content(content, prefix)
+        if content is None:
+            content = ""
+        sender_id = f"github:{login}"
+        injected = injected_dynamic_context_hashes_from_metadata(metadata)
+        try:
+            prior_state = await client.threads.get_state(thread_id)
+            values = prior_state.get("values") if isinstance(prior_state, dict) else None
+            if isinstance(values, dict):
+                injected.update(dynamic_context_hashes_from_messages(values.get("messages")))
+        except Exception:
+            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
+        person: PersonIdentity = {
+            "id": sender_id,
+            "platform": "github",
+            "github_login": login,
+        }
+        if email:
+            person["email"] = email
+        structured = build_input_messages(
+            content,
+            {"sender_id": sender_id, "surface": "web", "kind": "human"},
+            people=[person],
+            systems=(
+                [
+                    {
+                        "id": "system:dashboard-handoff",
+                        "display_name": "Dashboard handoff",
+                        "platform": "open-swe",
+                    }
+                ]
+                if metadata.get("source") == "slack"
+                else None
+            ),
+            injected_dynamic_context_hashes=injected,
+        )
         if metadata.get("source") == "slack":
-            content = _prepend_message_content_block(content, DASHBOARD_HANDOFF_INSTRUCTION)
-        _set_command_last_message_content(params, content)
+            structured.insert(
+                -1,
+                build_input_messages(
+                    DASHBOARD_HANDOFF_BODY,
+                    {
+                        "sender_id": "system:dashboard-handoff",
+                        "surface": "automation",
+                        "kind": "system",
+                    },
+                    injected_dynamic_context_hashes={"system:dashboard-handoff"},
+                )[0],
+            )
+        run_input = params.get("input")
+        if isinstance(run_input, dict):
+            run_input["messages"] = structured
         metadata_update: dict[str, Any] = {
             "source": _DASHBOARD_SOURCE,
             "plan_mode": plan_mode_requested,
             PARTICIPANT_LOGINS_KEY: merge_participant_logins(
                 metadata.get(PARTICIPANT_LOGINS_KEY), login
             ),
+            "injected_dynamic_context_hashes": sorted(injected),
         }
         if command_images and run_model and run_effort:
             overrides["agent_model_id"] = run_model
@@ -1610,7 +1656,7 @@ async def send_dashboard_message(
     metadata = thread_metadata(thread)
     _assert_thread_readable(metadata)
 
-    prompt = f"{_attribution_prefix(metadata, login, email)}{body.content.strip()}"
+    prompt = body.content.strip()
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
     handoff_metadata = dict(metadata)
@@ -1644,6 +1690,14 @@ async def send_dashboard_message(
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
+        "surface": "web",
+        "sender": {
+            "id": f"github:{login}",
+            "platform": "github",
+            "github_login": login,
+            **({"email": email} if email else {}),
+        },
+        "from_owner": _user_owns_thread(metadata, login, email),
     }
     if isinstance(content, list):
         queue_payload["images"] = [
@@ -2106,13 +2160,9 @@ async def get_dashboard_thread_turn_diff(
     include_content: bool = True,
     email: str | None = None,
 ) -> dict[str, Any]:
-    """What one turn (or the whole thread) changed, straight from git.
-
-    ``turn_key`` is the id of the user message that opened the turn. Omit it for
-    the cumulative thread diff. The head is the next turn's checkpoint, or the
-    live worktree for the most recent turn.
-    """
+    """Return a persisted run diff, with sandbox checkpoints as a legacy fallback."""
     from ..utils.turn_checkpoint import read_turn_diff
+    from .run_diffs import THREAD_DIFF_KEY, get_run_diff, project_run_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     checkpoints = metadata.get("turn_checkpoints")
@@ -2136,6 +2186,15 @@ async def get_dashboard_thread_turn_diff(
         }
 
     checkpoint = checkpoints[index]
+    if turn_key is not None:
+        stored = await get_run_diff(thread_id, turn_key)
+        if stored is not None:
+            return project_run_diff(stored, max_files=max_files, include_content=include_content)
+    else:
+        stored = await get_run_diff(thread_id, THREAD_DIFF_KEY)
+        if stored is not None:
+            return project_run_diff(stored, max_files=max_files, include_content=include_content)
+
     plan_ref = checkpoint.get("plan_ref")
     if (
         turn_key is not None

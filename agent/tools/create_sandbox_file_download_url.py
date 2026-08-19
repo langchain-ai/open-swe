@@ -1,4 +1,5 @@
 import posixpath
+import shlex
 from typing import Any, Literal
 
 from langgraph.config import get_config
@@ -38,12 +39,20 @@ async def create_sandbox_file_download_url(
         raise ValueError("no thread_id in run config")
 
     backend_proxy = await get_sandbox_backend(thread_id)
-    work_dir = await aresolve_sandbox_work_dir(backend_proxy)
+    work_dir = posixpath.normpath(await aresolve_sandbox_work_dir(backend_proxy))
     path = posixpath.normpath(
         file_path.strip()
         if file_path.strip().startswith("/")
         else posixpath.join(work_dir, file_path.strip())
     )
+    if posixpath.commonpath((work_dir, path)) != work_dir:
+        raise ValueError(f"file_path must resolve within the sandbox work directory ({work_dir})")
+    resolved = await backend_proxy.aexecute(f"realpath -- {shlex.quote(path)}")
+    if resolved.exit_code != 0:
+        raise ValueError("file_path must identify an existing sandbox file")
+    path = posixpath.normpath(resolved.output.strip())
+    if posixpath.commonpath((work_dir, path)) != work_dir:
+        raise ValueError(f"file_path must resolve within the sandbox work directory ({work_dir})")
     backend = unwrap_sandbox_backend(backend_proxy)
     async with get_async_sandbox_client() as client:
         download = await client.generate_download_url(

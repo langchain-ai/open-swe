@@ -15,6 +15,7 @@ async def slack_add_reaction(
     Prefer `saluting_face` for taking ownership, `eyes` for active review,
     `thinking_face` for investigation, and `tada` for genuine wins. Never use
     `white_check_mark`, because teams use it to indicate that a pull request is approved.
+    To target a specific message, pass its `message_ts` identifier shown in Slack context.
     If `message_ts` is omitted, this reacts to the latest message that triggered the run.
     Pass emoji names without surrounding colons.
     """

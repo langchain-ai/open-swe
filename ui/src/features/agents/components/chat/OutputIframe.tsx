@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown, Download, ExternalLink } from "lucide-react"
 
+import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
 import type { OutputIframeDisplay } from "@/features/agents/lib/types"
 import { IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -128,14 +129,13 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
         </IconButton>
       </header>
       {expanded && (
-        <iframe
+        <SandboxedHtmlFrame
           ref={iframeRef}
           title={display.title}
-          srcDoc={srcDoc}
+          html={srcDoc}
           sandbox="allow-scripts allow-downloads"
           allow="clipboard-write"
-          referrerPolicy="no-referrer"
-          className="block w-full border-0 border-t border-border bg-white"
+          className="border-t border-border bg-white"
           style={{ height }}
         />
       )}

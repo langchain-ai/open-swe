@@ -30,6 +30,12 @@ class _AsyncClient:
 class _Backend:
     id = "sandbox-1"
 
+    async def aexecute(self, command: str) -> Any:
+        path = command.removeprefix("realpath -- ").strip("'")
+        if path == "/workspace/project/link-to-secret":
+            path = "/etc/passwd"
+        return SimpleNamespace(exit_code=0, output=f"{path}\n")
+
 
 def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClient:
     monkeypatch.setattr(
@@ -89,12 +95,12 @@ async def test_create_download_url_defaults_to_a_non_expiring_link(
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    await download_tool.create_sandbox_file_download_url("/tmp/result.zip")
+    await download_tool.create_sandbox_file_download_url("/workspace/project/result.zip")
 
     assert client.calls == [
         (
             "sandbox-1",
-            "/tmp/result.zip",
+            "/workspace/project/result.zip",
             {
                 "expires_in_seconds": None,
                 "content_type": None,
@@ -102,6 +108,35 @@ async def test_create_download_url_defaults_to_a_non_expiring_link(
             },
         )
     ]
+
+
+@pytest.mark.parametrize(
+    "file_path",
+    ["../secret.txt", "artifacts/../../secret.txt", "/etc/passwd", "/workspace/project-other/x"],
+)
+async def test_create_download_url_rejects_paths_outside_work_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    file_path: str,
+) -> None:
+    backend = _Backend()
+    client = _configure(monkeypatch, backend)
+
+    with pytest.raises(ValueError, match="must resolve within the sandbox work directory"):
+        await download_tool.create_sandbox_file_download_url(file_path)
+
+    assert client.calls == []
+
+
+async def test_create_download_url_rejects_symlink_outside_work_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _Backend()
+    client = _configure(monkeypatch, backend)
+
+    with pytest.raises(ValueError, match="must resolve within the sandbox work directory"):
+        await download_tool.create_sandbox_file_download_url("link-to-secret")
+
+    assert client.calls == []
 
 
 @pytest.mark.parametrize("expires_in_seconds", [0, -1])

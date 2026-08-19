@@ -8,7 +8,7 @@ import {
 // Full plan-review flow, driven through the mock Slack UI + the real dashboard:
 //   user asks Open SWE in Slack to PLAN something ->
 //   agent calls enter_plan_mode, posts the plan-review link to Slack, writes the
-//   plan as a markdown file (save_plan), and posts "ready" back to Slack ->
+//   plan as a self-contained HTML file (save_plan), and posts "ready" back to Slack ->
 //   owner (user1) and a collaborator (user2) open the plan and leave whole-document
 //   comments over plain HTTP (each polls and sees the other's) ->
 //   only the owner can approve -> on approval the agent implements, opens a PR,
@@ -168,12 +168,12 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(loggedOut.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(loggedOut.getByTestId("plan-document")).toContainText(
-      "greet",
-      {
-        timeout: 30_000,
-      },
-    );
+    await expect(
+      loggedOut
+        .getByTestId("plan-artifact-frame")
+        .contentFrame()
+        .getByText("Add greet() helper"),
+    ).toBeVisible({ timeout: 30_000 });
     const summaryBox = await loggedOut
       .getByTestId("plan-summary")
       .boundingBox();
@@ -203,20 +203,26 @@ test.describe("Plan review (HTTP comments)", () => {
     await ownerCtx.request.post("/control/login", { data: OWNER });
     const owner = await ownerCtx.newPage();
     await owner.goto(`/agents/${threadId}`);
-    const reviewLink = owner.getByTestId("review-plan-link");
+    const reviewLink = owner.getByTestId("inline-plan-artifact");
     await expect(reviewLink).toBeVisible({ timeout: 30_000 });
-    await reviewLink.click();
-    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}$`));
+    await expect(reviewLink).toHaveCSS("height", "250px");
+    await expect(owner.getByTestId("inline-plan-fade")).toBeVisible();
     await expect(
       owner.locator('button[aria-current="page"]', { hasText: "Plan" }),
-    ).toBeVisible();
+    ).toHaveCount(0);
+    await reviewLink.click();
+    await expect(owner).toHaveURL(new RegExp(`/agents/${threadId}/plan$`));
     await expect(owner.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(owner.getByText("Back to conversation")).toHaveCount(0);
-    await expect(owner.getByTestId("plan-document")).toContainText("greet", {
+    await expect(owner.getByText("Back to conversation")).toBeVisible();
+    const ownerArtifact = owner.getByTestId("plan-artifact-frame");
+    await expect(
+      ownerArtifact.contentFrame().getByText("Add greet() helper"),
+    ).toBeVisible({
       timeout: 30_000,
     });
+    await expect(ownerArtifact).toHaveAttribute("sandbox", "");
     const embeddedSummaryBox = await owner
       .getByTestId("plan-summary")
       .boundingBox();
@@ -225,22 +231,24 @@ test.describe("Plan review (HTTP comments)", () => {
       .boundingBox();
     expect(embeddedSummaryBox).not.toBeNull();
     expect(embeddedActionsBox).not.toBeNull();
-    expect(embeddedActionsBox!.y).toBeGreaterThanOrEqual(
-      embeddedSummaryBox!.y + embeddedSummaryBox!.height,
+    // At the plan page's full width the header runs as a row, so the actions
+    // sit to the right of the summary instead of stacking under it.
+    expect(embeddedActionsBox!.x).toBeGreaterThanOrEqual(
+      embeddedSummaryBox!.x + embeddedSummaryBox!.width,
     );
     await expect(owner.getByTestId("approve-plan")).toBeVisible();
     // "Request changes" is meaningless with no feedback → disabled until a
     // comment exists.
     await expect(owner.getByTestId("reject-plan")).toBeDisabled();
 
-    // Copy the whole plan as markdown.
+    // Copy the whole plan as HTML.
     await owner.getByTestId("copy-plan").click();
     await expect(owner.getByTestId("copy-plan")).toContainText("Copied!");
     const clipboard = await owner.evaluate(() =>
       navigator.clipboard.readText(),
     );
-    expect(clipboard).toContain("## Plan: Add greet() helper");
-    expect(clipboard).toContain("### Verification");
+    expect(clipboard).toContain("<title>Greeting Blueprint</title>");
+    expect(clipboard).toContain("<h2>Verification</h2>");
 
     // Owner leaves a comment with Cmd+Enter.
     await addComment(owner, "Owner: looks solid, ship it.", "meta");
@@ -255,9 +263,12 @@ test.describe("Plan review (HTTP comments)", () => {
     await expect(collab.getByTestId("plan-review")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(collab.getByTestId("plan-document")).toContainText("greet", {
-      timeout: 30_000,
-    });
+    await expect(
+      collab
+        .getByTestId("plan-artifact-frame")
+        .contentFrame()
+        .getByText("Add greet() helper"),
+    ).toBeVisible({ timeout: 30_000 });
     await expect(collab.getByTestId("plan-comment")).toHaveCount(1, {
       timeout: 30_000,
     });
@@ -349,9 +360,9 @@ test.describe("Plan review (HTTP comments)", () => {
         "I'll wait for your review and approval before implementing.",
       ),
     ).toHaveCount(2, { timeout: 60_000 });
-    await expect(
-      owner.getByText("A plan is ready for your review."),
-    ).toBeVisible({ timeout: 60_000 });
+    await expect(owner.getByTestId("inline-plan-artifact")).toBeVisible({
+      timeout: 60_000,
+    });
 
     await owner.goto(planPath);
     await expect(owner.getByTestId("approve-plan")).toBeVisible({

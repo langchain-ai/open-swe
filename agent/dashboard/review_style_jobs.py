@@ -8,6 +8,7 @@ from typing import Any
 from langgraph_sdk import get_client
 
 from ..dispatch import create_durable_run
+from ..input_messages import RunInput, build_run_input
 from ..review.style_collector import (
     collect_review_samples,
     format_samples_for_analyzer,
@@ -36,21 +37,28 @@ def _client():
     return get_client()
 
 
-def build_continual_run_input(full_name: str) -> dict[str, Any]:
+def build_continual_run_input(full_name: str) -> RunInput:
     """Run input for a continual-learning analyzer run (shared with the cron)."""
-    return {
-        "messages": [
+    return build_run_input(
+        (
+            f"Refine the review-style prompt for `{full_name}` using this "
+            "reviewer's recorded finding outcomes. Follow the continual-learning "
+            "skill, then save the refined prompt."
+        ),
+        {
+            "sender_id": "system:review-style-continual",
+            "surface": "automation",
+            "kind": "system",
+        },
+        systems=[
             {
-                "role": "user",
-                "content": (
-                    f"Refine the review-style prompt for `{full_name}` using this "
-                    "reviewer's recorded finding outcomes. Follow the continual-learning "
-                    "skill, then save the refined prompt."
-                ),
+                "id": "system:review-style-continual",
+                "display_name": "Review style continual learning",
+                "platform": "open-swe",
             }
         ],
-        "files": build_skill_files(),
-    }
+        files=build_skill_files(),
+    )
 
 
 def build_continual_run_configurable(full_name: str) -> dict[str, Any]:
@@ -125,20 +133,27 @@ async def start_bootstrap_analysis(
         run = await create_durable_run(
             thread_id,
             _ASSISTANT_ID,
-            input={
-                "messages": [
+            input=build_run_input(
+                (
+                    f"Analyze review style for `{full_name}`. Follow the "
+                    "bootstrap-repo-analysis skill: browse merged PR review feedback "
+                    "with `gh` until you have enough human examples, "
+                    "then save the repository-specific prompt."
+                ),
+                {
+                    "sender_id": "system:review-style-bootstrap",
+                    "surface": "automation",
+                    "kind": "system",
+                },
+                systems=[
                     {
-                        "role": "user",
-                        "content": (
-                            f"Analyze review style for `{full_name}`. Follow the "
-                            "bootstrap-repo-analysis skill: browse merged PR review feedback "
-                            "with `gh` until you have enough human examples, "
-                            "then save the repository-specific prompt."
-                        ),
+                        "id": "system:review-style-bootstrap",
+                        "display_name": "Review style bootstrap",
+                        "platform": "open-swe",
                     }
                 ],
-                "files": build_skill_files(),
-            },
+                files=build_skill_files(),
+            ),
             source="review-style-bootstrap",
             config={"configurable": {**configurable, "prepare_run_id": str(uuid.uuid4())}},
             client=client,

@@ -4,6 +4,7 @@ const { randomUUID } = require("node:crypto")
 
 const STATUSES = new Set(["starting", "idle", "running", "error"])
 const MUTABLE_FIELDS = new Set(["title", "modelId", "effort", "status"])
+const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -32,6 +33,28 @@ function cleanImages(value) {
     }))
 }
 
+function cleanSkills(value) {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter(
+      (skill) =>
+        isRecord(skill) &&
+        typeof skill.name === "string" &&
+        skill.name.length <= 64 &&
+        SKILL_NAME.test(skill.name) &&
+        typeof skill.description === "string" &&
+        skill.description.trim() &&
+        skill.description.length <= 1_024 &&
+        typeof skill.instructions === "string" &&
+        skill.instructions.length <= 20_000
+    )
+    .map(({ name, description, instructions }) => ({
+      name,
+      description: description.trim(),
+      instructions,
+    }))
+}
+
 function normalizeThread(value) {
   if (
     !isRecord(value) ||
@@ -55,6 +78,7 @@ function normalizeThread(value) {
     ? {
         prompt: stringOrNull(value.pending.prompt, 2_000_000) || "",
         images: cleanImages(value.pending.images),
+        skills: cleanSkills(value.pending.skills),
       }
     : null
   return {
@@ -147,7 +171,7 @@ class LocalThreadStore {
       createdAt: now,
       updatedAt: now,
       checkpoint: { repo: null, ref: null },
-      pending: { prompt, images: cleanImages(input.images) },
+      pending: { prompt, images: cleanImages(input.images), skills: cleanSkills(input.skills) },
     }
     this.threads.set(thread.id, thread)
     this.persist()

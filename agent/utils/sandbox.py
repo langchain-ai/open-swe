@@ -10,6 +10,15 @@ if TYPE_CHECKING:
 
 SandboxFactory = Callable[..., Any]
 
+
+class SandboxGoneError(RuntimeError):
+    """The sandbox a thread is bound to no longer exists.
+
+    Distinct from a sandbox that is merely unreachable: a deleted one holds no
+    working tree, so callers recreate instead of failing the run.
+    """
+
+
 SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "langsmith": ("agent.integrations.langsmith", "create_langsmith_sandbox"),
     "daytona": ("agent.integrations.daytona", "create_daytona_sandbox"),

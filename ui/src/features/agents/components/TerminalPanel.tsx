@@ -281,7 +281,10 @@ export function TerminalPanel({
   const atSplitLimit = terminalIds.length >= MAX_TERMINALS_PER_GROUP
 
   return (
-    <div className="group/terminal relative flex h-full min-h-0 flex-col">
+    <div
+      className="group/terminal relative flex h-full min-h-0 flex-col"
+      data-hotkeys="ignore"
+    >
       <div className="absolute top-1 right-2 z-10 flex items-center rounded-md border border-border bg-background/95 opacity-0 shadow-sm transition-opacity group-hover/terminal:opacity-100 focus-within:opacity-100">
         <ActionButton
           label={`Split horizontally${atSplitLimit ? " (maximum 4)" : ""}`}

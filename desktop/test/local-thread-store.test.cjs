@@ -28,12 +28,17 @@ test("persists a prompt until it is acknowledged", (t) => {
     images: [{ base64: "aW1n", mimeType: "image/png", fileName: "bug.png" }],
     modelId: "anthropic:test",
     effort: "high",
+    skills: [
+      { name: "review", description: "Review changes", instructions: "Be concise." },
+      { name: "../bad", description: "Invalid", instructions: "Ignore." },
+    ],
   })
   assert.equal(thread.title, "fix the tests")
   assert.equal(fs.statSync(fixture.path).mode & 0o777, 0o600)
   assert.deepEqual(store.pendingPrompt(thread.id), {
     prompt: "  fix the tests  ",
     images: [{ kind: "image", base64: "aW1n", mimeType: "image/png", fileName: "bug.png" }],
+    skills: [{ name: "review", description: "Review changes", instructions: "Be concise." }],
   })
   assert.deepEqual(store.pendingPrompt(thread.id), store.pendingPrompt(thread.id))
   store.clearPrompt(thread.id)

@@ -20,6 +20,7 @@ export interface MessagesProps extends ApprovalCallbacks {
   messages: Array<Message>
   /** Cloud threads only; enables the git-sourced changed-files card per turn. */
   threadId?: string
+  showPlanArtifact?: boolean
   queuedMessages?: Array<QueuedThreadMessage>
   isStreaming: boolean
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */

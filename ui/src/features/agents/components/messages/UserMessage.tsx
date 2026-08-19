@@ -5,6 +5,7 @@ import { MessageTimestamp } from "./MessageTimestamp"
 import type { Message } from "@/features/agents/lib/types"
 
 export function UserMessage({ message }: { message: Message }) {
+  const isSystem = message.structuredSenderKind === "system"
   const text = message.chunks
     .filter((c) => c.kind === "text")
     .map((c) => c.text)
@@ -36,10 +37,22 @@ export function UserMessage({ message }: { message: Message }) {
       : undefined
 
   return (
-    <div className="group/turn my-4 flex flex-col items-end gap-1">
+    <div
+      className={`group/turn my-4 flex flex-col gap-1 ${isSystem ? "items-start" : "items-end"}`}
+      data-message-sender-kind={message.structuredSenderKind}
+    >
       <div className="max-w-[80%]">
+        {message.structuredSenderName && (
+          <div className="mb-1 px-1 text-[11px] font-medium text-muted-foreground">
+            {message.structuredSenderName}
+          </div>
+        )}
         {(text || images.length > 0) && (
-          <div className="relative overflow-hidden rounded-2xl bg-accent p-3">
+          <div
+            className={`relative overflow-hidden rounded-2xl p-3 ${
+              isSystem ? "border border-border bg-muted/50" : "bg-accent"
+            }`}
+          >
             {images.length > 0 && (
               <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                 {images.map((img, i) => (
@@ -74,7 +87,7 @@ export function UserMessage({ message }: { message: Message }) {
         {!message.timestampIsFallback && (
           <MessageTimestamp
             timestamp={message.timestamp}
-            align="right"
+            align={isSystem ? "left" : "right"}
             className="mt-1 pr-1"
           />
         )}

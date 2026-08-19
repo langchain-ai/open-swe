@@ -358,11 +358,6 @@ class TestRefreshProxyOnSandboxReuse:
                 new_callable=AsyncMock,
                 return_value="/workspace",
             ),
-            patch(
-                "agent.server.check_sandbox_reachable",
-                new_callable=AsyncMock,
-                return_value=mock_sandbox,
-            ),
             patch("agent.server.make_model", return_value=MagicMock()),
             patch("agent.server.construct_system_prompt", return_value="prompt"),
             patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),

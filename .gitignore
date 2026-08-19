@@ -77,3 +77,8 @@ __pycache__/
 
 #
 logs/
+
+# Playwright output written when run from the repo root
+test-results/
+playwright-report/
+blob-report/

@@ -200,6 +200,36 @@ def _text(content: Any) -> str:
     return str(content)
 
 
+def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
+    """The user turns a script routes on, recovered from the structured stream.
+
+    A Slack dispatch replays the thread's earlier messages as context before the
+    system block that frames the mention, so only the message after that block is
+    the turn. An instruction Open SWE dispatches to itself — a plan decision, a
+    scheduled wake-up — carries no Slack timestamp and is always a turn.
+    """
+    selected: list[HumanMessage] = []
+    slack_request_pending = False
+    for message in messages:
+        if not isinstance(message, HumanMessage):
+            continue
+        text = _text(message.content).lstrip()
+        if text.startswith("<dynamic-context "):
+            continue
+        if text.startswith("<input-message "):
+            header = text.split(">", 1)[0]
+            if 'kind="system"' in header:
+                slack_request_pending = 'surface="slack"' in header
+                continue
+            if 'surface="slack"' in header and "<timestamp>" in text:
+                if slack_request_pending:
+                    selected.append(message)
+                    slack_request_pending = False
+                continue
+        selected.append(message)
+    return selected
+
+
 def _pr_url_from_messages(messages: list[BaseMessage]) -> str | None:
     for msg in reversed(messages):
         if isinstance(msg, ToolMessage):
@@ -648,7 +678,7 @@ class FakeScriptedChatModel(BaseChatModel):
     model: str = "fake"
     profile: ModelProfile | None = {
         "tool_calling": True,
-        "max_input_tokens": 8_000,
+        "max_input_tokens": 128_000,
     }
     script: list[Any] = []
 
@@ -670,7 +700,7 @@ class FakeScriptedChatModel(BaseChatModel):
             if isinstance(message, SystemMessage):
                 LAST_SYSTEM_PROMPT["text"] = _text(message.content)
                 break
-        humans = [m for m in messages if isinstance(m, HumanMessage)]
+        humans = _script_humans(messages)
         context = ScriptContext(
             first_text=_text(humans[0].content) if humans else "",
             last_text=_text(humans[-1].content) if humans else "",

@@ -475,6 +475,87 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(queuedMessage).toBeVisible();
   });
 
+  test("renders structured input envelopes safely and keeps legacy messages", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openRunningThreadViaSlackLink(page);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+    await waitForThreadIdle(page, threadId);
+
+    await page.route(
+      `**/dashboard/api/threads/${threadId}/state`,
+      async (route) => {
+        const response = await route.fetch();
+        const body = (await response.json()) as {
+          values?: { messages?: Array<Record<string, unknown>> };
+        };
+        const messages = body.values?.messages ?? [];
+        body.values = {
+          ...body.values,
+          messages: [
+            {
+              type: "human",
+              id: "entity-person",
+              content:
+                '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
+            },
+            {
+              type: "human",
+              id: "entity-system",
+              content:
+                '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
+            },
+            {
+              type: "human",
+              id: "structured-person",
+              content:
+                '<input-message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></input-message>',
+            },
+            {
+              type: "human",
+              id: "structured-system",
+              content:
+                '<input-message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></input-message>',
+            },
+            {
+              type: "human",
+              id: "legacy-e2e",
+              content: "Legacy stays visible",
+            },
+            ...messages,
+          ],
+        };
+        await route.fulfill({ response, json: body });
+      },
+    );
+
+    await page.reload();
+    await expect(
+      page.getByText("Person says <img data-e2e-injected src=x>"),
+    ).toBeVisible();
+    await expect(page.locator("img[data-e2e-injected]")).toHaveCount(0);
+    await expect(page.getByText("Automation checks CI")).toBeVisible();
+    await expect(page.getByText("Legacy stays visible")).toBeVisible();
+    await expect(page.getByText("github:alice", { exact: false })).toHaveCount(
+      0,
+    );
+    await expect(
+      page.getByText("system:scheduler", { exact: false }),
+    ).toHaveCount(0);
+    await expect(
+      page
+        .locator('[data-message-sender-kind="person"]')
+        .filter({ hasText: "Person says" }),
+    ).toBeVisible();
+    await expect(
+      page
+        .locator('[data-message-sender-kind="system"]')
+        .filter({ hasText: "Automation checks CI" }),
+    ).toBeVisible();
+  });
+
   test("stops a Slack-started run from the web app", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await page.goto("/mock/slack");
