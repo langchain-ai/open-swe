@@ -7,6 +7,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.thread_title import (
+    _normalize_title,
     _ThreadTitle,
     generate_and_store_thread_title,
     schedule_thread_title_generation,
@@ -49,6 +50,23 @@ class _Threads:
     async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
         assert thread_id == "thread-123"
         self.metadata.update(metadata)
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Review Devin comments on pull request 34300", "Review Devin comments on pull request"),
+        ("Fix review comments for pull request 32722", "Fix review comments for pull request"),
+        ("Review PR 33627 feedback", "Review PR feedback"),
+        ("Fix issue 39727 with co-authored changes", "Fix issue with co-authored changes"),
+        ("Spawn review run for PR 675", "Spawn review run for PR"),
+        ("Address review comments on pull request", "Address review comments on pull request"),
+    ],
+)
+def test_normalize_title_removes_pr_and_issue_numbers_without_losing_subject(
+    title: str, expected: str
+) -> None:
+    assert _normalize_title(title) == expected
 
 
 @pytest.mark.parametrize(
