@@ -181,10 +181,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       streamMessagesToUi(
         stream.messages,
         stream.toolCalls,
-        stream.subagents,
         messageArrivalTimestamp
       ),
-    [stream.messages, stream.toolCalls, stream.subagents]
+    [stream.messages, stream.toolCalls]
   )
 
   const updateStatus = useCallback(
