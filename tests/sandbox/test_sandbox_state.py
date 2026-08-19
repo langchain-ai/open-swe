@@ -192,7 +192,7 @@ async def test_sandbox_proxy_uses_registered_reconnect_once(
 
 
 @pytest.mark.asyncio
-async def test_sandbox_proxy_refreshes_initialized_backend_when_started() -> None:
+async def test_sandbox_proxy_refreshes_a_stale_backend() -> None:
     refreshed = _FakeSandboxBackend()
     calls = 0
 
@@ -206,70 +206,16 @@ async def test_sandbox_proxy_refreshes_initialized_backend_when_started() -> Non
         thread_id="thread-1",
         reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
     )
-    proxy.start()
+    proxy.mark_stale()
 
+    assert await proxy.ready() is refreshed
+    # The refresh happens once per run, not once per access.
     assert await proxy.ready() is refreshed
     assert calls == 1
 
 
 @pytest.mark.asyncio
-async def test_sandbox_proxy_starts_reconnect_before_first_operation() -> None:
-    started = asyncio.Event()
-    release = asyncio.Event()
-
-    async def reconnect():
-        started.set()
-        await release.wait()
-        return _FakeSandboxBackend()
-
-    proxy = SandboxBackendProxy(
-        thread_id="thread-1",
-        reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
-    )
-    proxy.start()
-
-    await started.wait()
-    assert not proxy.has_backend
-    release.set()
-    backend = await proxy.ready()
-
-    assert backend.id == "sandbox-1"
-    assert proxy.has_backend
-
-
-@pytest.mark.asyncio
-async def test_sandbox_proxy_startup_survives_waiter_cancellation() -> None:
-    started = asyncio.Event()
-    release = asyncio.Event()
-    calls = 0
-
-    async def reconnect():
-        nonlocal calls
-        calls += 1
-        started.set()
-        await release.wait()
-        return _FakeSandboxBackend()
-
-    proxy = SandboxBackendProxy(
-        thread_id="thread-1",
-        reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
-    )
-    proxy.start()
-    waiter = asyncio.create_task(proxy.ready())
-    await started.wait()
-    waiter.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await waiter
-
-    release.set()
-    backend = await proxy.ready()
-
-    assert backend.id == "sandbox-1"
-    assert calls == 1
-
-
-@pytest.mark.asyncio
-async def test_sandbox_proxy_retries_failed_startup() -> None:
+async def test_sandbox_proxy_retries_a_failed_reconnect() -> None:
     calls = 0
 
     async def reconnect():
@@ -283,7 +229,6 @@ async def test_sandbox_proxy_retries_failed_startup() -> None:
         thread_id="thread-1",
         reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
     )
-    proxy.start()
 
     with pytest.raises(RuntimeError, match="startup failed"):
         await proxy.ready()
@@ -309,7 +254,7 @@ async def test_sandbox_proxy_delegates_delete_after_lazy_startup() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_sandbox_backend_awaits_registered_startup() -> None:
+async def test_get_sandbox_backend_awaits_the_reconnect() -> None:
     thread_id = "thread-1"
     clear_sandbox_backend(thread_id)
     release = asyncio.Event()
@@ -322,7 +267,6 @@ async def test_get_sandbox_backend_awaits_registered_startup() -> None:
         thread_id,
         reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
     )
-    proxy.start()
     waiter = asyncio.create_task(get_sandbox_backend(thread_id))
     await asyncio.sleep(0)
     assert not waiter.done()
@@ -353,20 +297,16 @@ async def test_sandbox_id_metadata_falls_back_to_live_thread(
     threads.get.assert_awaited_once_with("thread-1")
 
 
-def test_sandbox_proxy_recovers_when_the_next_run_runs_on_another_loop() -> None:
-    """The queue hands consecutive runs to different loops; the cache spans both.
+def test_sandbox_proxy_refuses_a_second_event_loop() -> None:
+    """One loop per process is an invariant, so a second one is a hard failure.
 
-    An interrupted run leaves a shielded startup task behind. Awaiting that task
-    from the next run's loop raises "attached to a different loop" and locks the
-    thread out of every later run, so the next loop must start its own.
+    Everything the proxy caches is loop-affine. Papering over a second loop is
+    what left threads permanently unusable, so it raises instead — loudly, where
+    the cause is still visible.
     """
-    calls = 0
 
     async def reconnect():
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            await asyncio.Event().wait()
+        await asyncio.sleep(0)
         return _FakeSandboxBackend()
 
     proxy = SandboxBackendProxy(
@@ -374,27 +314,15 @@ def test_sandbox_proxy_recovers_when_the_next_run_runs_on_another_loop() -> None
         reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
     )
 
-    async def interrupted_run() -> None:
-        proxy.start()
-        waiter = asyncio.create_task(proxy.ready())
-        await asyncio.sleep(0)
-        waiter.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await waiter
-
-    async def next_run() -> SandboxBackendProtocol:
-        proxy.start()
+    async def run() -> SandboxBackendProtocol:
+        proxy.mark_stale()
         return await proxy.ready()
 
-    # Both runners stay open: a queue runner's loop outlives the job it ran, so
-    # the abandoned startup task is still pending on a live, idle loop.
     first_loop, second_loop = asyncio.Runner(), asyncio.Runner()
     try:
-        first_loop.run(interrupted_run())
-        backend = second_loop.run(next_run())
+        assert first_loop.run(run()).id == "sandbox-1"
+        with pytest.raises(RuntimeError, match="one event loop per process"):
+            second_loop.run(run())
     finally:
         first_loop.close()
         second_loop.close()
-
-    assert backend.id == "sandbox-1"
-    assert calls == 2

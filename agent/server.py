@@ -1263,7 +1263,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
 
     backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-    backend.start()
+    backend.mark_stale()
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization and credentialed integrations, which stay personal to them.
