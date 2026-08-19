@@ -790,6 +790,7 @@ function DictationSection() {
           <Select
             value={preset && customModel === null ? selectedModel : "custom"}
             onValueChange={(model) => {
+              if (model === null) return
               if (model === "custom")
                 setCustomModel(preset ? "" : selectedModel)
               else {

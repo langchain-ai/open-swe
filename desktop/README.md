@@ -6,15 +6,9 @@
 The Electron package ships the compiled Open SWE web UI. Users configure only the URL of a
 compatible Open SWE backend; they do not need a separately hosted dashboard.
 
-Desktop users can choose **This Mac** in the new-task composer to run the Python
-`deepagents-code` agent over ACP in a selected local project. The web dashboard does not expose
-this option. The desktop app runs `deepagents-code[fireworks]==0.1.56` through `uv tool run --isolated`, passes the
-selected model and reasoning effort, and inherits the user's authentication and configuration. `uv`
-caches the pinned tool environment outside the app, so a `dcode` executable elsewhere on `PATH` is
-never used. Missing `uv`, local provider credentials, or packages fail during startup and surface in
-the composer. Added projects are persisted in the desktop app's local data and can be selected from
-the **This Mac** submenu or managed from the sidebar. Local dcode runs are ephemeral: their sessions
-remain available only for the lifetime of the desktop process and cannot be resumed after it exits.
+Desktop users can choose **This Mac** in the new-task composer to run the same Open SWE LangGraph agent over a selected local project. Electron owns a loopback-only LangGraph server, proxies it to the bundled UI, and stops it with the app. Local threads use the same streaming protocol, graph, tools, subagents, and middleware assembly as cloud threads; only the filesystem backend and unavailable cloud integrations differ.
+
+The packaged app bundles its Python runtime and locked Open SWE dependencies. Source development uses `uv run langgraph dev`. Provider credentials stay in the local LangGraph process and are not inherited by agent shell commands. Added projects and local thread history are persisted in the desktop app's local data.
 
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
 started, so it shows what the agent changed and not the working tree's prior state. It also shows
@@ -61,8 +55,7 @@ beside an installed `Open SWE` app without sharing its login session, backend co
 projects, or single-instance lock. The dev window is labeled **Open SWE Development**; its first
 launch may require signing in and adding projects again.
 
-A separate dcode installation is not required. Confirm `uv --version` succeeds before starting the
-desktop app; the first local-agent launch may take longer while `uv` installs the pinned release.
+A separate agent installation is not required. Confirm `uv --version` succeeds before starting the desktop app in development.
 
 Development defaults to `http://localhost:2024`. Point to another backend with:
 

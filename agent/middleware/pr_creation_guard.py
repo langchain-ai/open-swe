@@ -258,7 +258,7 @@ class PullRequestCreationGuardMiddleware(AgentMiddleware):
     state_schema = AgentState
 
     def _blocked_message_for_request(self, request: ToolCallRequest) -> ToolMessage | None:
-        if _tool_name(request) != "execute":
+        if _tool_name(request) not in {"execute", "background_execute"}:
             return None
         command = _tool_args(request).get("command")
         if not isinstance(command, str) or not is_pr_creation_fallback_command(command):

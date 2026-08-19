@@ -10,6 +10,7 @@ import type {
 import type { AutomationTemplate } from "@/features/automations/lib/automation-templates"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
+import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -339,6 +340,13 @@ export function AutomationEditor({
             />
           </div>
         </div>
+
+        {mode === "edit" && schedule && (
+          <>
+            <SectionLabel>Recent runs</SectionLabel>
+            <AutomationRuns automationId={schedule.id} limit={10} />
+          </>
+        )}
 
         {errorMessage && (
           <p className="mt-4 text-xs text-destructive">{errorMessage}</p>

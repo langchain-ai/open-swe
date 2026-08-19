@@ -16,6 +16,7 @@ import {
   FolderPlusIcon,
   GitMergeIcon,
   GitPullRequestIcon,
+  KanbanIcon,
   LightningIcon,
   PlusIcon,
   SparkleIcon,
@@ -24,11 +25,11 @@ import {
 } from "@phosphor-icons/react"
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import type { ComponentType, ReactNode, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
-import type { DesktopAcpSessionSummary, DesktopProject } from "@/desktop"
+import type { DesktopLocalThreadSummary, DesktopProject } from "@/desktop"
 import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
@@ -54,7 +55,10 @@ import {
   useSidebarThreads,
 } from "@/features/agents/lib/queries"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
-import { useDesktopAcpSessions } from "@/features/agents/lib/desktopAcp"
+import {
+  useDesktopLocalThreads,
+  useRefreshLocalThreads,
+} from "@/features/agents/lib/desktopLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { cn } from "@/lib/utils"
 
@@ -106,6 +110,7 @@ interface AgentsSidebarProps {
 }
 
 const NAV = [
+  { to: "/agents/threads", label: "Threads", icon: KanbanIcon },
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/my-settings", label: "Dashboard", icon: ChartLineUpIcon },
@@ -118,6 +123,13 @@ export function AgentsSidebar({
   activeLocalSessionId,
   layout,
 }: AgentsSidebarProps) {
+  const navigate = useNavigate()
+  const openThread = useCallback(
+    (threadId: string) => {
+      void navigate({ to: "/agents/$threadId", params: { threadId } })
+    },
+    [navigate]
+  )
   const {
     prefs,
     setGroup,
@@ -132,8 +144,14 @@ export function AgentsSidebar({
     prefs.filters.includeAutomations ||
       prefs.filters.sources.includes("schedule")
   )
-  const { sessions: localSessions, deleteSession: deleteLocalSession } =
-    useDesktopAcpSessions()
+  const localSessions = useDesktopLocalThreads().data ?? []
+  const refreshLocalThreads = useRefreshLocalThreads()
+  const deleteLocalSession = async (sessionId: string) => {
+    const deleted =
+      (await window.openSweDesktop?.deleteLocalThread(sessionId)) ?? false
+    if (deleted) refreshLocalThreads()
+    return deleted
+  }
   const {
     projects: localProjects,
     addProject: addLocalProject,
@@ -147,13 +165,17 @@ export function AgentsSidebar({
   const resolvedHasMore = sidebar.data?.resolved.hasMore ?? false
   const visibleThreads = [...activeThreads, ...resolvedThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
-  useRunCompletionNotifier(visibleThreads, activeThreadId)
+  useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
   const facets = availableFacets(visibleThreads)
   const filteredActive = filterThreads(activeThreads, prefs.filters)
   const filteredResolved = filterThreads(resolvedThreads, prefs.filters)
-  const sections = groupThreadsByMode(filteredActive, prefs.group)
   const showResolved = prefs.filters.includeResolved
+  const groupedThreads =
+    prefs.group === "focus" && showResolved
+      ? [...filteredActive, ...filteredResolved]
+      : filteredActive
+  const sections = groupThreadsByMode(groupedThreads, prefs.group)
   const isEmpty =
     localGroups.length === 0 &&
     sections.length === 0 &&
@@ -190,7 +212,7 @@ export function AgentsSidebar({
           className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
         >
           <PlusIcon className="size-4" />
-          New Agent
+          New Thread
         </Link>
       </div>
 
@@ -297,9 +319,19 @@ export function AgentsSidebar({
                     onNavigate={layout.closeOnMobile}
                     defaultCollapsed={section.defaultCollapsed}
                     compact={prefs.compact}
+                    hasMore={
+                      prefs.group === "focus" && section.key === "done"
+                        ? resolvedHasMore
+                        : false
+                    }
+                    count={
+                      prefs.group === "focus" && section.key === "done"
+                        ? filteredResolved.length
+                        : section.threads.length
+                    }
                   />
                 ))}
-            {showResolved && (
+            {showResolved && prefs.group !== "focus" && (
               <ResolvedThreadGroup
                 threads={filteredResolved}
                 hasMore={resolvedHasMore}
@@ -422,9 +454,9 @@ function DeleteThreadDialog({
 
 function groupLocalProjects(
   projects: Array<DesktopProject>,
-  sessions: Array<DesktopAcpSessionSummary>
+  sessions: Array<DesktopLocalThreadSummary>
 ) {
-  const sessionsByProject = new Map<string, Array<DesktopAcpSessionSummary>>()
+  const sessionsByProject = new Map<string, Array<DesktopLocalThreadSummary>>()
   for (const session of sessions) {
     const group = sessionsByProject.get(session.cwd) ?? []
     group.push(session)
@@ -456,7 +488,7 @@ function LocalThreadGroup({
   compact = false,
 }: {
   project: DesktopProject
-  sessions: Array<DesktopAcpSessionSummary>
+  sessions: Array<DesktopLocalThreadSummary>
   activeSessionId?: string
   onNavigate?: () => void
   onDelete: (sessionId: string) => Promise<boolean>
@@ -513,7 +545,7 @@ function LocalThreadRow({
   onDelete,
   compact = false,
 }: {
-  session: DesktopAcpSessionSummary
+  session: DesktopLocalThreadSummary
   isActive: boolean
   onNavigate?: () => void
   onDelete: (sessionId: string) => Promise<boolean>
@@ -531,7 +563,7 @@ function LocalThreadRow({
     setDeleteError(null)
     try {
       if (!(await onDelete(session.id))) {
-        throw new Error("Local Deep Agents Code session not found")
+        throw new Error("Local Open SWE thread not found")
       }
       setDeleteOpen(false)
       if (isActive) {
@@ -615,7 +647,7 @@ function LocalThreadRow({
         threadTitle={session.title}
         isDeleting={isDeleting}
         onConfirm={() => void confirmDelete()}
-        detail="This removes its dcode history but does not revert changes made to your project."
+        detail="This removes its history but does not revert changes made to your project."
         error={deleteError}
       />
     </>
@@ -629,6 +661,8 @@ function ThreadGroup({
   onNavigate,
   defaultCollapsed = false,
   compact = false,
+  hasMore = false,
+  count = threads.length,
 }: {
   label: string
   threads: Array<AgentThread>
@@ -636,6 +670,8 @@ function ThreadGroup({
   onNavigate?: () => void
   defaultCollapsed?: boolean
   compact?: boolean
+  hasMore?: boolean
+  count?: number
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   if (threads.length === 0) return null
@@ -652,18 +688,25 @@ function ThreadGroup({
       >
         <ToggleIcon className="size-3" />
         <span className="min-w-0 flex-1 truncate">{label}</span>
-        <span>{threads.length}</span>
+        <span>
+          {count}
+          {hasMore ? "+" : ""}
+        </span>
       </button>
-      {!collapsed &&
-        threads.map((thread) => (
-          <ThreadRow
-            key={thread.id}
-            thread={thread}
-            isActive={thread.id === activeThreadId}
-            onNavigate={onNavigate}
-            compact={compact}
-          />
-        ))}
+      {!collapsed && (
+        <>
+          {threads.map((thread) => (
+            <ThreadRow
+              key={thread.id}
+              thread={thread}
+              isActive={thread.id === activeThreadId}
+              onNavigate={onNavigate}
+              compact={compact}
+            />
+          ))}
+          {hasMore && <ShowAllResolvedLink onNavigate={onNavigate} />}
+        </>
+      )}
     </div>
   )
 }
@@ -713,19 +756,28 @@ function ResolvedThreadGroup({
               compact={compact}
             />
           ))}
-          {hasMore && (
-            <Link
-              to="/agents/threads"
-              search={{ resolved: true, page: 1 }}
-              onClick={onNavigate}
-              className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-            >
-              Show all
-            </Link>
-          )}
+          {hasMore && <ShowAllResolvedLink onNavigate={onNavigate} />}
         </>
       )}
     </div>
+  )
+}
+
+function ShowAllResolvedLink({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <Link
+      to="/agents/threads"
+      search={{
+        resolved: true,
+        page: 1,
+        layout: "board",
+        group: "focus",
+      }}
+      onClick={onNavigate}
+      className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+    >
+      Show all
+    </Link>
   )
 }
 

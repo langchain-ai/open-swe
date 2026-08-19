@@ -1,10 +1,9 @@
 """Run-completion webhook handler — guarantees every run ends with a signal.
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
-as the ``webhook`` on every dispatched run, see ``agent.dispatch``). When a run
-ends in a failure state (``error`` / ``timeout``) we post a
-short failure reply to the originating channel, so a run that died on a server
-recycle or hit a limit never leaves the user in silence.
+as the ``webhook`` on every dispatched run, see ``agent.dispatch``). Successful
+Slack runs enqueue deferred session-cost enrichment; failures (``error`` /
+``timeout``) post a short reply so a run that died never leaves the user silent.
 
 This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
@@ -19,6 +18,7 @@ from typing import Any
 
 from .review.findings import REVIEWER_THREAD_KIND
 from .review.publish import settle_review_check_run
+from .session_cost import schedule_session_cost_refresh
 from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import post_github_comment
@@ -38,6 +38,9 @@ _FAILURE_REPLY_FLAG = "failure_reply_posted"
 _FAILURE_REPLY_RUN_ID = "failure_reply_posted_run_id"
 _FAILURE_REPLY_RUN_IDS = "failure_reply_posted_run_ids"
 _MAX_FAILURE_REPLY_RUN_IDS = 20
+_SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
+_SESSION_COST_REFRESH_RUN_IDS = "session_cost_refresh_scheduled_run_ids"
+_MAX_SESSION_COST_REFRESH_RUN_IDS = 20
 
 # Shared-secret bearer token proving a /webhooks/run-complete call came from our
 # own dispatch (which appends ?token= when this is set) rather than from an
@@ -192,11 +195,87 @@ def _failure_reply_metadata(metadata: dict[str, Any], run_id: str | None) -> dic
     }
 
 
+def _scheduled_cost_run_ids(metadata: dict[str, Any]) -> list[str]:
+    raw = metadata.get(_SESSION_COST_REFRESH_RUN_IDS)
+    ids = [item for item in raw if isinstance(item, str) and item] if isinstance(raw, list) else []
+    latest = metadata.get(_SESSION_COST_REFRESH_RUN_ID)
+    if isinstance(latest, str) and latest and latest not in ids:
+        ids.append(latest)
+    return ids
+
+
+def _cost_refresh_metadata(metadata: dict[str, Any], run_id: str) -> dict[str, Any]:
+    ids = [item for item in _scheduled_cost_run_ids(metadata) if item != run_id]
+    ids.append(run_id)
+    return {
+        _SESSION_COST_REFRESH_RUN_ID: run_id,
+        _SESSION_COST_REFRESH_RUN_IDS: ids[-_MAX_SESSION_COST_REFRESH_RUN_IDS:],
+    }
+
+
+def _prepare_run_id(payload: dict[str, Any]) -> str | None:
+    metadata = payload.get("metadata")
+    value = metadata.get("prepare_run_id") if isinstance(metadata, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+async def _schedule_success_cost_refresh(
+    thread_id: str, run_id: str | None, payload: dict[str, Any]
+) -> dict[str, str]:
+    if run_id is None:
+        return {"status": "ignored", "reason": "missing run_id"}
+    prepare_run_id = _prepare_run_id(payload)
+    if prepare_run_id is None:
+        return {"status": "ignored", "reason": "missing prepare_run_id"}
+
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("run-complete: could not load thread %s", thread_id, exc_info=True)
+        return {"status": "error", "reason": "thread fetch failed"}
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    metadata = metadata if isinstance(metadata, dict) else {}
+    if metadata.get("kind") == REVIEWER_THREAD_KIND:
+        return {"status": "ignored", "reason": "not an agent Slack run"}
+    if run_id in _scheduled_cost_run_ids(metadata):
+        return {"status": "ignored", "reason": "cost refresh already scheduled for run"}
+
+    source_context = metadata.get("source_context")
+    slack_thread = source_context.get("slack_thread") if isinstance(source_context, dict) else None
+    channel_id = slack_thread.get("channel_id") if isinstance(slack_thread, dict) else None
+    thread_ts = slack_thread.get("thread_ts") if isinstance(slack_thread, dict) else None
+    if not isinstance(channel_id, str) or not channel_id:
+        return {"status": "ignored", "reason": "no Slack channel"}
+    if not isinstance(thread_ts, str) or not thread_ts:
+        return {"status": "ignored", "reason": "no Slack thread"}
+
+    scheduled = await schedule_session_cost_refresh(
+        {
+            "agent_thread_id": thread_id,
+            "run_id": run_id,
+            "prepare_run_id": prepare_run_id,
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+        },
+        client=client,
+    )
+    if not scheduled:
+        return {"status": "error", "reason": "cost refresh scheduling failed"}
+    try:
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata=_cost_refresh_metadata(metadata, run_id),
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
+    return {"status": "ok", "reason": "cost refresh scheduled"}
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
-    Posts a failure reply only when the run ended in a failure state and we
-    haven't already replied for this thread.
+    Enqueues successful Slack cost refreshes and posts failure replies idempotently.
     """
     status = payload.get("status")
     thread_id = payload.get("thread_id")
@@ -204,6 +283,15 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
+    if status == "success":
+        return await _schedule_success_cost_refresh(thread_id, run_id, payload)
+    payload_metadata = payload.get("metadata")
+    if (
+        status in _TERMINAL_FAILURE_STATUSES
+        and isinstance(payload_metadata, dict)
+        and payload_metadata.get("kind") == "thread_wakeup"
+    ):
+        return {"status": "ignored", "reason": "automated wakeup failure"}
     if status not in _TERMINAL_FAILURE_STATUSES:
         return {"status": "ignored", "reason": f"non-failure status: {status}"}
 

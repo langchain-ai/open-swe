@@ -17,7 +17,6 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
-import { parseApprovalThreshold } from "@/lib/reviewApproval"
 import { useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
@@ -27,8 +26,6 @@ const DEFAULT_SETTINGS: TeamSettings = {
   review_draft_prs: false,
   pr_summaries: true,
   review_trace_links: true,
-  auto_approve_enabled: false,
-  auto_approve_default_threshold: 90,
   review_tracing_project: null,
   org_guidelines: null,
   default_agent_model: null,
@@ -51,16 +48,12 @@ function ReviewPage() {
   })
   const [local, setLocal] = useState<TeamSettings>(DEFAULT_SETTINGS)
   const [guidelinesDraft, setGuidelinesDraft] = useState("")
-  const [approvalThresholdDraft, setApprovalThresholdDraft] = useState("90")
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (settings.data) {
       setLocal(settings.data)
       setGuidelinesDraft(settings.data.org_guidelines ?? "")
-      setApprovalThresholdDraft(
-        String(settings.data.auto_approve_default_threshold)
-      )
     }
   }, [settings.data])
 
@@ -149,47 +142,6 @@ function ReviewPage() {
 
       <SettingsSection title="Configuration">
         <div className="divide-y divide-border">
-          <SettingsRow
-            label="Automatic PR Approval"
-            description="Allow enabled repositories to submit approvals when a review meets the configured score and safety gates. This never merges a PR."
-            control={
-              <Switch
-                checked={current.auto_approve_enabled}
-                onCheckedChange={(v) => persist({ auto_approve_enabled: v })}
-                disabled={!canEdit}
-              />
-            }
-          />
-          <SettingsRow
-            label="Default Approval Threshold"
-            description="Minimum review score from 0 to 100. Repositories may override this value."
-            control={
-              <input
-                aria-label="Default approval threshold"
-                type="number"
-                min={0}
-                max={100}
-                value={approvalThresholdDraft}
-                onChange={(event) =>
-                  setApprovalThresholdDraft(event.target.value)
-                }
-                onBlur={() => {
-                  const value = parseApprovalThreshold(approvalThresholdDraft)
-                  if (value !== null) {
-                    if (value !== current.auto_approve_default_threshold) {
-                      persist({ auto_approve_default_threshold: value })
-                    }
-                  } else {
-                    setApprovalThresholdDraft(
-                      String(current.auto_approve_default_threshold)
-                    )
-                  }
-                }}
-                disabled={!canEdit}
-                className="h-8 w-20 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-50"
-              />
-            }
-          />
           <SettingsRow
             label="Review Draft PRs"
             description="Org-wide default for whether Jarvis Review runs on draft PRs. Each user can override this in Profile Settings."

@@ -102,6 +102,16 @@ async def github_webhook(
         )
         return {"status": "ignored", "reason": "Repository not in allowlist"}
 
+    if event_type in common._GITHUB_CI_EVENTS:
+        delivery_id = request.headers.get("X-GitHub-Delivery")
+        background_tasks.add_task(
+            service.process_github_ci_event,
+            payload,
+            event_type,
+            delivery_id,
+        )
+        return {"status": "accepted", "message": "Processing GitHub CI event"}
+
     if is_issue_event:
         action = payload.get("action", "")
         if action not in common._SUPPORTED_GH_ISSUE_ACTIONS:

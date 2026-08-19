@@ -111,6 +111,7 @@ from ..utils.slack import (
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
     is_slack_channel_named,
+    lookup_slack_run_mapping,  # noqa: F401
     lookup_slack_thread_id,  # noqa: F401
     normalize_slack_channel_context,  # noqa: F401
     post_slack_thread_reply,
@@ -120,6 +121,7 @@ from ..utils.slack import (
     select_slack_context_messages,  # noqa: F401
     store_slack_run_mapping,  # noqa: F401
     strip_bot_mention,  # noqa: F401
+    update_slack_message,
     verify_slack_signature,
 )
 from ..utils.slack_events import (
@@ -269,6 +271,7 @@ __all__ = [
     "store_slack_run_mapping",
     "strip_bot_mention",
     "update_agent_thread_pr_state",
+    "update_slack_message",
     "upsert_agent_thread_owner_metadata",
     "verify_github_signature",
     "verify_linear_signature",
@@ -1094,6 +1097,7 @@ def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
+_GITHUB_CI_EVENTS = frozenset(["check_run", "check_suite", "workflow_run", "status"])
 _SUPPORTED_GH_EVENTS = frozenset(
     [
         "issue_comment",
@@ -1102,6 +1106,7 @@ _SUPPORTED_GH_EVENTS = frozenset(
         "pull_request_review_comment",
         "pull_request_review",
         "push",
+        *_GITHUB_CI_EVENTS,
     ]
 )
 _SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])

@@ -10,6 +10,7 @@ import {
 } from "@phosphor-icons/react"
 
 import type { AgentSchedule } from "@/features/agents/lib/types"
+import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { AutomationTemplates } from "@/features/automations/components/AutomationTemplates"
 import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -33,14 +34,22 @@ function formatDate(value?: string | null): string {
   })
 }
 
-export function AutomationsList() {
+export type AutomationsTab = "overview" | "runs"
+
+export function AutomationsList({
+  tab,
+  onTabChange,
+}: {
+  tab: AutomationsTab
+  onTabChange: (tab: AutomationsTab) => void
+}) {
   const schedulesQuery = useAgentSchedules()
   const schedules = schedulesQuery.data ?? []
 
   const total = schedules.length
-  const active = schedules.filter((s) => s.enabled).length
+  const active = schedules.filter((schedule) => schedule.enabled).length
   const paused = total - active
-  const issues = schedules.filter((s) => !!s.lastError).length
+  const issues = schedules.filter((schedule) => !!schedule.lastError).length
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
@@ -50,46 +59,71 @@ export function AutomationsList() {
           Run Jarvis on a recurring schedule. Each run starts a fresh agent
           thread.
         </p>
-
-        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard label="Total" value={total} />
-          <StatCard label="Active" value={active} />
-          <StatCard label="Paused" value={paused} />
-          <StatCard
-            label="Needs attention"
-            value={issues}
-            highlight={issues > 0}
-          />
+        <div className="mt-4 flex w-fit rounded-md border border-border bg-card p-0.5">
+          {(["overview", "runs"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => onTabChange(value)}
+              className={cn(
+                "rounded px-3 py-1 text-xs capitalize transition-colors",
+                tab === value
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {value}
+            </button>
+          ))}
         </div>
 
-        <div className="mt-8 flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground">
-            {total} {total === 1 ? "automation" : "automations"}
-          </span>
-          <Link to="/agents/automations/new" className={buttonVariants()}>
-            <PlusIcon className="size-4" />
-            New Automation
-          </Link>
-        </div>
-
-        <div className="mt-3">
-          {schedulesQuery.isLoading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-16 w-full rounded-xl" />
-              <Skeleton className="h-16 w-full rounded-xl" />
+        {tab === "runs" ? (
+          <div className="mt-6">
+            <AutomationRuns />
+          </div>
+        ) : (
+          <>
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatCard label="Total" value={total} />
+              <StatCard label="Active" value={active} />
+              <StatCard label="Paused" value={paused} />
+              <StatCard
+                label="Needs attention"
+                value={issues}
+                highlight={issues > 0}
+              />
             </div>
-          ) : total === 0 ? (
-            <EmptyState />
-          ) : (
-            <div className="space-y-2">
-              {schedules.map((schedule) => (
-                <AutomationRow key={schedule.id} schedule={schedule} />
-              ))}
-            </div>
-          )}
-        </div>
 
-        <AutomationTemplates />
+            <div className="mt-8 flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">
+                {total} {total === 1 ? "automation" : "automations"}
+              </span>
+              <Link to="/agents/automations/new" className={buttonVariants()}>
+                <PlusIcon className="size-4" />
+                New Automation
+              </Link>
+            </div>
+
+            <div className="mt-3">
+              {schedulesQuery.isLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-16 w-full rounded-xl" />
+                  <Skeleton className="h-16 w-full rounded-xl" />
+                </div>
+              ) : total === 0 ? (
+                <EmptyState />
+              ) : (
+                <div className="space-y-2">
+                  {schedules.map((schedule) => (
+                    <AutomationRow key={schedule.id} schedule={schedule} />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <AutomationTemplates />
+          </>
+        )}
       </div>
     </div>
   )

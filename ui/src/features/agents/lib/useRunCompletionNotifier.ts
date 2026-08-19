@@ -13,7 +13,8 @@ const TERMINAL_STATUSES = new Set(["finished", "error", "interrupted"])
  */
 export function useRunCompletionNotifier(
   threads: Array<AgentThread> | undefined,
-  activeThreadId?: string
+  activeThreadId: string | undefined,
+  openThread: (threadId: string) => void
 ) {
   const prevStatusRef = useRef<Map<string, string>>(new Map())
 
@@ -33,9 +34,9 @@ export function useRunCompletionNotifier(
         TERMINAL_STATUSES.has(thread.status) &&
         !(isViewingThread && thread.id === activeThreadId)
       ) {
-        showRunNotification(thread)
+        showRunNotification(thread, openThread)
       }
       prev.set(thread.id, thread.status)
     }
-  }, [threads, activeThreadId])
+  }, [threads, activeThreadId, openThread])
 }

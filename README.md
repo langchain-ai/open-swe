@@ -71,6 +71,8 @@ Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE 
 | `fetch_url` | Fetch web pages as markdown |
 | `http_request` | API calls (GET, POST, etc.) |
 | `linear_comment` | Post updates to Linear tickets |
+| `linear_search_issues` | Search Linear issues by free text |
+| `output_iframe` | Render sandboxed HTML visualizations in the dashboard |
 | `slack_add_reaction` | React to Slack messages |
 | `slack_thread_reply` | Reply in Slack threads |
 

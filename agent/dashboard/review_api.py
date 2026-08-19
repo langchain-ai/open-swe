@@ -17,7 +17,6 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from fastapi import HTTPException, Response
 
-from ..review.approval import latest_approval_assessment
 from ..review.findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_checks import github_headers
@@ -225,49 +224,6 @@ def _run_status(thread: ThreadLike, metadata: dict[str, Any]) -> str:
     return "idle"
 
 
-def _serialize_approval_assessment(
-    metadata: dict[str, Any], current_head_sha: str | None
-) -> dict[str, Any] | None:
-    assessment = latest_approval_assessment(metadata)
-    if not isinstance(assessment, dict):
-        return None
-    assessed_sha = assessment.get("assessed_sha")
-    score = assessment.get("score")
-    raw_score = assessment.get("raw_score")
-    if not isinstance(assessed_sha, str) or not assessed_sha:
-        return None
-    if score is not None and (type(score) is not int or not 0 <= score <= 100):
-        return None
-    if raw_score is not None and (type(raw_score) is not int or not 0 <= raw_score <= 100):
-        return None
-    return {
-        "rubric_version": assessment.get("rubric_version") or "",
-        "assessed_sha": assessed_sha,
-        "raw_score": raw_score,
-        "score": score,
-        "reasons": [item for item in assessment.get("reasons", []) if isinstance(item, str)],
-        "risks": [item for item in assessment.get("risks", []) if isinstance(item, str)],
-        "valid": assessment.get("valid") is True,
-        "policy": assessment.get("policy") if isinstance(assessment.get("policy"), dict) else {},
-        "decision": assessment.get("decision")
-        if isinstance(assessment.get("decision"), str)
-        else "",
-        "blockers": [item for item in assessment.get("blockers", []) if isinstance(item, str)],
-        "github_review_id": (
-            assessment.get("github_review_id")
-            if isinstance(assessment.get("github_review_id"), int)
-            else None
-        ),
-        "github_review_event": (
-            assessment.get("github_review_event")
-            if assessment.get("github_review_event") in {"COMMENT", "APPROVE"}
-            else "COMMENT"
-        ),
-        "recorded_at": assessment.get("recorded_at") or "",
-        "stale": bool(current_head_sha and assessed_sha != current_head_sha),
-    }
-
-
 def _thread_review_summary(thread: ThreadLike) -> dict[str, Any] | None:
     metadata = thread_metadata(thread)
     pr = metadata.get("pr")
@@ -280,7 +236,6 @@ def _thread_review_summary(thread: ThreadLike) -> dict[str, Any] | None:
         return None
     findings = _findings_list(metadata)
     updated_at = thread.get("updated_at")
-    approval = _serialize_approval_assessment(metadata, metadata.get("head_sha"))
     return {
         "thread_id": thread.get("thread_id"),
         "owner": owner,
@@ -296,10 +251,6 @@ def _thread_review_summary(thread: ThreadLike) -> dict[str, Any] | None:
         "watch": bool(metadata.get("watch")),
         "status": _run_status(thread, metadata),
         "counts": _finding_counts(findings),
-        "approval_score": approval.get("score") if approval else None,
-        "approval_decision": approval.get("decision") if approval else None,
-        "approval_event": approval.get("github_review_event") if approval else None,
-        "approval_stale": approval.get("stale") if approval else False,
         "updated_at": updated_at if isinstance(updated_at, str) else None,
     }
 
@@ -600,7 +551,6 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         "pr": details,
         "checks": checks,
         "findings": findings,
-        "approval_assessment": _serialize_approval_assessment(metadata, head_sha),
         "diff_groups": diff_groups,
         "diff_groups_stale": diff_groups_stale,
     }

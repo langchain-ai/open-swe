@@ -273,6 +273,9 @@ async def slack_action(request: Request) -> JSONResponse:
     user_id = str(body.get("user") or TEST_USERS[0]["slack_id"])
     if not isinstance(action, dict) or not channel_id or not thread_ts or not message_ts:
         raise HTTPException(status_code=400, detail="Missing Slack action context")
+    source_message = fakes.slack_message(channel_id, thread_ts, message_ts)
+    if source_message is None:
+        raise HTTPException(status_code=404, detail="Slack message not found")
 
     payload = {
         "type": "block_actions",
@@ -283,7 +286,12 @@ async def slack_action(request: Request) -> JSONResponse:
             "message_ts": message_ts,
             "thread_ts": thread_ts,
         },
-        "message": {"ts": message_ts, "thread_ts": thread_ts},
+        "message": {
+            "ts": message_ts,
+            "thread_ts": thread_ts,
+            "text": source_message["text"],
+            "blocks": source_message["blocks"],
+        },
         "actions": [{**action, "action_ts": fakes.next_slack_ts()}],
     }
     response = await _deliver_slack_interaction(payload)
@@ -360,17 +368,17 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
             for u in TEST_USERS
         )
         return HTMLResponse(
-            f"""<!doctype html><meta charset=utf-8><title>GitHub · Authorize open-swe</title>
+            f"""<!doctype html><meta charset=utf-8><title>GitHub · Authorize Open SWE</title>
             <body style="font-family:system-ui;max-width:420px;margin:3rem auto;padding:0 1rem">
             <main data-testid="fake-github-login">
-              <h1 style="font-size:1.1rem">Authorize open-swe</h1>
+              <h1 style="font-size:1.1rem">Authorize Open SWE</h1>
               <p style="color:#888;font-size:0.9rem">Pick a fake GitHub account to continue.</p>
               <form method=get action=/fake-gh/login/oauth/authorize>
                 <input type=hidden name=redirect_to value="{escape(dest, quote=True)}">
                 <label>GitHub user
                   <select name=login style="font:inherit;padding:0.4rem">{options}</select>
                 </label>
-                <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Authorize open-swe</button>
+                <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Authorize Open SWE</button>
               </form>
             </main>
             </body>"""
@@ -684,6 +692,20 @@ async def slack_post_message(request: Request) -> JSONResponse:
         is_bot=True,
     )
     return _ok({"ts": ts, "message": {"ts": ts}})
+
+
+@app.post("/fake-slack/chat.update")
+async def slack_update_message(request: Request) -> JSONResponse:
+    body = await request.json()
+    message = fakes.update_slack_message(
+        str(body.get("channel") or ""),
+        str(body.get("ts") or ""),
+        text=str(body.get("text") or ""),
+        blocks=body.get("blocks"),
+    )
+    if message is None:
+        return JSONResponse({"ok": False, "error": "message_not_found"})
+    return _ok({"ts": message["ts"], "message": message})
 
 
 @app.post("/fake-slack/chat.postEphemeral")

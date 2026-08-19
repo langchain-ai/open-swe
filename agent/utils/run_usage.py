@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 class RunUsageSummary:
     models: tuple[str, ...]
     main_agent_tokens: int | None
+    session_cost_usd: float | None = None
 
 
 def _number(value: Any) -> int | None:
@@ -18,13 +19,17 @@ def _tokens(usage: Any) -> int | None:
     if not isinstance(usage, dict):
         return None
     total = _number(usage.get("total_tokens"))
-    if total is not None:
-        return total
-    input_tokens = _number(usage.get("input_tokens"))
-    output_tokens = _number(usage.get("output_tokens"))
-    if input_tokens is None or output_tokens is None:
-        return None
-    return input_tokens + output_tokens
+    if total is None:
+        input_tokens = _number(usage.get("input_tokens"))
+        output_tokens = _number(usage.get("output_tokens"))
+        if input_tokens is None or output_tokens is None:
+            return None
+        total = input_tokens + output_tokens
+    input_details = usage.get("input_token_details")
+    cache_read = (
+        _number(input_details.get("cache_read")) if isinstance(input_details, dict) else None
+    )
+    return max(total - (cache_read or 0), 0)
 
 
 def _message_model(message: AIMessage) -> str | None:
