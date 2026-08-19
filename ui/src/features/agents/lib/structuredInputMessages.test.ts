@@ -35,11 +35,13 @@ describe("structured input messages", () => {
       displayName: undefined,
       handle: "bob",
     })
-    expect(collectStructuredEntities([introduction]).get("github:bob")).toEqual({
-      kind: "person",
-      displayName: undefined,
-      handle: "bob",
-    })
+    expect(collectStructuredEntities([introduction]).get("github:bob")).toEqual(
+      {
+        kind: "person",
+        displayName: undefined,
+        handle: "bob",
+      }
+    )
   })
 
   it("ignores the data fields a real envelope carries beside its content", () => {
