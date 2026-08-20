@@ -682,6 +682,9 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
 
 async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkeypatch) -> None:
     class FakeThreads:
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            return {"values": {"messages": [{"id": "existing-message"}]}}
+
         async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
             pass
 
@@ -704,7 +707,11 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
 
     command = {
         "method": "run.start",
-        "params": {"input": {"messages": [{"role": "user", "content": "continue here"}]}},
+        "params": {
+            "input": {
+                "messages": [{"role": "user", "content": "continue here", "id": "existing-message"}]
+            }
+        },
     }
 
     enriched = await thread_api._enrich_run_start_command(
@@ -726,6 +733,7 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
     assert "conversation has moved to Web" in (handoff.findtext("content") or "")
     assert user_message.attrib["sender"] == "github:teammate"
     assert user_message.findtext("content") == "continue here"
+    assert "id" not in messages[-1]
     assert enriched["params"]["config"]["configurable"]["source"] == "dashboard"
 
 

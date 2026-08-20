@@ -608,6 +608,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     // The agent's canned reply is already in the transcript from the Slack run,
     // so wait on the run persisting this message rather than on any reply text.
     await waitForStateToContain(page, threadId, followUp);
+    await waitForThreadIdle(page, threadId);
+    await waitForThreadNotBusy(page, threadId);
 
     await expect(
       page.getByTestId("user-message").filter({ hasText: followUp }),
