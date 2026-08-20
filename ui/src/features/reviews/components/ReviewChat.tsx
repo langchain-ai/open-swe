@@ -30,6 +30,10 @@ import { IconButton } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, reviewChatApiBase } from "@/lib/api"
+import {
+  collectStructuredEntities,
+  parseStructuredInput,
+} from "@/features/agents/lib/structuredInputMessages"
 import { cn } from "@/lib/utils"
 
 // --- Composer bridge ---------------------------------------------------------
@@ -464,10 +468,23 @@ function ChatBody({
     [busy, stream, onUserSend]
   )
 
-  const visible = messages.filter((message) => {
+  const structuredEntities = collectStructuredEntities(
+    messages
+      .filter((message) => messageType(message) === "human")
+      .map((message) => messageText(message.content))
+  )
+  const visible: Array<{
+    message: BaseMessage
+    content: string
+    structured?: ReturnType<typeof parseStructuredInput>
+  }> = messages.flatMap((message) => {
     const type = messageType(message)
-    if (type !== "human" && type !== "ai") return false
-    return messageText(message.content).trim().length > 0
+    if (type !== "human" && type !== "ai") return []
+    const content = messageText(message.content)
+    if (type === "ai") return content.trim() ? [{ message, content }] : []
+    const parsed = parseStructuredInput(content, structuredEntities)
+    if (parsed.type === "entity" || !parsed.content.trim()) return []
+    return [{ message, content: parsed.content, structured: parsed }]
   })
 
   const submitComposer = () => {
@@ -524,21 +541,36 @@ function ChatBody({
           ref={scrollRef}
           className="flex flex-1 flex-col gap-4 overflow-y-auto p-4"
         >
-          {visible.map((message, index) => {
+          {visible.map(({ message, content, structured }, index) => {
             const isUser = messageType(message) === "human"
             if (!isUser) {
               return (
                 <div key={message.id ?? index} className="flex justify-start">
                   <div className="w-full text-[13px] text-foreground">
-                    <Markdown content={messageText(message.content)} />
+                    <Markdown content={content} />
                   </div>
                 </div>
               )
             }
-            const parsed = parseUserMessage(messageText(message.content))
+            const parsed = parseUserMessage(content)
+            const isSystem =
+              structured?.type === "message" &&
+              structured.senderKind === "system"
             return (
-              <div key={message.id ?? index} className="flex justify-end">
-                <div className="flex max-w-[85%] flex-col items-end gap-1.5">
+              <div
+                key={message.id ?? index}
+                className={isSystem ? "flex justify-start" : "flex justify-end"}
+                data-message-sender-kind={
+                  structured?.type === "message"
+                    ? structured.senderKind
+                    : undefined
+                }
+              >
+                <div
+                  className={`flex max-w-[85%] flex-col gap-1.5 ${
+                    isSystem ? "items-start" : "items-end"
+                  }`}
+                >
                   {parsed.attachments.length > 0 && (
                     <div className="flex flex-wrap justify-end gap-1">
                       {parsed.attachments.map((attachment, i) => (
@@ -547,7 +579,13 @@ function ChatBody({
                     </div>
                   )}
                   {parsed.text && (
-                    <span className="rounded-lg bg-muted px-3 py-2 text-[13px] whitespace-pre-wrap text-foreground">
+                    <span
+                      className={`rounded-lg px-3 py-2 text-[13px] whitespace-pre-wrap text-foreground ${
+                        isSystem
+                          ? "border border-border bg-muted/50"
+                          : "bg-muted"
+                      }`}
+                    >
                       {parsed.text}
                     </span>
                   )}

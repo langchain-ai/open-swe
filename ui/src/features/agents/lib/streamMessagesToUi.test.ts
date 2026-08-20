@@ -4,6 +4,65 @@ import { describe, expect, it } from "vitest"
 import { streamMessagesToUi } from "./streamMessagesToUi"
 
 describe("streamMessagesToUi", () => {
+  it("hides entity introductions and renders structured senders distinctly", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "person-entity",
+        content:
+          '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
+      }),
+      new HumanMessage({
+        id: "system-entity",
+        content:
+          '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
+      }),
+      new HumanMessage({
+        id: "person-message",
+        content:
+          '<input-message sender="github:alice" surface="web" kind="human"><content>Hello &lt;b&gt;world&lt;/b&gt;</content></input-message>',
+      }),
+      new HumanMessage({
+        id: "system-message",
+        content:
+          '<input-message sender="system:scheduler" surface="automation"><content>Check CI</content></input-message>',
+      }),
+      new HumanMessage({ id: "legacy", content: "Legacy message" }),
+    ])
+
+    expect(messages).toHaveLength(3)
+    expect(messages[0]).toMatchObject({
+      author: "user",
+      structuredSenderId: "github:alice",
+      structuredSenderKind: "person",
+      structuredSenderName: "Alice",
+      chunks: [{ kind: "text", text: "Hello <b>world</b>" }],
+    })
+    expect(messages[1]).toMatchObject({
+      author: "system",
+      structuredSenderKind: "system",
+      structuredSenderName: "Scheduler",
+      chunks: [{ kind: "text", text: "Check CI" }],
+    })
+    expect(messages[2]).toMatchObject({
+      author: "user",
+      chunks: [{ kind: "text", text: "Legacy message" }],
+    })
+  })
+
+  it("preserves structured message whitespace", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "structured",
+        content:
+          '<input-message sender="github:alice" surface="web" kind="human"><content>  indented\n</content></input-message>',
+      }),
+    ])
+
+    expect(messages[0]?.chunks).toEqual([
+      { kind: "text", text: "  indented\n" },
+    ])
+  })
+
   it("keys each agent turn by the user message that opened it", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({ id: "user-1", content: "first" }),

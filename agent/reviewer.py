@@ -49,6 +49,7 @@ from .dashboard.team_settings import (
 )
 from .middleware import (
     BasePrepareRunMiddleware,
+    DynamicContextMiddleware,
     ModelCallTimeoutMiddleware,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
@@ -1433,6 +1434,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 refresh_github_proxy_before_model,
                 check_message_queue_before_model,
                 TimeoutWrapupMiddleware(),
+                DynamicContextMiddleware(),
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),

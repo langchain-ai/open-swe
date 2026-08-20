@@ -319,7 +319,8 @@ async def test_dispatch_or_queue_enqueues_untagged_follow_up(
     assert run == {"run_id": "run-1"}
     await_args = dispatch.await_args
     assert await_args is not None
-    assert await_args.args[1] == blocks
+    assert await_args.args[1] is None
+    assert await_args.kwargs["input"] == {"messages": blocks}
     assert await_args.kwargs["multitask_strategy"] == "enqueue"
 
 
@@ -573,11 +574,11 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     fetch_messages.assert_not_awaited()
     await_args = dispatch.await_args
     assert await_args is not None
-    content_blocks = await_args.args[2]
-    prompt = content_blocks[0]["text"]
-    assert "new corrected text" in prompt
-    assert "old text" not in prompt
-    assert "## Conversation Context" not in prompt
+    run_input = await_args.args[2]
+    serialized = str(run_input["messages"])
+    assert "new corrected text" in serialized
+    assert "old text" not in serialized
+    assert "## Conversation Context" not in serialized
     assert await_args.kwargs["explicitly_tagged"] is False
     store_args = store_mapping.await_args
     assert store_args is not None

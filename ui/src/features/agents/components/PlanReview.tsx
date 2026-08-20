@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import type { KeyboardEvent } from "react"
 
@@ -12,18 +12,13 @@ import {
   updatePlan,
 } from "@/lib/plan"
 import { Button } from "@/components/ui/button"
+import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { useResolvedTheme } from "@/lib/theme"
-import { cn } from "@/lib/utils"
+import { useRegisterAppCommands } from "@/lib/appCommands"
 
 const POLL_MS = 4000
 
-// Copy text to the clipboard across browsers: prefer the async Clipboard API
-// (needs a secure context), and fall back to a hidden-textarea + execCommand
-// for older Safari/Firefox and non-HTTPS origins. Returns whether it copied.
 async function copyToClipboard(text: string): Promise<boolean> {
-  // The DOM types mark navigator.clipboard required, but it's absent in older
-  // browsers and non-secure origins — treat it as optional.
   const nav = navigator as { clipboard?: Clipboard }
   try {
     if (window.isSecureContext && nav.clipboard) {
@@ -31,7 +26,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
       return true
     }
   } catch {
-    /* fall through to the legacy path */
+    /* fall through */
   }
   try {
     const textarea = document.createElement("textarea")
@@ -42,9 +37,9 @@ async function copyToClipboard(text: string): Promise<boolean> {
     document.body.appendChild(textarea)
     textarea.select()
     textarea.setSelectionRange(0, text.length)
-    const ok = document.execCommand("copy")
+    const copied = document.execCommand("copy")
     document.body.removeChild(textarea)
-    return ok
+    return copied
   } catch {
     return false
   }
@@ -52,15 +47,12 @@ async function copyToClipboard(text: string): Promise<boolean> {
 
 export function PlanReview({
   plan,
-  compact = false,
   onApprove,
 }: {
   plan: PlanData
-  compact?: boolean
   onApprove?: (runId: string) => void
 }) {
   const navigate = useNavigate()
-  const resolvedTheme = useResolvedTheme()
   const [comments, setComments] = useState<Array<PlanComment>>([])
   const [draft, setDraft] = useState("")
   const [posting, setPosting] = useState(false)
@@ -68,54 +60,38 @@ export function PlanReview({
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  // Locally track the displayed markdown so a manual edit shows immediately; the
-  // route's query stops polling once content exists, so the prop won't refetch.
-  const [markdown, setMarkdown] = useState(plan.markdown)
+  const format = plan.html.trim() ? "html" : "markdown"
+  const planContent = format === "html" ? plan.html : plan.markdown
+  const [content, setContent] = useState(planContent)
   const [editing, setEditing] = useState(false)
-  const [editDraft, setEditDraft] = useState(plan.markdown)
+  const [editDraft, setEditDraft] = useState(planContent)
   const [saving, setSaving] = useState(false)
+  const planShortcuts = useMemo(
+    () => [
+      {
+        id: "plan-submit-comment",
+        label: "Submit plan comment",
+        shortcuts: ["mod+enter"],
+        group: "Plan review",
+        showInPalette: false,
+      },
+    ],
+    []
+  )
+  useRegisterAppCommands(planShortcuts)
 
-  // Reflect external plan updates (e.g. an agent revision) while not editing.
   useEffect(() => {
-    if (!editing) setMarkdown(plan.markdown)
-  }, [plan.markdown, editing])
+    if (!editing) setContent(planContent)
+  }, [editing, planContent])
 
   const isShared = plan.status === "shared"
-  const isTerminal = plan.status === "approved" || plan.status === "cancelled"
-  const canEdit = plan.isOwner && !isShared && !isTerminal
   const canApprove = plan.status === "ready"
+  const canEdit =
+    plan.isOwner &&
+    !isShared &&
+    plan.status !== "approved" &&
+    plan.status !== "cancelled"
 
-  const startEditing = useCallback(() => {
-    setEditDraft(markdown)
-    setEditing(true)
-    setError(null)
-  }, [markdown])
-
-  const cancelEditing = useCallback(() => {
-    setEditing(false)
-    setError(null)
-  }, [])
-
-  const saveEdit = useCallback(async () => {
-    const next = editDraft.trim()
-    if (!next) {
-      setError("The plan cannot be empty.")
-      return
-    }
-    setSaving(true)
-    setError(null)
-    try {
-      const result = await updatePlan(plan.threadId, next)
-      setMarkdown(result.markdown)
-      setEditing(false)
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }, [editDraft, plan.threadId])
-
-  // Poll so reviewers see each other's comments without a realtime transport.
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -123,7 +99,7 @@ export function PlanReview({
         const next = await getPlanComments(plan.threadId)
         if (!cancelled) setComments(next)
       } catch {
-        /* transient; next tick retries */
+        /* next poll retries */
       }
     }
     if (isShared) return
@@ -135,6 +111,25 @@ export function PlanReview({
     }
   }, [isShared, plan.threadId])
 
+  const saveEdit = useCallback(async () => {
+    const next = editDraft.trim()
+    if (!next) {
+      setError("The plan cannot be empty.")
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await updatePlan(plan.threadId, next, format)
+      setContent(next)
+      setEditing(false)
+    } catch (editError) {
+      setError((editError as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }, [editDraft, format, plan.threadId])
+
   const submitComment = useCallback(async () => {
     const body = draft.trim()
     if (!body) return
@@ -142,10 +137,10 @@ export function PlanReview({
     setError(null)
     try {
       const created = await addPlanComment(plan.threadId, body)
-      setComments((prev) => [...prev, created])
+      setComments((current) => [...current, created])
       setDraft("")
-    } catch (e) {
-      setError((e as Error).message)
+    } catch (commentError) {
+      setError((commentError as Error).message)
     } finally {
       setPosting(false)
     }
@@ -155,8 +150,7 @@ export function PlanReview({
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return
       event.preventDefault()
-      if (posting || !draft.trim()) return
-      void submitComment()
+      if (!posting && draft.trim()) void submitComment()
     },
     [draft, posting, submitComment]
   )
@@ -165,9 +159,9 @@ export function PlanReview({
     async (id: string) => {
       try {
         await deletePlanComment(plan.threadId, id)
-        setComments((prev) => prev.filter((c) => c.id !== id))
-      } catch (e) {
-        setError((e as Error).message)
+        setComments((current) => current.filter((comment) => comment.id !== id))
+      } catch (deleteError) {
+        setError((deleteError as Error).message)
       }
     },
     [plan.threadId]
@@ -189,233 +183,217 @@ export function PlanReview({
           return
         }
         await rejectPlan(plan.threadId)
-        if (compact) {
-          setDecision("Changes requested — the agent is revising the plan.")
-        } else {
-          await navigate({
-            to: "/agents/$threadId",
-            params: { threadId: plan.threadId },
-          })
-        }
-      } catch (e) {
-        setError((e as Error).message)
+        setDecision("Changes requested — the agent is revising the plan.")
+        await navigate({
+          to: "/agents/$threadId",
+          params: { threadId: plan.threadId },
+        })
+      } catch (decisionError) {
+        setError((decisionError as Error).message)
       } finally {
         setBusy(null)
       }
     },
-    [compact, navigate, onApprove, plan.threadId]
+    [navigate, onApprove, plan.threadId]
   )
 
   const copyPlan = useCallback(async () => {
     setError(null)
-    if (await copyToClipboard(markdown)) {
+    if (await copyToClipboard(content)) {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     } else {
-      setError("Couldn't copy the plan to the clipboard.")
+      setError(`Couldn't copy the plan ${format} to the clipboard.`)
     }
-  }, [markdown])
+  }, [content, format])
 
   return (
-    <div
+    <main
       data-testid="plan-review"
-      className="@container flex min-h-0 flex-1 flex-col bg-background text-foreground"
+      className="@container min-h-0 flex-1 overflow-y-auto bg-background text-foreground"
     >
-      <div
-        className={cn(
-          "flex flex-col gap-3 border-b border-border px-4 py-3 @3xl:flex-row @3xl:items-center @3xl:justify-between @3xl:gap-4",
-          !compact && "md:px-6"
-        )}
-      >
-        <div data-testid="plan-summary" className="min-w-0">
-          <h1 className="text-base font-semibold text-foreground">
-            {isShared ? "Shared response" : "Implementation plan"}
-          </h1>
-          <p className="text-xs text-muted-foreground/70">
-            {isShared ? "Viewing" : "Reviewing"} as {plan.user.name}
-            {plan.isOwner ? " (owner)" : ""} · status:{" "}
-            <span data-testid="plan-status">{plan.status}</span>
-            {plan.approvedBy ? ` · approved by ${plan.approvedBy.name}` : ""}
-          </p>
-        </div>
-        <div
-          data-testid="plan-actions"
-          className="flex min-w-0 flex-wrap items-center gap-2 @3xl:shrink-0 @3xl:justify-end"
-        >
-          {decision && (
-            <span
-              data-testid="plan-decision"
-              className="w-full text-xs text-muted-foreground/70 @3xl:w-auto"
-            >
-              {decision}
-            </span>
-          )}
-          {editing ? (
-            <>
-              <Button
-                data-testid="cancel-edit-plan"
-                variant="secondary"
-                disabled={saving}
-                onClick={cancelEditing}
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-4 md:px-8 md:py-6">
+        <header className="flex flex-col gap-3 border-b border-border pb-4 @3xl:flex-row @3xl:items-center @3xl:justify-between">
+          <div data-testid="plan-summary" className="min-w-0">
+            <h1 className="text-lg font-semibold text-foreground">
+              {isShared ? "Shared response" : "Implementation plan"}
+            </h1>
+            <p className="text-xs text-muted-foreground/70">
+              {isShared ? "Viewing" : "Reviewing"} as {plan.user.name}
+              {plan.isOwner ? " (owner)" : ""} · status:{" "}
+              <span data-testid="plan-status">{plan.status}</span>
+            </p>
+          </div>
+          <div
+            data-testid="plan-actions"
+            className="flex flex-wrap items-center gap-2"
+          >
+            {decision && (
+              <span
+                data-testid="plan-decision"
+                className="w-full text-xs text-muted-foreground"
               >
-                Cancel
-              </Button>
-              <Button
-                data-testid="save-plan"
-                disabled={saving || !editDraft.trim()}
-                onClick={() => void saveEdit()}
-              >
-                {saving ? "Saving…" : "Save"}
-              </Button>
-            </>
-          ) : (
-            <>
-              {canEdit && (
+                {decision}
+              </span>
+            )}
+            {editing ? (
+              <>
                 <Button
-                  data-testid="edit-plan"
+                  data-testid="cancel-edit-plan"
                   variant="secondary"
-                  disabled={busy !== null || decision !== null}
-                  onClick={startEditing}
+                  disabled={saving}
+                  onClick={() => {
+                    setEditing(false)
+                    setError(null)
+                  }}
                 >
-                  Edit
+                  Cancel
                 </Button>
-              )}
-              <Button
-                data-testid="copy-plan"
-                variant="secondary"
-                disabled={!markdown.trim()}
-                onClick={() => void copyPlan()}
-              >
-                {copied ? "Copied!" : "Copy markdown"}
-              </Button>
-              {canApprove && (
                 <Button
-                  data-testid="approve-plan"
-                  disabled={busy !== null || decision !== null}
-                  onClick={() => void decide("approve")}
+                  data-testid="save-plan"
+                  disabled={saving || !editDraft.trim()}
+                  onClick={() => void saveEdit()}
                 >
-                  Approve
+                  {saving ? "Saving…" : "Save"}
                 </Button>
-              )}
-              {!isShared && (
+              </>
+            ) : (
+              <>
+                {canEdit && (
+                  <Button
+                    data-testid="edit-plan"
+                    variant="secondary"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      setEditDraft(content)
+                      setEditing(true)
+                      setError(null)
+                    }}
+                  >
+                    Edit {format === "html" ? "HTML" : "Markdown"}
+                  </Button>
+                )}
                 <Button
-                  data-testid="reject-plan"
+                  data-testid="copy-plan"
                   variant="secondary"
-                  // Requesting changes feeds the comments to the agent, so it's
-                  // meaningless with none — disable until at least one is left.
-                  disabled={
-                    busy !== null || decision !== null || comments.length === 0
-                  }
-                  title={
-                    comments.length === 0
-                      ? "Leave a comment first to request changes"
-                      : undefined
-                  }
-                  onClick={() => void decide("reject")}
+                  disabled={!content.trim()}
+                  onClick={() => void copyPlan()}
                 >
-                  Request changes
+                  {copied
+                    ? "Copied!"
+                    : `Copy ${format === "html" ? "HTML" : "Markdown"}`}
                 </Button>
-              )}
-            </>
-          )}
-        </div>
-      </div>
+                {canApprove && (
+                  <Button
+                    data-testid="approve-plan"
+                    disabled={busy !== null}
+                    onClick={() => void decide("approve")}
+                  >
+                    Approve
+                  </Button>
+                )}
+                {!isShared && (
+                  <Button
+                    data-testid="reject-plan"
+                    variant="secondary"
+                    disabled={busy !== null || comments.length === 0}
+                    title={
+                      comments.length === 0
+                        ? "Leave a comment first"
+                        : undefined
+                    }
+                    onClick={() => void decide("reject")}
+                  >
+                    Request changes
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+        </header>
 
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col overflow-y-auto",
-          !compact && "md:flex-row md:overflow-hidden"
-        )}
-      >
-        <div
-          className={cn(
-            "min-w-0 px-4 py-4 md:min-h-0 md:flex-1 md:overflow-auto",
-            !compact && "md:px-6"
-          )}
+        <section
           data-testid="plan-document"
-          data-color-scheme={resolvedTheme}
+          className="min-w-0 overflow-hidden rounded-xl border border-border bg-card"
         >
           {editing ? (
-            <div className="flex h-full flex-col gap-2">
-              {error && <p className="text-xs text-destructive">{error}</p>}
-              <textarea
-                data-testid="plan-editor"
-                value={editDraft}
-                onChange={(e) => setEditDraft(e.target.value)}
-                spellCheck={false}
-                className="min-h-[20rem] w-full flex-1 resize-none rounded-md border border-border bg-background px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-primary"
-              />
-            </div>
-          ) : markdown.trim() ? (
-            <Markdown content={markdown} />
+            <textarea
+              data-testid="plan-editor"
+              value={editDraft}
+              onChange={(event) => setEditDraft(event.target.value)}
+              spellCheck={false}
+              className="min-h-[70vh] w-full resize-y bg-background px-4 py-3 font-mono text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          ) : content.trim() ? (
+            format === "html" ? (
+              <PlanArtifactFrame html={content} className="min-h-[70vh]" />
+            ) : (
+              <div data-testid="plan-markdown" className="min-h-[70vh] p-6">
+                <Markdown content={content} />
+              </div>
+            )
           ) : (
-            <p className="text-sm text-muted-foreground/70">
+            <p className="p-6 text-sm text-muted-foreground/70">
               The plan hasn't been written yet.
             </p>
           )}
-        </div>
+        </section>
 
         {!isShared && (
-          <aside
-            className={cn(
-              "flex shrink-0 flex-col border-t border-border",
-              !compact && "md:w-80 md:border-t-0 md:border-l"
-            )}
+          <section
+            data-testid="plan-comments"
+            className="flex flex-col gap-4 border-t border-border pt-5"
           >
-            <div className="border-b border-border px-4 py-3">
-              <h2 className="text-sm font-semibold text-foreground">
-                Comments
-              </h2>
+            <div>
+              <h2 className="text-base font-semibold">Comments</h2>
+              <p className="text-xs text-muted-foreground">
+                Feedback is sent to the agent with your decision.
+              </p>
             </div>
-            <div
-              className="max-h-80 space-y-3 overflow-auto px-4 py-3 md:max-h-none md:min-h-0 md:flex-1"
-              data-testid="plan-comments"
-            >
+            <div className="grid gap-3 md:grid-cols-2">
               {comments.length === 0 ? (
-                <p className="text-xs text-muted-foreground/70">
+                <p className="text-sm text-muted-foreground/70">
                   No comments yet.
                 </p>
               ) : (
-                comments.map((c) => (
-                  <div
-                    key={c.id}
+                comments.map((comment) => (
+                  <article
+                    key={comment.id}
                     data-testid="plan-comment"
-                    className="rounded-md border border-border bg-card px-3 py-2"
+                    className="rounded-lg border border-border bg-card px-3 py-3"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-medium text-foreground">
-                        {c.author}
+                      <span className="text-xs font-medium">
+                        {comment.author}
                       </span>
                       <button
                         type="button"
                         data-testid="comment-delete"
-                        className="text-xs text-muted-foreground/70 hover:text-foreground"
-                        onClick={() => void removeComment(c.id)}
+                        className="text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                        onClick={() => void removeComment(comment.id)}
                       >
                         Delete
                       </button>
                     </div>
-                    <p className="mt-1 text-sm whitespace-pre-wrap text-foreground">
-                      {c.body}
+                    <p className="mt-1 text-sm whitespace-pre-wrap">
+                      {comment.body}
                     </p>
-                  </div>
+                  </article>
                 ))
               )}
             </div>
-            <div className="border-t border-border p-3">
-              {error && (
-                <p className="mb-2 text-xs text-destructive">{error}</p>
-              )}
+            <div className="flex flex-col gap-2">
+              {error && <p className="text-xs text-destructive">{error}</p>}
               <textarea
                 data-testid="comment-input"
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={handleCommentKeyDown}
                 placeholder="Leave a comment on the plan"
                 rows={3}
-                className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-primary"
+                className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
-              <div className="mt-2 flex justify-end">
+              <div className="flex justify-end">
                 <Button
                   data-testid="comment-submit"
                   size="sm"
@@ -426,9 +404,9 @@ export function PlanReview({
                 </Button>
               </div>
             </div>
-          </aside>
+          </section>
         )}
       </div>
-    </div>
+    </main>
   )
 }

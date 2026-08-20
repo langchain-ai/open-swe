@@ -235,6 +235,36 @@ def _text(content: Any) -> str:
     return str(content)
 
 
+def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
+    """The user turns a script routes on, recovered from the structured stream.
+
+    A Slack dispatch replays the thread's earlier messages as context before the
+    system block that frames the mention, so only the message after that block is
+    the turn. An instruction Open SWE dispatches to itself — a plan decision, a
+    scheduled wake-up — carries no Slack timestamp and is always a turn.
+    """
+    selected: list[HumanMessage] = []
+    slack_request_pending = False
+    for message in messages:
+        if not isinstance(message, HumanMessage):
+            continue
+        text = _text(message.content).lstrip()
+        if text.startswith("<dynamic-context "):
+            continue
+        if text.startswith("<input-message "):
+            header = text.split(">", 1)[0]
+            if 'kind="system"' in header:
+                slack_request_pending = 'surface="slack"' in header
+                continue
+            if 'surface="slack"' in header and "<timestamp>" in text:
+                if slack_request_pending:
+                    selected.append(message)
+                    slack_request_pending = False
+                continue
+        selected.append(message)
+    return selected
+
+
 def _pr_url_from_messages(messages: list[BaseMessage]) -> str | None:
     for msg in reversed(messages):
         if isinstance(msg, ToolMessage):
@@ -315,22 +345,76 @@ def _desktop_reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.md"
+PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.html"
 
-PLAN_MARKDOWN = """## Plan: Add greet() helper
+PLAN_HTML = """<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Greeting Blueprint</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #1c1c1c;
+        --muted: #5c5c5c;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --bg: #1c1c1c;
+          --fg: #f4f4f4;
+          --muted: #a8a8a8;
+        }
+      }
+      :root[data-theme="dark"] {
+        --bg: #1c1c1c;
+        --fg: #f4f4f4;
+        --muted: #a8a8a8;
+      }
+      body {
+        margin: 0;
+        padding: 2rem 1.5rem;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        line-height: 1.6;
+      }
+      main { margin: 0 auto; max-width: 44rem; }
+      h1 { font-size: 1.5rem; margin: 0 0 0.5rem; }
+      h2 { font-size: 1.05rem; margin: 1.75rem 0 0.5rem; }
+      p.lede { color: var(--muted); margin: 0; }
+      code {
+        background: rgba(127, 127, 127, 0.18);
+        border-radius: 0.25rem;
+        padding: 0.1em 0.35em;
+      }
+      a:focus-visible, :focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Add greet() helper</h1>
+      <p class="lede">Add a tiny greeting helper to the demo repo.</p>
 
-### Overview
-Add a tiny greeting helper to the demo repo.
+      <h2>Files to change</h2>
+      <ul>
+        <li><code>greet.py</code> — new module exposing a <code>greet(name)</code> function.</li>
+      </ul>
 
-### Files to change
-- `greet.py` — new module exposing a `greet(name)` function.
+      <h2>Steps</h2>
+      <ol>
+        <li>Create <code>greet.py</code> with a <code>greet(name)</code> function.</li>
+        <li>Open a draft PR with the change.</li>
+      </ol>
 
-### Steps
-1. Create `greet.py` with a `greet(name)` function.
-2. Open a draft PR with the change.
-
-### Verification
-- Import `greet` and confirm it returns the expected string.
+      <h2>Verification</h2>
+      <ul>
+        <li>Import <code>greet</code> and confirm it returns the expected string.</li>
+      </ul>
+    </main>
+  </body>
+</html>
 """
 
 
@@ -365,7 +449,7 @@ def _write_plan_step(_messages: list[BaseMessage]) -> AIMessage:
         tool_calls=[
             {
                 "name": "write_file",
-                "args": {"file_path": PLAN_FILE_PATH, "content": PLAN_MARKDOWN},
+                "args": {"file_path": PLAN_FILE_PATH, "content": PLAN_HTML},
                 "id": "call-write-plan",
             }
         ],
@@ -771,7 +855,7 @@ class FakeScriptedChatModel(BaseChatModel):
             if isinstance(message, SystemMessage):
                 LAST_SYSTEM_PROMPT["text"] = _text(message.content)
                 break
-        humans = [m for m in messages if isinstance(m, HumanMessage)]
+        humans = _script_humans(messages)
         context = ScriptContext(
             first_text=_text(humans[0].content) if humans else "",
             last_text=_text(humans[-1].content) if humans else "",

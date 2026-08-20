@@ -16,7 +16,13 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_INSTRUCTION
+from ..input_messages import (
+    PersonIdentity,
+    build_input_messages,
+    dynamic_context_hashes_from_messages,
+    injected_dynamic_context_hashes_from_metadata,
+)
+from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from ..utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -37,6 +43,7 @@ from ..utils.thread_ops import (
     queue_message_for_thread,
 )
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
+from ..utils.timing import phase
 from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
 from .environments import get_environment, slugify
@@ -60,8 +67,6 @@ _TTFT_OBSERVER_TASKS: set[asyncio.Task[None]] = set()
 _ASSISTANT_ID = "agent"
 _DASHBOARD_SOURCE = "dashboard"
 # Modes required for the v2 event-stream protocol (`POST …/stream/events`).
-# `@langchain/react` subscribes to `messages`, `tools`, `lifecycle`, etc.;
-# legacy `messages-tuple`-only runs emit almost nothing on those channels.
 _DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "values",
     "updates",
@@ -75,6 +80,7 @@ _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif",
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 _PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+_DISCOVERY_HISTORY_LIMIT = 5
 _PROXY_STREAM_TIMEOUT = httpx.Timeout(None)
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
@@ -492,9 +498,6 @@ async def _thread_summary(
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
-    working_repo = metadata.get("working_repo_full_name")
-    if not isinstance(working_repo, str) or working_repo.count("/") != 1:
-        working_repo = None
     created_at = metadata.get("created_at_ms")
     updated_at = metadata.get("updated_at_ms")
     raw_title = metadata.get("title")
@@ -531,7 +534,6 @@ async def _thread_summary(
         "title": title,
         "repo": name,
         "repoFullName": full_name,
-        "workingRepoFullName": working_repo,
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
@@ -633,12 +635,14 @@ async def _latest_run_status(thread_id: str) -> str | None:
 
 
 async def _refresh_latest_run_metadata(
-    client: Any, thread: ThreadLike
+    client: Any, thread: ThreadLike, *, timings: dict[str, float] | None = None
 ) -> tuple[ThreadLike, str | None, str | None]:
+    record = timings if timings is not None else {}
     thread_id = thread.get("thread_id") or thread.get("id")
     if not isinstance(thread_id, str) or not thread_id:
         return thread, None, None
-    latest_run_status, latest_run_id = await _latest_run_info(client, thread_id)
+    with phase(record, "runs_list"):
+        latest_run_status, latest_run_id = await _latest_run_info(client, thread_id)
     metadata = thread_metadata(thread)
     metadata_update: dict[str, Any] = {}
     if latest_run_status and latest_run_status != metadata.get("latest_run_status"):
@@ -646,12 +650,15 @@ async def _refresh_latest_run_metadata(
     if latest_run_id and latest_run_id != metadata.get("latest_run_id"):
         metadata_update["latest_run_id"] = latest_run_id
     if metadata_update:
-        try:
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not persist latest run metadata for %s", thread_id, exc_info=True)
-        else:
-            thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
+        with phase(record, "thread_update"):
+            try:
+                await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "Could not persist latest run metadata for %s", thread_id, exc_info=True
+                )
+            else:
+                thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     return thread, latest_run_status, latest_run_id
 
 
@@ -660,7 +667,6 @@ _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
-_DISCOVERY_HISTORY_LIMIT = 5
 
 
 def _thread_id(thread: ThreadLike) -> str | None:
@@ -964,7 +970,11 @@ async def list_dashboard_threads_sidebar(
     active_thread_id: str | None = None,
     include_automations: bool = False,
     include_all: bool = False,
+    timings: dict[str, float] | None = None,
+    counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
+    record = timings if timings is not None else {}
+    count_record = counts if counts is not None else {}
     client = langgraph_client()
     searches = _owner_search_filters(login, email=email, include_all=include_all)
     safe_active_limit = min(max(active_limit, 1), 100)
@@ -974,68 +984,76 @@ async def list_dashboard_threads_sidebar(
     active: dict[str, ThreadLike] = {}
     resolved_threads: dict[str, ThreadLike] = {}
 
-    for owner_filter in searches:
-        local_active = 0
-        local_resolved = 0
-        offset = 0
-        while offset < _THREADS_PAGE_SCAN_CAP and (
-            local_active < active_target or local_resolved < resolved_target
-        ):
-            batch = await _search_threads_batch(
-                client,
-                owner_filter,
-                limit=_THREADS_SEARCH_PAGE,
-                offset=offset,
-            )
-            if not batch:
-                break
-            for thread in batch:
-                metadata = _thread_metadata(thread)
-                if not include_all and not _user_owns_thread(metadata, login, email):
-                    continue
-                if not include_automations and _is_automation_thread(metadata):
-                    continue
-                thread_id = _thread_id(thread)
-                if not thread_id or thread_id in active or thread_id in resolved_threads:
-                    continue
-                if _is_thread_resolved(metadata):
-                    local_resolved += 1
-                    resolved_threads[thread_id] = thread
-                else:
-                    local_active += 1
-                    active[thread_id] = thread
-            if len(batch) < _THREADS_SEARCH_PAGE:
-                break
-            offset += _THREADS_SEARCH_PAGE
+    with phase(record, "search"):
+        for owner_filter in searches:
+            local_active = 0
+            local_resolved = 0
+            offset = 0
+            while offset < _THREADS_PAGE_SCAN_CAP and (
+                local_active < active_target or local_resolved < resolved_target
+            ):
+                batch = await _search_threads_batch(
+                    client,
+                    owner_filter,
+                    limit=_THREADS_SEARCH_PAGE,
+                    offset=offset,
+                )
+                if not batch:
+                    break
+                for thread in batch:
+                    metadata = _thread_metadata(thread)
+                    if not include_all and not _user_owns_thread(metadata, login, email):
+                        continue
+                    if not include_automations and _is_automation_thread(metadata):
+                        continue
+                    thread_id = _thread_id(thread)
+                    if not thread_id or thread_id in active or thread_id in resolved_threads:
+                        continue
+                    if _is_thread_resolved(metadata):
+                        local_resolved += 1
+                        resolved_threads[thread_id] = thread
+                    else:
+                        local_active += 1
+                        active[thread_id] = thread
+                if len(batch) < _THREADS_SEARCH_PAGE:
+                    break
+                offset += _THREADS_SEARCH_PAGE
 
     active_candidates = sorted(active.values(), key=_thread_updated_ms, reverse=True)
     resolved_candidates = sorted(resolved_threads.values(), key=_thread_updated_ms, reverse=True)
     active_window = active_candidates[:safe_active_limit]
     resolved_window = resolved_candidates[:safe_resolved_limit]
     active_ids = {thread_id for thread in active_window if (thread_id := _thread_id(thread))}
-    active_items, resolved_items, active_thread = await asyncio.gather(
-        _summarize_threads(
-            client,
-            active_window,
-            owner_login=None if include_all else login,
-            owner_email=None if include_all else email,
-        ),
-        _summarize_threads(
-            client,
-            resolved_window,
-            owner_login=None if include_all else login,
-            owner_email=None if include_all else email,
-        ),
-        _sidebar_active_thread_summary(
-            client,
-            active_thread_id,
-            fallback_threads={**active, **resolved_threads},
-            visible_thread_ids=active_ids,
-            login=login,
-            email=email,
-            include_all=include_all,
-        ),
+    # The dominant cost when a user's threads have no cached run status: one
+    # `runs.list` per thread, eight at a time.
+    count_record["run_refreshes"] = sum(
+        _should_refresh_latest_run(thread) for thread in (*active_window, *resolved_window)
     )
+    count_record["threads"] = len(active_window) + len(resolved_window)
+    with phase(record, "summarize"):
+        active_items, resolved_items, active_thread = await asyncio.gather(
+            _summarize_threads(
+                client,
+                active_window,
+                owner_login=None if include_all else login,
+                owner_email=None if include_all else email,
+            ),
+            _summarize_threads(
+                client,
+                resolved_window,
+                owner_login=None if include_all else login,
+                owner_email=None if include_all else email,
+            ),
+            _sidebar_active_thread_summary(
+                client,
+                active_thread_id,
+                fallback_threads={**active, **resolved_threads},
+                visible_thread_ids=active_ids,
+                login=login,
+                email=email,
+                include_all=include_all,
+            ),
+        )
     active_has_more = len(active_candidates) > safe_active_limit
     resolved_has_more = len(resolved_candidates) > safe_resolved_limit
     if active_thread:
@@ -1568,18 +1586,64 @@ async def _enrich_run_start_command(
         if command_images and run_model and run_effort:
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
         _validate_command_images(content, model_id=run_model)
-        prefix = _attribution_prefix(metadata, login, email)
-        if prefix:
-            content = _prefix_message_content(content, prefix)
+        if content is None:
+            content = ""
+        sender_id = f"github:{login}"
+        injected = injected_dynamic_context_hashes_from_metadata(metadata)
+        try:
+            prior_state = await client.threads.get_state(thread_id)
+            values = prior_state.get("values") if isinstance(prior_state, dict) else None
+            if isinstance(values, dict):
+                injected.update(dynamic_context_hashes_from_messages(values.get("messages")))
+        except Exception:
+            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
+        person: PersonIdentity = {
+            "id": sender_id,
+            "platform": "github",
+            "github_login": login,
+        }
+        if email:
+            person["email"] = email
+        structured = build_input_messages(
+            content,
+            {"sender_id": sender_id, "surface": "web", "kind": "human"},
+            people=[person],
+            systems=(
+                [
+                    {
+                        "id": "system:dashboard-handoff",
+                        "display_name": "Dashboard handoff",
+                        "platform": "open-swe",
+                    }
+                ]
+                if metadata.get("source") == "slack"
+                else None
+            ),
+            injected_dynamic_context_hashes=injected,
+        )
         if metadata.get("source") == "slack":
-            content = _prepend_message_content_block(content, DASHBOARD_HANDOFF_INSTRUCTION)
-        _set_command_last_message_content(params, content)
+            structured.insert(
+                -1,
+                build_input_messages(
+                    DASHBOARD_HANDOFF_BODY,
+                    {
+                        "sender_id": "system:dashboard-handoff",
+                        "surface": "automation",
+                        "kind": "system",
+                    },
+                    injected_dynamic_context_hashes={"system:dashboard-handoff"},
+                )[0],
+            )
+        run_input = params.get("input")
+        if isinstance(run_input, dict):
+            run_input["messages"] = structured
         metadata_update: dict[str, Any] = {
             "source": _DASHBOARD_SOURCE,
             "plan_mode": plan_mode_requested,
             PARTICIPANT_LOGINS_KEY: merge_participant_logins(
                 metadata.get(PARTICIPANT_LOGINS_KEY), login
             ),
+            "injected_dynamic_context_hashes": sorted(injected),
         }
         if command_images and run_model and run_effort:
             overrides["agent_model_id"] = run_model
@@ -1673,7 +1737,7 @@ async def send_dashboard_message(
     metadata = thread_metadata(thread)
     _assert_thread_readable(metadata)
 
-    prompt = f"{_attribution_prefix(metadata, login, email)}{body.content.strip()}"
+    prompt = body.content.strip()
     now_ms = _now_ms()
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
     handoff_metadata = dict(metadata)
@@ -1707,6 +1771,14 @@ async def send_dashboard_message(
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": _DASHBOARD_SOURCE,
+        "surface": "web",
+        "sender": {
+            "id": f"github:{login}",
+            "platform": "github",
+            "github_login": login,
+            **({"email": email} if email else {}),
+        },
+        "from_owner": _user_owns_thread(metadata, login, email),
     }
     if isinstance(content, list):
         queue_payload["images"] = [
@@ -1882,18 +1954,27 @@ async def _readable_thread_metadata(
 
 
 async def get_dashboard_thread_state(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
+    record = timings if timings is not None else {}
     client = langgraph_client()
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
+    with phase(record, "thread_get"):
+        try:
+            thread = await client.threads.get(thread_id)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
     _assert_thread_readable(metadata)
-    thread, latest_run_status, _ = await _refresh_latest_run_metadata(client, thread)
+    thread, latest_run_status, _ = await _refresh_latest_run_metadata(
+        client, thread, timings=record
+    )
     metadata = thread_metadata(thread)
-    state = await client.threads.get_state(thread_id)
+    with phase(record, "get_state"):
+        state = await client.threads.get_state(thread_id)
     result = as_json_object(state)
     # The SDK's `useStream` opens its live event subscription only when the
     # hydrated `getState()` looks active (`next` non-empty / absent). When a
@@ -2169,13 +2250,9 @@ async def get_dashboard_thread_turn_diff(
     include_content: bool = True,
     email: str | None = None,
 ) -> dict[str, Any]:
-    """What one turn (or the whole thread) changed, straight from git.
-
-    ``turn_key`` is the id of the user message that opened the turn. Omit it for
-    the cumulative thread diff. The head is the next turn's checkpoint, or the
-    live worktree for the most recent turn.
-    """
+    """Return a persisted run diff, with sandbox checkpoints as a legacy fallback."""
     from ..utils.turn_checkpoint import read_turn_diff
+    from .run_diffs import THREAD_DIFF_KEY, get_run_diff, project_run_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     checkpoints = metadata.get("turn_checkpoints")
@@ -2199,6 +2276,15 @@ async def get_dashboard_thread_turn_diff(
         }
 
     checkpoint = checkpoints[index]
+    if turn_key is not None:
+        stored = await get_run_diff(thread_id, turn_key)
+        if stored is not None:
+            return project_run_diff(stored, max_files=max_files, include_content=include_content)
+    else:
+        stored = await get_run_diff(thread_id, THREAD_DIFF_KEY)
+        if stored is not None:
+            return project_run_diff(stored, max_files=max_files, include_content=include_content)
+
     plan_ref = checkpoint.get("plan_ref")
     if (
         turn_key is not None

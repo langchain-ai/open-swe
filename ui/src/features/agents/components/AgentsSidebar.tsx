@@ -18,6 +18,7 @@ import {
   GitPullRequestIcon,
   KanbanIcon,
   LightningIcon,
+  MagnifyingGlassIcon,
   PlusIcon,
   SparkleIcon,
   TrashIcon,
@@ -25,7 +26,7 @@ import {
 } from "@phosphor-icons/react"
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import type { ComponentType, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
@@ -54,6 +55,7 @@ import {
   useResolveAgentThread,
   useSeedAgentThreadDetails,
   useSidebarThreads,
+  SIDEBAR_RESOLVED_LIMIT as RESOLVED_SIDEBAR_LIMIT,
 } from "@/features/agents/lib/queries"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
@@ -62,9 +64,25 @@ import {
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { Kbd } from "@/components/ui/kbd"
+import {
+  useAppCommand,
+  useAppCommandControls,
+  useRegisterAppCommands,
+} from "@/lib/appCommands"
+import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
 
-const RESOLVED_SIDEBAR_LIMIT = 20
+function SidebarShortcut({ commandId }: { commandId: string }) {
+  const shortcut = useAppCommand(commandId)?.shortcuts?.[0] ?? ""
+  const label = useShortcutLabel(shortcut)
+  if (!shortcut) return null
+  return (
+    <Kbd className="ml-auto h-4 min-w-4 bg-transparent px-0 text-[10px]">
+      {label}
+    </Kbd>
+  )
+}
 
 type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -126,6 +144,7 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
+  const { openPalette } = useAppCommandControls()
   const openThread = useCallback(
     (threadId: string) => {
       void navigate({ to: "/agents/$threadId", params: { threadId } })
@@ -209,7 +228,7 @@ export function AgentsSidebar({
         <SidebarCollapseButton onToggle={layout.toggle} />
       </div>
 
-      <div className="px-2 pb-1">
+      <div className="flex flex-col gap-0.5 px-2 pb-1">
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
@@ -217,7 +236,20 @@ export function AgentsSidebar({
         >
           <PlusIcon className="size-4" />
           New Thread
+          <SidebarShortcut commandId="new-thread" />
         </Link>
+        <button
+          type="button"
+          onClick={() => {
+            layout.closeOnMobile()
+            openPalette()
+          }}
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+        >
+          <MagnifyingGlassIcon className="size-4" />
+          Search
+          <SidebarShortcut commandId="search-commands" />
+        </button>
       </div>
 
       <nav className="flex flex-col gap-0.5 px-2 pb-4">
@@ -978,6 +1010,23 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
+  const sidebarCommands = useMemo(
+    () => [
+      {
+        id: "toggle-sidebar",
+        label: "Toggle sidebar",
+        aliases: ["show sidebar", "hide sidebar"],
+        shortcuts: ["mod+b"],
+        group: "Workspace",
+        run: layout.toggle,
+        desktopId: "toggle-sidebar" as const,
+        desktopShortcuts: ["mod+b"],
+      },
+    ],
+    [layout.toggle]
+  )
+  useRegisterAppCommands(sidebarCommands)
+
   return (
     <SidebarLayoutProvider value={layout}>
       <div className="agents-ui flex h-svh overflow-hidden bg-background">

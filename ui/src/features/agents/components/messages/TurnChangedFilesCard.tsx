@@ -7,12 +7,7 @@ import { useAgentThreadTurnDiff } from "@/features/agents/lib/queries"
 
 const INLINE_CHANGED_FILES_LIMIT = 10
 
-/**
- * What a turn changed, according to git — not to the edit calls in the
- * transcript, which miss edits made through `execute` and still list files that
- * were later reverted. Older turns only fetch once opened; the newest turn is
- * the one people look at, so it loads with the transcript.
- */
+/** What a completed agent run changed, loaded from its persisted diff artifact. */
 export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
   threadId,
   turnKey,

@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, patch
+from xml.etree import ElementTree
 
 import pytest
 from fastapi import HTTPException
@@ -377,7 +378,7 @@ async def test_thread_summary_includes_pull_requests_across_repositories() -> No
     assert summary["diffStats"] == {"files": 1, "additions": 4, "deletions": 0}
 
 
-async def test_thread_summary_uses_working_repo_for_display_only() -> None:
+async def test_thread_summary_uses_configured_repo_for_display() -> None:
     metadata = {
         "repo": {"owner": "trusted", "name": "default"},
         "working_repo_full_name": "observed/checkout",
@@ -387,7 +388,7 @@ async def test_thread_summary_uses_working_repo_for_display_only() -> None:
 
     assert summary["repo"] == "default"
     assert summary["repoFullName"] == "trusted/default"
-    assert summary["workingRepoFullName"] == "observed/checkout"
+    assert "workingRepoFullName" not in summary
     assert metadata["repo"] == {"owner": "trusted", "name": "default"}
 
 
@@ -673,9 +674,9 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
         email="teammate@example.com",
     )
 
-    # A non-owner's message is forwarded but tagged with their login.
-    last = enriched["params"]["input"]["messages"][-1]
-    assert last["content"] == "@teammate: fix the bug"
+    last = ElementTree.fromstring(enriched["params"]["input"]["messages"][-1]["content"])
+    assert last.attrib["sender"] == "github:teammate"
+    assert last.findtext("content") == "fix the bug"
     assert updates[-1]["participant_logins"] == ["owner", "teammate"]
 
 
@@ -714,11 +715,17 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
         email="teammate@example.com",
     )
 
-    content = enriched["params"]["input"]["messages"][-1]["content"]
-    assert content[0] == {"type": "text", "text": thread_api.DASHBOARD_HANDOFF_INSTRUCTION}
-    assert content[1] == {"type": "text", "text": "@teammate: continue here"}
-    assert content[0]["text"].startswith("<open_swe_web_handoff>\n")
-    assert content[0]["text"].endswith("\n</open_swe_web_handoff>")
+    messages = enriched["params"]["input"]["messages"]
+    handoff = ElementTree.fromstring(messages[-2]["content"])
+    user_message = ElementTree.fromstring(messages[-1]["content"])
+    assert handoff.attrib == {
+        "sender": "system:dashboard-handoff",
+        "surface": "automation",
+        "kind": "system",
+    }
+    assert "conversation has moved to Web" in (handoff.findtext("content") or "")
+    assert user_message.attrib["sender"] == "github:teammate"
+    assert user_message.findtext("content") == "continue here"
     assert enriched["params"]["config"]["configurable"]["source"] == "dashboard"
 
 
@@ -766,10 +773,13 @@ async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(mon
         email="teammate@example.com",
     )
 
-    content = enriched["params"]["input"]["messages"][-1]["content"]
-    assert content[0] == {"type": "text", "text": thread_api.DASHBOARD_HANDOFF_INSTRUCTION}
-    assert content[1] == {"type": "text", "text": "@teammate:"}
-    assert content[2] == {"type": "text", "text": "continue here"}
+    messages = enriched["params"]["input"]["messages"]
+    handoff = ElementTree.fromstring(messages[-2]["content"])
+    content = messages[-1]["content"]
+    assert "conversation has moved to Web" in (handoff.findtext("content") or "")
+    user_message = ElementTree.fromstring(content[0]["text"])
+    assert user_message.attrib["sender"] == "github:teammate"
+    assert user_message.findtext("content") == "continue here"
 
 
 async def test_enrich_run_start_command_does_not_attribute_owner_message(monkeypatch) -> None:
@@ -807,8 +817,9 @@ async def test_enrich_run_start_command_does_not_attribute_owner_message(monkeyp
         email="owner@example.com",
     )
 
-    last = enriched["params"]["input"]["messages"][-1]
-    assert last["content"] == "fix the bug"
+    last = ElementTree.fromstring(enriched["params"]["input"]["messages"][-1]["content"])
+    assert last.attrib["sender"] == "github:owner"
+    assert last.findtext("content") == "fix the bug"
 
 
 async def test_enrich_run_start_command_allowlists_client_configurable(monkeypatch) -> None:
@@ -962,9 +973,11 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     assert body == b'{"type":"success","id":1,"result":{"run_id":"run-1"}}'
     outgoing = captured["outgoing"]
     assert isinstance(outgoing, dict)
-    content = outgoing["params"]["input"]["messages"][-1]["content"]
-    assert content[0] == {"type": "text", "text": thread_api.DASHBOARD_HANDOFF_INSTRUCTION}
-    assert content[1] == {"type": "text", "text": "continue here"}
+    messages = outgoing["params"]["input"]["messages"]
+    handoff = ElementTree.fromstring(messages[-2]["content"])
+    user_message = ElementTree.fromstring(messages[-1]["content"])
+    assert "conversation has moved to Web" in (handoff.findtext("content") or "")
+    assert user_message.findtext("content") == "continue here"
     assert captured["handoff_update"] == {
         "channel_id": "C1",
         "message_ts": "123.46",
@@ -1315,7 +1328,8 @@ async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
     )
 
     payload = cast(dict[str, object], captured["payload"])
-    assert payload["text"] == "@teammate: ship it"
+    assert payload["text"] == "ship it"
+    assert cast(dict[str, object], payload["sender"])["id"] == "github:teammate"
 
 
 async def test_send_dashboard_message_does_not_attribute_owner(monkeypatch) -> None:
@@ -2112,6 +2126,46 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     assert payload["default_agent_subagent_model"] != _FABLE
     assert payload["default_agent_model"] in model_ids
     assert payload["default_agent_subagent_model"] in model_ids
+
+
+async def test_turn_diff_prefers_persisted_run_artifact(monkeypatch) -> None:
+    metadata = {
+        "sandbox_id": "sandbox-1",
+        "turn_checkpoints": [
+            {"key": "msg-1", "ref": "refs/open-swe/turns/msg-1", "started_at": "t0"}
+        ],
+    }
+    stored = {
+        "status": "ready",
+        "files": [
+            {
+                "path": f"{index}.py",
+                "originalContent": "before",
+                "modifiedContent": "after",
+            }
+            for index in range(3)
+        ],
+        "truncated": False,
+        "summary": {"files": 3, "additions": 3, "deletions": 0},
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    monkeypatch.setattr("agent.dashboard.run_diffs.get_run_diff", AsyncMock(return_value=stored))
+    create_sandbox = AsyncMock()
+    monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
+
+    result = await thread_api.get_dashboard_thread_turn_diff(
+        "thread-1", "owner", turn_key="msg-1", max_files=2, include_content=False
+    )
+
+    assert result == {
+        **stored,
+        "files": [
+            {**file, "originalContent": None, "modifiedContent": None}
+            for file in stored["files"][:2]
+        ],
+        "truncated": True,
+    }
+    create_sandbox.assert_not_awaited()
 
 
 async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:

@@ -7,6 +7,7 @@ import logging
 import os
 import posixpath
 import shlex
+from time import perf_counter
 from typing import Any, Literal
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
@@ -21,10 +22,11 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import RedirectResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from ..utils.thread_ops import langgraph_url
+from ..utils.timing import server_timing_header
 from .admin import is_admin
 from .agent_instructions import (
     AgentInstructionsCreate,
@@ -1930,10 +1932,13 @@ async def api_list_threads_sidebar(
     include_automations: bool = False,
     all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
+) -> Response:
     if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
-    return await list_dashboard_threads_sidebar(
+    timings: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    started = perf_counter()
+    payload = await list_dashboard_threads_sidebar(
         session["sub"],
         email=session.get("email"),
         active_limit=active_limit,
@@ -1941,7 +1946,13 @@ async def api_list_threads_sidebar(
         active_thread_id=active_thread_id,
         include_automations=include_automations,
         include_all=all,
+        timings=timings,
+        counts=counts,
     )
+    timings["total"] = (perf_counter() - started) * 1000
+    header = server_timing_header(timings, counts)
+    logger.info("thread sidebar timings login=%s %s", session["sub"], header)
+    return JSONResponse(payload, headers={"Server-Timing": header})
 
 
 @router.get("/threads/page")
@@ -2263,8 +2274,16 @@ async def api_delete_thread(
 async def api_get_thread_state(
     thread_id: str,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    return await get_dashboard_thread_state(thread_id, session["sub"], email=session.get("email"))
+) -> Response:
+    timings: dict[str, float] = {}
+    started = perf_counter()
+    payload = await get_dashboard_thread_state(
+        thread_id, session["sub"], email=session.get("email"), timings=timings
+    )
+    timings["total"] = (perf_counter() - started) * 1000
+    header = server_timing_header(timings)
+    logger.info("thread state timings thread_id=%s %s", thread_id, header)
+    return JSONResponse(payload, headers={"Server-Timing": header})
 
 
 @router.post("/threads/{thread_id}/stream/events")

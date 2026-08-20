@@ -8,6 +8,7 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from ..dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
+from ..input_messages import build_run_input
 from ..utils.slack import get_active_slack_thread
 from ..utils.thread_ops import langgraph_url
 
@@ -130,7 +131,21 @@ async def _create_wakeup_cron(
     )
     kwargs: dict[str, Any] = {
         "schedule": schedule,
-        "input": {"messages": [{"role": "user", "content": prompt}]},
+        "input": build_run_input(
+            prompt,
+            {
+                "sender_id": "system:thread-wakeup",
+                "surface": "automation",
+                "kind": "system",
+            },
+            systems=[
+                {
+                    "id": "system:thread-wakeup",
+                    "display_name": "Thread wakeup scheduler",
+                    "platform": "open-swe",
+                }
+            ],
+        ),
         "config": run_config,
         "end_time": end_time,
         "timezone": "UTC",

@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from deepagents.backends.composite import CompositeBackend
+from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
 from agent.server import _registered_tool_name, get_agent
@@ -38,6 +39,9 @@ def _base_config() -> RunnableConfig:
 
 async def _capture_create_deep_agent_kwargs(
     config: RunnableConfig | None = None,
+    *,
+    profile: dict[str, object] | None = None,
+    thread_settings: dict[str, object] | None = None,
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
     config = config or _base_config()
@@ -70,7 +74,12 @@ async def _capture_create_deep_agent_kwargs(
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
-        patch("agent.server.load_profile", new_callable=AsyncMock, return_value=None),
+        patch("agent.server.load_profile", new_callable=AsyncMock, return_value=profile),
+        patch(
+            "agent.server.load_thread_settings",
+            new_callable=AsyncMock,
+            return_value=thread_settings or {},
+        ),
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.make_model", side_effect=[MagicMock(), MagicMock()]),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
@@ -80,6 +89,25 @@ async def _capture_create_deep_agent_kwargs(
 
     clear_sandbox_backend(thread_id)
     return captured
+
+
+@pytest.mark.asyncio
+async def test_existing_thread_reloads_sender_draft_preference_into_run_config() -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable["github_login"] = "draft-preference-owner"
+
+    await _capture_create_deep_agent_kwargs(
+        config,
+        profile={"draft_prs": False},
+        thread_settings={
+            "owner_login": "draft-preference-owner",
+            "model_id": "openai:gpt-5.6-sol",
+        },
+    )
+
+    assert configurable["draft_prs"] is False
 
 
 @pytest.mark.asyncio
@@ -154,6 +182,22 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
 
 
 @pytest.mark.asyncio
+async def test_desktop_agent_loads_snapshotted_and_bundled_skills() -> None:
+    config = _base_config()
+    config.setdefault("configurable", {}).update(
+        {"source": "desktop", "local_project_path": "/tmp"}
+    )
+    with patch("agent.server.create_desktop_backend", return_value=MagicMock()):
+        captured = await _capture_create_deep_agent_kwargs(config)
+
+    assert captured["skills"] == ["/skills/", "/bundled-skills/"]
+    backend = captured["backend"]
+    assert isinstance(backend, CompositeBackend)
+    assert isinstance(backend.routes["/skills/"], ReadOnlyBackend)
+    assert isinstance(backend.routes["/skills/"]._backend, StateBackend)
+
+
+@pytest.mark.asyncio
 async def test_agent_does_not_add_custom_repair_middleware() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     middleware = captured["middleware"]
@@ -208,6 +252,39 @@ async def test_agent_includes_recreate_sandbox_tool() -> None:
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert recreate_sandbox in tools
+
+
+@pytest.mark.asyncio
+async def test_agent_includes_sandbox_file_download_url_tool() -> None:
+    from agent.tools import create_sandbox_file_download_url
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert create_sandbox_file_download_url in tools
+
+
+@pytest.mark.asyncio
+async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
+
+    from agent.prompt import OPEN_SWE_SHARED_BASE
+    from agent.tools import create_sandbox_file_download_url
+
+    monkeypatch.setenv("SANDBOX_TYPE", "modal")
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    subagents = captured["subagents"]
+    assert isinstance(tools, list)
+    assert isinstance(subagents, list)
+    assert create_sandbox_file_download_url not in tools
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    assert create_sandbox_file_download_url not in general_purpose["tools"]
+    assert general_purpose["system_prompt"] == (
+        f"{OPEN_SWE_SHARED_BASE}\n\n{GENERAL_PURPOSE_SUBAGENT['system_prompt']}"
+    )
 
 
 @pytest.mark.asyncio

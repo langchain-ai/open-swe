@@ -1,5 +1,13 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
+import type { Skill } from "@/lib/api"
+
+export type DesktopCommandId =
+  | "new-thread"
+  | "show-command-palette"
+  | "open-settings"
+  | "show-keyboard-shortcuts"
+  | "toggle-sidebar"
 
 export interface DesktopProject {
   cwd: string
@@ -28,6 +36,7 @@ export interface DesktopLocalDiff {
 export interface DesktopLocalPromptInput {
   prompt: string
   images: Array<ImageChunk>
+  skills: Array<Skill>
 }
 
 export type DesktopTerminalStatus = "starting" | "running" | "exited" | "error"
@@ -125,6 +134,7 @@ declare global {
   interface Window {
     openSweDesktop?: {
       isDesktop: true
+      onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
       listProjects: () => Promise<Array<DesktopProject>>
       getProjectBranches: (cwd: string) => Promise<{
         current: string | null
@@ -168,6 +178,8 @@ declare global {
       updateLocalThread: (input: {
         threadId: string
         status: DesktopLocalThreadSummary["status"]
+        modelId?: string
+        effort?: string
       }) => Promise<DesktopLocalThreadSummary | null>
       deleteLocalThread: (threadId: string) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>

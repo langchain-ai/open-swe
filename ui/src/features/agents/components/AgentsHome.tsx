@@ -218,10 +218,18 @@ export function AgentsHome() {
           )
           return
         }
+        const managedSkills = await skills.refetch()
         const localSession = await desktop.startLocalThread({
           cwd: localProjectPath,
           prompt,
           images,
+          skills: [
+            ...new Map(
+              [...managedSkills.personal, ...managedSkills.organization].map(
+                (skill) => [skill.name, skill]
+              )
+            ).values(),
+          ],
           modelId: activeSelection?.modelId,
           effort: activeSelection?.effort,
         })
