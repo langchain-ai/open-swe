@@ -3,19 +3,22 @@ import type { CSSProperties } from "react"
 
 import { cn } from "@/lib/utils"
 
+type SandboxedHtmlFrameProps = (
+  { html: string; src?: never } | { src: string; html?: never }
+) & {
+  title: string
+  sandbox?: string
+  allow?: string
+  className?: string
+  style?: CSSProperties
+  testId?: string
+}
+
 export const SandboxedHtmlFrame = forwardRef<
   HTMLIFrameElement,
-  {
-    html: string
-    title: string
-    sandbox?: string
-    allow?: string
-    className?: string
-    style?: CSSProperties
-    testId?: string
-  }
+  SandboxedHtmlFrameProps
 >(function SandboxedHtmlFrame(
-  { html, title, sandbox = "", allow, className, style, testId },
+  { html, src, title, sandbox = "", allow, className, style, testId },
   ref
 ) {
   return (
@@ -23,6 +26,7 @@ export const SandboxedHtmlFrame = forwardRef<
       ref={ref}
       data-testid={testId}
       title={title}
+      src={src}
       srcDoc={html}
       sandbox={sandbox}
       allow={allow}

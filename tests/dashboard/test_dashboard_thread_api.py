@@ -326,6 +326,58 @@ async def test_thread_summary_includes_pr_and_diff_stats() -> None:
         "url": "https://github.com/langchain-ai/open-swe/pull/42",
     }
     assert summary["diffStats"] == {"files": 3, "additions": 10, "deletions": 2}
+    assert summary["pullRequests"][0]["repoFullName"] == "langchain-ai/open-swe"
+
+
+async def test_thread_summary_includes_pull_requests_across_repositories() -> None:
+    summary = await thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "repo_full_name": "langchain-ai/open-swe",
+                "title": "Cross-repo change",
+                "pull_requests": [
+                    {
+                        "repo_full_name": "langchain-ai/open-swe",
+                        "number": 42,
+                        "url": "https://github.com/langchain-ai/open-swe/pull/42",
+                        "title": "feat: dashboard",
+                        "state": "draft",
+                        "head_ref": "feature/dashboard",
+                        "base_ref": "main",
+                        "author": "octocat",
+                        "author_avatar_url": "https://avatars.example/octocat.png",
+                        "created_at": "2026-08-18T10:00:00Z",
+                        "diff_stats": {"files": 3, "additions": 10, "deletions": 2},
+                    },
+                    {
+                        "repo_full_name": "langchain-ai/langchain",
+                        "number": 9,
+                        "url": "https://github.com/langchain-ai/langchain/pull/9",
+                        "title": "feat: integration",
+                        "state": "open",
+                        "head_ref": "feature/integration",
+                        "base_ref": "master",
+                        "author": "hubot",
+                        "diff_stats": {"files": 1, "additions": 4, "deletions": 0},
+                    },
+                ],
+            }
+        )
+    )
+
+    assert [item["repoFullName"] for item in summary["pullRequests"]] == [
+        "langchain-ai/open-swe",
+        "langchain-ai/langchain",
+    ]
+    assert summary["pr"] == {
+        "number": 9,
+        "title": "feat: integration",
+        "state": "open",
+        "headRef": "feature/integration",
+        "baseRef": "master",
+        "url": "https://github.com/langchain-ai/langchain/pull/9",
+    }
+    assert summary["diffStats"] == {"files": 1, "additions": 4, "deletions": 0}
 
 
 async def test_thread_summary_uses_configured_repo_for_display() -> None:
@@ -1072,6 +1124,91 @@ async def test_proxy_commands_non_run_start_by_non_owner_is_rejected(monkeypatch
     assert exc_info.value.status_code == 404
 
 
+async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
+    class AdminThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "workspace-admin",
+                    "admin_thread": True,
+                },
+            }
+
+    class AdminClient:
+        threads = AdminThreads()
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: AdminClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_commands(
+            "tid", "teammate", b'{"method": "run.start"}'
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "only admins can send messages in admin threads"
+
+
+async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch) -> None:
+    class AdminThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "workspace-admin",
+                    "admin_thread": True,
+                },
+            }
+
+    class AdminClient:
+        threads = AdminThreads()
+
+    class FakeResponse:
+        status_code = 200
+        content = b"{}"
+        headers: dict[str, str] = {}
+
+    posted: list[bytes] = []
+
+    class FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        async def post(self, url: str, *, content: bytes, headers: dict[str, str]) -> FakeResponse:
+            posted.append(content)
+            return FakeResponse()
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin,another-admin")
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: AdminClient())
+    monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
+
+    status_code, _, _ = await thread_api.proxy_dashboard_thread_commands(
+        "tid", "another-admin", b'{"method": "input.respond"}'
+    )
+
+    assert status_code == 200
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "another-admin")
+    status_code, _, _ = await thread_api.proxy_dashboard_thread_commands(
+        "tid", "workspace-admin", b'{"method": "agent.getTree"}'
+    )
+
+    assert status_code == 200
+    assert posted == [
+        b'{"method": "input.respond"}',
+        b'{"method": "agent.getTree"}',
+    ]
+
+
 async def test_run_cancel_enforces_thread_ownership(monkeypatch) -> None:
     """Cancelling a run still requires thread ownership (it is not "posting")."""
 
@@ -1242,6 +1379,47 @@ async def test_send_dashboard_message_returns_502_when_activity_unknown(monkeypa
         )
 
     assert exc_info.value.status_code == 502
+
+
+async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
+    class AdminThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "workspace-admin",
+                    "admin_thread": True,
+                },
+            }
+
+        async def update(self, **kwargs: object) -> None:
+            raise AssertionError("must not update")
+
+    class AdminClient:
+        threads = AdminThreads()
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: AdminClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.send_dashboard_message(
+            "tid",
+            "teammate",
+            thread_api.ThreadMessageBody(content="ship it"),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "only admins can send messages in admin threads"
+
+
+def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+
+    thread_api._assert_thread_postable(
+        {"source": "dashboard", "admin_thread": True},
+        "workspace-admin",
+    )
 
 
 async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:

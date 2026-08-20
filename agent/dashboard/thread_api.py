@@ -83,6 +83,9 @@ _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 _PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 _DISCOVERY_HISTORY_LIMIT = 5
 _PROXY_STREAM_TIMEOUT = httpx.Timeout(None)
+_THREAD_POST_COMMAND_METHODS = frozenset(
+    {"run.start", "input.respond", "input.inject", "state.fork"}
+)
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
@@ -342,6 +345,14 @@ def _assert_thread_readable(metadata: Mapping[str, Any]) -> None:
         raise HTTPException(404, "thread not found")
 
 
+def _assert_thread_postable(
+    metadata: Mapping[str, Any], login: str, email: str | None = None
+) -> None:
+    _assert_thread_readable(metadata)
+    if metadata.get("admin_thread") is True and not is_admin(email, login=login):
+        raise HTTPException(403, "only admins can send messages in admin threads")
+
+
 def _metadata_repo(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     owner = metadata.get("repo_owner")
     name = metadata.get("repo_name")
@@ -447,6 +458,48 @@ def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     return category, origin, trigger_kind
 
 
+def _pull_request_summary(record: object, fallback_title: str) -> dict[str, Any] | None:
+    if not isinstance(record, dict):
+        return None
+    repo_full_name = record.get("repo_full_name")
+    number = record.get("number")
+    url = record.get("url")
+    if (
+        not isinstance(repo_full_name, str)
+        or repo_full_name.count("/") != 1
+        or not isinstance(number, int)
+        or isinstance(number, bool)
+        or not isinstance(url, str)
+    ):
+        return None
+    title = record.get("title")
+    state = record.get("state")
+    stats = record.get("diff_stats")
+    stats = stats if isinstance(stats, dict) else {}
+    return {
+        "repoFullName": repo_full_name,
+        "number": number,
+        "title": title if isinstance(title, str) and title else fallback_title,
+        "state": state if state in _PR_STATES else "open",
+        "headRef": record.get("head_ref") if isinstance(record.get("head_ref"), str) else "",
+        "baseRef": record.get("base_ref") if isinstance(record.get("base_ref"), str) else "main",
+        "url": url,
+        "author": record.get("author") if isinstance(record.get("author"), str) else None,
+        "authorAvatarUrl": (
+            record.get("author_avatar_url")
+            if isinstance(record.get("author_avatar_url"), str)
+            else None
+        ),
+        "createdAt": record.get("created_at")
+        if isinstance(record.get("created_at"), str)
+        else None,
+        "diffStats": {
+            key: max(0, value) if isinstance(value := stats.get(key), int) else 0
+            for key in ("files", "additions", "deletions")
+        },
+    }
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -459,7 +512,8 @@ async def _thread_summary(
     owner, name, full_name = _metadata_repo(metadata)
     created_at = metadata.get("created_at_ms")
     updated_at = metadata.get("updated_at_ms")
-    title = metadata.get("title") if isinstance(metadata.get("title"), str) else "Untitled agent"
+    raw_title = metadata.get("title")
+    title: str = raw_title if isinstance(raw_title, str) else "Untitled agent"
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
     effort = metadata.get("effort") if isinstance(metadata.get("effort"), str) else None
     thread_status = thread.get("status") if isinstance(thread.get("status"), str) else "idle"
@@ -526,22 +580,42 @@ async def _thread_summary(
         "sourceUrl": _thread_source_url(metadata),
         "sandboxId": sandbox_id,
     }
-    if isinstance(pr_number, int) and isinstance(pr_url, str):
-        summary["pr"] = {
+    raw_pull_requests = metadata.get("pull_requests")
+    pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []
+    pull_requests = [
+        parsed
+        for record in pull_request_records
+        if (parsed := _pull_request_summary(record, title)) is not None
+    ]
+    if not pull_requests and isinstance(pr_number, int) and isinstance(pr_url, str):
+        pr_ref = parse_github_pr_url(pr_url)
+        legacy_repo = (
+            full_name
+            if full_name.count("/") == 1
+            else f"{pr_ref.owner}/{pr_ref.repo}"
+            if pr_ref
+            else "unknown/unknown"
+        )
+        legacy_record = {
+            "repo_full_name": legacy_repo,
             "number": pr_number,
-            "title": pr_title if isinstance(pr_title, str) else title,
-            "state": pr_state if pr_state in _PR_STATES else "open",
-            "headRef": metadata.get("branch_name") or "",
-            "baseRef": metadata.get("base_branch") or "main",
             "url": pr_url,
+            "title": pr_title,
+            "state": pr_state,
+            "head_ref": metadata.get("branch_name"),
+            "base_ref": metadata.get("base_branch"),
+            "diff_stats": as_json_object(metadata.get("diff_stats")),
         }
-    diff_stats = as_json_object(metadata.get("diff_stats"))
-    if diff_stats:
-        summary["diffStats"] = {
-            "files": int(diff_stats.get("files") or 0),
-            "additions": int(diff_stats.get("additions") or 0),
-            "deletions": int(diff_stats.get("deletions") or 0),
+        legacy_pr = _pull_request_summary(legacy_record, title)
+        if legacy_pr:
+            pull_requests.append(legacy_pr)
+    if pull_requests:
+        latest_pr = pull_requests[-1]
+        summary["pullRequests"] = pull_requests
+        summary["pr"] = {
+            key: latest_pr[key] for key in ("number", "title", "state", "headRef", "baseRef", "url")
         }
+        summary["diffStats"] = latest_pr["diffStats"]
     # The transcript hydrates client-side from the SDK (`GET …/state` →
     # `stream.messages`); the summary only carries metadata.
     summary["messages"] = []
@@ -1687,7 +1761,7 @@ async def send_dashboard_message(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata)
+    _assert_thread_postable(metadata, login, email)
 
     prompt = body.content.strip()
     now_ms = _now_ms()
@@ -2418,9 +2492,9 @@ async def proxy_dashboard_thread_commands(
     # yet. That command lazily creates + stamps + owns the thread (in
     # ``_enrich_run_start_command``); any other command against a missing thread
     # is a 404. On an existing thread, ``run.start`` (the posting path) is open
-    # to any org member and attributed in ``_enrich_run_start_command``; every
-    # other write command carries unattributed input (e.g. ``input.respond``),
-    # so it stays owner-only.
+    # to any org member and attributed in ``_enrich_run_start_command``. Input
+    # commands on admin threads require an admin; other threads keep unattributed
+    # commands such as ``input.respond`` owner-only.
     method = parsed.get("method")
     try:
         thread = await langgraph_client().threads.get(thread_id)
@@ -2436,9 +2510,12 @@ async def proxy_dashboard_thread_commands(
         thread_busy = False
     else:
         metadata = thread_metadata(thread)
-        if method == "run.start":
-            _assert_thread_readable(metadata)
+        post_command = method in _THREAD_POST_COMMAND_METHODS
+        if post_command:
+            _assert_thread_postable(metadata, login, email)
         else:
+            _assert_thread_readable(metadata)
+        if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
             _assert_thread_owner(metadata, login, email)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}

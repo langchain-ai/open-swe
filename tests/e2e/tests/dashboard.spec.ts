@@ -60,7 +60,7 @@ async function openRunningThreadViaSlackLink(page: Page) {
 // "Open in Web" link, landing on the actual dashboard app.
 async function openThreadViaSlackLink(
   page: Page,
-  options: { repoPrivate?: boolean } = {},
+  options: { repoPrivate?: boolean; message?: string } = {},
 ) {
   await page.goto("/mock/slack");
   await page.locator("#reset").click();
@@ -70,7 +70,9 @@ async function openThreadViaSlackLink(
   await expect(page.locator("#thread")).toContainText("No messages yet");
   await page
     .locator("#text")
-    .fill("<@U0BOT> please add a greet() helper and open a PR");
+    .fill(
+      options.message ?? "<@U0BOT> please add a greet() helper and open a PR",
+    );
   await page.locator("#send").click();
   await expect(
     page.locator(".msg.bot").filter({ hasText: "Add greet() helper" }),
@@ -84,6 +86,25 @@ async function openThreadViaSlackLink(
 
 // The SDK hydrates an idle thread's transcript from getState on load, which can
 // briefly lag; a reload re-fetches it. Retry until the PR link renders.
+async function openMultiRepoPrThreadViaSlackLink(page: Page) {
+  await page.goto("/mock/slack");
+  await page.locator("#reset").click();
+  await page
+    .locator("#text")
+    .fill(
+      "<@U0BOT> E2E_MULTI_PR open related pull requests in both repositories",
+    );
+  await page.locator("#send").click();
+  await expect(
+    page.locator(".msg.bot").filter({ hasText: "anotherorg/companion" }),
+  ).toBeVisible();
+
+  const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
+  await expect(webLink).toBeVisible();
+  await webLink.click();
+  await expect(page).toHaveURL(/\/agents\//);
+}
+
 async function expectTranscriptVisible(page: Page) {
   await expect(async () => {
     await page.reload();
@@ -168,6 +189,50 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible();
   });
 
+  test("keeps pull requests from multiple repositories above the composer", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openMultiRepoPrThreadViaSlackLink(page);
+
+    const companionLink = page.getByRole("link", {
+      name: "Open anotherorg/companion pull request #2",
+    });
+    await expect(async () => {
+      await page.reload();
+      await expect(companionLink).toBeVisible({ timeout: 8000 });
+    }).toPass({ timeout: 60_000 });
+
+    const strip = page.getByTestId("thread-pull-requests");
+    await expect(strip).toBeVisible();
+    await expect(
+      page.getByRole("link", {
+        name: "Open fakeorg/demo pull request #1",
+      }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Show 1 more" }),
+    ).toBeVisible();
+
+    await companionLink.hover();
+    const hoverCard = page.getByTestId("pr-hover-card-anotherorg/companion-2");
+    await expect(hoverCard).toBeVisible();
+    await expect(hoverCard).toContainText("anotherorg/companion #2");
+    await expect(hoverCard).toContainText("Add companion integration");
+    await expect(hoverCard).toContainText("open-swe[bot]");
+    await expect(hoverCard).toContainText("main");
+    await expect(hoverCard).toContainText("add-integration");
+    await expect(hoverCard).toContainText("1 file");
+
+    await page.getByRole("button", { name: "Show 1 more" }).click();
+    await expect(
+      page.getByRole("link", {
+        name: "Open fakeorg/demo pull request #1",
+      }),
+    ).toBeVisible();
+    await expect(companionLink).toBeVisible();
+  });
+
   // A cold load of a finished thread must hydrate from `getState()` alone. The
   // event stream is blocked so run replay can't stand in for that read: a
   // long-finished run has no replay left, which is what makes a broken hydrate
@@ -191,6 +256,34 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toHaveCount(0);
   });
 
+  test("renders Slack mrkdwn and identifies the Slack sender", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page, {
+      message:
+        "<@U0BOT> please add a greet() helper and open a PR; review *important* R&amp;D `<https://example.com/code|code docs>` <https://example.com/slack-docs|Slack docs>",
+    });
+    await expectTranscriptVisible(page);
+
+    const slackMessage = page
+      .locator('[data-message-surface="slack"]')
+      .filter({ hasText: "Slack docs" })
+      .first();
+    await expect(
+      slackMessage.getByRole("img", { name: "Slack" }),
+    ).toBeVisible();
+    await expect(slackMessage.locator("strong")).toHaveText("important");
+    await expect(slackMessage).toContainText("R&D");
+    await expect(slackMessage.locator("code")).toContainText("code docs");
+    await expect(
+      slackMessage.getByRole("link", { name: "code docs" }),
+    ).toHaveCount(0);
+    await expect(
+      slackMessage.getByRole("link", { name: "Slack docs" }),
+    ).toHaveAttribute("href", "https://example.com/slack-docs");
+  });
+
   test("keeps sent Slack messages visible while work is folded", async ({
     page,
   }) => {
@@ -198,7 +291,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await openThreadViaSlackLink(page);
     await expectTranscriptVisible(page);
 
-    const worked = page.getByRole("button", { name: /^Worked(?: for .+)?$/ });
+    const worked = page.getByRole("button", {
+      name: /^Worked(?: for .+)? · \d+ actions?$/,
+    });
     const acknowledgement = page.getByText("On it!", { exact: true });
     const edit = page.getByRole("button", { name: "Edited greet.py" });
 
@@ -228,7 +323,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await openThreadViaSlackLink(page);
     await expectTranscriptVisible(page);
 
-    const worked = page.getByRole("button", { name: /^Worked(?: for .+)?$/ });
+    const worked = page.getByRole("button", {
+      name: /^Worked(?: for .+)? · \d+ actions?$/,
+    });
     await expect(worked).toBeVisible();
     await worked.click();
 
@@ -671,5 +768,80 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(
       page.getByText(new RegExp(`@${OTHER_USER.login}`)).first(),
     ).toBeVisible();
+  });
+
+  // A slow sidebar used to render as a blank column, indistinguishable from an
+  // account with no threads.
+  test("shows a loading placeholder while the sidebar list is in flight", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/dashboard/api/threads/sidebar*", async (route) => {
+      await held;
+      await route.continue();
+    });
+
+    // The held request would block `load`, so stop waiting at the first byte.
+    await page.goto("/agents", { waitUntil: "commit" });
+
+    const skeleton = page.getByTestId("sidebar-threads-skeleton");
+    await expect(skeleton).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("status")).toContainText("Loading threads");
+
+    release();
+    await expect(skeleton).toBeHidden({ timeout: 30_000 });
+  });
+
+  // A persisted filter makes the "no matches" branch true before any data has
+  // arrived, so the two states could otherwise render together.
+  test("does not claim an empty result while the sidebar is still loading", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        "open-swe.agents.sidebar-prefs",
+        JSON.stringify({ filters: { statuses: ["running"] } }),
+      );
+    });
+
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/dashboard/api/threads/sidebar*", async (route) => {
+      await held;
+      await route.continue();
+    });
+
+    await page.goto("/agents", { waitUntil: "commit" });
+
+    const skeleton = page.getByTestId("sidebar-threads-skeleton");
+    await expect(skeleton).toBeVisible({ timeout: 30_000 });
+
+    // The skeleton is in the server-rendered HTML, so its presence says nothing
+    // about hydration — and the persisted filter is only read on the client.
+    // `useSidebarPrefs` writes the full sanitized object back on mount, so the
+    // stored value gaining a key the seed never had is the hydration signal.
+    await page.waitForFunction(
+      () =>
+        (
+          localStorage.getItem("open-swe.agents.sidebar-prefs") ?? ""
+        ).includes("collapsed"),
+      undefined,
+      { timeout: 30_000 },
+    );
+
+    await expect(skeleton).toBeVisible();
+    await expect(page.getByText("No threads match these filters.")).toHaveCount(
+      0,
+    );
+
+    release();
   });
 });
