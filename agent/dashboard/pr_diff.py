@@ -1,9 +1,11 @@
-"""Shared builder for full-content PR diffs.
+"""Shared builders for full-content GitHub diffs.
 
-Fetches a PR's changed files and their full original/modified contents so the
-UI can render syntax-highlighted diffs with pierre's ``MultiFileDiff``. Used by
-both the thread PR diff endpoint (user token) and the review diff endpoint
-(App installation token).
+Fetches the changed files of a pull request — or of an arbitrary
+``base...head`` comparison, for a branch that has no pull request — together
+with their full original/modified contents, so the UI can render
+syntax-highlighted diffs with pierre's ``MultiFileDiff``. Used by the thread
+branch diff endpoint (user token) and the review diff endpoint (App
+installation token).
 """
 
 import asyncio
@@ -77,12 +79,66 @@ async def build_pr_diff_files(
     if not isinstance(raw_files, list):
         raise HTTPException(502, "github API returned an unexpected files payload")
 
+    return await _build_diff_files(client, full_name, raw_files, base_sha, head_sha)
+
+
+async def build_compare_diff_files(
+    client: httpx.AsyncClient,
+    full_name: str,
+    base_ref: str,
+    head_ref: str,
+) -> dict[str, Any]:
+    """Return ``{base_sha, head_sha, truncated, files}`` for ``base...head``.
+
+    Three-dot compare semantics: the base is the merge base of the two refs, so
+    commits landed on the base branch since the head branch forked are not
+    attributed to it. Same payload shape as :func:`build_pr_diff_files`; refs
+    are fully escaped, so a ref can never widen the request path.
+
+    ``head_sha`` is the ref itself, not a commit: the compare payload's commit
+    list is paginated, so its last entry is not reliably the branch tip. Blobs
+    are read at the ref, which always resolves to the tip.
+    """
+    base = quote(base_ref, safe="")
+    head = quote(head_ref, safe="")
+    response = await client.get(f"{_GITHUB_API}/repos/{full_name}/compare/{base}...{head}")
+    if response.status_code == 404:
+        raise HTTPException(404, "branch not found on GitHub")
+    if response.status_code != 200:
+        raise HTTPException(502, f"github API error ({response.status_code})")
+    comparison = response.json()
+    if not isinstance(comparison, dict):
+        raise HTTPException(502, "github API returned an unexpected compare payload")
+    merge_base = comparison.get("merge_base_commit")
+    base_sha = merge_base.get("sha") if isinstance(merge_base, dict) else None
+    if not isinstance(base_sha, str):
+        raise HTTPException(502, "github API returned an unexpected compare payload")
+
+    raw_files = comparison.get("files")
+    if raw_files is None:
+        raw_files = []
+    if not isinstance(raw_files, list):
+        raise HTTPException(502, "github API returned an unexpected files payload")
+
+    return await _build_diff_files(client, full_name, raw_files, base_sha, head_ref)
+
+
+async def _build_diff_files(
+    client: httpx.AsyncClient,
+    full_name: str,
+    raw_files: list[Any],
+    base_ref: str,
+    head_ref: str,
+) -> dict[str, Any]:
+    """Build file entries by reading each blob at ``base_ref`` and ``head_ref``."""
     truncated = len(raw_files) > PR_DIFF_MAX_FILES
     raw_files = raw_files[:PR_DIFF_MAX_FILES]
 
     semaphore = asyncio.Semaphore(PR_DIFF_FETCH_CONCURRENCY)
 
-    async def build_entry(raw: dict[str, Any]) -> dict[str, Any] | None:
+    async def build_entry(raw: Any) -> dict[str, Any] | None:
+        if not isinstance(raw, dict):
+            return None
         path = raw.get("filename")
         if not isinstance(path, str):
             return None
@@ -94,10 +150,10 @@ async def build_pr_diff_files(
         modified: str | None = ""
         if status != "added":
             original = await _fetch_file_at_ref(
-                client, semaphore, full_name, original_path, base_sha
+                client, semaphore, full_name, original_path, base_ref
             )
         if status != "removed":
-            modified = await _fetch_file_at_ref(client, semaphore, full_name, path, head_sha)
+            modified = await _fetch_file_at_ref(client, semaphore, full_name, path, head_ref)
 
         return {
             "path": path,
@@ -115,8 +171,8 @@ async def build_pr_diff_files(
     entries = await asyncio.gather(*(build_entry(raw) for raw in raw_files))
 
     return {
-        "base_sha": base_sha,
-        "head_sha": head_sha,
+        "base_sha": base_ref,
+        "head_sha": head_ref,
         "truncated": truncated,
         "files": [entry for entry in entries if entry is not None],
     }

@@ -73,8 +73,10 @@ export interface ThreadPrDiffFile {
   unrenderable: boolean
 }
 
-export interface ThreadPrDiff {
-  prNumber: number
+export interface ThreadBranchDiff {
+  prNumber: number | null
+  baseRef: string
+  headRef: string | null
   baseSha: string
   headSha: string
   truncated: boolean
@@ -341,9 +343,9 @@ export const agentsApi = {
     agentsRequest<void>(`/threads/${encodeURIComponent(threadId)}`, {
       method: "DELETE",
     }),
-  getThreadPrDiff: (threadId: string) =>
-    agentsRequest<ThreadPrDiff>(
-      `/threads/${encodeURIComponent(threadId)}/pr-diff`
+  getThreadBranchDiff: (threadId: string) =>
+    agentsRequest<ThreadBranchDiff>(
+      `/threads/${encodeURIComponent(threadId)}/branch-diff`
     ),
   getThreadTurnDiff: (
     threadId: string,
