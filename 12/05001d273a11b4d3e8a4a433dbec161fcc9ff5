@@ -1,0 +1,23 @@
+tests/reviewer/test_reviewer_trace_context.py
+  s_10382848b0a0c1::t_06d17776269da3 140-142,221-222
+  s_10382848b0a0c1::t_c109f9aace5b17 50,60-64
+  s_10382848b0a0c1::t_21560ab09adecd 65
+agent/review/trace_context.py
+  s_10382848b0a0c1::t_87b0c135687d77 207-218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "1205001d273a11b4d3e8a4a433dbec161fcc9ff5",
+  "prompts": {},
+  "sessions": {
+    "s_10382848b0a0c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cdb1c331-3860-4059-a071-b37883d5e0f0",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Emil Filipov <emil@langchain.dev>"
+    }
+  }
+}
