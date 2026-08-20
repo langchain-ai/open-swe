@@ -8,7 +8,6 @@ import type {
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import type { AgentPanelTab } from "@/features/agents/components/AgentGitPanel"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
@@ -124,7 +123,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(thread.id)
   )
-  const [panelTab, setPanelTab] = useState<AgentPanelTab>("git")
   const handlePanelCollapsedChange = useCallback(
     (next: boolean) => {
       setPanelCollapsed(next)
@@ -133,10 +131,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     [thread.id]
   )
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
+  const [revealChangesKey, setRevealChangesKey] = useState(0)
   const handleOpenFile = useCallback(
     (filePath: string) => {
       setRevealFilePath(filePath)
-      setPanelTab("git")
+      setRevealChangesKey((key) => key + 1)
       handlePanelCollapsedChange(false)
     },
     [handlePanelCollapsedChange]
@@ -365,10 +364,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       <AgentGitPanel
         thread={thread}
         revealFilePath={revealFilePath}
+        revealChangesKey={revealChangesKey}
         collapsed={panelCollapsed}
-        requestedTab={panelTab}
         onCollapsedChange={handlePanelCollapsedChange}
-        onTabChange={setPanelTab}
       />
     </div>
   )
