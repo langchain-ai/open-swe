@@ -295,6 +295,7 @@ export function AgentTurn({
       {canFoldWork && (
         <TurnFoldRow
           label={foldLabelWithCount}
+          active={!!isStreaming}
           expanded={workFoldExpanded}
           onToggle={toggleWorkFold}
         />
