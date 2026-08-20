@@ -3,15 +3,24 @@ import { CloudIcon, LaptopIcon } from "@phosphor-icons/react"
 import type { DesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { cn } from "@/lib/utils"
 
+export interface ThreadActivity {
+  running: number
+  completed: number
+}
+
 export function DesktopThreadSourceToggle({
   source,
   localCount,
   cloudCount,
+  localActivity,
+  cloudActivity,
   onSourceChange,
 }: {
   source: DesktopThreadSource
   localCount: number
   cloudCount: number
+  localActivity: ThreadActivity
+  cloudActivity: ThreadActivity
   onSourceChange: (source: DesktopThreadSource) => void
 }) {
   return (
@@ -23,6 +32,7 @@ export function DesktopThreadSourceToggle({
       <SourceButton
         label="Cloud"
         count={cloudCount}
+        activity={cloudActivity}
         active={source === "cloud"}
         icon={CloudIcon}
         onClick={() => onSourceChange("cloud")}
@@ -30,6 +40,7 @@ export function DesktopThreadSourceToggle({
       <SourceButton
         label="This Mac"
         count={localCount}
+        activity={localActivity}
         active={source === "local"}
         icon={LaptopIcon}
         onClick={() => onSourceChange("local")}
@@ -41,12 +52,14 @@ export function DesktopThreadSourceToggle({
 function SourceButton({
   label,
   count,
+  activity,
   active,
   icon: Icon,
   onClick,
 }: {
   label: string
   count: number
+  activity: ThreadActivity
   active: boolean
   icon: typeof CloudIcon
   onClick: () => void
@@ -54,7 +67,7 @@ function SourceButton({
   return (
     <button
       type="button"
-      aria-label={`${label} threads, ${count}`}
+      aria-label={`${label} threads, ${count}, ${activity.running} running, ${activity.completed} completed`}
       aria-pressed={active}
       onClick={onClick}
       className={cn(
@@ -74,6 +87,40 @@ function SourceButton({
       >
         {count}
       </span>
+      {activity.running > 0 && (
+        <ActivityCount
+          label={`${activity.running} running`}
+          count={activity.running}
+          className="bg-primary"
+        />
+      )}
+      {activity.completed > 0 && (
+        <ActivityCount
+          label={`${activity.completed} completed`}
+          count={activity.completed}
+          className="bg-success-foreground"
+        />
+      )}
     </button>
+  )
+}
+
+function ActivityCount({
+  label,
+  count,
+  className,
+}: {
+  label: string
+  count: number
+  className: string
+}) {
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 text-[9px] tabular-nums"
+      title={label}
+    >
+      <span className={cn("size-1.5 rounded-full", className)} />
+      {count}
+    </span>
   )
 }

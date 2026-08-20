@@ -4,13 +4,21 @@ import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "./appCommands"
 import { buildPaletteResults } from "@/components/AppCommandPalette"
-import { resolveAppCommands } from "./appCommands"
+import { createNewThreadCommand, resolveAppCommands } from "./appCommands"
 
 function command(id: string, label = id): AppCommand {
   return { id, label, group: "General", run: vi.fn() }
 }
 
 describe("app commands", () => {
+  it("uses Linear-style C for new threads on web and desktop", () => {
+    const newThread = createNewThreadCommand(vi.fn())
+
+    expect(newThread.shortcuts).toEqual(["c"])
+    expect(newThread.desktopShortcuts).toBeUndefined()
+    expect(newThread.desktopId).toBe("new-thread")
+  })
+
   it("lets the latest contextual registration replace a command", () => {
     const global = [command("new-thread")]
     const contextual = command("toggle-sidebar", "First sidebar")
@@ -45,6 +53,7 @@ describe("app commands", () => {
       title: "Fix local search",
       cwd: "/tmp/repo",
       status: "idle",
+      viewed: true,
       createdAt: 1,
       updatedAt: 2,
       modelId: null,

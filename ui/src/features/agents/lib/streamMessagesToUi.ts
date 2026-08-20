@@ -8,6 +8,7 @@ import { humanizeToolName } from "./toolNames"
 import type { BaseMessage, ContentBlock } from "@langchain/core/messages"
 import type { AssembledToolCall } from "@langchain/react"
 
+import type { StructuredEntity } from "./structuredInputMessages"
 import type {
   Chunk,
   DiffData,
@@ -15,6 +16,12 @@ import type {
   OutputIframeDisplay,
   ToolExecutionChunk,
 } from "./types"
+
+function senderNote(entity: StructuredEntity | undefined): string | undefined {
+  if (entity?.senderType === "bot") return "bot"
+  if (entity?.openSweAccount === "unlinked") return "not an Open SWE user"
+  return undefined
+}
 
 const READ_TOOLS = new Set(["read_file", "read", "ls"])
 const EDIT_TOOLS = new Set([
@@ -251,6 +258,16 @@ function toolOutputText(
   return text || undefined
 }
 
+function isHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false
+  try {
+    const url = new URL(value)
+    return url.protocol === "https:" || url.protocol === "http:"
+  } catch {
+    return false
+  }
+}
+
 function outputIframeDisplay(
   toolMessage: ToolMessage | undefined
 ): OutputIframeDisplay | undefined {
@@ -261,18 +278,29 @@ function outputIframeDisplay(
   const value = artifact as Record<string, unknown>
   if (
     value.type !== "output_iframe" ||
-    typeof value.html !== "string" ||
     typeof value.title !== "string" ||
     typeof value.filename !== "string"
   ) {
     return undefined
   }
-  return {
-    type: "output_iframe",
-    html: value.html,
-    title: value.title,
-    filename: value.filename,
+  if (isHttpUrl(value.preview_url) && isHttpUrl(value.download_url)) {
+    return {
+      type: "output_iframe",
+      previewUrl: value.preview_url,
+      downloadUrl: value.download_url,
+      title: value.title,
+      filename: value.filename,
+    }
   }
+  if (typeof value.html === "string") {
+    return {
+      type: "output_iframe",
+      html: value.html,
+      title: value.title,
+      filename: value.filename,
+    }
+  }
+  return undefined
 }
 
 /**
@@ -358,13 +386,16 @@ export function streamMessagesToUi(
       const chunks = imageChunks(content)
       const parsed = parseStructuredInput(raw.text, structuredEntities)
       if (parsed.type === "entity") return
-      const text = parsed.content
-      if (text.trim()) chunks.push({ kind: "text", text })
-      if (!chunks.length) return
       const entity =
         parsed.type === "message"
           ? structuredEntities.get(parsed.sender)
           : undefined
+      // Our own replies reach the transcript twice: once forwarded as thread
+      // context, once as the `slack_thread_reply` call that sent them.
+      if (entity?.senderType === "self") return
+      const text = parsed.content
+      if (text.trim()) chunks.push({ kind: "text", text })
+      if (!chunks.length) return
       uiMessages.push({
         id: msgId,
         author:
@@ -378,9 +409,11 @@ export function streamMessagesToUi(
           ? {
               structuredSenderId: parsed.sender,
               structuredSenderKind: parsed.senderKind,
+              structuredSurface: parsed.surface,
               structuredSenderName:
                 entity?.displayName ??
                 (entity?.handle ? `@${entity.handle}` : undefined),
+              structuredSenderNote: senderNote(entity),
             }
           : {}),
       })

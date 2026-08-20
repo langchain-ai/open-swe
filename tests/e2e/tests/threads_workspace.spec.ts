@@ -51,6 +51,14 @@ interface ThreadSeed {
 const createdThreadIds = new Set<string>();
 const createdScheduleIds = new Set<string>();
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 async function loginAs(page: Page) {
   const response = await page.request.post("/control/login", { data: USER });
   expect(response.ok()).toBeTruthy();
@@ -428,6 +436,91 @@ test.afterEach(async ({ request }) => {
 });
 
 test.describe("threads workspace", () => {
+  test("does not flash new-thread onboarding while a thread route loads", async ({
+    page,
+    request,
+  }) => {
+    const threadId = "75000000-0000-4000-8000-000000000001";
+    const title = "E2E Workspace Pending thread";
+    await seedThreads(request, [
+      {
+        id: threadId,
+        metadata: baseMetadata(Date.now(), title, 1_000, {
+          latest_run_id: "e2e-run-pending-thread",
+          latest_run_status: "success",
+        }),
+      },
+    ]);
+    await loginAs(page);
+
+    const profileGate = deferred();
+    const profileStarted = deferred();
+    const profileFinished = deferred();
+    await page.route("**/dashboard/api/profile", async (route) => {
+      profileStarted.resolve();
+      await profileGate.promise;
+      await route.fulfill({ json: {} });
+      profileFinished.resolve();
+    });
+
+    const threadChunkGate = deferred();
+    const threadChunkStarted = deferred();
+    await page.route(
+      /\/assets\/_threadId-(?!pendingComponent-)[^/]+\.js$/,
+      async (route) => {
+        threadChunkStarted.resolve();
+        await threadChunkGate.promise;
+        await route.continue();
+      },
+    );
+
+    await page.goto("/agents");
+    await expect(
+      page.getByText("Ask Open SWE to build, fix bugs, explore"),
+    ).toBeVisible();
+    await profileStarted.promise;
+
+    await page.evaluate(() => {
+      const seen = { value: false };
+      (window as unknown as Record<string, unknown>).__newThreadDialogSeen =
+        seen;
+      const detect = () => {
+        if (document.body.textContent?.includes("Choose your default model")) {
+          seen.value = true;
+        }
+      };
+      new MutationObserver(detect).observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+    });
+
+    await page.getByRole("link", { name: title }).click();
+    await threadChunkStarted.promise;
+    profileGate.resolve();
+    await profileFinished.promise;
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    threadChunkGate.resolve();
+
+    await expect(page).toHaveURL(`/agents/${threadId}`);
+    await expect(
+      page.getByText("This thread has no messages yet."),
+    ).toBeVisible();
+    const flashed = await page.evaluate(
+      () =>
+        (
+          (window as unknown as Record<string, unknown>)
+            .__newThreadDialogSeen as { value: boolean }
+        ).value,
+    );
+    expect(flashed).toBe(false);
+  });
+
   test("uses real thread metadata for focus and alternate groupings", async ({
     page,
     request,

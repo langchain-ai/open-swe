@@ -1,5 +1,6 @@
 import { memo } from "react"
 import { MessageCircle } from "lucide-react"
+import { SlackMrkdwn } from "../messages/SlackMrkdwn"
 import { Markdown } from "./Markdown"
 import type { ReactNode } from "react"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
@@ -16,10 +17,6 @@ function headerLabel(
   if (isLinear) return pending ? "Commenting on Linear…" : "Commented on Linear"
   return pending ? "Replying in Slack…" : "Replied in Slack"
 }
-
-const SLACK_TOKEN = /<([^>]+)>/g
-const LINK_CLASS =
-  "text-foreground/90 underline decoration-foreground/40 break-words [overflow-wrap:anywhere]"
 
 type SlackTextObject = { type?: string; text?: string }
 type SlackBlock = {
@@ -41,56 +38,6 @@ function isSlackBlockArray(value: unknown): value is Array<SlackBlock> {
     Array.isArray(value) &&
     value.every((block) => !!block && typeof block === "object")
   )
-}
-
-// Slack mrkdwn isn't standard Markdown — rewrite its link/mention syntax for display
-// rather than feeding it to the Markdown renderer (which mis-renders *bold* etc.).
-function renderSlackBody(text: string): Array<ReactNode> {
-  const nodes: Array<ReactNode> = []
-  let lastIndex = 0
-  let key = 0
-  SLACK_TOKEN.lastIndex = 0
-  for (
-    let match = SLACK_TOKEN.exec(text);
-    match;
-    match = SLACK_TOKEN.exec(text)
-  ) {
-    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index))
-    const token = match[1] ?? ""
-    const sep = token.indexOf("|")
-    const target = sep === -1 ? token : token.slice(0, sep)
-    const label = sep === -1 ? "" : token.slice(sep + 1)
-    if (target.startsWith("@") || target.startsWith("#")) {
-      const sigil = target[0]
-      nodes.push(
-        <span key={key++} className="text-foreground/90">
-          {sigil}
-          {label || target.slice(1)}
-        </span>
-      )
-    } else if (target.startsWith("!")) {
-      nodes.push(
-        <span key={key++} className="text-foreground/90">
-          @{label || target.slice(1)}
-        </span>
-      )
-    } else {
-      nodes.push(
-        <a
-          key={key++}
-          href={target}
-          target="_blank"
-          rel="noreferrer"
-          className={LINK_CLASS}
-        >
-          {label || target}
-        </a>
-      )
-    }
-    lastIndex = match.index + match[0].length
-  }
-  if (lastIndex < text.length) nodes.push(text.slice(lastIndex))
-  return nodes
 }
 
 function blocksFromOptions(
@@ -128,7 +75,11 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
               key={index}
               className="[overflow-wrap:anywhere] break-words whitespace-pre-wrap"
             >
-              {renderSlackBody(block.text.text ?? "")}
+              {block.text.type === "mrkdwn" ? (
+                <SlackMrkdwn text={block.text.text ?? ""} />
+              ) : (
+                block.text.text
+              )}
             </div>
           )
         }
@@ -186,7 +137,7 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
               renderSlackBlocks(blocks)
             ) : (
               <div className="[overflow-wrap:anywhere] break-words whitespace-pre-wrap">
-                {renderSlackBody(body)}
+                <SlackMrkdwn text={body} />
               </div>
             )}
           </div>

@@ -54,6 +54,7 @@ describe("structured input messages", () => {
       content: "please add a greet() helper",
       sender: "slack:U_ALICE",
       senderKind: "person",
+      surface: "slack",
     })
   })
 
@@ -67,6 +68,7 @@ describe("structured input messages", () => {
       content: "ship it",
       sender: "slack:U_ALICE",
       senderKind: "person",
+      surface: "slack",
     })
   })
 
@@ -80,6 +82,7 @@ describe("structured input messages", () => {
       content: "Fix it",
       sender: "linear:dev@example.com",
       senderKind: "person",
+      surface: "linear",
     })
   })
 
@@ -102,6 +105,7 @@ describe("structured input messages", () => {
       content: "Hello & welcome",
       sender: "github:alice",
       senderKind: "person",
+      surface: "web",
     })
     expect(
       parseStructuredInput(
@@ -113,7 +117,23 @@ describe("structured input messages", () => {
       content: "Check CI",
       sender: "system:scheduler",
       senderKind: "system",
+      surface: "automation",
     })
+  })
+
+  it("carries the bot marker and account link status of an entity", () => {
+    const bot = `<dynamic-context kind="system" id="system:slack-bot-B9">
+  <display_name>CI Bot</display_name>
+  <sender_type>bot</sender_type>
+</dynamic-context>`
+    const guest = `<dynamic-context kind="person" id="slack:U456">
+  <display_name>Guest</display_name>
+  <open_swe_account>unlinked</open_swe_account>
+</dynamic-context>`
+    const entities = collectStructuredEntities([bot, guest])
+
+    expect(entities.get("system:slack-bot-B9")?.senderType).toBe("bot")
+    expect(entities.get("slack:U456")?.openSweAccount).toBe("unlinked")
   })
 
   it("decodes escaped markup as plain text and supports numeric entities", () => {
