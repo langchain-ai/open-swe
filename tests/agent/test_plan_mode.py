@@ -38,6 +38,7 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     for tool in (
         "task",
         "manage_baby_sit",
+        "manage_thread",
         "open_pull_request",
         "recreate_sandbox",
         "request_pr_review",
@@ -52,6 +53,8 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
         assert tool in excluded
     # Read-only tools, plan-file editing tools, and explicit plan approval stay available.
     assert "approve_plan" not in excluded
+    assert "list_threads" not in excluded
+    assert "get_thread" not in excluded
     assert "read_file" not in excluded
     assert "write_file" not in excluded
     assert "edit_file" not in excluded

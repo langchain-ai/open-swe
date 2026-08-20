@@ -237,6 +237,8 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
+    assert configurable["prepare_run_id"] == enriched["params"]["metadata"]["prepare_run_id"]
+    assert configurable["prepare_run_id"]
     # Dashboard-only creation hints must not leak into the run config.
     assert "repo_explicitly_none" not in configurable
     assert enriched["params"]["assistant_id"] == "agent"
@@ -1851,6 +1853,60 @@ async def test_list_dashboard_threads_page_scopes_automation_runs(monkeypatch) -
     assert [item["id"] for item in interactive["items"]] == ["t2"]
     assert [item["id"] for item in automation["items"]] == ["t0"]
     assert automation["items"][0]["automationId"] == "schedule-1"
+
+
+async def test_list_dashboard_threads_page_separates_filter_owner_from_viewer(monkeypatch) -> None:
+    threads = [
+        {
+            "thread_id": "surfaced",
+            "metadata": {
+                "source": "dashboard",
+                "github_login": "other-user",
+                "latest_run_status": "success",
+                "updated_at_ms": 2,
+            },
+        },
+        {
+            "thread_id": "internal",
+            "metadata": {
+                "source": "reviewer",
+                "github_login": "other-user",
+                "latest_run_status": "success",
+                "updated_at_ms": 1,
+            },
+        },
+    ]
+    searches: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            searches.append(metadata)
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_page(
+        "admin-user",
+        email="admin@example.com",
+        filter_owner_login="other-user",
+        surfaced_only=True,
+    )
+
+    assert searches == [{"github_login": "other-user"}]
+    assert [item["id"] for item in result["items"]] == ["surfaced"]
+    assert result["items"][0]["ownerLogin"] == "other-user"
+    assert result["items"][0]["isOwner"] is False
 
 
 async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(monkeypatch) -> None:
