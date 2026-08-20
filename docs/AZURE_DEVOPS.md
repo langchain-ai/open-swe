@@ -40,7 +40,7 @@ For production, prefer Entra with a certificate-backed app registration and leav
 ```python
 {
     "scm_provider": "azure_devops",  # omit or "github" for GitHub (default)
-    "owner": "my-org",               # Azure DevOps organization
+    "owner": "my-org",  # Azure DevOps organization
     "project": "MyProject",
     "name": "my-repo",
 }
