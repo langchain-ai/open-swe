@@ -102,6 +102,7 @@ export function AgentTurn({
   projectPath,
   threadId,
   isLatestTurn,
+  activityLabel,
   ...callbacks
 }: {
   message: Message
@@ -111,6 +112,7 @@ export function AgentTurn({
   /** Cloud threads only; enables the git-sourced changed-files card. */
   threadId?: string
   isLatestTurn?: boolean
+  activityLabel?: string
 } & ApprovalCallbacks) {
   const renderItems = useMemo(
     () => buildRenderItems(message.chunks, message.id),
@@ -179,7 +181,7 @@ export function AgentTurn({
         .trim(),
     [replyItems]
   )
-  const canFoldWork = !isStreaming && workItems.length > 0
+  const canFoldWork = !!isStreaming || workItems.length > 0
   const [workFoldExpanded, setWorkFoldExpanded] = useState(false)
   const toggleWorkFold = useCallback(
     () => setWorkFoldExpanded((value) => !value),
@@ -276,10 +278,11 @@ export function AgentTurn({
     workDurationMs && workDurationMs >= 1000
       ? `Worked for ${formatElapsed(workDurationMs)}`
       : "Worked"
-  const foldLabel =
+  const foldLabel = isStreaming ? (activityLabel ?? "Working…") : workLabel
+  const foldLabelWithCount =
     actionCount > 0
-      ? `${workLabel} · ${actionCount} action${actionCount === 1 ? "" : "s"}`
-      : workLabel
+      ? `${foldLabel} · ${actionCount} action${actionCount === 1 ? "" : "s"}`
+      : foldLabel
   const visibleItems =
     canFoldWork && workFoldExpanded
       ? renderItems
@@ -291,7 +294,7 @@ export function AgentTurn({
     <div className="group/turn my-2 min-w-0 space-y-1.5">
       {canFoldWork && (
         <TurnFoldRow
-          label={foldLabel}
+          label={foldLabelWithCount}
           expanded={workFoldExpanded}
           onToggle={toggleWorkFold}
         />
