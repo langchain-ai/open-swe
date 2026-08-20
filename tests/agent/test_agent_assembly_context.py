@@ -255,13 +255,14 @@ async def test_agent_includes_recreate_sandbox_tool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_includes_sandbox_file_download_url_tool() -> None:
-    from agent.tools import create_sandbox_file_download_url
+async def test_agent_includes_sandbox_file_download_url_tools() -> None:
+    from agent.tools import create_sandbox_file_download_url, output_iframe
 
     captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert create_sandbox_file_download_url in tools
+    assert output_iframe in tools
 
 
 @pytest.mark.asyncio
@@ -271,7 +272,7 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 
     from agent.prompt import OPEN_SWE_SHARED_BASE
-    from agent.tools import create_sandbox_file_download_url
+    from agent.tools import create_sandbox_file_download_url, output_iframe
 
     monkeypatch.setenv("SANDBOX_TYPE", "modal")
     captured = await _capture_create_deep_agent_kwargs()
@@ -280,8 +281,10 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     assert isinstance(tools, list)
     assert isinstance(subagents, list)
     assert create_sandbox_file_download_url not in tools
+    assert output_iframe not in tools
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
     assert create_sandbox_file_download_url not in general_purpose["tools"]
+    assert output_iframe not in general_purpose["tools"]
     assert general_purpose["system_prompt"] == (
         f"{OPEN_SWE_SHARED_BASE}\n\n{GENERAL_PURPOSE_SUBAGENT['system_prompt']}"
     )

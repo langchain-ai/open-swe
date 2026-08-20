@@ -161,9 +161,11 @@ async def test_check_message_queue_injects_pending_autofix_event() -> None:
         )
 
     assert result is not None
-    message = result["messages"][0]
-    assert message["role"] == "user"
-    text = message["content"][0]["text"]
+    entity = ElementTree.fromstring(_envelope(result["messages"][0]))
+    message = ElementTree.fromstring(_envelope(result["messages"][-1]))
+    assert entity.attrib["id"] == "system:thread-queue"
+    assert message.attrib["kind"] == "system"
+    text = message.findtext("content") or ""
     assert "PR babysitting event arrived" in text
     # The reviewer's actual comment is carried through, not dropped for a generic nudge.
     assert "rename to userId" in text

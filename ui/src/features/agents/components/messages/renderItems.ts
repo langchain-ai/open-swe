@@ -58,6 +58,74 @@ export function splitWorkAndReply(items: Array<RenderItem>): {
   return { workItems, replyItems }
 }
 
+function toolNeedsAttention(
+  chunk: ToolExecutionChunk,
+  includeUnfinished: boolean
+): boolean {
+  return (
+    chunk.status === "error" ||
+    chunk.status === "pending" ||
+    (includeUnfinished && chunk.status === "in_progress")
+  )
+}
+
+function attentionItems(
+  item: RenderItem,
+  includeUnfinished: boolean
+): Array<RenderItem> {
+  if (item.type === "explored-group" || item.type === "subagent-group") {
+    return item.chunks
+      .filter((chunk) => toolNeedsAttention(chunk, includeUnfinished))
+      .map((chunk) => ({
+        type: "tool-item" as const,
+        key: `attention-${chunk.toolCallId}`,
+        chunk,
+      }))
+  }
+
+  if (
+    item.type === "edit-item" ||
+    item.type === "shell-item" ||
+    item.type === "tool-item"
+  ) {
+    return toolNeedsAttention(item.chunk, includeUnfinished) ? [item] : []
+  }
+
+  if (item.type === "text-chunk" && item.chunk.kind === "error") {
+    return [item]
+  }
+
+  return []
+}
+
+export function selectCollapsedTurnItems(
+  items: Array<RenderItem>,
+  includeUnfinished = false
+): Array<RenderItem> {
+  const { replyItems } = splitWorkAndReply(items)
+  const replyKeys = new Set(replyItems.map((item) => item.key))
+
+  return items.flatMap((item) =>
+    replyKeys.has(item.key) ? [item] : attentionItems(item, includeUnfinished)
+  )
+}
+
+export function countWorkActions(items: Array<RenderItem>): number {
+  return items.reduce((count, item) => {
+    if (item.type === "explored-group" || item.type === "subagent-group") {
+      return count + item.chunks.length
+    }
+    if (
+      item.type === "edit-item" ||
+      item.type === "shell-item" ||
+      item.type === "tool-item"
+    ) {
+      return count + 1
+    }
+    return count
+  }, 0)
+}
+
 function getChunkRenderKey(chunk: Chunk, sourceIndex: number): string {
   switch (chunk.kind) {
     case "tool-execution":

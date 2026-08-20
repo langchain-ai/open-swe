@@ -14,6 +14,7 @@ import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { PANEL_MIN_CHAT_WIDTH } from "@/features/agents/components/AgentPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import {
   readStoredPanelCollapsed,
@@ -26,6 +27,7 @@ import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useAgentSkills } from "@/features/agents/lib/queries"
+import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -94,6 +96,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const sidebarCollapsed = useSidebarCollapsed()
   const skills = useAgentSkills()
+  const session = useSession()
+  const canPost = !thread.adminThread || session.data?.is_admin === true
 
   const { models, defaultSelection } = useModelOptions()
   const threadSelection = useMemo<ModelSelection | null>(() => {
@@ -265,9 +269,15 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             />
             <div className="shrink-0 px-4 pb-4">
               <div className="mx-auto w-full max-w-3xl min-w-0">
+                <ThreadPullRequests pullRequests={thread.pullRequests ?? []} />
                 <AgentPromptBar
-                  placeholder="Add a follow up"
+                  placeholder={
+                    canPost
+                      ? "Add a follow up"
+                      : "Only workspace admins can send messages in this thread"
+                  }
                   compact
+                  disabled={!canPost}
                   busy={isStreaming}
                   activeRun={activeRun}
                   onSubmit={(content, images) =>
@@ -320,9 +330,15 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               </p>
             )}
             <div className="w-full max-w-3xl">
+              <ThreadPullRequests pullRequests={thread.pullRequests ?? []} />
               <AgentPromptBar
-                placeholder="Send the first message"
+                placeholder={
+                  canPost
+                    ? "Send the first message"
+                    : "Only workspace admins can send messages in this thread"
+                }
                 compact
+                disabled={!canPost}
                 busy={isStreaming}
                 activeRun={activeRun}
                 onSubmit={(content, images) =>
