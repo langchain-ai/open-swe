@@ -54,7 +54,6 @@ import {
   useResolveAgentThread,
   useSeedAgentThreadDetails,
   useSidebarThreads,
-  SIDEBAR_RESOLVED_LIMIT as RESOLVED_SIDEBAR_LIMIT,
 } from "@/features/agents/lib/queries"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
@@ -152,12 +151,13 @@ export function AgentsSidebar({
   )
   const { prefs, setGroup, setCompact, setFilters, resetFilters } =
     useSidebarPrefs()
-  const sidebar = useSidebarThreads(
-    RESOLVED_SIDEBAR_LIMIT,
+  const sidebar = useSidebarThreads({
     activeThreadId,
-    prefs.filters.includeAutomations ||
-      prefs.filters.sources.includes("schedule")
-  )
+    includeAutomations:
+      prefs.filters.includeAutomations ||
+      prefs.filters.sources.includes("schedule"),
+    includeResolved: prefs.filters.includeResolved,
+  })
   const localSessions = useDesktopLocalThreads().data ?? []
   const refreshLocalThreads = useRefreshLocalThreads()
   const deleteLocalSession = async (sessionId: string) => {
@@ -180,14 +180,23 @@ export function AgentsSidebar({
     if (activeLocalSessionId) setDesktopThreadSource("local")
     else if (activeThreadId) setDesktopThreadSource("cloud")
   }, [activeLocalSessionId, activeThreadId, isDesktop, setDesktopThreadSource])
-  const activeThreads = sidebar.data?.active.items ?? []
-  const resolvedThreads = sidebar.data?.resolved.items ?? []
-  const resolvedHasMore = sidebar.data?.resolved.hasMore ?? false
+  const activeThreads = sidebar.data.active.items
+  const resolvedThreads = sidebar.data.resolved.items
+  const activeHasMore = sidebar.data.active.hasMore
+  const resolvedHasMore = sidebar.data.resolved.hasMore
   const visibleThreads = [...activeThreads, ...resolvedThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
-  const facets = availableFacets(visibleThreads)
+  const loadedFacets = availableFacets(visibleThreads)
+  const facets = {
+    models: [
+      ...new Set([...prefs.filters.models, ...loadedFacets.models]),
+    ].sort((a, b) => a.localeCompare(b)),
+    repos: [...new Set([...prefs.filters.repos, ...loadedFacets.repos])].sort(
+      (a, b) => a.localeCompare(b)
+    ),
+  }
   const filteredActive = filterThreads(activeThreads, prefs.filters)
   const filteredResolved = filterThreads(resolvedThreads, prefs.filters)
   const showResolved = prefs.filters.includeResolved
@@ -196,11 +205,11 @@ export function AgentsSidebar({
       ? [...filteredActive, ...filteredResolved]
       : filteredActive
   const sections = groupThreadsByMode(groupedThreads, prefs.group)
-  // Never alongside the loading placeholder: a first load with a persisted
-  // filter has no sections yet, and "no matches" would be a definitive answer
-  // to a request still in flight.
+  const resolvedLoading =
+    !sidebar.isPending && showResolved && sidebar.resolvedQuery.isLoading
   const isCloudEmpty =
     !sidebar.isPending &&
+    !resolvedLoading &&
     sections.length === 0 &&
     (!showResolved || filteredResolved.length === 0) &&
     hasActiveFilters(prefs.filters)
@@ -372,6 +381,23 @@ export function AgentsSidebar({
                       }
                     />
                   )))}
+            {!sidebar.isPending && activeHasMore && (
+              <LoadMoreThreadsButton
+                label="Load more threads"
+                loading={sidebar.activeQuery.isFetchingNextPage}
+                onClick={() => void sidebar.activeQuery.fetchNextPage()}
+              />
+            )}
+            {!sidebar.isPending &&
+              showResolved &&
+              prefs.group === "focus" &&
+              resolvedHasMore && (
+                <LoadMoreThreadsButton
+                  label="Load more resolved threads"
+                  loading={sidebar.resolvedQuery.isFetchingNextPage}
+                  onClick={() => void sidebar.resolvedQuery.fetchNextPage()}
+                />
+              )}
             {showResolved && prefs.group !== "focus" && (
               <ResolvedThreadGroup
                 threads={filteredResolved}
@@ -379,7 +405,15 @@ export function AgentsSidebar({
                 activeThreadId={activeThreadId}
                 onNavigate={layout.closeOnMobile}
                 compact={prefs.compact}
+                onLoadMore={() => void sidebar.resolvedQuery.fetchNextPage()}
+                isLoadingMore={sidebar.resolvedQuery.isFetchingNextPage}
               />
+            )}
+            {resolvedLoading && (
+              <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
+                <CircleNotchIcon className="size-3.5 animate-spin" />
+                Loading resolved threads…
+              </div>
             )}
             {isCloudEmpty && (
               <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
@@ -754,7 +788,6 @@ function ThreadGroup({
               compact={compact}
             />
           ))}
-          {hasMore && <ShowAllResolvedLink onNavigate={onNavigate} />}
         </>
       )}
     </div>
@@ -767,18 +800,21 @@ function ResolvedThreadGroup({
   activeThreadId,
   onNavigate,
   compact = false,
+  onLoadMore,
+  isLoadingMore,
 }: {
   threads: Array<AgentThread>
   hasMore: boolean
   activeThreadId?: string
   onNavigate?: () => void
   compact?: boolean
+  onLoadMore: () => void
+  isLoadingMore: boolean
 }) {
   const [collapsed, setCollapsed] = useState(true)
-  if (threads.length === 0) return null
+  if (threads.length === 0 && !hasMore) return null
 
   const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
-  const visible = threads.slice(0, RESOLVED_SIDEBAR_LIMIT)
 
   return (
     <div className="mb-3">
@@ -797,7 +833,7 @@ function ResolvedThreadGroup({
       </button>
       {!collapsed && (
         <>
-          {visible.map((thread) => (
+          {threads.map((thread) => (
             <ThreadRow
               key={thread.id}
               thread={thread}
@@ -806,28 +842,38 @@ function ResolvedThreadGroup({
               compact={compact}
             />
           ))}
-          {hasMore && <ShowAllResolvedLink onNavigate={onNavigate} />}
+          {hasMore && (
+            <LoadMoreThreadsButton
+              label="Load more resolved threads"
+              loading={isLoadingMore}
+              onClick={onLoadMore}
+            />
+          )}
         </>
       )}
     </div>
   )
 }
 
-function ShowAllResolvedLink({ onNavigate }: { onNavigate?: () => void }) {
+function LoadMoreThreadsButton({
+  label,
+  loading,
+  onClick,
+}: {
+  label: string
+  loading: boolean
+  onClick: () => void
+}) {
   return (
-    <Link
-      to="/agents/threads"
-      search={{
-        resolved: true,
-        page: 1,
-        layout: "board",
-        group: "focus",
-      }}
-      onClick={onNavigate}
-      className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={loading}
+      className="mt-0.5 flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground disabled:cursor-wait disabled:opacity-60"
     >
-      Show all
-    </Link>
+      {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
+      {loading ? "Loading…" : label}
+    </button>
   )
 }
 
