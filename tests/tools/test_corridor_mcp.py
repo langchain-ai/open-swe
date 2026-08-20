@@ -181,7 +181,14 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
         ):
             await server.get_agent(cast(RunnableConfig, config))
             middleware = cast(list[object], captured["middleware"])
-            prepare = cast(AgentMiddleware, middleware[0])
+            prepare = cast(
+                AgentMiddleware,
+                next(
+                    item
+                    for item in middleware
+                    if type(item).__name__ == "PrepareAgentRunMiddleware"
+                ),
+            )
             await prepare.abefore_agent(
                 cast(AgentState[object], {"messages": []}),
                 cast(Runtime[None], MagicMock()),

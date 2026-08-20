@@ -1,16 +1,4 @@
-"""REST API for the plan-review page: read the plan, comment, approve, or request
-changes — all plain HTTP, no CRDT/WebSocket.
-
-Reviewers leave whole-document comments via this API; they're stored server-side
-and listed for everyone who can read the thread. On approve/reject the comments
-are read back here, formatted, and handed to the agent as the instruction for the
-follow-up run. The agent never sees comments during review — only this aggregated
-feedback at the decision point.
-
-Permissions: any authenticated org member can read a surfaced thread, comment,
-approve, and request changes (reject). A comment can be deleted by its author or
-the thread owner.
-"""
+"""REST API for HTML plan artifacts, comments, approval, and change requests."""
 
 import asyncio
 import logging
@@ -63,7 +51,8 @@ class CommentBody(BaseModel):
 
 
 class PlanUpdate(BaseModel):
-    markdown: str
+    html: str | None = None
+    markdown: str | None = None
 
 
 async def _thread_metadata(thread_id: str) -> dict[str, Any]:
@@ -99,6 +88,7 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
     return {
         "threadId": thread_id,
         "status": content.get("status") or metadata.get("plan_status") or "planning",
+        "html": content.get("html", ""),
         "markdown": content.get("markdown", ""),
         "isOwner": _user_owns_thread(metadata, login, email),
         "approvedBy": approved_by,
@@ -116,19 +106,18 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
 async def update_plan(
     thread_id: str, body: PlanUpdate, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    """Owner-only manual edit of the plan markdown.
-
-    Re-publishes the edited plan as ``ready`` (and mirrors it into the sandbox
-    plan file) while preserving reviewer comments, so the owner can refine the
-    plan before approving it."""
+    """Save an owner-edited HTML artifact while preserving review comments."""
     metadata = await _thread_metadata(thread_id)
     if not _user_owns_thread(metadata, session["sub"], session.get("email")):
         raise HTTPException(403, "only the plan owner can edit the plan")
-    markdown = body.markdown.strip()
-    if not markdown:
-        raise HTTPException(422, "plan markdown cannot be empty")
     content = await get_plan_content(thread_id) or {}
     _reject_shared_content(content)
+    legacy_markdown = isinstance(content.get("markdown"), str) and not content.get("html")
+    field = "markdown" if legacy_markdown else "html"
+    value = getattr(body, field)
+    value = value.strip() if isinstance(value, str) else ""
+    if not value:
+        raise HTTPException(422, f"plan {field} cannot be empty")
     status = content.get("status") or metadata.get("plan_status") or "planning"
     if status in (PLAN_STATUS_APPROVED, PLAN_STATUS_CANCELLED):
         raise HTTPException(409, f"cannot edit a {status} plan")
@@ -136,15 +125,24 @@ async def update_plan(
     plan_file_path = (
         plan_file_path if isinstance(plan_file_path, str) else plan_file_path_for_thread(thread_id)
     )
-    await save_plan_content(
-        thread_id,
-        markdown=markdown,
-        status=PLAN_STATUS_READY,
-        clear_comments=False,
-        plan_file_path=plan_file_path,
-    )
-    await write_plan_to_sandbox(thread_id, markdown, plan_file_path=plan_file_path)
-    return {"status": PLAN_STATUS_READY, "markdown": markdown}
+    if legacy_markdown:
+        await save_plan_content(
+            thread_id,
+            markdown=value,
+            status=PLAN_STATUS_READY,
+            clear_comments=False,
+            plan_file_path=plan_file_path,
+        )
+    else:
+        await save_plan_content(
+            thread_id,
+            html=value,
+            status=PLAN_STATUS_READY,
+            clear_comments=False,
+            plan_file_path=plan_file_path,
+        )
+    await write_plan_to_sandbox(thread_id, value, plan_file_path=plan_file_path)
+    return {"status": PLAN_STATUS_READY, field: value}
 
 
 @plan_router.get("/{thread_id}/comments")
@@ -230,6 +228,7 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
                 "status": str(content.get("status") or metadata.get("plan_status") or "planning"),
                 "already_approved": True,
             }
+        plan_html = str(content.get("html", "")).strip()
         plan_markdown = str(content.get("markdown", "")).strip()
         comments = await list_plan_comments(thread_id, raise_on_error=True)
         feedback = _format_comments(comments)
@@ -239,11 +238,17 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
             plan_mode=False,
             approved_by=approver,
         )
-        if plan_markdown:
+        if plan_html:
             text = (
-                "The plan has been approved. Use the reviewed plan below as the implementation "
-                "guide. Apply reasonable engineering judgment where details need adjustment while "
-                f"preserving its goals and reviewer edits:\n\n{plan_markdown}"
+                "The plan has been approved. Use the reviewed self-contained HTML artifact below "
+                "as the implementation guide. Apply reasonable engineering judgment where details "
+                f"need adjustment while preserving its goals and reviewer edits:\n\n{plan_html}"
+            )
+        elif plan_markdown:
+            text = (
+                "The plan has been approved. Use the reviewed Markdown plan below as the "
+                "implementation guide. Apply reasonable engineering judgment where details need "
+                f"adjustment while preserving its goals and reviewer edits:\n\n{plan_markdown}"
             )
         else:
             text = "The plan has been approved. Implement it now as described in the plan."
@@ -273,10 +278,9 @@ async def reject_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) ->
     feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
     await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
     text = (
-        "The plan needs changes before implementation. Address this reviewer "
-        "feedback in the existing Markdown file under /workspace/plans/, then "
-        "publish an updated plan with the save_plan tool:\n\n"
-        f"{feedback or '(no specific comments were left)'}"
+        "The plan needs changes before implementation. Address this reviewer feedback in the "
+        "existing self-contained HTML file under /workspace/plans/, then publish an updated "
+        f"artifact with the save_plan tool:\n\n{feedback or '(no specific comments were left)'}"
     )
     await _dispatch_followup(thread_id, metadata, text, plan_mode=True)
     return {"status": PLAN_STATUS_REVISING}
@@ -355,13 +359,7 @@ def _format_comments(comments: list[dict[str, Any]]) -> str:
 async def _dispatch_followup(
     thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
 ) -> Run:
-    """Continue the existing thread with a new instruction run.
-
-    Runs on the same LangGraph thread, so the agent resumes from the checkpoint
-    with the full planning history plus this instruction. The configurable is
-    rebuilt from the thread's stored owner/repo/Slack context so the agent can
-    push, open a PR, and reply in the original channel.
-    """
+    """Continue the existing thread with the decision as a new instruction run."""
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "source": _thread_source(metadata) or "slack",
@@ -380,8 +378,6 @@ async def _dispatch_followup(
         slack_thread = source_context.get("slack_thread")
         if isinstance(slack_thread, dict):
             configurable["slack_thread"] = slack_thread
-    # Carry the decision to the follow-up run: approve continues out of plan
-    # mode (implement), reject stays in plan mode (revise the plan).
     configurable["plan_mode"] = plan_mode
 
     return await dispatch_agent_run(

@@ -55,12 +55,17 @@ async def read_repo_file(path: str, ref: str | None = None) -> dict[str, Any]:
     owner, repo, token, head_sha = _chat_repo_context()
     if not owner or not repo:
         return {"success": False, "error": "repository context unavailable"}
+    if not token:
+        return {
+            "success": False,
+            "error": "GitHub credentials unavailable; repository source was not read",
+        }
 
     clean_path = path.strip().lstrip("/")
     resolved_ref = (ref or head_sha or "").strip()
     params = {"ref": resolved_ref} if resolved_ref else None
     url = f"{_GITHUB_API}/repos/{owner}/{repo}/contents/{clean_path}"
-    headers = github_headers(token or "")
+    headers = github_headers(token)
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url, headers=headers, params=params)

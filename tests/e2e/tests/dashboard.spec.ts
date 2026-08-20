@@ -198,7 +198,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await openThreadViaSlackLink(page);
     await expectTranscriptVisible(page);
 
-    const worked = page.getByRole("button", { name: /^Worked(?: for .+)?$/ });
+    const worked = page.getByRole("button", {
+      name: /^Worked(?: for .+)? · \d+ actions?$/,
+    });
     const acknowledgement = page.getByText("On it!", { exact: true });
     const edit = page.getByRole("button", { name: "Edited greet.py" });
 
@@ -228,7 +230,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await openThreadViaSlackLink(page);
     await expectTranscriptVisible(page);
 
-    const worked = page.getByRole("button", { name: /^Worked(?: for .+)?$/ });
+    const worked = page.getByRole("button", {
+      name: /^Worked(?: for .+)? · \d+ actions?$/,
+    });
     await expect(worked).toBeVisible();
     await worked.click();
 
@@ -251,6 +255,71 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect
       .poll(() => inlineDiff.locator("[data-line] span").count())
       .toBeGreaterThan(2);
+  });
+
+  test("bounds inline changed files and reports omitted files", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.goto("/mock/slack");
+    await page.locator("#reset").click();
+    const prepare = await page.request.post("/control/prepare-sandbox-repo");
+    expect(prepare.ok()).toBeTruthy();
+    await page
+      .locator("#text")
+      .fill("<@U0BOT> E2E_MANY_FILES create several files and open a PR");
+    await page.locator("#send").click();
+    await expect(
+      page.locator(".msg.bot").filter({ hasText: "Add greet() helper" }).last(),
+    ).toBeVisible();
+    const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
+    const href = await webLink.getAttribute("href");
+    if (!href) throw new Error("Open in Web link is missing its href");
+    const threadId = new URL(href, page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+
+    const turnDiffResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname === `/dashboard/api/threads/${threadId}/turn-diff` &&
+        url.searchParams.get("max_files") === "10" &&
+        url.searchParams.get("include_content") === "false"
+      );
+    });
+    await webLink.click();
+    const response = await turnDiffResponse;
+    expect(response.ok()).toBeTruthy();
+    const payload = (await response.json()) as {
+      status: "ready" | "missing" | "error";
+      truncated: boolean;
+      summary: { files: number; additions: number; deletions: number };
+      files: Array<{
+        originalContent: string | null;
+        modifiedContent: string | null;
+      }>;
+    };
+    expect(payload.status).toBe("ready");
+    expect(payload).toMatchObject({
+      truncated: true,
+      summary: { files: 15, additions: 15, deletions: 0 },
+    });
+    expect(payload.files).toHaveLength(10);
+    expect(
+      payload.files.every(
+        (file) =>
+          file.originalContent === null && file.modifiedContent === null,
+      ),
+    ).toBeTruthy();
+
+    const card = page.getByTestId("turn-changed-files-card");
+    await expect(card).toContainText("15 files changed");
+    await expect(card).toContainText("+15");
+    await expect(card).toContainText("-0");
+    await expect(card.getByTestId("turn-changed-file")).toHaveCount(10);
+    await expect(card.getByTestId("turn-changed-files-omitted")).toHaveText(
+      "5 more files not shown",
+    );
   });
 
   test("keeps the transcript mounted after navigation and refocus", async ({
@@ -408,6 +477,91 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       status: "running",
     });
     await expect(queuedMessage).toBeVisible();
+  });
+
+  test("renders structured input envelopes safely and keeps legacy messages", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openRunningThreadViaSlackLink(page);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+    await waitForThreadIdle(page, threadId);
+
+    await page.route(
+      `**/dashboard/api/threads/${threadId}/state`,
+      async (route) => {
+        const response = await route.fetch();
+        const body = (await response.json()) as {
+          values?: { messages?: Array<Record<string, unknown>> };
+        };
+        const messages = body.values?.messages ?? [];
+        body.values = {
+          ...body.values,
+          messages: [
+            {
+              type: "human",
+              id: "entity-person",
+              content:
+                '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
+            },
+            {
+              type: "human",
+              id: "entity-system",
+              content:
+                '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
+            },
+            {
+              type: "human",
+              id: "structured-person",
+              content:
+                '<input-message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></input-message>',
+            },
+            {
+              type: "human",
+              id: "structured-system",
+              content:
+                '<input-message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></input-message>',
+            },
+            {
+              type: "human",
+              id: "legacy-e2e",
+              content: "Legacy stays visible",
+            },
+            ...messages,
+          ],
+        };
+        await route.fulfill({ response, json: body });
+      },
+    );
+
+    await page.reload();
+    await expect(
+      page.getByText("Person says <img data-e2e-injected src=x>"),
+    ).toBeVisible();
+    await expect(page.locator("img[data-e2e-injected]")).toHaveCount(0);
+    await expect(page.getByText("Automation checks CI")).toHaveCount(0);
+    const systemChip = page.getByRole("button", { name: "Scheduler" });
+    await expect(systemChip).toBeVisible();
+    await systemChip.click();
+    await expect(page.getByText("Automation checks CI")).toBeVisible();
+    await expect(page.getByText("Legacy stays visible")).toBeVisible();
+    await expect(page.getByText("github:alice", { exact: false })).toHaveCount(
+      0,
+    );
+    await expect(
+      page.getByText("system:scheduler", { exact: false }),
+    ).toHaveCount(0);
+    await expect(
+      page
+        .locator('[data-message-sender-kind="person"]')
+        .filter({ hasText: "Person says" }),
+    ).toBeVisible();
+    await expect(
+      page
+        .locator('[data-message-sender-kind="system"]')
+        .filter({ hasText: "Automation checks CI" }),
+    ).toBeVisible();
   });
 
   test("stops a Slack-started run from the web app", async ({ page }) => {

@@ -350,7 +350,10 @@ def get_or_create_sandbox_backend_proxy(
 ) -> SandboxBackendProxy:
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     if sandbox_backend:
-        sandbox_backend.set_reconnect(reconnect)
+        # Callers that only want the handle pass no callback; keep the one the
+        # run registered rather than dropping it to the metadata fallback.
+        if reconnect is not None:
+            sandbox_backend.set_reconnect(reconnect)
         return sandbox_backend
 
     sandbox_backend = SandboxBackendProxy(thread_id=thread_id, reconnect=reconnect)

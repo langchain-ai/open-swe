@@ -1,5 +1,9 @@
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import { messageArrivalTimestamp } from "./messageTimestamps"
+import {
+  collectStructuredEntities,
+  parseStructuredInput,
+} from "./structuredInputMessages"
 import { humanizeToolName } from "./toolNames"
 import type { BaseMessage, ContentBlock } from "@langchain/core/messages"
 import type { AssembledToolCall } from "@langchain/react"
@@ -303,6 +307,11 @@ export function streamMessagesToUi(
     }
   }
 
+  const structuredEntities = collectStructuredEntities(
+    messages
+      .filter((message) => HumanMessage.isInstance(message))
+      .map((message) => message.text)
+  )
   const uiMessages: Array<Message> = []
   let agentTurn: AgentTurn | null = null
   let turnKey: string | undefined
@@ -347,15 +356,33 @@ export function streamMessagesToUi(
       turnKey = typeof raw.id === "string" ? raw.id : undefined
       const content = (raw as unknown as { content?: unknown }).content
       const chunks = imageChunks(content)
-      const text = raw.text.trim()
-      if (text) chunks.push({ kind: "text", text })
+      const parsed = parseStructuredInput(raw.text, structuredEntities)
+      if (parsed.type === "entity") return
+      const text = parsed.content
+      if (text.trim()) chunks.push({ kind: "text", text })
       if (!chunks.length) return
+      const entity =
+        parsed.type === "message"
+          ? structuredEntities.get(parsed.sender)
+          : undefined
       uiMessages.push({
         id: msgId,
-        author: "user",
+        author:
+          parsed.type === "message" && parsed.senderKind === "system"
+            ? "system"
+            : "user",
         timestamp,
         timestampIsFallback,
         chunks,
+        ...(parsed.type === "message"
+          ? {
+              structuredSenderId: parsed.sender,
+              structuredSenderKind: parsed.senderKind,
+              structuredSenderName:
+                entity?.displayName ??
+                (entity?.handle ? `@${entity.handle}` : undefined),
+            }
+          : {}),
       })
       return
     }

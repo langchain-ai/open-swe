@@ -9,12 +9,14 @@ import {
 } from "react"
 import { ChevronDown } from "lucide-react"
 
+import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
 import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { UserMessage } from "./UserMessage"
 import type { MessagesProps } from "./types"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
 const BOTTOM_LOCK_THRESHOLD_PX = 24
@@ -46,7 +48,7 @@ function QueuedMessages({
             </div>
             {message.content && (
               <div className="break-words whitespace-pre-wrap">
-                {message.content}
+                <SkillPromptText text={message.content} />
               </div>
             )}
             {imageCount > 0 && (
@@ -64,6 +66,7 @@ function QueuedMessages({
 export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
+  showPlanArtifact = false,
   queuedMessages = [],
   isStreaming,
   streamIsLoading,
@@ -276,7 +279,10 @@ export const Messages = memo(function MessagesComponent({
               const messageIsStreaming = isStreaming && isLastMessage
               const messageIsMarkdownLive = message.id === liveMarkdownMessageId
 
-              if (message.author === "user") {
+              if (
+                message.author === "user" ||
+                message.structuredSenderKind === "system"
+              ) {
                 return <UserMessage key={message.id} message={message} />
               }
 
@@ -296,6 +302,9 @@ export const Messages = memo(function MessagesComponent({
                 />
               )
             })}
+            {threadId && showPlanArtifact && (
+              <InlinePlanArtifact threadId={threadId} />
+            )}
             <QueuedMessages queuedMessages={queuedMessages} />
             <ThinkingSpinner
               isActive={!!(isThinking || streamIsLoading || isStreaming)}

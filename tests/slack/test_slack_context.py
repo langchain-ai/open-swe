@@ -1,5 +1,6 @@
 import asyncio
 from typing import cast
+from xml.etree import ElementTree
 
 import pytest
 
@@ -254,13 +255,18 @@ def test_parse_github_pr_url_slack_formatted_link() -> None:
     assert pr_ref.number == 1244
 
 
-def test_format_slack_messages_for_prompt_uses_name_and_id() -> None:
+def test_format_slack_messages_for_prompt_includes_ids_for_each_message() -> None:
     formatted = format_slack_messages_for_prompt(
-        [{"ts": "1.0", "text": "hello", "user": "U123"}],
-        {"U123": "alice"},
+        [
+            {"ts": "1.0", "text": "hello", "user": "U123"},
+            {"ts": "1.1", "text": "follow up", "user": "U456"},
+        ],
+        {"U123": "alice", "U456": "bob"},
     )
 
-    assert formatted == "@alice(U123): hello"
+    assert formatted == (
+        "@alice(U123) [message_ts=1.0]: hello\n@bob(U456) [message_ts=1.1]: follow up"
+    )
 
 
 def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> None:
@@ -271,7 +277,7 @@ def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> N
         bot_username="open-swe",
     )
 
-    assert formatted == "@alice(U123): @open-swe status update?"
+    assert formatted == "@alice(U123) [message_ts=1.0]: @open-swe status update?"
 
 
 def test_format_slack_messages_for_prompt_includes_forwarded_attachment() -> None:
@@ -295,7 +301,7 @@ def test_format_slack_messages_for_prompt_includes_forwarded_attachment() -> Non
     )
 
     assert formatted == (
-        "@alice(U123): please handle this\n"
+        "@alice(U123) [message_ts=1.0]: please handle this\n"
         "[Forwarded Slack message from Bob]\n"
         "The forwarded request\n"
         "Source: https://example.slack.com/archives/C123/p123"
@@ -322,7 +328,7 @@ def test_format_slack_messages_for_prompt_uses_forwarded_fallback() -> None:
     )
 
     assert formatted == (
-        "@alice(U123): [forwarded message]\n"
+        "@alice(U123) [message_ts=1.0]: [forwarded message]\n"
         "[Forwarded Slack message from Bob]\n"
         "Fallback forwarded text"
     )
@@ -362,7 +368,7 @@ def test_format_slack_messages_for_prompt_includes_nested_forwarded_attachments(
     )
 
     assert formatted == (
-        "@alice(U123): nested context\n"
+        "@alice(U123) [message_ts=1.0]: nested context\n"
         "[Forwarded Slack message from Bob]\n"
         "First level\n"
         "  [Forwarded Slack message from Carol]\n"
@@ -408,7 +414,7 @@ def test_format_slack_messages_for_prompt_ignores_regular_unfurl_attachment() ->
         {"U123": "alice"},
     )
 
-    assert formatted == "@alice(U123): look at this link"
+    assert formatted == "@alice(U123) [message_ts=1.0]: look at this link"
 
 
 def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -585,6 +591,14 @@ def test_format_slack_web_link_footer_includes_run_usage() -> None:
     )
 
 
+def test_format_slack_web_link_footer_prefers_session_cost() -> None:
+    usage = RunUsageSummary(models=("model-a",), main_agent_tokens=12_345, session_cost_usd=0.42)
+
+    footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
+
+    assert footer == "<https://app.example/agents/t1|Open in Web> • model-a • $0.42"
+
+
 def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:
     text = "Done <https://app.example/agents/t1|Open in Web> • model-a • 110 main-agent tokens"
     blocks = [
@@ -608,12 +622,12 @@ def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:
     repeated = slack_utils.with_slack_session_cost(updated_text, updated_blocks, 0.42)
 
     assert repeated == (updated_text, updated_blocks)
-    assert updated_text.endswith("110 main-agent tokens • $0.42 session cost")
+    assert updated_text.endswith("model-a • $0.42")
+    assert "main-agent tokens" not in updated_text
     assert updated_blocks is not None
     assert updated_blocks[1] == blocks[1]
-    assert updated_blocks[2]["elements"][0]["text"].endswith(
-        "110 main-agent tokens • $0.42 session cost"
-    )
+    assert updated_blocks[2]["elements"][0]["text"].endswith("model-a • $0.42")
+    assert "main-agent tokens" not in updated_blocks[2]["elements"][0]["text"]
 
 
 def test_post_slack_trace_reply_has_no_tip(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -944,9 +958,10 @@ def test_process_slack_mention_preserves_forwarded_attachment_from_event(
     run_create = captured["run_create"]
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
-    prompt_block = kwargs["input"]["messages"][0]["content"][0]
-    assert "[Forwarded Slack message from Teammate]" in prompt_block["text"]
-    assert "Forwarded requirements" in prompt_block["text"]
+    prompt_block = kwargs["input"]["messages"][-1]["content"][0]
+    prompt = ElementTree.fromstring(prompt_block["text"]).findtext("content") or ""
+    assert "[Forwarded Slack message from Teammate]" in prompt
+    assert "Forwarded requirements" in prompt
 
 
 def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
@@ -981,10 +996,10 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
 
     assert captured["thread_exists_check"] == expected_thread_id
     assert captured["fetch_thread"] == {"channel_id": "C123", "thread_ts": thread_ts}
-    assert captured["metadata_update"] == {
-        "thread_id": expected_thread_id,
-        "metadata": {"repo": {"owner": "langchain-ai", "name": "open-swe"}},
-    }
+    metadata_update = captured["metadata_update"]
+    assert isinstance(metadata_update, dict)
+    assert metadata_update["thread_id"] == expected_thread_id
+    assert "injected_dynamic_context_hashes" not in metadata_update["metadata"]
     assert "trace_reply" not in captured
 
     run_create = captured["run_create"]
@@ -998,23 +1013,41 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     slack_thread_context = kwargs["config"]["configurable"]["slack_thread"]
     assert slack_thread_context["thread_ts"] == thread_ts
     assert slack_thread_context["triggering_user_timezone"] == "America/New_York"
-    prompt_block = kwargs["input"]["messages"][0]["content"][0]
-    assert "## Default Repository Hint\nlangchain-ai/open-swe" in prompt_block["text"]
-    assert "## Triggering User Time Zone\nAmerica/New_York" in prompt_block["text"]
+    messages = kwargs["input"]["messages"]
+    entities = [
+        ElementTree.fromstring(message["content"])
+        for message in messages
+        if isinstance(message["content"], str) and message["content"].startswith("<dynamic-context")
+    ]
+    person = next(entity for entity in entities if entity.attrib["id"] == "slack:U123")
+    channel = next(entity for entity in entities if entity.attrib["id"] == "slack:C123")
+    request_block = messages[-1]["content"][0]
+    request = ElementTree.fromstring(request_block["text"]).findtext("content") or ""
+    prompt_message = next(
+        message
+        for message in messages
+        if isinstance(message["content"], str)
+        and 'sender="system:slack-context"' in message["content"]
+    )
+    prompt = ElementTree.fromstring(prompt_message["content"]).findtext("content") or ""
+    assert person.findtext("display_name") == "Mason"
+    assert channel.attrib["id"] == "slack:C123"
+    assert "## Default Repository Hint\nlangchain-ai/open-swe" in prompt
+    assert "## Triggering User Time Zone\nAmerica/New_York" in prompt
     assert (
         "Use this only if the Slack conversation does not identify a different repository."
-        in (prompt_block["text"])
+        in prompt
     )
-    assert prompt_block["text"].count("## Slack Thread") == 1
-    assert f"Thread TS: {thread_ts}" in prompt_block["text"]
-    assert "## Open SWE Links" in prompt_block["text"]
-    assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt_block["text"]
-    assert "- Trace: https://smith/x" in prompt_block["text"]
-    assert "do not duplicate it manually" in prompt_block["text"]
-    assert "slack_thread_reply" not in prompt_block["text"]
-    assert "slack_add_reaction" not in prompt_block["text"]
-    assert "slack_read_thread_messages" not in prompt_block["text"]
-    assert prompt_block["text"].endswith("## Latest Mention Request\ncontinue on the branch")
+    assert prompt.count("## Slack Thread") == 1
+    assert f"Thread TS: {thread_ts}" in prompt
+    assert "## Open SWE Links" in prompt
+    assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt
+    assert "- Trace: https://smith/x" in prompt
+    assert "do not duplicate it manually" in prompt
+    assert "slack_thread_reply" not in prompt
+    assert "slack_add_reaction" not in prompt
+    assert "slack_read_thread_messages" not in prompt
+    assert request == "continue on the branch"
 
 
 def test_process_slack_mention_treats_direct_message_as_implicit_mention(
@@ -1061,9 +1094,18 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
 
     run_create = captured["run_create"]
     assert isinstance(run_create, dict)
-    prompt_block = run_create["kwargs"]["input"]["messages"][0]["content"][0]
-    assert "Context starts at: the previous direct message" in prompt_block["text"]
-    assert "## Latest Mention Request\ncontinue on the branch" in prompt_block["text"]
+    messages = run_create["kwargs"]["input"]["messages"]
+    prompt_message = next(
+        message
+        for message in messages
+        if isinstance(message["content"], str)
+        and 'sender="system:slack-context"' in message["content"]
+    )
+    prompt = ElementTree.fromstring(prompt_message["content"]).findtext("content") or ""
+    request_block = messages[-1]["content"][0]
+    request = ElementTree.fromstring(request_block["text"]).findtext("content") or ""
+    assert "Context starts at: the previous direct message" in prompt
+    assert request == "continue on the branch"
     context_messages = captured["context_messages"]
     assert isinstance(context_messages, list)
     assert [message["ts"] for message in context_messages] == [

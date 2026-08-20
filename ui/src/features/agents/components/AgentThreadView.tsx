@@ -1,10 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
-import {
-  CircleAlert as CircleAlertIcon,
-  FolderOpen,
-  Map as MapIcon,
-} from "lucide-react"
+import { CircleAlert as CircleAlertIcon, FolderOpen } from "lucide-react"
 
 import type {
   AgentThread,
@@ -120,8 +116,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     [stream.messages]
   )
 
-  // Own the git panel's collapsed state so the plan banner can reserve space for
-  // the floating expand button the panel renders while collapsed.
+  // Own the git panel's collapsed state so file links can reveal the panel.
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(thread.id)
   )
@@ -133,23 +128,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     },
     [thread.id]
   )
-  // The plan renders in the panel, so open it as soon as the agent finishes
-  // writing rather than banner-nagging while it works. Mobile is excluded: there
-  // the panel is a full-screen overlay that would hide the conversation.
-  const planStatus = thread.planStatus
-  const planReady = planStatus === "ready" || planStatus === "shared"
-  // Seeded from the mount status (the view is keyed by thread id and only
-  // renders once the thread has loaded) so revisiting a thread with an
-  // already-ready plan keeps the user's collapsed preference.
-  const lastPlanStatus = useRef<string | null | undefined>(planStatus)
-  useEffect(() => {
-    const previous = lastPlanStatus.current
-    lastPlanStatus.current = planStatus
-    if (isMobile || !planReady || previous === planStatus) return
-    setPanelTab("plan")
-    handlePanelCollapsedChange(false)
-  }, [handlePanelCollapsedChange, isMobile, planReady, planStatus])
-
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const handleOpenFile = useCallback(
     (filePath: string) => {
@@ -190,7 +168,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   // this thread. Those are also the paths a follow-up is most likely about.
   const mentionPaths = useMemo(() => editedPaths(baseMessages), [baseMessages])
   const isThinking = stream.isLoading
-  const displayRepo = thread.workingRepoFullName || thread.repoFullName
   const settingUpSandbox = isThinking && baseMessages.length === 0
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
   // Show a loading state during that one-time fetch instead of the empty state.
@@ -228,11 +205,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               panelCollapsed && "pr-14"
             )}
           >
-            {displayRepo && (
+            {thread.repoFullName && (
               <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
                 <FolderOpen className="size-3.5 shrink-0" />
-                <span className="truncate" title={displayRepo}>
-                  {displayRepo}
+                <span className="truncate" title={thread.repoFullName}>
+                  {thread.repoFullName}
                 </span>
               </span>
             )}
@@ -270,50 +247,14 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           threadId={thread.id}
           pollWhileActive={isStreaming}
         />
-        {planReady && (
-          <div
-            className={cn(
-              "mx-auto w-full max-w-3xl shrink-0 px-4 pt-3",
-              // Both collapsed panels float a fixed expand button in a top
-              // corner; clear them so neither covers the banner.
-              sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
-              panelCollapsed && "pr-14"
-            )}
-          >
-            <button
-              type="button"
-              data-testid="review-plan-link"
-              className="block w-full rounded-xl text-left transition-colors hover:bg-info/8"
-              onClick={() => {
-                setPanelTab("plan")
-                handlePanelCollapsedChange(false)
-              }}
-            >
-              <Alert variant="info">
-                <MapIcon />
-                <AlertDescription>
-                  <span className="text-foreground">
-                    {planStatus === "shared"
-                      ? "The agent shared a longer response."
-                      : "A plan is ready for your review."}
-                  </span>
-                </AlertDescription>
-                <AlertAction>
-                  <span className="text-xs font-medium text-info-foreground">
-                    {planStatus === "shared"
-                      ? "Open response →"
-                      : "Review plan →"}
-                  </span>
-                </AlertAction>
-              </Alert>
-            </button>
-          </div>
-        )}
         {hasConversation ? (
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <Messages
               messages={baseMessages}
               threadId={thread.id}
+              showPlanArtifact={
+                thread.planStatus === "ready" || thread.planStatus === "shared"
+              }
               onOpenFile={handleOpenFile}
               queuedMessages={queuedMessages}
               isStreaming={isStreaming}

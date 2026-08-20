@@ -12,6 +12,8 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
+from ..input_messages import wrap_system_prompt
+
 
 class PrepareRunState(AgentState):
     run_prepared: NotRequired[bool]
@@ -88,5 +90,13 @@ class BasePrepareRunMiddleware(AgentMiddleware):
         if isinstance(rendered, str) and rendered:
             existing = request.system_message.text if request.system_message is not None else ""
             content = f"{rendered}\n\n{existing}" if existing else rendered
-            request = request.override(system_message=SystemMessage(content=content))
+            request = request.override(
+                system_message=SystemMessage(content=wrap_system_prompt(content))
+            )
+        elif request.system_message is not None:
+            request = request.override(
+                system_message=SystemMessage(
+                    content=wrap_system_prompt(request.system_message.text)
+                )
+            )
         return await handler(request)

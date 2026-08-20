@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
-export type PanelTabKind = "review" | "terminal" | "browser" | "files" | "plan"
+export type PanelTabKind = "review" | "terminal" | "browser" | "files"
 
 export interface PanelTab {
   id: string
@@ -22,7 +22,6 @@ const KINDS: ReadonlyArray<PanelTabKind> = [
   "terminal",
   "browser",
   "files",
-  "plan",
 ]
 
 /** Only terminals can be opened more than once. */

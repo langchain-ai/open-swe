@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useStreamContext as useAgentThreadStream } from "@langchain/react"
-import { useQueryClient } from "@tanstack/react-query"
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -14,12 +12,7 @@ import {
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
 import { agentsApi } from "@/features/agents/lib/api"
-import {
-  agentThreadKeys,
-  invalidateAgentThreadLists,
-  useAgentThreadPrDiff,
-  useAgentThreadTurnDiff,
-} from "@/features/agents/lib/queries"
+import { useAgentThreadTurnDiff } from "@/features/agents/lib/queries"
 import { ReviewTab } from "@/features/reviews/components/ReviewTab"
 import { AgentPanelShell } from "@/features/agents/components/AgentPanelShell"
 import {
@@ -34,14 +27,14 @@ import {
   DiffFilesView,
   toPanelFiles,
 } from "@/features/agents/components/DiffFilesView"
-import { PlanView } from "@/features/agents/components/PlanView"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
 import { usePanelTabs } from "@/features/agents/lib/panelTabs"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
+import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
 
-export type AgentPanelTab = "git" | "plan"
+export type AgentPanelTab = "git"
 
 interface AgentGitPanelProps {
   thread: AgentThread
@@ -61,8 +54,6 @@ export function AgentGitPanel({
   onCollapsedChange,
   onTabChange,
 }: AgentGitPanelProps) {
-  const queryClient = useQueryClient()
-  const stream = useAgentThreadStream()
   const [tab, setTab] = useState<"diff" | "review" | "commits">("diff")
   const [wrap, setWrap] = useDiffWrap()
   const panel = usePanelTabs(`cloud:${thread.id}`)
@@ -70,18 +61,8 @@ export function AgentGitPanel({
     { kind: "cloud", threadId: thread.id },
     ""
   )
-  const hasPlan = Boolean(
-    thread.planStatus &&
-    thread.planStatus !== "approved" &&
-    thread.planStatus !== "cancelled"
-  )
-
   const topTab =
-    requestedTab === "plan" && hasPlan
-      ? "plan"
-      : panel.activeTab?.kind === "terminal"
-        ? panel.activeTab.id
-        : "git"
+    panel.activeTab?.kind === "terminal" ? panel.activeTab.id : requestedTab
   const handleOpenKind = useCallback(
     (kind: PanelTabKind) => {
       if (kind !== "terminal") return
@@ -92,7 +73,7 @@ export function AgentGitPanel({
   )
   const handleSelectTab = useCallback(
     (id: string) => {
-      if (id === "git" || id === "plan") {
+      if (id === "git") {
         onTabChange(id)
         panel.select("")
         return
@@ -107,7 +88,7 @@ export function AgentGitPanel({
   )
   const handleCloseTab = useCallback(
     async (id: string) => {
-      if (id === "git" || id === "plan") {
+      if (id === "git") {
         onCollapsedChange(true)
         return
       }
@@ -115,6 +96,55 @@ export function AgentGitPanel({
     },
     [onCollapsedChange, panel, terminals]
   )
+  const terminalAvailable =
+    thread.isOwner !== false && Boolean(thread.sandboxId)
+  const toggleTerminal = useCallback(() => {
+    if (!collapsed && panel.activeTab?.kind === "terminal") {
+      onCollapsedChange(true)
+      return
+    }
+    onCollapsedChange(false)
+    onTabChange("git")
+    const existing = panel.tabs.find(
+      (candidate) => candidate.kind === "terminal"
+    )
+    if (existing) handleSelectTab(existing.id)
+    else handleOpenKind("terminal")
+  }, [
+    collapsed,
+    handleOpenKind,
+    handleSelectTab,
+    onCollapsedChange,
+    onTabChange,
+    panel.activeTab?.kind,
+    panel.tabs,
+  ])
+  const panelCommands = useMemo(
+    () => [
+      {
+        id: "toggle-work-panel",
+        label: "Toggle work panel",
+        aliases: ["show panel", "hide panel", "review panel"],
+        shortcuts: ["mod+alt+b"],
+        group: "Workspace",
+        run: () => onCollapsedChange(!collapsed),
+      },
+      ...(terminalAvailable
+        ? [
+            {
+              id: "toggle-terminal",
+              label: "Toggle terminal",
+              aliases: ["open terminal", "hide terminal"],
+              shortcuts: ["ctrl+`"],
+              group: "Workspace",
+              run: toggleTerminal,
+            },
+          ]
+        : []),
+    ],
+    [collapsed, onCollapsedChange, terminalAvailable, toggleTerminal]
+  )
+  useRegisterAppCommands(panelCommands)
   const terminalGroupIds = terminals.state.terminalGroups
     .map((group) => group.id)
     .join(",")
@@ -122,30 +152,7 @@ export function AgentGitPanel({
   useEffect(() => {
     syncTerminals(terminalGroupIds ? terminalGroupIds.split(",") : [])
   }, [syncTerminals, terminalGroupIds])
-  const onPlanApproved = useCallback(
-    (runId: string) => {
-      queryClient.setQueryData<AgentThread>(
-        agentThreadKeys.detail(thread.id),
-        (current) =>
-          current
-            ? { ...current, planStatus: "approved", status: "running" }
-            : current
-      )
-      void queryClient.invalidateQueries({ queryKey: ["plan", thread.id] })
-      invalidateAgentThreadLists(queryClient)
-      panel.select("")
-      onTabChange("git")
-      void stream.client.runs.join(thread.id, runId).finally(() => {
-        void queryClient.invalidateQueries({
-          queryKey: agentThreadKeys.detail(thread.id),
-        })
-      })
-    },
-    [onTabChange, panel, queryClient, stream, thread.id]
-  )
-
-  // Collapsed state is owned by the parent (so the plan banner can reserve space
-  // for the floating expand button); persistence to localStorage lives there too.
+  // Collapsed state is owned and persisted by the parent.
   const setCollapsed = onCollapsedChange
 
   const pr = thread.pr
@@ -162,10 +169,7 @@ export function AgentGitPanel({
     setCollapsed(false)
   }
 
-  const prDiff = useAgentThreadPrDiff(thread.id, Boolean(pr))
-  // Without a PR the sandbox's git checkpoints are the only source of truth for
-  // what this thread changed.
-  const turnDiff = useAgentThreadTurnDiff(thread.id, null, !pr && !collapsed)
+  const turnDiff = useAgentThreadTurnDiff(thread.id, null, !collapsed)
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const canDownloadRecovery =
@@ -196,8 +200,8 @@ export function AgentGitPanel({
   }, [thread.id])
 
   const files = useMemo(
-    () => toPanelFiles(prDiff.data?.files ?? turnDiff.data?.files ?? []),
-    [prDiff.data, turnDiff.data]
+    () => toPanelFiles(turnDiff.data?.files ?? []),
+    [turnDiff.data]
   )
 
   const totals = useMemo(
@@ -211,9 +215,9 @@ export function AgentGitPanel({
       ),
     [files]
   )
-  const truncated = prDiff.data?.truncated ?? turnDiff.data?.truncated
-  const tabLabels = { diff: "Branch", review: "Review", commits: "Committed" }
-  const refreshDiff = () => void (pr ? prDiff.refetch() : turnDiff.refetch())
+  const truncated = turnDiff.data?.truncated
+  const tabLabels = { diff: "Thread", review: "Review", commits: "Committed" }
+  const refreshDiff = () => void turnDiff.refetch()
 
   const reviewHeader = (
     <div className="shrink-0 px-3 pb-2">
@@ -311,9 +315,6 @@ export function AgentGitPanel({
     <AgentPanelShell
       tabs={[
         { id: "git", kind: "review" as const, closable: false },
-        ...(hasPlan
-          ? [{ id: "plan", kind: "plan" as const, closable: false }]
-          : []),
         ...panel.tabs.map((panelTab) => ({
           ...panelTab,
           title: terminalTabTitle(terminals, panelTab.id),
@@ -336,9 +337,7 @@ export function AgentGitPanel({
     >
       {({ fullScreen }) => (
         <>
-          {topTab === "plan" ? (
-            <PlanView threadId={thread.id} onApprove={onPlanApproved} />
-          ) : topTab === "git" ? (
+          {topTab === "git" ? (
             <>
               {reviewHeader}
               {tab === "diff" ? (
@@ -348,7 +347,9 @@ export function AgentGitPanel({
                   fullScreen={fullScreen}
                   hideHeader
                   emptyLabel={
-                    prDiff.isLoading ? "Loading PR diff…" : "No diff available."
+                    turnDiff.isLoading
+                      ? "Loading thread diff…"
+                      : "No diff available."
                   }
                   truncated={truncated}
                 />

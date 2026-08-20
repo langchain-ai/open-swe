@@ -5,7 +5,6 @@ import base64
 import json
 import logging
 import os
-import uuid
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -15,9 +14,12 @@ from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from langsmith.sandbox import (
     AsyncSandboxClient,
     CommandTimeoutError,
+    ResourceNotFoundError,
     SandboxConnectionError,
     SandboxServerReloadError,
 )
+
+from agent.utils.sandbox import SandboxGoneError
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,9 @@ PROXY_CONFIG_MAX_ATTEMPTS = 3
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+PROXY_CONFIG_NOT_READY_STATUS = 400
+PROXY_CONFIG_ERROR_BODY_CHARS = 500
+SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 
 
@@ -86,33 +91,6 @@ def _get_sandbox_api_endpoint() -> str:
     root = _get_sandbox_endpoint().rstrip("/")
     suffix = "/v2/sandboxes"
     return root if root.endswith(suffix) else f"{root}{suffix}"
-
-
-def _current_thread_id() -> str | None:
-    """The LangGraph thread id for the active run, if any."""
-    try:
-        from langgraph.config import get_config
-
-        return get_config().get("configurable", {}).get("thread_id")
-    except Exception:
-        return None
-
-
-def _sandbox_name_for_thread(thread_id: str | None) -> str | None:
-    """Deterministic, thread-traceable sandbox name: ``openswe-<b32(thread uuid)>``.
-
-    The thread id (a UUID) is base32-encoded lowercase without padding so the
-    name is a compact, hyphen-free token that maps back to the thread. Returns
-    None when the thread id is missing or not a UUID, leaving the name unset.
-    """
-    if not thread_id:
-        return None
-    try:
-        raw = uuid.UUID(thread_id).bytes
-    except ValueError:
-        return None
-    encoded = base64.b32encode(raw).decode("ascii").rstrip("=").lower()
-    return f"openswe-{encoded}"
 
 
 def _parse_optional_int(name: str, default: int) -> int:
@@ -258,13 +236,12 @@ def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
     }
 
 
-def _is_sandbox_name_taken_error(exc: BaseException) -> bool:
-    return "already exists" in str(exc).lower()
-
-
 async def _reuse_existing_sandbox(client: AsyncSandboxClient, sandbox_id: str) -> Any:
     try:
         return await client.get_sandbox(name=sandbox_id)
+    except ResourceNotFoundError as e:
+        msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
+        raise SandboxGoneError(msg) from e
     except Exception as e:
         msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
         raise RuntimeError(msg) from e
@@ -274,7 +251,6 @@ async def _create_sandbox_with_retry(
     client: AsyncSandboxClient,
     *,
     snapshot_id: str,
-    name: str | None,
     fs_capacity_bytes: int | None,
     vcpus: int | None,
     mem_bytes: int | None,
@@ -286,7 +262,6 @@ async def _create_sandbox_with_retry(
         try:
             return await client.create_sandbox(
                 snapshot_id=snapshot_id,
-                name=name,
                 fs_capacity_bytes=fs_capacity_bytes,
                 vcpus=vcpus,
                 mem_bytes=mem_bytes,
@@ -311,6 +286,86 @@ async def _create_sandbox_with_retry(
     raise RuntimeError("unreachable sandbox retry state")
 
 
+def _with_response_body(exc: BaseException) -> httpx.HTTPStatusError | None:
+    """Re-raisable copy of ``exc`` carrying the response body, or ``None`` to re-raise as-is.
+
+    ``raise_for_status`` builds its message from the status line and an MDN link
+    only, so the API's own explanation of a rejection never reaches the logs.
+    """
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return None
+    body = exc.response.text.strip()[:PROXY_CONFIG_ERROR_BODY_CHARS]
+    if not body:
+        return None
+    return httpx.HTTPStatusError(
+        f"{exc}\nResponse body: {body}",
+        request=exc.request,
+        response=exc.response,
+    )
+
+
+async def _patch_proxy_config(
+    client: httpx.AsyncClient,
+    url: str,
+    payload: dict[str, Any],
+    api_key: str,
+    sandbox_name: str,
+) -> None:
+    for attempt in range(PROXY_CONFIG_MAX_ATTEMPTS):
+        try:
+            response = await client.patch(
+                url,
+                json=payload,
+                headers={"X-API-Key": api_key},
+            )
+            response.raise_for_status()
+            return
+        except Exception as exc:
+            if attempt == PROXY_CONFIG_MAX_ATTEMPTS - 1 or not _is_retryable_proxy_config_error(
+                exc
+            ):
+                enriched = _with_response_body(exc)
+                if enriched is not None:
+                    raise enriched from exc
+                raise
+            retry_after = (
+                _retry_after_seconds(exc.response)
+                if isinstance(exc, httpx.HTTPStatusError)
+                else None
+            )
+            delay = (
+                retry_after
+                or PROXY_CONFIG_RETRY_DELAYS_SECONDS[
+                    min(attempt, len(PROXY_CONFIG_RETRY_DELAYS_SECONDS) - 1)
+                ]
+            )
+            logger.warning(
+                "Failed to configure GitHub proxy for sandbox %s (%s); retrying in %.1fs",
+                sandbox_name,
+                type(exc).__name__,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
+
+async def _start_sandbox_best_effort(sandbox_name: str) -> None:
+    """Start ``sandbox_name`` so a proxy-config update can land on it.
+
+    The API rejects a proxy-config update on any sandbox that is not ``ready``,
+    and an idle sandbox is stopped rather than deleted — its filesystem, and the
+    agent's uncommitted work with it, comes back when the box starts again.
+    Failures are logged and swallowed: the retried update reports the real state.
+    """
+    client = get_async_sandbox_client()
+    try:
+        await client.start_sandbox(sandbox_name, timeout=SANDBOX_START_TIMEOUT_SECONDS)
+        logger.info("Started sandbox %s before retrying GitHub proxy config", sandbox_name)
+    except Exception:
+        logger.warning("Failed to start sandbox %s", sandbox_name, exc_info=True)
+    finally:
+        await client.aclose()
+
+
 async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
 
@@ -330,38 +385,18 @@ async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
     async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
-        for attempt in range(PROXY_CONFIG_MAX_ATTEMPTS):
-            try:
-                response = await client.patch(
-                    url,
-                    json=payload,
-                    headers={"X-API-Key": api_key},
-                )
-                response.raise_for_status()
-                break
-            except Exception as exc:
-                if attempt == PROXY_CONFIG_MAX_ATTEMPTS - 1 or not _is_retryable_proxy_config_error(
-                    exc
-                ):
-                    raise
-                retry_after = (
-                    _retry_after_seconds(exc.response)
-                    if isinstance(exc, httpx.HTTPStatusError)
-                    else None
-                )
-                delay = (
-                    retry_after
-                    or PROXY_CONFIG_RETRY_DELAYS_SECONDS[
-                        min(attempt, len(PROXY_CONFIG_RETRY_DELAYS_SECONDS) - 1)
-                    ]
-                )
-                logger.warning(
-                    "Failed to configure GitHub proxy for sandbox %s (%s); retrying in %.1fs",
-                    sandbox_name,
-                    type(exc).__name__,
-                    delay,
-                )
-                await asyncio.sleep(delay)
+        try:
+            await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != PROXY_CONFIG_NOT_READY_STATUS:
+                raise
+            logger.warning(
+                "Proxy config rejected for sandbox %s; starting it and retrying: %s",
+                sandbox_name,
+                exc,
+            )
+            await _start_sandbox_best_effort(sandbox_name)
+            await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
     logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
 
 
@@ -420,36 +455,17 @@ async def create_langsmith_sandbox(
     backend = await provider.get_or_create(
         sandbox_id=sandbox_id,
         snapshot_id=effective_snapshot_id,
-        name=_sandbox_name_for_thread(_current_thread_id()),
         fs_capacity_bytes=fs_capacity_bytes,
         vcpus=vcpus,
         mem_bytes=mem_bytes,
         idle_ttl_seconds=idle_ttl_seconds,
         delete_after_stop_seconds=delete_after_stop_seconds,
     )
-    await _update_thread_sandbox_metadata(backend.id)
 
     if sandbox_id is None and github_token:
         await _configure_github_proxy(backend.id, github_token)
 
     return backend
-
-
-async def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
-    """Update thread metadata with sandbox_id."""
-    try:
-        from langgraph_sdk import get_client
-
-        thread_id = _current_thread_id()
-        if not thread_id:
-            return
-        client = get_client()
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={"sandbox_id": sandbox_id},
-        )
-    except Exception:
-        pass
 
 
 class TimeoutLangSmithSandbox(LangSmithSandbox):
@@ -543,10 +559,9 @@ class SandboxProvider(ABC):
     """Interface for creating sandbox backends.
 
     Intentionally has no delete. A sandbox holds the agent's only copy of its
-    working tree, and callers cannot reliably tell a free name from one held by
-    a live box — thread metadata reads and writes both fail open to "no sandbox".
-    Reclamation is the platform's job, via the idle TTL and delete-after-stop
-    set at create time.
+    working tree, and the thread metadata read fails open to "no sandbox", so a
+    delete keyed off it can destroy a live box. Reclamation is the platform's
+    job, via the idle TTL and delete-after-stop set at create time.
     """
 
     @abstractmethod
@@ -613,7 +628,6 @@ class LangSmithProvider(SandboxProvider):
         sandbox_id: str | None = None,
         timeout: int = 180,
         snapshot_id: str | None = None,
-        name: str | None = None,
         fs_capacity_bytes: int | None = None,
         vcpus: int | None = None,
         mem_bytes: int | None = None,
@@ -651,7 +665,6 @@ class LangSmithProvider(SandboxProvider):
                 sandbox = await _create_sandbox_with_retry(
                     client,
                     snapshot_id=snapshot_id,
-                    name=name,
                     fs_capacity_bytes=fs_capacity_bytes,
                     vcpus=vcpus,
                     mem_bytes=mem_bytes,
@@ -660,13 +673,7 @@ class LangSmithProvider(SandboxProvider):
                     timeout=timeout,
                 )
             except Exception as e:
-                if not (name and _is_sandbox_name_taken_error(e)):
-                    msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
-                    raise RuntimeError(msg) from e
-                # Sandbox names are deterministic per thread, so the holder is this
-                # thread's own sandbox from a run that died before persisting its id.
-                # Creating is impossible and failing strands the thread forever.
-                logger.warning("Sandbox %s already exists; adopting it instead of creating", name)
-                sandbox = await _reuse_existing_sandbox(client, name)
+                msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
+                raise RuntimeError(msg) from e
 
             return TimeoutLangSmithSandbox(sandbox.to_sync())

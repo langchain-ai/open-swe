@@ -18,6 +18,7 @@ import {
   GitPullRequestIcon,
   KanbanIcon,
   LightningIcon,
+  MagnifyingGlassIcon,
   PlusIcon,
   SparkleIcon,
   TrashIcon,
@@ -25,14 +26,15 @@ import {
 } from "@phosphor-icons/react"
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
-import { useCallback, useState } from "react"
-import type { ComponentType, ReactNode, SVGProps } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import type { ComponentType, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import type { DesktopLocalThreadSummary, DesktopProject } from "@/desktop"
 import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import { DesktopThreadSourceToggle } from "@/features/agents/components/DesktopThreadSourceToggle"
 import { SidebarFilterMenu } from "@/features/agents/components/SidebarFilterMenu"
 import { Button } from "@/components/ui/button"
 import {
@@ -53,6 +55,7 @@ import {
   useResolveAgentThread,
   useSeedAgentThreadDetails,
   useSidebarThreads,
+  SIDEBAR_RESOLVED_LIMIT as RESOLVED_SIDEBAR_LIMIT,
 } from "@/features/agents/lib/queries"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
@@ -60,9 +63,26 @@ import {
   useRefreshLocalThreads,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
+import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { Kbd } from "@/components/ui/kbd"
+import {
+  useAppCommand,
+  useAppCommandControls,
+  useRegisterAppCommands,
+} from "@/lib/appCommands"
+import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
 
-const RESOLVED_SIDEBAR_LIMIT = 20
+function SidebarShortcut({ commandId }: { commandId: string }) {
+  const shortcut = useAppCommand(commandId)?.shortcuts?.[0] ?? ""
+  const label = useShortcutLabel(shortcut)
+  if (!shortcut) return null
+  return (
+    <Kbd className="ml-auto h-4 min-w-4 bg-transparent px-0 text-[10px]">
+      {label}
+    </Kbd>
+  )
+}
 
 type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -124,20 +144,15 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
+  const { openPalette } = useAppCommandControls()
   const openThread = useCallback(
     (threadId: string) => {
       void navigate({ to: "/agents/$threadId", params: { threadId } })
     },
     [navigate]
   )
-  const {
-    prefs,
-    setGroup,
-    setCompact,
-    toggleSection,
-    setFilters,
-    resetFilters,
-  } = useSidebarPrefs()
+  const { prefs, setGroup, setCompact, setFilters, resetFilters } =
+    useSidebarPrefs()
   const sidebar = useSidebarThreads(
     RESOLVED_SIDEBAR_LIMIT,
     activeThreadId,
@@ -160,6 +175,12 @@ export function AgentsSidebar({
   const localGroups = groupLocalProjects(localProjects, localSessions)
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
+  useEffect(() => {
+    if (!isDesktop) return
+    if (activeLocalSessionId) setDesktopThreadSource("local")
+    else if (activeThreadId) setDesktopThreadSource("cloud")
+  }, [activeLocalSessionId, activeThreadId, isDesktop, setDesktopThreadSource])
   const activeThreads = sidebar.data?.active.items ?? []
   const resolvedThreads = sidebar.data?.resolved.items ?? []
   const resolvedHasMore = sidebar.data?.resolved.hasMore ?? false
@@ -176,8 +197,7 @@ export function AgentsSidebar({
       ? [...filteredActive, ...filteredResolved]
       : filteredActive
   const sections = groupThreadsByMode(groupedThreads, prefs.group)
-  const isEmpty =
-    localGroups.length === 0 &&
+  const isCloudEmpty =
     sections.length === 0 &&
     (!showResolved || filteredResolved.length === 0) &&
     hasActiveFilters(prefs.filters)
@@ -185,7 +205,10 @@ export function AgentsSidebar({
     (total, group) => total + group.sessions.length,
     0
   )
-  const cloudCollapsed = isDesktop && prefs.collapsed.cloud
+  const cloudThreadCount =
+    filteredActive.length + (showResolved ? filteredResolved.length : 0)
+  const showLocalThreads = isDesktop && desktopThreadSource === "local"
+  const showCloudThreads = !isDesktop || desktopThreadSource === "cloud"
 
   return (
     <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
@@ -205,7 +228,7 @@ export function AgentsSidebar({
         <SidebarCollapseButton onToggle={layout.toggle} />
       </div>
 
-      <div className="px-2 pb-1">
+      <div className="flex flex-col gap-0.5 px-2 pb-1">
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
@@ -213,7 +236,20 @@ export function AgentsSidebar({
         >
           <PlusIcon className="size-4" />
           New Thread
+          <SidebarShortcut commandId="new-thread" />
         </Link>
+        <button
+          type="button"
+          onClick={() => {
+            layout.closeOnMobile()
+            openPalette()
+          }}
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+        >
+          <MagnifyingGlassIcon className="size-4" />
+          Search
+          <SidebarShortcut commandId="search-commands" />
+        </button>
       </div>
 
       <nav className="flex flex-col gap-0.5 px-2 pb-4">
@@ -238,67 +274,51 @@ export function AgentsSidebar({
 
       <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
         {isDesktop && (
-          <div
-            className={cn(
-              "mb-3 flex min-h-0 flex-col",
-              prefs.collapsed.local
-                ? "shrink-0"
-                : cloudCollapsed
-                  ? "flex-1"
-                  : "max-h-1/2 shrink-0"
-            )}
-          >
-            <SectionHeader
-              label="Local"
-              count={localSessionCount}
-              collapsed={prefs.collapsed.local}
-              onToggle={() => toggleSection("local")}
-            >
+          <DesktopThreadSourceToggle
+            source={desktopThreadSource}
+            localCount={localSessionCount}
+            cloudCount={cloudThreadCount}
+            onSourceChange={setDesktopThreadSource}
+          />
+        )}
+        {showLocalThreads && (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="mb-1 flex items-center px-2 py-1">
+              <span className="min-w-0 flex-1 truncate font-heading text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                Projects and threads
+              </span>
               <button
                 aria-label="Add project"
-                className="mr-1 flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+                className="flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
                 onClick={() => void addLocalProject()}
                 title="Add project"
                 type="button"
               >
                 <FolderPlusIcon className="size-3.5" />
               </button>
-            </SectionHeader>
-            {!prefs.collapsed.local && (
-              <div className="min-h-0 overflow-y-auto">
-                {localGroups.map((group) => (
-                  <LocalThreadGroup
-                    key={group.project.cwd}
-                    project={group.project}
-                    sessions={group.sessions}
-                    activeSessionId={activeLocalSessionId}
-                    onNavigate={layout.closeOnMobile}
-                    onDelete={deleteLocalSession}
-                    onRemove={() => void removeLocalProject(group.project.cwd)}
-                    compact={prefs.compact}
-                  />
-                ))}
-                {localGroups.length === 0 && (
-                  <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
-                    No projects yet
-                  </p>
-                )}
-              </div>
-            )}
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {localGroups.map((group) => (
+                <LocalThreadGroup
+                  key={group.project.cwd}
+                  project={group.project}
+                  sessions={group.sessions}
+                  activeSessionId={activeLocalSessionId}
+                  onNavigate={layout.closeOnMobile}
+                  onDelete={deleteLocalSession}
+                  onRemove={() => void removeLocalProject(group.project.cwd)}
+                  compact={prefs.compact}
+                />
+              ))}
+              {localGroups.length === 0 && (
+                <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
+                  No projects yet
+                </p>
+              )}
+            </div>
           </div>
         )}
-        {isDesktop && (
-          <SectionHeader
-            label="Cloud"
-            count={
-              filteredActive.length +
-              (showResolved ? filteredResolved.length : 0)
-            }
-            collapsed={prefs.collapsed.cloud}
-            onToggle={() => toggleSection("cloud")}
-          />
-        )}
-        {!cloudCollapsed && (
+        {showCloudThreads && (
           <div className="min-h-0 flex-1 overflow-y-auto">
             {prefs.group === "none"
               ? sections[0]?.threads.map((thread) => (
@@ -340,7 +360,7 @@ export function AgentsSidebar({
                 compact={prefs.compact}
               />
             )}
-            {isEmpty && (
+            {isCloudEmpty && (
               <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
                 No threads match these filters.
               </p>
@@ -353,47 +373,18 @@ export function AgentsSidebar({
         <div className="min-w-0 flex-1">
           <SidebarUserMenu user={user} showSettingsLink />
         </div>
-        <SidebarFilterMenu
-          prefs={prefs}
-          facets={facets}
-          onGroupChange={setGroup}
-          onFiltersChange={setFilters}
-          onCompactChange={setCompact}
-          onResetFilters={resetFilters}
-        />
+        {showCloudThreads && (
+          <SidebarFilterMenu
+            prefs={prefs}
+            facets={facets}
+            onGroupChange={setGroup}
+            onFiltersChange={setFilters}
+            onCompactChange={setCompact}
+            onResetFilters={resetFilters}
+          />
+        )}
       </div>
     </SidebarFrame>
-  )
-}
-
-function SectionHeader({
-  label,
-  count,
-  collapsed,
-  onToggle,
-  children,
-}: {
-  label: string
-  count: number
-  collapsed: boolean
-  onToggle: () => void
-  children?: ReactNode
-}) {
-  return (
-    <div className="flex items-center">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left font-heading text-xs font-semibold tracking-wide text-foreground uppercase transition-colors hover:text-foreground/80"
-        aria-expanded={!collapsed}
-      >
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-        <span className="text-[10px] font-medium text-muted-foreground/70">
-          {count}
-        </span>
-      </button>
-      {children}
-    </div>
   )
 }
 
@@ -1019,6 +1010,23 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
+  const sidebarCommands = useMemo(
+    () => [
+      {
+        id: "toggle-sidebar",
+        label: "Toggle sidebar",
+        aliases: ["show sidebar", "hide sidebar"],
+        shortcuts: ["mod+b"],
+        group: "Workspace",
+        run: layout.toggle,
+        desktopId: "toggle-sidebar" as const,
+        desktopShortcuts: ["mod+b"],
+      },
+    ],
+    [layout.toggle]
+  )
+  useRegisterAppCommands(sidebarCommands)
+
   return (
     <SidebarLayoutProvider value={layout}>
       <div className="agents-ui flex h-svh overflow-hidden bg-background">

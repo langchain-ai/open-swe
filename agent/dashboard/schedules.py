@@ -11,6 +11,7 @@ from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
 from ..dispatch import create_durable_run
+from ..input_messages import InputMessageContext, build_run_input
 from ..utils.slack import (
     bind_slack_thread_id,
     post_slack_top_level_message_with_ts,
@@ -640,10 +641,32 @@ async def _launch_agent_schedule_record(
     metadata = _agent_run_metadata(record, thread_id, slack_thread, test_run=test_run)
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
+    input_context: InputMessageContext = {
+        "sender_id": f"system:schedule:{schedule_id}",
+        "surface": "automation",
+        "kind": "system",
+    }
+    if isinstance(slack_channel_id, str) and slack_channel_id:
+        input_context["channel_id"] = f"slack:{slack_channel_id}"
     run = await create_durable_run(
         thread_id,
         _AGENT_ASSISTANT_ID,
-        input={"messages": [{"role": "user", "content": _scheduled_prompt(record, slack_thread)}]},
+        input=build_run_input(
+            _scheduled_prompt(record, slack_thread),
+            input_context,
+            systems=[
+                {
+                    "id": f"system:schedule:{schedule_id}",
+                    "display_name": record.get("name") or "Scheduled automation",
+                    "platform": "open-swe",
+                }
+            ],
+            channels=(
+                [{"id": f"slack:{slack_channel_id}", "platform": "slack"}]
+                if isinstance(slack_channel_id, str) and slack_channel_id
+                else None
+            ),
+        ),
         source="schedule",
         config=await _agent_run_config(record, thread_id, slack_thread, test_run=test_run),
         client=client,
