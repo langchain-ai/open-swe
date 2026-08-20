@@ -10,8 +10,6 @@ withmartian/code-review-benchmark `step3_judge_comments.py` so scores are
 directly comparable to martian's published numbers.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import threading
@@ -22,7 +20,7 @@ from uuid import UUID
 from langchain_anthropic import ChatAnthropic
 from langsmith.schemas import Example, Run
 
-from agent.reviewer_findings import REVIEW_FINDING_CAP
+from agent.review.findings import REVIEW_FINDING_CAP
 
 JUDGE_MODEL = "claude-opus-4-5"
 

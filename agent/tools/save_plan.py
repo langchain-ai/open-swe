@@ -1,11 +1,4 @@
-"""Tool: ``save_plan``. Publish sandbox Markdown for review or sharing.
-
-Reads the Markdown file the agent created in the sandbox and publishes it to the
-plan-review page. In plan mode it is an approvable implementation plan; outside
-plan mode it is read-only shared content.
-"""
-
-from __future__ import annotations
+"""Tool: ``save_plan``. Publish a sandbox HTML artifact for review or sharing."""
 
 import logging
 from collections.abc import Mapping
@@ -25,28 +18,31 @@ from ..utils.sandbox_state import get_sandbox_backend
 logger = logging.getLogger(__name__)
 
 _MAX_PLAN_LINES = 20_000
-_MARKDOWN_EXTENSIONS = (".md", ".markdown")
 
 
 async def save_plan(
     plan_file_path: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Publish a Markdown plan file from the sandbox for review.
+    """Publish a self-contained HTML plan artifact from the sandbox.
 
-    Use this in plan mode once your plan is ready. Outside plan mode, use it to
-    share long Slack responses without switching the thread into plan mode. First
-    create a Markdown file under ``/workspace/plans/`` using a dated, descriptive
-    filename, then pass that file path here. The file contents are published to
-    the plan-review page linked in the conversation. In plan mode, the user can
-    comment, approve, or request changes; outside plan mode, the page is read-only
-    shared content.
+    Use this in plan mode once the artifact is ready. Outside plan mode, use it
+    to share a long response without switching the thread into plan mode. Create
+    one complete ``.html`` document directly under ``/workspace/plans/`` and pass
+    that path here. The document is displayed only in a sandboxed iframe.
 
-    Write the content in standard Markdown — headings, bullet/numbered lists, and
-    fenced code blocks all render.
+    The HTML must include a descriptive ``<title>``, real content, inline CSS,
+    explicit body background and text colors, accessible focus states, and a
+    responsive layout. Inline or data-URI every asset. Google Fonts stylesheets
+    are the only permitted external resources; include fallback font stacks.
+    Define complete light tokens in ``:root``, system-dark overrides in
+    ``@media (prefers-color-scheme: dark)`` guarded by
+    ``:root:not([data-theme=\"light\"])``, and explicit dark overrides in
+    ``:root[data-theme=\"dark\"]``. Do not include scripts, forms, embeds, or
+    dependencies on host-page CSS or JavaScript.
 
     Args:
-        plan_file_path: Path to the Markdown plan file in the sandbox.
+        plan_file_path: Path to the HTML artifact in the sandbox.
 
     Returns:
         ``{success: True, path}`` on success, or ``{success: False, error}``.
@@ -56,10 +52,10 @@ async def save_plan(
     path = plan_file_path.strip()
     if not path:
         return {"success": False, "error": "plan_file_path cannot be empty"}
-    if not _is_markdown_path(path):
+    if not _is_html_path(path):
         return {
             "success": False,
-            "error": f"plan_file_path must point to a Markdown file in {PLAN_FILE_DIRECTORY}",
+            "error": f"plan_file_path must point to an HTML file in {PLAN_FILE_DIRECTORY}",
         }
 
     try:
@@ -75,6 +71,9 @@ async def save_plan(
         content = (await _read_plan_file(str(thread_id), path)).strip()
         if not content:
             return {"success": False, "error": "plan file cannot be empty"}
+        validation_error = _validate_html(content)
+        if validation_error:
+            return {"success": False, "error": validation_error}
         await _save(str(thread_id), content, path, plan_mode=_active_plan_mode(state, configurable))
     except Exception as exc:  # noqa: BLE001
         logger.exception("save_plan failed for thread %s", thread_id)
@@ -85,7 +84,7 @@ async def save_plan(
 async def _save(thread_id: str, content: str, path: str, *, plan_mode: bool) -> None:
     await save_plan_content(
         thread_id,
-        markdown=content,
+        html=content,
         status=PLAN_STATUS_READY if plan_mode else PLAN_STATUS_SHARED,
         plan_file_path=path,
         plan_mode=plan_mode or None,
@@ -124,10 +123,23 @@ def _value(value: Any, key: str) -> Any:
     return getattr(value, key, None)
 
 
-def _is_markdown_path(path: str) -> bool:
+def _is_html_path(path: str) -> bool:
     if "\x00" in path or not path.startswith(f"{PLAN_FILE_DIRECTORY}/"):
         return False
     filename = path.removeprefix(f"{PLAN_FILE_DIRECTORY}/")
-    if not filename or "/" in filename:
-        return False
-    return filename.lower().endswith(_MARKDOWN_EXTENSIONS)
+    return bool(filename and "/" not in filename and filename.lower().endswith(".html"))
+
+
+def _validate_html(content: str) -> str | None:
+    lowered = content.lower()
+    if "<html" not in lowered or "<head" not in lowered or "<body" not in lowered:
+        return "plan file must be a complete HTML document with html, head, and body elements"
+    if "<title" not in lowered:
+        return "plan file must include a descriptive title"
+    if "<script" in lowered:
+        return "plan HTML cannot include scripts"
+    if "<iframe" in lowered or "<object" in lowered or "<embed" in lowered:
+        return "plan HTML cannot include nested embeds"
+    if "<form" in lowered:
+        return "plan HTML cannot include forms"
+    return None

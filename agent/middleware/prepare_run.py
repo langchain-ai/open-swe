@@ -1,9 +1,7 @@
-from __future__ import annotations
-
 import hashlib
 import json
-from collections.abc import Awaitable, Callable
-from typing import Any, NotRequired
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any, NotRequired, cast
 
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -14,6 +12,8 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
+from ..input_messages import wrap_system_prompt
+
 
 class PrepareRunState(AgentState):
     run_prepared: NotRequired[bool]
@@ -22,7 +22,7 @@ class PrepareRunState(AgentState):
     rendered_system_prompt: NotRequired[str | None]
 
 
-def _latest_message_fingerprint(state: dict[str, Any]) -> str | None:
+def _latest_message_fingerprint(state: Mapping[str, Any]) -> str | None:
     messages = state.get("messages")
     if not isinstance(messages, list) or not messages:
         return None
@@ -53,13 +53,17 @@ class BasePrepareRunMiddleware(AgentMiddleware):
 
     async def abefore_agent(
         self,
-        state: PrepareRunState,
+        state: AgentState,
         runtime: Runtime,
     ) -> dict[str, Any] | None:
-        fingerprint = self._prepare_fingerprint(state, runtime)
-        if state.get("run_prepared") and state.get("run_prepared_for") == fingerprint:
+        prepared_state = cast(PrepareRunState, state)
+        fingerprint = self._prepare_fingerprint(prepared_state, runtime)
+        if (
+            prepared_state.get("run_prepared")
+            and prepared_state.get("run_prepared_for") == fingerprint
+        ):
             return None
-        updates = await self._prepare(state, runtime)
+        updates = await self._prepare(prepared_state, runtime)
         return {"run_prepared": True, "run_prepared_for": fingerprint, **updates}
 
     def _prepare_fingerprint(self, state: PrepareRunState, runtime: Runtime) -> str:  # noqa: ARG002
@@ -86,5 +90,13 @@ class BasePrepareRunMiddleware(AgentMiddleware):
         if isinstance(rendered, str) and rendered:
             existing = request.system_message.text if request.system_message is not None else ""
             content = f"{rendered}\n\n{existing}" if existing else rendered
-            request = request.override(system_message=SystemMessage(content=content))
+            request = request.override(
+                system_message=SystemMessage(content=wrap_system_prompt(content))
+            )
+        elif request.system_message is not None:
+            request = request.override(
+                system_message=SystemMessage(
+                    content=wrap_system_prompt(request.system_message.text)
+                )
+            )
         return await handler(request)

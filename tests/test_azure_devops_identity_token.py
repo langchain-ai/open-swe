@@ -1,8 +1,7 @@
 """Tests for Entra ID token acquisition (mocked; no live Azure calls)."""
 
-from __future__ import annotations
-
 import asyncio
+from collections.abc import Iterator
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -16,7 +15,7 @@ from agent.utils.azure_devops_identity_token import (
 
 
 @pytest.fixture(autouse=True)
-def _reset_entra_credential() -> None:
+def _reset_entra_credential() -> Iterator[None]:
     reset_entra_credential_for_tests()
     yield
     reset_entra_credential_for_tests()

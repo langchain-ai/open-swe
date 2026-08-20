@@ -1,9 +1,8 @@
 """GitHub OAuth and LangSmith authentication utilities."""
 
-from __future__ import annotations
-
 import logging
 import os
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -14,10 +13,15 @@ from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
 from .github_app import get_github_app_installation_token_with_expiry
-from .github_token import cache_github_token_for_thread, get_github_token_from_thread
+from .github_token import (
+    cache_github_token_for_thread,
+    get_github_token_from_thread,
+    github_token_principal,
+)
 from .http import DEFAULT_HTTP_TIMEOUT
 from .linear import comment_on_linear_issue
-from .slack import post_slack_thread_reply
+from .slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
+from .user_messages import WARNING_ICON, warning
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +72,7 @@ def is_bot_token_only_mode() -> bool:
 
 def _retry_instruction(source: str) -> str:
     if source == "slack":
-        return "Once authenticated, mention me again in this Slack thread to retry."
+        return "Once authenticated, mention Open SWE again in this Slack thread to retry."
     return "Once authenticated, reply to this issue mentioning @openswe to retry."
 
 
@@ -252,8 +256,14 @@ async def leave_failure_comment(
         return
     if source == "slack":
         slack_thread = configurable.get("slack_thread", {})
-        channel_id = slack_thread.get("channel_id") if isinstance(slack_thread, dict) else None
-        thread_ts = slack_thread.get("thread_ts") if isinstance(slack_thread, dict) else None
+        thread_id = configurable.get("thread_id")
+        active = await get_active_slack_thread(
+            get_client(url=LANGGRAPH_URL),
+            thread_id if isinstance(thread_id, str) else None,
+            slack_thread if isinstance(slack_thread, dict) else None,
+        )
+        channel_id = active.get("channel_id") if active else None
+        thread_ts = active.get("thread_ts") if active else None
         if channel_id and thread_ts:
             # The auth-failure ``message`` can carry a per-user GitHub auth URL,
             # which must not be posted in a shared thread (anyone could complete
@@ -275,8 +285,11 @@ async def leave_failure_comment(
             await post_slack_thread_reply(
                 channel_id,
                 thread_ts,
-                "⚠️ I couldn't resolve your GitHub account for this run. Sign in with GitHub and "
-                f"connect your Slack account in {link}, then tag me again.",
+                warning(
+                    "Open SWE couldn't resolve your GitHub account for this run. Sign in "
+                    f"with GitHub and connect your Slack account in {link}, then mention it again."
+                ),
+                agent_thread_id=thread_id if isinstance(thread_id, str) else None,
             )
         return
     if source in ("github", "github_push"):
@@ -288,9 +301,20 @@ async def leave_failure_comment(
 
 
 def _cache_resolved_github_token(
-    thread_id: str, token: str, expires_at: str | None = None
+    thread_id: str,
+    token: str,
+    expires_at: str | None = None,
+    *,
+    principal: str | None = None,
+    is_bot_token: bool = False,
 ) -> tuple[str, str | None]:
-    cache_github_token_for_thread(thread_id, token, expires_at=expires_at)
+    cache_github_token_for_thread(
+        thread_id,
+        token,
+        expires_at=expires_at,
+        principal=principal,
+        is_bot_token=is_bot_token,
+    )
     return token, expires_at
 
 
@@ -306,8 +330,8 @@ async def resolve_token_from_email(
         raise ValueError("GitHub auth failed: missing thread_id")
     if not email:
         message = (
-            "❌ **GitHub Auth Error**\n\n"
-            "Failed to authenticate with GitHub: missing_user_email\n\n"
+            f"{WARNING_ICON} **GitHub Auth Error**\n\n"
+            "Open SWE failed to authenticate with GitHub: missing_user_email\n\n"
             "Please try again or contact support."
         )
         await leave_failure_comment(source, message)
@@ -349,8 +373,8 @@ async def resolve_token_from_email(
     if not token:
         error = auth_result.get("error", "unknown")
         message = (
-            "❌ **GitHub Auth Error**\n\n"
-            f"Failed to authenticate with GitHub: {error}\n\n"
+            f"{WARNING_ICON} **GitHub Auth Error**\n\n"
+            f"Open SWE failed to authenticate with GitHub: {error}\n\n"
             "Please try again or contact support."
         )
         await leave_failure_comment(source, message)
@@ -358,7 +382,13 @@ async def resolve_token_from_email(
 
     expires_at = auth_result.get("expires_at") if isinstance(auth_result, dict) else None
     return _cache_resolved_github_token(
-        thread_id, token, expires_at=expires_at if isinstance(expires_at, str) else None
+        thread_id,
+        token,
+        expires_at=expires_at if isinstance(expires_at, str) else None,
+        principal=github_token_principal(
+            login=configurable.get("github_login"),
+            email=email,
+        ),
     )
 
 
@@ -379,7 +409,10 @@ async def _resolve_dashboard_user_token(
     record = await get_oauth_record(OAUTH_TOKENS_NAMESPACE, login)
     expires_at = record.get("token_expires_at") if isinstance(record, dict) else None
     return _cache_resolved_github_token(
-        thread_id, token, expires_at=expires_at if isinstance(expires_at, str) else None
+        thread_id,
+        token,
+        expires_at=expires_at if isinstance(expires_at, str) else None,
+        principal=github_token_principal(login=login),
     )
 
 
@@ -395,10 +428,14 @@ async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str | No
     logger.info(
         "Using GitHub App installation token for thread %s (bot-token-only mode)", thread_id
     )
-    return _cache_resolved_github_token(thread_id, bot_token, expires_at=expires_at)
+    return _cache_resolved_github_token(
+        thread_id, bot_token, expires_at=expires_at, is_bot_token=True
+    )
 
 
-async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[str, str | None]:
+async def resolve_github_token(
+    config: Mapping[str, Any] | RunnableConfig, thread_id: str
+) -> tuple[str, str | None]:
     """Resolve a GitHub token from the run config based on the source.
 
     Routes to the correct auth method depending on the source. Sources that
@@ -413,7 +450,9 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
     Raises:
         RuntimeError: If source is missing or token resolution fails.
     """
-    configurable = config["configurable"]
+    configurable = config.get("configurable")
+    if not isinstance(configurable, Mapping):
+        raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing configurable state")
     source = configurable.get("source")
     if not source:
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
@@ -447,7 +486,9 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
 
     try:
         if source == "github":
-            cached_token, cached_expires_at = await get_github_token_from_thread(thread_id)
+            cached_token, cached_expires_at = await get_github_token_from_thread(
+                thread_id, principal=github_token_principal(login=github_login)
+            )
             if cached_token:
                 return cached_token, cached_expires_at
             from ..dashboard.user_mappings import email_for_login

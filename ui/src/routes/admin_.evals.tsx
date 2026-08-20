@@ -10,7 +10,9 @@ import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
-export const Route = createFileRoute("/admin_/evals")({ component: ReviewerEvalPage })
+export const Route = createFileRoute("/admin_/evals")({
+  component: ReviewerEvalPage,
+})
 
 function ReviewerEvalPage() {
   const session = useSession()
@@ -79,9 +81,15 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
     <div className="grid gap-2 p-4 text-xs text-muted-foreground sm:grid-cols-2">
       <StatusLine label="Status" value={data.status} strong />
       <StatusLine label="Progress" value={progressLabel(data)} />
-      <StatusLine label="Run name" value={data.run_name ?? config?.experiment_prefix} />
+      <StatusLine
+        label="Run name"
+        value={data.run_name ?? config?.experiment_prefix}
+      />
       <StatusLine label="Dataset" value={config?.dataset_name} />
-      <StatusLine label="Limit" value={data.limit ? String(data.limit) : "full dataset"} />
+      <StatusLine
+        label="Limit"
+        value={data.limit ? String(data.limit) : "full dataset"}
+      />
       <StatusLine label="Model" value={config?.model_id} />
       <StatusLine label="Effort" value={config?.reasoning_effort} />
       <StatusLine label="Score mode" value={config?.score_mode} />
@@ -202,7 +210,7 @@ function ReviewerEvalLogs() {
                 el.scrollHeight - el.scrollTop - el.clientHeight < 24
               setFollow(atBottom)
             }}
-            className="max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 font-mono text-xs text-foreground"
+            className="max-h-[28rem] overflow-auto rounded-md bg-muted/50 p-3 font-mono text-xs break-words whitespace-pre-wrap text-foreground"
           >
             {logTail}
           </pre>

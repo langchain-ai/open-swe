@@ -1,15 +1,15 @@
 """Slack API utilities."""
 
-from __future__ import annotations
-
 import asyncio
+import copy
 import hashlib
 import hmac
 import logging
 import os
-import random
 import re
 import time
+import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -19,8 +19,10 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.run_usage import RunUsageSummary
 
 from .http import DEFAULT_HTTP_TIMEOUT
+from .user_messages import WARNING_ICON
 
 logger = logging.getLogger(__name__)
 
@@ -28,25 +30,21 @@ SLACK_API_BASE_URL = "https://slack.com/api"
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
-DEFAULT_ASSISTANT_STATUS = "is thinking…"
 
 SlackChannelContext = dict[str, str]
 _SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
-# Curated rotating loading strings shown by Slack while the indicator is active.
-# Capped at 10 by Slack's API.
-DEFAULT_LOADING_MESSAGES: tuple[str, ...] = (
-    "Pondering…",
-    "Cogitating…",
-    "Ruminating…",
-    "Noodling…",
-    "Percolating…",
-    "Marinating…",
-    "Simmering…",
-    "Conjuring…",
-    "Tinkering…",
-    "Schlepping…",
+SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
+SLACK_SECTION_TEXT_MAX_CHARS = 3000
+LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
+    "LANGGRAPH_URL_PROD", "http://localhost:2024"
 )
+_SLACK_CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+_SLACK_MESSAGE_TS_RE = re.compile(r"^[0-9]{1,20}(?:\.[0-9]{1,12})?$")
+SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10
+SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH = 4
+SLACK_FORWARDED_ATTACHMENT_MAX_NODES = 50
+SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
 
 
 @dataclass(frozen=True)
@@ -183,6 +181,8 @@ def select_slack_context_messages(
     current_message_ts: str,
     bot_user_id: str,
     bot_username: str = "",
+    *,
+    treat_all_messages_as_mentions: bool = False,
 ) -> tuple[list[dict[str, Any]], str]:
     """Select context from thread start or previous bot mention."""
     if not messages:
@@ -199,18 +199,88 @@ def select_slack_context_messages(
         mention_tokens.append(f"<@{bot_user_id}>")
     if bot_username:
         mention_tokens.append(f"@{bot_username}")
-    if not mention_tokens:
+    if not mention_tokens and not treat_all_messages_as_mentions:
         return up_to_current, "thread_start"
 
     last_mention_index = -1
     for index, message in enumerate(up_to_current[:-1]):
         text = message.get("text", "")
-        if isinstance(text, str) and any(token in text for token in mention_tokens):
+        is_explicit_mention = isinstance(text, str) and any(
+            token in text for token in mention_tokens
+        )
+        user_id = message.get("user")
+        is_user_message = (
+            isinstance(user_id, str)
+            and bool(user_id)
+            and user_id != bot_user_id
+            and not message.get("bot_id")
+            and not message.get("bot_profile")
+        )
+        if is_explicit_mention or (treat_all_messages_as_mentions and is_user_message):
             last_mention_index = index
 
     if last_mention_index >= 0:
         return up_to_current[last_mention_index:], "last_mention"
     return up_to_current, "thread_start"
+
+
+def _format_forwarded_slack_attachments(attachments: Any) -> str:
+    forwarded: list[str] = []
+    rendered_count = 0
+    visited_count = 0
+
+    def visit(values: Any, depth: int) -> None:
+        nonlocal rendered_count, visited_count
+        if depth > SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH or not isinstance(values, list):
+            return
+
+        for attachment in values:
+            if (
+                rendered_count >= SLACK_FORWARDED_ATTACHMENT_MAX_COUNT
+                or visited_count >= SLACK_FORWARDED_ATTACHMENT_MAX_NODES
+            ):
+                return
+            visited_count += 1
+            if not isinstance(attachment, dict):
+                continue
+
+            is_forwarded = any(
+                attachment.get(flag) is True
+                for flag in ("is_share", "is_msg_unfurl", "is_reply_unfurl")
+            )
+            if is_forwarded:
+                author = attachment.get("author_name")
+                author = author.strip() if isinstance(author, str) else ""
+                content = attachment.get("text")
+                if not isinstance(content, str) or not content.strip():
+                    content = attachment.get("fallback")
+                content = content.strip() if isinstance(content, str) else ""
+                if len(content) > SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS:
+                    content = (
+                        content[:SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS].rstrip()
+                        + "… [truncated]"
+                    )
+                source = attachment.get("from_url")
+                source = source.strip() if isinstance(source, str) else ""
+
+                label = "[Forwarded Slack message"
+                if author:
+                    label += f" from {author}"
+                label += "]"
+                parts = [label]
+                if content:
+                    parts.append(content)
+                if source:
+                    parts.append(f"Source: {source}")
+                if len(parts) > 1:
+                    indentation = "  " * depth
+                    forwarded.append("\n".join(f"{indentation}{part}" for part in parts))
+                    rendered_count += 1
+
+            visit(attachment.get("attachments"), depth + 1)
+
+    visit(attachments, 0)
+    return "\n".join(forwarded)
 
 
 def format_slack_messages_for_prompt(
@@ -219,20 +289,18 @@ def format_slack_messages_for_prompt(
     bot_user_id: str = "",
     bot_username: str = "",
 ) -> str:
-    """Format Slack messages into readable prompt text."""
+    """Format Slack messages, including forwarded context, as readable prompt text."""
     if not messages:
         return "(no thread messages available)"
 
     lines: list[str] = []
     for message in messages:
-        text = (
-            replace_bot_mention_with_username(
-                str(message.get("text", "")),
-                bot_user_id=bot_user_id,
-                bot_username=bot_username,
-            ).strip()
-            or "[non-text message]"
-        )
+        forwarded = _format_forwarded_slack_attachments(message.get("attachments"))
+        text = replace_bot_mention_with_username(
+            str(message.get("text", "")),
+            bot_user_id=bot_user_id,
+            bot_username=bot_username,
+        ).strip() or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
         if isinstance(user_id, str) and user_id:
             author_name = (user_names_by_id or {}).get(user_id) or user_id
@@ -244,57 +312,34 @@ def format_slack_messages_for_prompt(
             else:
                 bot_name = message.get("username") or "Bot"
             author = f"@{bot_name}(bot)"
-        lines.append(f"{author}: {text}")
+        raw_message_ts = message.get("ts")
+        message_ts = raw_message_ts.strip() if isinstance(raw_message_ts, str) else ""
+        identifier = (
+            f" [message_ts={message_ts}]" if _SLACK_MESSAGE_TS_RE.fullmatch(message_ts) else ""
+        )
+        line = f"{author}{identifier}: {text}"
+        if forwarded:
+            line += f"\n{forwarded}"
+        lines.append(line)
     return "\n".join(lines)
 
 
-async def set_slack_assistant_status(
+def _log_automated_warning_sent_to_slack(
     channel_id: str,
-    thread_ts: str,
-    status: str = DEFAULT_ASSISTANT_STATUS,
-    loading_messages: list[str] | tuple[str, ...] | None = None,
-) -> bool:
-    """Set the assistant typing/status indicator on a Slack thread.
-
-    Wraps Slack's `assistant.threads.setStatus` API. The `chat:write` scope
-    on the bot token is sufficient. Status auto-clears when the bot posts to
-    the thread, and Slack itself expires it after ~2 minutes — callers that
-    want it visible across longer runs must refresh it periodically.
-
-    `loading_messages` is an optional list (max 10) of strings Slack rotates
-    through while the indicator is visible.
-
-    No-op (returning False) when the bot token is missing or the
-    channel/thread is not provided. Failures are logged but never raised —
-    the indicator is a UX nicety, not a correctness requirement.
-    """
-    if not SLACK_BOT_TOKEN or not channel_id or not thread_ts:
-        return False
-
-    payload: dict[str, Any] = {
-        "channel_id": channel_id,
-        "thread_ts": thread_ts,
-        "status": status,
-    }
-    if loading_messages:
-        payload["loading_messages"] = list(loading_messages)[:10]
-
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-        try:
-            response = await http_client.post(
-                f"{SLACK_API_BASE_URL}/assistant.threads.setStatus",
-                headers=_slack_headers(),
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-            if not data.get("ok"):
-                logger.warning("Slack assistant.threads.setStatus failed: %s", data.get("error"))
-                return False
-            return True
-        except httpx.HTTPError:
-            logger.exception("Slack assistant.threads.setStatus request failed")
-            return False
+    thread_ts: str | None,
+    text: str,
+) -> None:
+    if not text.lstrip().startswith(WARNING_ICON):
+        return
+    if thread_ts:
+        logger.error(
+            "Sent automated warning message to Slack thread %s/%s: %s",
+            channel_id,
+            thread_ts,
+            text,
+        )
+        return
+    logger.error("Sent automated warning message to Slack channel %s: %s", channel_id, text)
 
 
 async def _post_slack_message_with_ts(
@@ -343,11 +388,186 @@ async def _post_slack_message_with_ts(
                 return None, error
             message_ts = data.get("ts")
             if isinstance(message_ts, str) and message_ts:
+                _log_automated_warning_sent_to_slack(channel_id, thread_ts, text)
                 return message_ts, None
             return None, None
         except httpx.HTTPError as exc:
             logger.exception("Slack chat.postMessage request failed")
             return None, f"http_error: {type(exc).__name__}"
+
+
+def _slack_thread_dashboard_url(
+    channel_id: str, thread_ts: str, agent_thread_id: str | None = None
+) -> str | None:
+    return dashboard_thread_url(agent_thread_id) if agent_thread_id else None
+
+
+def _format_token_count(count: int) -> str:
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}K"
+    return str(count)
+
+
+def _safe_model_label(model: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)[:48].strip("-")
+
+
+def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
+    if usage is None:
+        return ""
+    labels = sorted({label for model in usage.models if (label := _safe_model_label(model))})
+    model_text = " + ".join(labels[:3])
+    if len(labels) > 3:
+        model_text = f"{model_text} +{len(labels) - 3}"
+    parts = [model_text] if model_text else []
+    if usage.session_cost_usd is not None:
+        parts.append(format_slack_session_cost(usage.session_cost_usd))
+    elif usage.main_agent_tokens is not None:
+        parts.append(f"{_format_token_count(usage.main_agent_tokens)} main-agent tokens")
+    return " • ".join(parts)
+
+
+_SESSION_COST_LABEL_RE = re.compile(
+    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)(?: session cost)?$"
+)
+_MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
+
+
+def format_slack_session_cost(cost: float) -> str:
+    if 0 < cost < 0.01:
+        return "<$0.01"
+    return f"${cost:.2f}"
+
+
+def _replace_slack_session_cost(text: str, cost: float, *, require_web_link: bool) -> str:
+    if require_web_link and SLACK_WEB_LINK_FOOTER_LABEL not in text:
+        return text
+    cleaned = _SESSION_COST_LABEL_RE.sub("", text).rstrip()
+    cleaned = _MAIN_AGENT_TOKEN_LABEL_RE.sub("", cleaned).rstrip()
+    return f"{cleaned} • {format_slack_session_cost(cost)}"
+
+
+def with_slack_session_cost(
+    text: str,
+    blocks: list[dict[str, Any]] | None,
+    cost: float,
+) -> tuple[str, list[dict[str, Any]] | None]:
+    """Replace the cumulative cost in a live Slack footer without changing its blocks."""
+    updated_text = _replace_slack_session_cost(text, cost, require_web_link=True)
+    if blocks is None:
+        return updated_text, None
+
+    updated_blocks = copy.deepcopy(blocks)
+    candidates: list[dict[str, Any]] = []
+    fallback_candidates: list[dict[str, Any]] = []
+    for block in updated_blocks:
+        if block.get("type") != "context":
+            continue
+        values: list[dict[str, Any]] = []
+        block_text = block.get("text")
+        if isinstance(block_text, dict):
+            values.append(block_text)
+        elements = block.get("elements")
+        if isinstance(elements, list):
+            values.extend(item for item in elements if isinstance(item, dict))
+        for value in values:
+            value_text = value.get("text")
+            if not isinstance(value_text, str):
+                continue
+            if "main-agent tokens" in value_text:
+                candidates.append(value)
+            elif SLACK_WEB_LINK_FOOTER_LABEL in value_text:
+                fallback_candidates.append(value)
+
+    target = next(iter(candidates or fallback_candidates), None)
+    if target is not None:
+        target["text"] = _replace_slack_session_cost(
+            str(target.get("text") or ""), cost, require_web_link=False
+        )
+    elif (
+        updated_text != text
+        and updated_blocks
+        and all(block.get("type") == "rich_text" for block in updated_blocks)
+    ):
+        updated_blocks = None
+    return updated_text, updated_blocks
+
+
+def format_slack_web_link_footer(
+    dashboard_url: str | None, usage: RunUsageSummary | None = None
+) -> str:
+    """Format the compact Slack Web footer link."""
+    if not dashboard_url:
+        return ""
+    footer = f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"
+    usage_text = format_slack_run_usage(usage)
+    return f"{footer} • {usage_text}" if usage_text else footer
+
+
+def append_slack_web_link_footer(
+    text: str, dashboard_url: str | None, usage: RunUsageSummary | None = None
+) -> str:
+    """Append the compact Slack Web footer link to fallback text."""
+    footer = format_slack_web_link_footer(dashboard_url, usage)
+    if not footer or footer in text:
+        return text
+    stripped = text.rstrip()
+    if not stripped:
+        return footer
+    return f"{stripped} {footer}"
+
+
+def _slack_web_link_context_block(
+    dashboard_url: str | None, usage: RunUsageSummary | None = None
+) -> dict[str, Any] | None:
+    footer = format_slack_web_link_footer(dashboard_url, usage)
+    if not footer:
+        return None
+    return {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}
+
+
+def _block_contains_text(block: dict[str, Any], needle: str) -> bool:
+    text = block.get("text")
+    if isinstance(text, dict) and needle in str(text.get("text") or ""):
+        return True
+    elements = block.get("elements")
+    if isinstance(elements, list):
+        return any(
+            isinstance(item, dict) and needle in str(item.get("text") or "") for item in elements
+        )
+    return False
+
+
+def _with_slack_web_link_context_block(
+    text: str,
+    blocks: list[dict[str, Any]] | None,
+    dashboard_url: str | None,
+    usage: RunUsageSummary | None = None,
+) -> list[dict[str, Any]] | None:
+    context_block = _slack_web_link_context_block(dashboard_url, usage)
+    if context_block is None:
+        return blocks
+    if not blocks:
+        if len(text) > SLACK_SECTION_TEXT_MAX_CHARS:
+            return None
+        return [
+            {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+            context_block,
+        ]
+    updated_blocks = copy.deepcopy(blocks)
+    if dashboard_url and any(
+        _block_contains_text(block, dashboard_url) for block in updated_blocks
+    ):
+        usage_text = format_slack_run_usage(usage)
+        if not usage_text or any(
+            _block_contains_text(block, usage_text) for block in updated_blocks
+        ):
+            return updated_blocks
+        context_block["elements"][0]["text"] = usage_text
+    updated_blocks.append(context_block)
+    return updated_blocks
 
 
 async def post_slack_thread_reply_with_ts(
@@ -358,8 +578,13 @@ async def post_slack_thread_reply_with_ts(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
+    usage: RunUsageSummary | None = None,
+    agent_thread_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
+    dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
+    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    text = append_slack_web_link_footer(text, dashboard_url, usage)
     return await _post_slack_message_with_ts(
         channel_id,
         text,
@@ -408,7 +633,7 @@ async def update_slack_message(
         "unfurl_links": unfurl_links,
         "unfurl_media": unfurl_media,
     }
-    if blocks:
+    if blocks is not None:
         payload["blocks"] = blocks
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
@@ -438,9 +663,19 @@ async def update_slack_message(
             return False, f"http_error: {type(exc).__name__}"
 
 
-async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+async def post_slack_thread_reply(
+    channel_id: str,
+    thread_ts: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+    agent_thread_id: str | None = None,
+) -> bool:
     """Post a reply in a Slack thread."""
-    message_ts, _ = await post_slack_thread_reply_with_ts(channel_id, thread_ts, text)
+    kwargs: dict[str, Any] = {"blocks": blocks}
+    if agent_thread_id is not None:
+        kwargs["agent_thread_id"] = agent_thread_id
+    message_ts, _ = await post_slack_thread_reply_with_ts(channel_id, thread_ts, text, **kwargs)
     return message_ts is not None
 
 
@@ -764,6 +999,58 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     return messages
 
 
+async def fetch_slack_thread_message_by_ts(
+    channel_id: str, thread_ts: str, message_ts: str
+) -> dict[str, Any] | None:
+    """Fetch an exact reply from a Slack thread."""
+    if not SLACK_BOT_TOKEN:
+        return None
+
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        try:
+            response = await http_client.get(
+                f"{SLACK_API_BASE_URL}/conversations.replies",
+                headers=_slack_headers(),
+                params={
+                    "channel": channel_id,
+                    "ts": thread_ts,
+                    "oldest": message_ts,
+                    "latest": message_ts,
+                    "inclusive": "true",
+                    "limit": 1,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPError:
+            logger.exception(
+                "Slack conversations.replies request failed for channel=%s thread=%s ts=%s",
+                channel_id,
+                thread_ts,
+                message_ts,
+            )
+            return None
+
+    if not payload.get("ok"):
+        logger.warning(
+            "Slack conversations.replies failed for channel=%s thread=%s ts=%s: %s",
+            channel_id,
+            thread_ts,
+            message_ts,
+            payload.get("error"),
+        )
+        return None
+    messages = payload.get("messages", [])
+    return next(
+        (
+            message
+            for message in messages
+            if isinstance(message, dict) and message.get("ts") == message_ts
+        ),
+        None,
+    )
+
+
 SLACK_MESSAGE_URL_RE = re.compile(
     r"https?://[a-zA-Z0-9\-]+\.slack\.com/archives/([A-Za-z0-9]+)/p(\d{16})(?:\?[^\s>]*)?"
 )
@@ -956,27 +1243,6 @@ async def resolve_slack_links_in_context(
     return resolved_links_section, image_urls
 
 
-TRACE_REPLY_TIPS: tuple[str, ...] = (
-    "You can message me in this thread while I'm running — I'll pick up your follow-up before my next step.",
-    "Kick off another task in parallel — each one runs in its own isolated sandbox, no queuing.",
-    "Add `repo:owner/name` to your message to point me at a different repo for this task.",
-    "Drop an `AGENTS.md` at your repo root and I'll read it on every run — it's the easiest way to teach me your conventions.",
-    "For code-change tasks, I'll open a draft PR when it's necessary or requested and link it back here.",
-    "Tag me on a PR comment of an open-swe PR to have me address review feedback on the same branch.",
-    "I can spawn subagents for independent subtasks — useful for parallel research or fan-out work.",
-    "Click `View trace` above to watch every tool call and model response live in LangSmith.",
-    "React to my final reply with :+1: or :-1: to share feedback — it helps me get better.",
-    "Ask me to review a GitHub PR in Slack and I'll spin up the reviewer agent to leave inline comments.",
-    "Pasting a GitHub URL into your message also works to point me at a repo — no `repo:` prefix needed.",
-    "Attach screenshots or images directly in Slack or Linear — I'll read them as part of the task context.",
-    "Tag `@openswe` on a Linear issue and I'll pull in the full title, description, and comment thread before starting.",
-    "I also pick up `@openswe` mentions in GitHub issue bodies and comments — not just on PRs.",
-    "On a GitHub PR, ask me to review it and I'll hand it off to the reviewer agent for inline comments.",
-    "Each thread keeps a persistent sandbox — follow-up runs reuse the same workspace, so my context sticks around.",
-    "Paste a Slack message link from another thread and I'll fetch its content (and any images) as extra context.",
-    "Ask me to search the web — I have a `web_search` tool for finding docs, examples, and GitHub repos mid-task.",
-    "I can read, update, and create Linear issues directly — useful for filing follow-up tickets or linking work back to a project.",
-)
 TRACE_REPLY_WEB_HANDOFF_NOTICE = (
     "Conversation moved to Web — use the `Open in Web` link above for follow-ups."
 )
@@ -985,7 +1251,7 @@ TRACE_REPLY_WEB_HANDOFF_NOTICE = (
 def _format_trace_reply(
     trace_url: str | None, dashboard_url: str | None, *, moved_to_web: bool = False
 ) -> str:
-    """Format the initial trace reply with status text."""
+    """Format the trace reply with status text."""
     links = []
     if trace_url:
         links.append(f"<{trace_url}|View trace>")
@@ -994,15 +1260,14 @@ def _format_trace_reply(
     head = f"{' • '.join(links)}\n" if links else ""
     if moved_to_web:
         return f"{head}_{TRACE_REPLY_WEB_HANDOFF_NOTICE}_"
-    tip = random.choice(TRACE_REPLY_TIPS)
-    return f"{head}_Tip: {tip}_"
+    return head.rstrip()
 
 
 async def post_slack_trace_reply(
     channel_id: str, thread_ts: str, thread_id: str, *, include_dashboard_link: bool = True
 ) -> str | None:
     """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
-    trace_url = get_langsmith_trace_url(thread_id)
+    trace_url = await get_langsmith_trace_url(thread_id)
     dashboard_url = dashboard_thread_url(thread_id) if include_dashboard_link else None
     message_ts, _ = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -1010,6 +1275,7 @@ async def post_slack_trace_reply(
         _format_trace_reply(trace_url, dashboard_url),
         unfurl_links=False,
         unfurl_media=False,
+        agent_thread_id=thread_id,
     )
     return message_ts
 
@@ -1018,7 +1284,7 @@ async def update_slack_trace_reply_for_web_handoff(
     channel_id: str, message_ts: str, thread_id: str
 ) -> bool:
     """Update the initial Slack trace reply after a dashboard handoff."""
-    trace_url = get_langsmith_trace_url(thread_id)
+    trace_url = await get_langsmith_trace_url(thread_id)
     dashboard_url = dashboard_thread_url(thread_id)
     ok, error = await update_slack_message(
         channel_id,
@@ -1037,12 +1303,212 @@ async def update_slack_trace_reply_for_web_handoff(
     return ok
 
 
+_SLACK_THREAD_MAP_NAMESPACE = "slack_thread_map"
 _SLACK_RUN_MAP_NAMESPACE = "slack_run_map"
 _THREAD_RUN_KEY_PREFIX = "thread:"
 _MESSAGE_RUN_KEY_PREFIX = "message:"
+_RUN_MESSAGE_KEY_PREFIX = "run:"
 
 
-def _extract_run_id_from_store_item(item: dict[str, Any] | None) -> str | None:
+class SlackThreadMappingError(RuntimeError):
+    pass
+
+
+def _normalize_slack_location(channel_id: str, thread_ts: str) -> tuple[str, str]:
+    channel = channel_id.strip() if isinstance(channel_id, str) else ""
+    timestamp = thread_ts.strip() if isinstance(thread_ts, str) else ""
+    if not _SLACK_CHANNEL_ID_RE.fullmatch(channel):
+        raise SlackThreadMappingError("Invalid Slack channel ID")
+    if not _SLACK_MESSAGE_TS_RE.fullmatch(timestamp):
+        raise SlackThreadMappingError("Invalid Slack thread timestamp")
+    return channel, timestamp
+
+
+def _mapping_thread_id(item: Mapping[str, Any] | None) -> str | None:
+    if not item:
+        return None
+    value = item.get("value")
+    if not isinstance(value, Mapping):
+        return None
+    thread_id = value.get("thread_id")
+    return thread_id if isinstance(thread_id, str) and thread_id else None
+
+
+async def lookup_slack_thread_id(
+    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
+) -> str | None:
+    """Look up the Open SWE thread explicitly mapped to a Slack location."""
+    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
+    item = await langgraph_client.store.get_item((_SLACK_THREAD_MAP_NAMESPACE, channel), timestamp)
+    return _mapping_thread_id(item)
+
+
+async def bind_slack_thread_id(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    thread_id: str,
+) -> str:
+    """Persist an explicit Slack-location mapping without overwriting another thread."""
+    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
+    normalized_thread_id = thread_id.strip() if isinstance(thread_id, str) else ""
+    if not normalized_thread_id:
+        raise SlackThreadMappingError("Open SWE thread ID is required")
+    existing = await lookup_slack_thread_id(langgraph_client, channel, timestamp)
+    if existing and existing != normalized_thread_id:
+        raise SlackThreadMappingError("Slack location is already mapped to another thread")
+    await langgraph_client.store.put_item(
+        (_SLACK_THREAD_MAP_NAMESPACE, channel),
+        timestamp,
+        {
+            "thread_id": normalized_thread_id,
+            "channel_id": channel,
+            "thread_ts": timestamp,
+        },
+    )
+    persisted = await lookup_slack_thread_id(langgraph_client, channel, timestamp)
+    if persisted != normalized_thread_id:
+        raise SlackThreadMappingError("Slack thread mapping did not persist")
+    return normalized_thread_id
+
+
+def _thread_metadata_slack_location(thread: Mapping[str, Any]) -> tuple[str, str] | None:
+    metadata = thread.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return None
+    source_context = metadata.get("source_context")
+    if not isinstance(source_context, Mapping):
+        return None
+    slack_thread = source_context.get("slack_thread")
+    if not isinstance(slack_thread, Mapping):
+        return None
+    channel_id = slack_thread.get("channel_id")
+    thread_ts = slack_thread.get("thread_ts")
+    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+        return None
+    try:
+        return _normalize_slack_location(channel_id, thread_ts)
+    except SlackThreadMappingError:
+        return None
+
+
+async def resolve_slack_thread_id(
+    langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
+) -> str:
+    """Resolve or create the explicit Open SWE thread mapping for a Slack location."""
+    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
+    item = await langgraph_client.store.get_item((_SLACK_THREAD_MAP_NAMESPACE, channel), timestamp)
+    existing = _mapping_thread_id(item)
+    if existing:
+        return existing
+    value = item.get("value") if isinstance(item, Mapping) else None
+    nonce = value.get("nonce") if isinstance(value, Mapping) else None
+
+    matches = await langgraph_client.threads.search(
+        metadata={
+            "source_context": {"slack_thread": {"channel_id": channel, "thread_ts": timestamp}}
+        },
+        limit=2,
+    )
+    matching_ids = {
+        candidate
+        for thread in matches or []
+        if isinstance(thread, Mapping)
+        and _thread_metadata_slack_location(thread) == (channel, timestamp)
+        and isinstance(candidate := thread.get("thread_id") or thread.get("id"), str)
+        and candidate
+    }
+    if len(matching_ids) > 1:
+        raise SlackThreadMappingError("Multiple Open SWE threads match this Slack location")
+
+    candidate = next(
+        iter(matching_ids),
+        str(uuid.uuid5(uuid.NAMESPACE_URL, f"slack:{channel}:{timestamp}:{nonce or ''}")),
+    )
+    await bind_slack_thread_id(langgraph_client, channel, timestamp, candidate)
+    return candidate
+
+
+async def get_active_slack_thread(
+    langgraph_client: LangGraphClient,
+    thread_id: str | None,
+    fallback: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Return the active Slack location stored on an Open SWE thread."""
+    if thread_id:
+        try:
+            thread = await langgraph_client.threads.get(thread_id)
+            metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
+            source_context = (
+                metadata.get("source_context") if isinstance(metadata, Mapping) else None
+            )
+            slack_thread = (
+                source_context.get("slack_thread") if isinstance(source_context, Mapping) else None
+            )
+            if isinstance(slack_thread, Mapping):
+                location = dict(slack_thread)
+                _normalize_slack_location(
+                    str(location.get("channel_id") or ""), str(location.get("thread_ts") or "")
+                )
+                return location
+        except Exception:
+            logger.debug("Could not resolve active Slack location for thread %s", thread_id)
+    if isinstance(fallback, Mapping):
+        location = dict(fallback)
+        try:
+            _normalize_slack_location(
+                str(location.get("channel_id") or ""), str(location.get("thread_ts") or "")
+            )
+        except SlackThreadMappingError:
+            return None
+        return location
+    return None
+
+
+async def delete_slack_thread_associations(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    *,
+    expected_thread_id: str | None = None,
+) -> None:
+    """Delete all Open SWE associations for a Slack location."""
+    channel, timestamp = _normalize_slack_location(channel_id, thread_ts)
+    mapped_thread_id = await lookup_slack_thread_id(langgraph_client, channel, timestamp)
+    if expected_thread_id and mapped_thread_id and mapped_thread_id != expected_thread_id:
+        return
+    await langgraph_client.store.put_item(
+        (_SLACK_THREAD_MAP_NAMESPACE, channel),
+        timestamp,
+        {"channel_id": channel, "thread_ts": timestamp, "nonce": str(uuid.uuid4())},
+    )
+    namespace = (_SLACK_RUN_MAP_NAMESPACE, channel)
+    while True:
+        response = await langgraph_client.store.search_items(
+            namespace,
+            filter={"thread_ts": timestamp},
+            limit=100,
+            offset=0,
+        )
+        items = response.get("items") if isinstance(response, Mapping) else None
+        exact_items = [
+            item
+            for item in (items or [])
+            if isinstance(item, Mapping)
+            and item.get("namespace") in (list(namespace), namespace)
+            and isinstance(item.get("value"), Mapping)
+            and item["value"].get("thread_ts") == timestamp
+            and isinstance(item.get("key"), str)
+        ]
+        if not exact_items:
+            break
+        for item in exact_items:
+            await langgraph_client.store.delete_item(namespace, key=item["key"])
+    if await lookup_slack_thread_id(langgraph_client, channel, timestamp):
+        raise SlackThreadMappingError("Original Slack thread mapping was not detached")
+
+
+def _extract_run_id_from_store_item(item: Mapping[str, Any] | None) -> str | None:
     if not item:
         return None
     value = item.get("value")
@@ -1061,6 +1527,7 @@ async def store_slack_run_mapping(
     message_ts: str | None = None,
     triggering_user_id: str | None = None,
     trace_message_ts: str | None = None,
+    agent_thread_id: str | None = None,
 ) -> None:
     """Persist Slack thread/message to LangGraph run mapping."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
@@ -1075,15 +1542,26 @@ async def store_slack_run_mapping(
         value["triggering_user_id"] = triggering_user_id
     if trace_message_ts:
         value["trace_message_ts"] = trace_message_ts
+    if agent_thread_id:
+        value["agent_thread_id"] = agent_thread_id
     try:
         await langgraph_client.store.put_item(
             namespace, f"{_THREAD_RUN_KEY_PREFIX}{thread_ts}", value
         )
+        run_key = f"{_RUN_MESSAGE_KEY_PREFIX}{run_id}"
+        existing_run = await langgraph_client.store.get_item(namespace, run_key)
+        stored_run_value = existing_run.get("value") if isinstance(existing_run, dict) else None
+        run_value = {
+            **(stored_run_value if isinstance(stored_run_value, dict) else {}),
+            **value,
+            **({"message_ts": message_ts} if message_ts else {}),
+        }
+        await langgraph_client.store.put_item(namespace, run_key, run_value)
         if message_ts:
             await langgraph_client.store.put_item(
                 namespace,
                 f"{_MESSAGE_RUN_KEY_PREFIX}{message_ts}",
-                {**value, "message_ts": message_ts},
+                run_value,
             )
     except Exception:
         logger.exception(
@@ -1099,40 +1577,45 @@ async def store_slack_message_run_mapping(
     channel_id: str,
     thread_ts: str,
     message_ts: str,
+    *,
+    run_id: str | None = None,
+    triggering_user_id: str | None = None,
 ) -> None:
-    """Persist a Slack message mapping using the current thread's run mapping."""
+    """Persist an exact run-to-Slack-message mapping."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
     try:
-        item = await langgraph_client.store.get_item(
+        thread_item = await langgraph_client.store.get_item(
             namespace, f"{_THREAD_RUN_KEY_PREFIX}{thread_ts}"
         )
-        run_id = _extract_run_id_from_store_item(item)
-        if not run_id:
+        run_item = (
+            await langgraph_client.store.get_item(namespace, f"{_RUN_MESSAGE_KEY_PREFIX}{run_id}")
+            if run_id
+            else thread_item
+        )
+        resolved_run_id = run_id or _extract_run_id_from_store_item(thread_item)
+        if not resolved_run_id:
             logger.debug(
-                "No Slack thread run mapping found for channel=%s thread=%s",
+                "No Slack run mapping found for channel=%s thread=%s",
                 channel_id,
                 thread_ts,
             )
             return
-        triggering_user_id: str | None = None
-        trace_message_ts: str | None = None
-        if isinstance(item, dict):
-            value = item.get("value")
-            if isinstance(value, dict):
-                candidate = value.get("triggering_user_id")
-                if isinstance(candidate, str) and candidate:
-                    triggering_user_id = candidate
-                candidate = value.get("trace_message_ts")
-                if isinstance(candidate, str) and candidate:
-                    trace_message_ts = candidate
-        await store_slack_run_mapping(
-            langgraph_client,
-            channel_id,
-            thread_ts,
-            run_id,
-            message_ts=message_ts,
-            triggering_user_id=triggering_user_id,
-            trace_message_ts=trace_message_ts,
+        thread_value = thread_item.get("value") if isinstance(thread_item, dict) else None
+        run_value = run_item.get("value") if isinstance(run_item, dict) else None
+        value: dict[str, Any] = {
+            **(thread_value if isinstance(thread_value, dict) else {}),
+            **(run_value if isinstance(run_value, dict) else {}),
+            "run_id": resolved_run_id,
+            "thread_ts": thread_ts,
+            "message_ts": message_ts,
+        }
+        if triggering_user_id:
+            value["triggering_user_id"] = triggering_user_id
+        await langgraph_client.store.put_item(
+            namespace, f"{_MESSAGE_RUN_KEY_PREFIX}{message_ts}", value
+        )
+        await langgraph_client.store.put_item(
+            namespace, f"{_RUN_MESSAGE_KEY_PREFIX}{resolved_run_id}", value
         )
     except Exception:
         logger.exception(
@@ -1140,6 +1623,28 @@ async def store_slack_message_run_mapping(
             channel_id,
             message_ts,
         )
+
+
+async def lookup_slack_run_message_mapping(
+    langgraph_client: LangGraphClient,
+    channel_id: str,
+    run_id: str,
+) -> dict[str, Any] | None:
+    """Return the latest Slack-message mapping written by an exact run."""
+    namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
+    try:
+        item = await langgraph_client.store.get_item(
+            namespace, f"{_RUN_MESSAGE_KEY_PREFIX}{run_id}"
+        )
+    except Exception:
+        logger.exception(
+            "Failed to look up Slack run mapping for channel=%s run=%s",
+            channel_id,
+            run_id,
+        )
+        return None
+    value = item.get("value") if isinstance(item, dict) else None
+    return value if isinstance(value, dict) else None
 
 
 async def lookup_slack_thread_run_mapping(

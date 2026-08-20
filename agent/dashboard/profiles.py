@@ -10,8 +10,6 @@ Each upsert only touches its own namespace, so the two flows can't clobber
 each other's fields even when they interleave.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
@@ -44,15 +42,18 @@ class ProfileUpdate(BaseModel):
     base_branch: str | None = None
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
-    create_prs: bool = False
+    draft_prs: bool | None = None
     review_draft_prs: bool | None = None
 
     @model_validator(mode="after")
-    def _normalize_stale_model_pairs(self) -> ProfileUpdate:
-        self.default_model, self.reasoning_effort = _normalize_stale_model_pair(
+    def _normalize_stale_model_pairs(self) -> "ProfileUpdate":
+        model, effort = _normalize_stale_model_pair(
             self.default_model,
             self.reasoning_effort,
         )
+        self.default_model = model
+        if effort is not None:
+            self.reasoning_effort = effort
         if self.default_subagent_model is not None:
             self.default_subagent_model, self.subagent_reasoning_effort = (
                 _normalize_stale_model_pair(
@@ -94,6 +95,7 @@ def _normalize_stale_model_pair(model: str, effort: str | None) -> tuple[str, st
 
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
+    value.pop("create_prs", None)
     model = value.get("default_model")
     effort = value.get("reasoning_effort")
     if isinstance(model, str):
@@ -154,7 +156,9 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "base_branch": update.base_branch,
         "branch_prefix": update.branch_prefix,
         "auto_fix_ci": update.auto_fix_ci,
-        "create_prs": update.create_prs,
+        "draft_prs": (
+            update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
+        ),
         "review_draft_prs": update.review_draft_prs,
         "updated_at": datetime.now(UTC).isoformat(),
     }
@@ -164,6 +168,7 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "allow_artifacts",
         "slack_notifications",
         "preferred_pr_destination",
+        "create_prs",
     ):
         value.pop(stale_field, None)
     await _client().store.put_item(PROFILES_NAMESPACE, login, value)
@@ -289,7 +294,8 @@ async def _refresh_stored_token(login: str, record: dict[str, Any]) -> tuple[str
     except Exception as exc:  # noqa: BLE001
         logger.warning("GitHub token refresh failed for %s", login, exc_info=True)
         return None, is_unrecoverable_refresh_error(exc)
-    email = record.get("email") if isinstance(record.get("email"), str) else ""
+    email_value = record.get("email")
+    email = email_value if isinstance(email_value, str) else ""
     await upsert_access_token_from_github_response(login, email, data)
     access_token = data.get("access_token")
     return (access_token if isinstance(access_token, str) else None), False

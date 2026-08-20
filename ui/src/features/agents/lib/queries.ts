@@ -1,0 +1,578 @@
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
+import { useEffect } from "react"
+
+import { agentsApi } from "./api"
+import type { QueryClient } from "@tanstack/react-query"
+import type {
+  ScheduleUpdateRequest,
+  SidebarThreads,
+  ThreadTurnDiffOptions,
+  ThreadsPageParams,
+} from "./api"
+import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
+import type { Skill, SkillInput } from "@/lib/api"
+import { api } from "@/lib/api"
+
+export const agentThreadKeys = {
+  lists: ["agent-threads", "lists"] as const,
+  sidebar: (params: {
+    activeLimit: number
+    resolvedLimit: number
+    activeThreadId?: string
+    includeAutomations: boolean
+  }) => ["agent-threads", "lists", "sidebar", params] as const,
+  detail: (threadId: string) => ["agent-threads", threadId] as const,
+  prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
+  turnDiff: (
+    threadId: string,
+    turnKey: string | null,
+    options: ThreadTurnDiffOptions = {}
+  ) => ["agent-threads", threadId, "turn-diff", turnKey, options] as const,
+  workflowApprovals: (threadId: string) =>
+    ["agent-threads", threadId, "workflow-approvals"] as const,
+  page: (params: ThreadsPageParams) =>
+    ["agent-threads", "lists", "page", params] as const,
+  infinitePages: (params: Omit<ThreadsPageParams, "offset">) =>
+    ["agent-threads", "lists", "infinite-pages", params] as const,
+}
+
+export function invalidateAgentThreadLists(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: agentThreadKeys.lists })
+}
+
+export function seedAgentThreadLists(
+  queryClient: QueryClient,
+  thread: AgentThread
+): void {
+  queryClient.setQueriesData<SidebarThreads>(
+    { queryKey: ["agent-threads", "lists", "sidebar"] },
+    (prev) => {
+      if (!prev) return prev
+      const activeItems = [
+        thread,
+        ...prev.active.items.filter((item) => item.id !== thread.id),
+      ].slice(0, prev.active.limit)
+      const resolvedItems = prev.resolved.items.filter(
+        (item) => item.id !== thread.id
+      )
+      return {
+        ...prev,
+        active: { ...prev.active, items: activeItems },
+        resolved: { ...prev.resolved, items: resolvedItems },
+      }
+    }
+  )
+}
+
+export const agentScheduleKeys = {
+  all: ["agent-schedules"] as const,
+}
+
+export const agentSkillKeys = {
+  personal: ["agent-skills", "personal"] as const,
+  organization: ["agent-skills", "organization"] as const,
+}
+
+const BUNDLED_SKILLS: Array<Skill> = [
+  {
+    name: "baby-sit",
+    description:
+      "Monitor a GitHub pull request until CI is green, diagnose failures, and rerun only evidence-backed flaky GitHub Actions jobs.",
+    instructions: "",
+  },
+]
+
+export const environmentOptionKeys = {
+  all: ["environment-options"] as const,
+}
+
+/** Environments a new thread can boot from. Empty when none are configured. */
+export function useEnvironmentOptions() {
+  return useQuery({
+    queryKey: environmentOptionKeys.all,
+    queryFn: api.listEnvironmentOptions,
+    staleTime: 60_000,
+  })
+}
+
+async function listPersonalSkills() {
+  const items = []
+  let offset = 0
+  do {
+    const page = await api.listSkills(offset)
+    items.push(...page.items)
+    offset = page.next_offset ?? 0
+  } while (offset)
+  return items
+}
+
+async function listOrganizationSkills() {
+  const items: Array<Skill> = []
+  let cursor: string | null = null
+  do {
+    const page = await api.listOrganizationSkills(cursor)
+    items.push(...page.items)
+    cursor = page.next_cursor
+  } while (cursor)
+  return items
+}
+
+export function usePersonalAgentSkills() {
+  return useQuery({
+    queryKey: agentSkillKeys.personal,
+    queryFn: listPersonalSkills,
+  })
+}
+
+export function useOrganizationAgentSkills() {
+  return useQuery({
+    queryKey: agentSkillKeys.organization,
+    queryFn: listOrganizationSkills,
+  })
+}
+
+export function useAgentSkills() {
+  const personal = usePersonalAgentSkills()
+  const organization = useOrganizationAgentSkills()
+  return {
+    ...personal,
+    personal: personal.data ?? [],
+    organization: organization.data ?? [],
+    refetch: async () => {
+      const [personalResult, organizationResult] = await Promise.all([
+        personal.refetch(),
+        organization.refetch(),
+      ])
+      if (personalResult.error) throw personalResult.error
+      if (organizationResult.error) throw organizationResult.error
+      return {
+        personal: personalResult.data ?? [],
+        organization: organizationResult.data ?? [],
+      }
+    },
+    data: [
+      ...new Map(
+        [
+          ...BUNDLED_SKILLS,
+          ...(personal.data ?? []),
+          ...(organization.data ?? []),
+        ].map((skill) => [skill.name, skill])
+      ).values(),
+    ],
+    error: personal.error ?? organization.error,
+    isError: personal.isError || organization.isError,
+    isLoading: personal.isLoading || organization.isLoading,
+  }
+}
+
+function useSkillMutation(
+  mutationFn: (vars: SkillInput & { name: string }) => Promise<Skill>,
+  queryKey: ReadonlyArray<string>
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+  })
+}
+
+export function useCreateAgentSkill(organization = false) {
+  return useSkillMutation(
+    ({ name, ...body }) =>
+      organization
+        ? api.createOrganizationSkill(name, body)
+        : api.createSkill(name, body),
+    organization ? agentSkillKeys.organization : agentSkillKeys.personal
+  )
+}
+
+export function useUpdateAgentSkill(organization = false) {
+  return useSkillMutation(
+    ({ name, ...body }) =>
+      organization
+        ? api.saveOrganizationSkill(name, body)
+        : api.saveSkill(name, body),
+    organization ? agentSkillKeys.organization : agentSkillKeys.personal
+  )
+}
+
+export function useDeleteAgentSkill(organization = false) {
+  const queryClient = useQueryClient()
+  const queryKey = organization
+    ? agentSkillKeys.organization
+    : agentSkillKeys.personal
+  return useMutation({
+    mutationFn: organization ? api.deleteOrganizationSkill : api.deleteSkill,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+  })
+}
+
+// Sidebar lists and detail reads return the same per-thread summary, so warming
+// the detail cache from the already-fetched sidebar avoids a fan-out of one
+// request per thread. Navigation stays instant; the real (mark-viewed) fetch
+// fires only when a thread is actually opened. The active thread is skipped so
+// its live detail query stays the source of truth.
+export function useSeedAgentThreadDetails(
+  threads: Array<AgentThread>,
+  activeThreadId?: string
+) {
+  const queryClient = useQueryClient()
+
+  useEffect(() => {
+    for (const thread of threads) {
+      if (thread.id === activeThreadId) continue
+      // Seed as already-stale: the detail GET is what marks a thread viewed
+      // server-side, so opening a seeded entry must still refetch despite the
+      // detail query's `staleTime` (which exists for the optimistic seed).
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread, {
+        updatedAt: 0,
+      })
+    }
+  }, [activeThreadId, queryClient, threads])
+}
+
+export const SIDEBAR_ACTIVE_LIMIT = 50
+export const SIDEBAR_RESOLVED_LIMIT = 20
+
+function sidebarThreads(data?: SidebarThreads): Array<AgentThread> {
+  return [...(data?.active.items ?? []), ...(data?.resolved.items ?? [])]
+}
+
+function sidebarRefetchInterval(query: { state: { data?: SidebarThreads } }) {
+  return sidebarThreads(query.state.data).some(
+    (thread) => thread.status === "running"
+  )
+    ? 2000
+    : false
+}
+
+export function useSidebarThreads(
+  resolvedLimit: number,
+  activeThreadId?: string,
+  includeAutomations = false
+) {
+  const params = {
+    activeLimit: SIDEBAR_ACTIVE_LIMIT,
+    resolvedLimit,
+    activeThreadId,
+    includeAutomations,
+  }
+  return useQuery({
+    queryKey: agentThreadKeys.sidebar(params),
+    queryFn: () => agentsApi.listSidebarThreads(params),
+    refetchInterval: sidebarRefetchInterval,
+    placeholderData: (prev) => prev,
+  })
+}
+
+export function useAgentThread(threadId: string) {
+  const queryClient = useQueryClient()
+  const queryKey = agentThreadKeys.detail(threadId)
+
+  return useQuery({
+    queryKey,
+    queryFn: async () => {
+      const thread = await agentsApi.getThread(threadId)
+      const queuedMessages =
+        queryClient.getQueryData<AgentThread>(queryKey)?.queuedMessages
+      return thread.status === "running" && queuedMessages?.length
+        ? { ...thread, queuedMessages }
+        : thread
+    },
+    // Server truth heartbeat while a run is live. The SDK's SSE transport does
+    // not reconnect once a custom `fetch` is supplied (it needs the dashboard
+    // session cookie), so a dropped event stream must not leave the view — and
+    // its stop button — believing the run already ended.
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ? 3000 : false,
+    // Lets the optimistic detail seeded by `AgentsHome` survive until the
+    // proxied run.start stamps the server-side thread; an immediate refetch
+    // would 404 and bounce the route back to /agents.
+    staleTime: 30_000,
+  })
+}
+
+export function useAgentThreadPrDiff(threadId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: agentThreadKeys.prDiff(threadId),
+    queryFn: () => agentsApi.getThreadPrDiff(threadId),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
+  })
+}
+
+export function useAgentThreadTurnDiff(
+  threadId: string,
+  turnKey: string | null,
+  enabled: boolean,
+  options: ThreadTurnDiffOptions = {}
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.turnDiff(threadId, turnKey, options),
+    queryFn: () => agentsApi.getThreadTurnDiff(threadId, turnKey, options),
+    enabled: enabled && Boolean(threadId),
+    staleTime: 30_000,
+    refetchInterval: (query) =>
+      query.state.data?.status === "ready" ? false : 3000,
+    retry: false,
+  })
+}
+
+export function useWorkflowApprovals(
+  threadId: string,
+  options: { pollWhileActive?: boolean } = {}
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.workflowApprovals(threadId),
+    queryFn: () => agentsApi.listWorkflowApprovals(threadId),
+    enabled: Boolean(threadId),
+    refetchInterval: (query) =>
+      options.pollWhileActive ||
+      query.state.data?.approvals.some(
+        (approval) => approval.status === "pending"
+      )
+        ? 3000
+        : false,
+    retry: false,
+  })
+}
+
+export function useWorkflowApprovalDecision(threadId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: {
+      fingerprint: string
+      decision: "approve" | "reject"
+    }) =>
+      vars.decision === "approve"
+        ? agentsApi.approveWorkflowPush(threadId, vars.fingerprint)
+        : agentsApi.rejectWorkflowPush(threadId, vars.fingerprint),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: agentThreadKeys.workflowApprovals(threadId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: agentThreadKeys.detail(threadId),
+      })
+      invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
+export function useAgentSchedules() {
+  return useQuery({
+    queryKey: agentScheduleKeys.all,
+    queryFn: () => agentsApi.listSchedules(),
+  })
+}
+
+export function useCreateAgentSchedule() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: agentsApi.createSchedule,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+    },
+  })
+}
+
+export function useUpdateAgentSchedule() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: { scheduleId: string; body: ScheduleUpdateRequest }) =>
+      agentsApi.updateSchedule(vars.scheduleId, vars.body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+    },
+  })
+}
+
+export function useTriggerAgentSchedule() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: agentsApi.triggerSchedule,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+      invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
+export function useDeleteAgentSchedule() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: agentsApi.deleteSchedule,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+    },
+  })
+}
+
+export interface CreateAgentThreadVariables {
+  prompt: string
+  images?: Array<ImageChunk>
+  repo?: string | null
+  repo_explicitly_none?: boolean
+  model_id?: string | null
+  effort?: string | null
+}
+
+/**
+ * Build the placeholder thread shown the instant a run is started from the
+ * home page — before the server has stamped the thread record. Seeded into
+ * the detail + list caches by `AgentsHome` so the `$threadId` route renders
+ * immediately (the 30s `staleTime` keeps it from refetching into a 404), then
+ * reconciled to server truth by the list's running refetch + the stream's
+ * `onCreated` / `onCompleted` invalidations.
+ */
+export function optimisticThread(
+  threadId: string,
+  vars: CreateAgentThreadVariables
+): AgentThread {
+  const now = Date.now()
+  const text = vars.prompt.trim()
+  const repoFullName = vars.repo ?? ""
+  const chunks: Array<Chunk> = [
+    ...(vars.images ?? []),
+    ...(text ? [{ kind: "text", text } satisfies Chunk] : []),
+  ]
+  const message: Message = {
+    id: `optimistic-user-${threadId}`,
+    author: "user",
+    timestamp: new Date(now).toISOString(),
+    chunks,
+  }
+  return {
+    id: threadId,
+    title: text.slice(0, 80) || "New agent",
+    repo: repoFullName.split("/")[1] ?? "",
+    repoFullName,
+    branch: "main",
+    model: vars.model_id ?? "Default",
+    effort: vars.effort ?? null,
+    source: "dashboard",
+    status: "running",
+    viewed: true,
+    viewedAt: now,
+    isOwner: true,
+    createdAt: now,
+    updatedAt: now,
+    traceUrl: null,
+    sandboxId: null,
+    messages: message.chunks.length > 0 ? [message] : [],
+  }
+}
+
+export interface SendAgentMessageVariables {
+  content: string
+  images?: Array<ImageChunk>
+  model_id?: string | null
+  effort?: string | null
+  plan_mode?: boolean
+}
+
+export function useCancelAgentThread(threadId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: () => agentsApi.cancelThread(threadId),
+    onSuccess: (thread) => {
+      queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
+      invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
+export function useAdminCancelAgentThread() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (threadId: string) => agentsApi.adminCancelThread(threadId),
+    onSuccess: (thread) => {
+      queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
+      invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
+export function useDeleteAgentThread() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+
+  return useMutation({
+    mutationFn: (threadId: string) => agentsApi.deleteThread(threadId),
+    onSuccess: (_, threadId) => {
+      queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
+      invalidateAgentThreadLists(queryClient)
+      const path = window.location.pathname
+      if (path.includes(`/agents/${threadId}`)) {
+        navigate({ to: "/agents" })
+      }
+    },
+  })
+}
+
+export function useResolveAgentThread() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: { threadId: string; resolved: boolean }) =>
+      agentsApi.resolveThread(vars.threadId, vars.resolved),
+    onSuccess: (thread, vars) => {
+      queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
+      invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
+export function useInfiniteThreadsPages(
+  params: Omit<ThreadsPageParams, "offset">,
+  options: { enabled?: boolean; staleWhileRevalidate?: boolean } = {}
+) {
+  return useInfiniteQuery({
+    queryKey: agentThreadKeys.infinitePages(params),
+    queryFn: ({ pageParam }) =>
+      agentsApi.listThreadsPage({ ...params, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (page) =>
+      page.hasMore ? page.offset + page.items.length : undefined,
+    enabled: options.enabled,
+    ...(options.staleWhileRevalidate
+      ? {
+          staleTime: 30_000,
+          gcTime: Infinity,
+          refetchOnWindowFocus: true,
+        }
+      : {}),
+  })
+}
+
+export function useThreadsPage(
+  params: ThreadsPageParams,
+  options: { enabled?: boolean; staleWhileRevalidate?: boolean } = {}
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.page(params),
+    queryFn: () => agentsApi.listThreadsPage(params),
+    enabled: options.enabled,
+    placeholderData: (prev) => prev,
+    ...(options.staleWhileRevalidate
+      ? {
+          staleTime: 30_000,
+          gcTime: Infinity,
+          refetchOnWindowFocus: true,
+        }
+      : {}),
+  })
+}

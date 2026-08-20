@@ -1,7 +1,5 @@
 """Azure DevOps Service Hook webhook validation."""
 
-from __future__ import annotations
-
 import logging
 import secrets
 

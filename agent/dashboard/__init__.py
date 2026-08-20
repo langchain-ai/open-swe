@@ -6,9 +6,12 @@ and it must NOT drag in routes.py + FastAPI + every API/job module. Only the
 webapp, which actually mounts the router, pays that cost.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 __all__ = ["router"]
+
+if TYPE_CHECKING:
+    from .routes import router
 
 
 def __getattr__(name: str) -> Any:

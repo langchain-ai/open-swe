@@ -1,7 +1,5 @@
 """Linear API utilities."""
 
-from __future__ import annotations
-
 import logging
 import os
 from typing import Any
@@ -69,7 +67,7 @@ async def post_linear_trace_comment(
     issue_id: str, thread_id: str, triggering_comment_id: str
 ) -> None:
     """Post a trace URL comment on a Linear issue."""
-    trace_url = get_langsmith_trace_url(thread_id)
+    trace_url = await get_langsmith_trace_url(thread_id)
     if trace_url:
         await comment_on_linear_issue(
             issue_id,
@@ -104,6 +102,40 @@ async def list_teams() -> dict[str, Any]:
     return {"teams": result.get("teams", {}).get("nodes", [])}
 
 
+async def fetch_linear_issue_participant_emails(issue_id: str) -> set[str] | None:
+    """Return verified participant emails for a Linear issue."""
+    query = """
+    query GetIssueParticipants($id: String!) {
+        issue(id: $id) {
+            creator { email }
+            assignee { email }
+            comments {
+                nodes { user { email } }
+            }
+        }
+    }
+    """
+    result = await _graphql_request(query, {"id": issue_id})
+    if "error" in result:
+        return None
+    issue = result.get("issue")
+    if not isinstance(issue, dict):
+        return None
+    identities = [issue.get("creator"), issue.get("assignee")]
+    comments = issue.get("comments")
+    if isinstance(comments, dict):
+        for comment in comments.get("nodes") or []:
+            if isinstance(comment, dict):
+                identities.append(comment.get("user"))
+    return {
+        email.strip().lower()
+        for identity in identities
+        if isinstance(identity, dict)
+        and isinstance(email := identity.get("email"), str)
+        and email.strip()
+    }
+
+
 async def get_issue(issue_id: str) -> dict[str, Any]:
     """Get a Linear issue by ID."""
     query = """
@@ -130,6 +162,118 @@ async def get_issue(issue_id: str) -> dict[str, Any]:
     if "error" in result:
         return result
     return {"issue": result.get("issue")}
+
+
+async def search_issues(
+    query: str | None = None,
+    team_id: str | None = None,
+    filters: dict[str, Any] | None = None,
+    limit: int = 10,
+    include_archived: bool = False,
+    include_comments: bool = False,
+    after: str | None = None,
+) -> dict[str, Any]:
+    """Search Linear issues by text, structured filters, or both."""
+    query = (query or "").strip()
+    issue_filter = dict(filters or {})
+    if team_id:
+        team_filter = {"team": {"id": {"eq": team_id}}}
+        issue_filter = {"and": [issue_filter, team_filter]} if issue_filter else team_filter
+    if not query and not issue_filter:
+        return {"error": "Search query or filters must be provided"}
+    if not 1 <= limit <= 50:
+        return {"error": "Search limit must be between 1 and 50"}
+
+    connection_fields = """
+        totalCount
+        pageInfo {
+            hasNextPage
+            endCursor
+        }
+        nodes {
+            id
+            identifier
+            title
+            priority
+            priorityLabel
+            state { id name type }
+            assignee { id name email }
+            team { id name key }
+            project { id name }
+            labels { nodes { id name } }
+            createdAt
+            updatedAt
+            archivedAt
+            url
+        }
+    """
+    if query:
+        graphql_query = f"""
+        query SearchIssues(
+            $query: String!
+            $filter: IssueFilter
+            $limit: Int!
+            $includeArchived: Boolean
+            $includeComments: Boolean
+            $after: String
+        ) {{
+            searchIssues(
+                term: $query
+                filter: $filter
+                first: $limit
+                includeArchived: $includeArchived
+                includeComments: $includeComments
+                after: $after
+            ) {{
+                {connection_fields}
+            }}
+        }}
+        """
+        variables = {
+            "query": query,
+            "filter": issue_filter or None,
+            "limit": limit,
+            "includeArchived": include_archived,
+            "includeComments": include_comments,
+            "after": after,
+        }
+        connection_name = "searchIssues"
+    else:
+        graphql_query = f"""
+        query FilterIssues(
+            $filter: IssueFilter!
+            $limit: Int!
+            $includeArchived: Boolean
+            $after: String
+        ) {{
+            issues(
+                filter: $filter
+                first: $limit
+                includeArchived: $includeArchived
+                after: $after
+            ) {{
+                {connection_fields}
+            }}
+        }}
+        """
+        variables = {
+            "filter": issue_filter,
+            "limit": limit,
+            "includeArchived": include_archived,
+            "after": after,
+        }
+        connection_name = "issues"
+
+    result = await _graphql_request(graphql_query, variables)
+    if "error" in result:
+        return result
+
+    search_results = result.get(connection_name, {})
+    return {
+        "issues": search_results.get("nodes", []),
+        "total_count": search_results.get("totalCount", 0),
+        "page_info": search_results.get("pageInfo", {}),
+    }
 
 
 async def create_issue(

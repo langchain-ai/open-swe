@@ -3,7 +3,7 @@ from typing import Any
 import httpx
 from markdownify import markdownify
 
-from .http_request import _request_with_safe_redirects
+from ..utils.url_safety import request_with_safe_redirects
 
 FETCH_URL_MAX_CHARS = 100_000
 
@@ -35,7 +35,7 @@ async def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
     """
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response, blocked = await _request_with_safe_redirects(
+            response, blocked = await request_with_safe_redirects(
                 client,
                 "GET",
                 url,
@@ -47,6 +47,8 @@ async def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
                     "status_code": blocked["status_code"],
                     "url": blocked["url"],
                 }
+            if response is None:
+                return {"error": "Fetch URL error: no response received", "url": url}
 
             response.raise_for_status()
 

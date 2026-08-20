@@ -1,15 +1,24 @@
-"""Linear webhook handler — moved out of webapp.py (behavior-identical).
+"""Linear webhook handler — moved out of common.py (behavior-identical).
 
-Helpers and constants stay in webapp.py; they are accessed through the module
-object (``webapp.X``) so tests that monkeypatch them keep working.
+Helpers and constants stay in common.py; they are accessed through the module
+object (``common.X``) so tests that monkeypatch them keep working.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from langchain_core.messages.content import create_text_block
 
-from agent import webapp
+from agent.input_messages import (
+    PersonIdentity,
+    RunInput,
+    human_input,
+    person_introduction,
+    system_input,
+    system_introduction,
+)
+
+from . import common
 
 
 async def process_linear_issue(  # noqa: PLR0912, PLR0915
@@ -22,7 +31,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         repo_config: The repo configuration with owner and name.
     """
     issue_id = issue_data.get("id", "")
-    webapp.logger.info(
+    common.logger.info(
         "Processing Linear issue %s for repo %s/%s",
         issue_id,
         repo_config.get("owner"),
@@ -31,11 +40,11 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
     triggering_comment_id = issue_data.get("triggering_comment_id", "")
     if triggering_comment_id:
-        await webapp.react_to_linear_comment(triggering_comment_id, "👀")
+        await common.react_to_linear_comment(triggering_comment_id, "👀")
 
-    thread_id = webapp.generate_thread_id_from_issue(issue_id)
+    thread_id = common.generate_thread_id_from_issue(issue_id)
 
-    full_issue = await webapp.fetch_linear_issue_details(issue_id)
+    full_issue = await common.fetch_linear_issue_details(issue_id)
     if not full_issue:
         full_issue = issue_data
 
@@ -56,21 +65,22 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             user_email = assignee.get("email")
             user_name = user_name or assignee.get("name")
 
-    webapp.logger.info("User email for issue %s: %s", issue_id, user_email)
+    common.logger.info("User email for issue %s: %s", issue_id, user_email)
 
     title = full_issue.get("title", "No title")
     description = full_issue.get("description") or "No description"
     image_urls: list[str] = []
-    description_image_urls = webapp.extract_image_urls(description)
+    description_image_urls = common.extract_image_urls(description)
     if description_image_urls:
         image_urls.extend(description_image_urls)
-        webapp.logger.debug(
+        common.logger.debug(
             "Found %d image URL(s) in issue description",
             len(description_image_urls),
         )
 
     comments = full_issue.get("comments", {}).get("nodes", [])
-    comments_text = ""
+    included_comments: list[dict[str, Any]] = []
+    image_urls_by_comment_id: dict[str, list[str]] = {}
     triggering_comment = issue_data.get("triggering_comment", "")
     triggering_comment_id = issue_data.get("triggering_comment_id", "")
 
@@ -99,46 +109,51 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             trigger_index = comment_id_to_index.get(triggering_comment_id)
         if trigger_index is not None:
             relevant_comments = comments[trigger_index:]
-            webapp.logger.debug(
+            common.logger.debug(
                 "Using triggering comment index %d to build relevant comments",
                 trigger_index,
             )
         else:
-            relevant_comments = webapp.get_recent_comments(comments, bot_message_prefixes)
+            relevant_comments = common.get_recent_comments(comments, bot_message_prefixes)
 
         if relevant_comments:
-            comments_text = "\n\n## Comments:\n"
             for comment in relevant_comments:
                 user = comment.get("user") or {}
                 author = user.get("name", "User")
                 body = comment.get("body", "")
-                body_image_urls = webapp.extract_image_urls(body)
+                body_image_urls = common.extract_image_urls(body)
                 if body_image_urls:
                     image_urls.extend(body_image_urls)
-                    webapp.logger.debug(
+                    image_urls_by_comment_id[str(comment.get("id", ""))] = body_image_urls
+                    common.logger.debug(
                         "Found %d image URL(s) in comment by %s",
                         len(body_image_urls),
                         author,
                     )
                 if any(body.startswith(prefix) for prefix in bot_message_prefixes):
                     continue
-                comments_text += f"\n**{author}:** {body}\n"
+                included_comments.append(comment)
 
     if triggering_comment and triggering_comment_id not in comment_ids:
-        if not comments_text:
-            comments_text = "\n\n## Comments:\n"
         trigger_author = comment_author.get("name", "Unknown")
         trigger_body = triggering_comment
-        trigger_image_urls = webapp.extract_image_urls(trigger_body)
+        trigger_image_urls = common.extract_image_urls(trigger_body)
         if trigger_image_urls:
             image_urls.extend(trigger_image_urls)
-            webapp.logger.debug(
+            image_urls_by_comment_id[str(triggering_comment_id)] = trigger_image_urls
+            common.logger.debug(
                 "Found %d image URL(s) in triggering comment by %s",
                 len(trigger_image_urls),
                 trigger_author,
             )
-        comments_text += f"\n**{trigger_author}:** {trigger_body}\n"
-        webapp.logger.debug(
+        included_comments.append(
+            {
+                "id": triggering_comment_id,
+                "body": trigger_body,
+                "user": comment_author,
+            }
+        )
+        common.logger.debug(
             "Appended triggering comment %s not present in issue comments list",
             triggering_comment_id or "<missing-id>",
         )
@@ -160,8 +175,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         f"{triggered_by_line}"
         f"## Linear Ticket: {identifier} - Ticket ID: {issue_id}\n\n"
         f"{ticket_url_line}"
-        f"## Description:\n{description}\n"
-        f"{comments_text}\n\n"
+        f"## Description:\n{description}\n\n"
         "Please analyze this issue and implement the necessary changes. "
         "If you open a PR for this issue, make sure the PR description links back to "
         "this Linear ticket and follows this repository's PR conventions for the title, body, "
@@ -169,20 +183,21 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         ".changelog/README.md, and nearby docs before choosing the PR title/body format. "
         f"When you're done, commit and push your changes. {tag_instruction}"
     )
-    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+    description_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
+    image_blocks_by_url: dict[str, dict[str, Any]] = {}
 
     # Resolve the GitHub login from the Linear email via the same user-mapping
     # store Slack uses, so PRs open *as the triggering user* and the thread is
     # tagged for the dashboard.
-    mapped_login = await webapp.resolve_login_from_email_async(user_email) if user_email else None
+    mapped_login = await common.resolve_login_from_email_async(user_email) if user_email else None
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
-        image_urls = webapp.dedupe_urls(image_urls)
-        resolved_model_id = await webapp.resolve_agent_model_id(mapped_login)
-        if not webapp.model_supports_images(resolved_model_id):
-            fallback_model_id, fallback_effort = webapp.default_vision_model_pair()
-            webapp.logger.info(
+        image_urls = common.dedupe_urls(image_urls)
+        resolved_model_id = await common.resolve_agent_model_id(mapped_login)
+        if not common.model_supports_images(resolved_model_id):
+            fallback_model_id, fallback_effort = common.default_vision_model_pair()
+            common.logger.info(
                 "Using vision fallback model %s for %d Linear image(s); configured model %s "
                 "does not support images",
                 fallback_model_id,
@@ -191,15 +206,20 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             )
             resolved_model_id = fallback_model_id
             image_model_override = (fallback_model_id, fallback_effort)
-        webapp.logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
-        webapp.logger.debug("Image URLs: %s", image_urls)
+        common.logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
+        common.logger.debug("Image URLs: %s", image_urls)
 
-        async with httpx.AsyncClient(timeout=webapp.DEFAULT_HTTP_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as client:
             for image_url in image_urls:
-                image_block = await webapp.fetch_image_block(image_url, client)
+                image_block = await common.fetch_image_block(image_url, client)
                 if image_block:
-                    content_blocks.append(image_block)
-        webapp.logger.info("Built %d content block(s) for prompt", len(content_blocks))
+                    image_blocks_by_url[image_url] = cast(dict[str, Any], image_block)
+        description_blocks.extend(
+            image_blocks_by_url[url]
+            for url in common.dedupe_urls(description_image_urls)
+            if url in image_blocks_by_url
+        )
+        common.logger.info("Built %d description content block(s)", len(description_blocks))
 
     linear_project_id = ""
     linear_issue_number = ""
@@ -228,7 +248,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
 
-    await webapp.upsert_agent_thread_owner_metadata(
+    await common.upsert_agent_thread_owner_metadata(
         thread_id,
         source="linear",
         repo_config=repo_config,
@@ -238,16 +258,78 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         source_context={"linear_issue": configurable["linear_issue"]},
     )
 
-    run = await webapp.dispatch_agent_run(
+    run_messages = [
+        system_introduction(
+            {"id": "system:linear-issue", "display_name": "Linear issue", "platform": "linear"}
+        ),
+        system_input(
+            description_blocks if len(description_blocks) > 1 else prompt,
+            {
+                "sender_id": "system:linear-issue",
+                "surface": "linear",
+                "kind": "system",
+                "data": {
+                    "issue": {
+                        "id": issue_id,
+                        "identifier": identifier,
+                        "url": ticket_url,
+                        "repository": f"{repo_config.get('owner')}/{repo_config.get('name')}",
+                        "title": title,
+                    }
+                },
+            },
+        ),
+    ]
+    introduced: set[str] = set()
+    for comment in included_comments:
+        author = comment.get("user") or {}
+        author_key = author.get("id") or author.get("email") or author.get("name") or "unknown"
+        sender_id = f"linear:{str(author_key).replace(' ', '-')}"
+        person: PersonIdentity = {"id": sender_id, "platform": "linear"}
+        if author.get("name"):
+            person["display_name"] = str(author["name"])
+        if author.get("email"):
+            person["email"] = str(author["email"])
+        if sender_id not in introduced:
+            run_messages.append(person_introduction(person))
+            introduced.add(sender_id)
+        body = str(comment.get("body", ""))
+        comment_image_blocks = [
+            image_blocks_by_url[url]
+            for url in common.dedupe_urls(
+                image_urls_by_comment_id.get(str(comment.get("id", "")), [])
+            )
+            if url in image_blocks_by_url
+        ]
+        blocks: str | list[dict[str, Any]] = body
+        if comment_image_blocks:
+            blocks = [
+                cast(dict[str, Any], create_text_block(body)),
+                *comment_image_blocks,
+            ]
+        run_messages.append(
+            human_input(
+                blocks,
+                {
+                    "sender_id": sender_id,
+                    "surface": "linear",
+                    "kind": "human",
+                    "data": {"comment_id": str(comment.get("id", ""))},
+                },
+            )
+        )
+    run_input: RunInput = {"messages": run_messages}
+    run = await common.dispatch_agent_run(
         thread_id,
-        content_blocks,
+        None,
         configurable,
         source="linear",
-        metadata=webapp._AGENT_VERSION_METADATA,
+        input=run_input,
+        metadata=common._AGENT_VERSION_METADATA,
     )
-    webapp.logger.info(
+    common.logger.info(
         "LangGraph run dispatched for thread %s (run=%s)",
         thread_id,
         run.get("run_id") if isinstance(run, dict) else None,
     )
-    await webapp.post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)
+    await common.post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)

@@ -7,8 +7,6 @@ structured output for the eval. Findings are normalized into the legacy
 verbatim form martian published.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 import threading
@@ -16,7 +14,8 @@ from typing import Any, Literal, cast
 
 from langgraph_sdk import get_client
 
-from agent.reviewer_findings import (
+from agent.input_messages import build_run_input
+from agent.review.findings import (
     REVIEW_FINDING_CAP,
     REVIEWER_EVAL_PUBLICATION_KEY,
     Finding,
@@ -155,7 +154,21 @@ async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
         result = await client.runs.wait(
             thread_id,
             assistant_id=get_reviewer_assistant_id(),
-            input={"messages": [{"role": "user", "content": _build_user_message(inputs)}]},
+            input=build_run_input(
+                _build_user_message(inputs),
+                {
+                    "sender_id": "system:reviewer-eval",
+                    "surface": "eval",
+                    "kind": "system",
+                },
+                systems=[
+                    {
+                        "id": "system:reviewer-eval",
+                        "display_name": "Reviewer evaluation",
+                        "platform": "open-swe",
+                    }
+                ],
+            ),
             config={"configurable": _build_configurable(inputs)},
         )
         score_mode = get_score_mode()

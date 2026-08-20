@@ -3,8 +3,6 @@
 Supports GitHub and Azure DevOps Git (pull requests via REST).
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any, Protocol, runtime_checkable
 
@@ -75,9 +73,12 @@ class GitHubPullRequestClient:
         *,
         reviewers: list[dict[str, Any]] | None = None,
         draft: bool | None = None,
+        work_item_ids: list[int] | None = None,
     ) -> tuple[str | None, int | None, bool]:
-        if reviewers is not None:
-            logger.debug("GitHub create_pull_request ignores reviewers (Azure DevOps only)")
+        if reviewers is not None or work_item_ids is not None:
+            logger.debug(
+                "GitHub create_pull_request ignores reviewers/work_item_ids (Azure DevOps only)"
+            )
         async with httpx.AsyncClient(timeout=30.0) as client:
             payload = {
                 "title": title,

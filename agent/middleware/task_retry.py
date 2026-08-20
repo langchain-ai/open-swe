@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 
 _RETURN_TO_MODEL_CODES = frozenset({"invalid_prompt", "context_length_exceeded"})
@@ -10,6 +8,10 @@ _TRANSIENT_ERROR_NAMES = frozenset(
         "APIConnectionError",
         "APITimeoutError",
         "ConnectTimeout",
+        # A subagent's wedged model call (ModelCallTimeoutMiddleware). Subagents
+        # have no fallback middleware, so retrying the delegated task is the
+        # escalation path.
+        "ModelCallTimeoutError",
         "ReadTimeout",
         "TimeoutException",
         "TransportError",

@@ -1,7 +1,5 @@
 """Tests for Azure DevOps LangSmith proxy rules."""
 
-from __future__ import annotations
-
 import base64
 
 from agent.integrations.langsmith import _azure_devops_proxy_rules

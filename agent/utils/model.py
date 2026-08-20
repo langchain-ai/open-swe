@@ -1,10 +1,10 @@
 import asyncio
 import os
-from typing import Any, Literal, TypedDict, Unpack
+from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
 
-from ..dashboard.options import DEFAULT_MODEL_ID
+from ..dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
 from .gateway import gateway_env_default, gateway_overrides
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
@@ -12,6 +12,14 @@ OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
 # primary provider a fair chance before the fallback middleware kicks in.
 DEFAULT_MAX_RETRIES = 6
+
+# Per-request deadline. Without one a stalled provider connection can park a run
+# for as long as the socket stays half-open (observed: a single call wedged for an
+# hour). Every provider we ship accepts ``timeout``; keep it generous enough for
+# max-effort reasoning on a long context, and let ``max_retries`` above turn a
+# stall into a retry instead of a dead run.
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 600.0
+_TIMEOUT_PROVIDER_PREFIXES = ("openai:", "anthropic:", "google_genai:", "fireworks:")
 
 _MODEL_CACHE: dict[
     tuple[str, bool | None, int | None, tuple[tuple[str, str], ...], int | None], Any
@@ -35,7 +43,9 @@ async def close_cached_models() -> None:
     for model in models:
         close = getattr(model, "aclose", None)
         if callable(close):
-            await close()
+            result = close()
+            if asyncio.iscoroutine(result):
+                await result
             continue
         close = getattr(model, "close", None)
         if callable(close):
@@ -44,7 +54,7 @@ async def close_cached_models() -> None:
                 await result
 
 
-OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
+OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 # OpenAI's Responses API only returns human-readable reasoning text when a
 # summary is requested; without it, reasoning happens silently (billed in
 # output tokens) and the reasoning content block arrives empty.
@@ -78,8 +88,10 @@ class ModelKwargs(TypedDict, total=False):
     thinking_level: GoogleThinkingLevel | None
     temperature: float | None
     max_retries: int | None
+    timeout: float | None
     store: bool | None
     include: list[str] | None
+    output_version: Literal["responses/v1"] | None
     model_kwargs: dict[str, object] | None
 
 
@@ -100,6 +112,7 @@ def _configure_openai_responses_kwargs(model_kwargs: dict[str, object]) -> None:
     if model_kwargs.get("use_responses_api") is False:
         return
     model_kwargs.setdefault("store", False)
+    model_kwargs.setdefault("output_version", "responses/v1")
     include = model_kwargs.get("include")
     if include is None:
         model_kwargs["include"] = ["reasoning.encrypted_content"]
@@ -115,13 +128,17 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     gateway ``base_url``/``api_key``/``use_responses_api`` override the direct
     provider defaults below (see :mod:`agent.utils.gateway`).
     """
-    model_kwargs: dict[str, object] = kwargs.copy()
+    model_kwargs: dict[str, object] = dict(kwargs)
     model_kwargs.setdefault("max_retries", DEFAULT_MAX_RETRIES)
+    if model_id.startswith(_TIMEOUT_PROVIDER_PREFIXES):
+        model_kwargs.setdefault("timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS)
 
     if model_id.startswith("openai:"):
-        # Direct-provider default: Responses API over the OpenAI websocket base.
-        # Gateway routing overrides this below (an HTTP(S) proxy can't carry wss).
-        model_kwargs["base_url"] = OPENAI_RESPONSES_WS_BASE_URL
+        model_kwargs["base_url"] = (
+            os.environ.get("OPENAI_BASE_URL")
+            or os.environ.get("OPENAI_API_BASE")
+            or OPENAI_RESPONSES_WS_BASE_URL
+        )
         model_kwargs["use_responses_api"] = True
 
     enabled = gateway_env_default() if use_gateway is None else use_gateway
@@ -134,17 +151,23 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
         _configure_openai_responses_kwargs(model_kwargs)
         _coerce_openai_chat_completions_kwargs(model_kwargs)
 
+    profile_override = model_profile_with_context_override(model_id)
+    if profile_override is not None:
+        model_kwargs["profile"] = profile_override
+
+    max_tokens = model_kwargs.get("max_tokens")
+    max_tokens_key = max_tokens if type(max_tokens) is int else None
     key = (
         model_id,
         use_gateway,
-        model_kwargs.get("max_tokens") if isinstance(model_kwargs.get("max_tokens"), int) else None,
+        max_tokens_key,
         _freeze_model_kwargs(model_kwargs),
         _loop_cache_key(),
     )
     cached = _MODEL_CACHE.get(key)
     if cached is not None:
         return cached
-    model = init_chat_model(model=model_id, **model_kwargs)
+    model = init_chat_model(model=model_id, **cast(dict[str, Any], model_kwargs))
     _MODEL_CACHE[key] = model
     return model
 
@@ -159,7 +182,7 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
     if primary_model_id.startswith("anthropic:"):
         return "openai:gpt-5.6-sol"
     if primary_model_id.startswith("openai:"):
-        return "anthropic:claude-opus-4-8"
+        return "anthropic:claude-opus-5"
     return None
 
 
@@ -190,6 +213,8 @@ def openai_reasoning_for(
         return {"effort": "high", "summary": "auto"}
     if effort == "xhigh":
         return {"effort": "xhigh", "summary": "auto"}
+    if effort == "max":
+        return {"effort": "max", "summary": "auto"}
     return None
 
 

@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { ArrowLeftIcon, GitPullRequestIcon } from "@phosphor-icons/react"
 
 import type { PrReviewComment } from "@/lib/api"
-import { ReviewCommentsMenu } from "@/components/agents/ReviewCommentsMenu"
-import { ReviewMainBody } from "@/components/agents/ReviewMainBody"
+import { ReviewCommentsMenu } from "@/features/reviews/components/ReviewCommentsMenu"
+import { ReviewMainBody } from "@/features/reviews/components/ReviewMainBody"
 import { useSidebarControls } from "@/components/sidebar-layout"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
@@ -28,6 +28,13 @@ function ReviewDetailPage() {
     null
   )
   const closeActiveComment = useCallback(() => setActiveComment(null), [])
+  const updateActiveComment = useCallback(
+    (comment: PrReviewComment) =>
+      setActiveComment((current) =>
+        current?.id === comment.id ? comment : current
+      ),
+    []
+  )
 
   // Collapse the global nav by default while viewing a review (roomy diff),
   // restoring the prior preference on leave. Runs once for the page's lifetime.
@@ -127,6 +134,7 @@ function ReviewDetailPage() {
           detail={detail.data}
           diffFiles={diff.data?.files ?? null}
           openComment={activeComment}
+          onUpdateOpenComment={updateActiveComment}
           onCloseOpenComment={closeActiveComment}
         />
       )}

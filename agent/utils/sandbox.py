@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import os
 from collections.abc import Callable
 from importlib import import_module
@@ -8,6 +9,15 @@ if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
 
 SandboxFactory = Callable[..., Any]
+
+
+class SandboxGoneError(RuntimeError):
+    """The sandbox a thread is bound to no longer exists.
+
+    Distinct from a sandbox that is merely unreachable: a deleted one holds no
+    working tree, so callers recreate instead of failing the run.
+    """
+
 
 SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "langsmith": ("agent.integrations.langsmith", "create_langsmith_sandbox"),
@@ -41,8 +51,10 @@ async def create_sandbox(
     The provider is selected via the SANDBOX_TYPE environment variable.
     Supported values: langsmith (default), daytona, modal, runloop, e2b, local.
 
-    The langsmith provider provisions natively async; the other providers wrap
-    sync SDKs and are bridged onto the event loop with ``asyncio.to_thread``.
+    langsmith and modal provision natively async. local stays on
+    ``asyncio.to_thread`` because ``LocalShellBackend`` setup performs synchronous
+    filesystem I/O. daytona, e2b and runloop stay there because their
+    ``langchain_*`` wrappers bind synchronous SDK handles.
 
     Args:
         sandbox_id: Optional existing sandbox ID to reconnect to.
@@ -55,9 +67,9 @@ async def create_sandbox(
     """
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     factory = _load_sandbox_factory(sandbox_type)
-    if sandbox_type == "langsmith":
-        if snapshot_id is not None:
-            return await factory(sandbox_id, snapshot_id=snapshot_id)
+    if sandbox_type == "langsmith" and snapshot_id is not None:
+        return await factory(sandbox_id, snapshot_id=snapshot_id)
+    if inspect.iscoroutinefunction(factory):
         return await factory(sandbox_id)
     return await asyncio.to_thread(factory, sandbox_id)
 

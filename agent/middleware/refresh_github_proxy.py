@@ -7,8 +7,6 @@ the proxy with a fresh token before each model call when the recorded token is
 near expiry.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

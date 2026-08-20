@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { AutomationEditor } from "@/components/agents/AutomationEditor"
-import { automationTemplateById } from "@/lib/agents/automation-templates"
+import { AutomationEditor } from "@/features/automations/components/AutomationEditor"
+import { automationTemplateById } from "@/features/automations/lib/automation-templates"
 
 interface NewAutomationSearch {
   template?: string

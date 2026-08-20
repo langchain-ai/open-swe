@@ -6,8 +6,6 @@ endpoints surface that state plus live PR details/diff fetched from GitHub
 with the App installation token.
 """
 
-from __future__ import annotations
-
 import ipaddress
 import logging
 import re
@@ -19,10 +17,13 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from fastapi import HTTPException, Response
 
-from ..reviewer_findings import REVIEWER_THREAD_KIND
+from ..review.findings import REVIEWER_THREAD_KIND
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_checks import github_headers
+from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
 from ..utils.thread_ops import langgraph_client
+from ..webhooks.common import fetch_github_pr_metadata
+from ..webhooks.github import trigger_pr_review_from_ref
 from .pr_diff import build_pr_diff_files
 
 logger = logging.getLogger(__name__)
@@ -79,18 +80,24 @@ def _github_error_message(response: httpx.Response) -> str:
     return message_str or detail or fallback
 
 
-async def _github_post(path: str, token: str, *, json: dict[str, Any]) -> Any:
+async def _github_write(
+    method: Literal["POST", "PATCH"], path: str, token: str, *, json: dict[str, Any]
+) -> Any:
     async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
-        response = await client.post(
-            f"{_GITHUB_API}{path}", headers=github_headers(token), json=json
+        response = await client.request(
+            method, f"{_GITHUB_API}{path}", headers=github_headers(token), json=json
         )
     if response.status_code >= 400:
         message = _github_error_message(response)
-        logger.warning("GitHub POST %s failed: %s %s", path, response.status_code, message)
+        logger.warning("GitHub %s %s failed: %s %s", method, path, response.status_code, message)
         # Pass 4xx through verbatim (422 = line not in diff, 403 = perms); collapse
         # 5xx to a 502 so a GitHub outage doesn't masquerade as a client error.
         raise HTTPException(response.status_code if response.status_code < 500 else 502, message)
     return response.json()
+
+
+async def _github_post(path: str, token: str, *, json: dict[str, Any]) -> Any:
+    return await _github_write("POST", path, token, json=json)
 
 
 def reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
@@ -212,7 +219,7 @@ def _finding_counts(findings: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
-def _run_status(thread: dict[str, Any], metadata: dict[str, Any]) -> str:
+def _run_status(thread: ThreadLike, metadata: dict[str, Any]) -> str:
     if thread.get("status") == "busy":
         return "running"
     latest = metadata.get("latest_run_status")
@@ -223,8 +230,8 @@ def _run_status(thread: dict[str, Any], metadata: dict[str, Any]) -> str:
     return "idle"
 
 
-def _thread_review_summary(thread: dict[str, Any]) -> dict[str, Any] | None:
-    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+def _thread_review_summary(thread: ThreadLike) -> dict[str, Any] | None:
+    metadata = thread_metadata(thread)
     pr = metadata.get("pr")
     if not isinstance(pr, dict):
         return None
@@ -442,6 +449,32 @@ async def create_review_comment(
     )
 
 
+async def update_review_comment(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    comment_id: int,
+    *,
+    token: str,
+    viewer_login: str,
+    body: str,
+) -> dict[str, Any]:
+    """Update an inline review comment owned by the signed-in user."""
+    path = f"/repos/{owner}/{repo}/pulls/comments/{comment_id}"
+    comment = as_json_object(await _github_get(path, token))
+    author = as_json_object(comment.get("user")).get("login")
+    pull_request_url = comment.get("pull_request_url")
+    expected_pr_url = f"{_GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
+    if (
+        not isinstance(author, str)
+        or author.lower() != viewer_login.lower()
+        or not isinstance(pull_request_url, str)
+        or pull_request_url.lower() != expected_pr_url.lower()
+    ):
+        raise HTTPException(403, "comment is not editable by this user")
+    return await _github_write("PATCH", path, token, json={"body": body})
+
+
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # Inline comments the reviewer posts carry this hidden marker (see reviewer_publish).
 _OPEN_SWE_COMMENT_RE = re.compile(r"<!--\s*open-swe-review-comment\b")
@@ -455,8 +488,9 @@ def _clean_comment_body(body: str) -> str:
 
 
 def _normalize_review_comment(item: dict[str, Any]) -> dict[str, Any]:
-    body = item.get("body") if isinstance(item.get("body"), str) else ""
-    user = item.get("user") if isinstance(item.get("user"), dict) else {}
+    raw_body = item.get("body")
+    body = raw_body if isinstance(raw_body, str) else ""
+    user = as_json_object(item.get("user"))
     line = item.get("line")
     if not isinstance(line, int):
         original = item.get("original_line")
@@ -519,7 +553,7 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         raise HTTPException(404, "review not found") from exc
     if not isinstance(thread, dict):
         raise HTTPException(404, "review not found")
-    metadata = thread.get("metadata") if isinstance(thread.get("metadata"), dict) else {}
+    metadata = thread_metadata(thread)
     summary = _thread_review_summary(thread)
     if not summary:
         raise HTTPException(404, "review not found")
@@ -697,7 +731,6 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
 
 async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
     from ..utils.slack import GitHubPrRef
-    from ..webapp import trigger_pr_review_from_ref
 
     pr_ref = GitHubPrRef(
         owner=owner,
@@ -715,10 +748,9 @@ async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dic
     """Resolve a PR to its author coding-agent thread without running a review."""
     from dataclasses import asdict
 
-    from ..reviewer_trace_context import resolve_pr_trace
+    from ..review.trace_context import resolve_pr_trace
     from ..utils.github_app import get_github_app_installation_token_with_expiry
     from ..utils.slack import GitHubPrRef
-    from ..webapp import fetch_github_pr_metadata
 
     pr_ref = GitHubPrRef(
         owner=owner,

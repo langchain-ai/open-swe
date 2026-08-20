@@ -5,10 +5,8 @@ comments that arrived while the agent was busy) and injects them as new
 human messages before the next model call.
 """
 
-from __future__ import annotations
-
 import logging
-from typing import Any
+from typing import Any, NotRequired, cast
 
 import httpx
 from langchain.agents.middleware import AgentState, before_model
@@ -18,10 +16,14 @@ from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
 
 from ..dashboard.options import model_supports_images
-from ..utils.dashboard_handoff import (  # noqa: F401
-    DASHBOARD_HANDOFF_INSTRUCTION,
-    DASHBOARD_HANDOFF_MARKER,
+from ..input_messages import (
+    PersonIdentity,
+    SystemIdentity,
+    build_input_messages,
+    dynamic_context_hashes_from_messages,
 )
+from ..prompt import replace_source_guidance
+from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.multimodal import fetch_image_block, vision_not_supported_warning
 
@@ -32,6 +34,8 @@ class LinearNotifyState(AgentState):
     """Extended agent state for tracking Linear notifications."""
 
     linear_messages_sent_count: int
+    plan_approval_blocked: NotRequired[bool]
+    rendered_system_prompt: NotRequired[str | None]
 
 
 async def _resolve_thread_model_id(thread_id: str) -> str | None:
@@ -81,7 +85,7 @@ async def _build_blocks_from_payload(
         for image_url in image_urls:
             image_block = await fetch_image_block(image_url, client)
             if image_block:
-                blocks.append(image_block)
+                blocks.append(cast(dict[str, Any], image_block))
     return blocks
 
 
@@ -89,15 +93,70 @@ def _is_dashboard_queued_message(content: object) -> bool:
     return isinstance(content, dict) and content.get("source") == "dashboard"
 
 
-def _message_update(content_blocks: list[dict[str, Any]], thread_id: str) -> dict[str, Any] | None:
-    if not content_blocks:
+def _dashboard_queued_message_from_owner(content: object) -> bool:
+    return isinstance(content, dict) and content.get("from_owner") is True
+
+
+_QUEUE_SYSTEM: SystemIdentity = {
+    "id": "system:thread-queue",
+    "display_name": "Queued message",
+    "platform": "open-swe",
+}
+
+
+# Each structured envelope has to arrive as its own message: the transcript
+# parses one envelope per message, so packing several into one message's blocks
+# renders the concatenation as raw XML.
+def _merge_text_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    texts = [
+        block["text"]
+        for block in blocks
+        if block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"]
+    ]
+    others = [block for block in blocks if block.get("type") != "text"]
+    merged: list[dict[str, Any]] = [{"type": "text", "text": "\n\n".join(texts)}] if texts else []
+    return merged + others
+
+
+def _flush_blocks(
+    messages: list[dict[str, Any]], blocks: list[dict[str, Any]], injected: set[str]
+) -> None:
+    if not blocks:
+        return
+    messages.extend(
+        cast(
+            list[dict[str, Any]],
+            build_input_messages(
+                _merge_text_blocks(blocks),
+                {"sender_id": _QUEUE_SYSTEM["id"], "surface": "automation", "kind": "system"},
+                systems=[_QUEUE_SYSTEM],
+                injected_dynamic_context_hashes=injected,
+            ),
+        )
+    )
+    blocks.clear()
+
+
+def _message_update(
+    queued: list[dict[str, Any]],
+    thread_id: str,
+    *,
+    plan_approval_blocked: bool | None = None,
+    rendered_system_prompt: str | None = None,
+) -> dict[str, Any] | None:
+    if not queued:
         return None
     logger.info(
-        "Injected %d queued message block(s) into state for thread %s",
-        len(content_blocks),
+        "Injected %d queued message(s) into state for thread %s",
+        len(queued),
         thread_id,
     )
-    return {"messages": [{"role": "user", "content": content_blocks}]}
+    update: dict[str, Any] = {"messages": queued}
+    if plan_approval_blocked is not None:
+        update["plan_approval_blocked"] = plan_approval_blocked
+    if rendered_system_prompt is not None:
+        update["rendered_system_prompt"] = rendered_system_prompt
+    return update
 
 
 async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> str | None:
@@ -163,7 +222,11 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         if store is None:
             return None
 
+        queued_updates: list[dict[str, Any]] = []
         content_blocks: list[dict[str, Any]] = []
+        injected = dynamic_context_hashes_from_messages(state.get("messages"))
+        plan_approval_blocked: bool | None = None
+        dashboard_handoff = False
         pending_autofix = await _consume_pending_autofix_event(store, thread_id)
         if pending_autofix:
             content_blocks.append({"type": "text", "text": pending_autofix})
@@ -174,10 +237,12 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             queued_item = await store.aget(namespace, "pending_messages")
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to get queued item: %s", e)
-            return _message_update(content_blocks, thread_id)
+            _flush_blocks(queued_updates, content_blocks, injected)
+            return _message_update(queued_updates, thread_id)
 
         if queued_item is None:
-            return _message_update(content_blocks, thread_id)
+            _flush_blocks(queued_updates, content_blocks, injected)
+            return _message_update(queued_updates, thread_id)
 
         queued_value = queued_item.value
         queued_messages = queued_value.get("messages", [])
@@ -186,7 +251,8 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         await store.adelete(namespace, "pending_messages")
 
         if not queued_messages:
-            return _message_update(content_blocks, thread_id)
+            _flush_blocks(queued_updates, content_blocks, injected)
+            return _message_update(queued_updates, thread_id)
 
         logger.info(
             "Found %d queued message(s) for thread %s, injecting into state",
@@ -206,13 +272,58 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         for msg in queued_messages:
             content = msg.get("content")
             if _is_dashboard_queued_message(content):
-                content_blocks.append({"type": "text", "text": DASHBOARD_HANDOFF_INSTRUCTION})
+                dashboard_handoff = True
+                handoff = build_input_messages(
+                    DASHBOARD_HANDOFF_BODY,
+                    {
+                        "sender_id": "system:dashboard-handoff",
+                        "surface": "automation",
+                        "kind": "system",
+                    },
+                    systems=[
+                        {
+                            "id": "system:dashboard-handoff",
+                            "display_name": "Dashboard handoff",
+                            "platform": "open-swe",
+                        }
+                    ],
+                    injected_dynamic_context_hashes=injected,
+                )
+                _flush_blocks(queued_updates, content_blocks, injected)
+                queued_updates.extend(cast(list[dict[str, Any]], handoff))
+                if _dashboard_queued_message_from_owner(content):
+                    plan_approval_blocked = False
+                elif plan_approval_blocked is None:
+                    plan_approval_blocked = True
             if isinstance(content, dict) and (
                 "text" in content or "image_urls" in content or "images" in content
             ):
                 logger.debug("Queued message contains text + image URLs")
                 blocks = await _build_blocks_from_payload(content, model_id=resolved_model_id)
-                content_blocks.extend(blocks)
+                sender = content.get("sender")
+                if isinstance(sender, dict) and isinstance(sender.get("id"), str):
+                    person: PersonIdentity = {"id": sender["id"]}
+                    for key in (
+                        "display_name",
+                        "handle",
+                        "platform",
+                        "github_login",
+                        "email",
+                        "timezone",
+                    ):
+                        value = sender.get(key)
+                        if isinstance(value, str):
+                            cast(dict[str, str], person)[key] = value
+                    structured = build_input_messages(
+                        blocks,
+                        {"sender_id": person["id"], "surface": "web", "kind": "human"},
+                        people=[person],
+                        injected_dynamic_context_hashes=injected,
+                    )
+                    _flush_blocks(queued_updates, content_blocks, injected)
+                    queued_updates.extend(cast(list[dict[str, Any]], structured))
+                else:
+                    content_blocks.extend(blocks)
                 continue
             if isinstance(content, list):
                 logger.debug("Queued message contains %d content block(s)", len(content))
@@ -222,7 +333,18 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                 logger.debug("Queued message contains text content")
                 content_blocks.append({"type": "text", "text": content})
 
-        return _message_update(content_blocks, thread_id)  # noqa: TRY300
+        rendered_prompt = state.get("rendered_system_prompt")
+        if dashboard_handoff and isinstance(rendered_prompt, str):
+            rendered_prompt = replace_source_guidance(rendered_prompt, "dashboard")
+        else:
+            rendered_prompt = None
+        _flush_blocks(queued_updates, content_blocks, injected)
+        return _message_update(
+            queued_updates,
+            thread_id,
+            plan_approval_blocked=plan_approval_blocked,
+            rendered_system_prompt=rendered_prompt,
+        )  # noqa: TRY300
     except Exception:
         logger.exception("Error in check_message_queue_before_model")
     return None

@@ -5,14 +5,10 @@
  * cookie set by the OAuth callback rides along on cross-origin calls.
  */
 
-const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
-  /\/$/,
-  ""
-)
+import { dashboardApiBase } from "./api-base"
+import { dashboardApiUrl, dashboardForwardedHeaders } from "./dashboard-fetch"
 
-if (!API_BASE && typeof window !== "undefined") {
-  console.warn("VITE_DASHBOARD_API_BASE_URL is not set")
-}
+const API_BASE = dashboardApiBase()
 
 const GITHUB_IMAGE_HOST_RE =
   /^(?:www\.)?github\.com$|\.githubusercontent\.com$/i
@@ -68,11 +64,12 @@ export function isGithubReauthError(error: unknown): boolean {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
+  const res = await fetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...dashboardForwardedHeaders(),
       ...(init.headers ?? {}),
     },
   })
@@ -92,6 +89,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+export async function transcribeAudio(audio: Blob): Promise<string> {
+  const response = await request<{ text: string }>("/voice/transcriptions", {
+    method: "POST",
+    body: audio,
+    headers: { "Content-Type": audio.type },
+  })
+  return response.text
 }
 
 export interface PRTraceResolutionResult {
@@ -121,6 +127,7 @@ export interface ModelOption {
   efforts: Array<string>
   default_effort: string
   supports_images: boolean
+  context_window?: number | null
 }
 
 export interface OptionsPayload {
@@ -142,7 +149,7 @@ export interface Profile {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  create_prs?: boolean
+  draft_prs?: boolean
   review_draft_prs?: boolean | null
   updated_at?: string
 }
@@ -156,7 +163,7 @@ export interface ProfileUpdate {
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  create_prs?: boolean
+  draft_prs?: boolean
   review_draft_prs?: boolean | null
 }
 
@@ -166,6 +173,7 @@ export interface TeamSettings {
   review_trace_links: boolean
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
+  transcription_model?: string
   fable_enabled?: boolean
   review_tracing_project?: string | null
   org_guidelines?: string | null
@@ -182,6 +190,8 @@ export interface TeamSettings {
   default_grouping_reasoning_effort?: string | null
   default_chat_model?: string | null
   default_chat_reasoning_effort?: string | null
+  default_thread_title_model?: string | null
+  default_thread_title_reasoning_effort?: string | null
   updated_at?: string | null
 }
 
@@ -209,11 +219,13 @@ export interface LangSmithConnectBody {
   endpoint?: string | null
 }
 
-export interface CurrentsCredentialStatus {
+export interface ApiKeyCredentialStatus {
   connected: boolean
   api_key_last4?: string
   updated_at?: string | null
 }
+
+export type CurrentsCredentialStatus = ApiKeyCredentialStatus
 
 export interface CurrentsConnectBody {
   api_key: string
@@ -337,6 +349,46 @@ export interface AgentInstructions {
   updated_at?: string
 }
 
+export interface UserInstructions {
+  login?: string
+  instructions: string
+  created_at?: string
+  updated_at?: string
+  updated_by?: string
+}
+
+export interface Skill {
+  name: string
+  description: string
+  instructions: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface SkillInput {
+  description: string
+  instructions: string
+}
+
+export interface SkillsPage {
+  items: Array<Skill>
+  next_offset: number | null
+}
+
+export interface OrganizationSkillsPage {
+  items: Array<Skill>
+  next_cursor: string | null
+}
+
+export interface SandboxSettings {
+  base_snapshot_id: string | null
+  env_base_snapshot_id: string | null
+  effective_base_snapshot_id: string | null
+  base_snapshot_source: "admin" | "env" | "unset"
+  updated_at: string | null
+  updated_by: string | null
+}
+
 export type RepoSnapshotStatus = "none" | "building" | "ready" | "failed"
 
 export interface RepoSnapshot {
@@ -359,6 +411,49 @@ export interface RepoSnapshot {
   created_by?: string
   created_at?: string
   updated_at?: string
+}
+
+export type EnvironmentSnapshotStatus =
+  "none" | "capturing" | "ready" | "failed"
+
+export interface Environment {
+  slug: string
+  name: string
+  prompt: string
+  repos: Array<string>
+  snapshot_id: string | null
+  snapshot_name: string | null
+  snapshot_status: EnvironmentSnapshotStatus
+  status_message: string | null
+  source_sandbox_id: string | null
+  last_captured_at: string | null
+  created_by?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EnvironmentList {
+  environments: Array<Environment>
+  /** Slug of the environment runs boot from — the one literally named "default". */
+  default_slug: string
+}
+
+export interface EnvironmentUpdateBody {
+  name?: string
+  prompt?: string
+  repos?: Array<string>
+}
+
+/** What a non-admin needs to pick an environment for a new thread. */
+export interface EnvironmentOption {
+  slug: string
+  name: string
+  has_snapshot: boolean
+}
+
+export interface EnvironmentOptionList {
+  environments: Array<EnvironmentOption>
+  default_slug: string
 }
 
 export interface RepoSnapshotUpdateBody {
@@ -610,7 +705,8 @@ export const api = {
   profile: () => request<Profile>("/profile"),
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
-  repos: () => request<ReposPayload>("/repos"),
+  repos: (options?: { refresh?: boolean }) =>
+    request<ReposPayload>(options?.refresh ? "/repos?refresh=true" : "/repos"),
   listReviewStyles: () => request<Array<ReviewStyle>>("/review-styles"),
   createReviewStyle: (full_name: string) =>
     request<ReviewStyle>("/review-styles", {
@@ -642,6 +738,48 @@ export const api = {
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
+  getMyInstructions: () => request<UserInstructions>("/me/instructions"),
+  saveMyInstructions: (instructions: string) =>
+    request<UserInstructions>("/me/instructions", {
+      method: "PUT",
+      body: JSON.stringify({ instructions }),
+    }),
+  deleteMyInstructions: () =>
+    request<void>("/me/instructions", { method: "DELETE" }),
+  listSkills: (offset = 0) =>
+    request<SkillsPage>(`/skills?limit=100&offset=${offset}`),
+  createSkill: (name: string, body: SkillInput) =>
+    request<Skill>("/skills", {
+      method: "POST",
+      body: JSON.stringify({ name, ...body }),
+    }),
+  saveSkill: (name: string, body: SkillInput) =>
+    request<Skill>(`/skills/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteSkill: (name: string) =>
+    request<void>(`/skills/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+  listOrganizationSkills: (cursor: string | null = null) =>
+    request<OrganizationSkillsPage>(
+      `/organization-skills?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
+    ),
+  createOrganizationSkill: (name: string, body: SkillInput) =>
+    request<Skill>("/organization-skills", {
+      method: "POST",
+      body: JSON.stringify({ name, ...body }),
+    }),
+  saveOrganizationSkill: (name: string, body: SkillInput) =>
+    request<Skill>(`/organization-skills/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteOrganizationSkill: (name: string) =>
+    request<void>(`/organization-skills/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
   listAgentInstructions: () =>
     request<Array<AgentInstructions>>("/agent-instructions"),
   createAgentInstructions: (full_name: string) =>
@@ -664,6 +802,12 @@ export const api = {
   deleteAgentInstructions: (full_name: string) =>
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
+    }),
+  getSandboxSettings: () => request<SandboxSettings>("/sandbox-settings"),
+  saveSandboxSettings: (base_snapshot_id: string | null) =>
+    request<SandboxSettings>("/sandbox-settings", {
+      method: "PUT",
+      body: JSON.stringify({ base_snapshot_id }),
     }),
   listRepoSnapshots: () => request<Array<RepoSnapshot>>("/repo-snapshots"),
   createRepoSnapshot: (full_name: string) =>
@@ -691,11 +835,28 @@ export const api = {
     request<void>(`/repo-snapshots/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
+  listEnvironments: () => request<EnvironmentList>("/environments"),
+  listEnvironmentOptions: () =>
+    request<EnvironmentOptionList>("/environments/options"),
+  saveEnvironment: (slug: string, body: EnvironmentUpdateBody) =>
+    request<Environment>(`/environments/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteEnvironment: (slug: string) =>
+    request<void>(`/environments/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+    }),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   saveTeamSettings: (body: TeamSettings) =>
     request<TeamSettings>("/team-settings", {
       method: "PUT",
       body: JSON.stringify(body),
+    }),
+  saveTranscriptionModel: (transcription_model: string) =>
+    request<TeamSettings>("/team-settings/transcription", {
+      method: "PUT",
+      body: JSON.stringify({ transcription_model }),
     }),
   getTeamCredentials: () => request<TeamCredentialsStatus>("/team-credentials"),
   connectDatadog: (body: DatadogConnectBody) =>
@@ -727,18 +888,29 @@ export const api = {
     request<CurrentsCredentialStatus>("/my-credentials/currents", {
       method: "DELETE",
     }),
+  getMyLangSmithStatus: () =>
+    request<ApiKeyCredentialStatus>("/my-credentials/langsmith"),
+  connectMyLangSmith: (body: CurrentsConnectBody) =>
+    request<ApiKeyCredentialStatus>("/my-credentials/langsmith", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  disconnectMyLangSmith: () =>
+    request<ApiKeyCredentialStatus>("/my-credentials/langsmith", {
+      method: "DELETE",
+    }),
   getMyNotionStatus: () =>
     request<NotionCredentialStatus>("/my-credentials/notion"),
   disconnectNotion: () =>
     request<NotionCredentialStatus>("/my-credentials/notion", {
       method: "DELETE",
     }),
-  listEnabledReviewRepos: () =>
+  listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
-  setEnabledReviewRepo: (full_name: string, enabled: boolean) =>
+  setAutoReviewRepo: (full_name: string, runAutomatically: boolean) =>
     request<{ repos: Array<string> }>("/enabled-review-repos", {
       method: "PUT",
-      body: JSON.stringify({ full_name, enabled }),
+      body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
   usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
     request<UsageLeaderboardPayload>(
@@ -810,6 +982,17 @@ export const api = {
   listReviewComments: (owner: string, repo: string, number: number) =>
     request<ReviewCommentsPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
+    ),
+  updateReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    commentId: number,
+    body: string
+  ) =>
+    request<ReviewCommentResult>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments/${commentId}`,
+      { method: "PATCH", body: JSON.stringify({ body }) }
     ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),

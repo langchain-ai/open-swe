@@ -1,7 +1,5 @@
 """Parse Azure DevOps Service Hook payloads (no REST calls)."""
 
-from __future__ import annotations
-
 import uuid
 from typing import Any
 from urllib.parse import urlparse

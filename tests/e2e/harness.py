@@ -10,18 +10,17 @@ Nothing here touches agent logic — it only stands in for the SaaS boundaries
 and renders their state back as a user-facing UI.
 """
 
-from __future__ import annotations
-
 import hashlib
 import hmac
 import json
 import os
 import sys
 import time
+import uuid
 from html import escape
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -59,14 +58,23 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
     },
 }
 
+from langgraph_sdk import get_client  # noqa: E402
+
+from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
-from agent.webapp import app, generate_thread_id_from_slack_thread  # noqa: E402
+from agent.utils.slack import lookup_slack_thread_id  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
 STATIC_DIR = Path(__file__).parent / "static"
 
 CURRENT_THREAD: dict[str, str | None] = {"channel": DEMO_CHANNEL, "thread_ts": None}
+LAST_SLACK_EVENT: dict[str, Any] = {"payload": None}
+
+# Message timestamps restart from a fixed base on every boot, but the store the
+# webhook dedupes against is persisted — so event ids need a per-process salt or
+# a rerun's mentions look like redeliveries of the previous run's.
+EVENT_ID_SALT = uuid.uuid4().hex[:8]
 
 fakes.seed_bare_remote()
 
@@ -75,7 +83,15 @@ fakes.seed_bare_remote()
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
+    LAST_SLACK_EVENT["payload"] = None
+    return JSONResponse({"ok": True})
+
+
+@app.post("/control/prepare-sandbox-repo")
+async def control_prepare_sandbox_repo() -> JSONResponse:
+    fakes.seed_sandbox_repo()
     return JSONResponse({"ok": True})
 
 
@@ -86,59 +102,206 @@ async def control_state() -> JSONResponse:
     )
 
 
-@app.post("/mock/slack/send")
-async def slack_send(request: Request) -> JSONResponse:
-    """Simulate a user posting in Slack: store the message, then deliver the
-    signed Events-API webhook to the real /webhooks/slack route."""
-    form = await request.json()
-    text = str(form.get("text", ""))
-    mention_bot = bool(form.get("mention_bot", True))
-    # Sender defaults to the first test user (Alice) — the canonical owner the
-    # automated tests log in as; the mock UI passes the chosen test user.
-    user_id = str(form.get("user") or TEST_USERS[0]["slack_id"])
-    channel = DEMO_CHANNEL
+@app.get("/control/snapshots")
+async def control_snapshots() -> JSONResponse:
+    """Snapshot captures/deletes the environment tools asked the platform for."""
+    return JSONResponse({"captured": fakes.SNAPSHOTS, "deleted": fakes.DELETED_SNAPSHOTS})
 
-    ts = fakes.new_thread_ts()
-    CURRENT_THREAD["thread_ts"] = ts
-    fakes.add_slack_message(channel, ts, user=user_id, text=text, is_bot=False)
 
-    payload = {
-        "type": "event_callback",
-        "event_id": f"Ev{ts}",
-        "authorizations": [{"user_id": BOT_USER_ID}],
-        "event": {
-            "type": "app_mention" if mention_bot else "message",
-            "channel": channel,
-            "user": user_id,
-            "text": text,
-            "ts": ts,
-            "thread_ts": ts,
-        },
-    }
+@app.get("/control/last-system-prompt")
+async def control_last_system_prompt() -> JSONResponse:
+    """The system prompt of the most recent model call (what the agent was told)."""
+    from fake_llm import LAST_SYSTEM_PROMPT
+
+    return JSONResponse({"text": LAST_SYSTEM_PROMPT["text"]})
+
+
+@app.post("/control/repo-private")
+async def control_repo_private(request: Request) -> JSONResponse:
+    body = await request.json()
+    value = bool(body.get("private", False))
+    fakes.set_repo_private(value)
+    return JSONResponse({"ok": True, "private": value})
+
+
+@app.get("/control/queued")
+async def control_queued(thread_id: str = "") -> JSONResponse:
+    """Count the follow-ups parked on a busy thread's message queue.
+
+    While the agent is busy, debounced follow-ups accumulate here (namespace
+    ``("queue", thread_id)``) until the active run drains them together at its
+    next model call. Lets the E2E assert coalescing instead of per-message runs."""
+    from langgraph_sdk import get_client
+
+    value: Any = None
+    try:
+        client = get_client(url=os.environ["LANGGRAPH_URL"])
+        item = await client.store.get_item(("queue", thread_id), key="pending_messages")
+        value = item.get("value") if item else None
+    except Exception:  # noqa: BLE001
+        value = None
+    messages = value.get("messages") if isinstance(value, dict) else None
+    return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
+
+
+async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> httpx.Response:
+    """POST a signed Events-API delivery to the real /webhooks/slack route."""
     raw = json.dumps(payload).encode()
     req_ts = str(int(time.time()))
     base = f"v0:{req_ts}:{raw.decode()}".encode()
     sig = "v0=" + hmac.new(SLACK_SIGNING_SECRET.encode(), base, hashlib.sha256).hexdigest()
+    headers = {
+        "X-Slack-Signature": sig,
+        "X-Slack-Request-Timestamp": req_ts,
+        "Content-Type": "application/json",
+    }
+    if retry_num:
+        headers["X-Slack-Retry-Num"] = retry_num
+        headers["X-Slack-Retry-Reason"] = "http_timeout"
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://harness") as client:
-        resp = await client.post(
-            "/webhooks/slack",
-            content=raw,
-            headers={
-                "X-Slack-Signature": sig,
-                "X-Slack-Request-Timestamp": req_ts,
-                "Content-Type": "application/json",
-            },
-        )
+        return await client.post("/webhooks/slack", content=raw, headers=headers)
+
+
+async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx.Response:
+    raw = urlencode({"payload": json.dumps(payload)}).encode()
+    req_ts = str(int(time.time()))
+    base = f"v0:{req_ts}:{raw.decode()}".encode()
+    sig = "v0=" + hmac.new(SLACK_SIGNING_SECRET.encode(), base, hashlib.sha256).hexdigest()
+    headers = {
+        "X-Slack-Signature": sig,
+        "X-Slack-Request-Timestamp": req_ts,
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://harness") as client:
+        return await client.post("/webhooks/slack/interactivity", content=raw, headers=headers)
+
+
+async def _slack_send_result(payload: dict[str, Any], resp: httpx.Response) -> JSONResponse:
+    event = payload["event"]
+    channel = str(event["channel"])
+    thread_ts = str(event["thread_ts"])
+    thread_id = await lookup_slack_thread_id(
+        get_client(url=os.environ["LANGGRAPH_URL"]), channel, thread_ts
+    )
     return JSONResponse(
         {
-            "thread_ts": ts,
-            "thread_id": generate_thread_id_from_slack_thread(channel, ts),
+            "thread_ts": thread_ts,
+            "thread_id": thread_id,
+            "event_id": payload.get("event_id"),
             "webhook_status": resp.status_code,
             "webhook": resp.json(),
         }
     )
+
+
+@app.post("/control/forget-slack-events")
+async def control_forget_slack_events() -> JSONResponse:
+    """Drop the in-process record of handled Slack events.
+
+    A redelivery normally lands on a different instance than the original, which
+    only has the LangGraph store to dedupe on. Clearing the local cache lets the
+    E2E exercise that path instead of the same-process fast path."""
+    from agent.utils.slack_events import reset_slack_event_claims
+
+    reset_slack_event_claims()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/mock/slack/send")
+async def slack_send(request: Request) -> JSONResponse:
+    """Simulate a user posting in Slack: store the message, then deliver the
+    signed Events-API webhook to the real /webhooks/slack route.
+
+    ``redeliver`` replays the previous delivery verbatim — same ``event_id``, no
+    new Slack message — which is what Slack does when it doesn't get a 2xx in
+    three seconds."""
+    form = await request.json()
+    if form.get("redeliver"):
+        payload = LAST_SLACK_EVENT.get("payload")
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="No Slack event to redeliver")
+        resp = await _deliver_slack_event(payload, str(form.get("retry_num") or "1"))
+        return await _slack_send_result(payload, resp)
+
+    text = str(form.get("text", ""))
+    mention_bot = bool(form.get("mention_bot", True))
+    channel_type = str(form.get("channel_type") or "")
+    # Sender defaults to the first test user (Alice) — the canonical owner the
+    # automated tests log in as; the mock UI passes the chosen test user.
+    user_id = str(form.get("user") or TEST_USERS[0]["slack_id"])
+    channel = str(form.get("channel") or ("D_DEMO" if channel_type == "im" else DEMO_CHANNEL))
+
+    # ``thread_ts`` replies into an existing thread (a distinct message ts under
+    # the same thread); omitting it opens a fresh thread, as the mock UI does.
+    reply_thread_ts = str(form.get("thread_ts") or "")
+    if reply_thread_ts:
+        thread_ts = reply_thread_ts
+        event_ts = fakes.add_slack_message(
+            channel, thread_ts, user=user_id, text=text, is_bot=False
+        )
+    else:
+        thread_ts = fakes.new_thread_ts()
+        fakes.add_slack_message(channel, thread_ts, user=user_id, text=text, is_bot=False)
+        event_ts = thread_ts
+    CURRENT_THREAD["channel"] = channel
+    CURRENT_THREAD["thread_ts"] = thread_ts
+
+    event = {
+        "type": "app_mention" if mention_bot else "message",
+        "channel": channel,
+        "user": user_id,
+        "text": text,
+        "ts": event_ts,
+        "thread_ts": thread_ts,
+    }
+    if channel_type:
+        event["channel_type"] = channel_type
+    payload = {
+        "type": "event_callback",
+        "event_id": f"Ev{EVENT_ID_SALT}{event_ts}",
+        "authorizations": [{"user_id": BOT_USER_ID}],
+        "event": event,
+    }
+    LAST_SLACK_EVENT["payload"] = payload
+    return await _slack_send_result(payload, await _deliver_slack_event(payload))
+
+
+@app.post("/mock/slack/action")
+async def slack_action(request: Request) -> JSONResponse:
+    body = await request.json()
+    action = body.get("action")
+    channel_id = str(CURRENT_THREAD.get("channel") or "")
+    thread_ts = str(body.get("thread_ts") or CURRENT_THREAD.get("thread_ts") or "")
+    message_ts = str(body.get("message_ts") or "")
+    user_id = str(body.get("user") or TEST_USERS[0]["slack_id"])
+    if not isinstance(action, dict) or not channel_id or not thread_ts or not message_ts:
+        raise HTTPException(status_code=400, detail="Missing Slack action context")
+    source_message = fakes.slack_message(channel_id, thread_ts, message_ts)
+    if source_message is None:
+        raise HTTPException(status_code=404, detail="Slack message not found")
+
+    payload = {
+        "type": "block_actions",
+        "user": {"id": user_id},
+        "channel": {"id": channel_id},
+        "container": {
+            "channel_id": channel_id,
+            "message_ts": message_ts,
+            "thread_ts": thread_ts,
+        },
+        "message": {
+            "ts": message_ts,
+            "thread_ts": thread_ts,
+            "text": source_message["text"],
+            "blocks": source_message["blocks"],
+        },
+        "actions": [{**action, "action_ts": fakes.next_slack_ts()}],
+    }
+    response = await _deliver_slack_interaction(payload)
+    return JSONResponse(response.json(), status_code=response.status_code)
 
 
 @app.post("/control/login")
@@ -211,17 +374,17 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
             for u in TEST_USERS
         )
         return HTMLResponse(
-            f"""<!doctype html><meta charset=utf-8><title>GitHub · Authorize open-swe</title>
+            f"""<!doctype html><meta charset=utf-8><title>GitHub · Authorize Open SWE</title>
             <body style="font-family:system-ui;max-width:420px;margin:3rem auto;padding:0 1rem">
             <main data-testid="fake-github-login">
-              <h1 style="font-size:1.1rem">Authorize open-swe</h1>
+              <h1 style="font-size:1.1rem">Authorize Open SWE</h1>
               <p style="color:#888;font-size:0.9rem">Pick a fake GitHub account to continue.</p>
               <form method=get action=/fake-gh/login/oauth/authorize>
                 <input type=hidden name=redirect_to value="{escape(dest, quote=True)}">
                 <label>GitHub user
                   <select name=login style="font:inherit;padding:0.4rem">{options}</select>
                 </label>
-                <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Authorize open-swe</button>
+                <button style="font:inherit;padding:0.45rem 0.9rem;cursor:pointer">Authorize Open SWE</button>
               </form>
             </main>
             </body>"""
@@ -250,17 +413,54 @@ async def control_logout() -> JSONResponse:
     return resp
 
 
-# --- serve the REAL built ui/ SPA, same-origin so the session cookie works ----
+# --- serve the REAL built ui/ app, same-origin so the session cookie works ----
 # The "Open in Web" link (DASHBOARD_BASE_URL/agents/{id}) lands on the real app;
 # it calls /dashboard/api/* (same origin) and streams via the dashboard proxy.
+#
+# HTML comes from the app's own Nitro server (started by ``global-setup.ts``) so
+# the tests exercise server rendering, the root session gate, and hydration —
+# serving the prerendered shell here would skip all three. Static assets are
+# still read off disk: same bytes, no extra hop.
 UI_PUBLIC = REPO_ROOT / "ui" / ".output" / "public"
 _ASSETS_ROOT = (UI_PUBLIC / "assets").resolve()
+UI_SERVER_URL = os.environ.get("E2E_UI_SERVER", "http://127.0.0.1:3100").rstrip("/")
+
+# Set by the proxy: the response is already decoded and re-framed by httpx.
+_DROPPED_RESPONSE_HEADERS = {"content-encoding", "content-length", "transfer-encoding"}
+
+
+async def _render_app_route(request: Request) -> Response:
+    body = await request.body()
+    # Host is forwarded verbatim, as a reverse proxy does: the app derives its own
+    # origin from it, and swapping in the UI server's port would make every render
+    # look like it came from a different origin than the API.
+    headers = dict(request.headers)
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as client:
+            upstream = await client.request(
+                request.method,
+                f"{UI_SERVER_URL}{request.url.path}",
+                params=dict(request.query_params),
+                headers=headers,
+                content=body,
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            502, f"UI server unreachable at {UI_SERVER_URL} — is global-setup running it?"
+        ) from exc
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers={
+            k: v for k, v in upstream.headers.items() if k.lower() not in _DROPPED_RESPONSE_HEADERS
+        },
+    )
 
 
 def _ui_file(name: str) -> FileResponse:
     path = UI_PUBLIC / name
     if not path.is_file():
-        raise HTTPException(404, f"{name} not built — run `bun run build` in ui/")
+        raise HTTPException(404, f"{name} not built — run `pnpm run build` at the repo root")
     return FileResponse(path)
 
 
@@ -299,22 +499,33 @@ async def ui_logo_mark() -> FileResponse:
     return _ui_file("logo-mark.png")
 
 
-# Client routes used by the handoff tests: serve the SPA shell; the client
-# router boots at the current URL. Kept explicit (no catch-all) so LangGraph's
-# own root routes — which the dashboard proxy calls server-side — are untouched.
+# App routes used by the handoff tests. Kept explicit (no catch-all) so
+# LangGraph's own root routes — which the dashboard proxy calls server-side —
+# are untouched.
+@app.get("/agents", response_class=HTMLResponse)
+async def ui_agents_home(request: Request) -> Response:
+    return await _render_app_route(request)
+
+
 @app.get("/agents/{thread_id}", response_class=HTMLResponse)
-async def ui_agents_thread(thread_id: str) -> FileResponse:  # noqa: ARG001
-    return _ui_file("_shell.html")
+async def ui_agents_thread(request: Request, thread_id: str) -> Response:  # noqa: ARG001
+    return await _render_app_route(request)
 
 
 @app.get("/agents/{thread_id}/plan", response_class=HTMLResponse)
-async def ui_agents_plan(thread_id: str) -> FileResponse:  # noqa: ARG001
-    return _ui_file("_shell.html")
+async def ui_agents_plan(request: Request, thread_id: str) -> Response:  # noqa: ARG001
+    return await _render_app_route(request)
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def ui_login() -> FileResponse:
-    return _ui_file("_shell.html")
+async def ui_login(request: Request) -> Response:
+    return await _render_app_route(request)
+
+
+# Server functions and the SSR data stream the rendered pages fetch after load.
+@app.api_route("/_serverFn/{fn_path:path}", methods=["GET", "POST"])
+async def ui_server_fn(request: Request, fn_path: str) -> Response:  # noqa: ARG001
+    return await _render_app_route(request)
 
 
 @app.get("/mock/users")
@@ -324,16 +535,24 @@ async def mock_users() -> JSONResponse:
 
 
 @app.get("/mock/slack/messages")
-async def slack_messages() -> JSONResponse:
-    msgs = fakes.slack_messages(CURRENT_THREAD["channel"])
+async def slack_messages(channel: str = "", thread_ts: str = "") -> JSONResponse:
+    selected_channel = channel or CURRENT_THREAD["channel"]
+    assert selected_channel is not None
+    msgs = (
+        fakes.slack_thread(selected_channel, thread_ts)
+        if thread_ts
+        else fakes.slack_messages(selected_channel)
+    )
     return JSONResponse(
         [
             {
+                "channel": selected_channel,
                 "user": m["user"],
                 "text": m["text"],
                 "is_bot": m["is_bot"],
                 "ts": m["ts"],
                 "thread_ts": m["thread_ts"],
+                "blocks": m["blocks"],
             }
             for m in msgs
         ]
@@ -415,7 +634,7 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "body": pr["body"],
         "user": {"login": pr["author"]},
         "head": {"ref": pr["head"]},
-        "base": {"ref": pr["base"]},
+        "base": {"ref": pr["base"], "repo": {"private": fakes.repo_private()}},
         "additions": pr["additions"],
         "deletions": pr["deletions"],
         "changed_files": len(pr["files"]),
@@ -424,7 +643,7 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/fake-gh/repos/{owner}/{repo}")
 async def gh_get_repo(owner: str, repo: str) -> JSONResponse:
-    return JSONResponse({"full_name": f"{owner}/{repo}", "private": False})
+    return JSONResponse({"full_name": f"{owner}/{repo}", "private": fakes.repo_private()})
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/branches/{branch:path}")
@@ -481,16 +700,24 @@ async def slack_post_message(request: Request) -> JSONResponse:
     return _ok({"ts": ts, "message": {"ts": ts}})
 
 
+@app.post("/fake-slack/chat.update")
+async def slack_update_message(request: Request) -> JSONResponse:
+    body = await request.json()
+    message = fakes.update_slack_message(
+        str(body.get("channel") or ""),
+        str(body.get("ts") or ""),
+        text=str(body.get("text") or ""),
+        blocks=body.get("blocks"),
+    )
+    if message is None:
+        return JSONResponse({"ok": False, "error": "message_not_found"})
+    return _ok({"ts": message["ts"], "message": message})
+
+
 @app.post("/fake-slack/chat.postEphemeral")
 async def slack_post_ephemeral(request: Request) -> JSONResponse:
     await request.body()
     return _ok({"message_ts": fakes.next_slack_ts()})
-
-
-@app.post("/fake-slack/assistant.threads.setStatus")
-async def slack_set_status(request: Request) -> JSONResponse:
-    await request.body()
-    return _ok()
 
 
 @app.post("/fake-slack/reactions.add")

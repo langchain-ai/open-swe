@@ -1,9 +1,9 @@
 <div align="center">
   <a href="https://github.com/langchain-ai/open-swe">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="static/dark.svg">
-      <source media="(prefers-color-scheme: light)" srcset="static/light.svg">
-      <img alt="Open SWE Logo" src="static/dark.svg" width="35%">
+      <source media="(prefers-color-scheme: dark)" srcset="assets/dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="assets/light.svg">
+      <img alt="Open SWE Logo" src="assets/dark.svg" width="35%">
     </picture>
   </a>
 </div>
@@ -53,7 +53,7 @@ create_deep_agent(
 
 Every task runs in its own **isolated cloud sandbox** — a remote Linux environment with full shell access. The repo is cloned in, the agent gets full permissions, and the blast radius of any mistake is fully contained. No production access, no confirmation prompts.
 
-Open SWE supports multiple sandbox providers out of the box — [Modal](https://modal.com/), [Daytona](https://www.daytona.io/), [Runloop](https://www.runloop.ai/), [E2B](https://e2b.dev/), and [LangSmith](https://smith.langchain.com/) — and you can plug in your own. See the [Customization Guide](CUSTOMIZATION.md#1-sandbox) for details.
+Open SWE supports multiple sandbox providers out of the box — [Modal](https://modal.com/), [Daytona](https://www.daytona.io/), [Runloop](https://www.runloop.ai/), [E2B](https://e2b.dev/), and [LangSmith](https://smith.langchain.com/) — and you can plug in your own. See the [Customization Guide](docs/CUSTOMIZATION.md#1-sandbox) for details.
 
 This follows the principle all three companies converge on: **isolate first, then give full permissions inside the boundary.**
 
@@ -71,12 +71,14 @@ Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE 
 | `fetch_url` | Fetch web pages as markdown |
 | `http_request` | API calls (GET, POST, etc.) |
 | `linear_comment` | Post updates to Linear tickets |
+| `linear_search_issues` | Search Linear issues by free text |
+| `output_iframe` | Render sandboxed HTML visualizations in the dashboard |
 | `slack_add_reaction` | React to Slack messages |
 | `slack_thread_reply` | Reply in Slack threads |
 
-GitHub operations are performed with `GH_TOKEN=dummy gh` inside the sandbox, backed by the LangSmith proxy. Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `write_todos`, and `task` (subagent spawning).
+GitHub operations are performed with `gh` inside the sandbox, backed by the LangSmith proxy. Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `delete`, `ls`, `glob`, `grep`, `execute`, and `task` (subagent spawning).
 
-**Optional observability tools (server-side):** Admins can connect Datadog and LangSmith from team settings (Admin → Observability credentials). When connected, the agent gains Datadog tools (via Datadog's hosted MCP server, default `toolsets=core`) and read-only LangSmith tools (`langsmith_get_trace`, `langsmith_list_runs`). These run in the LangGraph server process using credentials encrypted at rest — the sandbox never holds Datadog or LangSmith keys. They are loaded **only for runs triggered by an authorized user** (admins, plus any emails in `OBSERVABILITY_AUTHORIZED_EMAILS`), so a prompt-injected run from an untrusted contributor cannot reach team observability data. Use scoped, read-oriented keys regardless: observability data (logs, traces) is attacker-influenced content that can carry prompt injection, and the agent has network egress — the same residual-risk class as `web_search` / `fetch_url`.
+**Optional observability tools (server-side):** Admins can connect Datadog and LangSmith from team settings (Admin → Observability credentials). When connected, the agent gains Datadog tools (via Datadog's hosted MCP server, default `toolsets=core`) and read-only LangSmith tools (`langsmith_get_trace`, `langsmith_list_runs`). These run in the LangGraph server process using credentials encrypted at rest — the sandbox never holds Datadog or LangSmith keys. They are loaded **only for runs triggered by an authorized user** (admins plus any emails in `OBSERVABILITY_AUTHORIZED_EMAILS`; active members of `ALLOWED_GITHUB_ORGS` also receive LangSmith tools), so a prompt-injected run from an untrusted contributor cannot reach team observability data. Use scoped, read-oriented keys regardless: observability data (logs, traces) is attacker-influenced content that can carry prompt injection, and the agent has network egress — the same residual-risk class as `web_search` / `fetch_url`.
 
 **Optional Corridor guardrails (server-side MCP):** Set `CORRIDOR_API_TOKEN` (or `CORRIDOR_MCP_TOKEN` / `CORRIDOR_TOKEN`) to load Corridor's hosted MCP server for each agent run. Open SWE exposes only Corridor's `analyzePlan` tool. `CORRIDOR_MCP_URL` defaults to `https://app.corridor.dev/api/mcp`; if set explicitly, Open SWE only accepts the same HTTPS host and `/api/mcp` path. Tokens are sent via `Authorization: Bearer ...` from the LangGraph server process and are never placed in the sandbox. A legacy `?token=...` URL is accepted and normalized into the header form.
 
@@ -91,7 +93,7 @@ Open SWE gathers context from two sources:
 
 Open SWE's orchestration has two layers:
 
-**Subagents:** The Deep Agents framework natively supports spawning child agents via the `task` tool. The main agent can fan out independent subtasks to isolated subagents — each with its own middleware stack, todo list, and file operations. This is similar to Ramp's child sessions for parallel work.
+**Subagents:** The Deep Agents framework natively supports spawning child agents via the `task` tool. The main agent can fan out independent subtasks to isolated subagents — each with its own middleware stack and file operations. This is similar to Ramp's child sessions for parallel work.
 
 **Middleware:** Deterministic middleware hooks run around the agent loop:
 
@@ -112,7 +114,7 @@ Each invocation creates a deterministic thread ID, so follow-up messages on the 
 ### 7. Validation — Prompt-Driven
 
 The agent is instructed to run linters, formatters, and tests before committing, and is responsible end-to-end for committing, pushing, opening/updating the draft PR, and replying in the source channel.
-This is an area where you can extend Open SWE for your org: add deterministic CI checks, visual verification, or review gates as additional middleware. See the [Customization Guide](CUSTOMIZATION.md#6-middleware) for how.
+This is an area where you can extend Open SWE for your org: add deterministic CI checks, visual verification, or review gates as additional middleware. See the [Customization Guide](docs/CUSTOMIZATION.md#6-middleware) for how.
 
 ---
 
@@ -140,13 +142,15 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 - **Opens PRs automatically** — commits changes and opens a draft PR when done, linked back to your ticket
 - **Subagent support** — the agent can spawn child agents for parallel subtasks
 - **Web dashboard** — a companion app (in `ui/`) for GitHub login, per-user model/profile settings, team defaults, enabled-repo and review-style management, user mappings, and an Agents chat UI
+- **Desktop app (experimental)** — an Electron wrapper (in `desktop/`) around the same dashboard; the web UI remains the recommended way to use Open SWE
 
 ---
 
 ## Getting Started
 
-- **[Installation Guide](INSTALLATION.md)** — local dev (backend + dashboard), GitHub App creation, LangSmith, Linear/Slack/GitHub triggers, and production deployment
-- **[Customization Guide](CUSTOMIZATION.md)** — swap the sandbox, model, tools, triggers, system prompt, and middleware for your org
+- **[Installation Guide](docs/INSTALLATION.md)** — local dev (backend + dashboard), GitHub App creation, LangSmith, Linear/Slack/GitHub triggers, and production deployment
+- **macOS Desktop beta** — clone this repository and run `make install-desktop` from the root to install or update the app
+- **[Customization Guide](docs/CUSTOMIZATION.md)** — swap the sandbox, model, tools, triggers, system prompt, and middleware for your org
 
 ## License
 

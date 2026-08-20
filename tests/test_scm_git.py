@@ -1,7 +1,5 @@
 """Tests for Azure DevOps git auth injection and branch validation."""
 
-from __future__ import annotations
-
 import pytest
 
 from agent.utils.scm_git import (

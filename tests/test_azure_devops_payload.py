@@ -1,7 +1,5 @@
 """Tests for Azure DevOps Service Hook payload parsing."""
 
-from __future__ import annotations
-
 from agent.utils.azure_devops_payload import (
     azure_devops_service_hook_should_process,
     extract_work_item_id_from_payload,

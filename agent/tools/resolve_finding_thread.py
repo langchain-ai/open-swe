@@ -1,10 +1,8 @@
-from __future__ import annotations
-
 from typing import Any
 
 from langgraph.config import get_config
 
-from ..reviewer_findings import (
+from ..review.findings import (
     Finding,
     ReviewerThreadMissingError,
     get_finding,
@@ -13,14 +11,14 @@ from ..reviewer_findings import (
     update_finding_fields,
     update_finding_surface,
 )
-from ..reviewer_publish import (
+from ..review.publish import (
     fetch_pr_review_threads,
     fetch_review_thread_id_for_comment,
     render_resolution_comment,
     reply_to_review_comment,
     resolve_review_thread,
 )
-from ..reviewer_reconcile import reconcile_findings_with_review_threads
+from ..review.reconcile import reconcile_findings_with_review_threads
 from ..utils.github_token import get_github_token
 from ..utils.reviewer_outcomes import emit_finding_status_outcome
 
@@ -82,7 +80,7 @@ async def resolve_finding_thread(
         return thread_missing_tool_result(exc)
     if result.get("success") and isinstance(result.get("finding"), dict):
         thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
-        emit_finding_status_outcome(
+        await emit_finding_status_outcome(
             result["finding"],
             status,
             configurable=configurable,
@@ -224,7 +222,7 @@ def _str_list(value: Any) -> list[str]:
     return [item for item in value if isinstance(item, str) and item]
 
 
-def _comment_ids_for_finding(finding: dict[str, Any]) -> list[int]:
+def _comment_ids_for_finding(finding: Finding) -> list[int]:
     comment_ids = _int_list(finding.get("github_review_comment_ids"))
     comment_id = finding.get("github_review_comment_id")
     if isinstance(comment_id, int) and comment_id not in comment_ids:
@@ -232,7 +230,7 @@ def _comment_ids_for_finding(finding: dict[str, Any]) -> list[int]:
     return comment_ids
 
 
-def _thread_ids_for_finding(finding: dict[str, Any]) -> list[str]:
+def _thread_ids_for_finding(finding: Finding) -> list[str]:
     thread_ids = _str_list(finding.get("github_review_thread_ids"))
     thread_id = finding.get("github_review_thread_id")
     if isinstance(thread_id, str) and thread_id and thread_id not in thread_ids:

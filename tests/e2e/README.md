@@ -22,6 +22,10 @@ code runs for real.
 | The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
 | `api.github.com` REST (PR create) + dashboard GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github`                |
 | `slack.com/api` (post message, etc.)                             | **fake** (`/fake-slack/...`), thread rendered at `/mock/slack`             |
+| Environment tools, store records, snapshot naming + status       | **real**                                                                   |
+| Electron UI, main process, IPC, git diff                         | **real**                                                                   |
+| Pinned uv `dcode --acp`, tools, and local project                | **real**; only its model class points at `fake_llm.py`                      |
+| LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the local sandbox has nothing to snapshot         |
 | GitHub App token mint, `api.github.com/user` identity            | stubbed (offline)                                                          |
 
 The fake GitHub/Slack stores are the single source of truth the mock UIs render,
@@ -42,6 +46,8 @@ so what Playwright asserts on is exactly what the real agent produced.
 - `static/{slack,github}.html` — the mock Slack/GitHub UIs (external SaaS we can't
   run locally). The dashboard is **not** mocked — it's the real `ui/` app.
 - `global-setup.ts` — builds the real `ui/` SPA (once) so the harness can serve it.
+- `playwright.desktop.config.ts` + `tests/desktop.spec.ts` — launch Electron and drive
+  the real pinned dcode ACP flow against the same fake model and GitHub state.
 
 ## The dashboard — the real `ui/` app
 
@@ -52,17 +58,23 @@ app** — served same-origin from the harness so the session cookie and
 (minted via `/control/login`), so per-user authorization is genuine; the only
 extra fake is the OAuth-token store (an external credential).
 
-The UI is built by `global-setup.ts` with `VITE_DASHBOARD_API_BASE_URL` pointed at
-the harness. It builds once; set `E2E_FORCE_UI_BUILD=1` to rebuild (e.g. after a
-UI change or port change). Requires Corepack with `pnpm` enabled.
+The UI is built by `global-setup.ts` with both API bases pointed at the harness,
+which then runs the app's own Nitro server on `E2E_UI_PORT` (default 3100). The
+harness proxies page requests to it, so the specs exercise real server rendering
+— the root session gate, the redirect, hydration — instead of a static shell.
+`ssr.spec.ts` asserts that on the raw response, because a server-rendering
+regression falls back to the client and otherwise passes unnoticed.
+
+It builds once; set `E2E_FORCE_UI_BUILD=1` to rebuild (e.g. after a UI change or
+port change). Requires `pnpm`.
 
 ## Run
 
 ```bash
-cd tests/e2e
-npm install
-npx playwright install chromium
-npx playwright test          # boots langgraph dev automatically, then runs
+pnpm install --frozen-lockfile
+pnpm run test:e2e:install
+pnpm run test:e2e            # browser suite
+pnpm run test:e2e:desktop    # Electron + pinned uv dcode ACP
 ```
 
 Watch it in human time:
@@ -73,17 +85,18 @@ SLOW_MO=700 npx playwright test --headed
 
 ## Artifacts (replay a run)
 
-Every test records a **trace** (DOM-snapshot timeline + network + console + source)
-and a **video**; failures also get a screenshot. Locally they land in
-`test-results/<test>/` and are embedded in `playwright-report/`:
+Browser tests record a **trace** (DOM-snapshot timeline + network + console + source)
+and a **video**; failures also get a screenshot. The Desktop test records an Electron trace and a
+success screenshot. Artifacts land in `test-results/<test>/` and `playwright-report/`:
 
 ```bash
 npx playwright show-report                       # browse runs; each has a Trace tab
 npx playwright show-trace test-results/<test>/trace.zip   # open one trace directly
 ```
 
-In CI the `Playwright E2E` job uploads both `playwright-report/` and
-`test-results/` as the **playwright-report** artifact on the run. Download it,
+In CI the browser shards upload **playwright-report-1**, **playwright-report-2**,
+and **playwright-report-3**; Desktop uploads **playwright-report-desktop**. Each
+contains `playwright-report/` and `test-results/`. Download the relevant artifact,
 then `npx playwright show-report <unzipped-dir>` (or drag a `trace.zip` onto
 <https://trace.playwright.dev>) to replay.
 

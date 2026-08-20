@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models.base import LangSmithParams
 
 
 class DeferredErrorModel(BaseChatModel):
@@ -15,7 +14,7 @@ class DeferredErrorModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "deferred-error"
 
-    def _get_ls_params(self, stop: Any = None, **kwargs: Any) -> dict[str, Any]:
+    def _get_ls_params(self, stop: list[str] | None = None, **kwargs: Any) -> LangSmithParams:
         params = super()._get_ls_params(stop=stop, **kwargs)
         if self.model_id:
             params["ls_model_name"] = self.model_id
@@ -23,7 +22,7 @@ class DeferredErrorModel(BaseChatModel):
                 params["ls_provider"] = self.model_id.split(":", 1)[0]
         return params
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> DeferredErrorModel:
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "DeferredErrorModel":
         return self
 
     def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any):

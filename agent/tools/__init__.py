@@ -4,7 +4,14 @@ from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
+    "approve_plan": ".approve_plan",
+    "background_execute": ".background_execute",
+    "background_task": ".background_execute",
+    "capture_environment_snapshot": ".environments",
+    "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
+    "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
+    "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
     "http_request": ".http_request",
     "linear_comment": ".linear_comment",
@@ -13,20 +20,32 @@ _TOOL_MODULES = {
     "linear_get_issue": ".linear_get_issue",
     "linear_get_issue_comments": ".linear_get_issue_comments",
     "linear_list_teams": ".linear_list_teams",
+    "linear_search_issues": ".linear_search_issues",
     "linear_update_issue": ".linear_update_issue",
+    "list_environments": ".environments",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
+    "manage_baby_sit": ".manage_baby_sit",
+    "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
+    "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
     "read_repo_file": ".read_repo_file",
+    "read_user_settings": ".read_user_settings",
+    "recreate_sandbox": ".recreate_sandbox",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": ".request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
+    "save_environment": ".environments",
     "save_plan": ".save_plan",
+    "save_user_instructions": ".save_user_instructions",
+    "save_user_skill": ".user_skills",
+    "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": ".search_repo_code",
     "slack_add_reaction": ".slack_add_reaction",
+    "slack_move_thread": ".slack_move_thread",
     "slack_read_thread_messages": ".slack_read_thread_messages",
     "slack_start_new_thread": ".slack_start_new_thread",
     "slack_thread_reply": ".slack_thread_reply",
@@ -36,7 +55,14 @@ _TOOL_MODULES = {
 
 __all__ = [
     "add_finding",
+    "approve_plan",
+    "background_execute",
+    "background_task",
+    "capture_environment_snapshot",
+    "create_sandbox_file_download_url",
+    "delete_environment",
     "enter_plan_mode",
+    "fetch_review_diff",
     "fetch_url",
     "http_request",
     "linear_comment",
@@ -45,20 +71,32 @@ __all__ = [
     "linear_get_issue",
     "linear_get_issue_comments",
     "linear_list_teams",
+    "linear_search_issues",
     "linear_update_issue",
+    "list_environments",
     "list_findings",
     "list_review_findings",
+    "manage_baby_sit",
+    "notify_automation_channel",
     "open_pull_request",
+    "output_iframe",
     "publish_review",
     "read_repo_file",
+    "read_user_settings",
+    "recreate_sandbox",
     "report_platform_issue",
     "request_pr_review",
     "reply_to_finding_thread",
     "resolve_finding_thread",
+    "save_environment",
     "save_plan",
+    "save_user_instructions",
+    "save_user_skill",
+    "delete_user_skill",
     "schedule_thread_wakeup",
     "search_repo_code",
     "slack_add_reaction",
+    "slack_move_thread",
     "slack_read_thread_messages",
     "slack_start_new_thread",
     "slack_thread_reply",
@@ -68,7 +106,17 @@ __all__ = [
 
 if TYPE_CHECKING:
     from .add_finding import add_finding
+    from .approve_plan import approve_plan
+    from .background_execute import background_execute, background_task
+    from .create_sandbox_file_download_url import create_sandbox_file_download_url
     from .enter_plan_mode import enter_plan_mode
+    from .environments import (
+        capture_environment_snapshot,
+        delete_environment,
+        list_environments,
+        save_environment,
+    )
+    from .fetch_review_diff import fetch_review_diff
     from .fetch_url import fetch_url
     from .http_request import http_request
     from .linear_comment import linear_comment
@@ -77,24 +125,33 @@ if TYPE_CHECKING:
     from .linear_get_issue import linear_get_issue
     from .linear_get_issue_comments import linear_get_issue_comments
     from .linear_list_teams import linear_list_teams
+    from .linear_search_issues import linear_search_issues
     from .linear_update_issue import linear_update_issue
     from .list_findings import list_findings
     from .list_review_findings import list_review_findings
+    from .manage_baby_sit import manage_baby_sit
+    from .notify_automation_channel import notify_automation_channel
     from .open_pull_request import open_pull_request
+    from .output_iframe import output_iframe
     from .publish_review import publish_review
     from .read_repo_file import read_repo_file
+    from .read_user_settings import read_user_settings
+    from .recreate_sandbox import recreate_sandbox
     from .reply_to_finding_thread import reply_to_finding_thread
     from .report_platform_issue import report_platform_issue
     from .request_pr_review import request_pr_review
     from .resolve_finding_thread import resolve_finding_thread
     from .save_plan import save_plan
+    from .save_user_instructions import save_user_instructions
     from .schedule_thread_wakeup import schedule_thread_wakeup
     from .search_repo_code import search_repo_code
     from .slack_add_reaction import slack_add_reaction
+    from .slack_move_thread import slack_move_thread
     from .slack_read_thread_messages import slack_read_thread_messages
     from .slack_start_new_thread import slack_start_new_thread
     from .slack_thread_reply import slack_thread_reply
     from .update_finding import update_finding
+    from .user_skills import delete_user_skill, save_user_skill
     from .web_search import web_search
 
 

@@ -5,13 +5,11 @@ reviewer thread for the PR. The reviewer thread id is seeded into the run config
 by the dashboard chat proxy.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from langgraph.config import get_config
 
-from ..reviewer_findings import list_findings as list_findings_async
+from ..review.findings import list_findings as list_findings_async
 
 _COMPACT_FIELDS = (
     "id",

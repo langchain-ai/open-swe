@@ -1,7 +1,5 @@
 """Azure DevOps Git REST API: default branch and pull request creation."""
 
-from __future__ import annotations
-
 import base64
 import logging
 import os

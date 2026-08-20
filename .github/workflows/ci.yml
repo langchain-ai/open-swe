@@ -18,8 +18,8 @@ jobs:
     name: Agent lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run lint
@@ -29,54 +29,150 @@ jobs:
     name: Agent format check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run format check
         run: make format-check
 
+  typecheck:
+    name: Agent typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+      - name: Run typecheck
+        run: make typecheck
+
   unit-tests:
     name: Agent unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run unit tests
         run: make test
 
-  e2e:
-    name: Playwright E2E
+  ui-format:
+    name: UI format check
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version: 22
-      - uses: oven-sh/setup-bun@v2
+      - run: corepack enable
+      # The root package too, for Turborepo — but not desktop, whose Electron
+      # download this job has no use for.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
+      - name: Run format check
+        run: pnpm run format:check
+
+  desktop:
+    name: Desktop checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+      - run: corepack enable
+      - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
+        with:
+          mode: firewall-free
+      - name: Install workspace dependencies
+        env:
+          # `pnpm run check` only syntax-checks the sources, runs node tests, and
+          # builds the UI — none of it launches Electron, so downloading ~100 MB
+          # of binary here buys nothing and fails the job whenever the fetch does.
+          # The release workflow, which actually packages the app, still gets it.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: pnpm install --frozen-lockfile
+      - name: Run desktop checks
+        run: pnpm run check
+
+  browser-e2e:
+    name: Browser E2E (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
       - name: Install Python deps (langgraph dev runtime)
         run: uv sync --locked
+      - run: corepack enable
+      - name: Install workspace dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
       - name: Install Playwright + Chromium
-        working-directory: tests/e2e
         run: |
-          npm ci
           sudo rm -f /etc/apt/sources.list.d/azure-cli.list /etc/apt/sources.list.d/microsoft-prod.list
-          npx playwright install --with-deps chromium
-      # Playwright's webServer boots `langgraph dev`; globalSetup builds the real
-      # ui/ SPA. The fake LLM/GitHub/Slack boundaries need no secrets.
-      - name: Run E2E
-        working-directory: tests/e2e
-        run: npx playwright test
+          pnpm run test:e2e:install
+      - name: Run browser E2E
+        run: pnpm run test:e2e -- --shard=${{ matrix.shard }}/3
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: |
             tests/e2e/playwright-report
             tests/e2e/test-results
           retention-days: 7
+
+  desktop-e2e:
+    name: Desktop E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+      - name: Install Python deps (langgraph dev runtime)
+        run: uv sync --locked
+      - run: corepack enable
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright
+        run: npm --prefix tests/e2e ci
+      - name: Run Desktop E2E
+        run: xvfb-run --auto-servernum pnpm run test:e2e:desktop
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-desktop
+          path: |
+            tests/e2e/playwright-report
+            tests/e2e/test-results
+          retention-days: 7
+
+  e2e:
+    name: Playwright E2E
+    if: ${{ always() }}
+    needs: [browser-e2e, desktop-e2e]
+    runs-on: ubuntu-latest
+    env:
+      BROWSER_RESULT: ${{ needs.browser-e2e.result }}
+      DESKTOP_RESULT: ${{ needs.desktop-e2e.result }}
+    steps:
+      - run: test "$BROWSER_RESULT" = success && test "$DESKTOP_RESULT" = success

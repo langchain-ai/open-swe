@@ -1,19 +1,23 @@
 """Single durable dispatch contract behind every agent/reviewer run trigger.
 
 Replaces the per-site ``runs.create`` calls (plus the ``is_thread_active``
-busy-check and the custom store-queue) with one function that always uses:
+busy-check and the custom store-queue) with one function that uses:
 
-- ``multitask_strategy="interrupt"`` — a follow-up halts the active run
+- ``multitask_strategy="interrupt"`` by default — a follow-up halts the active run
   (progress preserved by the sync checkpoint) and resumes the agent with full
-  history + the new message; on an idle thread it just starts. This is the
-  platform-native, cross-process replacement for the racy busy-check + queue.
+  history + the new message; on an idle thread it just starts. Background
+  follow-ups such as `/baby-sit` can opt into ``enqueue`` instead.
 - ``durability="sync"`` — checkpoint before each step so a crash/recycle
   resumes from the last checkpoint instead of losing all work.
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
   failure so every run ends with a signal even if the agent died.
+- ``stream_resumable=True`` — the run's event stream is retained so a client that
+  attaches later can replay it. Without this the dashboard cannot observe a run
+  it did not start: the v2 protocol only synthesizes the ``lifecycle: running``
+  event that drives ``stream.isLoading`` when it can replay the run's events, so
+  a Slack/Linear/GitHub-triggered run looked idle in the web UI (no stop button)
+  until it happened to emit its next event.
 """
-
-from __future__ import annotations
 
 import logging
 import os
@@ -23,12 +27,107 @@ from urllib.parse import urlparse
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.schema import Run
+
+from .input_messages import (
+    ChannelIdentity,
+    InputMessageContext,
+    PersonIdentity,
+    RunInput,
+    Surface,
+    SystemIdentity,
+    build_run_input,
+)
 
 logger = logging.getLogger(__name__)
 
 ContentBlocks = str | list[dict[str, Any]]
-RunInput = dict[str, Any]
 RunConfig = dict[str, Any]
+
+
+def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str, Any]) -> RunInput:
+    surface: Surface = (
+        source
+        if source in {"slack", "linear", "github", "web", "desktop", "eval"}
+        else "automation"
+    )  # type: ignore[assignment]
+    people: list[PersonIdentity] = []
+    channels: list[ChannelIdentity] = []
+    systems: list[SystemIdentity] = []
+    login = configurable.get("github_login")
+    email = configurable.get("user_email")
+    slack_thread = configurable.get("slack_thread")
+    sender_id = ""
+    channel_id: str | None = None
+    if surface == "slack" and isinstance(slack_thread, dict):
+        user_id = slack_thread.get("triggering_user_id")
+        slack_channel_id = slack_thread.get("channel_id")
+        if isinstance(user_id, str) and user_id:
+            sender_id = f"slack:{user_id}"
+            person: PersonIdentity = {"id": sender_id, "platform": "slack"}
+            display_name = slack_thread.get("triggering_user_name")
+            timezone = slack_thread.get("triggering_user_timezone")
+            if isinstance(display_name, str) and display_name:
+                person["display_name"] = display_name
+            if isinstance(timezone, str) and timezone:
+                person["timezone"] = timezone
+            if isinstance(login, str) and login:
+                person["github_login"] = login
+            if isinstance(email, str) and email:
+                person["email"] = email
+            people.append(person)
+        if isinstance(slack_channel_id, str) and slack_channel_id:
+            channel_id = f"slack:{slack_channel_id}"
+            channel: ChannelIdentity = {"id": channel_id, "platform": "slack"}
+            channel_context = slack_thread.get("channel_context")
+            if isinstance(channel_context, dict):
+                name = channel_context.get("name") or channel_context.get("name_normalized")
+                topic = channel_context.get("topic")
+                purpose = channel_context.get("purpose")
+                if isinstance(name, str) and name:
+                    channel["name"] = name
+                if isinstance(topic, str) and topic:
+                    channel["topic"] = topic
+                if isinstance(purpose, str) and purpose:
+                    channel["purpose"] = purpose
+            thread_ts = slack_thread.get("thread_ts")
+            if isinstance(thread_ts, str) and thread_ts:
+                channel["thread_id"] = thread_ts
+            channels.append(channel)
+    if not sender_id and isinstance(login, str) and login:
+        sender_id = f"github:{login}"
+        person = {"id": sender_id, "platform": "github", "github_login": login}
+        if isinstance(email, str) and email:
+            person["email"] = email
+        people.append(person)
+    if not sender_id and surface == "linear" and isinstance(email, str) and email:
+        sender_id = f"linear:{email.lower()}"
+        people.append({"id": sender_id, "platform": "linear", "email": email})
+    kind = "human" if sender_id else "system"
+    if not sender_id:
+        sender_id = f"system:{source.replace('_', '-')}"
+        systems.append(
+            {
+                "id": sender_id,
+                "display_name": source.replace("-", " ").title(),
+                "platform": "open-swe",
+            }
+        )
+    context: InputMessageContext = {
+        "sender_id": sender_id,
+        "surface": surface,
+        "kind": kind,
+    }
+    if channel_id:
+        context["channel_id"] = channel_id
+    return build_run_input(
+        content,
+        context,
+        people=people,
+        channels=channels,
+        systems=systems,
+    )
+
 
 # FastAPI route the platform POSTs run completion/failure to. The platform
 # rejects loopback webhooks (relative URLs / localhost) — they bypass auth via
@@ -89,7 +188,7 @@ def dispatch_client() -> LangGraphClient:
     return get_client(url=_langgraph_url())
 
 
-def _config_with_prepare_run_id(
+def prepare_run_config(
     config: RunConfig | None,
     metadata: dict[str, Any] | None,
 ) -> RunConfig:
@@ -98,8 +197,12 @@ def _config_with_prepare_run_id(
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
     configurable.setdefault("prepare_run_id", str(uuid.uuid4()))
     run_config["configurable"] = configurable
+    existing_metadata = run_config.get("metadata")
+    merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
     if metadata is not None:
-        run_config["metadata"] = metadata
+        merged_metadata.update(metadata)
+    merged_metadata["prepare_run_id"] = configurable["prepare_run_id"]
+    run_config["metadata"] = merged_metadata
     return run_config
 
 
@@ -116,24 +219,25 @@ async def create_durable_run(
     durability: str = "sync",
     if_not_exists: str = "create",
     stream_mode: Any | None = None,
-    stream_resumable: bool | None = None,
+    stream_resumable: bool = True,
     after_seconds: int | float | None = None,
-) -> dict[str, Any]:
+) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
     client = client or dispatch_client()
+    run_config = prepare_run_config(config, metadata)
     create_kwargs: dict[str, Any] = {
         "input": input,
-        "config": _config_with_prepare_run_id(config, metadata),
+        "config": run_config,
+        "metadata": run_config["metadata"],
         "multitask_strategy": multitask_strategy,
         "durability": durability,
         "if_not_exists": if_not_exists,
+        "stream_resumable": stream_resumable,
     }
     if COMPLETION_WEBHOOK_URL:
         create_kwargs["webhook"] = COMPLETION_WEBHOOK_URL
     if stream_mode is not None:
         create_kwargs["stream_mode"] = stream_mode
-    if stream_resumable is not None:
-        create_kwargs["stream_resumable"] = stream_resumable
     if after_seconds is not None:
         create_kwargs["after_seconds"] = after_seconds
 
@@ -150,26 +254,51 @@ async def create_durable_run(
 
 async def dispatch_agent_run(
     thread_id: str,
-    content: ContentBlocks,
+    content: ContentBlocks | None,
     configurable: dict[str, Any],
     *,
     source: str,
+    input: RunInput | None = None,
+    context: InputMessageContext | None = None,
+    people: list[PersonIdentity] | None = None,
+    channels: list[ChannelIdentity] | None = None,
+    systems: list[SystemIdentity] | None = None,
     assistant_id: str = "agent",
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
-) -> dict[str, Any]:
-    """Create (or interrupt-and-resume) a run for ``thread_id``.
+    multitask_strategy: str = "interrupt",
+) -> Run:
+    """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
     Routes every Slack / Linear / GitHub / dashboard trigger through one
     contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
     the graph (``"agent"`` or ``"reviewer"``).
     """
+    if input is not None and any(
+        value is not None for value in (content, context, people, channels, systems)
+    ):
+        raise ValueError("prebuilt input cannot be combined with content or source identities")
+    if input is None:
+        if content is None:
+            raise ValueError("content is required when input is not provided")
+        input = (
+            build_run_input(
+                content,
+                context,
+                people=people,
+                channels=channels,
+                systems=systems,
+            )
+            if context is not None
+            else _dispatch_input(content, source, configurable)
+        )
     return await create_durable_run(
         thread_id,
         assistant_id,
-        input={"messages": [{"role": "user", "content": content}]},
+        input=input,
         config={"configurable": configurable},
         metadata=metadata or {},
         source=source,
         client=client or dispatch_client(),
+        multitask_strategy=multitask_strategy,
     )

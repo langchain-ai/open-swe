@@ -1,8 +1,9 @@
 from typing import Any
 
 from langgraph.config import get_config
+from langgraph_sdk import get_client
 
-from agent.utils.slack import GitHubPrRef, parse_github_pr_url
+from agent.utils.slack import GitHubPrRef, get_active_slack_thread, parse_github_pr_url
 
 
 async def trigger_pr_review_from_ref(
@@ -14,7 +15,7 @@ async def trigger_pr_review_from_ref(
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
 ) -> dict[str, Any]:
-    from agent.webapp import trigger_pr_review_from_ref as _trigger_pr_review_from_ref
+    from agent.webhooks.github import trigger_pr_review_from_ref as _trigger_pr_review_from_ref
 
     return await _trigger_pr_review_from_ref(
         pr_ref,
@@ -38,6 +39,13 @@ async def request_pr_review(pr_url: str) -> dict[str, Any]:
     configurable = get_config().get("configurable", {})
     source = configurable.get("source") or "agent"
     slack_thread = configurable.get("slack_thread") or {}
+    thread_id = configurable.get("thread_id")
+    active = await get_active_slack_thread(
+        get_client(),
+        thread_id if isinstance(thread_id, str) else None,
+        slack_thread if isinstance(slack_thread, dict) else None,
+    )
+    slack_thread = active or {}
     return await trigger_pr_review_from_ref(
         pr_ref,
         source=source,

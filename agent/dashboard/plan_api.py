@@ -1,24 +1,12 @@
-"""REST API for the plan-review page: read the plan, comment, approve, or request
-changes — all plain HTTP, no CRDT/WebSocket.
+"""REST API for HTML plan artifacts, comments, approval, and change requests."""
 
-Reviewers leave whole-document comments via this API; they're stored server-side
-and listed for everyone who can read the thread. On approve/reject the comments
-are read back here, formatted, and handed to the agent as the instruction for the
-follow-up run. The agent never sees comments during review — only this aggregated
-feedback at the decision point.
-
-Permissions: any authenticated org member can read a surfaced thread, comment, and
-request changes (reject); only the thread owner can approve. A comment can be
-deleted by its author or the thread owner.
-"""
-
-from __future__ import annotations
-
+import asyncio
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
+from langgraph_sdk.schema import Run
 from pydantic import BaseModel
 
 from ..dispatch import dispatch_agent_run
@@ -34,6 +22,7 @@ from .plan_store import (
     delete_plan_comment,
     get_plan_content,
     list_plan_comments,
+    make_plan_approver,
     plan_file_path_for_thread,
     save_plan_content,
     set_plan_status,
@@ -47,6 +36,7 @@ from .thread_api import (
 )
 
 logger = logging.getLogger(__name__)
+_plan_approval_locks: dict[str, asyncio.Lock] = {}
 
 plan_router = APIRouter(
     prefix="/dashboard/api/plan",
@@ -61,7 +51,8 @@ class CommentBody(BaseModel):
 
 
 class PlanUpdate(BaseModel):
-    markdown: str
+    html: str | None = None
+    markdown: str | None = None
 
 
 async def _thread_metadata(thread_id: str) -> dict[str, Any]:
@@ -84,11 +75,24 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
     login = session["sub"]
     email = session.get("email")
     content = await get_plan_content(thread_id) or {}
+    approved_by = content.get("approved_by") or metadata.get("plan_approved_by")
+    if isinstance(approved_by, dict):
+        approved_by = make_plan_approver(
+            actor_id=str(approved_by.get("id") or ""),
+            name=str(approved_by.get("name") or ""),
+            source=str(approved_by.get("source") or ""),
+        )
+    else:
+        approved_by = None
+    approved_at = content.get("approved_at") or metadata.get("plan_approved_at")
     return {
         "threadId": thread_id,
         "status": content.get("status") or metadata.get("plan_status") or "planning",
+        "html": content.get("html", ""),
         "markdown": content.get("markdown", ""),
         "isOwner": _user_owns_thread(metadata, login, email),
+        "approvedBy": approved_by,
+        "approvedAt": approved_at if isinstance(approved_at, str) else None,
         "user": {
             "id": login,
             "login": login,
@@ -102,19 +106,18 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
 async def update_plan(
     thread_id: str, body: PlanUpdate, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    """Owner-only manual edit of the plan markdown.
-
-    Re-publishes the edited plan as ``ready`` (and mirrors it into the sandbox
-    plan file) while preserving reviewer comments, so the owner can refine the
-    plan before approving it."""
+    """Save an owner-edited HTML artifact while preserving review comments."""
     metadata = await _thread_metadata(thread_id)
     if not _user_owns_thread(metadata, session["sub"], session.get("email")):
         raise HTTPException(403, "only the plan owner can edit the plan")
-    markdown = body.markdown.strip()
-    if not markdown:
-        raise HTTPException(422, "plan markdown cannot be empty")
     content = await get_plan_content(thread_id) or {}
     _reject_shared_content(content)
+    legacy_markdown = isinstance(content.get("markdown"), str) and not content.get("html")
+    field = "markdown" if legacy_markdown else "html"
+    value = getattr(body, field)
+    value = value.strip() if isinstance(value, str) else ""
+    if not value:
+        raise HTTPException(422, f"plan {field} cannot be empty")
     status = content.get("status") or metadata.get("plan_status") or "planning"
     if status in (PLAN_STATUS_APPROVED, PLAN_STATUS_CANCELLED):
         raise HTTPException(409, f"cannot edit a {status} plan")
@@ -122,15 +125,24 @@ async def update_plan(
     plan_file_path = (
         plan_file_path if isinstance(plan_file_path, str) else plan_file_path_for_thread(thread_id)
     )
-    await save_plan_content(
-        thread_id,
-        markdown=markdown,
-        status=PLAN_STATUS_READY,
-        clear_comments=False,
-        plan_file_path=plan_file_path,
-    )
-    await write_plan_to_sandbox(thread_id, markdown, plan_file_path=plan_file_path)
-    return {"status": PLAN_STATUS_READY, "markdown": markdown}
+    if legacy_markdown:
+        await save_plan_content(
+            thread_id,
+            markdown=value,
+            status=PLAN_STATUS_READY,
+            clear_comments=False,
+            plan_file_path=plan_file_path,
+        )
+    else:
+        await save_plan_content(
+            thread_id,
+            html=value,
+            status=PLAN_STATUS_READY,
+            clear_comments=False,
+            plan_file_path=plan_file_path,
+        )
+    await write_plan_to_sandbox(thread_id, value, plan_file_path=plan_file_path)
+    return {"status": PLAN_STATUS_READY, field: value}
 
 
 @plan_router.get("/{thread_id}/comments")
@@ -183,36 +195,77 @@ async def remove_plan_comment(
 @plan_router.post("/{thread_id}/approve")
 async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
     metadata = await _thread_metadata(thread_id)
-    if not _user_owns_thread(metadata, session["sub"], session.get("email")):
-        raise HTTPException(403, "only the plan owner can approve")
-    # Read the published plan + comments BEFORE mutating state: a store failure
-    # here aborts the decision (500) rather than dispatching without them. The
-    # published markdown may have been edited by the reviewer, so it is the
-    # source of truth handed to the agent (not its own stale history) — read it
-    # strictly so a transient failure can't silently drop the edit.
-    content = await get_plan_content(thread_id, raise_on_error=True) or {}
-    _reject_shared_content(content)
-    plan_markdown = str(content.get("markdown", "")).strip()
-    comments = await list_plan_comments(thread_id, raise_on_error=True)
-    feedback = _format_comments(comments)
-    await set_plan_status(thread_id, PLAN_STATUS_APPROVED, plan_mode=False)
-    if plan_markdown:
-        text = (
-            "The plan has been approved. Implement it now exactly as written "
-            "below (it may have been edited by the reviewer, so treat this as "
-            f"the source of truth):\n\n{plan_markdown}"
-        )
-    else:
-        text = "The plan has been approved. Implement it now as described in the plan."
-    if feedback:
-        text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
-    await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
-    await _maybe_post_plan_approved_to_slack(
-        metadata,
-        comment_count=len(comments),
-        actor=_approval_actor_name(session),
+    if not _thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
+    actor_id = str(session.get("sub") or "").strip()
+    return await approve_plan_for_thread(
+        thread_id,
+        approver=make_plan_approver(
+            actor_id=actor_id,
+            name=_approval_actor_name(session),
+            source="dashboard",
+        ),
     )
-    return {"status": PLAN_STATUS_APPROVED}
+
+
+async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -> dict[str, Any]:
+    approver = make_plan_approver(
+        actor_id=str(approver.get("id") or ""),
+        name=str(approver.get("name") or ""),
+        source=str(approver.get("source") or ""),
+    )
+    lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
+    async with lock:
+        metadata = await _thread_metadata(thread_id)
+        content = await get_plan_content(thread_id, raise_on_error=True) or {}
+        _reject_shared_content(content)
+        if (
+            metadata.get("plan_mode") is not True
+            or metadata.get("plan_status") != PLAN_STATUS_READY
+            or content.get("status") != PLAN_STATUS_READY
+        ):
+            return {
+                "status": str(content.get("status") or metadata.get("plan_status") or "planning"),
+                "already_approved": True,
+            }
+        plan_html = str(content.get("html", "")).strip()
+        plan_markdown = str(content.get("markdown", "")).strip()
+        comments = await list_plan_comments(thread_id, raise_on_error=True)
+        feedback = _format_comments(comments)
+        await set_plan_status(
+            thread_id,
+            PLAN_STATUS_APPROVED,
+            plan_mode=False,
+            approved_by=approver,
+        )
+        if plan_html:
+            text = (
+                "The plan has been approved. Use the reviewed self-contained HTML artifact below "
+                "as the implementation guide. Apply reasonable engineering judgment where details "
+                f"need adjustment while preserving its goals and reviewer edits:\n\n{plan_html}"
+            )
+        elif plan_markdown:
+            text = (
+                "The plan has been approved. Use the reviewed Markdown plan below as the "
+                "implementation guide. Apply reasonable engineering judgment where details need "
+                f"adjustment while preserving its goals and reviewer edits:\n\n{plan_markdown}"
+            )
+        else:
+            text = "The plan has been approved. Implement it now as described in the plan."
+        if feedback:
+            text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
+        try:
+            run = await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
+        except Exception:
+            await set_plan_status(thread_id, PLAN_STATUS_READY, plan_mode=True)
+            raise
+        await _maybe_post_plan_approved_to_slack(
+            metadata,
+            thread_id=thread_id,
+            comment_count=len(comments),
+            actor=approver["name"],
+        )
+        return {"status": PLAN_STATUS_APPROVED, "run_id": run["run_id"]}
 
 
 @plan_router.post("/{thread_id}/reject")
@@ -225,10 +278,9 @@ async def reject_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) ->
     feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
     await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
     text = (
-        "The plan needs changes before implementation. Address this reviewer "
-        "feedback in the existing Markdown file under /workspace/plans/, then "
-        "publish an updated plan with the save_plan tool:\n\n"
-        f"{feedback or '(no specific comments were left)'}"
+        "The plan needs changes before implementation. Address this reviewer feedback in the "
+        "existing self-contained HTML file under /workspace/plans/, then publish an updated "
+        f"artifact with the save_plan tool:\n\n{feedback or '(no specific comments were left)'}"
     )
     await _dispatch_followup(thread_id, metadata, text, plan_mode=True)
     return {"status": PLAN_STATUS_REVISING}
@@ -261,21 +313,28 @@ def _slack_thread_from_metadata(metadata: dict[str, Any]) -> tuple[str, str] | N
 
 
 def _plan_approved_slack_text(comment_count: int, actor: str) -> str:
-    return f"Plan approved with {comment_count} comments by {actor}\nbeginning implementation"
+    return f"Plan approved with {comment_count} comments by {actor}"
+
+
+def _plan_approved_slack_blocks(text: str) -> list[dict[str, Any]]:
+    return [{"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{text}_"}]}]
 
 
 async def _maybe_post_plan_approved_to_slack(
-    metadata: dict[str, Any], *, comment_count: int, actor: str
+    metadata: dict[str, Any], *, thread_id: str, comment_count: int, actor: str
 ) -> None:
     slack_thread = _slack_thread_from_metadata(metadata)
     if slack_thread is None:
         return
     channel_id, thread_ts = slack_thread
+    text = _plan_approved_slack_text(comment_count, actor)
     try:
         ok = await post_slack_thread_reply(
             channel_id,
             thread_ts,
-            _plan_approved_slack_text(comment_count, actor),
+            text,
+            blocks=_plan_approved_slack_blocks(text),
+            agent_thread_id=thread_id,
         )
     except Exception:
         logger.warning("Could not post plan approval Slack reply", exc_info=True)
@@ -299,14 +358,8 @@ def _format_comments(comments: list[dict[str, Any]]) -> str:
 
 async def _dispatch_followup(
     thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
-) -> None:
-    """Continue the existing thread with a new instruction run.
-
-    Runs on the same LangGraph thread, so the agent resumes from the checkpoint
-    with the full planning history plus this instruction. The configurable is
-    rebuilt from the thread's stored owner/repo/Slack context so the agent can
-    push, open a PR, and reply in the original channel.
-    """
+) -> Run:
+    """Continue the existing thread with the decision as a new instruction run."""
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "source": _thread_source(metadata) or "slack",
@@ -325,11 +378,9 @@ async def _dispatch_followup(
         slack_thread = source_context.get("slack_thread")
         if isinstance(slack_thread, dict):
             configurable["slack_thread"] = slack_thread
-    # Carry the decision to the follow-up run: approve continues out of plan
-    # mode (implement), reject stays in plan mode (revise the plan).
     configurable["plan_mode"] = plan_mode
 
-    await dispatch_agent_run(
+    return await dispatch_agent_run(
         thread_id,
         text,
         configurable,

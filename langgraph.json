@@ -3,11 +3,11 @@
   "python_version": "3.12",
   "api_version": "0.10.0rc3",
   "graphs": {
-    "agent": "agent.server:traced_agent",
-    "reviewer": "agent.reviewer:traced_reviewer_agent",
-    "analyzer": "agent.analyzer:traced_analyzer",
-    "chat": "agent.chat:traced_chat_agent",
-    "scheduler": "agent.scheduler:get_scheduler"
+    "agent": "agent.graphs.agent:traced_agent",
+    "reviewer": "agent.graphs.reviewer:traced_reviewer_agent",
+    "analyzer": "agent.graphs.analyzer:traced_analyzer",
+    "chat": "agent.graphs.chat:traced_chat_agent",
+    "scheduler": "agent.graphs.scheduler:get_scheduler"
   },
   "dependencies": [
     "."

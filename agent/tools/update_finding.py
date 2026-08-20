@@ -1,12 +1,10 @@
 """Tool: ``update_finding``. Mutate an existing finding by id."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from langgraph.config import get_config
 
-from ..reviewer_findings import (
+from ..review.findings import (
     DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
     Finding,
@@ -178,7 +176,7 @@ async def update_finding(
         from .resolve_finding_thread import resolve_finding_thread
 
         resolve_result = await resolve_finding_thread(
-            finding_id, status=status, note=normalized_note
+            finding_id, status=status, note=normalized_note or ""
         )
         if not resolve_result.get("success"):
             return {
@@ -212,7 +210,9 @@ async def update_finding(
     if updated is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
     if status in {"resolved", "dismissed"} and not delegated_resolution:
-        emit_finding_status_outcome(updated, status, configurable=configurable, thread_id=thread_id)
+        await emit_finding_status_outcome(
+            updated, status, configurable=configurable, thread_id=thread_id
+        )
     result = {"success": True, "finding": updated}
     if suggestion_dropped:
         result["suggestion_dropped"] = True

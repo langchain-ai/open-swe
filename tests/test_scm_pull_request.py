@@ -1,7 +1,5 @@
 """Tests for SCM pull request abstraction (GitHub implementation)."""
 
-from __future__ import annotations
-
 import pytest
 
 from agent.utils.scm_pull_request import (

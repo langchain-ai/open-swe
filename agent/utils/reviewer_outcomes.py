@@ -11,14 +11,16 @@ Writes are best-effort and deterministic (one example id per
 updates in place instead of duplicating.
 """
 
-from __future__ import annotations
-
+import asyncio
 import logging
 import os
 import uuid
 from typing import Any
 
-from langsmith import Client as LangSmithClient
+from langsmith import AsyncClient as AsyncLangSmithClient
+
+from ..review.findings import Finding
+from .langsmith import async_langsmith_client, sync_langsmith_client
 
 logger = logging.getLogger(__name__)
 
@@ -60,26 +62,32 @@ def outcome_from_score(score: float | None, *, source: str) -> tuple[str, str] |
     return FALSE_POSITIVE, f"{source}_thumbs_down"
 
 
-def _outcomes_client() -> LangSmithClient | None:
-    """Build a single LangSmith client, preferring the prod tenant."""
+def _outcomes_credentials() -> tuple[str, str] | None:
+    """Resolve the outcomes-dataset credentials, preferring the prod tenant."""
     prod_key = os.environ.get("LANGSMITH_API_KEY_PROD")
     if prod_key:
         api_url = os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
             "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
         )
-        return LangSmithClient(api_key=prod_key, api_url=api_url)
+        return prod_key, api_url
     api_key = os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY")
     if not api_key:
         return None
-    api_url = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
-    return LangSmithClient(api_key=api_key, api_url=api_url)
+    return api_key, os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
 
 
-def _ensure_dataset(client: LangSmithClient) -> Any:
-    existing = next((d for d in client.list_datasets(dataset_name=OUTCOMES_DATASET_NAME)), None)
+async def _find_dataset(client: AsyncLangSmithClient) -> Any:
+    async for dataset in client.list_datasets(dataset_name=OUTCOMES_DATASET_NAME):
+        if dataset.name == OUTCOMES_DATASET_NAME:
+            return dataset
+    return None
+
+
+async def _ensure_dataset(client: AsyncLangSmithClient) -> Any:
+    existing = await _find_dataset(client)
     if existing is not None:
         return existing.id
-    ds = client.create_dataset(
+    ds = await client.create_dataset(
         dataset_name=OUTCOMES_DATASET_NAME,
         description=(
             "Open SWE reviewer finding outcomes (resolved / dismissed / 👍👎) "
@@ -99,8 +107,9 @@ def _truncate(value: Any, limit: int) -> Any:
     return value
 
 
-def _create_or_update_example(
-    client: LangSmithClient,
+async def _create_or_update_example(
+    client: AsyncLangSmithClient,
+    credentials: tuple[str, str],
     *,
     dataset_id: Any,
     example_id: uuid.UUID,
@@ -109,7 +118,7 @@ def _create_or_update_example(
     metadata: dict[str, Any],
 ) -> None:
     try:
-        client.create_example(
+        await client.create_example(
             inputs=inputs,
             outputs=outputs,
             metadata=metadata,
@@ -117,7 +126,10 @@ def _create_or_update_example(
             example_id=example_id,
         )
     except Exception:  # noqa: BLE001 — example already exists; update in place
-        client.update_example(
+        # AsyncClient exposes no update_example; the sync one runs off-loop.
+        sync_client = sync_langsmith_client(*credentials)
+        await asyncio.to_thread(
+            sync_client.update_example,
             example_id=example_id,
             inputs=inputs,
             outputs=outputs,
@@ -125,8 +137,8 @@ def _create_or_update_example(
         )
 
 
-def upsert_finding_outcome(
-    finding: dict[str, Any],
+async def upsert_finding_outcome(
+    finding: Finding,
     *,
     label: str,
     label_source: str,
@@ -142,12 +154,11 @@ def upsert_finding_outcome(
     finding_id = str(finding.get("id") or "")
     if not finding_id or not repo:
         return False
-    client = _outcomes_client()
-    if client is None:
+    credentials = _outcomes_credentials()
+    if credentials is None:
         logger.debug("No LangSmith client configured; skipping outcome example")
         return False
     try:
-        dataset_id = _ensure_dataset(client)
         inputs = {
             "repo": repo,
             "pr_number": pr_number,
@@ -182,9 +193,11 @@ def upsert_finding_outcome(
             "thread_id": thread_id,
             "first_seen_sha": finding.get("first_seen_sha"),
         }
-        _create_or_update_example(
+        client = async_langsmith_client(*credentials)
+        await _create_or_update_example(
             client,
-            dataset_id=dataset_id,
+            credentials,
+            dataset_id=await _ensure_dataset(client),
             example_id=_example_id(repo, finding_id, label_source),
             inputs=inputs,
             outputs=outputs,
@@ -196,7 +209,7 @@ def upsert_finding_outcome(
         return False
 
 
-def upsert_run_outcome(
+async def upsert_run_outcome(
     *,
     label: str,
     label_source: str,
@@ -211,11 +224,10 @@ def upsert_run_outcome(
     """
     if not run_id:
         return False
-    client = _outcomes_client()
-    if client is None:
+    credentials = _outcomes_credentials()
+    if credentials is None:
         return False
     try:
-        dataset_id = _ensure_dataset(client)
         inputs = {"repo": repo, "run_id": run_id, **(extra or {})}
         outputs = {"label": label, "label_source": label_source}
         metadata = {
@@ -225,9 +237,11 @@ def upsert_run_outcome(
             "label": label,
             "label_source": label_source,
         }
-        _create_or_update_example(
+        client = async_langsmith_client(*credentials)
+        await _create_or_update_example(
             client,
-            dataset_id=dataset_id,
+            credentials,
+            dataset_id=await _ensure_dataset(client),
             example_id=uuid.uuid5(uuid.NAMESPACE_URL, f"run-outcome:{run_id}:{label_source}"),
             inputs=inputs,
             outputs=outputs,
@@ -246,8 +260,8 @@ def repo_full_name_from_config(configurable: dict[str, Any]) -> str:
     return ""
 
 
-def emit_finding_status_outcome(
-    finding: dict[str, Any],
+async def emit_finding_status_outcome(
+    finding: Finding,
     status: str,
     *,
     configurable: dict[str, Any],
@@ -269,7 +283,7 @@ def emit_finding_status_outcome(
         return False
     label, label_source = mapping
     pr_number = configurable.get("pr_number")
-    return upsert_finding_outcome(
+    return await upsert_finding_outcome(
         finding,
         label=label,
         label_source=label_source,
@@ -282,19 +296,20 @@ def emit_finding_status_outcome(
     )
 
 
-def read_outcomes_for_repo(repo: str, *, limit: int = 100) -> dict[str, list[dict[str, Any]]]:
+async def read_outcomes_for_repo(repo: str, *, limit: int = 100) -> dict[str, list[dict[str, Any]]]:
     """Return confirmed (true-positive) and dismissed (false-positive) findings
     for ``repo`` from the outcomes dataset. Best-effort; returns empty on error."""
     confirmed: list[dict[str, Any]] = []
     dismissed: list[dict[str, Any]] = []
-    client = _outcomes_client()
-    if client is None or not repo:
+    credentials = _outcomes_credentials()
+    if credentials is None or not repo:
         return {"confirmed": confirmed, "dismissed": dismissed}
     try:
-        existing = next((d for d in client.list_datasets(dataset_name=OUTCOMES_DATASET_NAME)), None)
+        client = async_langsmith_client(*credentials)
+        existing = await _find_dataset(client)
         if existing is None:
             return {"confirmed": confirmed, "dismissed": dismissed}
-        for example in client.list_examples(dataset_id=existing.id):
+        async for example in client.list_examples(dataset_id=existing.id):
             metadata = getattr(example, "metadata", None) or {}
             if metadata.get("granularity") != "finding" or metadata.get("repo") != repo:
                 continue

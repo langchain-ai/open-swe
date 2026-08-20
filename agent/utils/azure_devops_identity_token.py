@@ -10,8 +10,6 @@ Git and REST use the same string as with a PAT: Basic auth with an empty usernam
 and the access token as the password (see ``basic_auth_headers``).
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os

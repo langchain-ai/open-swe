@@ -4,8 +4,6 @@ Usage:
     uv run python -m evals.reviewer.run_eval
 """
 
-from __future__ import annotations
-
 import argparse
 import asyncio
 import contextlib
@@ -23,8 +21,8 @@ from langgraph_sdk import get_client
 from langsmith import Client, aevaluate
 from langsmith.schemas import Example
 
-from agent.reviewer_eval_store import _EXPERIMENT_URL_RE, _LOG_TAIL_CHARS
-from agent.reviewer_findings import REVIEW_FINDING_CAP
+from agent.review.eval_store import _EXPERIMENT_URL_RE, _LOG_TAIL_CHARS
+from agent.review.findings import REVIEW_FINDING_CAP
 from evals.reviewer.judge import aggregate_pr, judge_match
 from evals.reviewer.store_reporter import StoreReporter, is_enabled
 from evals.reviewer.target import (
@@ -79,7 +77,7 @@ DEFAULT_CONFIG: ReviewerEvalConfig = {
     "langgraph_url": "",
     "langsmith_project": DEFAULT_LANGSMITH_PROJECT,
     "assistant_id": "reviewer",
-    "model_id": "google_genai:gemini-3.5-flash",
+    "model_id": "google_genai:gemini-3.7-flash",
     "reasoning_effort": "medium",
     "score_mode": "surfaced_findings",
     "severity_threshold": "low",

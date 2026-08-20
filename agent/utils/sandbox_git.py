@@ -1,7 +1,5 @@
 """Sandbox git operations: timeouts and operator-facing hints (no secrets)."""
 
-from __future__ import annotations
-
 import logging
 import os
 

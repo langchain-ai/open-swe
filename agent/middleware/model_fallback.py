@@ -1,7 +1,8 @@
 """Middleware that retries model calls across a primary and fallback provider.
 
 Wraps the model call. When a model raises a transient provider error (5xx,
-429, connection/timeout), the request is retried, alternating between the
+429, connection/timeout, or a ``ModelCallTimeoutMiddleware`` deadline), the
+request is retried, alternating between the
 primary and the configured fallback model with exponential backoff between
 attempts. The fallback is bound to tools by the agent factory on each call,
 so swapping ``request.model`` is sufficient.
@@ -23,8 +24,6 @@ default) returns a terminal ``AIMessage`` explaining the outage, so the run
 ends with a visible message in Slack/GitHub instead of an abrupt crash. The
 turn's progress is checkpointed, so the user can retrigger to continue.
 """
-
-from __future__ import annotations
 
 import asyncio
 import logging
@@ -54,6 +53,9 @@ _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     openai.RateLimitError,
     openai.InternalServerError,
     httpx.TransportError,
+    # Includes ``ModelCallTimeoutMiddleware``'s deadline: a wedged provider call
+    # is exactly the case where trying the other provider is worthwhile.
+    TimeoutError,
 )
 
 # Seconds slept before each retry attempt (attempt 0 is the initial call).

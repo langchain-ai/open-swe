@@ -14,24 +14,27 @@ GitHub-backed tools never receive a user credential.
 """
 # ruff: noqa: E402
 
-from __future__ import annotations
-
 import logging
 import warnings
-from typing import Any
+from typing import Any, cast
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
+from langgraph.runtime import Runtime
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
+from deepagents.middleware.filesystem import FilesystemMiddleware
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
 from .dashboard.options import (
     SUPPORTED_MODEL_IDS,
+    canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
@@ -43,12 +46,15 @@ from .dashboard.team_settings import (
 from .middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
+    ModelCallTimeoutMiddleware,
     SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
 )
-from .server import (
+from .middleware.prepare_run import PrepareRunState
+from .runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_RECURSION_LIMIT,
     graph_loaded_for_execution,
@@ -73,7 +79,28 @@ CHAT_MODEL_CALL_LIMIT = 100
 # Read-only: the chat agent never mutates files or runs shell commands. These are
 # injected by deepagents' FilesystemMiddleware and stripped before the model sees
 # them (there is no sandbox, so ``execute`` would error anyway).
-_EXCLUDED_TOOLS = frozenset({"execute", "write_file", "edit_file"})
+_EXCLUDED_TOOLS = frozenset({"execute", "write_file", "edit_file", "delete"})
+
+
+def _chat_general_purpose_subagent() -> SubAgent:
+    # Deep Agents auto-adds a general-purpose subagent whose default
+    # FilesystemMiddleware would expose write_file/edit_file/delete/execute.
+    # Declaring the spec here suppresses that default and swaps in an
+    # allowlisted FilesystemMiddleware so delegated work stays read-only.
+    return {
+        "name": GENERAL_PURPOSE_SUBAGENT["name"],
+        "description": GENERAL_PURPOSE_SUBAGENT["description"],
+        "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        "middleware": cast(
+            list[AgentMiddleware[Any, Any, Any]],
+            [
+                FilesystemMiddleware(tools=["read_file", "ls", "glob", "grep"]),
+                SanitizeOpenAIResponsesMiddleware(),
+                ModelCallTimeoutMiddleware(),
+            ],
+        ),
+    }
+
 
 CHAT_PROMPT = """You are a code-review chat assistant. You help the author and reviewers \
 understand one GitHub pull request: `{repo_owner}/{repo_name}` #{pr_number}.
@@ -98,6 +125,7 @@ with severity, confidence, and resolution notes.
 Guidance:
 - Be concrete and cite specific files and line numbers from the diff.
 - Ground claims about the review in the actual findings; don't invent issues.
+- If repository access fails, disclose it and qualify claims that require unread source.
 - When you propose a change, describe it precisely — you cannot apply it yourself.
 - Keep answers focused and skimmable. Match the depth of the question.
 """
@@ -105,7 +133,7 @@ Guidance:
 
 async def _cached_gateway_enabled() -> bool:
     return await ttl_cache.cached(
-        f"team:gateway-enabled:{id(get_effective_gateway_enabled)}",
+        "team:gateway-enabled",
         60,
         get_effective_gateway_enabled,
     )
@@ -113,7 +141,7 @@ async def _cached_gateway_enabled() -> bool:
 
 async def _cached_team_chat_model() -> tuple[str, str]:
     return await ttl_cache.cached(
-        f"team-default-model:chat:{id(get_team_default_model)}",
+        "team-default-model:chat",
         60,
         lambda: get_team_default_model("chat"),
     )
@@ -148,8 +176,8 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
             else None,
         }
 
-    async def _prepare(self, state: dict, runtime: object) -> dict:  # noqa: ARG002
-        configurable = self._config["configurable"]
+    async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        configurable = self._config.get("configurable") or {}
         repo_owner = str(configurable.get("chat_repo_owner") or "")
         repo_name = str(configurable.get("chat_repo_name") or "")
         pr_number = configurable.get("chat_pr_number")
@@ -167,7 +195,7 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
         }
 
 
-async def _resolve_chat_model(configurable: dict) -> tuple[str, str]:
+async def _resolve_chat_model(configurable: dict[str, Any]) -> tuple[str, str]:
     model_id = configurable.get("chat_model_id")
     effort = configurable.get("chat_effort")
     if (
@@ -177,19 +205,24 @@ async def _resolve_chat_model(configurable: dict) -> tuple[str, str]:
         and model_supports_effort(model_id, effort)
     ):
         return model_id, effort
+    canonical = canonical_model_pair(model_id, effort)
+    if canonical is not None:
+        return canonical
     # Team review-chat default, which itself inherits the Agent default if unset.
     return await _cached_team_chat_model()
 
 
 async def get_chat_agent(config: RunnableConfig) -> Pregel:
     """Get a read-only PR chat agent. No sandbox; PR context comes via config."""
-    thread_id = config["configurable"].get("thread_id")
-    config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
+    config = config.copy()
+    configurable = dict(config.get("configurable") or {})
+    config["configurable"] = configurable
+    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
+    thread_id = configurable.get("thread_id")
 
     if thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
-    configurable = config["configurable"]
     model_id, effort = await _resolve_chat_model(configurable)
     model_id, effort = gate_fable_model(
         model_id, effort, fable_enabled=await get_team_fable_enabled()
@@ -212,15 +245,21 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
             web_search,
             fetch_url,
         ],
-        middleware=[
-            PrepareChatRunMiddleware(config=config),
-            SanitizeToolInputsMiddleware(),
-            ModelCallLimitMiddleware(run_limit=CHAT_MODEL_CALL_LIMIT, exit_behavior="end"),
-            ToolErrorMiddleware(),
-            ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),
-            SanitizeFireworksMessagesMiddleware(),
-            SanitizeThinkingBlocksMiddleware(),
-        ],
+        subagents=[_chat_general_purpose_subagent()],
+        middleware=cast(
+            list[AgentMiddleware[Any, Any, Any]],
+            [
+                PrepareChatRunMiddleware(config=config),
+                SanitizeToolInputsMiddleware(),
+                ModelCallLimitMiddleware(run_limit=CHAT_MODEL_CALL_LIMIT, exit_behavior="end"),
+                ToolErrorMiddleware(),
+                ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),
+                SanitizeFireworksMessagesMiddleware(),
+                SanitizeOpenAIResponsesMiddleware(),
+                SanitizeThinkingBlocksMiddleware(),
+                ModelCallTimeoutMiddleware(),
+            ],
+        ),
     ).with_config(config)
 
 

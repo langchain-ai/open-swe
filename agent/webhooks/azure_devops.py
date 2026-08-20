@@ -1,16 +1,13 @@
 """Azure DevOps Service Hook handlers (work item + PR comment)."""
 
-from __future__ import annotations
-
 import hashlib
 import logging
 import os
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.messages.content import create_text_block
 
-from agent import webapp
-from agent.utils.azure_devops_payload import (
+from ..utils.azure_devops_payload import (
     AZURE_DEVOPS_PR_COMMENT_EVENT_TYPES,
     extract_pull_request_context_from_comment_payload,
     extract_trigger_comment_text,
@@ -20,6 +17,7 @@ from agent.utils.azure_devops_payload import (
     parse_org_project_from_pr_comment_payload,
     parse_org_project_from_service_hook,
 )
+from . import common
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +29,7 @@ def generate_thread_id_from_azure_devops_work_item(
 ) -> str:
     key = f"ado-wi:{organization.strip().lower()}:{project.strip().lower()}:{work_item_id}"
     digest = hashlib.sha256(key.encode()).hexdigest()
-    return (
-        f"{digest[:8]}-{digest[8:12]}-{digest[12:16]}-"
-        f"{digest[16:20]}-{digest[20:32]}"
-    )
+    return f"{digest[:8]}-{digest[8:12]}-{digest[12:16]}-{digest[16:20]}-{digest[20:32]}"
 
 
 def generate_thread_id_from_azure_devops_pr(
@@ -48,10 +43,7 @@ def generate_thread_id_from_azure_devops_pr(
         f"{project.strip().lower()}:{repository_id.strip().lower()}:{pull_request_id}"
     )
     digest = hashlib.sha256(key.encode()).hexdigest()
-    return (
-        f"{digest[:8]}-{digest[8:12]}-{digest[12:16]}-"
-        f"{digest[16:20]}-{digest[20:32]}"
-    )
+    return f"{digest[:8]}-{digest[8:12]}-{digest[12:16]}-{digest[16:20]}-{digest[20:32]}"
 
 
 def build_azure_devops_repo_config(organization: str, project: str) -> dict[str, str] | None:
@@ -101,12 +93,12 @@ async def process_azure_devops_work_item(
             "project": project,
         },
     }
-    await webapp.dispatch_agent_run(
+    await common.dispatch_agent_run(
         thread_id,
-        [create_text_block(prompt)],
+        [cast(dict[str, Any], create_text_block(prompt))],
         configurable,
         source="azure_devops",
-        metadata=webapp._AGENT_VERSION_METADATA,
+        metadata=common._AGENT_VERSION_METADATA,
     )
 
 
@@ -162,12 +154,12 @@ async def process_azure_devops_pull_request_comment(
             "title": title,
         },
     }
-    await webapp.dispatch_agent_run(
+    await common.dispatch_agent_run(
         thread_id,
-        [create_text_block(prompt)],
+        [cast(dict[str, Any], create_text_block(prompt))],
         configurable,
         source="azure_devops",
-        metadata=webapp._AGENT_VERSION_METADATA,
+        metadata=common._AGENT_VERSION_METADATA,
     )
 
 
@@ -186,16 +178,12 @@ async def handle_azure_devops_webhook_payload(payload: dict[str, Any]) -> dict[s
         return {"status": "ignored", "reason": "AZURE_DEVOPS_REPO not configured"}
 
     if event_type in AZURE_DEVOPS_PR_COMMENT_EVENT_TYPES:
-        await process_azure_devops_pull_request_comment(
-            payload, repo_config, organization, project
-        )
+        await process_azure_devops_pull_request_comment(payload, repo_config, organization, project)
         return {"status": "accepted", "message": "Processing Azure DevOps PR comment"}
 
     work_item_id = extract_work_item_id_from_payload(payload)
     if work_item_id is None:
         return {"status": "ignored", "reason": "Missing work item id in payload"}
 
-    await process_azure_devops_work_item(
-        organization, project, work_item_id, repo_config, payload
-    )
+    await process_azure_devops_work_item(organization, project, work_item_id, repo_config, payload)
     return {"status": "accepted", "message": "Processing Azure DevOps work item"}

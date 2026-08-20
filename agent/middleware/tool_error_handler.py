@@ -4,8 +4,6 @@ Wraps all tool calls in try/except so that unhandled exceptions are
 returned as error ToolMessages instead of crashing the agent run.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
@@ -21,9 +19,15 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langsmith.sandbox import SandboxClientError
 
+from ..utils.sandbox_state import clear_sandbox_backend
+from .sandbox_circuit_breaker import (
+    extract_sandbox_id,
+    post_sandbox_unreachable_notification,
+)
+
 logger = logging.getLogger(__name__)
 
-SANDBOX_RECREATED_AFTER_CLIENT_ERROR = "sandbox_recreated_after_client_error"
+SANDBOX_UNREACHABLE = "sandbox_unreachable"
 
 
 def _get_name(candidate: object) -> str | None:
@@ -60,24 +64,28 @@ def _to_error_payload(e: Exception, request: ToolCallRequest | None = None) -> d
     return data
 
 
-def _to_sandbox_recreated_payload(
+def _to_sandbox_unreachable_payload(
     e: SandboxClientError,
-    sandbox_id: str,
     request: ToolCallRequest | None = None,
 ) -> dict[str, str]:
+    sandbox_id = extract_sandbox_id(str(e))
+    which = f" ({sandbox_id})" if sandbox_id else ""
     data: dict[str, str] = {
         "status": "error",
         "error_type": e.__class__.__name__,
         "previous_error": str(e),
-        "recovery": SANDBOX_RECREATED_AFTER_CLIENT_ERROR,
-        "sandbox_id": sandbox_id,
+        "recovery": SANDBOX_UNREACHABLE,
         "error": (
-            "The previous sandbox became unreachable mid-run. A fresh sandbox "
-            f"({sandbox_id}) has been created and cached for this thread. "
-            "Retry the last tool call; if repository files are missing, re-clone or "
-            "reinitialize the workspace first."
+            f"The sandbox for this thread{which} stopped responding. It will not be "
+            "replaced automatically: a fresh sandbox is empty, so swapping one in "
+            "would discard any uncommitted work while looking like a recovery. Stop "
+            "calling sandbox tools and tell the user their sandbox stopped "
+            "responding, naming it, and that retriggering the thread retries the "
+            "same sandbox while a new thread gets a fresh one."
         ),
     }
+    if sandbox_id:
+        data["sandbox_id"] = sandbox_id
     tool_name = _extract_tool_name(request)
     if tool_name:
         data["name"] = tool_name
@@ -90,21 +98,22 @@ def _get_tool_call_id(request: ToolCallRequest) -> str | None:
     return None
 
 
-def _get_thread_id(request: ToolCallRequest) -> str | None:
+def _get_run_config(request: ToolCallRequest) -> Mapping[str, Any] | None:
     runtime_config = getattr(getattr(request, "runtime", None), "config", None)
-    config: Mapping[str, Any] | None = (
-        runtime_config if isinstance(runtime_config, Mapping) else None
-    )
-    if config is None:
-        try:
-            maybe_config = get_config()
-        except Exception:
-            logger.exception("Failed to read runnable config while handling sandbox error")
-            return None
-        config = maybe_config if isinstance(maybe_config, Mapping) else None
+    if isinstance(runtime_config, Mapping):
+        return runtime_config
+    try:
+        maybe_config = get_config()
+    except Exception:
+        logger.exception("Failed to read runnable config while handling sandbox error")
+        return None
+    return maybe_config if isinstance(maybe_config, Mapping) else None
+
+
+def _get_thread_id(request: ToolCallRequest) -> str | None:
+    config = _get_run_config(request)
     if config is None:
         return None
-
     configurable = config.get("configurable", {})
     if not isinstance(configurable, Mapping):
         return None
@@ -112,23 +121,11 @@ def _get_thread_id(request: ToolCallRequest) -> str | None:
     return thread_id if isinstance(thread_id, str) and thread_id else None
 
 
-async def _recreate_sandbox_for_thread(thread_id: str) -> str:
-    from agent.server import _configure_git_identity, _recreate_sandbox, client
-    from agent.utils.sandbox_state import set_sandbox_backend
-
-    sandbox_backend = await _recreate_sandbox(thread_id)
-    sandbox_backend = set_sandbox_backend(thread_id, sandbox_backend)
-    await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id})
-    await _configure_git_identity(sandbox_backend)
-    return sandbox_backend.id
-
-
-def _sandbox_recreated_tool_message(
+def _sandbox_unreachable_tool_message(
     e: SandboxClientError,
-    sandbox_id: str,
     request: ToolCallRequest,
 ) -> ToolMessage:
-    data = _to_sandbox_recreated_payload(e, sandbox_id, request)
+    data = _to_sandbox_unreachable_payload(e, request)
     return ToolMessage(
         content=json.dumps(data),
         tool_call_id=_get_tool_call_id(request),
@@ -166,12 +163,16 @@ class ToolErrorMiddleware(AgentMiddleware):
             logger.exception("Sandbox error during tool call handling; request=%r", request)
             thread_id = _get_thread_id(request)
             if thread_id:
+                clear_sandbox_backend(thread_id)
+            config = _get_run_config(request)
+            if config is not None:
                 try:
-                    sandbox_id = await _recreate_sandbox_for_thread(thread_id)
-                    return _sandbox_recreated_tool_message(e, sandbox_id, request)
+                    await post_sandbox_unreachable_notification(
+                        config, sandbox_id=extract_sandbox_id(str(e))
+                    )
                 except Exception:
-                    logger.exception("Failed to recreate sandbox for thread %s", thread_id)
-            return _generic_error_tool_message(e, request)
+                    logger.exception("Failed to notify user of dead sandbox for %s", thread_id)
+            return _sandbox_unreachable_tool_message(e, request)
         except Exception as e:
             logger.exception("Error during tool call handling; request=%r", request)
             return _generic_error_tool_message(e, request)

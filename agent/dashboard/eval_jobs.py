@@ -8,8 +8,6 @@ dashboard and reconciles a run whose heartbeat has gone stale (e.g. the Action
 was killed) to ``failed``.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 from datetime import UTC, datetime
@@ -17,13 +15,13 @@ from typing import Any, Literal, TypedDict
 
 from langgraph_sdk import get_client
 
-from agent.reviewer_eval_store import (
+from agent.review.eval_store import (
     _HEARTBEAT_STALE_SECONDS,
     DEFAULT_EVAL_PROJECT,
     EVALS_NAMESPACE,
     REVIEWER_EVAL_KEY,
 )
-from agent.reviewer_findings import REVIEW_FINDING_CAP
+from agent.review.findings import REVIEW_FINDING_CAP
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +51,7 @@ DEFAULT_REVIEWER_EVAL_CONFIG: ReviewerEvalConfig = {
     "langsmith_project": DEFAULT_EVAL_PROJECT,
     "langgraph_url": "",
     "assistant_id": "reviewer",
-    "model_id": "google_genai:gemini-3.5-flash",
+    "model_id": "google_genai:gemini-3.7-flash",
     "reasoning_effort": "medium",
     "score_mode": "surfaced_findings",
     "severity_threshold": "low",

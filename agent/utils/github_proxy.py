@@ -7,8 +7,6 @@ sandbox. This module records when each thread's proxy token expires and lets a
 before-model middleware re-configure the proxy before it goes stale.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 from collections.abc import Sequence

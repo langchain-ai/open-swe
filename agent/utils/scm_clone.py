@@ -1,7 +1,5 @@
 """Clone or pull Azure DevOps Git repos into a sandbox using a PAT."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import shlex
@@ -82,7 +80,9 @@ async def clone_or_pull_azure_devops_repo_in_sandbox(
             None, git_has_uncommitted_changes, sandbox_backend, repo_dir
         )
         if has_changes:
-            logger.warning("Azure DevOps repo has uncommitted changes at %s, skipping pull", repo_dir)
+            logger.warning(
+                "Azure DevOps repo has uncommitted changes at %s, skipping pull", repo_dir
+            )
         else:
             pull_cmd = (
                 f"cd {safe_repo_dir} && git {ado_c_prefix}pull origin "
