@@ -49,6 +49,27 @@ describe("streamMessagesToUi", () => {
     })
   })
 
+  it("drops our own forwarded Slack replies, which already render as tool calls", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "self-entity",
+        content:
+          '<dynamic-context kind="system" id="system:open-swe"><display_name>Open SWE</display_name><sender_type>self</sender_type></dynamic-context>',
+      }),
+      new HumanMessage({
+        id: "self-message",
+        content:
+          '<input-message sender="system:open-swe" surface="slack" kind="system"><content>on it</content></input-message>',
+      }),
+      new HumanMessage({ id: "legacy", content: "Legacy message" }),
+    ])
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({
+      chunks: [{ kind: "text", text: "Legacy message" }],
+    })
+  })
+
   it("preserves structured message whitespace", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({
