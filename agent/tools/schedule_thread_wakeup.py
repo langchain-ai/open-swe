@@ -205,7 +205,7 @@ async def _create_wakeup_cron(
     configurable: dict[str, Any],
     client: Any | None = None,
 ) -> dict[str, Any]:
-    client = client or get_client(url=langgraph_url())
+    resolved_client = get_client(url=langgraph_url()) if client is None else client
     schedule = _build_one_shot_cron(fire_time)
     end_time = fire_time + timedelta(seconds=_END_TIME_PADDING_SECONDS)
     run_config = prepare_run_config(
@@ -236,7 +236,7 @@ async def _create_wakeup_cron(
     }
     if COMPLETION_WEBHOOK_URL:
         kwargs["webhook"] = COMPLETION_WEBHOOK_URL
-    cron = await client.crons.create_for_thread(
+    cron = await resolved_client.crons.create_for_thread(
         thread_id,
         _AGENT_ASSISTANT_ID,
         **kwargs,
