@@ -5,14 +5,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { useAgentThread } from "@/features/agents/lib/queries"
 
-export function AgentThreadPending() {
-  return (
-    <main className="flex min-w-0 flex-1 items-center justify-center p-6">
-      <Skeleton className="h-40 w-full max-w-md" />
-    </main>
-  )
-}
-
 export function AgentThreadPage({
   threadId,
   active = true,
@@ -22,7 +14,13 @@ export function AgentThreadPage({
 }) {
   const threadQuery = useAgentThread(threadId)
 
-  if (threadQuery.isLoading) return <AgentThreadPending />
+  if (threadQuery.isLoading) {
+    return (
+      <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+        <Skeleton className="h-40 w-full max-w-md" />
+      </main>
+    )
+  }
 
   if (threadQuery.isError || !threadQuery.data) {
     return active ? <Navigate to="/agents" /> : null
