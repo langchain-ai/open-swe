@@ -14,6 +14,7 @@ import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { PANEL_MIN_CHAT_WIDTH } from "@/features/agents/components/AgentPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import {
   readStoredPanelCollapsed,
@@ -265,6 +266,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             />
             <div className="shrink-0 px-4 pb-4">
               <div className="mx-auto w-full max-w-3xl min-w-0">
+                <ThreadPullRequests pullRequests={thread.pullRequests ?? []} />
                 <AgentPromptBar
                   placeholder="Add a follow up"
                   compact
@@ -320,6 +322,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               </p>
             )}
             <div className="w-full max-w-3xl">
+              <ThreadPullRequests pullRequests={thread.pullRequests ?? []} />
               <AgentPromptBar
                 placeholder="Send the first message"
                 compact

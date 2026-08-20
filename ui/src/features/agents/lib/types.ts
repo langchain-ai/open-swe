@@ -243,6 +243,27 @@ export interface WorkflowPushApprovalsResponse {
   approvals: Array<WorkflowPushApproval>
 }
 
+export interface AgentPullRequestSummary {
+  number: number
+  title: string
+  state: "draft" | "open" | "merged" | "closed"
+  headRef: string
+  baseRef: string
+  url: string
+}
+
+export interface AgentPullRequest extends AgentPullRequestSummary {
+  repoFullName: string
+  author: string | null
+  authorAvatarUrl: string | null
+  createdAt: string | null
+  diffStats: {
+    files: number
+    additions: number
+    deletions: number
+  }
+}
+
 export interface AgentThread {
   id: string
   title: string
@@ -273,14 +294,8 @@ export interface AgentThread {
   sandboxId?: string | null
   messages: Array<Message>
   queuedMessages?: Array<QueuedThreadMessage>
-  pr?: {
-    number: number
-    title: string
-    state: "draft" | "open" | "merged" | "closed"
-    headRef: string
-    baseRef: string
-    url: string
-  }
+  pr?: AgentPullRequestSummary
+  pullRequests?: Array<AgentPullRequest>
   diffStats?: {
     files: number
     additions: number

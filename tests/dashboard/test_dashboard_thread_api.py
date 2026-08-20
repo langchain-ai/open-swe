@@ -324,6 +324,58 @@ async def test_thread_summary_includes_pr_and_diff_stats() -> None:
         "url": "https://github.com/langchain-ai/open-swe/pull/42",
     }
     assert summary["diffStats"] == {"files": 3, "additions": 10, "deletions": 2}
+    assert summary["pullRequests"][0]["repoFullName"] == "langchain-ai/open-swe"
+
+
+async def test_thread_summary_includes_pull_requests_across_repositories() -> None:
+    summary = await thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "repo_full_name": "langchain-ai/open-swe",
+                "title": "Cross-repo change",
+                "pull_requests": [
+                    {
+                        "repo_full_name": "langchain-ai/open-swe",
+                        "number": 42,
+                        "url": "https://github.com/langchain-ai/open-swe/pull/42",
+                        "title": "feat: dashboard",
+                        "state": "draft",
+                        "head_ref": "feature/dashboard",
+                        "base_ref": "main",
+                        "author": "octocat",
+                        "author_avatar_url": "https://avatars.example/octocat.png",
+                        "created_at": "2026-08-18T10:00:00Z",
+                        "diff_stats": {"files": 3, "additions": 10, "deletions": 2},
+                    },
+                    {
+                        "repo_full_name": "langchain-ai/langchain",
+                        "number": 9,
+                        "url": "https://github.com/langchain-ai/langchain/pull/9",
+                        "title": "feat: integration",
+                        "state": "open",
+                        "head_ref": "feature/integration",
+                        "base_ref": "master",
+                        "author": "hubot",
+                        "diff_stats": {"files": 1, "additions": 4, "deletions": 0},
+                    },
+                ],
+            }
+        )
+    )
+
+    assert [item["repoFullName"] for item in summary["pullRequests"]] == [
+        "langchain-ai/open-swe",
+        "langchain-ai/langchain",
+    ]
+    assert summary["pr"] == {
+        "number": 9,
+        "title": "feat: integration",
+        "state": "open",
+        "headRef": "feature/integration",
+        "baseRef": "master",
+        "url": "https://github.com/langchain-ai/langchain/pull/9",
+    }
+    assert summary["diffStats"] == {"files": 1, "additions": 4, "deletions": 0}
 
 
 async def test_thread_summary_uses_configured_repo_for_display() -> None:
