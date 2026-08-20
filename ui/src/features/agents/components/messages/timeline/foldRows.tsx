@@ -20,7 +20,7 @@ export function TurnFoldRow({
   const Icon = expanded ? ChevronDown : ChevronRight
 
   return (
-    <div className="border-b border-border/60 pt-1 pb-2">
+    <div className={cn("pt-1 pb-2", !active && "border-b border-border/60")}>
       <button
         type="button"
         aria-expanded={expanded}
