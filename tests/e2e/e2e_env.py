@@ -21,6 +21,10 @@ BASE_BRANCH = "main"
 FEATURE_BRANCH = "add-greet"
 PR_TITLE = "Add greet() helper"
 FEATURE_FILE = "greet.py"
+SECOND_OWNER = "anotherorg"
+SECOND_REPO = "companion"
+SECOND_FEATURE_BRANCH = "add-integration"
+SECOND_PR_TITLE = "Add companion integration"
 
 # Fixed Slack identifiers so the mock UI and assertions are deterministic.
 BOT_USER_ID = "U0BOT"
@@ -34,6 +38,7 @@ BASE_URL = os.environ.setdefault("E2E_BASE", f"http://127.0.0.1:{PORT}")
 _GH_DIR = TMP / "github"
 _WORK_DIR = TMP / "work"
 BARE_REMOTE = _GH_DIR / f"{OWNER}__{REPO}.git"
+SECOND_BARE_REMOTE = _GH_DIR / f"{SECOND_OWNER}__{SECOND_REPO}.git"
 
 _DEFAULTS = {
     # Sandbox: real local provider, rooted in a throwaway temp dir.
@@ -44,6 +49,7 @@ _DEFAULTS = {
     "GIT_CONFIG_SYSTEM": "/dev/null",
     # Path the scripted agent clones from (a local bare repo = "fake GitHub").
     "E2E_REMOTE": str(BARE_REMOTE),
+    "E2E_SECOND_REMOTE": str(SECOND_BARE_REMOTE),
     # Webhook signing + bot identity.
     "GITHUB_WEBHOOK_SECRET": "test-github-secret",
     "SLACK_SIGNING_SECRET": "test-slack-secret",

@@ -28,6 +28,18 @@ export interface AppCommand {
   desktopShortcuts?: ReadonlyArray<string>
 }
 
+export function createNewThreadCommand(run: () => void): AppCommand {
+  return {
+    id: "new-thread",
+    label: "New thread",
+    aliases: ["new chat", "start thread"],
+    shortcuts: ["c"],
+    group: "General",
+    run,
+    desktopId: "new-thread",
+  }
+}
+
 interface CommandRegistration {
   key: number
   commands: ReadonlyArray<AppCommand>
@@ -89,16 +101,7 @@ export function AppCommandProvider({
         desktopId: "show-command-palette",
         desktopShortcuts: ["mod+k"],
       },
-      {
-        id: "new-thread",
-        label: "New thread",
-        aliases: ["new chat", "start thread"],
-        shortcuts: ["mod+n"],
-        group: "General",
-        run: () => void navigate({ to: "/agents" }),
-        desktopId: "new-thread",
-        desktopShortcuts: ["mod+n"],
-      },
+      createNewThreadCommand(() => void navigate({ to: "/agents" })),
       {
         id: "open-settings",
         label: "Open settings",
