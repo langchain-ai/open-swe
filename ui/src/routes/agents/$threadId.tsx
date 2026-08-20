@@ -6,11 +6,18 @@ import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsI
 import { useAgentThread } from "@/features/agents/lib/queries"
 
 export const Route = createFileRoute("/agents/$threadId")({
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { feedback?: boolean } => ({
+    feedback:
+      search.feedback === true || search.feedback === "true" ? true : undefined,
+  }),
   component: AgentThreadPage,
 })
 
 function AgentThreadPage() {
   const { threadId } = Route.useParams()
+  const { feedback } = Route.useSearch()
   const threadQuery = useAgentThread(threadId)
 
   if (threadQuery.isLoading) {
@@ -27,7 +34,11 @@ function AgentThreadPage() {
 
   return (
     <AgentThreadStreamBoundary>
-      <AgentThreadView key={threadId} thread={threadQuery.data} />
+      <AgentThreadView
+        key={threadId}
+        thread={threadQuery.data}
+        autoFocusComposer={feedback}
+      />
     </AgentThreadStreamBoundary>
   )
 }

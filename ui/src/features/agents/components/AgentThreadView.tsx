@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils"
 
 interface AgentThreadViewProps {
   thread: AgentThread
+  autoFocusComposer?: boolean
 }
 
 function messageText(message: Message): string {
@@ -86,7 +87,10 @@ function visibleQueuedMessages(
 
 // The stream lives at the `/agents` layout (one persistent provider that
 // survives the home → thread navigation), so this view only consumes it.
-export function AgentThreadView({ thread }: AgentThreadViewProps) {
+export function AgentThreadView({
+  thread,
+  autoFocusComposer = false,
+}: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadStream()
   const isMobile = useIsMobile()
@@ -267,6 +271,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               <div className="mx-auto w-full max-w-3xl min-w-0">
                 <AgentPromptBar
                   placeholder="Add a follow up"
+                  autoFocus={autoFocusComposer}
                   compact
                   busy={isStreaming}
                   activeRun={activeRun}
@@ -322,6 +327,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             <div className="w-full max-w-3xl">
               <AgentPromptBar
                 placeholder="Send the first message"
+                autoFocus={autoFocusComposer}
                 compact
                 busy={isStreaming}
                 activeRun={activeRun}
