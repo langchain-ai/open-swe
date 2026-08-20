@@ -49,11 +49,10 @@ dev = [
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
 override-dependencies = ["deepagents==0.7.6", "wcmatch>=11.0"]
 # Each langgraph-api release pins its langgraph-runtime-inmem peer to a single
-# minor window expressed in `.dev0` bounds (`>=0.32.0.dev0,<0.33.0.dev0`). Under
-# uv's default pre-release policy that makes every recent pair unattractive, so a
-# plain resolve lands on langgraph-api 0.10.3 — end of life, and its `run.start`
-# handler drops the run input, which leaves the local dev server unable to run a
-# web follow-up at all. Hold the dev/CI runtime at the current stable pair.
+# minor window expressed in `.dev0` bounds (`>=0.32.0.dev0,<0.33.0.dev0`), which
+# uv's default pre-release policy shies away from, so a plain resolve lands on the
+# end-of-life 0.10.3. Hold the local dev server at the version `langgraph.json`
+# declares for the deployment, so tests run against the runtime that serves prod.
 constraint-dependencies = ["langgraph-api>=0.12.6,<0.13"]
 
 [build-system]
