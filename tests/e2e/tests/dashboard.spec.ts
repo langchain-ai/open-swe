@@ -536,6 +536,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       page.getByText("Person says <img data-e2e-injected src=x>"),
     ).toBeVisible();
     await expect(page.locator("img[data-e2e-injected]")).toHaveCount(0);
+    await expect(page.getByText("Automation checks CI")).toHaveCount(0);
+    const systemChip = page.getByRole("button", { name: "Scheduler" });
+    await expect(systemChip).toBeVisible();
+    await systemChip.click();
     await expect(page.getByText("Automation checks CI")).toBeVisible();
     await expect(page.getByText("Legacy stays visible")).toBeVisible();
     await expect(page.getByText("github:alice", { exact: false })).toHaveCount(
