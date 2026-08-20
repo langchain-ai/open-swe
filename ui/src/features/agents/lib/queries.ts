@@ -15,7 +15,13 @@ import type {
   ThreadTurnDiffOptions,
   ThreadsPageParams,
 } from "./api"
-import type { AgentThread, Chunk, ImageChunk, Message } from "./types"
+import type {
+  AgentStatus,
+  AgentThread,
+  Chunk,
+  ImageChunk,
+  Message,
+} from "./types"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
 
@@ -44,6 +50,28 @@ export const agentThreadKeys = {
 
 export function invalidateAgentThreadLists(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: agentThreadKeys.lists })
+}
+
+export function setAgentThreadStatus(
+  queryClient: QueryClient,
+  threadId: string,
+  status: AgentStatus
+): void {
+  const update = (thread: AgentThread) =>
+    thread.id === threadId ? { ...thread, status } : thread
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.detail(threadId),
+    (prev) => (prev ? update(prev) : prev)
+  )
+  queryClient.setQueriesData<SidebarThreads>(
+    { queryKey: ["agent-threads", "lists", "sidebar"] },
+    (prev) =>
+      prev && {
+        ...prev,
+        active: { ...prev.active, items: prev.active.items.map(update) },
+        resolved: { ...prev.resolved, items: prev.resolved.items.map(update) },
+      }
+  )
 }
 
 export function seedAgentThreadLists(
