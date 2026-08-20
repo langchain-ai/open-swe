@@ -82,6 +82,9 @@ _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 _PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 _DISCOVERY_HISTORY_LIMIT = 5
 _PROXY_STREAM_TIMEOUT = httpx.Timeout(None)
+_THREAD_POST_COMMAND_METHODS = frozenset(
+    {"run.start", "input.respond", "input.inject", "state.fork"}
+)
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
@@ -339,6 +342,14 @@ def _thread_is_readable(metadata: Mapping[str, Any]) -> bool:
 def _assert_thread_readable(metadata: Mapping[str, Any]) -> None:
     if not _thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
+
+
+def _assert_thread_postable(
+    metadata: Mapping[str, Any], login: str, email: str | None = None
+) -> None:
+    _assert_thread_readable(metadata)
+    if metadata.get("admin_thread") is True and not is_admin(email, login=login):
+        raise HTTPException(403, "only admins can send messages in admin threads")
 
 
 def _metadata_repo(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
@@ -1735,7 +1746,7 @@ async def send_dashboard_message(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata)
+    _assert_thread_postable(metadata, login, email)
 
     prompt = body.content.strip()
     now_ms = _now_ms()
@@ -2466,9 +2477,9 @@ async def proxy_dashboard_thread_commands(
     # yet. That command lazily creates + stamps + owns the thread (in
     # ``_enrich_run_start_command``); any other command against a missing thread
     # is a 404. On an existing thread, ``run.start`` (the posting path) is open
-    # to any org member and attributed in ``_enrich_run_start_command``; every
-    # other write command carries unattributed input (e.g. ``input.respond``),
-    # so it stays owner-only.
+    # to any org member and attributed in ``_enrich_run_start_command``. Input
+    # commands on admin threads require an admin; other threads keep unattributed
+    # commands such as ``input.respond`` owner-only.
     method = parsed.get("method")
     try:
         thread = await langgraph_client().threads.get(thread_id)
@@ -2484,9 +2495,12 @@ async def proxy_dashboard_thread_commands(
         thread_busy = False
     else:
         metadata = thread_metadata(thread)
-        if method == "run.start":
-            _assert_thread_readable(metadata)
+        post_command = method in _THREAD_POST_COMMAND_METHODS
+        if post_command:
+            _assert_thread_postable(metadata, login, email)
         else:
+            _assert_thread_readable(metadata)
+        if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
             _assert_thread_owner(metadata, login, email)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
