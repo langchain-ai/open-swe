@@ -53,7 +53,7 @@ export type RightPanelSurface =
   | { id: "agents"; kind: "agents" }
 
 const RIGHT_PANEL_STORAGE_KEY = "open-swe:right-panel-state"
-const RIGHT_PANEL_STORAGE_VERSION = 1
+const RIGHT_PANEL_STORAGE_VERSION = 2
 
 export interface ThreadRightPanelState {
   isOpen: boolean
