@@ -269,7 +269,7 @@ async def test_schedule_thread_wakeup_returns_error_on_exception(
 
     assert result["success"] is False
     assert "connection refused" in result["error"]
-    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 0
+    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 1
 
 
 @pytest.mark.parametrize("prompt", [None, "   "])

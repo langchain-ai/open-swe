@@ -342,8 +342,4 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
             )
         except Exception as exc:
             logger.exception("Failed to schedule thread wakeup for %s", thread_id)
-            try:
-                await _record_wakeup(client, thread_id, generation, wakeup_count)
-            except Exception:
-                logger.exception("Failed to restore thread wakeup budget for %s", thread_id)
             return {"success": False, "error": str(exc)}
