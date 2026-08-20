@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -22,13 +23,24 @@ def _stub_purge(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(wakeup_tool, "_purge_expired_wakeups_best_effort", _noop)
     monkeypatch.setattr(wakeup_tool, "get_active_slack_thread", _active)
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: _FakeClient([]))
 
 
 class _FakeCrons:
     def __init__(self, crons: list[dict[str, Any]]) -> None:
         self._crons = list(crons)
+        self.created: list[dict[str, Any]] = []
         self.deleted: list[str] = []
         self.search_calls: list[dict[str, Any]] = []
+
+    async def create_for_thread(
+        self, thread_id: str, assistant_id: str, **kwargs: Any
+    ) -> dict[str, str]:
+        cron_id = f"cron-{len(self.created) + 1}"
+        self.created.append(
+            {"cron_id": cron_id, "thread_id": thread_id, "assistant_id": assistant_id, **kwargs}
+        )
+        return {"cron_id": cron_id}
 
     async def search(
         self,
@@ -52,9 +64,37 @@ class _FakeCrons:
         self._crons = [c for c in self._crons if c.get("cron_id") != cron_id]
 
 
+class _FakeThreads:
+    def __init__(
+        self,
+        messages: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self.messages = list(messages or [])
+        self.metadata = dict(metadata or {})
+        self.updates: list[dict[str, Any]] = []
+
+    async def get_state(self, thread_id: str) -> dict[str, Any]:
+        return {"values": {"messages": self.messages}}
+
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        return {"thread_id": thread_id, "metadata": self.metadata}
+
+    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
+        self.updates.append({"thread_id": thread_id, "metadata": metadata})
+        self.metadata.update(metadata)
+
+
 class _FakeClient:
-    def __init__(self, crons: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        crons: list[dict[str, Any]],
+        *,
+        messages: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         self.crons = _FakeCrons(crons)
+        self.threads = _FakeThreads(messages, metadata)
 
 
 def _wakeup_cron(cron_id: str, end_time: datetime | None) -> dict[str, Any]:
@@ -78,6 +118,16 @@ def _config(**overrides: Any) -> dict[str, Any]:
     }
     base["configurable"].update(overrides)
     return base
+
+
+def _input_message(message_id: str, *, kind: str, sender: str) -> dict[str, str]:
+    return {
+        "id": message_id,
+        "content": (
+            f'<input-message sender="{sender}" surface="automation" kind="{kind}">'
+            f"<content>{message_id}</content></input-message>"
+        ),
+    }
 
 
 async def test_schedule_thread_wakeup_rejects_zero_delay(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -126,6 +176,7 @@ async def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPat
         fire_time: datetime,
         prompt: str,
         configurable: dict[str, Any],
+        client: Any,
     ) -> dict[str, Any]:
         captured.update(
             {
@@ -205,15 +256,20 @@ async def test_schedule_thread_wakeup_returns_error_on_exception(
         fire_time: datetime,
         prompt: str,
         configurable: dict[str, Any],
+        client: Any,
     ) -> dict[str, Any]:
         raise RuntimeError("connection refused")
 
+    client = _FakeClient([])
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 
     result = await wakeup_tool.schedule_thread_wakeup(5)
+
     assert result["success"] is False
     assert "connection refused" in result["error"]
+    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 0
 
 
 @pytest.mark.parametrize("prompt", [None, "   "])
@@ -229,6 +285,7 @@ async def test_schedule_thread_wakeup_defaults_prompt_and_omits_none_configurabl
         fire_time: datetime,
         prompt: str,
         configurable: dict[str, Any],
+        client: Any,
     ) -> dict[str, Any]:
         captured["configurable"] = configurable
         captured["prompt"] = prompt
@@ -244,6 +301,124 @@ async def test_schedule_thread_wakeup_defaults_prompt_and_omits_none_configurabl
     assert "schedule_id" not in cfg
     assert cfg["thread_id"] == "test-thread-123"
     assert "automated re-trigger" in captured["prompt"].lower()
+
+
+async def test_schedule_allows_ten_wakeups_then_rejects_the_eleventh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient(
+        [],
+        messages=[_input_message("user-1", kind="human", sender="slack:U1")],
+    )
+    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+
+    for _ in range(10):
+        result = await wakeup_tool.schedule_thread_wakeup(5)
+        assert result["success"] is True
+
+    result = await wakeup_tool.schedule_thread_wakeup(5)
+
+    assert result["success"] is False
+    assert "at most 10 wakeups" in result["error"]
+    assert len(client.crons.created) == 10
+    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 10
+
+
+async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    human = _input_message("user-1", kind="human", sender="slack:U1")
+    client = _FakeClient([], messages=[human])
+    generation = wakeup_tool._latest_human_generation([human])
+    client.threads.metadata.update(
+        {
+            wakeup_tool._WAKEUP_GENERATION_METADATA_KEY: generation,
+            wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 10,
+        }
+    )
+    client.threads.messages.extend(
+        [
+            _input_message("wakeup-10", kind="system", sender="system:thread-wakeup"),
+            _input_message("user-2", kind="human", sender="slack:U1"),
+        ]
+    )
+    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+
+    result = await wakeup_tool.schedule_thread_wakeup(5)
+
+    assert result["success"] is True
+    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 1
+    assert client.threads.metadata[wakeup_tool._WAKEUP_GENERATION_METADATA_KEY] != generation
+
+
+async def test_system_wakeup_does_not_reset_wakeup_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    human = _input_message("user-1", kind="human", sender="slack:U1")
+    client = _FakeClient(
+        [],
+        messages=[
+            human,
+            _input_message("wakeup-10", kind="system", sender="system:thread-wakeup"),
+        ],
+        metadata={
+            wakeup_tool._WAKEUP_GENERATION_METADATA_KEY: (
+                wakeup_tool._latest_human_generation([human])
+            ),
+            wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 10,
+        },
+    )
+    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+
+    result = await wakeup_tool.schedule_thread_wakeup(5)
+
+    assert result["success"] is False
+    assert not client.crons.created
+
+
+async def test_schedule_does_not_create_cron_when_budget_cannot_be_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient(
+        [],
+        messages=[_input_message("user-1", kind="human", sender="slack:U1")],
+    )
+
+    async def fail_update(*, thread_id: str, metadata: dict[str, Any]) -> None:
+        raise RuntimeError("metadata unavailable")
+
+    monkeypatch.setattr(client.threads, "update", fail_update)
+    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+
+    result = await wakeup_tool.schedule_thread_wakeup(5)
+
+    assert result["success"] is False
+    assert result["error"] == "Unable to record the thread wakeup limit"
+    assert not client.crons.created
+
+
+async def test_parallel_schedules_share_one_wakeup_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    human = _input_message("user-1", kind="human", sender="slack:U1")
+    generation = wakeup_tool._latest_human_generation([human])
+    client = _FakeClient(
+        [],
+        messages=[human],
+        metadata={
+            wakeup_tool._WAKEUP_GENERATION_METADATA_KEY: generation,
+            wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 9,
+        },
+    )
+    monkeypatch.setattr(wakeup_tool, "get_config", _config)
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+
+    results = await asyncio.gather(
+        wakeup_tool.schedule_thread_wakeup(5),
+        wakeup_tool.schedule_thread_wakeup(5),
+    )
+
+    assert sum(result["success"] is True for result in results) == 1
+    assert len(client.crons.created) == 1
+    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 10
 
 
 def test_ceil_to_next_minute_keeps_exact_minute() -> None:
