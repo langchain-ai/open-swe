@@ -139,8 +139,12 @@ export function approvePlan(
   })
 }
 
-export function rejectPlan(threadId: string): Promise<{ status: string }> {
+export function rejectPlan(
+  threadId: string,
+  dispatch = true
+): Promise<{ status: string }> {
   return req(`/plan/${encodeURIComponent(threadId)}/reject`, {
     method: "POST",
+    body: JSON.stringify({ dispatch }),
   })
 }

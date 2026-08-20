@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { CircleAlert as CircleAlertIcon, FolderOpen } from "lucide-react"
 
-import type { AgentThread, Message } from "@/features/agents/lib/types"
+import type {
+  AgentThread,
+  ImageChunk,
+  Message,
+} from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
@@ -23,12 +27,14 @@ import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitA
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useAgentSkills } from "@/features/agents/lib/queries"
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
+import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
 interface AgentThreadViewProps {
   thread: AgentThread
+  autoFocusComposer?: boolean
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -46,7 +52,10 @@ function editedPaths(messages: Array<Message>): Array<string> {
 
 // The stream lives at the `/agents` layout (one persistent provider that
 // survives the home → thread navigation), so this view only consumes it.
-export function AgentThreadView({ thread }: AgentThreadViewProps) {
+export function AgentThreadView({
+  thread,
+  autoFocusComposer = false,
+}: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadStream()
   const isMobile = useIsMobile()
@@ -69,9 +78,32 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const [planMode, setPlanMode] = useState<boolean | null>(null)
+  const [planFeedbackPending, setPlanFeedbackPending] =
+    useState(autoFocusComposer)
   const activePlanMode = planMode ?? thread.planMode ?? false
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
+  )
+  const submitMessage = useCallback(
+    async (content: string, images: Array<ImageChunk>) => {
+      if (planFeedbackPending) await rejectPlan(thread.id, false)
+      await sendMessage.mutateAsync({
+        content,
+        images,
+        model_id: activeSelection?.modelId ?? null,
+        effort: activeSelection?.effort ?? null,
+        plan_mode: activePlanMode,
+      })
+      setPlanFeedbackPending(false)
+    },
+    [
+      activePlanMode,
+      activeSelection?.effort,
+      activeSelection?.modelId,
+      planFeedbackPending,
+      sendMessage,
+      thread.id,
+    ]
   )
   const usedTokens = useMemo(
     () => latestContextTokens(stream.messages),
@@ -234,19 +266,12 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                       ? "Add a follow up"
                       : "Only workspace admins can send messages in this thread"
                   }
+                  autoFocus={autoFocusComposer}
                   compact
                   disabled={!canPost}
                   busy={isStreaming}
                   activeRun={activeRun}
-                  onSubmit={(content, images) =>
-                    sendMessage.mutateAsync({
-                      content,
-                      images,
-                      model_id: activeSelection?.modelId ?? null,
-                      effort: activeSelection?.effort ?? null,
-                      plan_mode: activePlanMode,
-                    })
-                  }
+                  onSubmit={submitMessage}
                   models={models}
                   selection={activeSelection}
                   onSelectionChange={setSelection}
@@ -295,6 +320,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                     ? "Send the first message"
                     : "Only workspace admins can send messages in this thread"
                 }
+                autoFocus={autoFocusComposer}
                 compact
                 disabled={!canPost}
                 busy={isStreaming}

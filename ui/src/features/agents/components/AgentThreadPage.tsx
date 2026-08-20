@@ -8,9 +8,11 @@ import { useAgentThread } from "@/features/agents/lib/queries"
 export function AgentThreadPage({
   threadId,
   active = true,
+  autoFocusComposer = false,
 }: {
   threadId: string
   active?: boolean
+  autoFocusComposer?: boolean
 }) {
   const threadQuery = useAgentThread(threadId)
 
@@ -28,7 +30,10 @@ export function AgentThreadPage({
 
   return (
     <AgentThreadStreamBoundary active={active}>
-      <AgentThreadView thread={threadQuery.data} />
+      <AgentThreadView
+        thread={threadQuery.data}
+        autoFocusComposer={autoFocusComposer}
+      />
     </AgentThreadStreamBoundary>
   )
 }

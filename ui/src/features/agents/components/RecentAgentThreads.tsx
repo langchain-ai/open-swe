@@ -15,8 +15,10 @@ function addRecentThread(recentThreadIds: Array<string>, threadId: string) {
 
 export function RecentAgentThreads({
   activeThreadId,
+  autoFocusComposer = false,
 }: {
   activeThreadId: string
+  autoFocusComposer?: boolean
 }) {
   const [recentThreadIds, setRecentThreadIds] = useState(() => [activeThreadId])
   const visibleThreadIds = addRecentThread(recentThreadIds, activeThreadId)
@@ -34,7 +36,11 @@ export function RecentAgentThreads({
         aria-hidden={!active}
       >
         <AgentThreadStreamProvider threadId={threadId}>
-          <AgentThreadPage threadId={threadId} active={active} />
+          <AgentThreadPage
+            threadId={threadId}
+            active={active}
+            autoFocusComposer={active && autoFocusComposer}
+          />
         </AgentThreadStreamProvider>
       </div>
     )
