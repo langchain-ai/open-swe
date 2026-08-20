@@ -11,7 +11,7 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
-import { PANEL_MIN_CHAT_WIDTH } from "@/features/agents/components/AgentPanelShell"
+import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
@@ -189,7 +189,7 @@ export function AgentThreadView({
           "flex min-w-0 flex-1 flex-col",
           thread.adminThread && "bg-destructive/4"
         )}
-        style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
+        style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
           <div

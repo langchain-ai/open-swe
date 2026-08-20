@@ -115,6 +115,9 @@
     /* Compact control geometry — keep semantic so chat controls, menus, and
        tooltips cannot quietly drift apart. */
     --control-radius: 0.5rem;
+    /* Height of the right panel's tab bar; the empty-state launcher offsets by
+       it so its cards center against the whole panel. */
+    --workspace-topbar-height: 2.25rem;
     --glass-blur: 12px;
     --glass-opacity: 80%;
     --chart-1: oklch(0.872 0 0);

@@ -9,26 +9,19 @@ import type {
   DesktopLocalThreadSummary,
 } from "@/desktop"
 import type { ImageChunk } from "@/features/agents/lib/types"
-import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
-import {
-  AgentPanelShell,
-  PANEL_MIN_CHAT_WIDTH,
-} from "@/features/agents/components/AgentPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
-import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
+import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
+import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import {
-  AGENT_COMMON_TABS,
-  AGENT_PANEL_KINDS,
-  CHANGES_TAB,
-  usePanelTabs,
-} from "@/features/agents/lib/panelTabs"
+  selectThreadRightPanelState,
+  useRightPanelStore,
+} from "@/features/agents/lib/rightPanelStore"
 import { useAgentSkills } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
@@ -43,7 +36,6 @@ import {
 } from "@/features/agents/lib/gitPanelPreferences"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
-import { useRegisterAppCommands } from "@/lib/appCommands"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -105,7 +97,15 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
   )
-  const panel = usePanelTabs(sessionId, AGENT_COMMON_TABS)
+  const threadRef = useMemo(
+    () => ({ scope: "local" as const, threadId: sessionId }),
+    [sessionId]
+  )
+  const openSurface = useRightPanelStore((state) => state.open)
+  const activeSurfaceId = useRightPanelStore(
+    (state) =>
+      selectThreadRightPanelState(state.byThreadKey, threadRef).activeSurfaceId
+  )
   const terminals = useTerminalGroups(
     { kind: "local", sessionId },
     thread?.cwd ?? ""
@@ -122,103 +122,16 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const handleOpenFile = useCallback(
     (filePath: string) => {
       setRevealFilePath(filePath)
-      panel.open(CHANGES_TAB)
+      openSurface(threadRef, "diff")
       handlePanelCollapsedChange(false)
     },
-    [handlePanelCollapsedChange, panel]
+    [handlePanelCollapsedChange, openSurface, threadRef]
   )
-  const handleOpenKind = useCallback(
-    (kind: PanelTabKind) => {
-      if (kind !== "terminal") {
-        panel.open(CHANGES_TAB)
-        return
-      }
-      panel.open({ id: terminals.addGroup(), kind })
-    },
-    [panel, terminals]
-  )
-  const activePanelTabId = panel.activeTabId
-  const handleSelectTab = useCallback(
-    (id: string) => {
-      panel.select(id)
-      const group = terminals.state.terminalGroups.find(
-        (candidate) => candidate.id === id
-      )
-      const terminalId = group?.terminalIds[0]
-      if (terminalId) terminals.focus(terminalId)
-    },
-    [panel, terminals]
-  )
-  const handleCloseTab = useCallback(
-    async (id: string) => {
-      if (id === "changes") return
-      if (
-        panel.tabs.find((tab) => tab.id === id)?.kind === "terminal" &&
-        !(await terminals.closeGroup(id))
-      ) {
-        return
-      }
-      panel.close(id)
-    },
-    [panel, terminals]
-  )
-  const toggleTerminal = useCallback(() => {
-    if (!panelCollapsed && panel.activeTab?.kind === "terminal") {
-      handlePanelCollapsedChange(true)
-      return
-    }
-    handlePanelCollapsedChange(false)
-    const existing = panel.tabs.find(
-      (candidate) => candidate.kind === "terminal"
-    )
-    if (existing) handleSelectTab(existing.id)
-    else handleOpenKind("terminal")
-  }, [
-    handleOpenKind,
-    handlePanelCollapsedChange,
-    handleSelectTab,
-    panel.activeTab?.kind,
-    panel.tabs,
-    panelCollapsed,
-  ])
-  const threadCommands = useMemo(
-    () =>
-      thread
-        ? [
-            {
-              id: "toggle-terminal",
-              label: "Toggle terminal",
-              aliases: ["open terminal", "hide terminal"],
-              shortcuts: ["ctrl+`"],
-              group: "Workspace",
-              run: toggleTerminal,
-            },
-            {
-              id: "toggle-work-panel",
-              label: "Toggle work panel",
-              aliases: ["show panel", "hide panel", "changes panel"],
-              shortcuts: ["mod+alt+b"],
-              group: "Workspace",
-              run: () => handlePanelCollapsedChange(!panelCollapsed),
-            },
-          ]
-        : [],
-    [handlePanelCollapsedChange, panelCollapsed, thread, toggleTerminal]
-  )
-  useRegisterAppCommands(threadCommands)
-
-  const terminalGroupIds = terminals.state.terminalGroups
-    .map((group) => group.id)
-    .join(",")
-  const syncTerminals = panel.syncTerminals
-  useEffect(() => {
-    syncTerminals(terminalGroupIds ? terminalGroupIds.split(",") : [])
-  }, [syncTerminals, terminalGroupIds])
 
   const isRunning = stream.isLoading || thread?.status === "running"
   const diff = useLocalThreadDiff(
     sessionId,
-    !panelCollapsed && activePanelTabId === "changes" && Boolean(thread),
+    !panelCollapsed && activeSurfaceId === "diff" && Boolean(thread),
     isRunning
   )
   const files = useMemo(
@@ -387,7 +300,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     <div className="flex min-w-0 flex-1">
       <div
         className="flex min-w-0 flex-1 flex-col"
-        style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
+        style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
           <div
@@ -490,81 +403,36 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           </div>
         </div>
       </div>
-      <AgentPanelShell
-        tabs={panel.tabs.map((tab) =>
-          tab.kind === "terminal"
-            ? { ...tab, title: terminalTabTitle(terminals, tab.id) }
-            : tab
-        )}
-        activeTabId={activePanelTabId}
-        onSelectTab={handleSelectTab}
-        onCloseTab={handleCloseTab}
-        onOpenKind={handleOpenKind}
-        menuKinds={AGENT_PANEL_KINDS}
+      <AgentRightPanel
+        threadRef={threadRef}
+        terminals={terminals}
+        terminalTarget={{ kind: "local", sessionId: thread.id }}
+        cwd={thread.cwd}
+        terminalAvailable
+        diffAvailable
+        pullRequests={[]}
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
-      >
-        {({ fullScreen }) => (
-          <>
-            {activePanelTabId === "changes" && (
-              <ChangesPanel
-                files={files}
-                status={diff.data?.status}
-                isLoading={diff.isPending}
-                isFetching={diff.isFetching}
-                error={diff.error}
-                truncated={diff.data?.truncated}
-                branch={repository?.branch}
-                pr={pr}
-                revealFilePath={revealFilePath}
-                fullScreen={fullScreen}
-                onRefresh={() => void diff.refetch()}
-              />
-            )}
-            {/* Kept mounted across tabs: unmounting kills the user's shell. */}
-            {panel.tabs
-              .filter((tab) => tab.kind === "terminal")
-              .map((tab) => (
-                <div
-                  key={tab.id}
-                  className={cn(
-                    "min-h-0 flex-1",
-                    tab.id !== activePanelTabId && "hidden"
-                  )}
-                >
-                  <TerminalPanel
-                    target={{ kind: "local", sessionId: thread.id }}
-                    cwd={thread.cwd}
-                    groupId={tab.id}
-                    terminals={terminals}
-                    onOpenFile={handleOpenFile}
-                    onAddToChat={(text) =>
-                      setTerminalContexts((current) => [...current, text])
-                    }
-                  />
-                </div>
-              ))}
-          </>
+        onTerminalOpenFile={handleOpenFile}
+        onTerminalAddToChat={(text) =>
+          setTerminalContexts((current) => [...current, text])
+        }
+        renderDiff={({ fullScreen }) => (
+          <ChangesPanel
+            files={files}
+            status={diff.data?.status}
+            isLoading={diff.isPending}
+            isFetching={diff.isFetching}
+            error={diff.error}
+            truncated={diff.data?.truncated}
+            branch={repository?.branch}
+            pr={pr}
+            revealFilePath={revealFilePath}
+            fullScreen={fullScreen}
+            onRefresh={() => void diff.refetch()}
+          />
         )}
-      </AgentPanelShell>
+      />
     </div>
-  )
-}
-
-function terminalTabTitle(
-  terminals: TerminalGroupsController,
-  groupId: string
-): string {
-  const group = terminals.state.terminalGroups.find(
-    (candidate) => candidate.id === groupId
-  )
-  const terminalId = group?.terminalIds.includes(
-    terminals.state.activeTerminalId
-  )
-    ? terminals.state.activeTerminalId
-    : group?.terminalIds[0]
-  return (
-    (terminalId ? terminals.metadataById.get(terminalId)?.label : null) ||
-    "Terminal"
   )
 }
