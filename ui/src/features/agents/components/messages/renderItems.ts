@@ -63,7 +63,6 @@ function toolNeedsAttention(
   includeUnfinished: boolean
 ): boolean {
   return (
-    chunk.status === "error" ||
     chunk.status === "pending" ||
     (includeUnfinished && chunk.status === "in_progress")
   )

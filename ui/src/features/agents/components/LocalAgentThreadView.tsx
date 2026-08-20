@@ -8,7 +8,7 @@ import type {
   DesktopLocalPromptInput,
   DesktopLocalThreadSummary,
 } from "@/desktop"
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { ImageChunk, Message } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
@@ -133,7 +133,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [handlePanelCollapsedChange, openSurface, threadRef]
   )
 
-  const isRunning = stream.isLoading || thread?.status === "running"
+  const isRunning =
+    stream.isLoading ||
+    (Boolean(thread?.pending) && !error) ||
+    thread?.status === "running"
   const diffVisible =
     !panelCollapsed && activeSurfaceId === "diff" && Boolean(thread)
   const selectScope = useDiffPanelStore((state) => state.selectScope)
@@ -158,15 +161,26 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
   )
-  const messages = useMemo(
-    () =>
-      streamMessagesToUi(
-        stream.messages,
-        stream.toolCalls,
-        messageArrivalTimestamp
-      ),
-    [stream.messages, stream.toolCalls]
-  )
+  const messages = useMemo(() => {
+    const live = streamMessagesToUi(
+      stream.messages,
+      stream.toolCalls,
+      messageArrivalTimestamp
+    )
+    if (live.length > 0 || !thread?.pending) return live
+    const text = thread.pending.prompt.trim()
+    return [
+      {
+        id: `optimistic-user-${sessionId}`,
+        author: "user",
+        timestamp: new Date(thread.createdAt).toISOString(),
+        chunks: [
+          ...thread.pending.images,
+          ...(text ? [{ kind: "text" as const, text }] : []),
+        ],
+      } satisfies Message,
+    ]
+  }, [sessionId, stream.messages, stream.toolCalls, thread])
 
   const updateStatus = useCallback(
     async (
@@ -269,7 +283,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       .then(async (pending) => {
         if (!pending) return
         if (await submit(pending.prompt, pending.images, pending.skills)) {
-          await window.openSweDesktop?.clearLocalPrompt(sessionId)
+          const updated =
+            await window.openSweDesktop?.clearLocalPrompt(sessionId)
+          if (updated)
+            queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
         } else {
           initialPromptRef.current = null
         }
@@ -281,6 +298,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       })
   }, [
     modelsLoading,
+    queryClient,
     sessionId,
     stream.hydrationPromise,
     submit,
@@ -353,7 +371,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           <Messages
             contentWidthClass="max-w-3xl"
             isStreaming={isRunning}
-            isThinking={stream.isLoading}
+            isThinking={isRunning}
             messages={messages}
             onOpenFile={handleOpenFile}
             streamIsLoading={stream.isLoading}
