@@ -13,11 +13,17 @@ describe("visibleQueuedMessages", () => {
     const streamed: Message = {
       id: "message-1",
       author: "user",
-      timestamp: new Date(1_000).toISOString(),
+      timestamp: new Date(3_000).toISOString(),
       timestampIsFallback: true,
       chunks: [{ kind: "text", text: "follow up" }],
     }
 
     expect(visibleQueuedMessages([queued], [streamed])).toEqual([])
+    expect(
+      visibleQueuedMessages(
+        [queued],
+        [{ ...streamed, timestamp: new Date(500).toISOString() }]
+      )
+    ).toEqual([queued])
   })
 })

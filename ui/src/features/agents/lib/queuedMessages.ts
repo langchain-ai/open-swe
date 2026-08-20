@@ -19,7 +19,6 @@ export function visibleQueuedMessages(
     .map((message) => ({
       text: messageText(message),
       timestamp: Date.parse(message.timestamp),
-      timestampIsFallback: message.timestampIsFallback,
       consumed: false,
     }))
 
@@ -29,8 +28,7 @@ export function visibleQueuedMessages(
 
     const match = userMessages.find((message) => {
       if (message.consumed || !message.text.includes(queuedText)) return false
-      if (message.timestampIsFallback || !Number.isFinite(message.timestamp))
-        return true
+      if (!Number.isFinite(message.timestamp)) return true
       return message.timestamp >= queuedMessage.createdAt - 1000
     })
     if (!match) return true
