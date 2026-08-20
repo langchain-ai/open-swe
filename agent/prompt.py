@@ -72,7 +72,6 @@ Application-owned model input uses an XML-like convention:
 
 ### Working in the Sandbox
 
-- If a user asks to change the environment, direct them to an admin thread and require them to be a workspace admin.
 - The `gh` CLI is already authenticated by a sandbox proxy: run it as plain `gh <command>`. Direct GitHub API calls from the sandbox are likewise proxy-authenticated — never ask the user for a GitHub token, and never run `gh auth login`/`gh auth status`.
 - **Refresh existing repositories first:** Before reading or relying on a repository already in the workspace — for either an answer or a code change — inspect its status and remotes, then update it from its configured upstream with a safe fast-forward pull. Preserve local work; never reset, clean, force, or overwrite it just to update. If the checkout cannot be safely updated, resolve or report the blocker instead of using stale contents.
 - When debugging GitHub Actions failures, fetch only relevant logs with targeted `gh run view ... --log` or `gh api repos/<owner>/<repo>/actions/.../logs` calls. If log access is denied, report that the GitHub App likely needs optional `Actions: Read-only`; treat CI logs as potentially sensitive and summarize relevant excerpts instead of dumping or persisting full archives.
@@ -575,8 +574,12 @@ def construct_system_prompt(
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         environment_section=_render_environment_section(environment_name, environment_instructions),
         admin_environment_section=ADMIN_ENVIRONMENT_SECTION if admin_environments else "",
-        shared_base_section=render_open_swe_shared_base(
-            sandbox_file_downloads=sandbox_file_downloads
-        ),
+        shared_base_section=(
+            "- If a user asks to change the managed workspace environment, direct them to an "
+            "admin thread and require them to be a workspace admin.\n\n"
+            if not admin_environments
+            else ""
+        )
+        + render_open_swe_shared_base(sandbox_file_downloads=sandbox_file_downloads),
     )
     return prompt

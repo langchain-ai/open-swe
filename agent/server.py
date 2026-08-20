@@ -773,15 +773,17 @@ def _environment_slug(configurable: Mapping[str, Any] | None) -> str | None:
     return slug.strip() or None if isinstance(slug, str) else None
 
 
-def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
+async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
     configurable = (config or {}).get("configurable") or {}
     config_login = configurable.get("github_login")
     login = profile_login or (config_login if isinstance(config_login, str) else None)
     email = configurable.get("user_email")
-    return is_admin(email if isinstance(email, str) else None, login=login)
+    if is_admin(email if isinstance(email, str) else None, login=login):
+        return True
+    return is_admin(await email_for_login(login), login=login)
 
 
-def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
+async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether this run may manage environments.
 
     The dashboard only stamps ``admin_thread`` for an admin session, but the flag
@@ -789,7 +791,9 @@ def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
     capability to a non-admin who later messages it.
     """
     configurable = (config or {}).get("configurable") or {}
-    return configurable.get("admin_thread") is True and _workspace_admin(config, profile_login)
+    return configurable.get("admin_thread") is True and await _workspace_admin(
+        config, profile_login
+    )
 
 
 async def _allowed_org_member(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -1137,7 +1141,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             user_custom_instructions=sender_instructions,
             draft_prs=self._draft_prs,
             thread_url=dashboard_thread_url(self._thread_id),
-            workspace_admin=_workspace_admin(self._config or {}, self._profile_login),
+            workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
         )
         sender_message = self._sender_context_message(state, sender_context)
         preferred_repo_path = (
@@ -1405,7 +1409,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
     ]
 
-    admin_environments = _admin_thread(config, profile_login)
+    admin_environments = await _admin_thread(config, profile_login)
     if admin_environments:
         logger.info("Admin thread %s: adding environment management tools", thread_id)
 
