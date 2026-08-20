@@ -27,7 +27,7 @@ export function AgentThreadPage({
   }
 
   return (
-    <AgentThreadStreamBoundary>
+    <AgentThreadStreamBoundary active={active}>
       <AgentThreadView thread={threadQuery.data} />
     </AgentThreadStreamBoundary>
   )

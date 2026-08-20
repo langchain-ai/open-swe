@@ -17,9 +17,13 @@ vi.mock("@/features/agents/lib/AgentThreadStreamProvider", () => ({
 }))
 
 vi.mock("@/features/agents/components/AgentThreadPage", () => ({
-  AgentThreadPage: ({ threadId }: { threadId: string }) => (
-    <div>thread {threadId}</div>
-  ),
+  AgentThreadPage: ({
+    threadId,
+    active,
+  }: {
+    threadId: string
+    active: boolean
+  }) => <div data-active={active}>thread {threadId}</div>,
 }))
 
 afterEach(cleanup)
@@ -29,12 +33,8 @@ describe("RecentAgentThreads", () => {
     const view = render(<RecentAgentThreads activeThreadId="one" />)
 
     act(() => view.rerender(<RecentAgentThreads activeThreadId="two" />))
-    expect(
-      screen
-        .getByText("thread one")
-        .closest("[aria-hidden]")
-        ?.getAttribute("aria-hidden")
-    ).toBe("true")
+    expect(screen.getByText("thread one").dataset.active).toBe("false")
+    expect(screen.getByText("thread two").dataset.active).toBe("true")
 
     act(() => view.rerender(<RecentAgentThreads activeThreadId="three" />))
     act(() => view.rerender(<RecentAgentThreads activeThreadId="four" />))
