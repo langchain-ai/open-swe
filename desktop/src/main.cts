@@ -805,6 +805,15 @@ function createWindow() {
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
   );
+  window.webContents.on("did-finish-load", () =>
+    window.webContents.send("desktop:fullscreen-change", window.isFullScreen()),
+  );
+  window.on("enter-full-screen", () =>
+    window.webContents.send("desktop:fullscreen-change", true),
+  );
+  window.on("leave-full-screen", () =>
+    window.webContents.send("desktop:fullscreen-change", false),
+  );
   mainWindow = window;
   void loadApp(window);
   return window;

@@ -73,6 +73,10 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
 
 const DRAG_REGION_ID = "open-swe-desktop-drag-region"
 
+ipcRenderer.on("desktop:fullscreen-change", (_event, fullscreen) => {
+  document.documentElement.classList.toggle("desktop-fullscreen", fullscreen)
+})
+
 window.addEventListener("DOMContentLoaded", () => {
   if (process.platform !== "darwin") return
 
@@ -100,6 +104,10 @@ window.addEventListener("DOMContentLoaded", () => {
     [data-sidebar-expand] {
       -webkit-app-region: no-drag;
       left: 90px !important;
+    }
+
+    .desktop-fullscreen :is([data-sidebar-collapse], [data-sidebar-expand]) {
+      left: 12px !important;
     }
   `
   document.head.append(style)
