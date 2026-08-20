@@ -295,6 +295,7 @@ export const Messages = memo(function MessagesComponent({
                   projectPath={projectPath}
                   threadId={threadId}
                   isLatestTurn={index === lastAgentIndex}
+                  activityLabel={messageIsStreaming ? activityLabel : undefined}
                   onApprove={onApprove}
                   onReject={onReject}
                   onAutoApprove={onAutoApprove}
@@ -307,7 +308,10 @@ export const Messages = memo(function MessagesComponent({
             )}
             <QueuedMessages queuedMessages={queuedMessages} />
             <ThinkingSpinner
-              isActive={!!(isThinking || streamIsLoading || isStreaming)}
+              isActive={
+                !!(isThinking || streamIsLoading || isStreaming) &&
+                !(isStreaming && lastAgentIndex === visibleMessages.length - 1)
+              }
               settingUpSandbox={settingUpSandbox}
               label={activityLabel}
             />
