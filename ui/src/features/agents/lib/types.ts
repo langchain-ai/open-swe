@@ -67,12 +67,20 @@ export interface DiffData {
   totalLines: number
 }
 
-export interface OutputIframeDisplay {
-  type: "output_iframe"
-  html: string
-  title: string
-  filename: string
-}
+export type OutputIframeDisplay =
+  | {
+      type: "output_iframe"
+      previewUrl: string
+      downloadUrl: string
+      title: string
+      filename: string
+    }
+  | {
+      type: "output_iframe"
+      html: string
+      title: string
+      filename: string
+    }
 
 export interface ToolExecutionChunk {
   kind: "tool-execution"
@@ -156,6 +164,7 @@ export interface Message {
   structuredSenderKind?: "person" | "system"
   structuredSenderName?: string
   structuredSenderNote?: string
+  structuredSurface?: string
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
@@ -235,6 +244,27 @@ export interface WorkflowPushApprovalsResponse {
   approvals: Array<WorkflowPushApproval>
 }
 
+export interface AgentPullRequestSummary {
+  number: number
+  title: string
+  state: "draft" | "open" | "merged" | "closed"
+  headRef: string
+  baseRef: string
+  url: string
+}
+
+export interface AgentPullRequest extends AgentPullRequestSummary {
+  repoFullName: string
+  author: string | null
+  authorAvatarUrl: string | null
+  createdAt: string | null
+  diffStats: {
+    files: number
+    additions: number
+    deletions: number
+  }
+}
+
 export interface AgentThread {
   id: string
   title: string
@@ -265,14 +295,8 @@ export interface AgentThread {
   sandboxId?: string | null
   messages: Array<Message>
   queuedMessages?: Array<QueuedThreadMessage>
-  pr?: {
-    number: number
-    title: string
-    state: "draft" | "open" | "merged" | "closed"
-    headRef: string
-    baseRef: string
-    url: string
-  }
+  pr?: AgentPullRequestSummary
+  pullRequests?: Array<AgentPullRequest>
   diffStats?: {
     files: number
     additions: number
