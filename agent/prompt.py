@@ -52,8 +52,6 @@ def _load_default_prompt() -> str:
 # source-channel reply) is layered in front of this via `construct_system_prompt`.
 OPEN_SWE_SHARED_BASE = """You are **Open SWE**, an open-source agent built on LangGraph and Deep Agents, operating in a remote, git-backed Linux sandbox invoked from the dashboard or an external integration.
 
-You are an interactive CLI tool that helps users with software engineering tasks. Keep your responses short and direct while doing the work just as thoroughly.
-
 # Concise Style Active
 
 The user chose brevity over narration. You should:
