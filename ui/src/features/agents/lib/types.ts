@@ -163,6 +163,7 @@ export interface Message {
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
   structuredSenderName?: string
+  structuredSenderNote?: string
   structuredSurface?: string
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string

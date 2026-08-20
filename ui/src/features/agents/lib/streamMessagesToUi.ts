@@ -8,6 +8,7 @@ import { humanizeToolName } from "./toolNames"
 import type { BaseMessage, ContentBlock } from "@langchain/core/messages"
 import type { AssembledToolCall } from "@langchain/react"
 
+import type { StructuredEntity } from "./structuredInputMessages"
 import type {
   Chunk,
   DiffData,
@@ -15,6 +16,12 @@ import type {
   OutputIframeDisplay,
   ToolExecutionChunk,
 } from "./types"
+
+function senderNote(entity: StructuredEntity | undefined): string | undefined {
+  if (entity?.senderType === "bot") return "bot"
+  if (entity?.openSweAccount === "unlinked") return "not an Open SWE user"
+  return undefined
+}
 
 const READ_TOOLS = new Set(["read_file", "read", "ls"])
 const EDIT_TOOLS = new Set([
@@ -379,13 +386,16 @@ export function streamMessagesToUi(
       const chunks = imageChunks(content)
       const parsed = parseStructuredInput(raw.text, structuredEntities)
       if (parsed.type === "entity") return
-      const text = parsed.content
-      if (text.trim()) chunks.push({ kind: "text", text })
-      if (!chunks.length) return
       const entity =
         parsed.type === "message"
           ? structuredEntities.get(parsed.sender)
           : undefined
+      // Our own replies reach the transcript twice: once forwarded as thread
+      // context, once as the `slack_thread_reply` call that sent them.
+      if (entity?.senderType === "self") return
+      const text = parsed.content
+      if (text.trim()) chunks.push({ kind: "text", text })
+      if (!chunks.length) return
       uiMessages.push({
         id: msgId,
         author:
@@ -403,6 +413,7 @@ export function streamMessagesToUi(
               structuredSenderName:
                 entity?.displayName ??
                 (entity?.handle ? `@${entity.handle}` : undefined),
+              structuredSenderNote: senderNote(entity),
             }
           : {}),
       })

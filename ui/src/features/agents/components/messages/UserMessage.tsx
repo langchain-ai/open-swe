@@ -62,6 +62,11 @@ export function UserMessage({ message }: { message: Message }) {
               <ChevronRight className="size-3" />
             )}
             <span>{message.structuredSenderName || "Context"}</span>
+            {message.structuredSenderNote && (
+              <span className="text-muted-foreground/70">
+                · {message.structuredSenderNote}
+              </span>
+            )}
           </button>
         ) : (
           (message.structuredSenderName || isSlack) && (
@@ -71,6 +76,12 @@ export function UserMessage({ message }: { message: Message }) {
               )}
               {message.structuredSenderName && (
                 <span>{message.structuredSenderName}</span>
+              )}
+              {message.structuredSenderNote && (
+                <span className="font-normal text-muted-foreground/70">
+                  {" · "}
+                  {message.structuredSenderNote}
+                </span>
               )}
             </div>
           )
