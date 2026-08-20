@@ -142,6 +142,25 @@ async function waitForThreadNotBusy(page: Page, threadId: string) {
     .not.toBe("busy");
 }
 
+async function waitForStateToContain(
+  page: Page,
+  threadId: string,
+  text: string,
+) {
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get(
+          `/dashboard/api/threads/${threadId}/state`,
+        );
+        if (!res.ok()) return false;
+        return JSON.stringify(await res.json()).includes(text);
+      },
+      { timeout: 60_000, intervals: [500] },
+    )
+    .toBe(true);
+}
+
 async function latestPrBody(page: Page): Promise<string> {
   const res = await page.request.get("/mock/github/data");
   expect(res.ok()).toBeTruthy();
@@ -572,6 +591,31 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(queuedMessage).toBeVisible();
   });
 
+  // The dashboard proxy rewrites a run's input into the structured envelope. If
+  // that rewrite drops the client-minted message id, the SDK's optimistic copy
+  // never reconciles with the server's echo and the same text renders twice —
+  // once in place, once at the tail of the transcript.
+  test("renders a web follow-up exactly once", async ({ page }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+    await waitForThreadIdle(page, threadId);
+    await waitForThreadNotBusy(page, threadId);
+
+    const followUp = "Can you also add a docstring?";
+    await typeIntoComposer(page, followUp);
+    // The agent's canned reply is already in the transcript from the Slack run,
+    // so wait on the run persisting this message rather than on any reply text.
+    await waitForStateToContain(page, threadId, followUp);
+    await waitForThreadIdle(page, threadId);
+    await waitForThreadNotBusy(page, threadId);
+
+    await expect(
+      page.getByTestId("user-message").filter({ hasText: followUp }),
+    ).toHaveCount(1);
+  });
+
   test("renders structured input envelopes safely and keeps legacy messages", async ({
     page,
   }) => {
@@ -745,6 +789,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   }) => {
     await loginAs(page, OTHER_USER);
     await openThreadViaSlackLink(page);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
 
     // The same thread + transcript is visible…
     await expectTranscriptVisible(page);
@@ -758,13 +804,15 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(composer.prompt).toBeVisible();
 
     // Posting starts a new run — the agent's follow-up reply streams in.
-    await typeIntoComposer(page, "Can you also add a docstring?");
-    await expect(
-      page.getByText(/anything else you'd like changed/),
-    ).toBeVisible();
+    const followUp = "Can you also add a docstring?";
+    await typeIntoComposer(page, followUp);
+    await waitForStateToContain(page, threadId, followUp);
 
     // The non-owner's message is tagged server-side with their GitHub login, so
-    // the owner can tell who sent it.
+    // the owner can tell who sent it. Read it from the transcript the server
+    // stored: in the sender's own session the bubble is still the SDK's
+    // optimistic echo of what they typed, which carries no envelope.
+    await page.reload();
     await expect(
       page.getByText(new RegExp(`@${OTHER_USER.login}`)).first(),
     ).toBeVisible();

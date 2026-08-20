@@ -1440,6 +1440,21 @@ def _command_message_content(params: dict[str, Any]) -> Any:
     return last.get("content") if isinstance(last, dict) else None
 
 
+def _command_message_id(params: dict[str, Any]) -> str | None:
+    """The client-minted id of a ``run.start`` command's newest user message."""
+    run_input = params.get("input")
+    if not isinstance(run_input, dict):
+        return None
+    messages = run_input.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return None
+    last = messages[-1]
+    if not isinstance(last, dict):
+        return None
+    message_id = last.get("id")
+    return message_id if isinstance(message_id, str) and message_id else None
+
+
 def _set_command_last_message_content(params: dict[str, Any], content: Any) -> None:
     run_input = params.get("input")
     if not isinstance(run_input, dict):
@@ -1612,11 +1627,20 @@ async def _enrich_run_start_command(
             content = ""
         sender_id = f"github:{login}"
         injected = injected_dynamic_context_hashes_from_metadata(metadata)
+        persisted_message_ids: set[str] = set()
         try:
             prior_state = await client.threads.get_state(thread_id)
             values = prior_state.get("values") if isinstance(prior_state, dict) else None
             if isinstance(values, dict):
-                injected.update(dynamic_context_hashes_from_messages(values.get("messages")))
+                messages = values.get("messages")
+                injected.update(dynamic_context_hashes_from_messages(messages))
+                if isinstance(messages, list):
+                    persisted_message_ids = {
+                        message_id
+                        for message in messages
+                        if isinstance(message, Mapping)
+                        and isinstance(message_id := message.get("id"), str)
+                    }
         except Exception:
             logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
         person: PersonIdentity = {
@@ -1656,6 +1680,12 @@ async def _enrich_run_start_command(
                     injected_dynamic_context_hashes={"system:dashboard-handoff"},
                 )[0],
             )
+        # Keep the id the SDK minted for the submitted message: it reconciles
+        # the optimistic bubble with the server's echo, and a fresh id leaves
+        # both rendered.
+        client_message_id = _command_message_id(params)
+        if client_message_id and client_message_id not in persisted_message_ids:
+            structured[-1]["id"] = client_message_id
         run_input = params.get("input")
         if isinstance(run_input, dict):
             run_input["messages"] = structured
