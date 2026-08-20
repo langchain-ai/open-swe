@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   updateLocalThread: (input) => ipcRenderer.invoke("desktop:update-local-thread", input),
   deleteLocalThread: (threadId) => ipcRenderer.invoke("desktop:delete-local-thread", threadId),
   getLocalDiff: (threadId) => ipcRenderer.invoke("desktop:get-local-diff", threadId),
+  getLocalPrDiff: (threadId) => ipcRenderer.invoke("desktop:get-local-pr-diff", threadId),
   onProjectsChanged: (callback) => {
     const listener = (_event, projects) => callback(projects)
     ipcRenderer.on("desktop:projects-changed", listener)

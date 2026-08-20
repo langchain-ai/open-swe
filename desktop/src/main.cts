@@ -21,6 +21,7 @@ const {
   currentBranch,
   localBranches,
   deleteRefs,
+  readBranchDiff,
   readDiff,
   repoRoot,
   repositoryMetadata,
@@ -335,6 +336,24 @@ function configureDesktopIpc() {
         readDiff(thread.checkpoint.repo, thread.checkpoint.ref),
         repositoryMetadata(thread.checkpoint.repo),
       ]);
+      return { ...diff, repository };
+    } catch {
+      return { status: "error", files: [], truncated: false };
+    }
+  });
+  ipcMain.handle("desktop:get-local-pr-diff", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    const thread = localThreadStore.get(threadId);
+    if (!thread || !registeredProject(thread.cwd) || !thread.checkpoint.repo)
+      return { status: "missing", files: [], truncated: false };
+    try {
+      const repository = await repositoryMetadata(thread.checkpoint.repo);
+      if (!repository.pr)
+        return { status: "missing", files: [], truncated: false, repository };
+      const diff = await readBranchDiff(
+        thread.checkpoint.repo,
+        repository.pr.baseRef,
+      );
       return { ...diff, repository };
     } catch {
       return { status: "error", files: [], truncated: false };
