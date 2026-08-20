@@ -91,6 +91,8 @@ There is intentionally no after-agent safety net that opens a PR for the agent. 
 
 All tools live in `agent/tools/` and are flat-imported via `agent/tools/__init__.py`. The set is intentionally small and curated — see README "Tools — Curated, Not Accumulated".
 
+Agent/UI parity is a product principle: anything users can do in the dashboard UI should generally also be possible through an agent tool, subject to the same authorization and safety boundaries. When adding a UI capability, add or extend the corresponding curated tool unless there is a documented reason not to.
+
 Wired into `get_agent`:
 `http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `list_threads`, `get_thread`, `manage_thread`, `manage_baby_sit`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
 
