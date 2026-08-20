@@ -4,6 +4,7 @@ import { CircleAlert as CircleAlertIcon, FolderOpen } from "lucide-react"
 
 import type {
   AgentThread,
+  ImageChunk,
   Message,
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
@@ -26,6 +27,7 @@ import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useAgentSkills } from "@/features/agents/lib/queries"
+import { rejectPlan } from "@/lib/plan"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -111,9 +113,32 @@ export function AgentThreadView({
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const [planMode, setPlanMode] = useState<boolean | null>(null)
+  const [planFeedbackPending, setPlanFeedbackPending] =
+    useState(autoFocusComposer)
   const activePlanMode = planMode ?? thread.planMode ?? false
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
+  )
+  const submitMessage = useCallback(
+    async (content: string, images: Array<ImageChunk>) => {
+      if (planFeedbackPending) await rejectPlan(thread.id, false)
+      await sendMessage.mutateAsync({
+        content,
+        images,
+        model_id: activeSelection?.modelId ?? null,
+        effort: activeSelection?.effort ?? null,
+        plan_mode: activePlanMode,
+      })
+      setPlanFeedbackPending(false)
+    },
+    [
+      activePlanMode,
+      activeSelection?.effort,
+      activeSelection?.modelId,
+      planFeedbackPending,
+      sendMessage,
+      thread.id,
+    ]
   )
   const usedTokens = useMemo(
     () => latestContextTokens(stream.messages),
@@ -275,15 +300,7 @@ export function AgentThreadView({
                   compact
                   busy={isStreaming}
                   activeRun={activeRun}
-                  onSubmit={(content, images) =>
-                    sendMessage.mutateAsync({
-                      content,
-                      images,
-                      model_id: activeSelection?.modelId ?? null,
-                      effort: activeSelection?.effort ?? null,
-                      plan_mode: activePlanMode,
-                    })
-                  }
+                  onSubmit={submitMessage}
                   models={models}
                   selection={activeSelection}
                   onSelectionChange={setSelection}
