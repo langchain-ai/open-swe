@@ -6,6 +6,7 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
+from agent.input_messages import human_input, person_introduction
 from agent.thread_title import (
     _ThreadTitle,
     generate_and_store_thread_title,
@@ -81,7 +82,7 @@ async def test_generate_and_store_thread_title_only_replaces_explicit_seed(
 
     await generate_and_store_thread_title(
         thread_id="thread-123",
-        user_message="please review title generation",
+        conversation="please review title generation",
         model=cast(BaseChatModel, _Model()),
         client=client,
     )
@@ -142,7 +143,7 @@ async def test_title_generation_disables_inherited_callbacks() -> None:
 
     await generate_and_store_thread_title(
         thread_id="thread-123",
-        user_message="please review title generation",
+        conversation="please review title generation",
         model=cast(BaseChatModel, _Model(recorder)),
         client=client,
     )
@@ -151,29 +152,44 @@ async def test_title_generation_disables_inherited_callbacks() -> None:
 
 
 @pytest.mark.asyncio
-async def test_title_generation_skips_threads_past_the_first_message() -> None:
-    """Only the opening message seeds a title; later turns leave it alone."""
+async def test_title_generation_reads_the_whole_thread() -> None:
+    """Every message feeds the title; identity context and envelopes do not.
+
+    Runs open with a `dynamic-context` introduction and carry the user's prompt
+    inside an `<input-message>` envelope, so a titler that only accepted a lone
+    bare human message never fired at all.
+    """
     recorder: dict[str, Any] = {}
     threads = _Threads(
         {
             "source": "dashboard",
-            "title": "please review title generation",
-            "title_seed": "please review title generation",
+            "title": "first",
+            "title_seed": "first",
         }
     )
     client = type("Client", (), {"threads": threads})()
 
+    person = person_introduction({"id": "github:octocat", "platform": "github"})
+    prompt = human_input(
+        "first", {"sender_id": "github:octocat", "surface": "web", "kind": "human"}
+    )
     schedule_thread_title_generation(
         thread_id="thread-123",
         messages=[
-            HumanMessage(content="first"),
+            HumanMessage(content=cast(str, person["content"])),
+            HumanMessage(content=cast(str, prompt["content"])),
             AIMessage(content="reply"),
             HumanMessage(content="second"),
         ],
         model=cast(BaseChatModel, _Model(recorder)),
         client=client,
     )
-    for _ in range(10):
+    for _ in range(50):
         await asyncio.sleep(0)
+        if "messages" in recorder:
+            break
 
-    assert recorder == {}
+    sent = recorder["messages"][-1].text
+    assert "github:octocat" not in sent
+    assert "first\n\nreply\n\nsecond" in sent
+    assert threads.metadata["title"] == "Review thread title generation"
