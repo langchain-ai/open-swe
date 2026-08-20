@@ -298,6 +298,7 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return localThreadStore.update(input?.threadId, {
       status: input?.status,
+      ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
       ...(typeof input?.modelId === "string" ? { modelId: input.modelId } : {}),
       ...(typeof input?.effort === "string" ? { effort: input.effort } : {}),
     });

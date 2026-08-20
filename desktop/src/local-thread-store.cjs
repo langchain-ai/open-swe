@@ -3,7 +3,7 @@ const path = require("node:path")
 const { randomUUID } = require("node:crypto")
 
 const STATUSES = new Set(["starting", "idle", "running", "error"])
-const MUTABLE_FIELDS = new Set(["title", "modelId", "effort", "status"])
+const MUTABLE_FIELDS = new Set(["title", "modelId", "effort", "status", "viewed"])
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 function isRecord(value) {
@@ -88,6 +88,7 @@ function normalizeThread(value) {
     modelId: stringOrNull(value.modelId),
     effort: stringOrNull(value.effort),
     status: STATUSES.has(value.status) ? value.status : "error",
+    viewed: value.viewed !== false,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     checkpoint,
@@ -168,6 +169,7 @@ class LocalThreadStore {
       modelId: stringOrNull(input.modelId),
       effort: stringOrNull(input.effort),
       status: "idle",
+      viewed: true,
       createdAt: now,
       updatedAt: now,
       checkpoint: { repo: null, ref: null },
@@ -196,7 +198,11 @@ class LocalThreadStore {
       if (!STATUSES.has(patch.status)) throw new Error("Invalid local thread status")
       next.status = patch.status
     }
-    next.updatedAt = this.now()
+    if ("viewed" in patch) {
+      if (typeof patch.viewed !== "boolean") throw new Error("Invalid viewed state")
+      next.viewed = patch.viewed
+    }
+    if (Object.keys(patch).some((key) => key !== "viewed")) next.updatedAt = this.now()
     this.threads.set(id, next)
     this.persist()
     return this.get(id)
