@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useSubmitAgentMessage } from "./useSubmitAgentMessage"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { AgentsApiError } from "@/features/agents/lib/api"
+import type { SidebarThreads } from "@/features/agents/lib/api"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
 
 const stream = { isLoading: false, submit: vi.fn(async () => undefined) }
@@ -35,11 +36,23 @@ function setup() {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   })
-  client.setQueryData(agentThreadKeys.detail(THREAD_ID), {
+  const thread = {
     id: THREAD_ID,
     status: "idle",
     messages: [],
-  } as unknown as AgentThread)
+  } as unknown as AgentThread
+  client.setQueryData(agentThreadKeys.detail(THREAD_ID), thread)
+  client.setQueryData<SidebarThreads>(
+    agentThreadKeys.sidebar({
+      activeLimit: 50,
+      resolvedLimit: 20,
+      includeAutomations: false,
+    }),
+    {
+      active: { items: [thread], limit: 50, hasMore: false },
+      resolved: { items: [], limit: 20, hasMore: false },
+    }
+  )
   const queuedCounts: Array<number> = []
   client.getQueryCache().subscribe(() => {
     const thread = client.getQueryData<AgentThread>(
@@ -60,6 +73,12 @@ function queuedMessages(client: QueryClient) {
     ?.queuedMessages
 }
 
+function sidebarStatus(client: QueryClient) {
+  return client.getQueriesData<SidebarThreads>({
+    queryKey: ["agent-threads", "lists", "sidebar"],
+  })[0]?.[1]?.active.items[0]?.status
+}
+
 beforeEach(() => {
   stream.isLoading = false
   stream.submit.mockClear()
@@ -70,11 +89,12 @@ beforeEach(() => {
 describe("useSubmitAgentMessage", () => {
   it("never flashes a queued bubble when the send starts a new run", async () => {
     queueMessage.mockRejectedValueOnce(new AgentsApiError(409, "no active run"))
-    const { queuedCounts, result } = setup()
+    const { client, queuedCounts, result } = setup()
 
     await result.current.mutateAsync({ content: "hi", images: [] })
 
     await waitFor(() => expect(stream.submit).toHaveBeenCalled())
+    expect(sidebarStatus(client)).toBe("running")
     expect(queuedCounts.every((count) => count === 0)).toBe(true)
   })
 

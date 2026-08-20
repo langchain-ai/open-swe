@@ -20,6 +20,7 @@ export interface DesktopLocalThreadSummary {
   cwd: string
   title: string
   status: "starting" | "idle" | "running" | "error"
+  viewed: boolean
   createdAt: number
   updatedAt: number
   modelId: string | null
@@ -178,6 +179,7 @@ declare global {
       updateLocalThread: (input: {
         threadId: string
         status: DesktopLocalThreadSummary["status"]
+        viewed?: boolean
         modelId?: string
         effort?: string
       }) => Promise<DesktopLocalThreadSummary | null>
