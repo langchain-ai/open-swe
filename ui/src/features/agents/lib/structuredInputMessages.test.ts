@@ -116,6 +116,21 @@ describe("structured input messages", () => {
     })
   })
 
+  it("carries the bot marker and account link status of an entity", () => {
+    const bot = `<dynamic-context kind="system" id="system:slack-bot-B9">
+  <display_name>CI Bot</display_name>
+  <sender_type>bot</sender_type>
+</dynamic-context>`
+    const guest = `<dynamic-context kind="person" id="slack:U456">
+  <display_name>Guest</display_name>
+  <open_swe_account>unlinked</open_swe_account>
+</dynamic-context>`
+    const entities = collectStructuredEntities([bot, guest])
+
+    expect(entities.get("system:slack-bot-B9")?.senderType).toBe("bot")
+    expect(entities.get("slack:U456")?.openSweAccount).toBe("unlinked")
+  })
+
   it("decodes escaped markup as plain text and supports numeric entities", () => {
     expect(
       decodeXmlText("&lt;img src=x onerror=alert(1)&gt; &#x26; &#38;")

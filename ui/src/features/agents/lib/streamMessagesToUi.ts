@@ -8,6 +8,7 @@ import { humanizeToolName } from "./toolNames"
 import type { BaseMessage, ContentBlock } from "@langchain/core/messages"
 import type { AssembledToolCall } from "@langchain/react"
 
+import type { StructuredEntity } from "./structuredInputMessages"
 import type {
   Chunk,
   DiffData,
@@ -15,6 +16,12 @@ import type {
   OutputIframeDisplay,
   ToolExecutionChunk,
 } from "./types"
+
+function senderNote(entity: StructuredEntity | undefined): string | undefined {
+  if (entity?.senderType === "bot") return "bot"
+  if (entity?.openSweAccount === "unlinked") return "not an Open SWE user"
+  return undefined
+}
 
 const READ_TOOLS = new Set(["read_file", "read", "ls"])
 const EDIT_TOOLS = new Set([
@@ -381,6 +388,7 @@ export function streamMessagesToUi(
               structuredSenderName:
                 entity?.displayName ??
                 (entity?.handle ? `@${entity.handle}` : undefined),
+              structuredSenderNote: senderNote(entity),
             }
           : {}),
       })

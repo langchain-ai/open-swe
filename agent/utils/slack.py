@@ -92,6 +92,40 @@ def _extract_slack_user_name(user: dict[str, Any]) -> str:
     return "unknown"
 
 
+def slack_message_bot_id(message: dict[str, Any]) -> str:
+    """The bot identifier on a Slack message, or "" when a person authored it."""
+    bot_id = message.get("bot_id")
+    if isinstance(bot_id, str) and bot_id.strip():
+        return bot_id.strip()
+    if message.get("subtype") == "bot_message":
+        username = message.get("username")
+        return username.strip() if isinstance(username, str) and username.strip() else "unknown"
+    user_id = message.get("user")
+    return "" if isinstance(user_id, str) and user_id.strip() else "unknown"
+
+
+def slack_message_bot_name(message: dict[str, Any]) -> str:
+    """The display name for a bot-authored Slack message."""
+    profile = message.get("bot_profile")
+    if isinstance(profile, dict):
+        name = profile.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    username = message.get("username")
+    if isinstance(username, str) and username.strip():
+        return username.strip()
+    return "Bot"
+
+
+def is_own_slack_message(message: dict[str, Any], bot_user_id: str, bot_username: str = "") -> bool:
+    """Whether Open SWE itself posted this Slack message."""
+    if bot_user_id and message.get("user") == bot_user_id:
+        return True
+    if not slack_message_bot_id(message):
+        return False
+    return bool(bot_username) and slack_message_bot_name(message) == bot_username
+
+
 def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username: str) -> str:
     """Replace Slack bot ID mention token with @username."""
     if not text:
@@ -302,16 +336,13 @@ def format_slack_messages_for_prompt(
             bot_username=bot_username,
         ).strip() or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
-        if isinstance(user_id, str) and user_id:
-            author_name = (user_names_by_id or {}).get(user_id) or user_id
-            author = f"@{author_name}({user_id})"
+        if is_own_slack_message(message, bot_user_id, bot_username):
+            author = f"@{bot_username or 'Open SWE'}(self)"
+        elif slack_message_bot_id(message):
+            author = f"@{slack_message_bot_name(message)}(bot)"
         else:
-            bot_profile = message.get("bot_profile", {})
-            if isinstance(bot_profile, dict):
-                bot_name = bot_profile.get("name") or message.get("username") or "Bot"
-            else:
-                bot_name = message.get("username") or "Bot"
-            author = f"@{bot_name}(bot)"
+            author_name = (user_names_by_id or {}).get(str(user_id)) or str(user_id)
+            author = f"@{author_name}({user_id})"
         raw_message_ts = message.get("ts")
         message_ts = raw_message_ts.strip() if isinstance(raw_message_ts, str) else ""
         identifier = (

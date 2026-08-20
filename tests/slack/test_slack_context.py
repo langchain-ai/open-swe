@@ -1487,3 +1487,104 @@ def test_thread_environment_is_none_for_a_missing_thread(
     threads = _FakeThreadsClient(raise_not_found=True)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
     assert asyncio.run(webhook_common._get_thread_environment("thread-id")) is None
+
+
+def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
+    run_input = slack_webhooks._slack_context_input(
+        messages,
+        cast(dict, kwargs.get("user_names_by_id", {"U123": "Alice", "UBOT": "Open SWE"})),
+        cast(dict, kwargs.get("logins_by_user_id", {})),
+        channel_id="C123",
+        bot_user_id="UBOT",
+        event_ts="9.0",
+        request_text="do the thing",
+        request_blocks=[{"type": "text", "text": "do the thing"}],
+        operational_context="## Open SWE Links",
+    )
+    return [cast(str, message["content"]) for message in run_input["messages"]]
+
+
+def test_slack_context_attributes_own_replies_to_open_swe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Open SWE posts with a bot token, so its replies carry `user` *and* `bot_id`."""
+    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "Open SWE")
+    contents = _context_input(
+        [
+            {"ts": "1.0", "text": "please fix it", "user": "U123"},
+            {"ts": "1.1", "text": "on it", "user": "UBOT", "bot_id": "B1"},
+            {"ts": "9.0", "text": "<@UBOT> do the thing", "user": "U123"},
+        ]
+    )
+
+    own_reply = next(text for text in contents if "on it" in text)
+    assert 'sender="system:open-swe"' in own_reply
+    assert 'kind="system"' in own_reply
+    assert any(
+        '<dynamic-context kind="system"' in text and "<sender_type>self</sender_type>" in text
+        for text in contents
+    )
+    assert not any('sender="slack:UBOT"' in text for text in contents)
+
+
+def test_slack_context_marks_other_bots_as_bots() -> None:
+    contents = _context_input(
+        [
+            {
+                "ts": "1.0",
+                "text": "build failed",
+                "user": "UCI",
+                "bot_id": "B9",
+                "bot_profile": {"name": "CI Bot"},
+            },
+            {"ts": "9.0", "text": "<@UBOT> do the thing", "user": "U123"},
+        ]
+    )
+
+    bot_message = next(text for text in contents if "build failed" in text)
+    assert 'sender="system:slack-bot-B9"' in bot_message
+    assert 'kind="system"' in bot_message
+    intro = next(text for text in contents if 'id="system:slack-bot-B9"' in text)
+    assert "<display_name>CI Bot</display_name>" in intro
+    assert "<sender_type>bot</sender_type>" in intro
+
+
+def test_slack_context_marks_people_without_an_open_swe_account() -> None:
+    contents = _context_input(
+        [
+            {"ts": "1.0", "text": "hi", "user": "U123"},
+            {"ts": "1.1", "text": "hello", "user": "U456"},
+            {"ts": "9.0", "text": "<@UBOT> do the thing", "user": "U123"},
+        ],
+        user_names_by_id={"U123": "Alice", "U456": "Guest"},
+        logins_by_user_id={"U123": "alice-gh"},
+    )
+
+    linked = next(text for text in contents if 'id="slack:U123"' in text)
+    assert "<github_login>alice-gh</github_login>" in linked
+    assert "<open_swe_account>linked</open_swe_account>" in linked
+    unlinked = next(text for text in contents if 'id="slack:U456"' in text)
+    assert "<open_swe_account>unlinked</open_swe_account>" in unlinked
+    assert "github_login" not in unlinked
+
+
+def test_format_slack_messages_for_prompt_labels_bots_and_self() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {"ts": "1.0", "text": "on it", "user": "UBOT", "bot_id": "B1"},
+            {
+                "ts": "1.1",
+                "text": "build failed",
+                "user": "UCI",
+                "bot_id": "B9",
+                "bot_profile": {"name": "CI Bot"},
+            },
+        ],
+        {"UBOT": "Open SWE", "UCI": "CI Bot"},
+        bot_user_id="UBOT",
+        bot_username="Open SWE",
+    )
+
+    assert formatted == (
+        "@Open SWE(self) [message_ts=1.0]: on it\n@CI Bot(bot) [message_ts=1.1]: build failed"
+    )

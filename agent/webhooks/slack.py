@@ -14,6 +14,7 @@ from langchain_core.messages.content import create_text_block
 from agent.dashboard.environments import get_environment, parse_environment_tag
 from agent.input_messages import (
     InputMessageContext,
+    MessageKind,
     PersonIdentity,
     RunInput,
     SystemIdentity,
@@ -23,6 +24,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 
@@ -310,11 +312,65 @@ async def _format_slack_run_links_section(thread_id: str) -> str:
     return "\n".join(lines)
 
 
-def _slack_person(user_id: str, name: str = "") -> PersonIdentity:
-    person: PersonIdentity = {"id": f"slack:{user_id}", "platform": "slack"}
+_OPEN_SWE_SENDER_ID = "system:open-swe"
+
+
+async def _slack_logins_by_user_id(user_ids: list[str]) -> dict[str, str]:
+    """Map Slack user ids to the GitHub logins of linked Open SWE accounts."""
+    logins: dict[str, str] = {}
+    for user_id in {value for value in user_ids if value}:
+        login = await common.login_for_slack_id(user_id)
+        if login:
+            logins[user_id] = login
+    return logins
+
+
+def _slack_person(user_id: str, name: str = "", github_login: str = "") -> PersonIdentity:
+    person: PersonIdentity = {
+        "id": f"slack:{user_id}",
+        "platform": "slack",
+        "open_swe_account": "linked" if github_login else "unlinked",
+    }
     if name:
         person["display_name"] = name
+    if github_login:
+        person["github_login"] = github_login
     return person
+
+
+def _slack_sender(
+    message: dict[str, Any],
+    user_names_by_id: dict[str, str],
+    logins_by_user_id: dict[str, str],
+    bot_user_id: str,
+) -> tuple[str, PersonIdentity | SystemIdentity, MessageKind]:
+    """Resolve a thread message to its sender id, identity, and message kind.
+
+    Open SWE posts with a bot token, so its own replies carry a ``user`` id as well as a
+    ``bot_id``; keying off ``user`` alone attributes them to a person.
+    """
+    if slack_utils.is_own_slack_message(message, bot_user_id, common.SLACK_BOT_USERNAME):
+        identity: SystemIdentity = {
+            "id": _OPEN_SWE_SENDER_ID,
+            "display_name": common.SLACK_BOT_USERNAME or "Open SWE",
+            "platform": "slack",
+            "sender_type": "self",
+        }
+        return identity["id"], identity, "system"
+    bot_id = slack_utils.slack_message_bot_id(message)
+    if bot_id:
+        bot: SystemIdentity = {
+            "id": f"system:slack-bot-{bot_id}",
+            "display_name": slack_utils.slack_message_bot_name(message),
+            "platform": "slack",
+            "sender_type": "bot",
+        }
+        return bot["id"], bot, "system"
+    user_id = str(message.get("user"))
+    person = _slack_person(
+        user_id, user_names_by_id.get(user_id, ""), logins_by_user_id.get(user_id, "")
+    )
+    return person["id"], person, "human"
 
 
 def _slack_message_text(message: dict[str, Any], bot_user_id: str) -> str:
@@ -328,6 +384,7 @@ def _slack_message_text(message: dict[str, Any], bot_user_id: str) -> str:
 def _slack_context_input(
     messages: list[dict[str, Any]],
     user_names_by_id: dict[str, str],
+    logins_by_user_id: dict[str, str],
     *,
     channel_id: str,
     bot_user_id: str,
@@ -342,39 +399,27 @@ def _slack_context_input(
     for message in messages:
         if str(message.get("ts", "")) == str(event_ts):
             continue
-        user_id = message.get("user")
-        if isinstance(user_id, str) and user_id:
-            person = _slack_person(user_id, user_names_by_id.get(user_id, ""))
-            sender_id = person["id"]
-            introduction = person_introduction(person)
-        else:
-            bot_id = str(message.get("bot_id") or message.get("username") or "unknown")
-            sender_id = f"system:slack-bot-{bot_id}"
-            profile = message.get("bot_profile")
-            display_name = (
-                profile.get("name", "Slack bot") if isinstance(profile, dict) else "Slack bot"
-            )
-            system: SystemIdentity = {
-                "id": sender_id,
-                "display_name": display_name,
-                "platform": "slack",
-            }
-            introduction = system_introduction(system)
+        sender_id, identity, kind = _slack_sender(
+            message, user_names_by_id, logins_by_user_id, bot_user_id
+        )
         if sender_id not in introduced:
-            run_messages.append(introduction)
+            run_messages.append(
+                person_introduction(cast(PersonIdentity, identity))
+                if kind == "human"
+                else system_introduction(cast(SystemIdentity, identity))
+            )
             introduced.add(sender_id)
-        data: dict[str, object] = {"timestamp": str(message.get("ts", ""))}
         message_context: InputMessageContext = {
             "sender_id": sender_id,
             "channel_id": channel_entity_id,
             "surface": "slack",
-            "kind": "human" if isinstance(user_id, str) and user_id else "system",
-            "data": data,
+            "kind": kind,
+            "data": {"timestamp": str(message.get("ts", ""))},
         }
         text = _slack_message_text(message, bot_user_id)
         run_messages.append(
             human_input(text, message_context)
-            if message_context["kind"] == "human"
+            if kind == "human"
             else system_input(text, message_context)
         )
     run_messages.append(
@@ -401,7 +446,11 @@ def _slack_context_input(
         ),
         "unknown",
     )
-    trigger_person = _slack_person(trigger_id, user_names_by_id.get(trigger_id, ""))
+    trigger_person = _slack_person(
+        trigger_id,
+        user_names_by_id.get(trigger_id, ""),
+        logins_by_user_id.get(trigger_id, ""),
+    )
     if trigger_person["id"] not in introduced:
         run_messages.append(person_introduction(trigger_person))
     current_message = next(
@@ -660,6 +709,7 @@ async def _process_slack_mention_impl(
     user_names_by_id = await common.get_slack_user_names(context_user_ids)
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
+    logins_by_user_id = await _slack_logins_by_user_id([*context_user_ids, user_id])
     context_source = "the beginning of the thread"
     if context_mode == "last_mention":
         context_source = (
@@ -826,6 +876,7 @@ async def _process_slack_mention_impl(
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
+        logins_by_user_id[user_id] = mapped_login
     # Later mentions carry no tag, so the thread's environment comes back from
     # metadata — a follow-up must not be told about `default` while its sandbox
     # was built from the environment the opening message picked.
@@ -868,6 +919,7 @@ async def _process_slack_mention_impl(
     run_input = _slack_context_input(
         context_messages,
         user_names_by_id,
+        logins_by_user_id,
         channel_id=channel_id,
         bot_user_id=bot_user_id,
         event_ts=event_ts,

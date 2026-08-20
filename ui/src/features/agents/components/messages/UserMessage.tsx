@@ -58,11 +58,22 @@ export function UserMessage({ message }: { message: Message }) {
               <ChevronRight className="size-3" />
             )}
             <span>{message.structuredSenderName || "Context"}</span>
+            {message.structuredSenderNote && (
+              <span className="text-muted-foreground/70">
+                · {message.structuredSenderNote}
+              </span>
+            )}
           </button>
         ) : (
           message.structuredSenderName && (
-            <div className="mb-1 px-1 text-[11px] font-medium text-muted-foreground">
+            <div className="mb-1 px-1 text-right text-[11px] font-medium text-muted-foreground">
               {message.structuredSenderName}
+              {message.structuredSenderNote && (
+                <span className="font-normal text-muted-foreground/70">
+                  {" · "}
+                  {message.structuredSenderNote}
+                </span>
+              )}
             </div>
           )
         )}
