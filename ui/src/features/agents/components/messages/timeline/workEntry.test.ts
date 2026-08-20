@@ -140,6 +140,14 @@ describe("describeWorkEntry", () => {
 
     expect(entry.expandedText).toBe("ls\n\na.ts\nb.ts")
   })
+
+  it("keeps complete JSON tool output available for highlighted rendering", () => {
+    const output = JSON.stringify({ value: "x".repeat(5000) })
+    const entry = describeWorkEntry(chunk({ output }), projectPath)
+
+    expect(entry.expandedText).toBe(JSON.stringify(JSON.parse(output), null, 2))
+    expect(entry.expandedText).not.toContain("…")
+  })
 })
 
 describe("liveActivityLabel", () => {

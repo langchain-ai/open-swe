@@ -8,6 +8,7 @@ import {
   formatToolDisplayParts,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
+import { formatJsonToolResult } from "./toolResultJson"
 
 export type WorkEntryIconName =
   | "bot"
@@ -109,8 +110,10 @@ function expandedTextForChunk(
     typeof chunk.input?.command === "string" ? chunk.input.command.trim() : ""
   if (command) blocks.push(command)
 
-  const output = chunk.output?.trim()
-  if (output) blocks.push(output)
+  const rawOutput = chunk.output ?? ""
+  const output = rawOutput.trim()
+  const jsonOutput = formatJsonToolResult(rawOutput)
+  if (output) blocks.push(jsonOutput ?? output)
 
   const locations = chunk.locations ?? []
   if (!output && locations.length > 0) {
@@ -121,6 +124,7 @@ function expandedTextForChunk(
 
   if (blocks.length === 0) return null
   const joined = blocks.join("\n\n")
+  if (jsonOutput !== null && !command) return joined
   return joined.length > MAX_EXPANDED_TEXT_LENGTH
     ? `${joined.slice(0, MAX_EXPANDED_TEXT_LENGTH)}\n…`
     : joined
