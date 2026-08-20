@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import posixpath
+import uuid
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -519,6 +520,7 @@ async def _thread_summary(
         ),
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
+        "ownerLogin": _thread_owner_login(metadata),
         "isOwner": (_user_owns_thread(metadata, owner_login, owner_email) if owner_login else True),
         "traceUrl": trace_url,
         "sourceUrl": _thread_source_url(metadata),
@@ -800,6 +802,7 @@ async def _collect_thread_candidates(
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
     target_per_search: int | None = None,
+    surfaced_only: bool = False,
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     for owner_filter in searches:
@@ -822,6 +825,8 @@ async def _collect_thread_candidates(
                 break
             for thread in batch:
                 metadata = _thread_metadata(thread)
+                if surfaced_only and _thread_source(metadata) not in _SURFACED_SOURCES:
+                    continue
                 if not include_all and not _user_owns_thread(metadata, login, email):
                     continue
                 if not _metadata_matches_filters(
@@ -892,8 +897,8 @@ async def _sidebar_active_thread_summary(
     summary = await _summarize_thread(
         client,
         thread,
-        owner_login=None if include_all else login,
-        owner_email=None if include_all else email,
+        owner_login=login,
+        owner_email=email,
     )
     return summary, _is_thread_resolved(metadata)
 
@@ -972,14 +977,14 @@ async def list_dashboard_threads_sidebar(
             _summarize_threads(
                 client,
                 active_window,
-                owner_login=None if include_all else login,
-                owner_email=None if include_all else email,
+                owner_login=login,
+                owner_email=email,
             ),
             _summarize_threads(
                 client,
                 resolved_window,
-                owner_login=None if include_all else login,
-                owner_email=None if include_all else email,
+                owner_login=login,
+                owner_email=email,
             ),
             _sidebar_active_thread_summary(
                 client,
@@ -1045,9 +1050,13 @@ async def list_dashboard_threads_page(
     query: str | None = None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    filter_owner_login: str | None = None,
+    surfaced_only: bool = False,
 ) -> dict[str, Any]:
     client = langgraph_client()
-    searches = _owner_search_filters(login, email=email, include_all=include_all)
+    search_login = filter_owner_login or login
+    search_email = email if search_login == login else None
+    searches = _owner_search_filters(search_login, email=search_email, include_all=include_all)
     safe_offset = max(offset, 0)
     safe_limit = min(max(limit, 1), 100)
     summary_filters = viewed is not None or status is not None
@@ -1057,22 +1066,23 @@ async def list_dashboard_threads_page(
         client,
         searches,
         include_all=include_all,
-        login=login,
-        email=email,
+        login=search_login,
+        email=search_email,
         resolved=resolved,
         source=source,
         query=query,
         scope=scope,
         automation_id=automation_id,
         target_per_search=target,
+        surfaced_only=surfaced_only,
     )
 
     if summary_filters:
         summaries = await _summarize_threads(
             client,
             candidates,
-            owner_login=None if include_all else login,
-            owner_email=None if include_all else email,
+            owner_login=login,
+            owner_email=email,
         )
         filtered = [
             summary
@@ -1094,8 +1104,8 @@ async def list_dashboard_threads_page(
         items = await _summarize_threads(
             client,
             window,
-            owner_login=None if include_all else login,
-            owner_email=None if include_all else email,
+            owner_login=login,
+            owner_email=email,
         )
         has_more = len(candidates) > safe_offset + safe_limit
 
@@ -1475,7 +1485,8 @@ async def _enrich_run_start_command(
     plan_mode_requested = client_configurable.get("plan_mode") is True
     content = _command_message_content(params)
     command_images = _dashboard_images_from_content(content)
-    overrides: dict[str, Any] = {}
+    prepare_run_id = str(uuid.uuid4())
+    overrides: dict[str, Any] = {"prepare_run_id": prepare_run_id}
 
     if creating:
         # First ``run.start`` for a client-minted thread id: stamp the full
@@ -1612,7 +1623,11 @@ async def _enrich_run_start_command(
     run_metadata = params.get("metadata")
     if not isinstance(run_metadata, dict):
         run_metadata = {}
-    run_metadata = {**run_metadata, **_agent_version_metadata()}
+    run_metadata = {
+        **run_metadata,
+        **_agent_version_metadata(),
+        "prepare_run_id": prepare_run_id,
+    }
 
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
