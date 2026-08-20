@@ -75,7 +75,7 @@ from .dashboard.team_settings import (
     get_team_fable_enabled,
 )
 from .dashboard.user_mappings import email_for_login
-from .desktop import create_desktop_backend, is_desktop_run
+from .desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from .input_messages import append_message_data
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
@@ -1528,6 +1528,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if is_desktop_run(configurable):
         skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(StateBackend())
         skill_sources = [USER_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
+        # The default backend is the user's project, so offloads would land in
+        # their repository. Keep the agent's scratch files out of it.
+        skill_routes.update(desktop_artifact_routes(thread_id))
     else:
         skill_routes[ORGANIZATION_SKILLS_ROUTE] = ReadOnlyBackend(
             StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
