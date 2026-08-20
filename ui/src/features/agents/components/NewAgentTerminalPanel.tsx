@@ -1,14 +1,11 @@
-import { useCallback, useEffect } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 
-import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
-import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
-import { AgentPanelShell } from "@/features/agents/components/AgentPanelShell"
+import { RightPanelShell } from "@/features/agents/components/RightPanelShell"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
-import { usePanelTabs } from "@/features/agents/lib/panelTabs"
+import { useRightPanelStore } from "@/features/agents/lib/rightPanelStore"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
+import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
 import { cn } from "@/lib/utils"
-
-const NEW_AGENT_PANEL_KINDS: ReadonlyArray<PanelTabKind> = ["terminal"]
 
 export function NewAgentTerminalPanel({
   sessionId,
@@ -21,90 +18,84 @@ export function NewAgentTerminalPanel({
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
 }) {
-  const panel = usePanelTabs(sessionId)
+  const panel = useRightPanelStore(`draft:${sessionId}`)
   const terminals = useTerminalGroups({ kind: "local", sessionId }, cwd)
-
-  const handleOpenKind = useCallback(() => {
-    panel.open({ id: terminals.addGroup(), kind: "terminal" })
-  }, [panel, terminals])
-  const handleSelectTab = useCallback(
-    (id: string) => {
-      panel.select(id)
-      const terminalId = terminals.state.terminalGroups.find(
-        (group) => group.id === id
-      )?.terminalIds[0]
-      if (terminalId) terminals.focus(terminalId)
-    },
-    [panel, terminals]
-  )
-  const handleCloseTab = useCallback(
-    async (id: string) => {
-      if (!(await terminals.closeGroup(id))) return
-      panel.close(id)
-    },
-    [panel, terminals]
-  )
-
-  const terminalGroupIds = terminals.state.terminalGroups
-    .map((group) => group.id)
-    .join(",")
-  const syncTerminals = panel.syncTerminals
+  const openTerminal = useCallback(() => {
+    panel.openTerminal(terminals.addGroup())
+    onCollapsedChange(false)
+  }, [onCollapsedChange, panel, terminals])
+  const ids = terminals.state.terminalGroups.map((group) => group.id).join(",")
   useEffect(() => {
-    syncTerminals(terminalGroupIds ? terminalGroupIds.split(",") : [])
-  }, [syncTerminals, terminalGroupIds])
-
+    panel.reconcileTerminals(ids ? ids.split(",") : [])
+  }, [ids, panel.reconcileTerminals])
+  const labels = useMemo(
+    () =>
+      new Map(
+        terminals.state.terminalGroups.map((group) => [
+          group.id,
+          terminalTabTitle(terminals, group.id),
+        ])
+      ),
+    [terminals]
+  )
+  const close = useCallback(
+    async (surface: (typeof panel.surfaces)[number]) => {
+      if (surface.kind !== "terminal") return
+      if (await terminals.closeGroup(surface.resourceId))
+        panel.closeSurface(surface.id)
+    },
+    [panel, terminals]
+  )
   return (
-    <AgentPanelShell
-      tabs={panel.tabs.map((tab) => ({
-        ...tab,
-        title: terminalTabTitle(terminals, tab.id),
-      }))}
-      activeTabId={panel.activeTabId}
-      onSelectTab={handleSelectTab}
-      onCloseTab={handleCloseTab}
-      onOpenKind={handleOpenKind}
-      menuKinds={NEW_AGENT_PANEL_KINDS}
+    <RightPanelShell
+      surfaces={panel.surfaces}
+      activeSurfaceId={panel.activeSurfaceId}
+      terminalLabels={labels}
+      launcherItems={[
+        {
+          kind: "terminal",
+          available: true,
+          unavailableHint: "Available when a workspace is connected.",
+          disabledReason: "Terminal is unavailable.",
+        },
+      ]}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
+      onActivate={(surface) => panel.activate(surface.id)}
+      onClose={close}
+      onCloseOthers={async (surface) => {
+        for (const entry of panel.surfaces)
+          if (entry.id !== surface.id) await close(entry)
+      }}
+      onCloseToRight={async (surface) => {
+        const index = panel.surfaces.findIndex(
+          (entry) => entry.id === surface.id
+        )
+        for (const entry of panel.surfaces.slice(index + 1)) await close(entry)
+      }}
+      onCloseAll={async () => {
+        for (const surface of panel.surfaces) await close(surface)
+      }}
+      onOpen={openTerminal}
     >
-      {() => (
-        <>
-          {panel.tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className={cn(
-                "min-h-0 flex-1",
-                tab.id !== panel.activeTabId && "hidden"
-              )}
-            >
-              <TerminalPanel
-                target={{ kind: "local", sessionId }}
-                cwd={cwd}
-                groupId={tab.id}
-                terminals={terminals}
-              />
-            </div>
-          ))}
-        </>
-      )}
-    </AgentPanelShell>
-  )
-}
-
-function terminalTabTitle(
-  terminals: TerminalGroupsController,
-  groupId: string
-): string {
-  const group = terminals.state.terminalGroups.find(
-    (candidate) => candidate.id === groupId
-  )
-  const terminalId = group?.terminalIds.includes(
-    terminals.state.activeTerminalId
-  )
-    ? terminals.state.activeTerminalId
-    : group?.terminalIds[0]
-  return (
-    (terminalId ? terminals.metadataById.get(terminalId)?.label : null) ||
-    "Terminal"
+      {panel.surfaces
+        .filter((surface) => surface.kind === "terminal")
+        .map((surface) => (
+          <div
+            key={surface.id}
+            className={cn(
+              "min-h-0 flex-1",
+              surface.id !== panel.activeSurfaceId && "hidden"
+            )}
+          >
+            <TerminalPanel
+              target={{ kind: "local", sessionId }}
+              cwd={cwd}
+              groupId={surface.resourceId}
+              terminals={terminals}
+            />
+          </div>
+        ))}
+    </RightPanelShell>
   )
 }

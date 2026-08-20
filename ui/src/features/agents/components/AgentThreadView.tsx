@@ -11,7 +11,7 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
-import { PANEL_MIN_CHAT_WIDTH } from "@/features/agents/components/AgentPanelShell"
+import { PANEL_MIN_CHAT_WIDTH } from "@/features/agents/components/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"

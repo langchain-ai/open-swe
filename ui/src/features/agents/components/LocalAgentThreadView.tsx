@@ -9,42 +9,21 @@ import type {
   DesktopLocalThreadSummary,
 } from "@/desktop"
 import type { ImageChunk } from "@/features/agents/lib/types"
-import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
-import {
-  AgentPanelShell,
-  PANEL_MIN_CHAT_WIDTH,
-} from "@/features/agents/components/AgentPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
-import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
-import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
-import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
-import { BrowserPanel } from "@/features/agents/components/BrowserPanel"
 import {
-  FileEditorPanel,
-  FileExplorerPanel,
-  type WorkspaceAdapter,
-} from "@/features/agents/components/WorkspacePanel"
-import {
-  AGENT_COMMON_TABS,
-  AGENT_PANEL_KINDS,
-  CHANGES_TAB,
-  BROWSER_TAB,
-  FILES_TAB,
-  PULL_REQUEST_TAB,
-  usePanelTabs,
-} from "@/features/agents/lib/panelTabs"
+  RightPanelHost,
+  type RightPanelHostHandle,
+} from "@/features/agents/components/RightPanelHost"
+import { PANEL_MIN_CHAT_WIDTH } from "@/features/agents/components/RightPanelShell"
 import { useAgentSkills } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
-import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
   localThreadKeys,
   useDesktopLocalThread,
-  useLocalThreadDiff,
 } from "@/features/agents/lib/desktopLocal"
 import {
   readStoredPanelCollapsed,
@@ -52,7 +31,6 @@ import {
 } from "@/features/agents/lib/gitPanelPreferences"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
-import { useRegisterAppCommands } from "@/lib/appCommands"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -114,22 +92,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
   )
-  const panel = usePanelTabs(sessionId, AGENT_COMMON_TABS)
-  const terminals = useTerminalGroups(
-    { kind: "local", sessionId },
-    thread?.cwd ?? ""
-  )
-  const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
+  const panelRef = useRef<RightPanelHostHandle>(null)
   const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
-  const [dirtyFiles, setDirtyFiles] = useState<ReadonlySet<string>>(new Set())
-  const handleDirtyChange = useCallback((path: string, dirty: boolean) => {
-    setDirtyFiles((current) => {
-      const next = new Set(current)
-      if (dirty) next.add(path)
-      else next.delete(path)
-      return next
-    })
-  }, [])
   const handlePanelCollapsedChange = useCallback(
     (next: boolean) => {
       setPanelCollapsed(next)
@@ -137,129 +101,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     },
     [sessionId]
   )
-  const handleOpenFile = useCallback(
-    (filePath: string) => {
-      const relativePath = filePath.startsWith(`${thread?.cwd}/`)
-        ? filePath.slice((thread?.cwd.length ?? -1) + 1)
-        : filePath
-      setRevealFilePath(relativePath)
-      panel.openFile(relativePath)
-      handlePanelCollapsedChange(false)
-    },
-    [handlePanelCollapsedChange, panel, thread?.cwd]
-  )
-  const handleOpenKind = useCallback(
-    (kind: PanelTabKind) => {
-      if (kind === "terminal") panel.open({ id: terminals.addGroup(), kind })
-      else if (kind === "changes") panel.open(CHANGES_TAB)
-      else if (kind === "files") panel.open(FILES_TAB)
-      else if (kind === "browser") panel.open(BROWSER_TAB)
-      else if (kind === "pull-request") panel.open(PULL_REQUEST_TAB)
-    },
-    [panel, terminals]
-  )
-  const activePanelTabId = panel.activeTabId
-  const handleSelectTab = useCallback(
-    (id: string) => {
-      panel.select(id)
-      const group = terminals.state.terminalGroups.find(
-        (candidate) => candidate.id === id
-      )
-      const terminalId = group?.terminalIds[0]
-      if (terminalId) terminals.focus(terminalId)
-    },
-    [panel, terminals]
-  )
-  const handleCloseTab = useCallback(
-    async (id: string) => {
-      const tab = panel.tabs.find((candidate) => candidate.id === id)
-      if (
-        tab?.kind === "file" &&
-        tab.resourceId &&
-        dirtyFiles.has(tab.resourceId) &&
-        !window.confirm("Discard unsaved changes?")
-      )
-        return
-      if (tab?.kind === "terminal" && !(await terminals.closeGroup(id))) return
-      panel.close(id)
-    },
-    [dirtyFiles, panel, terminals]
-  )
-  const toggleTerminal = useCallback(() => {
-    if (!panelCollapsed && panel.activeTab?.kind === "terminal") {
-      handlePanelCollapsedChange(true)
-      return
-    }
-    handlePanelCollapsedChange(false)
-    const existing = panel.tabs.find(
-      (candidate) => candidate.kind === "terminal"
-    )
-    if (existing) handleSelectTab(existing.id)
-    else handleOpenKind("terminal")
-  }, [
-    handleOpenKind,
-    handlePanelCollapsedChange,
-    handleSelectTab,
-    panel.activeTab?.kind,
-    panel.tabs,
-    panelCollapsed,
-  ])
-  const threadCommands = useMemo(
-    () =>
-      thread
-        ? [
-            {
-              id: "toggle-terminal",
-              label: "Toggle terminal",
-              aliases: ["open terminal", "hide terminal"],
-              shortcuts: ["ctrl+`"],
-              group: "Workspace",
-              run: toggleTerminal,
-            },
-            {
-              id: "toggle-work-panel",
-              label: "Toggle work panel",
-              aliases: ["show panel", "hide panel", "changes panel"],
-              shortcuts: ["mod+alt+b"],
-              group: "Workspace",
-              run: () => handlePanelCollapsedChange(!panelCollapsed),
-            },
-          ]
-        : [],
-    [handlePanelCollapsedChange, panelCollapsed, thread, toggleTerminal]
-  )
-  useRegisterAppCommands(threadCommands)
-
-  const terminalGroupIds = terminals.state.terminalGroups
-    .map((group) => group.id)
-    .join(",")
-  const syncTerminals = panel.syncTerminals
-  useEffect(() => {
-    syncTerminals(terminalGroupIds ? terminalGroupIds.split(",") : [])
-  }, [syncTerminals, terminalGroupIds])
-
+  const handleOpenFile = useCallback((filePath: string) => {
+    panelRef.current?.openFile(filePath)
+  }, [])
   const isRunning = stream.isLoading || thread?.status === "running"
-  const diff = useLocalThreadDiff(
-    sessionId,
-    !panelCollapsed && activePanelTabId === "changes" && Boolean(thread),
-    isRunning
-  )
-  const files = useMemo(
-    () => toPanelFiles(diff.data?.files ?? []),
-    [diff.data?.files]
-  )
-  const repository = diff.data?.repository
-  const pr = repository?.pr
-  const workspace = useMemo<WorkspaceAdapter>(
-    () => ({
-      key: `local:${sessionId}`,
-      list: (path) => window.openSweDesktop!.listLocalFiles(sessionId, path),
-      read: (path) => window.openSweDesktop!.readLocalFile(sessionId, path),
-      write: (path, content) =>
-        window.openSweDesktop!.writeLocalFile(sessionId, path, content),
-    }),
-    [sessionId]
-  )
   const messages = useMemo(
     () =>
       streamMessagesToUi(
@@ -523,134 +368,16 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           </div>
         </div>
       </div>
-      <AgentPanelShell
-        tabs={panel.tabs.map((tab) =>
-          tab.kind === "terminal"
-            ? { ...tab, title: terminalTabTitle(terminals, tab.id) }
-            : tab
-        )}
-        activeTabId={activePanelTabId}
-        onSelectTab={handleSelectTab}
-        onCloseTab={handleCloseTab}
-        onOpenKind={handleOpenKind}
-        menuKinds={AGENT_PANEL_KINDS.filter(
-          (kind) => kind !== "pull-request" || Boolean(pr)
-        )}
+      <RightPanelHost
+        ref={panelRef}
+        target={{ kind: "local", thread }}
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
-      >
-        {({ fullScreen }) => (
-          <>
-            {activePanelTabId === "changes" && (
-              <ChangesPanel
-                files={files}
-                status={diff.data?.status}
-                isLoading={diff.isPending}
-                isFetching={diff.isFetching}
-                error={diff.error}
-                truncated={diff.data?.truncated}
-                branch={repository?.branch}
-                pr={pr}
-                revealFilePath={revealFilePath}
-                fullScreen={fullScreen}
-                onRefresh={() => void diff.refetch()}
-              />
-            )}
-            {panel.activeTab?.kind === "files" && (
-              <FileExplorerPanel adapter={workspace} onOpen={panel.openFile} />
-            )}
-            {panel.tabs
-              .filter((tab) => tab.kind === "file" && tab.resourceId)
-              .map((tab) => (
-                <div
-                  key={tab.id}
-                  className={cn(
-                    "flex min-h-0 flex-1 flex-col",
-                    tab.id !== activePanelTabId && "hidden"
-                  )}
-                >
-                  <FileEditorPanel
-                    adapter={workspace}
-                    path={tab.resourceId!}
-                    onDirtyChange={handleDirtyChange}
-                  />
-                </div>
-              ))}
-            {panel.tabs
-              .filter((tab) => tab.kind === "browser")
-              .map((tab) => (
-                <div
-                  key={tab.id}
-                  className={cn(
-                    "flex min-h-0 flex-1 flex-col",
-                    tab.id !== activePanelTabId && "hidden"
-                  )}
-                >
-                  <BrowserPanel
-                    openExternal={(url) =>
-                      void window.openSweDesktop?.openExternal(url)
-                    }
-                  />
-                </div>
-              ))}
-            {panel.activeTab?.kind === "pull-request" && (
-              <ChangesPanel
-                files={files}
-                status={diff.data?.status}
-                isLoading={diff.isPending}
-                isFetching={diff.isFetching}
-                error={diff.error}
-                truncated={diff.data?.truncated}
-                branch={repository?.branch}
-                pr={pr}
-                fullScreen={fullScreen}
-                onRefresh={() => void diff.refetch()}
-              />
-            )}
-            {/* Kept mounted across tabs: unmounting kills the user's shell. */}
-            {panel.tabs
-              .filter((tab) => tab.kind === "terminal")
-              .map((tab) => (
-                <div
-                  key={tab.id}
-                  className={cn(
-                    "min-h-0 flex-1",
-                    tab.id !== activePanelTabId && "hidden"
-                  )}
-                >
-                  <TerminalPanel
-                    target={{ kind: "local", sessionId: thread.id }}
-                    cwd={thread.cwd}
-                    groupId={tab.id}
-                    terminals={terminals}
-                    onOpenFile={handleOpenFile}
-                    onAddToChat={(text) =>
-                      setTerminalContexts((current) => [...current, text])
-                    }
-                  />
-                </div>
-              ))}
-          </>
-        )}
-      </AgentPanelShell>
+        isRunning={isRunning}
+        onAddToChat={(text) =>
+          setTerminalContexts((current) => [...current, text])
+        }
+      />
     </div>
-  )
-}
-
-function terminalTabTitle(
-  terminals: TerminalGroupsController,
-  groupId: string
-): string {
-  const group = terminals.state.terminalGroups.find(
-    (candidate) => candidate.id === groupId
-  )
-  const terminalId = group?.terminalIds.includes(
-    terminals.state.activeTerminalId
-  )
-    ? terminals.state.activeTerminalId
-    : group?.terminalIds[0]
-  return (
-    (terminalId ? terminals.metadataById.get(terminalId)?.label : null) ||
-    "Terminal"
   )
 }
