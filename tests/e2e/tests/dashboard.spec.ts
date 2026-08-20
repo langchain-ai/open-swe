@@ -60,7 +60,7 @@ async function openRunningThreadViaSlackLink(page: Page) {
 // "Open in Web" link, landing on the actual dashboard app.
 async function openThreadViaSlackLink(
   page: Page,
-  options: { repoPrivate?: boolean } = {},
+  options: { repoPrivate?: boolean; message?: string } = {},
 ) {
   await page.goto("/mock/slack");
   await page.locator("#reset").click();
@@ -70,7 +70,9 @@ async function openThreadViaSlackLink(
   await expect(page.locator("#thread")).toContainText("No messages yet");
   await page
     .locator("#text")
-    .fill("<@U0BOT> please add a greet() helper and open a PR");
+    .fill(
+      options.message ?? "<@U0BOT> please add a greet() helper and open a PR",
+    );
   await page.locator("#send").click();
   await expect(
     page.locator(".msg.bot").filter({ hasText: "Add greet() helper" }),
@@ -189,6 +191,34 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(
       page.getByText("This thread has no messages yet."),
     ).toHaveCount(0);
+  });
+
+  test("renders Slack mrkdwn and identifies the Slack sender", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page, {
+      message:
+        "<@U0BOT> please add a greet() helper and open a PR; review *important* R&amp;D `<https://example.com/code|code docs>` <https://example.com/slack-docs|Slack docs>",
+    });
+    await expectTranscriptVisible(page);
+
+    const slackMessage = page
+      .locator('[data-message-surface="slack"]')
+      .filter({ hasText: "Slack docs" })
+      .first();
+    await expect(
+      slackMessage.getByRole("img", { name: "Slack" }),
+    ).toBeVisible();
+    await expect(slackMessage.locator("strong")).toHaveText("important");
+    await expect(slackMessage).toContainText("R&D");
+    await expect(slackMessage.locator("code")).toContainText("code docs");
+    await expect(
+      slackMessage.getByRole("link", { name: "code docs" }),
+    ).toHaveCount(0);
+    await expect(
+      slackMessage.getByRole("link", { name: "Slack docs" }),
+    ).toHaveAttribute("href", "https://example.com/slack-docs");
   });
 
   test("keeps sent Slack messages visible while work is folded", async ({

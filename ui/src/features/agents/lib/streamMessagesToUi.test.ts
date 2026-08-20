@@ -35,12 +35,14 @@ describe("streamMessagesToUi", () => {
       structuredSenderId: "github:alice",
       structuredSenderKind: "person",
       structuredSenderName: "Alice",
+      structuredSurface: "web",
       chunks: [{ kind: "text", text: "Hello <b>world</b>" }],
     })
     expect(messages[1]).toMatchObject({
       author: "system",
       structuredSenderKind: "system",
       structuredSenderName: "Scheduler",
+      structuredSurface: "automation",
       chunks: [{ kind: "text", text: "Check CI" }],
     })
     expect(messages[2]).toMatchObject({

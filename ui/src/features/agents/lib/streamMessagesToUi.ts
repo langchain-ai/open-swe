@@ -378,6 +378,7 @@ export function streamMessagesToUi(
           ? {
               structuredSenderId: parsed.sender,
               structuredSenderKind: parsed.senderKind,
+              structuredSurface: parsed.surface,
               structuredSenderName:
                 entity?.displayName ??
                 (entity?.handle ? `@${entity.handle}` : undefined),
