@@ -200,13 +200,24 @@ def _text(content: Any) -> str:
     return str(content)
 
 
+_FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff")
+
+
+def _is_framing_block(header: str) -> bool:
+    """A system envelope that describes where the next turn came from."""
+    return 'kind="system"' in header and any(
+        f'sender="{sender}"' in header for sender in _FRAMING_SENDER_IDS
+    )
+
+
 def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
     """The user turns a script routes on, recovered from the structured stream.
 
     A Slack dispatch replays the thread's earlier messages as context before the
     system block that frames the mention, so only the message after that block is
     the turn. An instruction Open SWE dispatches to itself — a plan decision, a
-    scheduled wake-up — carries no Slack timestamp and is always a turn.
+    scheduled wake-up — carries no Slack timestamp and is always a turn, even
+    though it too arrives as a system envelope.
     """
     selected: list[HumanMessage] = []
     slack_request_pending = False
@@ -218,7 +229,7 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
             continue
         if text.startswith("<input-message "):
             header = text.split(">", 1)[0]
-            if 'kind="system"' in header:
+            if _is_framing_block(header):
                 slack_request_pending = 'surface="slack"' in header
                 continue
             if 'surface="slack"' in header and "<timestamp>" in text:
