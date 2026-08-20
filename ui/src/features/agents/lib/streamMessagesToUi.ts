@@ -251,6 +251,16 @@ function toolOutputText(
   return text || undefined
 }
 
+function isHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false
+  try {
+    const url = new URL(value)
+    return url.protocol === "https:" || url.protocol === "http:"
+  } catch {
+    return false
+  }
+}
+
 function outputIframeDisplay(
   toolMessage: ToolMessage | undefined
 ): OutputIframeDisplay | undefined {
@@ -261,18 +271,29 @@ function outputIframeDisplay(
   const value = artifact as Record<string, unknown>
   if (
     value.type !== "output_iframe" ||
-    typeof value.html !== "string" ||
     typeof value.title !== "string" ||
     typeof value.filename !== "string"
   ) {
     return undefined
   }
-  return {
-    type: "output_iframe",
-    html: value.html,
-    title: value.title,
-    filename: value.filename,
+  if (isHttpUrl(value.preview_url) && isHttpUrl(value.download_url)) {
+    return {
+      type: "output_iframe",
+      previewUrl: value.preview_url,
+      downloadUrl: value.download_url,
+      title: value.title,
+      filename: value.filename,
+    }
   }
+  if (typeof value.html === "string") {
+    return {
+      type: "output_iframe",
+      html: value.html,
+      title: value.title,
+      filename: value.filename,
+    }
+  }
+  return undefined
 }
 
 /**

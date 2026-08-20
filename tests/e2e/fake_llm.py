@@ -80,25 +80,21 @@ echo PUSHED_OK
 """.strip()
 
 _IFRAME_HTML_PATH = "/workspace/iframe-output.html"
-_IFRAME_DATA_PATH = "/workspace/iframe-data.json"
-_IFRAME_CSS_PATH = "/workspace/iframe-theme.css"
 _IFRAME_HTML = """<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>Iframe E2E Preview</title></head>
+<head>
+  <meta charset="utf-8">
+  <title>Iframe E2E Preview</title>
+  <style>body { min-height: 420px; margin: 0; color: rebeccapurple; }</style>
+</head>
 <body>
   <main>
     <h1>Iframe preview</h1>
-    <p id="output-data">Loading bundled data...</p>
+    <p id="output-data">Prototype loaded</p>
   </main>
-  <script>
-    const data = JSON.parse(window.__FILES__["data.json"]);
-    document.getElementById("output-data").textContent = data.label;
-  </script>
 </body>
 </html>
 """
-_IFRAME_DATA = '{"label":"Bundled data loaded"}'
-_IFRAME_CSS = "body { min-height: 420px; margin: 0; color: rebeccapurple; }"
 
 _DESKTOP_PR_PAYLOAD = json.dumps(
     {
@@ -477,24 +473,11 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-iframe-html",
         ),
         _tool_step(
-            "Writing the iframe data.",
-            "write_file",
-            {"file_path": _IFRAME_DATA_PATH, "content": _IFRAME_DATA},
-            "call-iframe-data",
-        ),
-        _tool_step(
-            "Writing the iframe stylesheet.",
-            "write_file",
-            {"file_path": _IFRAME_CSS_PATH, "content": _IFRAME_CSS},
-            "call-iframe-css",
-        ),
-        _tool_step(
             "Rendering the iframe preview.",
             "output_iframe",
             {
                 "path": _IFRAME_HTML_PATH,
                 "title": "Iframe E2E Preview",
-                "files": {"data.json": _IFRAME_DATA_PATH, "theme.css": _IFRAME_CSS_PATH},
             },
             "call-output-iframe",
         ),
