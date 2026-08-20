@@ -76,6 +76,7 @@ from .dashboard.team_settings import (
 )
 from .dashboard.user_mappings import email_for_login
 from .desktop import create_desktop_backend, is_desktop_run
+from .input_messages import append_message_data
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
@@ -1064,12 +1065,23 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         if message is None:
             return None
         content = message.content
+        # Inside the envelope, not after it: a trailing sibling makes the whole
+        # message unparseable and the transcript renders it as raw markup.
+        spliced = (
+            append_message_data(content, "sender_context", sender_context)
+            if isinstance(content, (str, list))
+            else None
+        )
+        if spliced is not None:
+            return message.model_copy(update={"content": spliced})
+        wrapped = f"<sender_context>\n{sender_context}\n</sender_context>"
+        updated_content: Any
         if isinstance(content, str):
-            updated_content: Any = f"{content}\n\n{sender_context}"
+            updated_content = f"{content}\n\n{wrapped}"
         elif isinstance(content, list):
-            updated_content = [*content, {"type": "text", "text": sender_context}]
+            updated_content = [*content, {"type": "text", "text": wrapped}]
         else:
-            updated_content = [content, {"type": "text", "text": sender_context}]
+            updated_content = [content, {"type": "text", "text": wrapped}]
         return message.model_copy(update={"content": updated_content})
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002

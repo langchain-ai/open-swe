@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronRight } from "lucide-react"
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
@@ -12,6 +13,7 @@ export function UserMessage({ message }: { message: Message }) {
     .join("")
 
   const images = message.chunks.filter((c) => c.kind === "image")
+  const [expanded, setExpanded] = useState(false)
   const textRef = useRef<HTMLDivElement>(null)
   const [scrolledFromTop, setScrolledFromTop] = useState(false)
   const [scrolledFromBottom, setScrolledFromBottom] = useState(false)
@@ -42,15 +44,32 @@ export function UserMessage({ message }: { message: Message }) {
       data-message-sender-kind={message.structuredSenderKind}
     >
       <div className="max-w-[80%]">
-        {message.structuredSenderName && (
-          <div className="mb-1 px-1 text-[11px] font-medium text-muted-foreground">
-            {message.structuredSenderName}
-          </div>
+        {isSystem ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+            data-testid="system-message-toggle"
+            className="flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/30"
+          >
+            {expanded ? (
+              <ChevronDown className="size-3" />
+            ) : (
+              <ChevronRight className="size-3" />
+            )}
+            <span>{message.structuredSenderName || "Context"}</span>
+          </button>
+        ) : (
+          message.structuredSenderName && (
+            <div className="mb-1 px-1 text-[11px] font-medium text-muted-foreground">
+              {message.structuredSenderName}
+            </div>
+          )
         )}
-        {(text || images.length > 0) && (
+        {(!isSystem || expanded) && (text || images.length > 0) && (
           <div
             className={`relative overflow-hidden rounded-2xl p-3 ${
-              isSystem ? "border border-border bg-muted/50" : "bg-accent"
+              isSystem ? "mt-1 border border-border bg-muted/50" : "bg-accent"
             }`}
           >
             {images.length > 0 && (
@@ -84,7 +103,7 @@ export function UserMessage({ message }: { message: Message }) {
             )}
           </div>
         )}
-        {!message.timestampIsFallback && (
+        {!message.timestampIsFallback && (!isSystem || expanded) && (
           <MessageTimestamp
             timestamp={message.timestamp}
             align={isSystem ? "left" : "right"}
