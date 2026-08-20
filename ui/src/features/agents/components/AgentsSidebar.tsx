@@ -212,6 +212,24 @@ export function AgentsSidebar({
   )
   const cloudThreadCount =
     filteredActive.length + (showResolved ? filteredResolved.length : 0)
+  const cloudActivity = {
+    running: activeThreads.filter((thread) => thread.status === "running")
+      .length,
+    completed: activeThreads.filter(
+      (thread) => thread.status === "finished" && !thread.viewed
+    ).length,
+  }
+  const localActivity = {
+    running: localSessions.filter(
+      (thread) => thread.status === "running" || thread.status === "starting"
+    ).length,
+    completed: localSessions.filter(
+      (thread) =>
+        !thread.viewed &&
+        thread.status !== "running" &&
+        thread.status !== "starting"
+    ).length,
+  }
   const showLocalThreads = isDesktop && desktopThreadSource === "local"
   const showCloudThreads = !isDesktop || desktopThreadSource === "cloud"
 
@@ -283,6 +301,8 @@ export function AgentsSidebar({
             source={desktopThreadSource}
             localCount={localSessionCount}
             cloudCount={cloudThreadCount}
+            localActivity={localActivity}
+            cloudActivity={cloudActivity}
             onSourceChange={setDesktopThreadSource}
           />
         )}
