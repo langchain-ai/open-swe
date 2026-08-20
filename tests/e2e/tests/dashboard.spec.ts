@@ -228,7 +228,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await openThreadViaSlackLink(page);
     await expectTranscriptVisible(page);
 
-    const worked = page.getByRole("button", { name: /^Worked(?: for .+)?$/ });
+    const worked = page.getByRole("button", {
+      name: /^Worked(?: for .+)? · \d+ actions?$/,
+    });
     const acknowledgement = page.getByText("On it!", { exact: true });
     const edit = page.getByRole("button", { name: "Edited greet.py" });
 
@@ -258,7 +260,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await openThreadViaSlackLink(page);
     await expectTranscriptVisible(page);
 
-    const worked = page.getByRole("button", { name: /^Worked(?: for .+)?$/ });
+    const worked = page.getByRole("button", {
+      name: /^Worked(?: for .+)? · \d+ actions?$/,
+    });
     await expect(worked).toBeVisible();
     await worked.click();
 
