@@ -501,6 +501,8 @@ def _agent_run_metadata(
         "schedule_id": record["id"],
         "schedule_name": record.get("name"),
         "schedule_test": test_run,
+        "automation_notification_mode": _slack_notification_mode(record),
+        "automation_action_taken": False,
         "github_login": record.get("created_by"),
         PARTICIPANT_LOGINS_KEY: [record["created_by"]] if record.get("created_by") else [],
         "triggering_user_email": record.get("user_email"),

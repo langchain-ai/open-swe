@@ -117,6 +117,14 @@ function groupAutomationRuns(runs: Array<AgentThread>) {
 
 function AutomationRunRow({ run }: { run: AgentThread }) {
   const isTest = run.triggerKind === "schedule_test"
+  const actionLabel =
+    run.automationNotificationMode !== "on_action"
+      ? null
+      : run.automationActionTaken
+        ? "Action taken"
+        : run.status === "running"
+          ? "Awaiting action"
+          : "No action"
   return (
     <Link
       to="/agents/$threadId"
@@ -144,6 +152,13 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
           <span>{STATUS_LABELS[run.status]}</span>
           <span>{isTest ? "Test run" : "Scheduled run"}</span>
+          {actionLabel && (
+            <span
+              className={cn(actionLabel === "Action taken" && "text-success")}
+            >
+              {actionLabel}
+            </span>
+          )}
           {run.repoFullName && <span>{run.repoFullName}</span>}
           <span>{formatRelativeTime(run.updatedAt)}</span>
         </div>

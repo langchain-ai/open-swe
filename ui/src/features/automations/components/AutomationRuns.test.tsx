@@ -38,4 +38,56 @@ describe("AutomationRuns", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(refetch).toHaveBeenCalledOnce()
   })
+
+  it("shows whether action-only runs performed an action", () => {
+    vi.mocked(useThreadsPage).mockReturnValue({
+      data: {
+        items: [
+          {
+            id: "action",
+            title: "Action run",
+            automationId: "schedule-1",
+            automationName: "Dependency check",
+            automationNotificationMode: "on_action",
+            automationActionTaken: true,
+            triggerKind: "schedule",
+            status: "finished",
+            updatedAt: 3,
+          },
+          {
+            id: "no-action",
+            title: "No action run",
+            automationId: "schedule-1",
+            automationName: "Dependency check",
+            automationNotificationMode: "on_action",
+            automationActionTaken: false,
+            triggerKind: "schedule",
+            status: "finished",
+            updatedAt: 2,
+          },
+          {
+            id: "pending",
+            title: "Pending run",
+            automationId: "schedule-1",
+            automationName: "Dependency check",
+            automationNotificationMode: "on_action",
+            automationActionTaken: false,
+            triggerKind: "schedule",
+            status: "running",
+            updatedAt: 1,
+          },
+        ],
+        hasMore: false,
+      },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+    } as unknown as ReturnType<typeof useThreadsPage>)
+
+    render(<AutomationRuns automationId="schedule-1" />)
+
+    expect(screen.getByText("Action taken")).toBeTruthy()
+    expect(screen.getByText("No action")).toBeTruthy()
+    expect(screen.getByText("Awaiting action")).toBeTruthy()
+  })
 })

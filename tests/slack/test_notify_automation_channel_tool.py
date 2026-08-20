@@ -21,9 +21,18 @@ class _FakeStore:
         self.items.pop((tuple(namespace), key), None)
 
 
+class _FakeThreads:
+    def __init__(self) -> None:
+        self.updated: list[dict[str, Any]] = []
+
+    async def update(self, **kwargs: Any) -> None:
+        self.updated.append(kwargs)
+
+
 class _FakeClient:
     def __init__(self) -> None:
         self.store = _FakeStore()
+        self.threads = _FakeThreads()
 
 
 def _config(thread_id: str = "thread_1") -> dict[str, Any]:
@@ -108,6 +117,7 @@ async def test_notify_automation_channel_validates_message(
         "error": "Message must be at most 3000 characters",
     }
     assert fake_client.store.items == {}
+    assert fake_client.threads.updated == []
 
 
 async def test_notify_automation_channel_posts_to_trusted_destination(
@@ -134,6 +144,12 @@ async def test_notify_automation_channel_posts_to_trusted_destination(
     stored = fake_client.store.items[(("automation_notifications",), "thread_1")]
     assert stored["status"] == "delivered"
     assert stored["message_ts"] == "1786504009.596419"
+    assert fake_client.threads.updated == [
+        {
+            "thread_id": "thread_1",
+            "metadata": {"automation_action_taken": True},
+        }
+    ]
 
 
 async def test_notify_automation_channel_suppresses_duplicate_posts(

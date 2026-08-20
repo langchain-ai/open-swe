@@ -41,6 +41,16 @@ async def _release_reservation(client: Any, thread_id: str) -> None:
         logger.exception("Failed to release automation notification for %s", thread_id)
 
 
+async def _record_action_taken(client: Any, thread_id: str) -> None:
+    try:
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={"automation_action_taken": True},
+        )
+    except Exception:
+        logger.exception("Failed to record automation action for %s", thread_id)
+
+
 async def notify_automation_channel(message: str) -> dict[str, Any]:
     """Notify the configured automation channel once after a concrete requested action."""
     config = get_config()
@@ -77,6 +87,7 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
         }
 
     client = get_client()
+    await _record_action_taken(client, thread_id)
     async with _notification_lock(thread_id):
         try:
             item = await client.store.get_item(_NOTIFICATION_NAMESPACE, thread_id)

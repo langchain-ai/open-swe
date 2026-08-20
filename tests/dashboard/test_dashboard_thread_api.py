@@ -413,6 +413,20 @@ async def test_thread_summary_omits_pr_when_no_pr_metadata() -> None:
     assert "diffStats" not in summary
 
 
+async def test_thread_summary_exposes_automation_action_result() -> None:
+    summary = await thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "automation_notification_mode": "on_action",
+                "automation_action_taken": True,
+            }
+        )
+    )
+
+    assert summary["automationNotificationMode"] == "on_action"
+    assert summary["automationActionTaken"] is True
+
+
 async def test_thread_summary_exposes_sandbox_id() -> None:
     summary = await thread_api._thread_summary(_thread_with_metadata({"sandbox_id": "sb-abc123"}))
 

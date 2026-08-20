@@ -691,6 +691,8 @@ async def test_launch_conditional_slack_schedule_starts_silently(
     assert "read-only checks" in (prompt.findtext("content") or "")
     metadata = fake_client.threads.created[0]["metadata"]
     assert "source_context" not in metadata
+    assert metadata["automation_notification_mode"] == "on_action"
+    assert metadata["automation_action_taken"] is False
 
 
 async def test_launch_scheduled_agent_run_stops_when_slack_post_fails(

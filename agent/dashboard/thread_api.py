@@ -558,6 +558,12 @@ async def _thread_summary(
         "triggerKind": trigger_kind,
         "automationId": _metadata_string(metadata, "schedule_id"),
         "automationName": _metadata_string(metadata, "schedule_name"),
+        "automationNotificationMode": (
+            metadata.get("automation_notification_mode")
+            if metadata.get("automation_notification_mode") in {"always", "on_action"}
+            else None
+        ),
+        "automationActionTaken": metadata.get("automation_action_taken") is True,
         "status": status,
         "viewed": _is_thread_viewed(metadata, latest_run_id),
         "viewedAt": (

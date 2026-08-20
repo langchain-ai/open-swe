@@ -282,6 +282,8 @@ export interface AgentThread {
   triggerKind?: AgentTriggerKind | string
   automationId?: string | null
   automationName?: string | null
+  automationNotificationMode?: SlackNotificationMode | null
+  automationActionTaken?: boolean
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null
