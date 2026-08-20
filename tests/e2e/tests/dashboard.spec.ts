@@ -668,4 +668,31 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       page.getByText(new RegExp(`@${OTHER_USER.login}`)).first(),
     ).toBeVisible();
   });
+
+  // A slow sidebar used to render as a blank column, indistinguishable from an
+  // account with no threads.
+  test("shows a loading placeholder while the sidebar list is in flight", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/dashboard/api/threads/sidebar*", async (route) => {
+      await held;
+      await route.continue();
+    });
+
+    // The held request would block `load`, so stop waiting at the first byte.
+    await page.goto("/agents", { waitUntil: "commit" });
+
+    const skeleton = page.getByTestId("sidebar-threads-skeleton");
+    await expect(skeleton).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("status")).toContainText("Loading threads");
+
+    release();
+    await expect(skeleton).toBeHidden({ timeout: 30_000 });
+  });
 });
