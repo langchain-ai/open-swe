@@ -67,12 +67,20 @@ export interface DiffData {
   totalLines: number
 }
 
-export interface OutputIframeDisplay {
-  type: "output_iframe"
-  html: string
-  title: string
-  filename: string
-}
+export type OutputIframeDisplay =
+  | {
+      type: "output_iframe"
+      previewUrl: string
+      downloadUrl: string
+      title: string
+      filename: string
+    }
+  | {
+      type: "output_iframe"
+      html: string
+      title: string
+      filename: string
+    }
 
 export interface ToolExecutionChunk {
   kind: "tool-execution"

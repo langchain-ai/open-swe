@@ -98,7 +98,8 @@ describe("streamMessagesToUi", () => {
         content: "Displayed the HTML output in the dashboard.",
         artifact: {
           type: "output_iframe",
-          html: "<h1>Chart</h1>",
+          preview_url: "https://downloads.example/preview?token=secret",
+          download_url: "https://downloads.example/download?token=secret",
           title: "Chart",
           filename: "chart.html",
         },
@@ -109,9 +110,80 @@ describe("streamMessagesToUi", () => {
     const tool = agent?.chunks.find((chunk) => chunk.kind === "tool-execution")
     expect(tool?.kind === "tool-execution" ? tool.display : undefined).toEqual({
       type: "output_iframe",
-      html: "<h1>Chart</h1>",
+      previewUrl: "https://downloads.example/preview?token=secret",
+      downloadUrl: "https://downloads.example/download?token=secret",
       title: "Chart",
       filename: "chart.html",
     })
+  })
+
+  it("preserves historical embedded iframe artifacts", () => {
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "ai-1",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-1",
+            name: "output_iframe",
+            args: { path: "/tmp/chart.html" },
+            type: "tool_call",
+          },
+        ],
+      }),
+      new ToolMessage({
+        tool_call_id: "call-1",
+        content: "Displayed the HTML output in the dashboard.",
+        artifact: {
+          type: "output_iframe",
+          html: "<h1>Historical chart</h1>",
+          title: "Chart",
+          filename: "chart.html",
+        },
+      }),
+    ])
+
+    const agent = messages.find((message) => message.author === "agent")
+    const tool = agent?.chunks.find((chunk) => chunk.kind === "tool-execution")
+    expect(tool?.kind === "tool-execution" ? tool.display : undefined).toEqual({
+      type: "output_iframe",
+      html: "<h1>Historical chart</h1>",
+      title: "Chart",
+      filename: "chart.html",
+    })
+  })
+
+  it("rejects non-HTTP iframe artifact URLs", () => {
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "ai-1",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-1",
+            name: "output_iframe",
+            args: { path: "/tmp/chart.html" },
+            type: "tool_call",
+          },
+        ],
+      }),
+      new ToolMessage({
+        tool_call_id: "call-1",
+        content: "Displayed the HTML output in the dashboard.",
+        artifact: {
+          type: "output_iframe",
+          preview_url: "javascript:alert(1)",
+          download_url: "https://downloads.example/download",
+          title: "Chart",
+          filename: "chart.html",
+        },
+      }),
+    ])
+
+    const agent = messages.find((message) => message.author === "agent")
+    const tool = agent?.chunks.find((chunk) => chunk.kind === "tool-execution")
+    expect(
+      tool?.kind === "tool-execution" ? tool.display : undefined
+    ).toBeUndefined()
   })
 })
