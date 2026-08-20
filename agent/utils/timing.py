@@ -15,5 +15,8 @@ def phase(timings: dict[str, float], name: str) -> Iterator[None]:
         timings[name] = (perf_counter() - start) * 1000
 
 
-def server_timing_header(timings: dict[str, float]) -> str:
-    return ", ".join(f"{name};dur={value:.1f}" for name, value in timings.items())
+def server_timing_header(timings: dict[str, float], counts: dict[str, int] | None = None) -> str:
+    """``dur`` is milliseconds, so anything that is not a duration rides in ``desc``."""
+    parts = [f"{name};dur={value:.1f}" for name, value in timings.items()]
+    parts += [f"{name};desc={value}" for name, value in (counts or {}).items()]
+    return ", ".join(parts)
