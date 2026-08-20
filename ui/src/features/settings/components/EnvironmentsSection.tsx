@@ -9,6 +9,7 @@ export function EnvironmentsSection({ isAdmin }: { isAdmin: boolean }) {
     queryKey: ["environment-options"],
     queryFn: api.listEnvironmentOptions,
     staleTime: 60_000,
+    refetchInterval: 5000,
   })
   const options = environments.data
 
