@@ -4,7 +4,7 @@ import {
   ArrowsOutIcon,
   SidebarSimpleIcon,
 } from "@phosphor-icons/react"
-import { FileDiff, Folder, Globe, Plus, SquareTerminal, X } from "lucide-react"
+import { FileDiff, Plus, SquareTerminal, X } from "lucide-react"
 
 import type { PanelTab, PanelTabKind } from "@/features/agents/lib/panelTabs"
 import { isMultiInstanceKind } from "@/features/agents/lib/panelTabs"
@@ -18,10 +18,8 @@ const PANEL_TAB_META: Record<
   PanelTabKind,
   { label: string; hint?: string; Icon: typeof FileDiff }
 > = {
-  review: { label: "Review", hint: "⌃⇧G", Icon: FileDiff },
+  changes: { label: "Changes", hint: "⌃⇧G", Icon: FileDiff },
   terminal: { label: "Terminal", Icon: SquareTerminal },
-  browser: { label: "Browser", Icon: Globe },
-  files: { label: "Files", Icon: Folder },
 }
 
 const PANEL_STORAGE_WIDTH = "open-swe.gitpanel.width"
@@ -204,26 +202,16 @@ function PanelLauncher({
   )
 }
 
-export function PanelComingSoon() {
-  return (
-    <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-xs text-muted-foreground/70">
-      Coming Soon
-    </div>
-  )
-}
-
 interface AgentPanelShellProps {
   tabs: ReadonlyArray<PanelTab>
   activeTabId: string | null
   onSelectTab: (id: string) => void
-  /** Omit to make tabs non-closable (cloud threads). */
   onCloseTab?: (id: string) => void
   onOpenKind?: (kind: PanelTabKind) => void
   /** Kinds offered by the launcher and the "+" menu. */
   menuKinds: ReadonlyArray<PanelTabKind>
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
-  seamlessHeader?: boolean
   /** Rendered as the panel body; `fullScreen` drives layout-only extras. */
   children: (state: { fullScreen: boolean }) => React.ReactNode
 }
@@ -242,7 +230,6 @@ export function AgentPanelShell({
   menuKinds,
   collapsed,
   onCollapsedChange,
-  seamlessHeader = false,
   children,
 }: AgentPanelShellProps) {
   const [width, setWidthState] = useState(() => readStoredPanelWidth())
@@ -316,12 +303,7 @@ export function AgentPanelShell({
       )}
       style={overlay ? { zIndex: Z.MODAL } : { width }}
     >
-      <div
-        className={cn(
-          "flex h-11 shrink-0 items-center px-2",
-          !seamlessHeader && "border-b border-border"
-        )}
-      >
+      <div className="flex h-11 shrink-0 items-center border-b border-border px-2">
         <div className="flex min-w-0 flex-1 items-center overflow-x-auto">
           {tabs.map((tab, index) => {
             const { label, Icon } = PANEL_TAB_META[tab.kind]

@@ -10,15 +10,11 @@ export interface ThreadActivity {
 
 export function DesktopThreadSourceToggle({
   source,
-  localCount,
-  cloudCount,
   localActivity,
   cloudActivity,
   onSourceChange,
 }: {
   source: DesktopThreadSource
-  localCount: number
-  cloudCount: number
   localActivity: ThreadActivity
   cloudActivity: ThreadActivity
   onSourceChange: (source: DesktopThreadSource) => void
@@ -31,7 +27,6 @@ export function DesktopThreadSourceToggle({
     >
       <SourceButton
         label="Cloud"
-        count={cloudCount}
         activity={cloudActivity}
         active={source === "cloud"}
         icon={CloudIcon}
@@ -39,7 +34,6 @@ export function DesktopThreadSourceToggle({
       />
       <SourceButton
         label="This Mac"
-        count={localCount}
         activity={localActivity}
         active={source === "local"}
         icon={LaptopIcon}
@@ -51,14 +45,12 @@ export function DesktopThreadSourceToggle({
 
 function SourceButton({
   label,
-  count,
   activity,
   active,
   icon: Icon,
   onClick,
 }: {
   label: string
-  count: number
   activity: ThreadActivity
   active: boolean
   icon: typeof CloudIcon
@@ -67,7 +59,7 @@ function SourceButton({
   return (
     <button
       type="button"
-      aria-label={`${label} threads, ${count}, ${activity.running} running, ${activity.completed} completed`}
+      aria-label={`${label} threads, ${activity.running} running, ${activity.completed} completed`}
       aria-pressed={active}
       onClick={onClick}
       className={cn(
@@ -79,26 +71,18 @@ function SourceButton({
     >
       <Icon className="size-3.5 shrink-0" />
       <span className="truncate">{label}</span>
-      <span
-        className={cn(
-          "text-[9px] tabular-nums",
-          active ? "text-muted-foreground" : "text-muted-foreground/70"
-        )}
-      >
-        {count}
-      </span>
       {activity.running > 0 && (
         <ActivityCount
           label={`${activity.running} running`}
           count={activity.running}
-          className="bg-primary"
+          className="bg-primary text-primary-foreground"
         />
       )}
       {activity.completed > 0 && (
         <ActivityCount
           label={`${activity.completed} completed`}
           count={activity.completed}
-          className="bg-success-foreground"
+          className="bg-success-foreground text-background"
         />
       )}
     </button>
@@ -116,10 +100,12 @@ function ActivityCount({
 }) {
   return (
     <span
-      className="inline-flex items-center gap-0.5 text-[9px] tabular-nums"
+      className={cn(
+        "inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[9px] leading-4 font-semibold tabular-nums",
+        className
+      )}
       title={label}
     >
-      <span className={cn("size-1.5 rounded-full", className)} />
       {count}
     </span>
   )

@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
-export type PanelTabKind = "review" | "terminal" | "browser" | "files"
+export type PanelTabKind = "changes" | "terminal"
 
 export interface PanelTab {
   id: string
   kind: PanelTabKind
-  /** Overrides the kind's default label (terminal tabs use the shell label). */
   title?: string
   closable?: boolean
 }
@@ -17,14 +16,17 @@ export interface PanelTabsState {
 
 const STORAGE_PREFIX = "open-swe.panel-tabs.v1:"
 const EMPTY: PanelTabsState = { tabs: [], activeTabId: null }
-const KINDS: ReadonlyArray<PanelTabKind> = [
-  "review",
-  "terminal",
-  "browser",
-  "files",
-]
+const KINDS: ReadonlyArray<PanelTabKind> = ["changes", "terminal"]
 
-/** Only terminals can be opened more than once. */
+export const CHANGES_TAB: PanelTab = {
+  id: "changes",
+  kind: "changes",
+  title: "Changes",
+  closable: false,
+}
+export const AGENT_COMMON_TABS: ReadonlyArray<PanelTab> = [CHANGES_TAB]
+export const AGENT_PANEL_KINDS: ReadonlyArray<PanelTabKind> = ["terminal"]
+
 export function isMultiInstanceKind(kind: PanelTabKind): boolean {
   return kind === "terminal"
 }
@@ -47,7 +49,7 @@ export function closePanelTab(
   id: string
 ): PanelTabsState {
   const index = state.tabs.findIndex((tab) => tab.id === id)
-  if (index < 0) return state
+  if (index < 0 || state.tabs[index]?.closable === false) return state
   const tabs = state.tabs.filter((tab) => tab.id !== id)
   return {
     tabs,
@@ -58,7 +60,6 @@ export function closePanelTab(
   }
 }
 
-/** Terminal tabs mirror the live terminal groups owned by `terminalState`. */
 export function syncTerminalTabs(
   state: PanelTabsState,
   groupIds: ReadonlyArray<string>
@@ -81,31 +82,58 @@ export function syncTerminalTabs(
   }
 }
 
-function isPanelTab(value: unknown): value is PanelTab {
+function migratePanelTab(value: unknown): PanelTab | null {
   const tab = value as PanelTab | null
-  return (
-    typeof tab?.id === "string" && tab.id.length > 0 && KINDS.includes(tab.kind)
-  )
+  if (typeof tab?.id !== "string" || tab.id.length === 0) return null
+  const kind = (tab.kind as string) === "review" ? "changes" : tab.kind
+  const id = tab.id === "review" ? "changes" : tab.id
+  if (!KINDS.includes(kind)) return null
+  return { ...tab, id, kind }
 }
 
-export function readPanelTabs(sessionId: string): PanelTabsState {
-  if (typeof window === "undefined") return EMPTY
+function normalizePanelTabs(
+  state: PanelTabsState,
+  commonTabs: ReadonlyArray<PanelTab>
+): PanelTabsState {
+  const tabs = [...commonTabs]
+  for (const tab of state.tabs) {
+    if (!tabs.some((candidate) => candidate.id === tab.id)) tabs.push(tab)
+  }
+  const activeTabId =
+    state.activeTabId === "review" ? "changes" : state.activeTabId
+  return {
+    tabs,
+    activeTabId: tabs.some((tab) => tab.id === activeTabId)
+      ? activeTabId
+      : (tabs[0]?.id ?? null),
+  }
+}
+
+export function readPanelTabs(
+  sessionId: string,
+  commonTabs: ReadonlyArray<PanelTab> = []
+): PanelTabsState {
+  if (typeof window === "undefined")
+    return normalizePanelTabs(EMPTY, commonTabs)
   const raw = window.localStorage.getItem(`${STORAGE_PREFIX}${sessionId}`)
-  if (!raw) return EMPTY
+  if (!raw) return normalizePanelTabs(EMPTY, commonTabs)
   try {
     const parsed = JSON.parse(raw) as Partial<PanelTabsState>
-    const tabs = (Array.isArray(parsed.tabs) ? parsed.tabs : []).filter(
-      isPanelTab
+    const tabs = (Array.isArray(parsed.tabs) ? parsed.tabs : [])
+      .map(migratePanelTab)
+      .filter((tab): tab is PanelTab => tab !== null)
+    const state = normalizePanelTabs(
+      {
+        tabs,
+        activeTabId:
+          typeof parsed.activeTabId === "string" ? parsed.activeTabId : null,
+      },
+      commonTabs
     )
-    return {
-      tabs,
-      activeTabId:
-        tabs.find((tab) => tab.id === parsed.activeTabId)?.id ??
-        tabs[0]?.id ??
-        null,
-    }
+    writePanelTabs(sessionId, state)
+    return state
   } catch {
-    return EMPTY
+    return normalizePanelTabs(EMPTY, commonTabs)
   }
 }
 
@@ -117,22 +145,52 @@ export function writePanelTabs(sessionId: string, state: PanelTabsState): void {
   )
 }
 
-export function usePanelTabs(sessionId: string) {
+export function usePanelTabs(
+  sessionId: string,
+  commonTabs: ReadonlyArray<PanelTab> = []
+) {
   const [state, setState] = useState<PanelTabsState>(() =>
-    readPanelTabs(sessionId)
+    readPanelTabs(sessionId, commonTabs)
   )
 
-  useEffect(() => setState(readPanelTabs(sessionId)), [sessionId])
+  useEffect(
+    () => setState(readPanelTabs(sessionId, commonTabs)),
+    [commonTabs, sessionId]
+  )
 
   const update = useCallback(
     (change: (current: PanelTabsState) => PanelTabsState) => {
       setState((current) => {
-        const next = change(current)
-        if (next !== current) writePanelTabs(sessionId, next)
+        const next = normalizePanelTabs(change(current), commonTabs)
+        writePanelTabs(sessionId, next)
         return next
       })
     },
-    [sessionId]
+    [commonTabs, sessionId]
+  )
+
+  const open = useCallback(
+    (tab: PanelTab) => update((current) => openPanelTab(current, tab)),
+    [update]
+  )
+  const select = useCallback(
+    (id: string) =>
+      update((current) =>
+        current.tabs.some((tab) => tab.id === id)
+          ? { ...current, activeTabId: id }
+          : current
+      ),
+    [update]
+  )
+  const openChanges = useCallback(() => open(CHANGES_TAB), [open])
+  const close = useCallback(
+    (id: string) => update((current) => closePanelTab(current, id)),
+    [update]
+  )
+  const syncTerminals = useCallback(
+    (groupIds: ReadonlyArray<string>) =>
+      update((current) => syncTerminalTabs(current, groupIds)),
+    [update]
   )
 
   return useMemo(
@@ -140,13 +198,12 @@ export function usePanelTabs(sessionId: string) {
       tabs: state.tabs,
       activeTabId: state.activeTabId,
       activeTab: state.tabs.find((tab) => tab.id === state.activeTabId) ?? null,
-      open: (tab: PanelTab) => update((current) => openPanelTab(current, tab)),
-      select: (id: string) =>
-        update((current) => ({ ...current, activeTabId: id })),
-      close: (id: string) => update((current) => closePanelTab(current, id)),
-      syncTerminals: (groupIds: ReadonlyArray<string>) =>
-        update((current) => syncTerminalTabs(current, groupIds)),
+      open,
+      select,
+      openChanges,
+      close,
+      syncTerminals,
     }),
-    [state, update]
+    [close, open, openChanges, select, state, syncTerminals]
   )
 }

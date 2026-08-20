@@ -179,7 +179,12 @@ export function WorkEntryRow({
               <span
                 className={cn(
                   "min-w-0 shrink truncate font-medium",
-                  isError ? "text-destructive" : "text-foreground/82"
+                  isError
+                    ? "text-destructive"
+                    : entry.status === "pending" ||
+                        entry.status === "in_progress"
+                      ? "shimmer-text"
+                      : "text-foreground/82"
                 )}
               >
                 {entry.heading}

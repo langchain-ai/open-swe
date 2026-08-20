@@ -772,7 +772,9 @@ def _is_move_followup(text: str) -> bool:
 
 def _is_approval(text: str) -> bool:
     t = text.lower()
-    return ("approve" in t or "approved" in t) and "implement" in t
+    return "the plan has been approved" in t or (
+        ("approve" in t or "approved" in t) and "implement" in t
+    )
 
 
 def _is_revision(text: str) -> bool:
