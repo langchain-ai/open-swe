@@ -499,13 +499,13 @@ async def test_approve_plan_tool_allows_non_owner_configurable_identity(
         "approve",
         "Approve & implement",
         "Approved!",
-        "Looks good to me.",
-        "go ahead",
+        "go ahead and implement",
+        "LGTM",
+        "please implement",
         "ship it",
-        "yes",
     ],
 )
-def test_natural_language_plan_approval_accepts_affirmative_replies(reply: str) -> None:
+def test_natural_language_plan_approval_accepts_explicit_replies(reply: str) -> None:
     from agent.webhooks.slack import _is_natural_language_plan_approval
 
     assert _is_natural_language_plan_approval(reply) is True
@@ -518,6 +518,10 @@ def test_natural_language_plan_approval_accepts_affirmative_replies(reply: str) 
         "No, revise the plan",
         "approve after these changes",
         "looks mostly good, but change the tests",
+        "yeah for sure webhook based",
+        "yes",
+        "Looks good to me.",
+        "approved by Alice",
         "cancel",
         "what changed?",
     ],

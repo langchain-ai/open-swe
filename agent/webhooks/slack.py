@@ -33,32 +33,23 @@ from . import common
 
 _PLAN_APPROVAL_PHRASES = {
     "approve",
+    "approve implement",
     "approve it",
     "approve plan",
     "approve the plan",
     "approved",
-    "go ahead",
     "go ahead and implement",
     "go ahead and implement it",
     "go ahead with implementation",
     "i approve",
+    "i approve plan",
     "i approve the plan",
+    "implement",
     "implement it",
     "lgtm",
-    "looks good",
-    "looks good go ahead",
-    "looks good please proceed",
-    "looks good to me",
     "please implement",
-    "please proceed",
-    "proceed",
     "ship it",
     "start implementation",
-    "this looks good",
-    "yeah",
-    "yep",
-    "yes",
-    "yes please",
 }
 _PLAN_APPROVAL_NEGATIONS = {
     "cancel",
@@ -86,7 +77,7 @@ def _is_natural_language_plan_approval(text: str) -> bool:
     padded = f" {normalized} "
     if any(f" {phrase} " in padded for phrase in _PLAN_APPROVAL_NEGATIONS):
         return False
-    return any(f" {phrase} " in padded for phrase in _PLAN_APPROVAL_PHRASES)
+    return normalized in _PLAN_APPROVAL_PHRASES
 
 
 STALE_PARTICIPANT_SECONDS = 15 * 60

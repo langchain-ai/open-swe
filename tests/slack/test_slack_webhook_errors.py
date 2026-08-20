@@ -83,7 +83,7 @@ async def test_non_owner_natural_language_plan_approval_uses_shared_flow(
     monkeypatch.setattr(plan_api, "approve_plan_for_thread", approve)
 
     handled = await slack_webhook._maybe_approve_ready_plan_reply(
-        "t1", "C1", "123.45", "U1", "Alice", "Looks good!"
+        "t1", "C1", "123.45", "U1", "Alice", "Approve the plan!"
     )
 
     assert handled is True
@@ -126,24 +126,22 @@ async def test_non_owner_can_send_untagged_ready_plan_reply(
 
 
 @pytest.mark.parametrize("reply", ["LGTM, thanks", "Looks good — please implement this"])
-async def test_plan_approval_allows_polite_surrounding_words(
+async def test_plan_approval_rejects_approval_embedded_in_other_text(
     monkeypatch: pytest.MonkeyPatch, reply: str
 ) -> None:
-    monkeypatch.setattr(
-        plan_api,
-        "_thread_metadata",
-        AsyncMock(return_value={"plan_mode": True, "plan_status": "ready"}),
-    )
-    approve = AsyncMock(return_value={"status": "approved", "run_id": "run-1"})
+    load_metadata = AsyncMock()
+    approve = AsyncMock()
+    monkeypatch.setattr(plan_api, "_thread_metadata", load_metadata)
     monkeypatch.setattr(plan_api, "approve_plan_for_thread", approve)
 
     assert (
         await slack_webhook._maybe_approve_ready_plan_reply(
             "t1", "C1", "123.45", "U1", "Alice", reply
         )
-        is True
+        is False
     )
-    approve.assert_awaited_once()
+    load_metadata.assert_not_awaited()
+    approve.assert_not_awaited()
 
 
 async def test_duplicate_plan_approval_returns_shared_result(
