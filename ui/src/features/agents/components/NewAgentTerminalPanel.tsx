@@ -43,7 +43,6 @@ export function NewAgentTerminalPanel({
       cwd={cwd}
       terminalAvailable
       diffAvailable={false}
-      pullRequests={[]}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
       renderDiff={() => null}

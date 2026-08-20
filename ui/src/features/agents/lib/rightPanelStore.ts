@@ -26,7 +26,6 @@ export const RIGHT_PANEL_KINDS = [
   "file",
   "preview",
   "terminal",
-  "pull-request",
   "agents",
 ] as const
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number]
@@ -51,16 +50,6 @@ export type RightPanelSurface =
       revealLine: number | null
       revealRequestId: number
     }
-  | {
-      /**
-       * A pull request opened beside a thread. The reference lives in the id so
-       * several pull requests can remain open as peer tabs.
-       */
-      id: `pull-request:${string}`
-      kind: "pull-request"
-      repository: string
-      number: number
-    }
   | { id: "agents"; kind: "agents" }
 
 const RIGHT_PANEL_STORAGE_KEY = "open-swe:right-panel-state"
@@ -72,23 +61,16 @@ export interface ThreadRightPanelState {
   surfaces: Array<RightPanelSurface>
 }
 
-type SingletonKind = Exclude<
-  RightPanelKind,
-  "file" | "preview" | "terminal" | "pull-request"
->
+type SingletonKind = Exclude<RightPanelKind, "file" | "preview" | "terminal">
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>
   open: (
     ref: PanelThreadRef,
-    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request">
+    kind: Exclude<RightPanelKind, "file" | "terminal">
   ) => void
   openBrowser: (ref: PanelThreadRef, tabId: string | null) => void
   openFile: (ref: PanelThreadRef, relativePath: string, line?: number) => void
-  openPullRequest: (
-    ref: PanelThreadRef,
-    target: { repository: string; number: number }
-  ) => void
   openTerminal: (ref: PanelThreadRef, terminalId: string) => void
   activateSurface: (ref: PanelThreadRef, surfaceId: string) => void
   closeSurface: (ref: PanelThreadRef, surfaceId: string) => void
@@ -104,7 +86,7 @@ interface RightPanelStoreState {
   toggleVisibility: (ref: PanelThreadRef) => void
   toggle: (
     ref: PanelThreadRef,
-    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request">
+    kind: Exclude<RightPanelKind, "file" | "terminal">
   ) => void
   removeThread: (ref: PanelThreadRef) => void
 }
@@ -150,30 +132,6 @@ const terminalSurface = (terminalId: string): RightPanelSurface => ({
   terminalIds: [terminalId],
   activeTerminalId: terminalId,
 })
-
-export type PullRequestSurface = Extract<
-  RightPanelSurface,
-  { kind: "pull-request" }
->
-
-export function pullRequestSurfaceId(target: {
-  repository: string
-  number: number
-}): PullRequestSurface["id"] {
-  return `pull-request:${encodeURIComponent(target.repository)}:${target.number}`
-}
-
-export function pullRequestSurface(target: {
-  repository: string
-  number: number
-}): PullRequestSurface {
-  return {
-    id: pullRequestSurfaceId(target),
-    kind: "pull-request",
-    repository: target.repository,
-    number: target.number,
-  }
-}
 
 const upsertSurface = (
   current: ThreadRightPanelState,
@@ -262,22 +220,6 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                   : 0
               return [
                 fileSurface(surface.relativePath, revealLine, revealRequestId),
-              ]
-            }
-            if (kind === "pull-request") {
-              if (
-                typeof surface.repository !== "string" ||
-                typeof surface.number !== "number" ||
-                !Number.isSafeInteger(surface.number) ||
-                surface.number < 1
-              ) {
-                return []
-              }
-              return [
-                pullRequestSurface({
-                  repository: surface.repository,
-                  number: surface.number,
-                }),
               ]
             }
             if (kind === "preview") {
@@ -396,14 +338,6 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                 surface
               )
             }
-          ),
-        })),
-      openPullRequest: (ref, target) =>
-        set((state) => ({
-          byThreadKey: updateThread(
-            state.byThreadKey,
-            scopedThreadKey(ref),
-            (current) => upsertSurface(current, pullRequestSurface(target))
           ),
         })),
       openFile: (ref, relativePath, line) =>

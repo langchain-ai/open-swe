@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import {
   migratePersistedRightPanelState,
-  pullRequestSurfaceId,
   selectActiveRightPanelSurface,
   selectThreadRightPanelState,
   useRightPanelStore,
@@ -53,16 +52,6 @@ describe("right panel store", () => {
     expect(
       state().surfaces.some((surface) => surface.id === state().activeSurfaceId)
     ).toBe(true)
-  })
-
-  it("keeps several pull requests open as peers", () => {
-    const { openPullRequest } = useRightPanelStore.getState()
-    openPullRequest(ref, { repository: "acme/app", number: 1 })
-    openPullRequest(ref, { repository: "acme/app", number: 2 })
-    expect(state().surfaces.map((surface) => surface.id)).toEqual([
-      pullRequestSurfaceId({ repository: "acme/app", number: 1 }),
-      pullRequestSurfaceId({ repository: "acme/app", number: 2 }),
-    ])
   })
 
   it("closes others and to the right relative to a surface", () => {
@@ -128,10 +117,12 @@ describe("migratePersistedRightPanelState", () => {
             { id: "diff", kind: "diff" },
             { id: "evil", kind: "script" },
             { id: "file:", kind: "file" },
+            // The retired pull-request surface, well formed as it was persisted.
             {
               id: "pull-request:acme%2Fapp:1",
               kind: "pull-request",
               repository: "acme/app",
+              number: 1,
             },
           ],
         },

@@ -2490,7 +2490,7 @@ async def test_turn_diff_rejects_checkpoints_from_different_repositories(monkeyp
     create_sandbox.assert_not_awaited()
 
 
-async def test_pr_diff_uses_repository_from_pr_url(monkeypatch) -> None:
+async def test_branch_diff_uses_repository_from_pr_url(monkeypatch) -> None:
     metadata = {
         "repo_owner": "langchain-ai",
         "repo_name": "deepagents",
@@ -2504,10 +2504,55 @@ async def test_pr_diff_uses_repository_from_pr_url(monkeypatch) -> None:
     )
     monkeypatch.setattr(thread_api, "build_pr_diff_files", build_diff)
 
-    await thread_api.get_dashboard_thread_pr_diff("thread-1", "owner")
+    await thread_api.get_dashboard_thread_branch_diff("thread-1", "owner")
 
     assert build_diff.await_args is not None
     assert build_diff.await_args.args[1:] == ("langchain-ai/open-swe", 1925)
+
+
+async def test_branch_diff_without_a_pull_request_compares_against_the_base(monkeypatch) -> None:
+    metadata = {
+        "repo_owner": "langchain-ai",
+        "repo_name": "open-swe",
+        "base_branch": "main",
+        "branch_name": "open-swe/feature",
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    monkeypatch.setattr(thread_api, "_github_token_for_login", AsyncMock(return_value="token"))
+    build_compare = AsyncMock(
+        return_value={"base_sha": "merge-base", "head_sha": "head", "truncated": False, "files": []}
+    )
+    monkeypatch.setattr(thread_api, "build_compare_diff_files", build_compare)
+
+    result = await thread_api.get_dashboard_thread_branch_diff("thread-1", "owner")
+
+    assert build_compare.await_args is not None
+    assert build_compare.await_args.args[1:] == (
+        "langchain-ai/open-swe",
+        "main",
+        "open-swe/feature",
+    )
+    assert result["prNumber"] is None
+    assert result["baseSha"] == "merge-base"
+
+
+async def test_branch_diff_rejects_an_unsafe_branch_name(monkeypatch) -> None:
+    metadata = {
+        "repo_owner": "langchain-ai",
+        "repo_name": "open-swe",
+        "base_branch": "main",
+        "branch_name": "../../etc/passwd",
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    monkeypatch.setattr(thread_api, "_github_token_for_login", AsyncMock(return_value="token"))
+    build_compare = AsyncMock()
+    monkeypatch.setattr(thread_api, "build_compare_diff_files", build_compare)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await thread_api.get_dashboard_thread_branch_diff("thread-1", "owner")
+
+    assert excinfo.value.status_code == 404
+    build_compare.assert_not_awaited()
 
 
 async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypatch) -> None:

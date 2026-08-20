@@ -4,7 +4,7 @@ import { DownloadIcon } from "lucide-react"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { agentsApi } from "@/features/agents/lib/api"
 import {
-  useAgentThreadPrDiff,
+  useAgentThreadBranchDiff,
   useAgentThreadTurnDiff,
 } from "@/features/agents/lib/queries"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
@@ -55,36 +55,43 @@ export function AgentGitPanel({
   const terminalAvailable =
     thread.isOwner !== false && Boolean(thread.sandboxId)
 
-  const hasPullRequest = Boolean(thread.pr)
+  // Served from GitHub, so it needs a repository — with or without a PR.
+  const branchScopeAvailable =
+    Boolean(thread.repoFullName) && Boolean(thread.branch)
   const selectScope = useDiffPanelStore((state) => state.selectScope)
   const scope = useDiffPanelStore((state) =>
-    selectThreadDiffScope(state.byThreadKey, threadRef, hasPullRequest)
+    selectThreadDiffScope(
+      state.byThreadKey,
+      threadRef,
+      branchScopeAvailable,
+      Boolean(thread.pr)
+    )
   )
   const diffVisible = !collapsed && activeSurfaceId === "diff"
 
   const turnDiff = useAgentThreadTurnDiff(
     thread.id,
     null,
-    diffVisible && scope === "thread",
+    diffVisible && scope === "working-tree",
     {},
     thread.status === "running"
   )
-  const prDiff = useAgentThreadPrDiff(
+  const branchDiff = useAgentThreadBranchDiff(
     thread.id,
-    diffVisible && scope === "pull-request"
+    diffVisible && scope === "branch"
   )
   const diff =
-    scope === "pull-request"
+    scope === "branch"
       ? {
-          files: prDiff.data?.files ?? [],
-          // The PR endpoint answers from GitHub: a successful response is
+          files: branchDiff.data?.files ?? [],
+          // The branch endpoint answers from GitHub: a successful response is
           // always a real diff, and a failure surfaces through `error`.
-          status: prDiff.data ? ("ready" as const) : undefined,
-          truncated: prDiff.data?.truncated,
-          isPending: prDiff.isPending,
-          isFetching: prDiff.isFetching,
-          error: prDiff.error,
-          refetch: prDiff.refetch,
+          status: branchDiff.data ? ("ready" as const) : undefined,
+          truncated: branchDiff.data?.truncated,
+          isPending: branchDiff.isPending,
+          isFetching: branchDiff.isFetching,
+          error: branchDiff.error,
+          refetch: branchDiff.refetch,
         }
       : {
           files: turnDiff.data?.files ?? [],
@@ -143,7 +150,6 @@ export function AgentGitPanel({
       cwd=""
       terminalAvailable={terminalAvailable}
       diffAvailable
-      pullRequests={thread.pullRequests ?? []}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
       renderDiff={({ fullScreen }) => (
@@ -159,10 +165,9 @@ export function AgentGitPanel({
           revealFilePath={revealFilePath}
           fullScreen={fullScreen}
           onRefresh={() => void diff.refetch()}
-          scope={hasPullRequest ? scope : undefined}
-          onScopeChange={
-            hasPullRequest ? (next) => selectScope(threadRef, next) : undefined
-          }
+          scope={scope}
+          branchScopeAvailable={branchScopeAvailable}
+          onScopeChange={(next) => selectScope(threadRef, next)}
           extraActions={
             canDownloadRecovery ? (
               <button

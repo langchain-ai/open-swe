@@ -2,8 +2,9 @@
  * Thread-scoped diff selection.
  *
  * The panel never stores diff data — only which source the Changes surface is
- * pointed at. Diffs are fetched live per scope, so a thread whose sandbox is
- * gone can still show its pull request's diff instead of an empty result.
+ * pointed at: the workspace's working tree, or everything the branch changes
+ * against its base. Diffs are fetched live per scope, so a thread whose sandbox
+ * is gone can still show its branch changes instead of an empty result.
  */
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
@@ -13,16 +14,16 @@ import {
   type PanelThreadRef,
 } from "@/features/agents/lib/rightPanelStore"
 
-export const DIFF_SCOPE_KINDS = ["thread", "pull-request"] as const
+export const DIFF_SCOPE_KINDS = ["working-tree", "branch"] as const
 export type DiffScopeKind = (typeof DIFF_SCOPE_KINDS)[number]
 
 export type DiffPanelSelection = { kind: DiffScopeKind }
 
-const THREAD_SELECTION: DiffPanelSelection = { kind: "thread" }
-const PULL_REQUEST_SELECTION: DiffPanelSelection = { kind: "pull-request" }
+const WORKING_TREE_SELECTION: DiffPanelSelection = { kind: "working-tree" }
+const BRANCH_SELECTION: DiffPanelSelection = { kind: "branch" }
 
 const DIFF_PANEL_STORAGE_KEY = "open-swe:diff-panel-state"
-const DIFF_PANEL_STORAGE_VERSION = 1
+const DIFF_PANEL_STORAGE_VERSION = 2
 
 interface DiffPanelStoreState {
   byThreadKey: Record<string, DiffPanelSelection>
@@ -49,9 +50,11 @@ export function migratePersistedDiffPanelState(persistedState: unknown): {
   )) {
     if (!threadKey || !value || typeof value !== "object") continue
     const kind = (value as { kind?: unknown }).kind
-    if (kind === "thread") byThreadKey[threadKey] = THREAD_SELECTION
-    else if (kind === "pull-request")
-      byThreadKey[threadKey] = PULL_REQUEST_SELECTION
+    // "thread"/"pull-request" are the v1 names for the same two sources.
+    if (kind === "working-tree" || kind === "thread")
+      byThreadKey[threadKey] = WORKING_TREE_SELECTION
+    else if (kind === "branch" || kind === "pull-request")
+      byThreadKey[threadKey] = BRANCH_SELECTION
   }
   return { byThreadKey }
 }
@@ -82,9 +85,7 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
             byThreadKey: {
               ...state.byThreadKey,
               [threadKey]:
-                kind === "pull-request"
-                  ? PULL_REQUEST_SELECTION
-                  : THREAD_SELECTION,
+                kind === "branch" ? BRANCH_SELECTION : WORKING_TREE_SELECTION,
             },
           }
         }),
@@ -110,17 +111,20 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
 
 /**
  * The scope the Changes surface should read. Absent an explicit choice a
- * thread with a pull request defaults to it: the PR diff is served from
- * GitHub, so it survives the sandbox the thread's own diff depends on.
+ * thread that already has a pull request defaults to its branch changes: that
+ * diff is served from GitHub, so it survives the sandbox the working tree
+ * depends on. A branch that was never pushed is selectable but not the
+ * default, since GitHub has nothing to compare yet.
  */
 export function selectThreadDiffScope(
   byThreadKey: Record<string, DiffPanelSelection>,
   ref: PanelThreadRef | null | undefined,
-  hasPullRequest = false
+  branchAvailable = false,
+  branchIsDefault = branchAvailable
 ): DiffScopeKind {
   const stored = ref ? byThreadKey[scopedThreadKey(ref)] : undefined
-  if (stored?.kind === "pull-request")
-    return hasPullRequest ? stored.kind : "thread"
-  if (stored?.kind === "thread") return stored.kind
-  return hasPullRequest ? "pull-request" : "thread"
+  if (stored?.kind === "branch")
+    return branchAvailable ? stored.kind : "working-tree"
+  if (stored?.kind === "working-tree") return stored.kind
+  return branchAvailable && branchIsDefault ? "branch" : "working-tree"
 }

@@ -37,7 +37,8 @@ export const agentThreadKeys = {
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
-  prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
+  branchDiff: (threadId: string) =>
+    ["agent-threads", threadId, "branch-diff"] as const,
   turnDiff: (
     threadId: string,
     turnKey: string | null,
@@ -390,10 +391,10 @@ export function useAgentThread(threadId: string) {
   })
 }
 
-export function useAgentThreadPrDiff(threadId: string, enabled: boolean) {
+export function useAgentThreadBranchDiff(threadId: string, enabled: boolean) {
   return useQuery({
-    queryKey: agentThreadKeys.prDiff(threadId),
-    queryFn: () => agentsApi.getThreadPrDiff(threadId),
+    queryKey: agentThreadKeys.branchDiff(threadId),
+    queryFn: () => agentsApi.getThreadBranchDiff(threadId),
     enabled,
     staleTime: 30_000,
     retry: false,

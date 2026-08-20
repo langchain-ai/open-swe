@@ -13,7 +13,6 @@ import {
   FileDiff,
   FileIcon,
   Files,
-  GitPullRequest,
   Globe2,
   Plus,
   TerminalSquare,
@@ -21,7 +20,6 @@ import {
 } from "lucide-react"
 
 import type { RightPanelSurface } from "@/features/agents/lib/rightPanelStore"
-import type { AgentPullRequest } from "@/features/agents/lib/types"
 import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
 import {
@@ -59,24 +57,14 @@ interface RightPanelTabsProps {
   onCopyFilePath: (relativePath: string) => void
   onAddTerminal: () => void
   onAddDiff: () => void
-  onAddPullRequest: () => void
   terminalAvailable: boolean
   diffAvailable: boolean
-  pullRequestAvailable: boolean
-  pullRequestStatuses?: Readonly<Record<string, PullRequestTabStatus>>
   children: ReactNode
-}
-
-export interface PullRequestTabStatus {
-  repository: string
-  number: number
-  state: AgentPullRequest["state"]
 }
 
 const SURFACE_DISABLED_REASONS = {
   terminal: "Terminals are only available from a running workspace.",
   diff: "Changes are only available for threads with a repository.",
-  pullRequest: "This thread's branch has no pull request yet.",
 } as const
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -93,7 +81,6 @@ const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
 const SURFACE_UNAVAILABLE_HINTS = {
   terminal: "Available once the workspace is running.",
   diff: "Available for Git repositories.",
-  pullRequest: "No pull request on this branch yet.",
 } as const
 
 type SurfaceShortcutEvent = Pick<
@@ -161,10 +148,8 @@ function SurfaceMenuItem(props: {
 function RightPanelEmptyState(props: {
   onAddTerminal: () => void
   onAddDiff: () => void
-  onAddPullRequest: () => void
   terminalAvailable: boolean
   diffAvailable: boolean
-  pullRequestAvailable: boolean
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1)
@@ -187,15 +172,6 @@ function RightPanelEmptyState(props: {
       available: props.diffAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.diff,
       onClick: props.onAddDiff,
-    },
-    {
-      label: "Pull request",
-      description: "Open this branch's pull request.",
-      icon: GitPullRequest,
-      shortcut: "P",
-      available: props.pullRequestAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.pullRequest,
-      onClick: props.onAddPullRequest,
     },
   ] as const
 
@@ -389,8 +365,6 @@ export function surfaceTitle(
       )
     case "terminal":
       return terminalLabelsById.get(surface.resourceId) ?? "Terminal"
-    case "pull-request":
-      return `#${surface.number}`
     case "agents":
       return "Agents"
     case "preview":
@@ -398,14 +372,7 @@ export function surfaceTitle(
   }
 }
 
-function SurfaceIcon({
-  surface,
-  pullRequestStatuses,
-}: {
-  surface: RightPanelSurface
-  pullRequestStatuses:
-    Readonly<Record<string, PullRequestTabStatus>> | undefined
-}) {
+function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
   switch (surface.kind) {
     case "preview":
       return <Globe2 className="size-3 shrink-0" />
@@ -419,20 +386,6 @@ function SurfaceIcon({
       return <TerminalSquare className="size-3 shrink-0" />
     case "agents":
       return <Bot className="size-3 shrink-0" />
-    case "pull-request": {
-      const status = pullRequestStatuses?.[surface.id] ?? null
-      const toneClassName =
-        status?.state === "merged"
-          ? "text-violet-600 dark:text-violet-300/90"
-          : status?.state === "closed"
-            ? "text-red-600 dark:text-red-300/90"
-            : status?.state === "draft"
-              ? "text-zinc-500 dark:text-zinc-400/80"
-              : status?.state === "open"
-                ? "text-emerald-600 dark:text-emerald-300/90"
-                : "text-muted-foreground"
-      return <GitPullRequest className={cn("size-3 shrink-0", toneClassName)} />
-    }
   }
 }
 
@@ -463,14 +416,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.diffAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.diff,
       onClick: props.onAddDiff,
-    },
-    {
-      label: "Pull request",
-      icon: GitPullRequest,
-      shortcut: "P",
-      available: props.pullRequestAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.pullRequest,
-      onClick: props.onAddPullRequest,
     },
   ] as const
 
@@ -574,10 +519,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     onClick={() => props.onCloseSurface(surface)}
                   >
                     <span className="relative flex size-3 items-center justify-center group-hover/tab:hidden group-focus-visible/close:hidden">
-                      <SurfaceIcon
-                        surface={surface}
-                        pullRequestStatuses={props.pullRequestStatuses}
-                      />
+                      <SurfaceIcon surface={surface} />
                       {pending ? (
                         <span
                           className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
@@ -710,10 +652,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           <RightPanelEmptyState
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
-            onAddPullRequest={props.onAddPullRequest}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
-            pullRequestAvailable={props.pullRequestAvailable}
           />
         ) : (
           props.children

@@ -227,7 +227,7 @@ from .thread_api import (
     delete_dashboard_thread,
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
-    get_dashboard_thread_pr_diff,
+    get_dashboard_thread_branch_diff,
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
     get_dashboard_thread_turn_diff,
@@ -2184,12 +2184,25 @@ async def api_get_thread_turn_diff(
     )
 
 
+@router.get("/threads/{thread_id}/branch-diff")
+async def api_get_thread_branch_diff(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_branch_diff(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
+    )
+
+
+# The pre-branch-diff name, kept for desktop bundles already in the wild.
 @router.get("/threads/{thread_id}/pr-diff")
 async def api_get_thread_pr_diff(
     thread_id: str,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await get_dashboard_thread_pr_diff(
+    return await get_dashboard_thread_branch_diff(
         thread_id,
         session["sub"],
         email=session.get("email"),

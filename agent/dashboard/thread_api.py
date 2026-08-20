@@ -56,7 +56,7 @@ from .options import (
     model_supports_effort,
     model_supports_images,
 )
-from .pr_diff import build_pr_diff_files
+from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
 from .team_settings import get_team_default_model, get_team_fable_enabled
 from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
@@ -2395,17 +2395,46 @@ async def get_dashboard_thread_turn_diff(
     )
 
 
-async def get_dashboard_thread_pr_diff(
+_UNSAFE_REF_CHARACTERS = set(" ~^:?*[\\\x7f") | {chr(code) for code in range(32)}
+
+
+def _safe_git_ref(value: Any) -> str | None:
+    """A branch name safe to place in a GitHub API path, or ``None``."""
+    if not isinstance(value, str) or not value or len(value) > 200:
+        return None
+    if value.startswith("-") or value.startswith("/") or value.endswith("/"):
+        return None
+    if ".." in value or "@{" in value or value.endswith(".lock"):
+        return None
+    if any(character in _UNSAFE_REF_CHARACTERS for character in value):
+        return None
+    return value
+
+
+async def get_dashboard_thread_branch_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
+    """Everything the thread's branch changes against its base.
+
+    Served from GitHub rather than the sandbox, so it outlives the workspace.
+    A thread with a pull request reads that PR; one without compares its branch
+    to the base it was cut from, which is the same three-dot range the PR would
+    eventually show.
+    """
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     pr_number = metadata.get("pr_number")
     pr_ref = parse_github_pr_url(str(metadata.get("pr_url") or ""))
     _, _, full_name = _metadata_repo(metadata)
     if pr_ref and pr_ref.number == pr_number:
         full_name = f"{pr_ref.owner}/{pr_ref.repo}"
-    if not isinstance(pr_number, int) or not full_name:
-        raise HTTPException(404, "thread has no pull request")
+    if not full_name:
+        raise HTTPException(404, "thread has no repository")
+    pull_request: int | None = pr_number if isinstance(pr_number, int) else None
+
+    base_ref = _safe_git_ref(metadata.get("base_branch")) or "main"
+    head_ref = _safe_git_ref(metadata.get("branch_name"))
+    if pull_request is None and head_ref == base_ref:
+        raise HTTPException(404, "thread never branched off its base")
 
     token = await _github_token_for_login(login)
     headers = {
@@ -2414,10 +2443,17 @@ async def get_dashboard_thread_pr_diff(
         "X-GitHub-Api-Version": "2022-11-28",
     }
     async with httpx.AsyncClient(headers=headers, timeout=_PROXY_REQUEST_TIMEOUT) as client:
-        diff = await build_pr_diff_files(client, full_name, pr_number)
+        if pull_request is not None:
+            diff = await build_pr_diff_files(client, full_name, pull_request)
+        elif head_ref is not None:
+            diff = await build_compare_diff_files(client, full_name, base_ref, head_ref)
+        else:
+            raise HTTPException(404, "thread has no branch")
 
     return {
-        "prNumber": pr_number,
+        "prNumber": pull_request,
+        "baseRef": base_ref,
+        "headRef": head_ref,
         "baseSha": diff["base_sha"],
         "headSha": diff["head_sha"],
         "truncated": diff["truncated"],

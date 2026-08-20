@@ -140,19 +140,20 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   // Also the source of the branch/PR metadata, so it stays enabled in either
   // scope: it is what tells us the branch has a pull request at all.
   const checkpointDiff = useLocalThreadDiff(sessionId, diffVisible, isRunning)
-  const hasPullRequest = Boolean(checkpointDiff.data?.repository?.pr)
+  // The pull request is what tells us the base to diff the branch against.
+  const branchScopeAvailable = Boolean(checkpointDiff.data?.repository?.pr)
   const scope = useDiffPanelStore((state) =>
-    selectThreadDiffScope(state.byThreadKey, threadRef, hasPullRequest)
+    selectThreadDiffScope(state.byThreadKey, threadRef, branchScopeAvailable)
   )
-  const prDiff = useLocalThreadPrDiff(
+  const branchDiff = useLocalThreadPrDiff(
     sessionId,
-    diffVisible && scope === "pull-request",
+    diffVisible && scope === "branch",
     isRunning
   )
-  const repository = prDiff.data?.repository ?? checkpointDiff.data?.repository
+  const repository =
+    branchDiff.data?.repository ?? checkpointDiff.data?.repository
   const pr = repository?.pr ?? null
-  const diff = scope === "pull-request" ? prDiff : checkpointDiff
-  const pullRequests = useMemo(() => (pr ? [pr] : []), [pr])
+  const diff = scope === "branch" ? branchDiff : checkpointDiff
   const files = useMemo(
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
@@ -427,7 +428,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         cwd={thread.cwd}
         terminalAvailable
         diffAvailable
-        pullRequests={pullRequests}
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
         onTerminalOpenFile={handleOpenFile}
@@ -447,12 +447,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             revealFilePath={revealFilePath}
             fullScreen={fullScreen}
             onRefresh={() => void diff.refetch()}
-            scope={hasPullRequest ? scope : undefined}
-            onScopeChange={
-              hasPullRequest
-                ? (next) => selectScope(threadRef, next)
-                : undefined
-            }
+            scope={scope}
+            branchScopeAvailable={branchScopeAvailable}
+            onScopeChange={(next) => selectScope(threadRef, next)}
           />
         )}
       />
