@@ -76,6 +76,10 @@ async def test_langsmith_cost_waits_for_thread_stats_freshness(
 
     assert await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1") is None
 
+    result = await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1", allow_stale=True)
+    assert result is not None
+    assert result.total_cost == 2.0
+
 
 async def test_refresh_updates_exact_mapped_slack_message_in_place(
     monkeypatch: pytest.MonkeyPatch,
@@ -136,6 +140,86 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
     assert args.kwargs["blocks"][1] == blocks[1]
 
 
+async def test_final_refresh_uses_stale_aggregate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Store:
+        async def get_item(self, namespace: Any, key: str) -> dict[str, Any] | None:
+            if key == "run:run-1":
+                return {"value": {"thread_ts": "1.0", "message_ts": "1.1"}}
+            return None
+
+    client: Any = SimpleNamespace(store=_Store())
+    monkeypatch.setattr(
+        session_cost,
+        "get_langsmith_thread_cost",
+        AsyncMock(side_effect=[None, SimpleNamespace(total_cost=0.42)]),
+    )
+    monkeypatch.setattr(
+        session_cost,
+        "fetch_slack_thread_message_by_ts",
+        AsyncMock(
+            return_value={
+                "text": "Done <https://app/agents/t1|Open in Web>",
+                "blocks": None,
+            }
+        ),
+    )
+    update = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(session_cost, "update_slack_message", update)
+
+    status, reason = await session_cost._refresh_once(
+        _state(len(session_cost._RETRY_DELAYS_SECONDS) - 1), client
+    )
+
+    assert (status, reason) == ("updated", "Slack footer updated with stale aggregate")
+    calls = session_cost.get_langsmith_thread_cost.await_args_list
+    assert calls[0].kwargs == {}
+    assert calls[1].kwargs == {"allow_stale": True}
+    assert "$0.42" in update.await_args.args[2]
+
+
+async def test_non_final_refresh_does_not_use_stale_aggregate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Store:
+        async def get_item(self, namespace: Any, key: str) -> dict[str, Any] | None:
+            return {"value": {"thread_ts": "1.0", "message_ts": "1.1"}}
+
+    client: Any = SimpleNamespace(store=_Store())
+    lookup = AsyncMock(return_value=None)
+    monkeypatch.setattr(session_cost, "get_langsmith_thread_cost", lookup)
+
+    status, reason = await session_cost._refresh_once(_state(0), client)
+
+    assert (status, reason) == ("pending", "LangSmith trace or fresh aggregate unavailable")
+    lookup.assert_awaited_once_with("thread-1", "prepare-1")
+
+
+async def test_allow_stale_preserves_missing_trace_and_invalid_cost_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        ls_utils, "_build_prod_langsmith_client", lambda: _LangSmithClient([], None)
+    )
+    monkeypatch.setattr(
+        ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
+    )
+    assert (
+        await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1", allow_stale=True) is None
+    )
+
+    client = _LangSmithClient(
+        [SimpleNamespace(end_time=root_end)],
+        SimpleNamespace(total_cost="not-a-number", last_end_time=root_end),
+    )
+    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: client)
+    assert (
+        await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1", allow_stale=True) is None
+    )
+
+
 class _Runs:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
@@ -192,7 +276,9 @@ async def test_refresh_stops_after_final_attempt(monkeypatch: pytest.MonkeyPatch
         AsyncMock(return_value=("pending", "LangSmith not ready")),
     )
 
-    result = await session_cost.run_session_cost_refresh(_state(4), client=client)
+    result = await session_cost.run_session_cost_refresh(
+        _state(len(session_cost._RETRY_DELAYS_SECONDS) - 1), client=client
+    )
 
     assert result == {"status": "exhausted", "reason": "LangSmith not ready"}
     assert client.runs.created == []

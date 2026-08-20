@@ -18,7 +18,7 @@ from .utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
-_RETRY_DELAYS_SECONDS = (15, 30, 60, 120, 240)
+_RETRY_DELAYS_SECONDS = (15, 30, 60, 120, 240, 480, 960)
 
 
 class SessionCostRefresh(TypedDict):
@@ -113,12 +113,22 @@ async def _refresh_once(
     if not isinstance(message_ts, str) or not message_ts:
         return "unavailable", "run has no Slack response"
 
+    allow_stale = state.get("attempt") == len(_RETRY_DELAYS_SECONDS) - 1
+    used_stale_aggregate = False
     try:
         snapshot = await get_langsmith_thread_cost(
             payload["agent_thread_id"], payload["prepare_run_id"]
         )
     except LangSmithCostUnavailable as exc:
         return "unavailable", str(exc)
+    if snapshot is None and allow_stale:
+        try:
+            snapshot = await get_langsmith_thread_cost(
+                payload["agent_thread_id"], payload["prepare_run_id"], allow_stale=True
+            )
+        except LangSmithCostUnavailable as exc:
+            return "unavailable", str(exc)
+        used_stale_aggregate = snapshot is not None
     if snapshot is None:
         return "pending", "LangSmith trace or fresh aggregate unavailable"
 
@@ -144,7 +154,11 @@ async def _refresh_once(
     )
     if not updated:
         return "pending", error or "Slack update failed"
-    return "updated", "Slack footer updated"
+    return "updated", (
+        "Slack footer updated with stale aggregate"
+        if used_stale_aggregate
+        else "Slack footer updated"
+    )
 
 
 async def run_session_cost_refresh(
@@ -172,7 +186,16 @@ async def run_session_cost_refresh(
         return {"status": status, "reason": reason}
     next_attempt = attempt + 1
     if next_attempt >= len(_RETRY_DELAYS_SECONDS):
-        logger.info("Session-cost refresh exhausted for run %s: %s", state.get("run_id"), reason)
+        logger.warning(
+            "Session-cost refresh exhausted for run %s (agent_thread_id=%s, "
+            "prepare_run_id=%s, channel_id=%s, thread_ts=%s): %s",
+            state.get("run_id"),
+            state.get("agent_thread_id"),
+            state.get("prepare_run_id"),
+            state.get("channel_id"),
+            state.get("thread_ts"),
+            reason,
+        )
         return {"status": "exhausted", "reason": reason}
     scheduled = await schedule_session_cost_refresh(state, attempt=next_attempt, client=client)
     return {

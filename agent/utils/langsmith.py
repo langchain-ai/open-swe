@@ -142,6 +142,8 @@ async def get_langsmith_thread_cost(
     thread_id: str,
     prepare_run_id: str,
     project_name: str = AGENT_TRACING_PROJECT,
+    *,
+    allow_stale: bool = False,
 ) -> LangSmithThreadCost | None:
     """Return a cumulative thread cost correlated to a completed agent run."""
     client = _build_prod_langsmith_client()
@@ -194,7 +196,7 @@ async def get_langsmith_thread_cost(
         not math.isfinite(total_cost)
         or total_cost < 0
         or last_end_time is None
-        or last_end_time < target_end_time
+        or (not allow_stale and last_end_time < target_end_time)
     ):
         return None
     return LangSmithThreadCost(
