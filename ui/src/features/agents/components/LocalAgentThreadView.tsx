@@ -282,7 +282,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       .then(async (pending) => {
         if (!pending) return
         if (await submit(pending.prompt, pending.images, pending.skills)) {
-          await window.openSweDesktop?.clearLocalPrompt(sessionId)
+          const updated =
+            await window.openSweDesktop?.clearLocalPrompt(sessionId)
+          if (updated)
+            queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
         } else {
           initialPromptRef.current = null
         }
@@ -294,6 +297,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       })
   }, [
     modelsLoading,
+    queryClient,
     sessionId,
     stream.hydrationPromise,
     submit,
