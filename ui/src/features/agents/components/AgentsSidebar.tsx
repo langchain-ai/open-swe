@@ -6,7 +6,6 @@ import {
   CalendarBlankIcon,
   CaretDownIcon,
   CaretRightIcon,
-  ChartLineUpIcon,
   ChatCircleIcon,
   CheckCircleIcon,
   CircleNotchIcon,
@@ -16,7 +15,6 @@ import {
   FolderPlusIcon,
   GitMergeIcon,
   GitPullRequestIcon,
-  KanbanIcon,
   LightningIcon,
   MagnifyingGlassIcon,
   PlusIcon,
@@ -24,6 +22,7 @@ import {
   TrashIcon,
   TreeStructureIcon,
 } from "@phosphor-icons/react"
+import { Kanban } from "lucide-react"
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -131,10 +130,9 @@ interface AgentsSidebarProps {
 }
 
 const NAV = [
-  { to: "/agents/threads", label: "Threads", icon: KanbanIcon },
+  { to: "/agents/threads", label: "Kanban", icon: Kanban },
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
-  { to: "/my-settings", label: "Dashboard", icon: ChartLineUpIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
 ] as const
 
