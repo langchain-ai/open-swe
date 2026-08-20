@@ -702,4 +702,79 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       page.getByText(new RegExp(`@${OTHER_USER.login}`)).first(),
     ).toBeVisible();
   });
+
+  // A slow sidebar used to render as a blank column, indistinguishable from an
+  // account with no threads.
+  test("shows a loading placeholder while the sidebar list is in flight", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/dashboard/api/threads/sidebar*", async (route) => {
+      await held;
+      await route.continue();
+    });
+
+    // The held request would block `load`, so stop waiting at the first byte.
+    await page.goto("/agents", { waitUntil: "commit" });
+
+    const skeleton = page.getByTestId("sidebar-threads-skeleton");
+    await expect(skeleton).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("status")).toContainText("Loading threads");
+
+    release();
+    await expect(skeleton).toBeHidden({ timeout: 30_000 });
+  });
+
+  // A persisted filter makes the "no matches" branch true before any data has
+  // arrived, so the two states could otherwise render together.
+  test("does not claim an empty result while the sidebar is still loading", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        "open-swe.agents.sidebar-prefs",
+        JSON.stringify({ filters: { statuses: ["running"] } }),
+      );
+    });
+
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/dashboard/api/threads/sidebar*", async (route) => {
+      await held;
+      await route.continue();
+    });
+
+    await page.goto("/agents", { waitUntil: "commit" });
+
+    const skeleton = page.getByTestId("sidebar-threads-skeleton");
+    await expect(skeleton).toBeVisible({ timeout: 30_000 });
+
+    // The skeleton is in the server-rendered HTML, so its presence says nothing
+    // about hydration — and the persisted filter is only read on the client.
+    // `useSidebarPrefs` writes the full sanitized object back on mount, so the
+    // stored value gaining a key the seed never had is the hydration signal.
+    await page.waitForFunction(
+      () =>
+        (
+          localStorage.getItem("open-swe.agents.sidebar-prefs") ?? ""
+        ).includes("collapsed"),
+      undefined,
+      { timeout: 30_000 },
+    );
+
+    await expect(skeleton).toBeVisible();
+    await expect(page.getByText("No threads match these filters.")).toHaveCount(
+      0,
+    );
+
+    release();
+  });
 });

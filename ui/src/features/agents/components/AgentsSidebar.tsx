@@ -65,6 +65,7 @@ import {
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { Kbd } from "@/components/ui/kbd"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   useAppCommand,
   useAppCommandControls,
@@ -197,7 +198,11 @@ export function AgentsSidebar({
       ? [...filteredActive, ...filteredResolved]
       : filteredActive
   const sections = groupThreadsByMode(groupedThreads, prefs.group)
+  // Never alongside the loading placeholder: a first load with a persisted
+  // filter has no sections yet, and "no matches" would be a definitive answer
+  // to a request still in flight.
   const isCloudEmpty =
+    !sidebar.isPending &&
     sections.length === 0 &&
     (!showResolved || filteredResolved.length === 0) &&
     hasActiveFilters(prefs.filters)
@@ -320,37 +325,41 @@ export function AgentsSidebar({
         )}
         {showCloudThreads && (
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {prefs.group === "none"
-              ? sections[0]?.threads.map((thread) => (
-                  <ThreadRow
-                    key={thread.id}
-                    thread={thread}
-                    isActive={thread.id === activeThreadId}
-                    onNavigate={layout.closeOnMobile}
-                    compact={prefs.compact}
-                  />
-                ))
-              : sections.map((section) => (
-                  <ThreadGroup
-                    key={`${prefs.group}:${section.key}`}
-                    label={section.label}
-                    threads={section.threads}
-                    activeThreadId={activeThreadId}
-                    onNavigate={layout.closeOnMobile}
-                    defaultCollapsed={section.defaultCollapsed}
-                    compact={prefs.compact}
-                    hasMore={
-                      prefs.group === "focus" && section.key === "done"
-                        ? resolvedHasMore
-                        : false
-                    }
-                    count={
-                      prefs.group === "focus" && section.key === "done"
-                        ? filteredResolved.length
-                        : section.threads.length
-                    }
-                  />
-                ))}
+            {sidebar.isPending && (
+              <ThreadListSkeleton compact={prefs.compact} />
+            )}
+            {!sidebar.isPending &&
+              (prefs.group === "none"
+                ? sections[0]?.threads.map((thread) => (
+                    <ThreadRow
+                      key={thread.id}
+                      thread={thread}
+                      isActive={thread.id === activeThreadId}
+                      onNavigate={layout.closeOnMobile}
+                      compact={prefs.compact}
+                    />
+                  ))
+                : sections.map((section) => (
+                    <ThreadGroup
+                      key={`${prefs.group}:${section.key}`}
+                      label={section.label}
+                      threads={section.threads}
+                      activeThreadId={activeThreadId}
+                      onNavigate={layout.closeOnMobile}
+                      defaultCollapsed={section.defaultCollapsed}
+                      compact={prefs.compact}
+                      hasMore={
+                        prefs.group === "focus" && section.key === "done"
+                          ? resolvedHasMore
+                          : false
+                      }
+                      count={
+                        prefs.group === "focus" && section.key === "done"
+                          ? filteredResolved.length
+                          : section.threads.length
+                      }
+                    />
+                  )))}
             {showResolved && prefs.group !== "focus" && (
               <ResolvedThreadGroup
                 threads={filteredResolved}
@@ -642,6 +651,44 @@ function LocalThreadRow({
         error={deleteError}
       />
     </>
+  )
+}
+
+/**
+ * Mirrors the grouped thread list's shape so the sidebar reads as loading
+ * rather than as an account with no threads. Widths vary per row because a
+ * column of identical bars reads as a UI element, not as pending content.
+ */
+function ThreadListSkeleton({ compact = false }: { compact?: boolean }) {
+  const groups = [
+    [90, 64, 76],
+    [72, 84],
+  ]
+  return (
+    <div data-testid="sidebar-threads-skeleton">
+      <span className="sr-only" role="status">
+        Loading threads
+      </span>
+      {groups.map((widths, groupIndex) => (
+        <div key={groupIndex} className={compact ? "mb-2" : "mb-3"} aria-hidden>
+          <div className="flex items-center gap-1 px-2 py-1">
+            <Skeleton className="h-2 w-16 rounded-sm" />
+          </div>
+          {widths.map((width, rowIndex) => (
+            <div
+              key={rowIndex}
+              className={cn(
+                "mb-0.5 flex items-center gap-2 px-2.5",
+                compact ? "h-7 gap-1.5" : "h-8"
+              )}
+            >
+              <Skeleton className="size-3 shrink-0 rounded-full" />
+              <Skeleton className="h-2.5" style={{ width: `${width}%` }} />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
   )
 }
 
