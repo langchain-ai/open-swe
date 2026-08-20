@@ -31,55 +31,6 @@ from agent.utils.langsmith import get_langsmith_trace_url
 from ..utils.user_messages import warning
 from . import common
 
-_PLAN_APPROVAL_PHRASES = {
-    "approve",
-    "approve implement",
-    "approve it",
-    "approve plan",
-    "approve the plan",
-    "approved",
-    "go ahead and implement",
-    "go ahead and implement it",
-    "go ahead with implementation",
-    "i approve",
-    "i approve plan",
-    "i approve the plan",
-    "implement",
-    "implement it",
-    "lgtm",
-    "please implement",
-    "ship it",
-    "start implementation",
-}
-_PLAN_APPROVAL_NEGATIONS = {
-    "cancel",
-    "change",
-    "changes",
-    "deny",
-    "denied",
-    "do not",
-    "don t",
-    "dont",
-    "hold",
-    "no",
-    "not",
-    "reject",
-    "revise",
-    "stop",
-    "wait",
-}
-
-
-def _is_natural_language_plan_approval(text: str) -> bool:
-    normalized = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
-    if not normalized:
-        return False
-    padded = f" {normalized} "
-    if any(f" {phrase} " in padded for phrase in _PLAN_APPROVAL_NEGATIONS):
-        return False
-    return normalized in _PLAN_APPROVAL_PHRASES
-
-
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60
 
@@ -476,48 +427,22 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         await _notify_slack_processing_error(event_data, repo_config)
 
 
-async def _maybe_approve_ready_plan_reply(
-    thread_id: str,
-    channel_id: str,
-    thread_ts: str,
-    user_id: str,
-    user_name: str,
-    text: str,
-) -> bool:
-    if not _is_natural_language_plan_approval(text):
-        return False
-
-    from agent.dashboard.plan_api import _thread_metadata, approve_plan_for_thread
-    from agent.dashboard.plan_store import make_plan_approver
-
-    try:
-        metadata = await _thread_metadata(thread_id)
-    except Exception:  # noqa: BLE001
-        return False
-    if metadata.get("plan_mode") is not True or metadata.get("plan_status") != "ready":
-        return False
-    result = await approve_plan_for_thread(
-        thread_id,
-        approver=make_plan_approver(
-            actor_id=user_id,
-            name=user_name or user_id or "Slack user",
-            source="slack",
-        ),
-    )
-    return result.get("already_approved") is not True
-
-
 async def process_slack_plan_approval(
     event_data: dict[str, Any], repo_config: dict[str, str]
 ) -> None:
+    from agent.dashboard.plan_api import approve_plan_for_thread
+    from agent.dashboard.plan_store import make_plan_approver
+
     try:
-        await _maybe_approve_ready_plan_reply(
+        user_id = str(event_data.get("user_id") or "")
+        user_name = str(event_data.get("user_name") or "")
+        await approve_plan_for_thread(
             str(event_data.get("thread_id") or ""),
-            str(event_data.get("channel_id") or ""),
-            str(event_data.get("thread_ts") or ""),
-            str(event_data.get("user_id") or ""),
-            str(event_data.get("user_name") or ""),
-            "approve",
+            approver=make_plan_approver(
+                actor_id=user_id,
+                name=user_name or user_id or "Slack user",
+                source="slack",
+            ),
         )
     except Exception:  # noqa: BLE001
         common.logger.exception("Unexpected error while processing Slack plan approval")
@@ -712,10 +637,6 @@ async def _process_slack_mention_impl(
         common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
         or "(no text in mention)"
     )
-    if await _maybe_approve_ready_plan_reply(
-        thread_id, channel_id, thread_ts, user_id, user_name, clean_text
-    ):
-        return
     is_first_mention = not await common._thread_exists(thread_id)
     # `env:<name>` on the message that opens a thread picks the environment its
     # sandbox boots from. Only the opening message can: the sandbox is created
