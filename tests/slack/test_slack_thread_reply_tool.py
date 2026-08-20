@@ -1,4 +1,5 @@
 import importlib
+import json
 from typing import Any
 from uuid import UUID
 
@@ -231,6 +232,14 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
     action_ids = [button["action_id"] for button in actions["elements"]]
     assert action_ids == ["open_swe_option_select_0", "open_swe_option_select_1"]
     assert len(action_ids) == len(set(action_ids))
+
+    plan_blocks = slack_reply_tool._build_option_blocks(
+        "Review", ["Approve & implement", "Request changes"]
+    )
+    assert [json.loads(button["value"]) for button in plan_blocks[1]["elements"]] == [
+        {"type": "plan_approval", "action": "approve"},
+        {"type": "plan_approval", "action": "revise"},
+    ]
 
 
 def test_slack_action_ids_are_unique_and_recognized() -> None:
