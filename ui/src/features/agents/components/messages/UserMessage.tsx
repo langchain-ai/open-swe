@@ -1,12 +1,15 @@
 import { ChevronDown, ChevronRight } from "lucide-react"
+import { IoLogoSlack } from "react-icons/io5"
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
+import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
 
 export function UserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
+  const isSlack = message.structuredSurface === "slack"
   const text = message.chunks
     .filter((c) => c.kind === "text")
     .map((c) => c.text)
@@ -42,6 +45,7 @@ export function UserMessage({ message }: { message: Message }) {
     <div
       className={`group/turn my-4 flex flex-col gap-1 ${isSystem ? "items-start" : "items-end"}`}
       data-message-sender-kind={message.structuredSenderKind}
+      data-message-surface={message.structuredSurface}
     >
       <div className="max-w-[80%]">
         {isSystem ? (
@@ -60,9 +64,14 @@ export function UserMessage({ message }: { message: Message }) {
             <span>{message.structuredSenderName || "Context"}</span>
           </button>
         ) : (
-          message.structuredSenderName && (
-            <div className="mb-1 px-1 text-[11px] font-medium text-muted-foreground">
-              {message.structuredSenderName}
+          (message.structuredSenderName || isSlack) && (
+            <div className="mb-1 flex items-center gap-1 px-1 text-[11px] font-medium text-muted-foreground">
+              {isSlack && (
+                <IoLogoSlack className="size-3" role="img" aria-label="Slack" />
+              )}
+              {message.structuredSenderName && (
+                <span>{message.structuredSenderName}</span>
+              )}
             </div>
           )
         )}
@@ -98,7 +107,11 @@ export function UserMessage({ message }: { message: Message }) {
                   WebkitMaskImage: textEdgeMask,
                 }}
               >
-                <SkillPromptText text={text} />
+                {isSlack ? (
+                  <SlackMrkdwn text={text} />
+                ) : (
+                  <SkillPromptText text={text} />
+                )}
               </div>
             )}
           </div>

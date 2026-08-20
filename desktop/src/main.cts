@@ -596,7 +596,6 @@ function createMenu() {
         {
           id: "new-thread",
           label: "New Thread",
-          accelerator: "CmdOrCtrl+N",
           click: () => sendDesktopCommand("new-thread"),
         },
         {

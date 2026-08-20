@@ -13,6 +13,7 @@ export type ParsedStructuredInput =
       content: string
       sender: string
       senderKind: StructuredSenderKind
+      surface?: string
     }
   | { type: "legacy"; content: string }
 
@@ -175,6 +176,7 @@ export function parseStructuredInput(
         content: decodeXmlText(split.content),
         sender: attributes.sender,
         senderKind: senderKind(attributes, entities),
+        surface: attributes.surface,
       }
     }
   }

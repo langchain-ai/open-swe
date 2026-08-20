@@ -4,7 +4,12 @@ import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
 import { MessageTimestamp } from "../MessageTimestamp"
 import { ReasoningBlock } from "../ReasoningBlock"
-import { buildRenderItems, splitWorkAndReply } from "../renderItems"
+import {
+  buildRenderItems,
+  countWorkActions,
+  selectCollapsedTurnItems,
+  splitWorkAndReply,
+} from "../renderItems"
 import { TurnChangedFilesCard } from "../TurnChangedFilesCard"
 import { MessageCopyButton } from "./MessageCopyButton"
 import { WorkEntryRow } from "./WorkEntryRow"
@@ -45,6 +50,7 @@ function EditWorkEntry({
       entry={describeWorkEntry(chunk, projectPath)}
       timestamp={chunk.timestamp}
       body={diff ? <DiffView diffData={diff} snippet /> : undefined}
+      defaultExpanded={chunk.status === "pending"}
     />
   )
 }
@@ -156,6 +162,11 @@ export function AgentTurn({
     () => splitWorkAndReply(renderItems),
     [renderItems]
   )
+  const collapsedItems = useMemo(
+    () => selectCollapsedTurnItems(renderItems, !isStreaming),
+    [isStreaming, renderItems]
+  )
+  const actionCount = useMemo(() => countWorkActions(workItems), [workItems])
   const replyText = useMemo(
     () =>
       replyItems
@@ -224,6 +235,7 @@ export function AgentTurn({
             entry={describeWorkEntry(item.chunk, projectPath)}
             timestamp={item.chunk.timestamp}
             body={<ShellEntryBody chunk={item.chunk} />}
+            defaultExpanded={item.chunk.status === "pending"}
           />
         )
 
@@ -260,36 +272,32 @@ export function AgentTurn({
     }
   }
 
-  const foldLabel =
+  const workLabel =
     workDurationMs && workDurationMs >= 1000
       ? `Worked for ${formatElapsed(workDurationMs)}`
       : "Worked"
+  const foldLabel =
+    actionCount > 0
+      ? `${workLabel} · ${actionCount} action${actionCount === 1 ? "" : "s"}`
+      : workLabel
+  const visibleItems =
+    canFoldWork && workFoldExpanded
+      ? renderItems
+      : isStreaming || canFoldWork
+        ? collapsedItems
+        : renderItems
 
   return (
     <div className="group/turn my-2 min-w-0 space-y-1.5">
-      {canFoldWork ? (
-        <>
-          <TurnFoldRow
-            label={foldLabel}
-            expanded={workFoldExpanded}
-            onToggle={toggleWorkFold}
-          />
-          {workFoldExpanded ? (
-            <div className="space-y-0.5">
-              {renderItems.map((item, index) =>
-                renderItem(item, index, renderItems.length)
-              )}
-            </div>
-          ) : (
-            replyItems.map((item, index) =>
-              renderItem(item, workItems.length + index, renderItems.length)
-            )
-          )}
-        </>
-      ) : (
-        renderItems.map((item, index) =>
-          renderItem(item, index, renderItems.length)
-        )
+      {canFoldWork && (
+        <TurnFoldRow
+          label={foldLabel}
+          expanded={workFoldExpanded}
+          onToggle={toggleWorkFold}
+        />
+      )}
+      {visibleItems.map((item, index) =>
+        renderItem(item, index, visibleItems.length)
       )}
 
       {threadId && message.turnKey && !isStreaming && (

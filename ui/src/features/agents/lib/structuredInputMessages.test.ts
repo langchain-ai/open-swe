@@ -54,6 +54,7 @@ describe("structured input messages", () => {
       content: "please add a greet() helper",
       sender: "slack:U_ALICE",
       senderKind: "person",
+      surface: "slack",
     })
   })
 
@@ -67,6 +68,7 @@ describe("structured input messages", () => {
       content: "ship it",
       sender: "slack:U_ALICE",
       senderKind: "person",
+      surface: "slack",
     })
   })
 
@@ -80,6 +82,7 @@ describe("structured input messages", () => {
       content: "Fix it",
       sender: "linear:dev@example.com",
       senderKind: "person",
+      surface: "linear",
     })
   })
 
@@ -102,6 +105,7 @@ describe("structured input messages", () => {
       content: "Hello & welcome",
       sender: "github:alice",
       senderKind: "person",
+      surface: "web",
     })
     expect(
       parseStructuredInput(
@@ -113,6 +117,7 @@ describe("structured input messages", () => {
       content: "Check CI",
       sender: "system:scheduler",
       senderKind: "system",
+      surface: "automation",
     })
   })
 

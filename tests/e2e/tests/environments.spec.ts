@@ -182,7 +182,9 @@ test.describe("Environments", () => {
     // No Admin toggle in the composer, so they cannot start an admin thread.
     await openNewAgentHome(page);
     await expect(page.getByTestId("composer-editor")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Admin" })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Admin mode", exact: true }),
+    ).toHaveCount(0);
   });
 
   test("the composer picker appears only with several environments, and the pick reaches the run", async ({
@@ -272,20 +274,14 @@ test.describe("Environments", () => {
     await page.request.post("/control/reset");
 
     await openNewAgentHome(page);
-    const extras = page.getByRole("button", { name: "More composer options" });
-    const enableAdmin = page.getByRole("menuitem", {
-      name: "Enable admin mode",
+    const adminToggle = page.getByRole("button", {
+      name: "Admin mode",
+      exact: true,
     });
-    await expect(async () => {
-      await extras.click();
-      await expect(enableAdmin).toBeVisible({ timeout: 2000 });
-    }).toPass({ timeout: 20_000 });
-    await enableAdmin.click();
-    await extras.click();
-    await expect(
-      page.getByRole("menuitem", { name: "Disable admin mode" }),
-    ).toBeVisible();
-    await page.keyboard.press("Escape");
+    await expect(adminToggle).toBeVisible({ timeout: 20_000 });
+    await expect(adminToggle).toHaveAttribute("aria-pressed", "false");
+    await adminToggle.click();
+    await expect(adminToggle).toHaveAttribute("aria-pressed", "true");
 
     await typeIntoComposer(
       page,
