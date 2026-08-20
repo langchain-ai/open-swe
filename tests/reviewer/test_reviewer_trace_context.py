@@ -47,6 +47,7 @@ def _thread_id_from_filter(filter_expr: str) -> str | None:
 class _FakeLangSmithClient:
     def __init__(self, search_results: dict[str, list[dict[str, Any]]] | None = None) -> None:
         self.filters: list[str] = []
+        self.closed = False
         self.search_results = (
             search_results
             if search_results is not None
@@ -55,6 +56,12 @@ class _FakeLangSmithClient:
                 'search("abc1234567890abcdef")': [_run("sha", "thread-1")],
             }
         )
+
+    async def __aenter__(self) -> "_FakeLangSmithClient":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.closed = True
 
     async def list_runs(self, **kwargs: Any):
         filter_expr = kwargs["filter"]
@@ -130,6 +137,9 @@ async def test_prepare_pr_trace_context_resolves_on_branch_alone() -> None:
         )
 
     assert result is not None
+    # The client is an async context manager: its connection pool must be released
+    # on the way out, not left to the cycle collector.
+    assert fake_client.closed is True
     assert result.file_path == "/workspace/.open-swe/review-author-trace.json"
     assert sandbox.uploaded_path == "/workspace/.open-swe/review-author-trace.json"
     assert result.thread_id == "thread-1"
@@ -208,6 +218,8 @@ async def test_prepare_pr_trace_context_returns_none_without_match() -> None:
 
     assert result is None
     assert sandbox.payload is None
+    # This path returns from inside the `async with`; the client must still close.
+    assert fake_client.closed is True
 
 
 @pytest.mark.asyncio

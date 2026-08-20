@@ -204,15 +204,18 @@ async def _resolve_session(
     if pr_context is None:
         return None, "Missing repo owner/name or PR number.", project
 
-    client = _client(creds)
-    thread_id, evidence = await _resolve_thread(client, project, pr_context)
-    if thread_id is None:
-        detail = f"No coding-agent thread matched (tried {_attempted_keys(pr_context)})."
-        return None, detail, project
+    # ``async with`` so the client's connection pool is released here rather than
+    # whenever the cycle collector happens to run: httpcore's pool graph is
+    # cyclic, so dropping the client leaves its socket open until then.
+    async with _client(creds) as client:
+        thread_id, evidence = await _resolve_thread(client, project, pr_context)
+        if thread_id is None:
+            detail = f"No coding-agent thread matched (tried {_attempted_keys(pr_context)})."
+            return None, detail, project
 
-    runs = await _list_thread_runs(client, project, thread_id, limit=_MAX_SESSION_RUNS)
-    if not runs:
-        return None, f"Matched thread {thread_id} but it returned no runs.", project
+        runs = await _list_thread_runs(client, project, thread_id, limit=_MAX_SESSION_RUNS)
+        if not runs:
+            return None, f"Matched thread {thread_id} but it returned no runs.", project
 
     runs.sort(key=lambda r: _run_time(r, "start_time") or datetime.min.replace(tzinfo=UTC))
     confidence = 0.9 if evidence.startswith("branch:") else 0.85
