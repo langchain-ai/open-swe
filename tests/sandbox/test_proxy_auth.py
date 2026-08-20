@@ -195,8 +195,8 @@ class TestConfigureGithubProxy:
         request = httpx.Request(
             "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
         )
-        response = httpx.Response(400, request=request)
-        error = httpx.HTTPStatusError("Bad request", request=request, response=response)
+        response = httpx.Response(403, request=request)
+        error = httpx.HTTPStatusError("Forbidden", request=request, response=response)
         with (
             patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
             patch(
@@ -215,6 +215,122 @@ class TestConfigureGithubProxy:
 
             mock_client.patch.assert_called_once()
             mock_sleep.assert_not_called()
+
+    async def test_error_message_carries_response_body(self) -> None:
+        """The API's explanation must survive into the raised error."""
+        request = httpx.Request(
+            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
+        )
+        response = httpx.Response(403, request=request, text="sandbox belongs to another tenant")
+        error = httpx.HTTPStatusError("Forbidden", request=request, response=response)
+        with (
+            patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
+            mock_client = MagicMock()
+            failed_response = MagicMock()
+            failed_response.raise_for_status.side_effect = error
+            mock_client.patch = AsyncMock(return_value=failed_response)
+            _mock_async_client(mock_client_cls, mock_client)
+
+            with pytest.raises(httpx.HTTPStatusError, match="another tenant"):
+                await _configure_github_proxy("sandbox-abc", "token")
+
+
+class TestConfigureGithubProxyStartsStoppedSandbox:
+    """A 400 means the sandbox is not ready; start it and retry the update."""
+
+    @staticmethod
+    def _not_ready_error() -> httpx.HTTPStatusError:
+        request = httpx.Request(
+            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
+        )
+        response = httpx.Response(
+            400,
+            request=request,
+            text='sandbox "sandbox-abc" is in "stopped" state, must be "ready"',
+        )
+        return httpx.HTTPStatusError("Bad request", request=request, response=response)
+
+    async def test_starts_sandbox_then_retries(self) -> None:
+        with (
+            patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch(
+                "agent.integrations.langsmith.get_async_sandbox_client"
+            ) as mock_sandbox_client_factory,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
+            mock_client = MagicMock()
+            failed_response = MagicMock()
+            failed_response.raise_for_status.side_effect = self._not_ready_error()
+            successful_response = MagicMock()
+            successful_response.raise_for_status = MagicMock()
+            mock_client.patch = AsyncMock(side_effect=[failed_response, successful_response])
+            _mock_async_client(mock_client_cls, mock_client)
+
+            sandbox_client = MagicMock()
+            sandbox_client.start_sandbox = AsyncMock()
+            sandbox_client.aclose = AsyncMock()
+            mock_sandbox_client_factory.return_value = sandbox_client
+
+            await _configure_github_proxy("sandbox-abc", "token")
+
+            sandbox_client.start_sandbox.assert_awaited_once()
+            assert sandbox_client.start_sandbox.await_args.args[0] == "sandbox-abc"
+            sandbox_client.aclose.assert_awaited_once()
+            assert mock_client.patch.call_count == 2
+
+    async def test_retries_even_when_start_fails(self) -> None:
+        """A failed start is logged, not fatal: the retry reports the real state."""
+        with (
+            patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch(
+                "agent.integrations.langsmith.get_async_sandbox_client"
+            ) as mock_sandbox_client_factory,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
+            mock_client = MagicMock()
+            failed_response = MagicMock()
+            failed_response.raise_for_status.side_effect = self._not_ready_error()
+            mock_client.patch = AsyncMock(return_value=failed_response)
+            _mock_async_client(mock_client_cls, mock_client)
+
+            sandbox_client = MagicMock()
+            sandbox_client.start_sandbox = AsyncMock(side_effect=RuntimeError("start rejected"))
+            sandbox_client.aclose = AsyncMock()
+            mock_sandbox_client_factory.return_value = sandbox_client
+
+            with pytest.raises(httpx.HTTPStatusError, match="stopped"):
+                await _configure_github_proxy("sandbox-abc", "token")
+
+            sandbox_client.start_sandbox.assert_awaited_once()
+            sandbox_client.aclose.assert_awaited_once()
+            assert mock_client.patch.call_count == 2
+
+    async def test_does_not_start_twice(self) -> None:
+        """Only one start attempt per configure call, even if the retry also 400s."""
+        with (
+            patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch(
+                "agent.integrations.langsmith.get_async_sandbox_client"
+            ) as mock_sandbox_client_factory,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
+            mock_client = MagicMock()
+            failed_response = MagicMock()
+            failed_response.raise_for_status.side_effect = self._not_ready_error()
+            mock_client.patch = AsyncMock(return_value=failed_response)
+            _mock_async_client(mock_client_cls, mock_client)
+
+            sandbox_client = MagicMock()
+            sandbox_client.start_sandbox = AsyncMock()
+            sandbox_client.aclose = AsyncMock()
+            mock_sandbox_client_factory.return_value = sandbox_client
+
+            with pytest.raises(httpx.HTTPStatusError):
+                await _configure_github_proxy("sandbox-abc", "token")
+
+            sandbox_client.start_sandbox.assert_awaited_once()
 
 
 class TestCreateSandboxWithProxy:

@@ -42,6 +42,9 @@ PROXY_CONFIG_MAX_ATTEMPTS = 3
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+PROXY_CONFIG_NOT_READY_STATUS = 400
+PROXY_CONFIG_ERROR_BODY_CHARS = 500
+SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 
 
@@ -283,6 +286,86 @@ async def _create_sandbox_with_retry(
     raise RuntimeError("unreachable sandbox retry state")
 
 
+def _with_response_body(exc: BaseException) -> httpx.HTTPStatusError | None:
+    """Re-raisable copy of ``exc`` carrying the response body, or ``None`` to re-raise as-is.
+
+    ``raise_for_status`` builds its message from the status line and an MDN link
+    only, so the API's own explanation of a rejection never reaches the logs.
+    """
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return None
+    body = exc.response.text.strip()[:PROXY_CONFIG_ERROR_BODY_CHARS]
+    if not body:
+        return None
+    return httpx.HTTPStatusError(
+        f"{exc}\nResponse body: {body}",
+        request=exc.request,
+        response=exc.response,
+    )
+
+
+async def _patch_proxy_config(
+    client: httpx.AsyncClient,
+    url: str,
+    payload: dict[str, Any],
+    api_key: str,
+    sandbox_name: str,
+) -> None:
+    for attempt in range(PROXY_CONFIG_MAX_ATTEMPTS):
+        try:
+            response = await client.patch(
+                url,
+                json=payload,
+                headers={"X-API-Key": api_key},
+            )
+            response.raise_for_status()
+            return
+        except Exception as exc:
+            if attempt == PROXY_CONFIG_MAX_ATTEMPTS - 1 or not _is_retryable_proxy_config_error(
+                exc
+            ):
+                enriched = _with_response_body(exc)
+                if enriched is not None:
+                    raise enriched from exc
+                raise
+            retry_after = (
+                _retry_after_seconds(exc.response)
+                if isinstance(exc, httpx.HTTPStatusError)
+                else None
+            )
+            delay = (
+                retry_after
+                or PROXY_CONFIG_RETRY_DELAYS_SECONDS[
+                    min(attempt, len(PROXY_CONFIG_RETRY_DELAYS_SECONDS) - 1)
+                ]
+            )
+            logger.warning(
+                "Failed to configure GitHub proxy for sandbox %s (%s); retrying in %.1fs",
+                sandbox_name,
+                type(exc).__name__,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
+
+async def _start_sandbox_best_effort(sandbox_name: str) -> None:
+    """Start ``sandbox_name`` so a proxy-config update can land on it.
+
+    The API rejects a proxy-config update on any sandbox that is not ``ready``,
+    and an idle sandbox is stopped rather than deleted — its filesystem, and the
+    agent's uncommitted work with it, comes back when the box starts again.
+    Failures are logged and swallowed: the retried update reports the real state.
+    """
+    client = get_async_sandbox_client()
+    try:
+        await client.start_sandbox(sandbox_name, timeout=SANDBOX_START_TIMEOUT_SECONDS)
+        logger.info("Started sandbox %s before retrying GitHub proxy config", sandbox_name)
+    except Exception:
+        logger.warning("Failed to start sandbox %s", sandbox_name, exc_info=True)
+    finally:
+        await client.aclose()
+
+
 async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
 
@@ -302,38 +385,18 @@ async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
     payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
     async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
-        for attempt in range(PROXY_CONFIG_MAX_ATTEMPTS):
-            try:
-                response = await client.patch(
-                    url,
-                    json=payload,
-                    headers={"X-API-Key": api_key},
-                )
-                response.raise_for_status()
-                break
-            except Exception as exc:
-                if attempt == PROXY_CONFIG_MAX_ATTEMPTS - 1 or not _is_retryable_proxy_config_error(
-                    exc
-                ):
-                    raise
-                retry_after = (
-                    _retry_after_seconds(exc.response)
-                    if isinstance(exc, httpx.HTTPStatusError)
-                    else None
-                )
-                delay = (
-                    retry_after
-                    or PROXY_CONFIG_RETRY_DELAYS_SECONDS[
-                        min(attempt, len(PROXY_CONFIG_RETRY_DELAYS_SECONDS) - 1)
-                    ]
-                )
-                logger.warning(
-                    "Failed to configure GitHub proxy for sandbox %s (%s); retrying in %.1fs",
-                    sandbox_name,
-                    type(exc).__name__,
-                    delay,
-                )
-                await asyncio.sleep(delay)
+        try:
+            await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != PROXY_CONFIG_NOT_READY_STATUS:
+                raise
+            logger.warning(
+                "Proxy config rejected for sandbox %s; starting it and retrying: %s",
+                sandbox_name,
+                exc,
+            )
+            await _start_sandbox_best_effort(sandbox_name)
+            await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
     logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
 
 

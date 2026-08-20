@@ -113,6 +113,26 @@ def message_sender_id(content: object) -> str | None:
     return None
 
 
+def input_message_text(content: object) -> str | None:
+    """The authored text carried by a serialized input message, when present."""
+    texts: list[str] = []
+    values = content if isinstance(content, list) else [content]
+    for value in values:
+        text = value.get("text") if isinstance(value, dict) else value
+        if not isinstance(text, str) or "<input-message" not in text:
+            continue
+        try:
+            root = ElementTree.fromstring(text)
+        except ElementTree.ParseError:
+            continue
+        messages = [root] if root.tag == "input-message" else root.findall(".//input-message")
+        for message in messages:
+            body = message.findtext("content")
+            if body and body.strip():
+                texts.append(body.strip())
+    return "\n\n".join(texts) or None
+
+
 def dynamic_context_hash(content: object) -> str | None:
     values = content if isinstance(content, list) else [content]
     for value in values:

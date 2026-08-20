@@ -43,6 +43,7 @@ from ..utils.thread_ops import (
     queue_message_for_thread,
 )
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
+from ..utils.timing import phase
 from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
 from .environments import get_environment, slugify
@@ -571,12 +572,14 @@ async def _latest_run_status(thread_id: str) -> str | None:
 
 
 async def _refresh_latest_run_metadata(
-    client: Any, thread: ThreadLike
+    client: Any, thread: ThreadLike, *, timings: dict[str, float] | None = None
 ) -> tuple[ThreadLike, str | None, str | None]:
+    record = timings if timings is not None else {}
     thread_id = thread.get("thread_id") or thread.get("id")
     if not isinstance(thread_id, str) or not thread_id:
         return thread, None, None
-    latest_run_status, latest_run_id = await _latest_run_info(client, thread_id)
+    with phase(record, "runs_list"):
+        latest_run_status, latest_run_id = await _latest_run_info(client, thread_id)
     metadata = thread_metadata(thread)
     metadata_update: dict[str, Any] = {}
     if latest_run_status and latest_run_status != metadata.get("latest_run_status"):
@@ -584,12 +587,15 @@ async def _refresh_latest_run_metadata(
     if latest_run_id and latest_run_id != metadata.get("latest_run_id"):
         metadata_update["latest_run_id"] = latest_run_id
     if metadata_update:
-        try:
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not persist latest run metadata for %s", thread_id, exc_info=True)
-        else:
-            thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
+        with phase(record, "thread_update"):
+            try:
+                await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "Could not persist latest run metadata for %s", thread_id, exc_info=True
+                )
+            else:
+                thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     return thread, latest_run_status, latest_run_id
 
 
@@ -901,7 +907,11 @@ async def list_dashboard_threads_sidebar(
     active_thread_id: str | None = None,
     include_automations: bool = False,
     include_all: bool = False,
+    timings: dict[str, float] | None = None,
+    counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
+    record = timings if timings is not None else {}
+    count_record = counts if counts is not None else {}
     client = langgraph_client()
     searches = _owner_search_filters(login, email=email, include_all=include_all)
     safe_active_limit = min(max(active_limit, 1), 100)
@@ -911,68 +921,76 @@ async def list_dashboard_threads_sidebar(
     active: dict[str, ThreadLike] = {}
     resolved_threads: dict[str, ThreadLike] = {}
 
-    for owner_filter in searches:
-        local_active = 0
-        local_resolved = 0
-        offset = 0
-        while offset < _THREADS_PAGE_SCAN_CAP and (
-            local_active < active_target or local_resolved < resolved_target
-        ):
-            batch = await _search_threads_batch(
-                client,
-                owner_filter,
-                limit=_THREADS_SEARCH_PAGE,
-                offset=offset,
-            )
-            if not batch:
-                break
-            for thread in batch:
-                metadata = _thread_metadata(thread)
-                if not include_all and not _user_owns_thread(metadata, login, email):
-                    continue
-                if not include_automations and _is_automation_thread(metadata):
-                    continue
-                thread_id = _thread_id(thread)
-                if not thread_id or thread_id in active or thread_id in resolved_threads:
-                    continue
-                if _is_thread_resolved(metadata):
-                    local_resolved += 1
-                    resolved_threads[thread_id] = thread
-                else:
-                    local_active += 1
-                    active[thread_id] = thread
-            if len(batch) < _THREADS_SEARCH_PAGE:
-                break
-            offset += _THREADS_SEARCH_PAGE
+    with phase(record, "search"):
+        for owner_filter in searches:
+            local_active = 0
+            local_resolved = 0
+            offset = 0
+            while offset < _THREADS_PAGE_SCAN_CAP and (
+                local_active < active_target or local_resolved < resolved_target
+            ):
+                batch = await _search_threads_batch(
+                    client,
+                    owner_filter,
+                    limit=_THREADS_SEARCH_PAGE,
+                    offset=offset,
+                )
+                if not batch:
+                    break
+                for thread in batch:
+                    metadata = _thread_metadata(thread)
+                    if not include_all and not _user_owns_thread(metadata, login, email):
+                        continue
+                    if not include_automations and _is_automation_thread(metadata):
+                        continue
+                    thread_id = _thread_id(thread)
+                    if not thread_id or thread_id in active or thread_id in resolved_threads:
+                        continue
+                    if _is_thread_resolved(metadata):
+                        local_resolved += 1
+                        resolved_threads[thread_id] = thread
+                    else:
+                        local_active += 1
+                        active[thread_id] = thread
+                if len(batch) < _THREADS_SEARCH_PAGE:
+                    break
+                offset += _THREADS_SEARCH_PAGE
 
     active_candidates = sorted(active.values(), key=_thread_updated_ms, reverse=True)
     resolved_candidates = sorted(resolved_threads.values(), key=_thread_updated_ms, reverse=True)
     active_window = active_candidates[:safe_active_limit]
     resolved_window = resolved_candidates[:safe_resolved_limit]
     active_ids = {thread_id for thread in active_window if (thread_id := _thread_id(thread))}
-    active_items, resolved_items, active_thread = await asyncio.gather(
-        _summarize_threads(
-            client,
-            active_window,
-            owner_login=None if include_all else login,
-            owner_email=None if include_all else email,
-        ),
-        _summarize_threads(
-            client,
-            resolved_window,
-            owner_login=None if include_all else login,
-            owner_email=None if include_all else email,
-        ),
-        _sidebar_active_thread_summary(
-            client,
-            active_thread_id,
-            fallback_threads={**active, **resolved_threads},
-            visible_thread_ids=active_ids,
-            login=login,
-            email=email,
-            include_all=include_all,
-        ),
+    # The dominant cost when a user's threads have no cached run status: one
+    # `runs.list` per thread, eight at a time.
+    count_record["run_refreshes"] = sum(
+        _should_refresh_latest_run(thread) for thread in (*active_window, *resolved_window)
     )
+    count_record["threads"] = len(active_window) + len(resolved_window)
+    with phase(record, "summarize"):
+        active_items, resolved_items, active_thread = await asyncio.gather(
+            _summarize_threads(
+                client,
+                active_window,
+                owner_login=None if include_all else login,
+                owner_email=None if include_all else email,
+            ),
+            _summarize_threads(
+                client,
+                resolved_window,
+                owner_login=None if include_all else login,
+                owner_email=None if include_all else email,
+            ),
+            _sidebar_active_thread_summary(
+                client,
+                active_thread_id,
+                fallback_threads={**active, **resolved_threads},
+                visible_thread_ids=active_ids,
+                login=login,
+                email=email,
+                include_all=include_all,
+            ),
+        )
     active_has_more = len(active_candidates) > safe_active_limit
     resolved_has_more = len(resolved_candidates) > safe_resolved_limit
     if active_thread:
@@ -1873,18 +1891,27 @@ async def _readable_thread_metadata(
 
 
 async def get_dashboard_thread_state(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
+    record = timings if timings is not None else {}
     client = langgraph_client()
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
+    with phase(record, "thread_get"):
+        try:
+            thread = await client.threads.get(thread_id)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
     _assert_thread_readable(metadata)
-    thread, latest_run_status, _ = await _refresh_latest_run_metadata(client, thread)
+    thread, latest_run_status, _ = await _refresh_latest_run_metadata(
+        client, thread, timings=record
+    )
     metadata = thread_metadata(thread)
-    state = await client.threads.get_state(thread_id)
+    with phase(record, "get_state"):
+        state = await client.threads.get_state(thread_id)
     result = as_json_object(state)
     # The SDK's `useStream` opens its live event subscription only when the
     # hydrated `getState()` looks active (`next` non-empty / absent). When a

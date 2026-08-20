@@ -237,7 +237,8 @@ export function useSeedAgentThreadDetails(
   }, [activeThreadId, queryClient, threads])
 }
 
-const SIDEBAR_ACTIVE_LIMIT = 50
+export const SIDEBAR_ACTIVE_LIMIT = 50
+export const SIDEBAR_RESOLVED_LIMIT = 20
 
 function sidebarThreads(data?: SidebarThreads): Array<AgentThread> {
   return [...(data?.active.items ?? []), ...(data?.resolved.items ?? [])]
