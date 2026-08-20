@@ -3,7 +3,8 @@ import { useCallback, useEffect, useState } from "react"
 import { DEFAULT_SIDEBAR_FILTERS } from "./sidebarFilter"
 import type { SidebarFilters, SidebarGroupMode } from "./sidebarFilter"
 
-const STORAGE_KEY = "open-swe.agents.sidebar-prefs"
+export const SIDEBAR_PREFS_STORAGE_KEY = "open-swe.agents.sidebar-prefs"
+const STORAGE_KEY = SIDEBAR_PREFS_STORAGE_KEY
 
 const GROUP_MODES: ReadonlyArray<SidebarGroupMode> = [
   "none",
