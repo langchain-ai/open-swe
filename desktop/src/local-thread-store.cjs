@@ -169,7 +169,7 @@ class LocalThreadStore {
       title: sessionTitle(prompt),
       modelId: stringOrNull(input.modelId),
       effort: stringOrNull(input.effort),
-      status: "starting",
+      status: "idle",
       viewed: true,
       createdAt: now,
       updatedAt: now,

@@ -29,12 +29,6 @@ vi.mock("@/features/agents/components/AgentThreadPage", () => ({
 afterEach(cleanup)
 
 describe("RecentAgentThreads", () => {
-  it("uses the layout stream for the active thread", () => {
-    render(<RecentAgentThreads activeThreadId="one" />)
-
-    expect(screen.getByText("thread one").closest("[data-provider]")).toBeNull()
-  })
-
   it("keeps the three most recently viewed threads mounted", () => {
     const view = render(<RecentAgentThreads activeThreadId="one" />)
 

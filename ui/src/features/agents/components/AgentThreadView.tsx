@@ -133,21 +133,18 @@ export function AgentThreadView({
   )
 
   const baseMessages = useMemo<Array<Message>>(() => {
-    const live = streamMessagesToUi(
+    if (thread.messages.length > 0) return thread.messages
+    return streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
       messageArrivalTimestamp
     )
-    if (live.length > 0) return live
-    // Optimistic transcript seeded by `AgentsHome` on thread creation (the
-    // only case where a fetched thread carries messages — `getThread` returns
-    // none). Bridges the brief gap before the SDK's optimistic `submit` echo
-    // lands in `stream.messages`.
-    if (thread.messages.length > 0) return thread.messages
-    return live
   }, [stream.messages, stream.toolCalls, thread.messages])
 
-  const isStreaming = thread.status === "running" || stream.isLoading
+  const isStreaming =
+    thread.status === "running" ||
+    stream.isLoading ||
+    thread.messages.length > 0
   const activeRun = useMemo(
     () => ({ threadId: thread.id, running: thread.status === "running" }),
     [thread.id, thread.status]

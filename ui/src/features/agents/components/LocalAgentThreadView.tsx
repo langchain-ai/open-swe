@@ -135,7 +135,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
 
   const isRunning =
     stream.isLoading ||
-    thread?.status === "starting" ||
+    (Boolean(thread?.pending) && !error) ||
     thread?.status === "running"
   const diffVisible =
     !panelCollapsed && activeSurfaceId === "diff" && Boolean(thread)
