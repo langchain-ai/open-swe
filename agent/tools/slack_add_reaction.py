@@ -10,9 +10,10 @@ async def slack_add_reaction(
     emoji: str,
     message_ts: str | None = None,
 ) -> dict[str, Any]:
-    """Add a context-appropriate reaction to a Slack message in the current thread.
+    """Commit to acting on a Slack message by adding a context-appropriate reaction.
 
-    Prefer `saluting_face` for taking ownership, `eyes` for active review,
+    Use this only when work will continue and always follow up with the outcome; never react before
+    `no_op`. Prefer `saluting_face` for taking ownership, `eyes` for active review,
     `thinking_face` for investigation, and `tada` for genuine wins. Never use
     `white_check_mark`, because teams use it to indicate that a pull request is approved.
     To target a specific message, pass its `message_ts` identifier shown in Slack context.
