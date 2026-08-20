@@ -310,7 +310,11 @@ export const Messages = memo(function MessagesComponent({
             <ThinkingSpinner
               isActive={
                 !!(isThinking || streamIsLoading || isStreaming) &&
-                !(isStreaming && lastAgentIndex === visibleMessages.length - 1)
+                !(
+                  isStreaming &&
+                  lastAgentIndex >= 0 &&
+                  lastAgentIndex === visibleMessages.length - 1
+                )
               }
               settingUpSandbox={settingUpSandbox}
               label={activityLabel}
