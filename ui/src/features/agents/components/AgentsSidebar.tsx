@@ -204,12 +204,6 @@ export function AgentsSidebar({
     sections.length === 0 &&
     (!showResolved || filteredResolved.length === 0) &&
     hasActiveFilters(prefs.filters)
-  const localSessionCount = localGroups.reduce(
-    (total, group) => total + group.sessions.length,
-    0
-  )
-  const cloudThreadCount =
-    filteredActive.length + (showResolved ? filteredResolved.length : 0)
   const cloudActivity = {
     running: activeThreads.filter((thread) => thread.status === "running")
       .length,
@@ -299,8 +293,6 @@ export function AgentsSidebar({
         {isDesktop && (
           <DesktopThreadSourceToggle
             source={desktopThreadSource}
-            localCount={localSessionCount}
-            cloudCount={cloudThreadCount}
             localActivity={localActivity}
             cloudActivity={cloudActivity}
             onSourceChange={setDesktopThreadSource}
