@@ -9,6 +9,7 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
+from agent.input_messages import human_input
 from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
 from agent.server import PrepareAgentRunMiddleware
 from agent.utils import ttl_cache
@@ -111,7 +112,7 @@ def test_sender_context_updates_only_latest_human_message():
 
     updated = PrepareAgentRunMiddleware._sender_context_message(
         cast(PrepareRunState, {"messages": [first, latest]}),
-        "<sender_context>sender</sender_context>",
+        "sender",
     )
 
     assert updated is not None
@@ -120,8 +121,26 @@ def test_sender_context_updates_only_latest_human_message():
     assert first.content == "first"
     assert updated.content == [
         {"type": "text", "text": "second"},
-        {"type": "text", "text": "<sender_context>sender</sender_context>"},
+        {"type": "text", "text": "<sender_context>\nsender\n</sender_context>"},
     ]
+
+
+def test_sender_context_goes_inside_the_envelope():
+    envelope = human_input(
+        "ship it <now> & fast",
+        {"sender_id": "slack:U1", "surface": "slack", "kind": "human"},
+    )
+    message = HumanMessage(content=cast(str, envelope["content"]), id="turn")
+
+    updated = PrepareAgentRunMiddleware._sender_context_message(
+        cast(PrepareRunState, {"messages": [message]}),
+        "identity: 'ramon' & <team>",
+    )
+
+    assert updated is not None
+    root = ElementTree.fromstring(cast(str, updated.content))
+    assert root.findtext("content") == "ship it <now> & fast"
+    assert root.findtext("sender_context") == "identity: 'ramon' & <team>"
 
 
 @pytest.mark.asyncio

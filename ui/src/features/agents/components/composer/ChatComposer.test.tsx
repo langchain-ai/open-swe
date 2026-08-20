@@ -37,6 +37,10 @@ vi.mock("@/features/agents/lib/api", () => ({
   AgentsApiError: class AgentsApiError extends Error {},
 }))
 
+vi.mock("@/lib/appCommands", () => ({
+  useRegisterAppCommands: vi.fn(),
+}))
+
 afterEach(() => cleanup())
 
 beforeEach(() => {
@@ -159,16 +163,50 @@ describe("ChatComposer stop button", () => {
 })
 
 describe("ChatComposer admin mode", () => {
-  it("tints the composer options control when enabled", () => {
+  it("hides the toggle when admin mode is unavailable", () => {
+    renderComposer(false)
+
+    expect(screen.queryByRole("button", { name: "Admin mode" })).toBeNull()
+  })
+
+  it("shows a direct toggle for eligible admins", () => {
+    const onAdminThreadChange = vi.fn()
+    renderComposer(false, { onAdminThreadChange })
+
+    const toggle = screen.getByRole("button", { name: "Admin mode" })
+    expect(toggle.getAttribute("aria-pressed")).toBe("false")
+
+    fireEvent.click(toggle)
+
+    expect(onAdminThreadChange).toHaveBeenCalledWith(true)
+  })
+
+  it("shows the active state and can disable admin mode", () => {
+    const onAdminThreadChange = vi.fn()
     renderComposer(false, {
       adminThread: true,
-      onAdminThreadChange: vi.fn(),
+      onAdminThreadChange,
     })
 
-    const options = screen.getByRole("button", {
-      name: "More composer options",
-    })
-    expect(options.className.split(" ")).toContain("bg-destructive/10")
+    const toggle = screen.getByRole("button", { name: "Admin mode" })
+    expect(toggle.getAttribute("aria-pressed")).toBe("true")
+    expect(toggle.className.split(" ")).toContain("bg-destructive/10")
+
+    fireEvent.click(toggle)
+
+    expect(onAdminThreadChange).toHaveBeenCalledWith(false)
+  })
+
+  it("cannot change modes while the composer is disabled", () => {
+    const onAdminThreadChange = vi.fn()
+    renderComposer(false, { disabled: true, onAdminThreadChange })
+
+    const toggle = screen.getByRole("button", { name: "Admin mode" })
+    expect(toggle.hasAttribute("disabled")).toBe(true)
+
+    fireEvent.click(toggle)
+
+    expect(onAdminThreadChange).not.toHaveBeenCalled()
   })
 })
 

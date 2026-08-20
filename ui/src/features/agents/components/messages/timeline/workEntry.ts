@@ -1,5 +1,6 @@
 import type {
   AcpToolStatus,
+  Chunk,
   ToolExecutionChunk,
 } from "@/features/agents/lib/types"
 import {
@@ -183,4 +184,66 @@ export function describeWorkEntry(
     status: chunk.status,
     expandedText: expandedTextForChunk(chunk, projectPath),
   }
+}
+
+function toolActivityVerb(chunk: ToolExecutionChunk): string {
+  const active = chunk.status === "in_progress" || chunk.status === "pending"
+
+  switch (chunk.toolKind) {
+    case "read":
+    case "search":
+      return active ? "Exploring" : "Explored"
+    case "execute":
+      return active ? "Running" : "Ran"
+    case "edit":
+    case "delete":
+    case "move":
+      return active ? "Editing" : "Updated"
+    case "fetch":
+      return active ? "Researching" : "Researched"
+    case "task":
+      return active ? "Delegating" : "Delegated"
+    case "think":
+      return "Thinking"
+    case "slack":
+    case "linear":
+      return "Sending update"
+    case "other":
+      return describeWorkEntry(chunk).heading
+  }
+}
+
+export function liveActivityLabel(
+  chunks: Array<Chunk>,
+  projectPath?: string
+): string {
+  for (let index = chunks.length - 1; index >= 0; index -= 1) {
+    const chunk = chunks[index]
+    if (!chunk) continue
+
+    if (chunk.kind === "reasoning") return "Thinking…"
+    if (chunk.kind === "text") {
+      if (chunk.text.trim()) return "Writing response…"
+      continue
+    }
+    if (chunk.kind === "error") return "Recovering from an error…"
+    if (
+      chunk.kind === "code" ||
+      chunk.kind === "list" ||
+      chunk.kind === "image"
+    ) {
+      return "Preparing response…"
+    }
+    if (chunk.kind === "todo") return "Planning next steps…"
+
+    if (chunk.status === "pending") return "Waiting for approval…"
+    if (chunk.status === "error") return "Recovering from an error…"
+    if (chunk.display?.type === "output_iframe") return "Preparing preview…"
+
+    const entry = describeWorkEntry(chunk, projectPath)
+    const verb = toolActivityVerb(chunk)
+    return entry.preview ? `${verb} · ${entry.preview}` : `${verb}…`
+  }
+
+  return "Working…"
 }

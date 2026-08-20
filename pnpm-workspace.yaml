@@ -11,7 +11,7 @@ allowBuilds:
 
 overrides:
   '@hono/node-server': 2.0.10
-  brace-expansion@2.1.1: 2.1.2
+  brace-expansion@2.1.1: 2.1.4
   'brace-expansion@>=5.0.0': 5.0.9
   dompurify: 3.4.13
   fast-uri: 3.1.5
@@ -19,6 +19,6 @@ overrides:
   ip-address: 10.3.1
   js-yaml: 4.3.1
   mermaid: 11.16.1
-  'nanoid@>=3.0.0 <4.0.0': 3.3.17
+  'nanoid@>=3.0.0 <4.0.0': 3.3.18
   postcss: 8.5.23
   undici: 7.29.0
