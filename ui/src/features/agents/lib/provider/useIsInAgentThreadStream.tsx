@@ -20,12 +20,14 @@ export function useIsInAgentThreadStream(): boolean {
 }
 
 export function AgentThreadStreamBoundary({
+  active = true,
   children,
 }: {
+  active?: boolean
   children: ReactNode
 }) {
   return (
-    <AgentThreadStreamBoundaryContext.Provider value={true}>
+    <AgentThreadStreamBoundaryContext.Provider value={active}>
       {children}
     </AgentThreadStreamBoundaryContext.Provider>
   )
