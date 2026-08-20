@@ -7,6 +7,7 @@ import logging
 import os
 import posixpath
 import shlex
+from time import perf_counter
 from typing import Any, Literal
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
@@ -21,10 +22,11 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import RedirectResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from ..utils.thread_ops import langgraph_url
+from ..utils.timing import server_timing_header
 from .admin import is_admin
 from .agent_instructions import (
     AgentInstructionsCreate,
@@ -2263,8 +2265,16 @@ async def api_delete_thread(
 async def api_get_thread_state(
     thread_id: str,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    return await get_dashboard_thread_state(thread_id, session["sub"], email=session.get("email"))
+) -> Response:
+    timings: dict[str, float] = {}
+    started = perf_counter()
+    payload = await get_dashboard_thread_state(
+        thread_id, session["sub"], email=session.get("email"), timings=timings
+    )
+    timings["total"] = (perf_counter() - started) * 1000
+    header = server_timing_header(timings)
+    logger.info("thread state timings thread_id=%s %s", thread_id, header)
+    return JSONResponse(payload, headers={"Server-Timing": header})
 
 
 @router.post("/threads/{thread_id}/stream/events")
