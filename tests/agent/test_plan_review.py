@@ -1141,6 +1141,38 @@ async def test_reject_plan_can_mark_revising_without_dispatch(
     assert dispatched == []
 
 
+async def test_reject_plan_rejects_stale_decision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import HTTPException
+
+    from agent.dashboard import plan_api
+
+    statuses: list[tuple[str, bool]] = []
+
+    async def fake_meta(thread_id: str) -> dict[str, Any]:
+        return {"source": "dashboard", "plan_mode": False, "plan_status": "approved"}
+
+    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
+        return {"html": "<h1>Plan</h1>", "status": "approved"}
+
+    async def fake_set_status(thread_id: str, status: str, *, plan_mode: bool) -> None:
+        statuses.append((status, plan_mode))
+
+    monkeypatch.setattr(plan_api, "_thread_metadata", fake_meta)
+    monkeypatch.setattr(plan_api, "_thread_is_readable", lambda metadata: True)
+    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
+    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
+
+    with pytest.raises(HTTPException, match="no longer ready") as exc_info:
+        await plan_api.reject_plan(
+            "t1", plan_api.PlanRejection(dispatch=False), session={"sub": "a", "email": None}
+        )
+
+    assert exc_info.value.status_code == 409
+    assert statuses == []
+
+
 async def test_reject_plan_rejects_shared_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

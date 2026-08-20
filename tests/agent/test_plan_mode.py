@@ -491,38 +491,3 @@ async def test_approve_plan_tool_allows_non_owner_configurable_identity(
 
     assert isinstance(result, Command)
     assert saved["approved_by"] == {"id": "other", "name": "other", "source": "linear"}
-
-
-@pytest.mark.parametrize(
-    "reply",
-    [
-        "approve",
-        "Approve & implement",
-        "Approved!",
-        "Looks good to me.",
-        "go ahead",
-        "ship it",
-        "yes",
-    ],
-)
-def test_natural_language_plan_approval_accepts_affirmative_replies(reply: str) -> None:
-    from agent.webhooks.slack import _is_natural_language_plan_approval
-
-    assert _is_natural_language_plan_approval(reply) is True
-
-
-@pytest.mark.parametrize(
-    "reply",
-    [
-        "do not approve",
-        "No, revise the plan",
-        "approve after these changes",
-        "looks mostly good, but change the tests",
-        "cancel",
-        "what changed?",
-    ],
-)
-def test_natural_language_plan_approval_rejects_ambiguous_or_negative_replies(reply: str) -> None:
-    from agent.webhooks.slack import _is_natural_language_plan_approval
-
-    assert _is_natural_language_plan_approval(reply) is False

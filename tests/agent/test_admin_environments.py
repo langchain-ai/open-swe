@@ -5,7 +5,7 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent import server
-from agent.prompt import construct_system_prompt
+from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.tools import environments as env_tools
 
 _READY = {"slug": "base", "name": "Base", "snapshot_status": "ready", "snapshot_id": "env-snap"}
@@ -75,21 +75,39 @@ def test_environment_slug_reads_the_run_config() -> None:
 # --- admin thread gate ---
 
 
-def test_admin_thread_requires_flag_and_configured_admin(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_admin_thread_requires_flag_and_configured_admin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramon.nogueira@langchain.dev")
     admin_config = _config(admin_thread=True, user_email="ramon.nogueira@langchain.dev")
 
-    assert server._admin_thread(admin_config, None) is True
+    assert await server._admin_thread(admin_config, None) is True
     # Same user, no flag: an ordinary thread never gets the tools.
-    assert server._admin_thread(_config(user_email="ramon.nogueira@langchain.dev"), None) is False
+    assert (
+        await server._admin_thread(_config(user_email="ramon.nogueira@langchain.dev"), None)
+        is False
+    )
     # Flag set by a thread whose current requester is not an admin.
     non_admin = _config(admin_thread=True, user_email="someone@else.dev")
-    assert server._admin_thread(non_admin, None) is False
+    assert await server._admin_thread(non_admin, None) is False
 
 
-def test_admin_thread_accepts_configured_login(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_admin_thread_accepts_configured_login(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    assert server._admin_thread(_config(admin_thread=True), "ramonn") is True
+    assert await server._admin_thread(_config(admin_thread=True), "ramonn") is True
+
+
+@pytest.mark.asyncio
+async def test_workspace_admin_resolves_email_for_github_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramon@langchain.dev")
+    with patch.object(
+        server, "email_for_login", new_callable=AsyncMock, return_value="ramon@langchain.dev"
+    ):
+        assert await server._workspace_admin(_config(github_login="ramonn"), None) is True
 
 
 # --- tool gate ---
@@ -127,6 +145,11 @@ async def test_capture_tool_requires_a_saved_environment(monkeypatch: pytest.Mon
 # --- prompt wiring ---
 
 
+def test_sender_context_includes_workspace_admin_status() -> None:
+    assert "Workspace admin: yes." in construct_sender_context(None, workspace_admin=True)
+    assert "Workspace admin: no." in construct_sender_context(None)
+
+
 def test_environment_instructions_render_in_system_prompt() -> None:
     prompt = construct_system_prompt(
         working_dir="/workspace",
@@ -139,9 +162,9 @@ def test_environment_instructions_render_in_system_prompt() -> None:
 
 
 def test_admin_section_only_for_admin_threads() -> None:
-    assert "### Admin Thread: Environment Setup" in construct_system_prompt(
-        working_dir="/workspace", admin_environments=True
-    )
+    prompt = construct_system_prompt(working_dir="/workspace", admin_environments=True)
+    assert "### Admin Thread: Environment Setup" in prompt
+    assert "direct them to an admin thread" not in prompt
 
 
 def test_blank_environment_prompt_renders_nothing() -> None:

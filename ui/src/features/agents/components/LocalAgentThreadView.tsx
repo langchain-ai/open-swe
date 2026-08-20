@@ -278,6 +278,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       const updated = await window.openSweDesktop?.updateLocalThread({
         threadId: sessionId,
         status,
+        viewed: status === "running",
         ...(model && { modelId: model.modelId, effort: model.effort }),
       })
       if (!updated) return
@@ -290,6 +291,25 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     },
     [queryClient, sessionId]
   )
+
+  useEffect(() => {
+    if (!thread || thread.viewed || isRunning) return
+    void window.openSweDesktop
+      ?.updateLocalThread({
+        threadId: sessionId,
+        status: thread.status,
+        viewed: true,
+      })
+      .then((updated) => {
+        if (!updated) return
+        queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+        queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
+          localThreadKeys.all,
+          (threads = []) =>
+            threads.map((item) => (item.id === sessionId ? updated : item))
+        )
+      })
+  }, [isRunning, queryClient, sessionId, thread])
 
   const submit = useCallback(
     async (

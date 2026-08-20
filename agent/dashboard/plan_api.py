@@ -281,9 +281,17 @@ async def reject_plan(
     metadata = await _thread_metadata(thread_id)
     if not _thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
-    content = await get_plan_content(thread_id, raise_on_error=True) or {}
-    _reject_shared_content(content)
-    await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
+    lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
+    async with lock:
+        metadata = await _thread_metadata(thread_id)
+        content = await get_plan_content(thread_id, raise_on_error=True) or {}
+        _reject_shared_content(content)
+        if (
+            metadata.get("plan_status") != PLAN_STATUS_READY
+            or content.get("status") != PLAN_STATUS_READY
+        ):
+            raise HTTPException(409, "plan is no longer ready for review")
+        await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
     if rejection is not None and not rejection.dispatch:
         return {"status": PLAN_STATUS_REVISING}
     feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
