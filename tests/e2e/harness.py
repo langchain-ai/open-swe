@@ -502,6 +502,11 @@ async def ui_logo_mark() -> FileResponse:
 # App routes used by the handoff tests. Kept explicit (no catch-all) so
 # LangGraph's own root routes — which the dashboard proxy calls server-side —
 # are untouched.
+@app.get("/my-settings", response_class=HTMLResponse)
+async def ui_settings(request: Request) -> Response:
+    return await _render_app_route(request)
+
+
 @app.get("/agents", response_class=HTMLResponse)
 async def ui_agents_home(request: Request) -> Response:
     return await _render_app_route(request)
