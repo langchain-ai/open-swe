@@ -44,6 +44,7 @@ export function UserMessage({ message }: { message: Message }) {
   return (
     <div
       className={`group/turn my-4 flex flex-col gap-1 ${isSystem ? "items-start" : "items-end"}`}
+      data-testid="user-message"
       data-message-sender-kind={message.structuredSenderKind}
       data-message-surface={message.structuredSurface}
     >

@@ -1430,6 +1430,21 @@ def _command_message_content(params: dict[str, Any]) -> Any:
     return last.get("content") if isinstance(last, dict) else None
 
 
+def _command_message_id(params: dict[str, Any]) -> str | None:
+    """The client-minted id of a ``run.start`` command's newest user message."""
+    run_input = params.get("input")
+    if not isinstance(run_input, dict):
+        return None
+    messages = run_input.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return None
+    last = messages[-1]
+    if not isinstance(last, dict):
+        return None
+    message_id = last.get("id")
+    return message_id if isinstance(message_id, str) and message_id else None
+
+
 def _set_command_last_message_content(params: dict[str, Any], content: Any) -> None:
     run_input = params.get("input")
     if not isinstance(run_input, dict):
@@ -1645,6 +1660,12 @@ async def _enrich_run_start_command(
                     injected_dynamic_context_hashes={"system:dashboard-handoff"},
                 )[0],
             )
+        # Keep the id the SDK minted for the submitted message: it reconciles
+        # the optimistic bubble with the server's echo, and a fresh id leaves
+        # both rendered.
+        client_message_id = _command_message_id(params)
+        if client_message_id:
+            structured[-1]["id"] = client_message_id
         run_input = params.get("input")
         if isinstance(run_input, dict):
             run_input["messages"] = structured

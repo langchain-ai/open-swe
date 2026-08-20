@@ -55,6 +55,7 @@ class InputMessageContext(TypedDict):
 class RunMessage(TypedDict):
     role: Literal["user", "system"]
     content: str | list[dict[str, Any]]
+    id: NotRequired[str]
 
 
 class RunInput(TypedDict):
