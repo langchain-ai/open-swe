@@ -43,6 +43,7 @@ from ..utils.thread_ops import (
     queue_message_for_thread,
 )
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
+from ..utils.timing import phase
 from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
 from .environments import get_environment, slugify
@@ -571,12 +572,14 @@ async def _latest_run_status(thread_id: str) -> str | None:
 
 
 async def _refresh_latest_run_metadata(
-    client: Any, thread: ThreadLike
+    client: Any, thread: ThreadLike, *, timings: dict[str, float] | None = None
 ) -> tuple[ThreadLike, str | None, str | None]:
+    record = timings if timings is not None else {}
     thread_id = thread.get("thread_id") or thread.get("id")
     if not isinstance(thread_id, str) or not thread_id:
         return thread, None, None
-    latest_run_status, latest_run_id = await _latest_run_info(client, thread_id)
+    with phase(record, "runs_list"):
+        latest_run_status, latest_run_id = await _latest_run_info(client, thread_id)
     metadata = thread_metadata(thread)
     metadata_update: dict[str, Any] = {}
     if latest_run_status and latest_run_status != metadata.get("latest_run_status"):
@@ -584,12 +587,15 @@ async def _refresh_latest_run_metadata(
     if latest_run_id and latest_run_id != metadata.get("latest_run_id"):
         metadata_update["latest_run_id"] = latest_run_id
     if metadata_update:
-        try:
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not persist latest run metadata for %s", thread_id, exc_info=True)
-        else:
-            thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
+        with phase(record, "thread_update"):
+            try:
+                await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "Could not persist latest run metadata for %s", thread_id, exc_info=True
+                )
+            else:
+                thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     return thread, latest_run_status, latest_run_id
 
 
@@ -1873,18 +1879,27 @@ async def _readable_thread_metadata(
 
 
 async def get_dashboard_thread_state(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
+    record = timings if timings is not None else {}
     client = langgraph_client()
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
+    with phase(record, "thread_get"):
+        try:
+            thread = await client.threads.get(thread_id)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
     _assert_thread_readable(metadata)
-    thread, latest_run_status, _ = await _refresh_latest_run_metadata(client, thread)
+    thread, latest_run_status, _ = await _refresh_latest_run_metadata(
+        client, thread, timings=record
+    )
     metadata = thread_metadata(thread)
-    state = await client.threads.get_state(thread_id)
+    with phase(record, "get_state"):
+        state = await client.threads.get_state(thread_id)
     result = as_json_object(state)
     # The SDK's `useStream` opens its live event subscription only when the
     # hydrated `getState()` looks active (`next` non-empty / absent). When a
