@@ -188,7 +188,9 @@ test("agent thread tools update the real threads UI", async ({ page }) => {
   await expect(
     page.getByText("Resolved the target thread through the thread tools."),
   ).toBeVisible({ timeout: 60_000 });
-  const worked = page.getByRole("button", { name: /^Worked(?: for .+)?$/ });
+  const worked = page.getByRole("button", {
+    name: /^Worked(?: for .+| · \d+ actions?)?$/,
+  });
   await expect(worked).toBeVisible();
   await worked.click();
   await expect(
