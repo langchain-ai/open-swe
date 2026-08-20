@@ -131,38 +131,27 @@ async function typeIntoComposer(page: Page, text: string) {
 }
 
 test.describe("Environments", () => {
-  test("an admin edits and deletes an environment in the dashboard", async ({
+  test("an admin views environments and editing instructions in Settings", async ({
     page,
   }) => {
     await loginAs(page, ADMIN);
     await deleteEnvironment(page, DRAFT_SLUG);
     await createEnvironment(page, DRAFT_NAME, "");
 
-    await page.goto("/agents/environments");
-    await expect(
-      page.getByRole("heading", { name: "Environments" }),
-    ).toBeVisible();
-    await expect(page.getByLabel("Add environment")).toHaveCount(0);
-    await expect(
-      page.getByText(/Create environments from an admin thread/),
-    ).toBeVisible();
+    await page.goto("/my-settings");
+    const section = page
+      .getByRole("heading", { name: "Environments" })
+      .locator("xpath=ancestor::section");
+    await expect(section).toBeVisible();
+    await expect(section.getByText(DRAFT_NAME)).toBeVisible();
+    await expect(section.getByText("No snapshot").first()).toBeVisible();
+    await expect(section.getByText(/enable admin mode/)).toBeVisible();
+    await expect(section.getByRole("button", { name: "Save" })).toHaveCount(0);
+    await expect(section.getByRole("button", { name: "Delete" })).toHaveCount(
+      0,
+    );
 
-    await page.getByRole("button", { name: new RegExp(DRAFT_NAME) }).click();
-    await expect(
-      page.getByText("draft — no run boots from this"),
-    ).toBeVisible();
-    await expect(page.getByText("No snapshot").first()).toBeVisible();
-
-    await page.getByLabel("Repositories").fill("fakeorg/demo, fakeorg/demo");
-    await page.getByRole("button", { name: "Save" }).click();
-
-    await expect
-      .poll(async () => (await findEnvironment(page, DRAFT_SLUG))?.repos)
-      .toEqual(["fakeorg/demo"]);
-
-    page.once("dialog", (dialog) => void dialog.accept());
-    await page.getByRole("button", { name: "Delete" }).click();
-    await expect.poll(() => findEnvironment(page, DRAFT_SLUG)).toBeUndefined();
+    await deleteEnvironment(page, DRAFT_SLUG);
   });
 
   test("a non-admin cannot reach the environments page or API", async ({
@@ -177,7 +166,8 @@ test.describe("Environments", () => {
     await expect(page).toHaveURL(/\/my-settings/);
     await expect(
       page.getByRole("heading", { name: "Environments" }),
-    ).toHaveCount(0);
+    ).toBeVisible();
+    await expect(page.getByText(/ask a workspace admin/)).toBeVisible();
 
     // No Admin toggle in the composer, so they cannot start an admin thread.
     await openNewAgentHome(page);
@@ -330,18 +320,13 @@ test.describe("Environments", () => {
     // Admin threads also carry the environment-management instructions.
     expect(systemPrompt).toContain("### Admin Thread: Environment Setup");
 
-    // The dashboard shows it as the environment runs boot from.
-    await page.goto("/agents/environments");
-    await page
-      .getByRole("button", { name: /default/ })
-      .first()
-      .click();
-    await expect(page.getByText("runs boot from this")).toBeVisible();
-    await expect(page.getByText(EXPECTED_SNAPSHOT_NAME)).toBeVisible();
+    await page.goto("/my-settings");
+    await expect(page.getByText("Default environment")).toBeVisible();
+    await expect(page.getByText("Snapshot ready")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Delete" })).toHaveCount(0);
 
     // Leave no default behind: later specs' runs would boot from it.
-    page.once("dialog", (dialog) => void dialog.accept());
-    await page.getByRole("button", { name: "Delete" }).click();
+    await deleteEnvironment(page, DEFAULT_SLUG);
     await expect
       .poll(() => findEnvironment(page, DEFAULT_SLUG))
       .toBeUndefined();

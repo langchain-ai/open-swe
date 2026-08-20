@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { AccountSection } from "@/features/settings/components/AccountSection"
 import { AppShell } from "@/components/AppShell"
 import { ConnectionsSection } from "@/features/settings/components/ConnectionsSection"
+import { EnvironmentsSection } from "@/features/settings/components/EnvironmentsSection"
 import { PersonalInstructionsSection } from "@/features/settings/components/PersonalInstructionsSection"
 import { PreferencesSection } from "@/features/settings/components/PreferencesSection"
 import { PullRequestsSection } from "@/features/settings/components/PullRequestsSection"
@@ -35,6 +36,7 @@ function MySettingsPage() {
       <AccountSection user={session.data} />
       <PreferencesSection />
       <PullRequestsSection />
+      <EnvironmentsSection isAdmin={session.data.is_admin} />
       <ConnectionsSection user={session.data} />
       <PersonalInstructionsSection />
     </AppShell>
