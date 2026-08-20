@@ -1,6 +1,7 @@
 import { memo } from "react"
 
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
+import { ToolResultBody } from "./ToolResultBody"
 
 export const ShellEntryBody = memo(function ShellEntryBody({
   chunk,
@@ -19,11 +20,7 @@ export const ShellEntryBody = memo(function ShellEntryBody({
           {command}
         </pre>
       )}
-      {output && (
-        <pre className="max-h-64 cursor-text overflow-auto font-mono text-[12px] leading-relaxed whitespace-pre text-muted-foreground select-text">
-          {output}
-        </pre>
-      )}
+      {output && <ToolResultBody value={output} />}
       {!output && chunk.status === "in_progress" && (
         <p className="font-mono text-[12px] text-muted-foreground">Running…</p>
       )}

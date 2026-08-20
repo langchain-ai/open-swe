@@ -20,6 +20,7 @@ import type { WorkEntryIconName, WorkEntryView } from "./workEntry"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { cn } from "@/lib/utils"
+import { ToolResultBody } from "./ToolResultBody"
 
 const ICONS: Record<WorkEntryIconName, typeof Bot> = {
   bot: Bot,
@@ -256,11 +257,10 @@ export function WorkEntryRow({
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          {body ?? (
-            <pre className="max-h-64 cursor-text overflow-auto font-mono text-[12px] leading-relaxed break-words whitespace-pre-wrap text-muted-foreground select-text">
-              {entry.expandedText}
-            </pre>
-          )}
+          {body ??
+            (entry.expandedText != null && (
+              <ToolResultBody value={entry.expandedText} />
+            ))}
         </div>
       )}
     </div>
