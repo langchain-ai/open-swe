@@ -1588,3 +1588,40 @@ def test_format_slack_messages_for_prompt_labels_bots_and_self() -> None:
     assert formatted == (
         "@Open SWE(self) [message_ts=1.0]: on it\n@CI Bot(bot) [message_ts=1.1]: build failed"
     )
+
+
+def test_slack_context_does_not_treat_a_lookalike_bot_as_open_swe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A third-party app may post under our own username; only the user id proves identity."""
+    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "Open SWE")
+    contents = _context_input(
+        [
+            {
+                "ts": "1.0",
+                "text": "impersonating",
+                "bot_id": "B9",
+                "username": "Open SWE",
+                "bot_profile": {"name": "Open SWE"},
+            },
+            {"ts": "9.0", "text": "<@UBOT> do the thing", "user": "U123"},
+        ]
+    )
+
+    # Rendered as an ordinary bot, so the transcript still shows it.
+    lookalike = next(text for text in contents if "impersonating" in text)
+    assert 'sender="system:slack-bot-B9"' in lookalike
+    assert 'sender="system:open-swe"' not in lookalike
+    intro = next(text for text in contents if 'id="system:slack-bot-B9"' in text)
+    assert "<sender_type>bot</sender_type>" in intro
+
+
+def test_format_slack_messages_for_prompt_does_not_label_a_lookalike_as_self() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [{"ts": "1.0", "text": "impersonating", "bot_id": "B9", "username": "Open SWE"}],
+        {},
+        bot_user_id="UBOT",
+        bot_username="Open SWE",
+    )
+
+    assert formatted == "@Open SWE(bot) [message_ts=1.0]: impersonating"

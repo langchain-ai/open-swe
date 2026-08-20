@@ -349,7 +349,7 @@ def _slack_sender(
     Open SWE posts with a bot token, so its own replies carry a ``user`` id as well as a
     ``bot_id``; keying off ``user`` alone attributes them to a person.
     """
-    if slack_utils.is_own_slack_message(message, bot_user_id, common.SLACK_BOT_USERNAME):
+    if slack_utils.is_own_slack_message(message, bot_user_id):
         identity: SystemIdentity = {
             "id": _OPEN_SWE_SENDER_ID,
             "display_name": common.SLACK_BOT_USERNAME or "Open SWE",

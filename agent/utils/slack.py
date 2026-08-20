@@ -117,13 +117,14 @@ def slack_message_bot_name(message: dict[str, Any]) -> str:
     return "Bot"
 
 
-def is_own_slack_message(message: dict[str, Any], bot_user_id: str, bot_username: str = "") -> bool:
-    """Whether Open SWE itself posted this Slack message."""
-    if bot_user_id and message.get("user") == bot_user_id:
-        return True
-    if not slack_message_bot_id(message):
-        return False
-    return bool(bot_username) and slack_message_bot_name(message) == bot_username
+def is_own_slack_message(message: dict[str, Any], bot_user_id: str) -> bool:
+    """Whether Open SWE itself posted this Slack message.
+
+    Only the authoring user id proves it. A display name cannot: any app may post
+    under our configured username, and treating that as proof would hide a third
+    party's message from the transcript and attribute it to us.
+    """
+    return bool(bot_user_id) and message.get("user") == bot_user_id
 
 
 def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username: str) -> str:
@@ -336,7 +337,7 @@ def format_slack_messages_for_prompt(
             bot_username=bot_username,
         ).strip() or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
-        if is_own_slack_message(message, bot_user_id, bot_username):
+        if is_own_slack_message(message, bot_user_id):
             author = f"@{bot_username or 'Open SWE'}(self)"
         elif slack_message_bot_id(message):
             author = f"@{slack_message_bot_name(message)}(bot)"
