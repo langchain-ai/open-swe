@@ -151,4 +151,18 @@ test("branch diff reports only what the branch committed", async (t) => {
 
   assert.equal((await readBranchDiff(repo, "no-such-branch")).status, "missing")
   assert.equal((await readBranchDiff(repo, "--upload-pack=touch")).status, "missing")
+
+  // The thread's branch is reported even while another one holds the checkout.
+  await checkoutBranch(dir, "main")
+  fs.writeFileSync(path.join(dir, "search.ts"), "search\nmain work\n")
+  git(dir, ["add", "-A"])
+  git(dir, ["commit", "-qm", "main work"])
+
+  const fromElsewhere = await readBranchDiff(repo, "main", "feature")
+  assert.deepEqual(
+    fromElsewhere.files.map((file) => file.path),
+    ["models.ts"]
+  )
+  assert.equal((await readBranchDiff(repo, "main", "no-such-branch")).status, "missing")
+  assert.equal((await readBranchDiff(repo, "main", "--upload-pack=touch")).status, "missing")
 })

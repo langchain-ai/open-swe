@@ -166,7 +166,31 @@ async function recordLocalCheckpoint(thread) {
   if (!repo) return thread;
   const ref = checkpointRef(thread.id);
   await captureCheckpoint(repo, ref);
-  return localThreadStore.setCheckpoint(thread.id, { repo, ref });
+  const branch = await currentBranch(repo);
+  return localThreadStore.setCheckpoint(thread.id, { repo, ref, branch });
+}
+
+/**
+ * Remember which branch this thread is working on. Sessions share one worktree,
+ * so the checked-out branch only belongs to a thread while that thread has it:
+ * record it then, and read the recorded value afterwards.
+ */
+async function syncThreadBranch(thread) {
+  if (!thread?.checkpoint.repo) return thread;
+  const branch = await currentBranch(thread.checkpoint.repo);
+  if (!branch || branch === thread.checkpoint.branch) return thread;
+  return (
+    localThreadStore.setCheckpoint(thread.id, {
+      ...thread.checkpoint,
+      branch,
+    }) ?? thread
+  );
+}
+
+/** A running thread owns the checkout, so its branch can still be changing. */
+async function diffThread(threadId) {
+  const thread = localThreadStore.get(threadId);
+  return thread?.status === "running" ? syncThreadBranch(thread) : thread;
 }
 
 function configureDesktopIpc() {
@@ -295,14 +319,15 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return localThreadStore.list();
   });
-  ipcMain.handle("desktop:update-local-thread", (event, input) => {
+  ipcMain.handle("desktop:update-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
-    return localThreadStore.update(input?.threadId, {
+    const updated = localThreadStore.update(input?.threadId, {
       status: input?.status,
       ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
       ...(typeof input?.modelId === "string" ? { modelId: input.modelId } : {}),
       ...(typeof input?.effort === "string" ? { effort: input.effort } : {}),
     });
+    return syncThreadBranch(updated);
   });
   ipcMain.handle("desktop:delete-local-thread", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
@@ -323,7 +348,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:get-local-diff", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(threadId);
+    const thread = await diffThread(threadId);
     if (
       !thread ||
       !registeredProject(thread.cwd) ||
@@ -334,7 +359,11 @@ function configureDesktopIpc() {
     try {
       const [diff, repository] = await Promise.all([
         readDiff(thread.checkpoint.repo, thread.checkpoint.ref),
-        repositoryMetadata(thread.checkpoint.repo),
+        repositoryMetadata(
+          thread.checkpoint.repo,
+          undefined,
+          thread.checkpoint.branch,
+        ),
       ]);
       return { ...diff, repository };
     } catch {
@@ -343,16 +372,21 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:get-local-pr-diff", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(threadId);
+    const thread = await diffThread(threadId);
     if (!thread || !registeredProject(thread.cwd) || !thread.checkpoint.repo)
       return { status: "missing", files: [], truncated: false };
     try {
-      const repository = await repositoryMetadata(thread.checkpoint.repo);
+      const repository = await repositoryMetadata(
+        thread.checkpoint.repo,
+        undefined,
+        thread.checkpoint.branch,
+      );
       if (!repository.pr)
         return { status: "missing", files: [], truncated: false, repository };
       const diff = await readBranchDiff(
         thread.checkpoint.repo,
         repository.pr.baseRef,
+        thread.checkpoint.branch,
       );
       return { ...diff, repository };
     } catch {

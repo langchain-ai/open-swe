@@ -122,7 +122,7 @@ function parsePullRequest(raw) {
   }
 }
 
-async function pullRequest(repo, env) {
+async function pullRequest(repo, env, branch = null) {
   try {
     const output = await new Promise<string>((resolve, reject) => {
       execFile(
@@ -130,6 +130,7 @@ async function pullRequest(repo, env) {
         [
           "pr",
           "view",
+          ...(branch ? [branch] : []),
           "--json",
           "number,title,state,isDraft,headRefName,baseRefName,url,author,createdAt,additions,deletions,changedFiles",
         ],
@@ -149,9 +150,15 @@ async function pullRequest(repo, env) {
   }
 }
 
-async function repositoryMetadata(repo, env) {
-  const branch = await currentBranch(repo)
-  return { branch, pr: branch ? await pullRequest(repo, env) : null }
+/**
+ * `threadBranch` is the branch the thread last worked on. Every session in the
+ * project shares one worktree, so the branch that happens to be checked out
+ * right now is not necessarily the one this thread's pull request belongs to.
+ */
+async function repositoryMetadata(repo, env, threadBranch = null) {
+  const named = await validBranchName(repo, threadBranch)
+  const branch = named ?? (await currentBranch(repo))
+  return { branch, pr: branch ? await pullRequest(repo, env, named) : null }
 }
 
 function gitStdin(cwd, args, input) {
@@ -376,14 +383,22 @@ async function readDiff(repo, base, headish = null) {
 }
 
 /** First ref spec that resolves to a commit, preferring the pushed remote. */
-async function resolveBaseRef(repo, baseRef) {
-  if (typeof baseRef !== "string" || !baseRef.trim()) return null
-  const name = baseRef.trim()
+/** A branch name safe to pass as a positional argument, or null. */
+async function validBranchName(repo, branch) {
+  if (typeof branch !== "string" || !branch.trim()) return null
+  const name = branch.trim()
+  if (name.startsWith("-")) return null
   try {
     await git(repo, ["check-ref-format", "--branch", name], null, 5_000)
   } catch {
     return null
   }
+  return name
+}
+
+async function resolveBaseRef(repo, baseRef) {
+  const name = await validBranchName(repo, baseRef)
+  if (!name) return null
   for (const spec of [`origin/${name}`, name]) {
     try {
       return text(await git(repo, ["rev-parse", "--verify", "-q", `${spec}^{commit}`], null, 5_000))
@@ -393,17 +408,31 @@ async function resolveBaseRef(repo, baseRef) {
 }
 
 /**
- * What the current branch has *committed* on top of `baseRef` — the pull
- * request's own content. Committed refs only: the worktree is shared with
- * every other session in the project, so its uncommitted state says nothing
- * about which thread made a change.
+ * What `headRef` has *committed* on top of `baseRef` — the pull request's own
+ * content. Committed refs only: the worktree is shared with every other
+ * session in the project, so its uncommitted state says nothing about which
+ * thread made a change. `headRef` defaults to the checkout only when the
+ * thread's own branch is unknown.
  */
-async function readBranchDiff(repo, baseRef) {
+async function readBranchDiff(repo, baseRef, headRef = null) {
+  const missing = { status: "missing", files: [], truncated: false }
   const base = await resolveBaseRef(repo, baseRef)
-  if (!base) return { status: "missing", files: [], truncated: false }
-  const mergeBase = text(await git(repo, ["merge-base", base, "HEAD"], null, 10_000))
-  if (!mergeBase) return { status: "missing", files: [], truncated: false }
-  return readDiff(repo, mergeBase, "HEAD")
+  if (!base) return missing
+  const named = await validBranchName(repo, headRef)
+  let head = "HEAD"
+  if (named) {
+    try {
+      head = text(await git(repo, ["rev-parse", "--verify", "-q", `${named}^{commit}`], null, 5_000))
+    } catch {
+      return missing
+    }
+    if (!head) return missing
+  } else if (headRef) {
+    return missing
+  }
+  const mergeBase = text(await git(repo, ["merge-base", base, head], null, 10_000))
+  if (!mergeBase) return missing
+  return readDiff(repo, mergeBase, head)
 }
 
 module.exports = {

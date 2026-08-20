@@ -72,8 +72,9 @@ function normalizeThread(value) {
     ? {
         repo: stringOrNull(value.checkpoint.repo, 8_192),
         ref: stringOrNull(value.checkpoint.ref, 1_024),
+        branch: stringOrNull(value.checkpoint.branch, 1_024),
       }
-    : { repo: null, ref: null }
+    : { repo: null, ref: null, branch: null }
   const pending = isRecord(value.pending)
     ? {
         prompt: stringOrNull(value.pending.prompt, 2_000_000) || "",
@@ -172,7 +173,7 @@ class LocalThreadStore {
       viewed: true,
       createdAt: now,
       updatedAt: now,
-      checkpoint: { repo: null, ref: null },
+      checkpoint: { repo: null, ref: null, branch: null },
       pending: { prompt, images: cleanImages(input.images), skills: cleanSkills(input.skills) },
     }
     this.threads.set(thread.id, thread)
@@ -213,7 +214,11 @@ class LocalThreadStore {
     if (!current) return null
     const next = {
       ...current,
-      checkpoint: { repo: checkpoint.repo, ref: checkpoint.ref },
+      checkpoint: {
+        repo: checkpoint.repo,
+        ref: checkpoint.ref,
+        branch: stringOrNull(checkpoint.branch, 1_024),
+      },
       updatedAt: this.now(),
     }
     this.threads.set(id, next)
