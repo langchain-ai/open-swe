@@ -5,7 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 
 import { agentsApi } from "./api"
 import type { QueryClient } from "@tanstack/react-query"
@@ -340,17 +340,38 @@ export function useAgentThreadTurnDiff(
   threadId: string,
   turnKey: string | null,
   enabled: boolean,
-  options: ThreadTurnDiffOptions = {}
+  options: ThreadTurnDiffOptions = {},
+  pollWhileRunning = false
 ) {
-  return useQuery({
-    queryKey: agentThreadKeys.turnDiff(threadId, turnKey, options),
+  const queryKey = agentThreadKeys.turnDiff(threadId, turnKey, options)
+  const query = useQuery({
+    queryKey,
     queryFn: () => agentsApi.getThreadTurnDiff(threadId, turnKey, options),
     enabled: enabled && Boolean(threadId),
     staleTime: 30_000,
-    refetchInterval: (query) =>
-      query.state.data?.status === "ready" ? false : 3000,
+    refetchInterval: pollWhileRunning
+      ? 3000
+      : (query) => (query.state.data?.status === "ready" ? false : 3000),
     retry: false,
   })
+
+  const { refetch } = query
+  const previous = useRef({ enabled, pollWhileRunning })
+  useEffect(() => {
+    const was = previous.current
+    previous.current = { enabled, pollWhileRunning }
+    const finishedWhileVisible =
+      was.enabled && was.pollWhileRunning && enabled && !pollWhileRunning
+    if (finishedWhileVisible) {
+      const timers = [0, 1000, 3000].map((delay) =>
+        window.setTimeout(() => void refetch(), delay)
+      )
+      return () => timers.forEach(window.clearTimeout)
+    }
+    if (!was.enabled && enabled && !pollWhileRunning) void refetch()
+  }, [enabled, pollWhileRunning, refetch])
+
+  return query
 }
 
 export function useWorkflowApprovals(

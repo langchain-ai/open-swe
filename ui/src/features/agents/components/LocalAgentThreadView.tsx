@@ -1,13 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
-import {
-  CircleAlert,
-  FolderOpen,
-  GitPullRequestIcon,
-  RefreshCwIcon,
-  X,
-} from "lucide-react"
+import { CircleAlert, FolderOpen, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
 import type {
@@ -23,16 +17,18 @@ import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import {
   AgentPanelShell,
   PANEL_MIN_CHAT_WIDTH,
-  PanelComingSoon,
 } from "@/features/agents/components/AgentPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
-import {
-  DiffFilesView,
-  toPanelFiles,
-} from "@/features/agents/components/DiffFilesView"
+import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
+import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
-import { usePanelTabs } from "@/features/agents/lib/panelTabs"
+import {
+  AGENT_COMMON_TABS,
+  AGENT_PANEL_KINDS,
+  CHANGES_TAB,
+  usePanelTabs,
+} from "@/features/agents/lib/panelTabs"
 import { useAgentSkills } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
@@ -50,13 +46,6 @@ import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
-
-const LOCAL_PANEL_KINDS: ReadonlyArray<PanelTabKind> = [
-  "review",
-  "terminal",
-  "browser",
-  "files",
-]
 
 function promptContent(text: string, images: Array<ImageChunk>) {
   const trimmed = text.trim()
@@ -116,7 +105,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(sessionId)
   )
-  const panel = usePanelTabs(sessionId)
+  const panel = usePanelTabs(sessionId, AGENT_COMMON_TABS)
   const terminals = useTerminalGroups(
     { kind: "local", sessionId },
     thread?.cwd ?? ""
@@ -133,7 +122,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const handleOpenFile = useCallback(
     (filePath: string) => {
       setRevealFilePath(filePath)
-      panel.open({ id: "review", kind: "review" })
+      panel.open(CHANGES_TAB)
       handlePanelCollapsedChange(false)
     },
     [handlePanelCollapsedChange, panel]
@@ -141,13 +130,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const handleOpenKind = useCallback(
     (kind: PanelTabKind) => {
       if (kind !== "terminal") {
-        panel.open({ id: kind, kind })
+        panel.open(CHANGES_TAB)
         return
       }
       panel.open({ id: terminals.addGroup(), kind })
     },
     [panel, terminals]
   )
+  const activePanelTabId = panel.activeTabId
   const handleSelectTab = useCallback(
     (id: string) => {
       panel.select(id)
@@ -161,6 +151,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
   const handleCloseTab = useCallback(
     async (id: string) => {
+      if (id === "changes") return
       if (
         panel.tabs.find((tab) => tab.id === id)?.kind === "terminal" &&
         !(await terminals.closeGroup(id))
@@ -205,7 +196,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             {
               id: "toggle-work-panel",
               label: "Toggle work panel",
-              aliases: ["show panel", "hide panel", "review panel"],
+              aliases: ["show panel", "hide panel", "changes panel"],
               shortcuts: ["mod+alt+b"],
               group: "Workspace",
               run: () => handlePanelCollapsedChange(!panelCollapsed),
@@ -227,7 +218,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const isRunning = stream.isLoading || thread?.status === "running"
   const diff = useLocalThreadDiff(
     sessionId,
-    !panelCollapsed && panel.activeTab?.kind === "review" && Boolean(thread),
+    !panelCollapsed && activePanelTabId === "changes" && Boolean(thread),
     isRunning
   )
   const files = useMemo(
@@ -236,30 +227,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
   const repository = diff.data?.repository
   const pr = repository?.pr
-  const diffActions = (
-    <>
-      <button
-        type="button"
-        aria-label="Refresh changes"
-        title="Refresh changes"
-        onClick={() => void diff.refetch()}
-        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-      >
-        <RefreshCwIcon className="size-3.5" />
-      </button>
-      {pr && (
-        <a
-          href={pr.url}
-          target="_blank"
-          rel="noreferrer"
-          className="flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-        >
-          <GitPullRequestIcon className="size-3.5" />
-          View PR
-        </a>
-      )}
-    </>
-  )
   const messages = useMemo(
     () =>
       streamMessagesToUi(
@@ -529,36 +496,31 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             ? { ...tab, title: terminalTabTitle(terminals, tab.id) }
             : tab
         )}
-        activeTabId={panel.activeTabId}
+        activeTabId={activePanelTabId}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
         onOpenKind={handleOpenKind}
-        menuKinds={LOCAL_PANEL_KINDS}
+        menuKinds={AGENT_PANEL_KINDS}
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
       >
         {({ fullScreen }) => (
           <>
-            {panel.activeTab?.kind === "review" && (
-              <DiffFilesView
+            {activePanelTabId === "changes" && (
+              <ChangesPanel
                 files={files}
+                status={diff.data?.status}
+                isLoading={diff.isPending}
+                isFetching={diff.isFetching}
+                error={diff.error}
+                truncated={diff.data?.truncated}
+                branch={repository?.branch}
+                pr={pr}
                 revealFilePath={revealFilePath}
                 fullScreen={fullScreen}
-                emptyLabel={localDiffEmptyLabel(
-                  diff.data?.status,
-                  diff.isPending
-                )}
-                truncated={diff.data?.truncated}
-                leading={
-                  <span className="min-w-0 truncate text-sm font-medium text-foreground">
-                    Branch{repository?.branch ? ` · ${repository.branch}` : ""}
-                  </span>
-                }
-                actions={diffActions}
+                onRefresh={() => void diff.refetch()}
               />
             )}
-            {(panel.activeTab?.kind === "browser" ||
-              panel.activeTab?.kind === "files") && <PanelComingSoon />}
             {/* Kept mounted across tabs: unmounting kills the user's shell. */}
             {panel.tabs
               .filter((tab) => tab.kind === "terminal")
@@ -567,7 +529,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   key={tab.id}
                   className={cn(
                     "min-h-0 flex-1",
-                    tab.id !== panel.activeTabId && "hidden"
+                    tab.id !== activePanelTabId && "hidden"
                   )}
                 >
                   <TerminalPanel
@@ -605,14 +567,4 @@ function terminalTabTitle(
     (terminalId ? terminals.metadataById.get(terminalId)?.label : null) ||
     "Terminal"
   )
-}
-
-function localDiffEmptyLabel(
-  status: string | undefined,
-  isPending: boolean
-): string {
-  if (isPending) return "Reading changes…"
-  if (status === "missing") return "This project is not a git repository."
-  if (status === "error") return "Could not read this project's git changes."
-  return "No changes yet."
 }

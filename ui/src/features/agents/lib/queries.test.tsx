@@ -5,8 +5,12 @@ import { render, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { agentsApi } from "./api"
-import { agentThreadKeys, useThreadsPage } from "./queries"
-import type { ThreadsPage, ThreadsPageParams } from "./api"
+import {
+  agentThreadKeys,
+  useAgentThreadTurnDiff,
+  useThreadsPage,
+} from "./queries"
+import type { ThreadTurnDiff, ThreadsPage, ThreadsPageParams } from "./api"
 
 const params: ThreadsPageParams = {
   limit: 100,
@@ -28,6 +32,122 @@ afterEach(() => {
   for (const client of clients) client.clear()
   clients.length = 0
   vi.restoreAllMocks()
+})
+
+describe("useAgentThreadTurnDiff", () => {
+  const diff: ThreadTurnDiff = {
+    status: "ready",
+    truncated: false,
+    summary: { files: 0, additions: 0, deletions: 0 },
+    files: [],
+  }
+
+  function Probe({
+    running,
+    enabled = true,
+  }: {
+    running: boolean
+    enabled?: boolean
+  }) {
+    useAgentThreadTurnDiff("thread-1", null, enabled, {}, running)
+    return null
+  }
+
+  function renderProbe(running: boolean, enabled = true) {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    clients.push(client)
+    return render(
+      <QueryClientProvider client={client}>
+        <Probe running={running} enabled={enabled} />
+      </QueryClientProvider>
+    )
+  }
+
+  it("keeps polling ready cloud diffs while the run is active", async () => {
+    vi.useFakeTimers()
+    const getDiff = vi
+      .spyOn(agentsApi, "getThreadTurnDiff")
+      .mockResolvedValue(diff)
+
+    renderProbe(true)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(3000)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(2))
+  })
+
+  it("refreshes immediately and twice after a running cloud diff finishes", async () => {
+    vi.useFakeTimers()
+    const getDiff = vi
+      .spyOn(agentsApi, "getThreadTurnDiff")
+      .mockResolvedValue(diff)
+    const view = renderProbe(true)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))
+
+    view.rerender(
+      <QueryClientProvider client={clients.at(-1)!}>
+        <Probe running={false} />
+      </QueryClientProvider>
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(2))
+    await vi.advanceTimersByTimeAsync(1000)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(3))
+    await vi.advanceTimersByTimeAsync(2000)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(4))
+  })
+
+  it("refetches a fresh cached diff when enabled after the run finished", async () => {
+    vi.useFakeTimers()
+    const getDiff = vi
+      .spyOn(agentsApi, "getThreadTurnDiff")
+      .mockResolvedValue(diff)
+    const view = renderProbe(true)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))
+
+    view.rerender(
+      <QueryClientProvider client={clients.at(-1)!}>
+        <Probe running enabled={false} />
+      </QueryClientProvider>
+    )
+    view.rerender(
+      <QueryClientProvider client={clients.at(-1)!}>
+        <Probe running={false} enabled={false} />
+      </QueryClientProvider>
+    )
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(getDiff).toHaveBeenCalledTimes(1)
+
+    view.rerender(
+      <QueryClientProvider client={clients.at(-1)!}>
+        <Probe running={false} enabled />
+      </QueryClientProvider>
+    )
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(2))
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(getDiff).toHaveBeenCalledTimes(2)
+  })
+
+  it("cleans delayed final refreshes on unmount", async () => {
+    vi.useFakeTimers()
+    const getDiff = vi
+      .spyOn(agentsApi, "getThreadTurnDiff")
+      .mockResolvedValue(diff)
+    const view = renderProbe(true)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))
+
+    view.rerender(
+      <QueryClientProvider client={clients.at(-1)!}>
+        <Probe running={false} />
+      </QueryClientProvider>
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(2))
+    view.unmount()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(getDiff).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe("useThreadsPage", () => {
