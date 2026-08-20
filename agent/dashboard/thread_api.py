@@ -31,6 +31,7 @@ from ..utils.json_types import (
     thread_metadata,
 )
 from ..utils.langsmith import get_langsmith_trace_url
+from ..utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
 from ..utils.slack import (
     lookup_slack_thread_run_mapping,
     parse_github_pr_url,
@@ -162,6 +163,13 @@ class ThreadMessageBody(BaseModel):
 
 class ThreadResolveBody(BaseModel):
     resolved: bool = True
+
+
+class WorkspaceFileWriteBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, max_length=4096)
+    content: str = Field(max_length=1_000_000)
 
 
 def _normalize_model_choice(
@@ -2348,6 +2356,131 @@ async def get_dashboard_thread_turn_diff(
         include_content=include_content,
         repo_path=repo_path if isinstance(repo_path, str) else None,
     )
+
+
+_WORKSPACE_FILE_MAX_LINES = 20_000
+_WORKSPACE_FILE_MAX_BYTES = 1_000_000
+_WORKSPACE_LIST_MAX_ENTRIES = 2_000
+
+
+def _workspace_relative_path(value: str, *, allow_root: bool = False) -> str:
+    if not isinstance(value, str) or "\x00" in value or "\\" in value:
+        raise HTTPException(400, "invalid workspace path")
+    stripped = value.strip().strip("/")
+    normalized = posixpath.normpath(stripped or ".")
+    if normalized == "." and allow_root:
+        return normalized
+    if normalized in {"", "."} or normalized == ".." or normalized.startswith("../"):
+        raise HTTPException(400, "invalid workspace path")
+    if any(part in {".git", ".env"} or part.startswith(".env.") for part in normalized.split("/")):
+        raise HTTPException(403, "workspace path is not available")
+    return normalized
+
+
+def _result_value(value: Any, key: str) -> Any:
+    return value.get(key) if isinstance(value, Mapping) else getattr(value, key, None)
+
+
+async def _workspace_backend(
+    thread_id: str, login: str, *, email: str | None = None
+) -> tuple[Any, str]:
+    metadata = await _authorized_thread_metadata(thread_id, login, email=email)
+    sandbox_id = metadata.get("sandbox_id")
+    if not isinstance(sandbox_id, str) or not sandbox_id:
+        raise HTTPException(404, "thread workspace is not available")
+    try:
+        backend = await create_sandbox(sandbox_id)
+        repo_name = metadata.get("repo_name")
+        root = (
+            await aresolve_repo_dir(backend, repo_name)
+            if isinstance(repo_name, str) and posixpath.basename(repo_name) == repo_name
+            else await aresolve_sandbox_work_dir(backend)
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not connect to workspace for %s", thread_id, exc_info=True)
+        raise HTTPException(502, "could not connect to thread workspace") from exc
+    return backend, root
+
+
+async def list_dashboard_workspace_files(
+    thread_id: str, login: str, *, path: str = ".", email: str | None = None
+) -> dict[str, Any]:
+    relative = _workspace_relative_path(path, allow_root=True)
+    backend, root = await _workspace_backend(thread_id, login, email=email)
+    result = await backend.als(root if relative == "." else posixpath.join(root, relative))
+    error = _result_value(result, "error")
+    if error:
+        raise HTTPException(404, "workspace directory not found")
+    entries = _result_value(result, "entries")
+    if not isinstance(entries, list):
+        return {"path": relative, "entries": [], "truncated": False}
+    projected: list[dict[str, Any]] = []
+    for entry in entries[:_WORKSPACE_LIST_MAX_ENTRIES]:
+        entry_path = _result_value(entry, "path")
+        if not isinstance(entry_path, str):
+            continue
+        entry_relative = posixpath.relpath(entry_path, root)
+        try:
+            entry_relative = _workspace_relative_path(entry_relative)
+        except HTTPException:
+            continue
+        projected.append(
+            {
+                "path": entry_relative,
+                "name": posixpath.basename(entry_relative),
+                "isDirectory": _result_value(entry, "is_dir") is True,
+                "size": _result_value(entry, "size"),
+                "modifiedAt": _result_value(entry, "modified_at"),
+            }
+        )
+    projected.sort(key=lambda item: (not item["isDirectory"], item["name"].lower()))
+    return {
+        "path": relative,
+        "entries": projected,
+        "truncated": len(entries) > _WORKSPACE_LIST_MAX_ENTRIES,
+    }
+
+
+async def read_dashboard_workspace_file(
+    thread_id: str, login: str, *, path: str, email: str | None = None
+) -> dict[str, Any]:
+    relative = _workspace_relative_path(path)
+    backend, root = await _workspace_backend(thread_id, login, email=email)
+    result = await backend.aread(
+        posixpath.join(root, relative), offset=0, limit=_WORKSPACE_FILE_MAX_LINES
+    )
+    error = _result_value(result, "error")
+    data = _result_value(result, "file_data")
+    if error or data is None:
+        raise HTTPException(404, "workspace file not found")
+    encoding = _result_value(data, "encoding")
+    content = _result_value(data, "content")
+    if encoding != "utf-8" or not isinstance(content, str):
+        return {"path": relative, "content": None, "binary": True, "truncated": False}
+    encoded_size = len(content.encode("utf-8"))
+    if (
+        encoded_size > _WORKSPACE_FILE_MAX_BYTES
+        or content.count("\n") + 1 >= _WORKSPACE_FILE_MAX_LINES
+    ):
+        return {"path": relative, "content": None, "binary": False, "truncated": True}
+    return {"path": relative, "content": content, "binary": False, "truncated": False}
+
+
+async def write_dashboard_workspace_file(
+    thread_id: str,
+    login: str,
+    body: WorkspaceFileWriteBody,
+    *,
+    email: str | None = None,
+) -> dict[str, Any]:
+    relative = _workspace_relative_path(body.path)
+    if len(body.content.encode("utf-8")) > _WORKSPACE_FILE_MAX_BYTES:
+        raise HTTPException(413, "workspace file is too large")
+    backend, root = await _workspace_backend(thread_id, login, email=email)
+    result = await backend.awrite(posixpath.join(root, relative), body.content)
+    if _result_value(result, "error"):
+        raise HTTPException(400, "workspace file could not be saved")
+    return {"path": relative, "saved": True}
 
 
 async def get_dashboard_thread_pr_diff(

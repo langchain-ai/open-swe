@@ -4,7 +4,16 @@ import {
   ArrowsOutIcon,
   SidebarSimpleIcon,
 } from "@phosphor-icons/react"
-import { FileDiff, Plus, SquareTerminal, X } from "lucide-react"
+import {
+  ExternalLink,
+  File,
+  FileDiff,
+  Files,
+  Globe2,
+  Plus,
+  SquareTerminal,
+  X,
+} from "lucide-react"
 
 import type { PanelTab, PanelTabKind } from "@/features/agents/lib/panelTabs"
 import { isMultiInstanceKind } from "@/features/agents/lib/panelTabs"
@@ -20,6 +29,10 @@ const PANEL_TAB_META: Record<
 > = {
   changes: { label: "Changes", hint: "⌃⇧G", Icon: FileDiff },
   terminal: { label: "Terminal", Icon: SquareTerminal },
+  files: { label: "Files", hint: "F", Icon: Files },
+  file: { label: "File", Icon: File },
+  browser: { label: "Browser", hint: "B", Icon: Globe2 },
+  "pull-request": { label: "Pull request", hint: "P", Icon: ExternalLink },
 }
 
 const PANEL_STORAGE_WIDTH = "open-swe.gitpanel.width"
@@ -177,27 +190,74 @@ function PanelLauncher({
   kinds: ReadonlyArray<PanelTabKind>
   onOpen: (kind: PanelTabKind) => void
 }) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (
+        event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        target?.matches("input, textarea, select, [contenteditable='true']")
+      )
+        return
+      const kind = kinds.find((candidate) =>
+        candidate === "browser"
+          ? event.key.toLowerCase() === "b"
+          : candidate === "terminal"
+            ? event.key.toLowerCase() === "t"
+            : candidate === "files"
+              ? event.key.toLowerCase() === "f"
+              : candidate === "changes"
+                ? event.key.toLowerCase() === "d"
+                : candidate === "pull-request"
+                  ? event.key.toLowerCase() === "p"
+                  : false
+      )
+      if (kind) {
+        event.preventDefault()
+        onOpen(kind)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [kinds, onOpen])
   return (
-    <div className="flex min-h-0 flex-1 flex-col justify-center gap-1 p-3">
-      {kinds.map((kind) => {
-        const { label, hint, Icon } = PANEL_TAB_META[kind]
-        return (
-          <button
-            key={kind}
-            type="button"
-            onClick={() => onOpen(kind)}
-            className="flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-foreground transition-colors hover:bg-accent"
-          >
-            <Icon className="size-4 text-muted-foreground" />
-            <span>{label}</span>
-            {hint && (
-              <span className="ml-auto text-xs tracking-widest text-muted-foreground/60">
-                {hint}
+    <div className="flex min-h-0 flex-1 flex-col justify-center p-5">
+      <div className="mx-auto grid w-full max-w-xl grid-cols-2 overflow-hidden rounded-xl border border-border">
+        {kinds.map((kind) => {
+          const { label, hint, Icon } = PANEL_TAB_META[kind]
+          return (
+            <button
+              key={kind}
+              type="button"
+              onClick={() => onOpen(kind)}
+              className="flex min-h-24 flex-col items-start gap-2 border-r border-b border-border p-4 text-sm text-foreground transition-colors hover:bg-accent"
+            >
+              <span className="flex w-full items-center gap-2">
+                <Icon className="size-4 text-muted-foreground" />
+                <span>{label}</span>
               </span>
-            )}
-          </button>
-        )
-      })}
+              <span className="text-left text-xs text-muted-foreground">
+                {kind === "browser"
+                  ? "Open a local app or URL."
+                  : kind === "terminal"
+                    ? "Start a shell in this workspace."
+                    : kind === "files"
+                      ? "Browse and edit workspace files."
+                      : kind === "changes"
+                        ? "Review worktree changes."
+                        : "Open the current pull request."}
+              </span>
+              {hint && (
+                <span className="ml-auto text-xs tracking-widest text-muted-foreground/60">
+                  {hint}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -206,7 +266,7 @@ interface AgentPanelShellProps {
   tabs: ReadonlyArray<PanelTab>
   activeTabId: string | null
   onSelectTab: (id: string) => void
-  onCloseTab?: (id: string) => void
+  onCloseTab?: (id: string) => void | Promise<void>
   onOpenKind?: (kind: PanelTabKind) => void
   /** Kinds offered by the launcher and the "+" menu. */
   menuKinds: ReadonlyArray<PanelTabKind>
@@ -234,11 +294,26 @@ export function AgentPanelShell({
 }: AgentPanelShellProps) {
   const [width, setWidthState] = useState(() => readStoredPanelWidth())
   const [fullScreen, setFullScreen] = useState(false)
+  const [tabMenu, setTabMenu] = useState<{
+    id: string
+    x: number
+    y: number
+  } | null>(null)
   const isMobile = useIsMobile()
   // On mobile the panel is never an inline resizable column — it's a full-screen
   // overlay that the user navigates to (and back from), like the sidebar.
   const overlay = fullScreen || isMobile
   const panelRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!tabMenu) return
+    const close = () => setTabMenu(null)
+    window.addEventListener("pointerdown", close)
+    window.addEventListener("blur", close)
+    return () => {
+      window.removeEventListener("pointerdown", close)
+      window.removeEventListener("blur", close)
+    }
+  }, [tabMenu])
 
   const applyWidth = useCallback(
     (next: number) => {
@@ -325,6 +400,24 @@ export function AgentPanelShell({
                     "flex min-w-0 items-center rounded-md",
                     active && "bg-accent"
                   )}
+                  onAuxClick={(event) => {
+                    if (
+                      event.button === 1 &&
+                      onCloseTab &&
+                      tab.closable !== false
+                    ) {
+                      event.preventDefault()
+                      onCloseTab(tab.id)
+                    }
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault()
+                    setTabMenu({
+                      id: tab.id,
+                      x: event.clientX,
+                      y: event.clientY,
+                    })
+                  }}
                 >
                   <button
                     type="button"
@@ -420,6 +513,45 @@ export function AgentPanelShell({
           onResize={applyWidth}
           onResizeEnd={commitWidth}
         />
+      )}
+      {tabMenu && onCloseTab && (
+        <div
+          role="menu"
+          className="fixed z-[1000] min-w-40 rounded-md border border-border bg-popover p-1 text-xs text-popover-foreground shadow-lg"
+          style={{ left: tabMenu.x, top: tabMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {[
+            { label: "Close", ids: [tabMenu.id] },
+            {
+              label: "Close others",
+              ids: tabs
+                .filter((tab) => tab.id !== tabMenu.id)
+                .map((tab) => tab.id),
+            },
+            {
+              label: "Close to the right",
+              ids: tabs
+                .slice(tabs.findIndex((tab) => tab.id === tabMenu.id) + 1)
+                .map((tab) => tab.id),
+            },
+            { label: "Close all", ids: tabs.map((tab) => tab.id) },
+          ].map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              role="menuitem"
+              disabled={action.ids.length === 0}
+              className="flex w-full rounded px-2 py-1.5 text-left hover:bg-accent disabled:opacity-40"
+              onClick={() => {
+                setTabMenu(null)
+                for (const id of action.ids) void onCloseTab(id)
+              }}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
       )}
     </aside>
   )

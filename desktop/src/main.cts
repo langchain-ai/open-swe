@@ -160,6 +160,104 @@ function resolveLocalProjectPath(localSessionId, value) {
   }
 }
 
+const WORKSPACE_FILE_MAX_BYTES = 1_000_000;
+const WORKSPACE_LIST_MAX_ENTRIES = 2_000;
+
+function localWorkspace(threadId) {
+  const thread = localThreadStore.get(threadId);
+  if (!thread) return null;
+  return registeredProject(thread.cwd);
+}
+
+function safeWorkspacePath(root, value, options: { forWrite?: boolean } = {}) {
+  if (typeof value !== "string" || value.includes("\0") || value.includes("\\"))
+    return null;
+  const relative = value.trim().replace(/^\/+|\/+$/g, "") || ".";
+  const parts = relative.split("/");
+  if (
+    parts.some(
+      (part) =>
+        part === ".." ||
+        part === ".git" ||
+        part === ".env" ||
+        part.startsWith(".env."),
+    )
+  )
+    return null;
+  try {
+    const candidate = path.resolve(root, relative);
+    const canonical = options.forWrite
+      ? path.join(fs.realpathSync(path.dirname(candidate)), path.basename(candidate))
+      : fs.realpathSync(candidate);
+    return pathIsInside(root, canonical) ? canonical : null;
+  } catch {
+    return null;
+  }
+}
+
+function localWorkspaceFiles(threadId, value) {
+  const root = localWorkspace(threadId);
+  const directory = root ? safeWorkspacePath(root, value || ".") : null;
+  if (!root || !directory) throw new Error("Workspace directory is not available");
+  const entries = fs.readdirSync(directory, { withFileTypes: true });
+  return {
+    path: value || ".",
+    entries: entries
+      .slice(0, WORKSPACE_LIST_MAX_ENTRIES)
+      .filter((entry) => ![".git", ".env"].includes(entry.name))
+      .map((entry) => {
+        const absolute = path.join(directory, entry.name);
+        const stats = fs.lstatSync(absolute);
+        return {
+          path: path.relative(root, absolute).split(path.sep).join("/"),
+          name: entry.name,
+          isDirectory: entry.isDirectory() && !entry.isSymbolicLink(),
+          size: stats.size,
+          modifiedAt: stats.mtime.toISOString(),
+        };
+      })
+      .sort((left, right) =>
+        left.isDirectory === right.isDirectory
+          ? left.name.localeCompare(right.name)
+          : left.isDirectory
+            ? -1
+            : 1,
+      ),
+    truncated: entries.length > WORKSPACE_LIST_MAX_ENTRIES,
+  };
+}
+
+function readLocalWorkspaceFile(threadId, value) {
+  const root = localWorkspace(threadId);
+  const file = root ? safeWorkspacePath(root, value) : null;
+  if (!root || !file) throw new Error("Workspace file is not available");
+  const stats = fs.statSync(file);
+  if (!stats.isFile()) throw new Error("Workspace path is not a file");
+  if (stats.size > WORKSPACE_FILE_MAX_BYTES)
+    return { path: value, content: null, binary: false, truncated: true };
+  const content = fs.readFileSync(file);
+  if (content.includes(0))
+    return { path: value, content: null, binary: true, truncated: false };
+  return { path: value, content: content.toString("utf8"), binary: false, truncated: false };
+}
+
+function writeLocalWorkspaceFile(threadId, value, content) {
+  const root = localWorkspace(threadId);
+  const file = root ? safeWorkspacePath(root, value, { forWrite: true }) : null;
+  if (!root || !file || typeof content !== "string")
+    throw new Error("Workspace file is not available");
+  if (Buffer.byteLength(content) > WORKSPACE_FILE_MAX_BYTES)
+    throw new Error("Workspace file is too large");
+  const temporary = `${file}.open-swe-${process.pid}-${Date.now()}`;
+  try {
+    fs.writeFileSync(temporary, content, { encoding: "utf8", flag: "wx" });
+    fs.renameSync(temporary, file);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
+  return { path: value, saved: true };
+}
+
 async function recordLocalCheckpoint(thread) {
   const repo = await repoRoot(thread.cwd);
   if (!repo) return thread;
@@ -339,6 +437,18 @@ function configureDesktopIpc() {
     } catch {
       return { status: "error", files: [], truncated: false };
     }
+  });
+  ipcMain.handle("desktop:list-local-files", (event, threadId, value) => {
+    requireTrustedDesktopIpc(event);
+    return localWorkspaceFiles(threadId, value);
+  });
+  ipcMain.handle("desktop:read-local-file", (event, threadId, value) => {
+    requireTrustedDesktopIpc(event);
+    return readLocalWorkspaceFile(threadId, value);
+  });
+  ipcMain.handle("desktop:write-local-file", (event, threadId, value, content) => {
+    requireTrustedDesktopIpc(event);
+    return writeLocalWorkspaceFile(threadId, value, content);
   });
 }
 

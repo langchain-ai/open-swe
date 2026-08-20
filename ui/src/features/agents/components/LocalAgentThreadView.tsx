@@ -23,10 +23,19 @@ import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
+import { BrowserPanel } from "@/features/agents/components/BrowserPanel"
+import {
+  FileEditorPanel,
+  FileExplorerPanel,
+  type WorkspaceAdapter,
+} from "@/features/agents/components/WorkspacePanel"
 import {
   AGENT_COMMON_TABS,
   AGENT_PANEL_KINDS,
   CHANGES_TAB,
+  BROWSER_TAB,
+  FILES_TAB,
+  PULL_REQUEST_TAB,
   usePanelTabs,
 } from "@/features/agents/lib/panelTabs"
 import { useAgentSkills } from "@/features/agents/lib/queries"
@@ -112,6 +121,15 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
   const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
+  const [dirtyFiles, setDirtyFiles] = useState<ReadonlySet<string>>(new Set())
+  const handleDirtyChange = useCallback((path: string, dirty: boolean) => {
+    setDirtyFiles((current) => {
+      const next = new Set(current)
+      if (dirty) next.add(path)
+      else next.delete(path)
+      return next
+    })
+  }, [])
   const handlePanelCollapsedChange = useCallback(
     (next: boolean) => {
       setPanelCollapsed(next)
@@ -121,19 +139,22 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
   const handleOpenFile = useCallback(
     (filePath: string) => {
-      setRevealFilePath(filePath)
-      panel.open(CHANGES_TAB)
+      const relativePath = filePath.startsWith(`${thread?.cwd}/`)
+        ? filePath.slice((thread?.cwd.length ?? -1) + 1)
+        : filePath
+      setRevealFilePath(relativePath)
+      panel.openFile(relativePath)
       handlePanelCollapsedChange(false)
     },
-    [handlePanelCollapsedChange, panel]
+    [handlePanelCollapsedChange, panel, thread?.cwd]
   )
   const handleOpenKind = useCallback(
     (kind: PanelTabKind) => {
-      if (kind !== "terminal") {
-        panel.open(CHANGES_TAB)
-        return
-      }
-      panel.open({ id: terminals.addGroup(), kind })
+      if (kind === "terminal") panel.open({ id: terminals.addGroup(), kind })
+      else if (kind === "changes") panel.open(CHANGES_TAB)
+      else if (kind === "files") panel.open(FILES_TAB)
+      else if (kind === "browser") panel.open(BROWSER_TAB)
+      else if (kind === "pull-request") panel.open(PULL_REQUEST_TAB)
     },
     [panel, terminals]
   )
@@ -151,16 +172,18 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
   const handleCloseTab = useCallback(
     async (id: string) => {
-      if (id === "changes") return
+      const tab = panel.tabs.find((candidate) => candidate.id === id)
       if (
-        panel.tabs.find((tab) => tab.id === id)?.kind === "terminal" &&
-        !(await terminals.closeGroup(id))
-      ) {
+        tab?.kind === "file" &&
+        tab.resourceId &&
+        dirtyFiles.has(tab.resourceId) &&
+        !window.confirm("Discard unsaved changes?")
+      )
         return
-      }
+      if (tab?.kind === "terminal" && !(await terminals.closeGroup(id))) return
       panel.close(id)
     },
-    [panel, terminals]
+    [dirtyFiles, panel, terminals]
   )
   const toggleTerminal = useCallback(() => {
     if (!panelCollapsed && panel.activeTab?.kind === "terminal") {
@@ -227,6 +250,16 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
   const repository = diff.data?.repository
   const pr = repository?.pr
+  const workspace = useMemo<WorkspaceAdapter>(
+    () => ({
+      key: `local:${sessionId}`,
+      list: (path) => window.openSweDesktop!.listLocalFiles(sessionId, path),
+      read: (path) => window.openSweDesktop!.readLocalFile(sessionId, path),
+      write: (path, content) =>
+        window.openSweDesktop!.writeLocalFile(sessionId, path, content),
+    }),
+    [sessionId]
+  )
   const messages = useMemo(
     () =>
       streamMessagesToUi(
@@ -500,7 +533,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
         onOpenKind={handleOpenKind}
-        menuKinds={AGENT_PANEL_KINDS}
+        menuKinds={AGENT_PANEL_KINDS.filter(
+          (kind) => kind !== "pull-request" || Boolean(pr)
+        )}
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
       >
@@ -517,6 +552,57 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 branch={repository?.branch}
                 pr={pr}
                 revealFilePath={revealFilePath}
+                fullScreen={fullScreen}
+                onRefresh={() => void diff.refetch()}
+              />
+            )}
+            {panel.activeTab?.kind === "files" && (
+              <FileExplorerPanel adapter={workspace} onOpen={panel.openFile} />
+            )}
+            {panel.tabs
+              .filter((tab) => tab.kind === "file" && tab.resourceId)
+              .map((tab) => (
+                <div
+                  key={tab.id}
+                  className={cn(
+                    "flex min-h-0 flex-1 flex-col",
+                    tab.id !== activePanelTabId && "hidden"
+                  )}
+                >
+                  <FileEditorPanel
+                    adapter={workspace}
+                    path={tab.resourceId!}
+                    onDirtyChange={handleDirtyChange}
+                  />
+                </div>
+              ))}
+            {panel.tabs
+              .filter((tab) => tab.kind === "browser")
+              .map((tab) => (
+                <div
+                  key={tab.id}
+                  className={cn(
+                    "flex min-h-0 flex-1 flex-col",
+                    tab.id !== activePanelTabId && "hidden"
+                  )}
+                >
+                  <BrowserPanel
+                    openExternal={(url) =>
+                      void window.openSweDesktop?.openExternal(url)
+                    }
+                  />
+                </div>
+              ))}
+            {panel.activeTab?.kind === "pull-request" && (
+              <ChangesPanel
+                files={files}
+                status={diff.data?.status}
+                isLoading={diff.isPending}
+                isFetching={diff.isFetching}
+                error={diff.error}
+                truncated={diff.data?.truncated}
+                branch={repository?.branch}
+                pr={pr}
                 fullScreen={fullScreen}
                 onRefresh={() => void diff.refetch()}
               />

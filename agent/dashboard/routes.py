@@ -222,6 +222,7 @@ from .team_settings import (
 from .thread_api import (
     ThreadMessageBody,
     ThreadResolveBody,
+    WorkspaceFileWriteBody,
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     delete_dashboard_thread,
@@ -234,13 +235,16 @@ from .thread_api import (
     list_dashboard_threads,
     list_dashboard_threads_page,
     list_dashboard_threads_sidebar,
+    list_dashboard_workspace_files,
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
     proxy_dashboard_thread_stream_events,
+    read_dashboard_workspace_file,
     resolve_dashboard_thread,
     send_dashboard_message,
     stream_dashboard_thread,
+    write_dashboard_workspace_file,
 )
 from .user_credentials import (
     CurrentsCredentialsUpdate,
@@ -2181,6 +2185,39 @@ async def api_get_thread_turn_diff(
         max_files=max_files,
         include_content=include_content,
         email=session.get("email"),
+    )
+
+
+@router.get("/threads/{thread_id}/workspace/files")
+async def api_list_thread_workspace_files(
+    thread_id: str,
+    path: str = Query(default=".", max_length=4096),
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await list_dashboard_workspace_files(
+        thread_id, session["sub"], path=path, email=session.get("email")
+    )
+
+
+@router.get("/threads/{thread_id}/workspace/file")
+async def api_get_thread_workspace_file(
+    thread_id: str,
+    path: str = Query(min_length=1, max_length=4096),
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await read_dashboard_workspace_file(
+        thread_id, session["sub"], path=path, email=session.get("email")
+    )
+
+
+@router.put("/threads/{thread_id}/workspace/file")
+async def api_put_thread_workspace_file(
+    thread_id: str,
+    body: WorkspaceFileWriteBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await write_dashboard_workspace_file(
+        thread_id, session["sub"], body, email=session.get("email")
     )
 
 

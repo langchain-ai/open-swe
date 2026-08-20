@@ -19,6 +19,17 @@ _FABLE = "anthropic:claude-fable-5"
 _PAIR = ("openai:gpt-5.6-sol", "medium")
 
 
+@pytest.mark.parametrize("value", ["../secret", "/../secret", "a\\b", ".git/config", ".env"])
+def test_workspace_relative_path_rejects_unsafe_values(value: str) -> None:
+    with pytest.raises(HTTPException):
+        thread_api._workspace_relative_path(value)
+
+
+def test_workspace_relative_path_normalizes_safe_values() -> None:
+    assert thread_api._workspace_relative_path("src/./app.py") == "src/app.py"
+    assert thread_api._workspace_relative_path(".", allow_root=True) == "."
+
+
 def _image() -> thread_api.DashboardImageBody:
     return thread_api.DashboardImageBody(
         base64=base64.b64encode(b"image").decode("ascii"),

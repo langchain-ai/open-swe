@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
-export type PanelTabKind = "changes" | "terminal"
+export type PanelTabKind =
+  "changes" | "terminal" | "files" | "file" | "browser" | "pull-request"
 
 export interface PanelTab {
   id: string
   kind: PanelTabKind
   title?: string
   closable?: boolean
+  resourceId?: string
 }
 
 export interface PanelTabsState {
@@ -16,19 +18,47 @@ export interface PanelTabsState {
 
 const STORAGE_PREFIX = "open-swe.panel-tabs.v1:"
 const EMPTY: PanelTabsState = { tabs: [], activeTabId: null }
-const KINDS: ReadonlyArray<PanelTabKind> = ["changes", "terminal"]
+const KINDS: ReadonlyArray<PanelTabKind> = [
+  "changes",
+  "terminal",
+  "files",
+  "file",
+  "browser",
+  "pull-request",
+]
 
 export const CHANGES_TAB: PanelTab = {
   id: "changes",
   kind: "changes",
   title: "Changes",
-  closable: false,
+  closable: true,
 }
-export const AGENT_COMMON_TABS: ReadonlyArray<PanelTab> = [CHANGES_TAB]
-export const AGENT_PANEL_KINDS: ReadonlyArray<PanelTabKind> = ["terminal"]
+export const FILES_TAB: PanelTab = {
+  id: "files",
+  kind: "files",
+  title: "Files",
+}
+export const BROWSER_TAB: PanelTab = {
+  id: "browser:new",
+  kind: "browser",
+  title: "Browser",
+}
+export const PULL_REQUEST_TAB: PanelTab = {
+  id: "pull-request",
+  kind: "pull-request",
+  title: "Pull request",
+}
+export const AGENT_COMMON_TABS: ReadonlyArray<PanelTab> = []
+export const AGENT_PANEL_KINDS: ReadonlyArray<PanelTabKind> = [
+  "browser",
+  "terminal",
+  "files",
+  "changes",
+  "pull-request",
+]
 
 export function isMultiInstanceKind(kind: PanelTabKind): boolean {
-  return kind === "terminal"
+  return kind === "terminal" || kind === "file" || kind === "browser"
 }
 
 export function openPanelTab(
@@ -183,6 +213,18 @@ export function usePanelTabs(
     [update]
   )
   const openChanges = useCallback(() => open(CHANGES_TAB), [open])
+  const openFiles = useCallback(() => open(FILES_TAB), [open])
+  const openBrowser = useCallback(() => open(BROWSER_TAB), [open])
+  const openFile = useCallback(
+    (path: string) =>
+      open({
+        id: `file:${path}`,
+        kind: "file",
+        title: path.slice(path.lastIndexOf("/") + 1),
+        resourceId: path,
+      }),
+    [open]
+  )
   const close = useCallback(
     (id: string) => update((current) => closePanelTab(current, id)),
     [update]
@@ -201,6 +243,9 @@ export function usePanelTabs(
       open,
       select,
       openChanges,
+      openFiles,
+      openBrowser,
+      openFile,
       close,
       syncTerminals,
     }),

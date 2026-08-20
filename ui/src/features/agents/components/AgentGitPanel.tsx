@@ -4,14 +4,27 @@ import { DownloadIcon } from "lucide-react"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
 import { agentsApi } from "@/features/agents/lib/api"
-import { useAgentThreadTurnDiff } from "@/features/agents/lib/queries"
+import {
+  useAgentThreadPrDiff,
+  useAgentThreadTurnDiff,
+} from "@/features/agents/lib/queries"
 import { AgentPanelShell } from "@/features/agents/components/AgentPanelShell"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
+import { BrowserPanel } from "@/features/agents/components/BrowserPanel"
+import {
+  FileEditorPanel,
+  FileExplorerPanel,
+  type WorkspaceAdapter,
+} from "@/features/agents/components/WorkspacePanel"
 import {
   AGENT_COMMON_TABS,
   AGENT_PANEL_KINDS,
+  BROWSER_TAB,
+  CHANGES_TAB,
+  FILES_TAB,
+  PULL_REQUEST_TAB,
   usePanelTabs,
 } from "@/features/agents/lib/panelTabs"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
@@ -40,6 +53,15 @@ export function AgentGitPanel({
     ""
   )
   const activeTabId = panel.activeTabId
+  const [dirtyFiles, setDirtyFiles] = useState<ReadonlySet<string>>(new Set())
+  const handleDirtyChange = useCallback((path: string, dirty: boolean) => {
+    setDirtyFiles((current) => {
+      const next = new Set(current)
+      if (dirty) next.add(path)
+      else next.delete(path)
+      return next
+    })
+  }, [])
   useEffect(() => {
     if (revealChangesKey > 0) panel.openChanges()
   }, [panel.openChanges, revealChangesKey])
@@ -48,8 +70,11 @@ export function AgentGitPanel({
 
   const handleOpenKind = useCallback(
     (kind: PanelTabKind) => {
-      if (kind !== "terminal") return
-      panel.open({ id: terminals.addGroup(), kind })
+      if (kind === "terminal") panel.open({ id: terminals.addGroup(), kind })
+      else if (kind === "changes") panel.open(CHANGES_TAB)
+      else if (kind === "files") panel.open(FILES_TAB)
+      else if (kind === "browser") panel.open(BROWSER_TAB)
+      else if (kind === "pull-request") panel.open(PULL_REQUEST_TAB)
     },
     [panel, terminals]
   )
@@ -65,9 +90,18 @@ export function AgentGitPanel({
   )
   const handleCloseTab = useCallback(
     async (id: string) => {
-      if (id !== "changes" && (await terminals.closeGroup(id))) panel.close(id)
+      const tab = panel.tabs.find((candidate) => candidate.id === id)
+      if (
+        tab?.kind === "file" &&
+        tab.resourceId &&
+        dirtyFiles.has(tab.resourceId) &&
+        !window.confirm("Discard unsaved changes?")
+      )
+        return
+      if (tab?.kind === "terminal" && !(await terminals.closeGroup(id))) return
+      panel.close(id)
     },
-    [panel, terminals]
+    [dirtyFiles, panel, terminals]
   )
   const toggleTerminal = useCallback(() => {
     if (!collapsed && panel.activeTab?.kind === "terminal") {
@@ -130,12 +164,26 @@ export function AgentGitPanel({
     {},
     thread.status === "running"
   )
+  const prDiff = useAgentThreadPrDiff(
+    thread.id,
+    !collapsed && panel.activeTab?.kind === "pull-request" && Boolean(thread.pr)
+  )
   const files = useMemo(
     () => toPanelFiles(turnDiff.data?.files ?? []),
     [turnDiff.data?.files]
   )
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
+  const workspace = useMemo<WorkspaceAdapter>(
+    () => ({
+      key: `cloud:${thread.id}`,
+      list: (path) => agentsApi.listWorkspaceFiles(thread.id, path),
+      read: (path) => agentsApi.readWorkspaceFile(thread.id, path),
+      write: (path, content) =>
+        agentsApi.writeWorkspaceFile(thread.id, path, content),
+    }),
+    [thread.id]
+  )
   const canDownloadRecovery =
     thread.status !== "running" && thread.isOwner !== false
   const downloadRecoveryPatch = useCallback(async () => {
@@ -172,8 +220,12 @@ export function AgentGitPanel({
       activeTabId={activeTabId}
       onSelectTab={handleSelectTab}
       onCloseTab={handleCloseTab}
-      onOpenKind={terminalAvailable ? handleOpenKind : undefined}
-      menuKinds={AGENT_PANEL_KINDS}
+      onOpenKind={handleOpenKind}
+      menuKinds={AGENT_PANEL_KINDS.filter(
+        (kind) =>
+          (kind !== "terminal" || terminalAvailable) &&
+          (kind !== "pull-request" || Boolean(thread.pr))
+      )}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
     >
@@ -206,6 +258,56 @@ export function AgentGitPanel({
                   </button>
                 ) : undefined
               }
+            />
+          )}
+          {panel.activeTab?.kind === "files" && (
+            <FileExplorerPanel adapter={workspace} onOpen={panel.openFile} />
+          )}
+          {panel.tabs
+            .filter((tab) => tab.kind === "file" && tab.resourceId)
+            .map((tab) => (
+              <div
+                key={tab.id}
+                className={cn(
+                  "flex min-h-0 flex-1 flex-col",
+                  tab.id !== activeTabId && "hidden"
+                )}
+              >
+                <FileEditorPanel
+                  adapter={workspace}
+                  path={tab.resourceId!}
+                  onDirtyChange={handleDirtyChange}
+                />
+              </div>
+            ))}
+          {panel.tabs
+            .filter((tab) => tab.kind === "browser")
+            .map((tab) => (
+              <div
+                key={tab.id}
+                className={cn(
+                  "flex min-h-0 flex-1 flex-col",
+                  tab.id !== activeTabId && "hidden"
+                )}
+              >
+                <BrowserPanel
+                  openExternal={(url) =>
+                    window.open(url, "_blank", "noopener,noreferrer")
+                  }
+                />
+              </div>
+            ))}
+          {panel.activeTab?.kind === "pull-request" && (
+            <ChangesPanel
+              files={toPanelFiles(prDiff.data?.files ?? [])}
+              isLoading={prDiff.isPending}
+              isFetching={prDiff.isFetching}
+              error={prDiff.error}
+              truncated={prDiff.data?.truncated}
+              branch={thread.branch}
+              pr={thread.pr}
+              fullScreen={fullScreen}
+              onRefresh={() => void prDiff.refetch()}
             />
           )}
           {panel.tabs

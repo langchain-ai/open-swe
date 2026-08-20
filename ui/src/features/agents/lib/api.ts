@@ -109,6 +109,27 @@ export interface CloudTerminalConnection {
   ticket: string
 }
 
+export interface WorkspaceFileEntry {
+  path: string
+  name: string
+  isDirectory: boolean
+  size?: number | null
+  modifiedAt?: string | null
+}
+
+export interface WorkspaceFileListing {
+  path: string
+  entries: Array<WorkspaceFileEntry>
+  truncated: boolean
+}
+
+export interface WorkspaceFileContent {
+  path: string
+  content: string | null
+  binary: boolean
+  truncated: boolean
+}
+
 export type ThreadScope = "all" | "interactive" | "automation"
 
 export interface ThreadsPageParams {
@@ -371,6 +392,19 @@ export const agentsApi = {
     agentsRequest<CloudTerminalConnection>(
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
       { method: "POST" }
+    ),
+  listWorkspaceFiles: (threadId: string, path = ".") =>
+    agentsRequest<WorkspaceFileListing>(
+      `/threads/${encodeURIComponent(threadId)}/workspace/files?${new URLSearchParams({ path })}`
+    ),
+  readWorkspaceFile: (threadId: string, path: string) =>
+    agentsRequest<WorkspaceFileContent>(
+      `/threads/${encodeURIComponent(threadId)}/workspace/file?${new URLSearchParams({ path })}`
+    ),
+  writeWorkspaceFile: (threadId: string, path: string, content: string) =>
+    agentsRequest<{ path: string; saved: true }>(
+      `/threads/${encodeURIComponent(threadId)}/workspace/file`,
+      { method: "PUT", body: JSON.stringify({ path, content }) }
     ),
   streamUrl: (threadId: string) =>
     `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,

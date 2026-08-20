@@ -34,6 +34,27 @@ export interface DesktopLocalDiff {
   repository?: { branch: string | null; pr: AgentThread["pr"] | null }
 }
 
+export interface WorkspaceFileEntry {
+  path: string
+  name: string
+  isDirectory: boolean
+  size?: number | null
+  modifiedAt?: string | null
+}
+
+export interface WorkspaceFileListing {
+  path: string
+  entries: Array<WorkspaceFileEntry>
+  truncated: boolean
+}
+
+export interface WorkspaceFileContent {
+  path: string
+  content: string | null
+  binary: boolean
+  truncated: boolean
+}
+
 export interface DesktopLocalPromptInput {
   prompt: string
   images: Array<ImageChunk>
@@ -185,6 +206,19 @@ declare global {
       }) => Promise<DesktopLocalThreadSummary | null>
       deleteLocalThread: (threadId: string) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
+      listLocalFiles: (
+        threadId: string,
+        path: string
+      ) => Promise<WorkspaceFileListing>
+      readLocalFile: (
+        threadId: string,
+        path: string
+      ) => Promise<WorkspaceFileContent>
+      writeLocalFile: (
+        threadId: string,
+        path: string,
+        content: string
+      ) => Promise<{ path: string; saved: true }>
       terminal: DesktopTerminalBridge
     }
   }
