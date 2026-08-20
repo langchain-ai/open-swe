@@ -25,6 +25,7 @@ export interface DesktopLocalThreadSummary {
   updatedAt: number
   modelId: string | null
   effort: string | null
+  pending?: DesktopLocalPromptInput | null
 }
 
 export interface DesktopLocalDiff {

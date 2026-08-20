@@ -35,13 +35,17 @@ export function RecentAgentThreads({
         className={cn(active ? "contents" : "hidden")}
         aria-hidden={!active}
       >
-        <AgentThreadStreamProvider threadId={threadId}>
+        {active ? (
           <AgentThreadPage
             threadId={threadId}
-            active={active}
-            autoFocusComposer={active && autoFocusComposer}
+            active
+            autoFocusComposer={autoFocusComposer}
           />
-        </AgentThreadStreamProvider>
+        ) : (
+          <AgentThreadStreamProvider threadId={threadId}>
+            <AgentThreadPage threadId={threadId} active={false} />
+          </AgentThreadStreamProvider>
+        )}
       </div>
     )
   })
