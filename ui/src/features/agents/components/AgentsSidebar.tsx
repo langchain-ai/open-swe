@@ -55,6 +55,7 @@ import {
   useResolveAgentThread,
   useSeedAgentThreadDetails,
   useSidebarThreads,
+  SIDEBAR_RESOLVED_LIMIT as RESOLVED_SIDEBAR_LIMIT,
 } from "@/features/agents/lib/queries"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
@@ -71,8 +72,6 @@ import {
 } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
-
-const RESOLVED_SIDEBAR_LIMIT = 20
 
 function SidebarShortcut({ commandId }: { commandId: string }) {
   const shortcut = useAppCommand(commandId)?.shortcuts?.[0] ?? ""

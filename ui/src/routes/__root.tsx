@@ -15,7 +15,7 @@ import type { QueryClient } from "@tanstack/react-query"
 import appCss from "../styles.css?url"
 import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
-import { threadStateWarmupScript } from "@/features/agents/lib/threadStateWarmup"
+import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
 
 const themeInitScript = `(function(){try{var t=localStorage.getItem("open-swe-theme");var d=t==="dark"||((!t||t==="system")&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}})();`
 
@@ -55,7 +55,7 @@ export const Route = createRootRouteWithContext<{
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { queryClient } = useRouter().options.context
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const warmupScript = threadStateWarmupScript(pathname)
+  const warmupScript = apiWarmupScript(pathname)
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
