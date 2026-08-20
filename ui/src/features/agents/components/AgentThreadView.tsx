@@ -2,13 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { CircleAlert as CircleAlertIcon, FolderOpen } from "lucide-react"
 
-import type {
-  AgentThread,
-  Message,
-  QueuedThreadMessage,
-} from "@/features/agents/lib/types"
+import type { AgentThread, Message } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import type { AgentPanelTab } from "@/features/agents/components/AgentGitPanel"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
@@ -27,19 +22,13 @@ import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useAgentSkills } from "@/features/agents/lib/queries"
+import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
 interface AgentThreadViewProps {
   thread: AgentThread
-}
-
-function messageText(message: Message): string {
-  return message.chunks
-    .map((chunk) => (chunk.kind === "text" ? chunk.text : ""))
-    .join("\n")
-    .trim()
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -53,37 +42,6 @@ function editedPaths(messages: Array<Message>): Array<string> {
     }
   }
   return [...paths]
-}
-
-function visibleQueuedMessages(
-  queuedMessages: Array<QueuedThreadMessage> | undefined,
-  messages: Array<Message>
-): Array<QueuedThreadMessage> {
-  const queued = queuedMessages ?? []
-  if (queued.length === 0) return queued
-
-  const userMessages = messages
-    .filter((message) => message.author === "user")
-    .map((message) => ({
-      text: messageText(message),
-      timestamp: Date.parse(message.timestamp),
-      consumed: false,
-    }))
-
-  return queued.filter((queuedMessage) => {
-    const queuedText = queuedMessage.content.trim()
-    if (!queuedText) return true
-
-    const match = userMessages.find((message) => {
-      if (message.consumed || !message.text.includes(queuedText)) return false
-      if (!Number.isFinite(message.timestamp)) return true
-      return message.timestamp >= queuedMessage.createdAt - 1000
-    })
-    if (!match) return true
-
-    match.consumed = true
-    return false
-  })
 }
 
 // The stream lives at the `/agents` layout (one persistent provider that
@@ -124,7 +82,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(thread.id)
   )
-  const [panelTab, setPanelTab] = useState<AgentPanelTab>("git")
   const handlePanelCollapsedChange = useCallback(
     (next: boolean) => {
       setPanelCollapsed(next)
@@ -133,10 +90,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     [thread.id]
   )
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
+  const [revealChangesKey, setRevealChangesKey] = useState(0)
   const handleOpenFile = useCallback(
     (filePath: string) => {
       setRevealFilePath(filePath)
-      setPanelTab("git")
+      setRevealChangesKey((key) => key + 1)
       handlePanelCollapsedChange(false)
     },
     [handlePanelCollapsedChange]
@@ -365,10 +323,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       <AgentGitPanel
         thread={thread}
         revealFilePath={revealFilePath}
+        revealChangesKey={revealChangesKey}
         collapsed={panelCollapsed}
-        requestedTab={panelTab}
         onCollapsedChange={handlePanelCollapsedChange}
-        onTabChange={setPanelTab}
       />
     </div>
   )

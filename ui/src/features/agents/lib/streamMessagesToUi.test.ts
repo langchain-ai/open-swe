@@ -101,6 +101,28 @@ describe("streamMessagesToUi", () => {
     ).toEqual(["user-1", "user-2"])
   })
 
+  it("identifies local task calls as subagents", () => {
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "ai-1",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-1",
+            name: "task",
+            args: { description: "Investigate the issue" },
+            type: "tool_call",
+          },
+        ],
+      }),
+    ])
+
+    expect(messages[0]?.chunks[0]).toMatchObject({
+      kind: "tool-execution",
+      toolKind: "task",
+    })
+  })
+
   it("attaches validated output iframe artifacts to their tool call", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({ id: "user-1", content: "draw a chart" }),

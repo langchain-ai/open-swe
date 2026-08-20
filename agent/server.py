@@ -130,6 +130,7 @@ from .tools import (
     delete_user_skill,
     enter_plan_mode,
     fetch_url,
+    get_thread,
     http_request,
     linear_comment,
     linear_create_issue,
@@ -140,7 +141,9 @@ from .tools import (
     linear_search_issues,
     linear_update_issue,
     list_environments,
+    list_threads,
     manage_baby_sit,
+    manage_thread,
     notify_automation_channel,
     open_pull_request,
     output_iframe,
@@ -613,6 +616,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "background_task",
         "http_request",
         "manage_baby_sit",
+        "manage_thread",
         "open_pull_request",
         "recreate_sandbox",
         "request_pr_review",
@@ -645,6 +649,9 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
     """Return whether a tool depends on parent-only source context."""
     name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
     return name.startswith("slack_") or name in {
+        "get_thread",
+        "list_threads",
+        "manage_thread",
         "notify_automation_channel",
         "read_user_settings",
     }
@@ -1472,6 +1479,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         linear_list_teams,
         linear_search_issues,
         linear_update_issue,
+        list_threads,
+        get_thread,
+        manage_thread,
         manage_baby_sit,
         notify_automation_channel,
         open_pull_request,

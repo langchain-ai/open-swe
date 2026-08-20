@@ -5,7 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 
 import { agentsApi } from "./api"
 import type { InfiniteData, QueryClient } from "@tanstack/react-query"
@@ -74,6 +74,21 @@ export function setAgentThreadStatus(
         active: { ...prev.active, items: prev.active.items.map(update) },
         resolved: { ...prev.resolved, items: prev.resolved.items.map(update) },
       }
+  )
+  queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
+    { queryKey: ["agent-threads", "lists", "infinite-pages"] },
+    (prev) =>
+      prev && {
+        ...prev,
+        pages: prev.pages.map((page) => ({
+          ...page,
+          items: page.items.map(update),
+        })),
+      }
+  )
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.sidebarActive(threadId),
+    (prev) => (prev ? update(prev) : prev)
   )
 }
 
@@ -389,17 +404,38 @@ export function useAgentThreadTurnDiff(
   threadId: string,
   turnKey: string | null,
   enabled: boolean,
-  options: ThreadTurnDiffOptions = {}
+  options: ThreadTurnDiffOptions = {},
+  pollWhileRunning = false
 ) {
-  return useQuery({
-    queryKey: agentThreadKeys.turnDiff(threadId, turnKey, options),
+  const queryKey = agentThreadKeys.turnDiff(threadId, turnKey, options)
+  const query = useQuery({
+    queryKey,
     queryFn: () => agentsApi.getThreadTurnDiff(threadId, turnKey, options),
     enabled: enabled && Boolean(threadId),
     staleTime: 30_000,
-    refetchInterval: (query) =>
-      query.state.data?.status === "ready" ? false : 3000,
+    refetchInterval: pollWhileRunning
+      ? 3000
+      : (current) => (current.state.data?.status === "ready" ? false : 3000),
     retry: false,
   })
+
+  const { refetch } = query
+  const previous = useRef({ enabled: false, pollWhileRunning })
+  useEffect(() => {
+    const was = previous.current
+    previous.current = { enabled, pollWhileRunning }
+    const finishedWhileVisible =
+      was.enabled && was.pollWhileRunning && enabled && !pollWhileRunning
+    if (finishedWhileVisible) {
+      const timers = [0, 1000, 3000].map((delay) =>
+        window.setTimeout(() => void refetch(), delay)
+      )
+      return () => timers.forEach(window.clearTimeout)
+    }
+    if (!was.enabled && enabled && !pollWhileRunning) void refetch()
+  }, [enabled, pollWhileRunning, refetch])
+
+  return query
 }
 
 export function useWorkflowApprovals(

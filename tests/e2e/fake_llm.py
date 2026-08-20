@@ -164,6 +164,11 @@ LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
+_THREAD_TOOLS_RE = re.compile(
+    r"E2E_THREAD_TOOLS:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+)
+_THREAD_TOOLS_TARGET_TITLE = "E2E Thread Tools Target"
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -512,7 +517,84 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
 
 
+def _tool_payload(messages: list[BaseMessage], tool_name: str) -> dict[str, Any]:
+    for message in reversed(messages):
+        if not isinstance(message, ToolMessage) or message.name != tool_name:
+            continue
+        payload = (
+            json.loads(message.content) if isinstance(message.content, str) else message.content
+        )
+        if isinstance(payload, dict):
+            return payload
+    raise ValueError(f"{tool_name} result is missing")
+
+
+def _listed_thread_id(messages: list[BaseMessage]) -> str:
+    items = _tool_payload(messages, "list_threads").get("items")
+    matches = [
+        item.get("id")
+        for item in items or []
+        if isinstance(item, dict) and item.get("title") == _THREAD_TOOLS_TARGET_TITLE
+    ]
+    if len(matches) != 1 or not isinstance(matches[0], str):
+        raise ValueError("list_threads did not return exactly one target thread")
+    return matches[0]
+
+
+def _inspected_thread_id(messages: list[BaseMessage]) -> str:
+    thread = _tool_payload(messages, "get_thread").get("thread")
+    thread_id = thread.get("id") if isinstance(thread, dict) else None
+    if not isinstance(thread_id, str):
+        raise ValueError("get_thread did not return the target thread")
+    return thread_id
+
+
+def _list_threads_step(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Finding the target thread.",
+        tool_calls=[
+            {
+                "name": "list_threads",
+                "args": {"query": _THREAD_TOOLS_TARGET_TITLE, "resolved": False},
+                "id": "call-list-threads",
+            }
+        ],
+    )
+
+
+def _get_thread_step(messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Inspecting the target thread.",
+        tool_calls=[
+            {
+                "name": "get_thread",
+                "args": {"thread_id": _listed_thread_id(messages)},
+                "id": "call-get-thread",
+            }
+        ],
+    )
+
+
+def _resolve_thread_step(messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Resolving the target thread.",
+        tool_calls=[
+            {
+                "name": "manage_thread",
+                "args": {"thread_id": _inspected_thread_id(messages), "action": "resolve"},
+                "id": "call-manage-thread",
+            }
+        ],
+    )
+
+
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    "thread_tools": (
+        _dynamic_step(_list_threads_step),
+        _dynamic_step(_get_thread_step),
+        _dynamic_step(_resolve_thread_step),
+        StepSpec(content="Resolved the target thread through the thread tools."),
+    ),
     "iframe": (
         _tool_step(
             "Acknowledging the iframe preview request.",
@@ -734,6 +816,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
 }
 
 
+def _is_thread_tools_request(text: str) -> bool:
+    return _THREAD_TOOLS_RE.search(text) is not None
+
+
 def _is_iframe_request(text: str) -> bool:
     return "E2E_IFRAME" in text
 
@@ -761,7 +847,7 @@ def _is_move_followup(text: str) -> bool:
 
 def _is_approval(text: str) -> bool:
     t = text.lower()
-    return "approved" in t and "implement" in t
+    return "the plan has been approved" in t or ("approved" in t and "implement" in t)
 
 
 def _is_revision(text: str) -> bool:
@@ -770,6 +856,10 @@ def _is_revision(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule(
+        "thread_tools",
+        lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
+    ),
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(
         "desktop",

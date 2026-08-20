@@ -781,8 +781,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    await page.route("**/dashboard/api/threads/sidebar*", async (route) => {
-      await held;
+    await page.route("**/dashboard/api/threads/page?*", async (route) => {
+      const params = new URL(route.request().url()).searchParams;
+      if (params.get("resolved") === "false" && params.get("limit") === "10") {
+        await held;
+      }
       await route.continue();
     });
 
@@ -814,8 +817,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    await page.route("**/dashboard/api/threads/sidebar*", async (route) => {
-      await held;
+    await page.route("**/dashboard/api/threads/page?*", async (route) => {
+      const params = new URL(route.request().url()).searchParams;
+      if (params.get("resolved") === "false" && params.get("limit") === "10") {
+        await held;
+      }
       await route.continue();
     });
 
@@ -830,9 +836,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     // stored value gaining a key the seed never had is the hydration signal.
     await page.waitForFunction(
       () =>
-        (
-          localStorage.getItem("open-swe.agents.sidebar-prefs") ?? ""
-        ).includes("collapsed"),
+        (localStorage.getItem("open-swe.agents.sidebar-prefs") ?? "").includes(
+          "collapsed",
+        ),
       undefined,
       { timeout: 30_000 },
     );

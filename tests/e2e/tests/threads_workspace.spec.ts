@@ -713,13 +713,15 @@ test.describe("threads workspace", () => {
     await expect(ready).toContainText(TITLES.ready);
     await expect(ready.locator("> button > span").last()).toHaveText("1");
     await expect(done).toContainText("E2E Workspace Resolved overflow 01");
+    await expect(done.locator("> button > span").last()).toHaveText("10+");
+    const loadMore = sidebar.getByRole("button", {
+      name: "Load more resolved threads",
+    });
+    await loadMore.click();
     await expect(done.locator("> button > span").last()).toHaveText("20+");
-    const showAll = done.getByRole("link", { name: "Show all" });
-    await expect(showAll).toBeVisible();
-    await expect(showAll).toHaveAttribute(
-      "href",
-      /\/agents\/threads\?.*resolved=true.*group=focus/,
-    );
+    await loadMore.click();
+    await expect(done.locator("> button > span").last()).toHaveText("22");
+    await expect(loadMore).toHaveCount(0);
 
     const screenshotPath = testInfo.outputPath("focus-grouping-sidebar.png");
     await sidebar.screenshot({ path: screenshotPath });

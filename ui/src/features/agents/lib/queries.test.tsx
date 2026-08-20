@@ -8,10 +8,13 @@ import { agentsApi } from "./api"
 import {
   SIDEBAR_PAGE_SIZE,
   agentThreadKeys,
+  setAgentThreadStatus,
+  useAgentThreadTurnDiff,
   useSidebarThreads,
   useThreadsPage,
 } from "./queries"
-import type { ThreadsPage, ThreadsPageParams } from "./api"
+import type { InfiniteData } from "@tanstack/react-query"
+import type { ThreadTurnDiff, ThreadsPage, ThreadsPageParams } from "./api"
 import type { AgentThread } from "./types"
 
 const params: ThreadsPageParams = {
@@ -43,6 +46,141 @@ function testClient() {
   clients.push(client)
   return client
 }
+
+describe("useAgentThreadTurnDiff", () => {
+  const diff: ThreadTurnDiff = {
+    status: "ready",
+    truncated: false,
+    summary: { files: 0, additions: 0, deletions: 0 },
+    files: [],
+  }
+
+  function Probe({
+    running,
+    enabled = true,
+  }: {
+    running: boolean
+    enabled?: boolean
+  }) {
+    useAgentThreadTurnDiff("thread-1", null, enabled, {}, running)
+    return null
+  }
+
+  function renderProbe(running: boolean, enabled = true) {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    clients.push(client)
+    return render(
+      <QueryClientProvider client={client}>
+        <Probe running={running} enabled={enabled} />
+      </QueryClientProvider>
+    )
+  }
+
+  it("keeps polling ready cloud diffs while the run is active", async () => {
+    vi.useFakeTimers()
+    const getDiff = vi
+      .spyOn(agentsApi, "getThreadTurnDiff")
+      .mockResolvedValue(diff)
+
+    renderProbe(true)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(3000)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(2))
+  })
+
+  it("refreshes immediately and twice after a running cloud diff finishes", async () => {
+    vi.useFakeTimers()
+    const getDiff = vi
+      .spyOn(agentsApi, "getThreadTurnDiff")
+      .mockResolvedValue(diff)
+    const view = renderProbe(true)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))
+
+    view.rerender(
+      <QueryClientProvider client={clients.at(-1)!}>
+        <Probe running={false} />
+      </QueryClientProvider>
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(2))
+    await vi.advanceTimersByTimeAsync(1000)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(3))
+    await vi.advanceTimersByTimeAsync(2000)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(4))
+  })
+
+  it("refetches a fresh cached diff when enabled after the run finished", async () => {
+    vi.useFakeTimers()
+    const getDiff = vi
+      .spyOn(agentsApi, "getThreadTurnDiff")
+      .mockResolvedValue(diff)
+    const view = renderProbe(true)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))
+
+    view.rerender(
+      <QueryClientProvider client={clients.at(-1)!}>
+        <Probe running enabled={false} />
+      </QueryClientProvider>
+    )
+    view.rerender(
+      <QueryClientProvider client={clients.at(-1)!}>
+        <Probe running={false} enabled={false} />
+      </QueryClientProvider>
+    )
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(getDiff).toHaveBeenCalledTimes(1)
+
+    view.rerender(
+      <QueryClientProvider client={clients.at(-1)!}>
+        <Probe running={false} enabled />
+      </QueryClientProvider>
+    )
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(2))
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(getDiff).toHaveBeenCalledTimes(2)
+  })
+
+  it("refetches a fresh cached diff when remounted after the run finished", async () => {
+    const getDiff = vi
+      .spyOn(agentsApi, "getThreadTurnDiff")
+      .mockResolvedValue(diff)
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    client.setQueryData(agentThreadKeys.turnDiff("thread-1", null, {}), diff)
+    clients.push(client)
+
+    render(
+      <QueryClientProvider client={client}>
+        <Probe running={false} />
+      </QueryClientProvider>
+    )
+
+    await waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))
+  })
+
+  it("cleans delayed final refreshes on unmount", async () => {
+    vi.useFakeTimers()
+    const getDiff = vi
+      .spyOn(agentsApi, "getThreadTurnDiff")
+      .mockResolvedValue(diff)
+    const view = renderProbe(true)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))
+
+    view.rerender(
+      <QueryClientProvider client={clients.at(-1)!}>
+        <Probe running={false} />
+      </QueryClientProvider>
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(2))
+    view.unmount()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(getDiff).toHaveBeenCalledTimes(2)
+  })
+})
 
 describe("useThreadsPage", () => {
   it("keeps cached threads visible while stale data revalidates", async () => {
@@ -85,6 +223,43 @@ describe("useThreadsPage", () => {
     expect(seen.at(-1)?.data).toBe(page)
     expect(seen.at(-1)?.isLoading).toBe(false)
     expect(seen.at(-1)?.isFetching).toBe(true)
+  })
+})
+
+describe("setAgentThreadStatus", () => {
+  it("updates paginated sidebar caches", () => {
+    const client = testClient()
+    const thread = {
+      id: "thread-1",
+      status: "finished",
+      resolved: false,
+    } as AgentThread
+    const key = agentThreadKeys.infinitePages({
+      limit: SIDEBAR_PAGE_SIZE,
+      resolved: false,
+      scope: "interactive",
+    })
+    client.setQueryData(key, {
+      pages: [
+        {
+          items: [thread],
+          limit: SIDEBAR_PAGE_SIZE,
+          offset: 0,
+          hasMore: false,
+        },
+      ],
+      pageParams: [0],
+    })
+    client.setQueryData(agentThreadKeys.sidebarActive(thread.id), thread)
+
+    setAgentThreadStatus(client, thread.id, "running")
+
+    expect(
+      client.getQueryData<InfiniteData<ThreadsPage>>(key)?.pages[0]?.items[0]
+    ).toMatchObject({ status: "running" })
+    expect(
+      client.getQueryData(agentThreadKeys.sidebarActive(thread.id))
+    ).toMatchObject({ status: "running" })
   })
 })
 
