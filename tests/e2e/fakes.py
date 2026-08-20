@@ -140,10 +140,17 @@ def seed_bare_remotes() -> None:
 
 
 def seed_sandbox_repo() -> None:
-    repo = TMP / "work" / "repo"
-    if repo.exists():
-        shutil.rmtree(repo)
-    _git("clone", str(BARE_REMOTE), str(repo))
+    """Leave the shared sandbox root holding exactly one checkout, named `repo`.
+
+    The local sandbox root is shared by every thread in a run, and the turn
+    checkpoint resolves the repo by globbing that root — so a checkout another
+    spec cloned alongside `repo` would silently win the glob.
+    """
+    work = TMP / "work"
+    for path in sorted(work.glob("*")):
+        if path.is_dir():
+            shutil.rmtree(path)
+    _git("clone", str(BARE_REMOTE), str(work / "repo"))
 
 
 def _diff_files(owner: str, repo: str, base: str, head: str) -> list[dict[str, Any]]:
