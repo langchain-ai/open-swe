@@ -1,9 +1,12 @@
 import json
 import os
+import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from deepagents.backends import LocalShellBackend
+from deepagents.backends.filesystem import FilesystemBackend
 
 SHELL_ENV_KEYS = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TMPDIR")
 
@@ -38,3 +41,29 @@ def create_desktop_backend(configurable: dict[str, Any]) -> LocalShellBackend:
         virtual_mode=True,
         env={key: value for key in SHELL_ENV_KEYS if (value := os.environ.get(key))},
     )
+
+
+def _artifacts_root() -> Path:
+    configured = os.environ.get("OPEN_SWE_LOCAL_ARTIFACTS_DIR")
+    if configured:
+        return Path(configured)
+    return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{os.getuid()}"
+
+
+def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
+    """Backends for the agent's own scratch files on a desktop run.
+
+    Offloaded tool results and evicted history default to the artifacts root,
+    which for a desktop run is the user's project: the dumps would show up as
+    changes and be swept into the next `git add -A`. Route them out of the
+    repository while leaving the virtual paths the model sees unchanged.
+    """
+    # The thread id becomes a path segment, so it may only be a plain name.
+    safe_id = re.sub(r"[^A-Za-z0-9._-]", "-", thread_id or "thread").lstrip(".") or "thread"
+    root = _artifacts_root() / safe_id
+    routes = {}
+    for name in ("large_tool_results", "conversation_history"):
+        directory = root / name
+        directory.mkdir(parents=True, exist_ok=True)
+        routes[f"/{name}/"] = FilesystemBackend(root_dir=directory, virtual_mode=True)
+    return routes

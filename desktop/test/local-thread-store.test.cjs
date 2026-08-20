@@ -52,7 +52,12 @@ test("reconciles interrupted threads and retains checkpoint refs until deletion"
   const fixture = temporaryStore(t)
   const store = fixture.create()
   const thread = store.create({ cwd: path.resolve("/tmp/project"), prompt: "work" })
-  store.setCheckpoint(thread.id, { repo: path.resolve("/tmp/project"), ref: "refs/open-swe/local/thread-1" })
+  store.setCheckpoint(thread.id, {
+    repo: path.resolve("/tmp/project"),
+    ref: "refs/open-swe/local/thread-1",
+    branch: "feature",
+  })
+  assert.equal(store.get(thread.id).checkpoint.branch, "feature")
   store.update(thread.id, { status: "running", viewed: false })
 
   const restored = fixture.create()

@@ -19,6 +19,10 @@ import { Messages } from "@/features/agents/components/messages"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import {
+  selectThreadDiffScope,
+  useDiffPanelStore,
+} from "@/features/agents/lib/diffPanelStore"
+import {
   selectThreadRightPanelState,
   useRightPanelStore,
 } from "@/features/agents/lib/rightPanelStore"
@@ -29,6 +33,7 @@ import {
   localThreadKeys,
   useDesktopLocalThread,
   useLocalThreadDiff,
+  useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
 import {
   readStoredPanelCollapsed,
@@ -129,17 +134,29 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
 
   const isRunning = stream.isLoading || thread?.status === "running"
-  const diff = useLocalThreadDiff(
+  const diffVisible =
+    !panelCollapsed && activeSurfaceId === "diff" && Boolean(thread)
+  const selectScope = useDiffPanelStore((state) => state.selectScope)
+  // Also the source of the branch/PR metadata, so it stays enabled in either
+  // scope: it is what tells us the branch has a pull request at all.
+  const checkpointDiff = useLocalThreadDiff(sessionId, diffVisible, isRunning)
+  const hasPullRequest = Boolean(checkpointDiff.data?.repository?.pr)
+  const scope = useDiffPanelStore((state) =>
+    selectThreadDiffScope(state.byThreadKey, threadRef, hasPullRequest)
+  )
+  const prDiff = useLocalThreadPrDiff(
     sessionId,
-    !panelCollapsed && activeSurfaceId === "diff" && Boolean(thread),
+    diffVisible && scope === "pull-request",
     isRunning
   )
+  const repository = prDiff.data?.repository ?? checkpointDiff.data?.repository
+  const pr = repository?.pr ?? null
+  const diff = scope === "pull-request" ? prDiff : checkpointDiff
+  const pullRequests = useMemo(() => (pr ? [pr] : []), [pr])
   const files = useMemo(
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
   )
-  const repository = diff.data?.repository
-  const pr = repository?.pr
   const messages = useMemo(
     () =>
       streamMessagesToUi(
@@ -410,7 +427,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         cwd={thread.cwd}
         terminalAvailable
         diffAvailable
-        pullRequests={[]}
+        pullRequests={pullRequests}
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
         onTerminalOpenFile={handleOpenFile}
@@ -430,6 +447,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             revealFilePath={revealFilePath}
             fullScreen={fullScreen}
             onRefresh={() => void diff.refetch()}
+            scope={hasPullRequest ? scope : undefined}
+            onScopeChange={
+              hasPullRequest
+                ? (next) => selectScope(threadRef, next)
+                : undefined
+            }
           />
         )}
       />

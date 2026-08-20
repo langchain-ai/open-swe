@@ -1,5 +1,5 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
-import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
+import type { AgentPullRequest, ImageChunk } from "@/features/agents/lib/types"
 import type { Skill } from "@/lib/api"
 
 export type DesktopCommandId =
@@ -31,7 +31,7 @@ export interface DesktopLocalDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
   files: Array<ThreadPrDiffFile>
-  repository?: { branch: string | null; pr: AgentThread["pr"] | null }
+  repository?: { branch: string | null; pr: AgentPullRequest | null }
 }
 
 export interface DesktopLocalPromptInput {
@@ -185,6 +185,7 @@ declare global {
       }) => Promise<DesktopLocalThreadSummary | null>
       deleteLocalThread: (threadId: string) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
+      getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
       terminal: DesktopTerminalBridge
     }
   }

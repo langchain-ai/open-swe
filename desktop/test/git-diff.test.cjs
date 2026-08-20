@@ -12,6 +12,7 @@ const {
   currentBranch,
   localBranches,
   parsePullRequest,
+  readBranchDiff,
   readDiff,
   repoRoot,
 } = require("../build/git-diff.cjs")
@@ -30,6 +31,11 @@ test("normalizes validated pull request metadata", () => {
       headRefName: "feature",
       baseRefName: "main",
       url: "https://github.com/example/repo/pull/12",
+      author: { login: "octocat" },
+      createdAt: "2026-08-20T00:00:00Z",
+      changedFiles: 3,
+      additions: 10,
+      deletions: 2,
     })
   )
   assert.deepEqual(pr, {
@@ -39,6 +45,11 @@ test("normalizes validated pull request metadata", () => {
     headRef: "feature",
     baseRef: "main",
     url: "https://github.com/example/repo/pull/12",
+    repoFullName: "example/repo",
+    author: "octocat",
+    authorAvatarUrl: null,
+    createdAt: "2026-08-20T00:00:00Z",
+    diffStats: { files: 3, additions: 10, deletions: 2 },
   })
   assert.equal(
     parsePullRequest(
@@ -108,4 +119,50 @@ test("diffs the worktree against a session checkpoint", async (t) => {
   const huge = diff.files.find((file) => file.path === "huge.txt")
   assert.equal(huge.unrenderable, true)
   assert.equal(huge.modifiedContent, null)
+})
+
+test("branch diff reports only what the branch committed", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-git-"))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  git(dir, ["init", "-q", "-b", "main"])
+  git(dir, ["config", "user.email", "test@example.com"])
+  git(dir, ["config", "user.name", "Test"])
+  fs.writeFileSync(path.join(dir, "models.ts"), "one\n")
+  fs.writeFileSync(path.join(dir, "search.ts"), "search\n")
+  git(dir, ["add", "-A"])
+  git(dir, ["commit", "-qm", "init"])
+
+  const repo = await repoRoot(dir)
+  await checkoutBranch(dir, "feature", true)
+  fs.writeFileSync(path.join(dir, "models.ts"), "one\ntwo\n")
+  git(dir, ["add", "-A"])
+  git(dir, ["commit", "-qm", "feature work"])
+
+  // Another session dirties the shared worktree; none of it is this branch's.
+  fs.writeFileSync(path.join(dir, "search.ts"), "search\nelsewhere\n")
+  fs.writeFileSync(path.join(dir, "stray.txt"), "stray\n")
+
+  const diff = await readBranchDiff(repo, "main")
+  assert.equal(diff.status, "ready")
+  assert.deepEqual(
+    diff.files.map((file) => [file.path, file.status, file.additions]),
+    [["models.ts", "modified", 1]]
+  )
+
+  assert.equal((await readBranchDiff(repo, "no-such-branch")).status, "missing")
+  assert.equal((await readBranchDiff(repo, "--upload-pack=touch")).status, "missing")
+
+  // The thread's branch is reported even while another one holds the checkout.
+  await checkoutBranch(dir, "main")
+  fs.writeFileSync(path.join(dir, "search.ts"), "search\nmain work\n")
+  git(dir, ["add", "-A"])
+  git(dir, ["commit", "-qm", "main work"])
+
+  const fromElsewhere = await readBranchDiff(repo, "main", "feature")
+  assert.deepEqual(
+    fromElsewhere.files.map((file) => file.path),
+    ["models.ts"]
+  )
+  assert.equal((await readBranchDiff(repo, "main", "no-such-branch")).status, "missing")
+  assert.equal((await readBranchDiff(repo, "main", "--upload-pack=touch")).status, "missing")
 })

@@ -3,10 +3,17 @@ import { DownloadIcon } from "lucide-react"
 
 import type { AgentThread } from "@/features/agents/lib/types"
 import { agentsApi } from "@/features/agents/lib/api"
-import { useAgentThreadTurnDiff } from "@/features/agents/lib/queries"
+import {
+  useAgentThreadPrDiff,
+  useAgentThreadTurnDiff,
+} from "@/features/agents/lib/queries"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
+import {
+  selectThreadDiffScope,
+  useDiffPanelStore,
+} from "@/features/agents/lib/diffPanelStore"
 import {
   selectThreadRightPanelState,
   useRightPanelStore,
@@ -48,17 +55,58 @@ export function AgentGitPanel({
   const terminalAvailable =
     thread.isOwner !== false && Boolean(thread.sandboxId)
 
+  const hasPullRequest = Boolean(thread.pr)
+  const selectScope = useDiffPanelStore((state) => state.selectScope)
+  const scope = useDiffPanelStore((state) =>
+    selectThreadDiffScope(state.byThreadKey, threadRef, hasPullRequest)
+  )
+  const diffVisible = !collapsed && activeSurfaceId === "diff"
+
   const turnDiff = useAgentThreadTurnDiff(
     thread.id,
     null,
-    !collapsed && activeSurfaceId === "diff",
+    diffVisible && scope === "thread",
     {},
     thread.status === "running"
   )
-  const files = useMemo(
-    () => toPanelFiles(turnDiff.data?.files ?? []),
-    [turnDiff.data?.files]
+  const prDiff = useAgentThreadPrDiff(
+    thread.id,
+    diffVisible && scope === "pull-request"
   )
+  const diff =
+    scope === "pull-request"
+      ? {
+          files: prDiff.data?.files ?? [],
+          // The PR endpoint answers from GitHub: a successful response is
+          // always a real diff, and a failure surfaces through `error`.
+          status: prDiff.data ? ("ready" as const) : undefined,
+          truncated: prDiff.data?.truncated,
+          isPending: prDiff.isPending,
+          isFetching: prDiff.isFetching,
+          error: prDiff.error,
+          refetch: prDiff.refetch,
+        }
+      : {
+          files: turnDiff.data?.files ?? [],
+          status: turnDiff.data?.status,
+          truncated: turnDiff.data?.truncated,
+          isPending: turnDiff.isPending,
+          isFetching: turnDiff.isFetching,
+          error: turnDiff.error,
+          refetch: turnDiff.refetch,
+        }
+  const files = useMemo(() => toPanelFiles(diff.files), [diff.files])
+
+  // Refresh whenever the window regains focus: the diff is read live, so a
+  // push or a review landing elsewhere should be visible on return.
+  const refetchDiff = diff.refetch
+  useEffect(() => {
+    if (!diffVisible) return
+    const onFocus = () => void refetchDiff()
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [diffVisible, refetchDiff])
+
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const canDownloadRecovery =
@@ -101,16 +149,20 @@ export function AgentGitPanel({
       renderDiff={({ fullScreen }) => (
         <ChangesPanel
           files={files}
-          status={turnDiff.data?.status}
-          isLoading={turnDiff.isPending}
-          isFetching={turnDiff.isFetching}
-          error={turnDiff.error}
-          truncated={turnDiff.data?.truncated}
+          status={diff.status}
+          isLoading={diff.isPending}
+          isFetching={diff.isFetching}
+          error={diff.error}
+          truncated={diff.truncated}
           branch={thread.branch}
           pr={thread.pr}
           revealFilePath={revealFilePath}
           fullScreen={fullScreen}
-          onRefresh={() => void turnDiff.refetch()}
+          onRefresh={() => void diff.refetch()}
+          scope={hasPullRequest ? scope : undefined}
+          onScopeChange={
+            hasPullRequest ? (next) => selectScope(threadRef, next) : undefined
+          }
           extraActions={
             canDownloadRecovery ? (
               <button

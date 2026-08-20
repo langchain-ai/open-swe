@@ -137,6 +137,9 @@ class BackendSupervisor {
         ...this.options.env,
         OPEN_SWE_LOCAL_AUTH_TOKEN: this.token,
         OPEN_SWE_LOCAL_PROJECTS_FILE: this.options.projectsFile,
+        ...(this.options.stateDir
+          ? { OPEN_SWE_LOCAL_ARTIFACTS_DIR: path.join(this.options.stateDir, "artifacts") }
+          : {}),
         PYTHONUNBUFFERED: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
