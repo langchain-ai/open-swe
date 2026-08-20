@@ -304,6 +304,24 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
     assert "approve_workflow_push" in result["available_actions"]
 
 
+def test_admin_thread_actions_require_admin() -> None:
+    options = {
+        "owner": False,
+        "admin_thread": True,
+        "running": False,
+        "resolved": False,
+        "can_delete_plan_comment": False,
+        "plan": {},
+        "approvals": {},
+    }
+
+    member_actions = threads_tool._available_actions(admin=False, **options)
+    admin_actions = threads_tool._available_actions(admin=True, **options)
+
+    assert "send_message" not in member_actions
+    assert "send_message" in admin_actions
+
+
 async def test_get_thread_reports_unavailable_cost_without_prepare_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -366,13 +366,14 @@ def _available_actions(
     *,
     owner: bool,
     admin: bool,
+    admin_thread: bool,
     running: bool,
     resolved: bool,
     can_delete_plan_comment: bool,
     plan: Mapping[str, Any],
     approvals: Mapping[str, Mapping[str, Any]],
 ) -> list[str]:
-    actions = ["send_message"]
+    actions = [] if admin_thread and not admin else ["send_message"]
     plan_status = plan.get("status")
     if plan_status and plan_status not in {"approved", "cancelled", "shared"}:
         actions.append("add_plan_comment")
@@ -475,6 +476,7 @@ async def get_thread(
         "available_actions": _available_actions(
             owner=owner,
             admin=actor.admin,
+            admin_thread=summary.get("adminThread") is True,
             running=running,
             resolved=summary.get("resolved") is True,
             can_delete_plan_comment=can_delete_plan_comment,
