@@ -5,7 +5,7 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent import server
-from agent.prompt import construct_system_prompt
+from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.tools import environments as env_tools
 
 _READY = {"slug": "base", "name": "Base", "snapshot_status": "ready", "snapshot_id": "env-snap"}
@@ -92,6 +92,13 @@ def test_admin_thread_accepts_configured_login(monkeypatch: pytest.MonkeyPatch) 
     assert server._admin_thread(_config(admin_thread=True), "ramonn") is True
 
 
+def test_workspace_admin_status_does_not_require_admin_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    assert server._workspace_admin(_config(github_login="ramonn"), None) is True
+
+
 # --- tool gate ---
 
 
@@ -125,6 +132,11 @@ async def test_capture_tool_requires_a_saved_environment(monkeypatch: pytest.Mon
 
 
 # --- prompt wiring ---
+
+
+def test_sender_context_includes_workspace_admin_status() -> None:
+    assert "Workspace admin: yes." in construct_sender_context(None, workspace_admin=True)
+    assert "Workspace admin: no." in construct_sender_context(None)
 
 
 def test_environment_instructions_render_in_system_prompt() -> None:
