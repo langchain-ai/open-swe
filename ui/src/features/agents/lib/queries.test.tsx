@@ -129,6 +129,25 @@ describe("useAgentThreadTurnDiff", () => {
     expect(getDiff).toHaveBeenCalledTimes(2)
   })
 
+  it("refetches a fresh cached diff when remounted after the run finished", async () => {
+    const getDiff = vi
+      .spyOn(agentsApi, "getThreadTurnDiff")
+      .mockResolvedValue(diff)
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    client.setQueryData(agentThreadKeys.turnDiff("thread-1", null, {}), diff)
+    clients.push(client)
+
+    render(
+      <QueryClientProvider client={client}>
+        <Probe running={false} />
+      </QueryClientProvider>
+    )
+
+    await waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))
+  })
+
   it("cleans delayed final refreshes on unmount", async () => {
     vi.useFakeTimers()
     const getDiff = vi

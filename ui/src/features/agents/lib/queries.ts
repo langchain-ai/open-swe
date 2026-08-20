@@ -356,7 +356,7 @@ export function useAgentThreadTurnDiff(
   })
 
   const { refetch } = query
-  const previous = useRef({ enabled, pollWhileRunning })
+  const previous = useRef({ enabled: false, pollWhileRunning })
   useEffect(() => {
     const was = previous.current
     previous.current = { enabled, pollWhileRunning }
