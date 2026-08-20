@@ -58,6 +58,7 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
         _github_proxy_token=None,
         _github_proxy_repositories=None,
         _repo=None,
+        ado_proxy_token=None,  # noqa: ARG001
     ):
         return sandbox_backend
 
@@ -104,6 +105,7 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
         _github_proxy_token=None,
         _github_proxy_repositories=None,
         _repo=None,
+        ado_proxy_token=None,  # noqa: ARG001
     ):
         return sandbox_backend
 

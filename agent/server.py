@@ -80,7 +80,7 @@ from .input_messages import append_message_data
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
-from .integrations.langsmith import _configure_github_proxy
+from .integrations.langsmith import _configure_sandbox_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
 from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
@@ -167,6 +167,7 @@ from .utils.authorship import (
     OPEN_SWE_BOT_NAME,
     resolve_triggering_user_identity,
 )
+from .utils.azure_devops_proxy import mark_ado_proxy_thread
 from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import get_github_app_installation_token_with_expiry
@@ -192,6 +193,8 @@ from .utils.sandbox_state import (
     set_sandbox_backend,
     unwrap_sandbox_backend,
 )
+from .utils.scm import azure_devops_repo_ready, is_azure_devops_repo
+from .utils.scm_clone import clone_or_pull_azure_devops_repo_in_sandbox
 from .utils.thread_settings import (
     ThreadSettings,
     load_thread_settings,
@@ -250,7 +253,12 @@ async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str
         owner = repo_config.get("owner")
         name = repo_config.get("name")
         if isinstance(owner, str) and isinstance(name, str):
-            return {"owner": owner, "name": name}
+            resolved: dict[str, str] = {"owner": owner, "name": name}
+            for key in ("scm_provider", "project"):
+                value = repo_config.get(key)
+                if isinstance(value, str) and value.strip():
+                    resolved[key] = value.strip()
+            return resolved
 
     if configurable.get("repo_explicitly_none") is True:
         return None
@@ -260,6 +268,52 @@ async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str
     except Exception:
         logger.debug("Failed to load team default repo for prompt", exc_info=True)
         return None
+
+
+async def _resolve_ado_pat(configurable: dict[str, Any]) -> str | None:
+    """Azure DevOps credential for the configured repo, or ``None`` for GitHub repos."""
+    repo_config = configurable.get("repo")
+    if not isinstance(repo_config, dict) or not is_azure_devops_repo(repo_config):
+        return None
+    from .utils.azure_devops import resolve_azure_devops_pat_async
+
+    return await resolve_azure_devops_pat_async(configurable)
+
+
+async def _resolve_ado_proxy_token(configurable: dict[str, Any]) -> str | None:
+    """Azure DevOps credential to inject into the LangSmith egress proxy, if any.
+
+    ``None`` for every other sandbox provider: only the LangSmith proxy can hold
+    the credential outside the sandbox, so those fall back to per-command
+    ``-c http.extraHeader`` in :mod:`agent.utils.scm_clone`.
+    """
+    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+        return None
+    return await _resolve_ado_pat(configurable)
+
+
+async def _clone_azure_devops_repo(
+    sandbox_backend: SandboxBackendProtocol,
+    configurable: dict[str, Any],
+    repo: dict[str, str],
+    pat: str,
+) -> None:
+    """Pre-clone the Azure DevOps repo: the agent has no `gh repo clone` equivalent."""
+    checkout_branch: str | None = None
+    pr_ctx = configurable.get("azure_devops_pull_request")
+    if isinstance(pr_ctx, dict):
+        branch = pr_ctx.get("source_branch_short_name")
+        if isinstance(branch, str) and branch.strip():
+            checkout_branch = branch.strip()
+    await clone_or_pull_azure_devops_repo_in_sandbox(
+        sandbox_backend,
+        str(repo.get("owner") or repo.get("organization")),
+        str(repo["project"]),
+        str(repo["name"]),
+        pat,
+        checkout_branch=checkout_branch,
+        git_auth_via_proxy=os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith",
+    )
 
 
 async def _resolve_repo_custom_instructions(
@@ -328,29 +382,42 @@ async def _resolve_snapshot_id(
 async def _create_sandbox_with_proxy(
     github_proxy_token: str | None = None,
     *,
+    ado_proxy_token: str | None = None,
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     repo: dict[str, str] | None = None,
     environment_slug: str | None = None,
 ) -> SandboxBackendProtocol:
-    """Create a new sandbox with GitHub proxy auth configured."""
+    """Create a new sandbox with GitHub and/or Azure DevOps proxy auth configured."""
     snapshot_id = await _resolve_snapshot_id(repo, environment_slug)
     sandbox_backend = await create_sandbox(snapshot_id=snapshot_id)
 
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     if sandbox_type == "langsmith":
-        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
-        if not token:
-            msg = "Cannot configure proxy: GitHub App installation token is unavailable"
+        token: str | None = None
+        expires_at: str | None = None
+        permissions = None
+        if github_proxy_token or not ado_proxy_token:
+            token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
+        if not token and not ado_proxy_token:
+            msg = (
+                "Cannot configure sandbox proxy: no GitHub App installation token and no "
+                "Azure DevOps credential"
+            )
             logger.error(msg)
             raise ValueError(msg)
-        await _configure_github_proxy(sandbox_backend.id, token)
-        record_proxy_token_expiry(
-            thread_id,
-            expires_at,
-            repositories=github_proxy_repositories,
-            permissions=permissions,
+        await _configure_sandbox_proxy(
+            sandbox_backend.id, github_token=token, ado_pat=ado_proxy_token
         )
+        if token:
+            record_proxy_token_expiry(
+                thread_id,
+                expires_at,
+                repositories=github_proxy_repositories,
+                permissions=permissions,
+            )
+        if ado_proxy_token:
+            mark_ado_proxy_thread(thread_id)
 
     return sandbox_backend
 
@@ -359,29 +426,37 @@ async def _refresh_github_proxy(
     sandbox_backend: SandboxBackendProtocol,
     github_proxy_token: str | None = None,
     *,
+    ado_proxy_token: str | None = None,
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
 ) -> None:
-    """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
+    """Refresh GitHub and/or Azure DevOps proxy credentials for reused LangSmith sandboxes."""
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
         return
 
-    token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
-    if not token:
+    token: str | None = None
+    expires_at: str | None = None
+    permissions = None
+    if github_proxy_token or not ado_proxy_token:
+        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
+    if not token and not ado_proxy_token:
         logger.warning(
-            "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
+            "Skipping sandbox proxy refresh for sandbox %s: no credentials available",
             sandbox_backend.id,
         )
         return
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
-    await _configure_github_proxy(current_backend.id, token)
-    record_proxy_token_expiry(
-        thread_id,
-        expires_at,
-        repositories=github_proxy_repositories,
-        permissions=permissions,
-    )
+    await _configure_sandbox_proxy(current_backend.id, github_token=token, ado_pat=ado_proxy_token)
+    if token:
+        record_proxy_token_expiry(
+            thread_id,
+            expires_at,
+            repositories=github_proxy_repositories,
+            permissions=permissions,
+        )
+    if ado_proxy_token:
+        mark_ado_proxy_thread(thread_id)
 
 
 async def _refresh_github_proxy_or_fail(
@@ -389,18 +464,21 @@ async def _refresh_github_proxy_or_fail(
     thread_id: str,
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
+    *,
+    ado_proxy_token: str | None = None,
 ) -> SandboxBackendProtocol:
     """Refresh proxy credentials; a sandbox we can't reconfigure is unreachable."""
     try:
         await _refresh_github_proxy(
             sandbox_backend,
             github_proxy_token,
+            ado_proxy_token=ado_proxy_token,
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
         )
     except Exception as exc:
         logger.warning(
-            "Failed to refresh GitHub proxy for sandbox %s on thread %s",
+            "Failed to refresh sandbox proxy for sandbox %s on thread %s",
             sandbox_backend.id,
             thread_id,
             exc_info=True,
@@ -423,6 +501,7 @@ async def _connect_existing_sandbox(
     sandbox_id: str | None,
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
+    ado_proxy_token: str | None = None,
 ) -> SandboxBackendProtocol:
     """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
 
@@ -443,7 +522,11 @@ async def _connect_existing_sandbox(
             logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
             raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
     return await _refresh_github_proxy_or_fail(
-        sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
+        sandbox_backend,
+        thread_id,
+        github_proxy_token,
+        github_proxy_repositories,
+        ado_proxy_token=ado_proxy_token,
     )
 
 
@@ -451,6 +534,7 @@ async def ensure_sandbox_for_thread(
     thread_id: str,
     *,
     github_proxy_token: str | None = None,
+    ado_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     repo: dict[str, str] | None = None,
     environment_slug: str | None = None,
@@ -497,6 +581,7 @@ async def ensure_sandbox_for_thread(
         logger.info("Creating new sandbox for thread %s", thread_id)
         sandbox_backend = await _create_sandbox_with_proxy(
             github_proxy_token,
+            ado_proxy_token=ado_proxy_token,
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
             repo=repo,
@@ -511,6 +596,7 @@ async def ensure_sandbox_for_thread(
                 sandbox_id=sandbox_id,
                 github_proxy_token=github_proxy_token,
                 github_proxy_repositories=github_proxy_repositories,
+                ado_proxy_token=ado_proxy_token,
             )
         except (SandboxGoneError, SandboxUnreachableError) as exc:
             gone = isinstance(exc, SandboxGoneError)
@@ -525,6 +611,7 @@ async def ensure_sandbox_for_thread(
             try:
                 sandbox_backend = await _create_sandbox_with_proxy(
                     github_proxy_token,
+                    ado_proxy_token=ado_proxy_token,
                     thread_id=thread_id,
                     github_proxy_repositories=github_proxy_repositories,
                     repo=repo,
@@ -1103,7 +1190,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     source="desktop",
                 ),
             }
-        github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
+        ado_pat = await _resolve_ado_pat(configurable)
+        github_token = (
+            None if ado_pat else (await resolve_github_token(self._config, self._thread_id))[0]
+        )
         prompt_default_repo = await _resolve_prompt_default_repo(configurable)
         triggering_user_identity_task = asyncio.create_task(
             asyncio.to_thread(
@@ -1126,6 +1216,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
             raise
         del github_token
+        if ado_pat and prompt_default_repo and azure_devops_repo_ready(prompt_default_repo):
+            await _clone_azure_devops_repo(
+                sandbox_backend, configurable, prompt_default_repo, ado_pat
+            )
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
         environment = await resolve_environment(_environment_slug(configurable))
         sender_instructions = await _resolve_user_custom_instructions(self._profile_login)
@@ -1216,6 +1310,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         return await ensure_sandbox_for_thread(
             _thread_id,
             repo=prompt_default_repo,
+            ado_proxy_token=await _resolve_ado_proxy_token(_configurable),
             environment_slug=_environment_slug(_configurable),
         )
 

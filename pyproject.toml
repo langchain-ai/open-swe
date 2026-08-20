@@ -32,6 +32,7 @@ dependencies = [
     "langchain-mcp-adapters>=0.3.1",
     "stagehand>=3.22.0",
     "websockets>=15.0.1",
+    "azure-identity>=1.19.0",
 ]
 
 [project.optional-dependencies]

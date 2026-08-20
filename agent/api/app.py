@@ -11,6 +11,7 @@ from ..dashboard import router as dashboard_router
 from ..dashboard.plan_api import plan_router
 from ..dashboard.workflow_approval_api import workflow_approval_router
 from ..utils.event_loop import pin_single_event_loop
+from ..webhooks.azure_devops_routes import router as azure_devops_webhook_router
 from ..webhooks.github_routes import router as github_webhook_router
 from ..webhooks.linear_routes import router as linear_webhook_router
 from ..webhooks.slack_routes import router as slack_webhook_router
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     app.include_router(slack_webhook_router)
     app.include_router(health_router)
     app.include_router(github_webhook_router)
+    app.include_router(azure_devops_webhook_router)
     return app
 
 
