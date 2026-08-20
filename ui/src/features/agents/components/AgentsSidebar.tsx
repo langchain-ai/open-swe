@@ -198,7 +198,11 @@ export function AgentsSidebar({
       ? [...filteredActive, ...filteredResolved]
       : filteredActive
   const sections = groupThreadsByMode(groupedThreads, prefs.group)
+  // Never alongside the loading placeholder: a first load with a persisted
+  // filter has no sections yet, and "no matches" would be a definitive answer
+  // to a request still in flight.
   const isCloudEmpty =
+    !sidebar.isPending &&
     sections.length === 0 &&
     (!showResolved || filteredResolved.length === 0) &&
     hasActiveFilters(prefs.filters)
