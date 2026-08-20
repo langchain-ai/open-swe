@@ -291,22 +291,80 @@ def _desktop_reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.md"
+PLAN_FILE_PATH = "/workspace/plans/2026-06-29-greet-helper.html"
 
-PLAN_MARKDOWN = """## Plan: Add greet() helper
-
-### Overview
-Add a tiny greeting helper to the demo repo.
-
-### Files to change
-- `greet.py` — new module exposing a `greet(name)` function.
-
-### Steps
-1. Create `greet.py` with a `greet(name)` function.
-2. Open a draft PR with the change.
-
-### Verification
-- Import `greet` and confirm it returns the expected string.
+PLAN_HTML = """<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Greeting Blueprint</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --fg: #1a1a1a;
+        --muted: #575757;
+        --rule: #d9d9d9;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --bg: #101112;
+          --fg: #f2f2f2;
+          --muted: #b3b3b3;
+          --rule: #333537;
+        }
+      }
+      :root[data-theme="dark"] {
+        --bg: #101112;
+        --fg: #f2f2f2;
+        --muted: #b3b3b3;
+        --rule: #333537;
+      }
+      body {
+        margin: 0;
+        padding: 2rem 1.25rem;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
+        line-height: 1.6;
+      }
+      main { margin: 0 auto; max-width: 44rem; }
+      h1 { font-size: 1.6rem; margin: 0 0 0.5rem; }
+      h2 { font-size: 1.1rem; margin: 1.75rem 0 0.5rem; }
+      p, li { color: var(--muted); }
+      code {
+        background: color-mix(in srgb, var(--fg) 8%, transparent);
+        border-radius: 0.25rem;
+        padding: 0.1rem 0.3rem;
+      }
+      hr { border: 0; border-top: 1px solid var(--rule); margin: 2rem 0; }
+      a:focus-visible, li:focus-visible {
+        outline: 2px solid currentColor;
+        outline-offset: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Add greet() helper</h1>
+      <p>Add a tiny greeting helper to the demo repo.</p>
+      <hr />
+      <h2>Files to change</h2>
+      <ul>
+        <li><code>greet.py</code> — new module exposing a <code>greet(name)</code> function.</li>
+      </ul>
+      <h2>Steps</h2>
+      <ol>
+        <li>Create <code>greet.py</code> with a <code>greet(name)</code> function.</li>
+        <li>Open a draft PR with the change.</li>
+      </ol>
+      <h2>Verification</h2>
+      <ul>
+        <li>Import <code>greet</code> and confirm it returns the expected string.</li>
+      </ul>
+    </main>
+  </body>
+</html>
 """
 
 
@@ -341,7 +399,7 @@ def _write_plan_step(_messages: list[BaseMessage]) -> AIMessage:
         tool_calls=[
             {
                 "name": "write_file",
-                "args": {"file_path": PLAN_FILE_PATH, "content": PLAN_MARKDOWN},
+                "args": {"file_path": PLAN_FILE_PATH, "content": PLAN_HTML},
                 "id": "call-write-plan",
             }
         ],
