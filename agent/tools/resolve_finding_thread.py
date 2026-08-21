@@ -11,8 +11,8 @@ from ..review.findings import (
     get_thread_id_from_runtime,
     thread_missing_tool_result,
 )
+from ..review.outcomes import emit_finding_status_outcome
 from ..review.thread_resolution import resolve_finding_on_github
-from ..utils.reviewer_outcomes import emit_finding_status_outcome
 
 
 async def resolve_finding_thread(

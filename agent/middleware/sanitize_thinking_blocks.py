@@ -8,7 +8,7 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage
 
-from ..utils.model import unwrap_chat_model
+from ..models.factory import unwrap_chat_model
 
 
 def _is_chat_anthropic(model: object) -> bool:

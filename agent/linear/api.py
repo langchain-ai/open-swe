@@ -5,10 +5,9 @@ from typing import Any
 
 import httpx
 
-from agent.utils.langsmith import get_langsmith_trace_url
-
 from ..config import linear_api_key
-from .http import DEFAULT_HTTP_TIMEOUT
+from ..langsmith.api import get_langsmith_trace_url
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 

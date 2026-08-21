@@ -19,8 +19,8 @@ from typing import Any
 from langsmith import AsyncClient as AsyncLangSmithClient
 
 from ..config import langsmith_credentials, reviewer_outcomes_dataset
-from ..review.findings import Finding
-from .langsmith import async_langsmith_client, sync_langsmith_client
+from ..langsmith.api import async_langsmith_client, sync_langsmith_client
+from .findings import Finding
 
 logger = logging.getLogger(__name__)
 

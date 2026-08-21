@@ -1,6 +1,6 @@
 from typing import Any
 
-from ..utils.linear import list_teams
+from ..linear.api import list_teams
 
 
 async def linear_list_teams() -> dict[str, Any]:

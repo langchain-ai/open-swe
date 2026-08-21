@@ -10,6 +10,7 @@ from ..config import langgraph_client
 from ..dashboard.repo_access import require_repo_access_for_user
 from ..dispatch import dispatch_agent_run
 from ..github.org_membership import is_repo_allowed
+from ..langsmith.api import get_langsmith_trace_url
 from ..slack.api import (
     post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
@@ -20,7 +21,6 @@ from ..slack.threads import (
     store_slack_run_mapping,
 )
 from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.langsmith import get_langsmith_trace_url
 
 _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000

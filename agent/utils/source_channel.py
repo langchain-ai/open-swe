@@ -20,9 +20,9 @@ from ..config import langgraph_client
 from ..github.app import get_github_app_installation_token
 from ..github.comments import post_github_comment
 from ..github.token import get_github_token
+from ..linear.api import comment_on_linear_issue
 from ..slack.api import post_slack_thread_reply
 from ..slack.threads import get_active_slack_thread
-from .linear import comment_on_linear_issue
 from .user_messages import warning
 
 logger = logging.getLogger(__name__)

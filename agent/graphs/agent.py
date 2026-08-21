@@ -43,6 +43,7 @@ from ..integrations.datadog_mcp import load_datadog_tools
 from ..integrations.langsmith_tools import load_langsmith_tools
 from ..integrations.notion_mcp import load_notion_tools
 from ..integrations.stagehand_browser import load_browser_tools
+from ..langsmith.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 from ..middleware import (
     BasePrepareRunMiddleware,
     DynamicContextMiddleware,
@@ -61,6 +62,7 @@ from ..middleware import (
 )
 from ..middleware.prepare_run import PrepareRunState
 from ..middleware.stack import core_stack, model_guard_middleware
+from ..models.factory import DEFAULT_LLM_REASONING, ModelKwargs, fallback_model_id_for
 from ..prompt import construct_sender_context, construct_system_prompt, render_open_swe_shared_base
 from ..runtime.constants import DEFAULT_LLM_MAX_TOKENS, MODEL_CALL_RECURSION_LIMIT
 from ..runtime.constants import (
@@ -128,10 +130,8 @@ from ..tools import (
 from ..utils import ttl_cache
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from ..utils.json_types import as_json_object
-from ..utils.model import DEFAULT_LLM_REASONING, ModelKwargs, fallback_model_id_for
 from ..utils.source_channel import post_sandbox_unreachable_notification
 from ..utils.thread_settings import ThreadSettings, normalize_thread_settings
-from ..utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 from ._assembly import (
     make_model_or_defer,
     model_spec,

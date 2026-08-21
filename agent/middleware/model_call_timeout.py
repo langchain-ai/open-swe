@@ -19,7 +19,7 @@ from ..config import model_call_timeout_seconds
 
 logger = logging.getLogger(__name__)
 
-# Above the provider-level ``timeout`` (agent.utils.model), so a stalled HTTP
+# Above the provider-level ``timeout`` (agent.models.factory), so a stalled HTTP
 # request fails and retries inside the provider client first and this only fires
 # for stalls the provider never notices.
 DEFAULT_MODEL_CALL_TIMEOUT_SECONDS = 900.0

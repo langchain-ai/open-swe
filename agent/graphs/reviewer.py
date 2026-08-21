@@ -32,6 +32,7 @@ from langgraph.runtime import Runtime
 from ..github.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from ..github.app import get_github_app_installation_token_with_expiry
 from ..github.token import cache_github_token_for_thread
+from ..langsmith.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 from ..middleware import (
     BasePrepareRunMiddleware,
     DynamicContextMiddleware,
@@ -42,6 +43,7 @@ from ..middleware import (
 )
 from ..middleware.prepare_run import PrepareRunState
 from ..middleware.stack import core_stack, model_guard_middleware
+from ..models.factory import DEFAULT_LLM_REASONING
 from ..review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -94,9 +96,7 @@ from ..tools import (
 )
 from ..utils import ttl_cache
 from ..utils.api_standards_skill import fetch_api_standards_skill
-from ..utils.model import DEFAULT_LLM_REASONING
 from ..utils.source_channel import post_sandbox_unreachable_notification
-from ..utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 from ._assembly import ModelSpec, cached_gateway_enabled, model_spec, prepare_config, stub_agent
 
 logger = logging.getLogger(__name__)

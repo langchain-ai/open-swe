@@ -25,6 +25,7 @@ from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 
 from ..github.app import get_github_app_installation_token
+from ..langsmith.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 from ..middleware import (
     BasePrepareRunMiddleware,
     DynamicContextMiddleware,
@@ -33,6 +34,7 @@ from ..middleware import (
 )
 from ..middleware.prepare_run import PrepareRunState
 from ..middleware.stack import core_stack, model_guard_middleware
+from ..models.factory import DEFAULT_LLM_REASONING
 from ..runtime import graph_loaded_for_execution
 from ..settings.team_settings import get_team_default_model, get_team_fable_enabled
 from ..tools import (
@@ -43,8 +45,6 @@ from ..tools import (
     web_search,
 )
 from ..utils import ttl_cache
-from ..utils.model import DEFAULT_LLM_REASONING
-from ..utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 from ._assembly import (
     cached_gateway_enabled,
     model_spec,

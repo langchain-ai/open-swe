@@ -24,8 +24,8 @@ from ..review.findings import (
     thread_missing_tool_result,
     update_finding_fields,
 )
+from ..review.outcomes import emit_finding_status_outcome
 from ..review.thread_resolution import resolve_finding_on_github
-from ..utils.reviewer_outcomes import emit_finding_status_outcome
 
 
 def _normalize_note(note: str | None) -> str | None:

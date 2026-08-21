@@ -6,7 +6,7 @@ key and the gateway resolves the real provider key from workspace Provider
 Secrets, enforcing spend/PII/secrets policies and tracing every call. Routing is
 opt-in via ``LANGSMITH_GATEWAY_ENABLED`` (deployment default) or the
 ``gateway_enabled`` team setting, and is applied centrally in
-:func:`agent.utils.model.make_model`.
+:func:`agent.models.factory.make_model`.
 """
 
 import logging

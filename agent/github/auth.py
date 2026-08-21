@@ -19,11 +19,11 @@ from ..config import (
     service_auth_jwt_secret,
     user_id_api_key_map,
 )
+from ..linear.api import comment_on_linear_issue
 from ..slack.api import post_slack_thread_reply
 from ..slack.threads import get_active_slack_thread
 from ..utils.dashboard_links import build_settings_url
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
-from ..utils.linear import comment_on_linear_issue
 from ..utils.user_messages import WARNING_ICON, warning
 from .app import get_github_app_installation_token_with_expiry
 from .token import (

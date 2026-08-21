@@ -5,6 +5,7 @@ from xml.etree import ElementTree
 import pytest
 from support.langgraph_fakes import FakeLangGraphClient
 
+from agent.langsmith.run_usage import RunUsageSummary
 from agent.slack import api as slack_api
 from agent.slack import format as slack_format
 from agent.slack.api import get_slack_permalink, post_slack_trace_reply
@@ -17,7 +18,6 @@ from agent.slack.format import (
 )
 from agent.utils import thread_ops
 from agent.utils.dashboard_links import dashboard_thread_url
-from agent.utils.run_usage import RunUsageSummary
 from agent.webhooks import repo_config as webhook_repo_config
 from agent.webhooks import slack as slack_webhooks
 

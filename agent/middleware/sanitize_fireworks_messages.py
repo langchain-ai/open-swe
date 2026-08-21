@@ -20,7 +20,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage
 
-from ..utils.model import unwrap_chat_model
+from ..models.factory import unwrap_chat_model
 
 try:
     from langchain_fireworks.chat_models import ChatFireworks

@@ -9,7 +9,7 @@ import copy
 import re
 from typing import Any
 
-from ..utils.run_usage import RunUsageSummary
+from ..langsmith.run_usage import RunUsageSummary
 
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000

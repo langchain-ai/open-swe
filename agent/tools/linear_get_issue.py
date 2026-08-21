@@ -1,6 +1,6 @@
 from typing import Any
 
-from ..utils.linear import get_issue
+from ..linear.api import get_issue
 
 
 async def linear_get_issue(issue_id: str) -> dict[str, Any]:

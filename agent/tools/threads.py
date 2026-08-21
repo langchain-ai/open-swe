@@ -27,6 +27,7 @@ from ..dashboard.threads.runs import (
     send_dashboard_message,
 )
 from ..input_messages import input_message_text, message_sender_id
+from ..langsmith.api import LangSmithCostUnavailable, get_langsmith_thread_cost
 from ..settings.agent_overrides import resolve_login_from_email_async
 from ..settings.options import normalize_model_choice
 from ..settings.plan_store import get_plan_content, list_plan_comments
@@ -37,7 +38,6 @@ from ..settings.workflow_approval import (
 )
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from ..utils.json_types import as_json_object, thread_metadata
-from ..utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
 
 logger = logging.getLogger(__name__)

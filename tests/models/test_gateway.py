@@ -1,4 +1,4 @@
-"""Unit tests for LangSmith LLM Gateway routing (agent/utils/gateway.py + make_model)."""
+"""Unit tests for LangSmith LLM Gateway routing (agent/models/gateway.py + make_model)."""
 
 from typing import Any, cast
 from unittest.mock import patch
@@ -10,8 +10,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-from agent.utils import gateway, model
-from agent.utils.model import OpenAIReasoning
+from agent.models import factory as model
+from agent.models import gateway
+from agent.models.factory import OpenAIReasoning
 
 _GATEWAY_ENV_VARS = (
     "LANGSMITH_API_KEY",

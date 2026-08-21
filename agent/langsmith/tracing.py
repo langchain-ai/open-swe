@@ -3,9 +3,10 @@
 import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-import langsmith as ls
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
+
+import langsmith as ls
 
 AGENT_TRACING_PROJECT = "open-swe-agent"
 REVIEW_TRACING_PROJECT = "open-swe-review"

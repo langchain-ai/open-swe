@@ -32,6 +32,7 @@ from ..input_messages import (
     system_input,
     system_introduction,
 )
+from ..langsmith.api import get_langsmith_trace_url
 from ..settings.agent_overrides import resolve_agent_model_id
 from ..settings.environments import get_environment, parse_environment_tag
 from ..settings.github_tokens import get_valid_access_token, has_access_token_record
@@ -69,7 +70,6 @@ from ..slack.threads import (
 from ..utils.dashboard_links import build_settings_url, dashboard_thread_url
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.json_types import ThreadLike, as_json_object, as_thread_dict
-from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from ..utils.thread_ops import (
     fetch_thread_metadata,

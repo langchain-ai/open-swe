@@ -9,11 +9,11 @@ from langgraph_sdk import get_client
 
 from ..github.comments import fetch_github_thread_participants
 from ..github.token import get_github_token
+from ..linear.api import fetch_linear_issue_participant_emails
 from ..settings.agent_overrides import resolve_github_login
 from ..settings.user_mappings import get_mapping, login_for_email, login_for_slack_id
 from ..slack.api import fetch_slack_thread_messages
 from .json_types import as_json_object, thread_metadata
-from .linear import fetch_linear_issue_participant_emails
 
 PARTICIPANT_LOGINS_KEY = "participant_logins"
 _SLACK_SYSTEM_MESSAGE_SUBTYPES = {

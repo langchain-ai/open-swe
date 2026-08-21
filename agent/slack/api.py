@@ -9,10 +9,10 @@ from typing import Any
 import httpx
 
 from ..config import slack_bot_token
+from ..langsmith.api import get_langsmith_trace_url
+from ..langsmith.run_usage import RunUsageSummary
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
-from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.run_usage import RunUsageSummary
 from ..utils.user_messages import WARNING_ICON
 from .format import (
     SlackChannelContext,

@@ -1,6 +1,6 @@
 from typing import Any
 
-from ..utils.linear import search_issues
+from ..linear.api import search_issues
 
 
 async def linear_search_issues(

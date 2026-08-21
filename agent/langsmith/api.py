@@ -19,7 +19,7 @@ from ..config import (
     langsmith_tenant_id,
     langsmith_tracing_project_id,
 )
-from .timestamps import parse_expiry
+from ..utils.timestamps import parse_expiry
 from .tracing import AGENT_TRACING_PROJECT
 
 logger = logging.getLogger(__name__)

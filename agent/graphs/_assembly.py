@@ -14,6 +14,8 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 
+from ..models.deferred import make_deferred_error_model
+from ..models.factory import ModelKwargs, OpenAIReasoning, make_model, provider_model_kwargs
 from ..runtime.constants import DEFAULT_LLM_MAX_TOKENS, DEFAULT_RECURSION_LIMIT
 from ..settings.options import (
     SUPPORTED_MODEL_IDS,
@@ -23,8 +25,6 @@ from ..settings.options import (
 )
 from ..settings.team_settings import get_effective_gateway_enabled
 from ..utils import ttl_cache
-from ..utils.deferred_model import make_deferred_error_model
-from ..utils.model import ModelKwargs, OpenAIReasoning, make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 
