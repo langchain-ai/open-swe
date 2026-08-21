@@ -6,7 +6,8 @@ import { AppShell } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { api } from "@/lib/api"
+import { reviewsApi } from "@/features/reviews/lib/api"
+import { reviewKeys } from "@/features/reviews/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
@@ -25,16 +26,16 @@ function RepositoriesOwnerPage() {
   const repos = useRepos()
 
   const autoReview = useQuery({
-    queryKey: ["autoReviewRepos"],
-    queryFn: api.listAutoReviewRepos,
+    queryKey: reviewKeys.autoReviewRepos,
+    queryFn: reviewsApi.listAutoReviewRepos,
     enabled: !!session.data,
   })
 
   const toggleAutoReview = useMutation({
     mutationFn: ({ full_name, on }: { full_name: string; on: boolean }) =>
-      api.setAutoReviewRepo(full_name, on),
+      reviewsApi.setAutoReviewRepo(full_name, on),
     onSuccess: (data) => {
-      qc.setQueryData(["autoReviewRepos"], data)
+      qc.setQueryData(reviewKeys.autoReviewRepos, data)
     },
   })
 

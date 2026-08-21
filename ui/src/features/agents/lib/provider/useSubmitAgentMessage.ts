@@ -3,7 +3,8 @@ import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
 import type { AgentThread } from "@/lib/agentTypes"
-import { AgentsApiError, agentsApi } from "@/features/agents/lib/api"
+import { ApiError } from "@/lib/apiClient"
+import { agentsApi } from "@/features/agents/lib/api"
 import {
   agentThreadKeys,
   setAgentThreadStatus,
@@ -119,7 +120,7 @@ export function useSubmitAgentMessage(threadId: string) {
         await queue(false)
         return
       } catch (error) {
-        if (!(error instanceof AgentsApiError) || error.status !== 409) {
+        if (!(error instanceof ApiError) || error.status !== 409) {
           throw error
         }
       }

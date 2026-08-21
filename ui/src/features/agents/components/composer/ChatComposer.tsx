@@ -38,15 +38,16 @@ import type {
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger"
 import type { RunTarget } from "./RunTargetSelector"
 import type { DesktopProject } from "@/desktop"
-import type { EnvironmentOption, ModelOption, Skill } from "@/lib/api"
+import type { EnvironmentOption, ModelOption } from "@/lib/api"
 import type { ImageChunk } from "@/lib/agentTypes"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
+import type { Skill } from "@/features/agents/lib/api"
+import { agentsApi } from "@/features/agents/lib/api"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { useRegisterAppCommands } from "@/lib/appCommands"
-import { transcribeAudio } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 export type { ActiveRun }
@@ -405,7 +406,7 @@ export const ChatComposer = memo(function ChatComposer({
           if (!audio.size) throw new Error("No audio was recorded")
           if (audio.size > MAX_AUDIO_BYTES)
             throw new Error("Recording is too long")
-          const transcript = await transcribeAudio(audio)
+          const transcript = await agentsApi.transcribeAudio(audio)
           const snapshot = editorRef.current?.readSnapshot() ?? {
             value,
             cursor: value.length,

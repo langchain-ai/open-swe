@@ -34,7 +34,6 @@ const cancelThread = vi.fn(async (threadId: string) => ({
 
 vi.mock("@/features/agents/lib/api", () => ({
   agentsApi: { cancelThread: (threadId: string) => cancelThread(threadId) },
-  AgentsApiError: class AgentsApiError extends Error {},
 }))
 
 vi.mock("@/lib/appCommands", () => ({

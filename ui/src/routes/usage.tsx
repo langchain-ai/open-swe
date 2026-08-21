@@ -5,7 +5,7 @@ import type {
   ReviewerStatsPayload,
   UsageLeaderboardPeriod,
   UsageLeaderboardRow,
-} from "@/lib/api"
+} from "@/features/usage/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
+import { usageApi } from "@/features/usage/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
@@ -46,7 +46,7 @@ function UsagePage() {
 
   const leaderboard = useQuery({
     queryKey: ["usageLeaderboard", activePeriod],
-    queryFn: () => api.usageLeaderboard(activePeriod, 10),
+    queryFn: () => usageApi.leaderboard(activePeriod, 10),
     enabled: !!session.data,
     staleTime: 5 * 60 * 1000,
   })

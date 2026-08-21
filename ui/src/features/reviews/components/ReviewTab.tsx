@@ -1,33 +1,20 @@
 import { useNavigate } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
 
 import type { AgentThread } from "@/lib/agentTypes"
 import { ReviewMainBody } from "@/features/reviews/components/ReviewMainBody"
-import { api } from "@/lib/api"
+import { useReviewDetail, useReviewDiff } from "@/features/reviews/lib/queries"
 
 // The git panel's "Review" sub-tab: the PR's Open SWE review rendered inline (no
 // side panel / chat), with an expand affordance that opens the full review page.
 export function ReviewTab({ thread }: { thread: AgentThread }) {
   const navigate = useNavigate()
   const pr = thread.pr
-  const [owner, repo] = thread.repoFullName.split("/")
+  const [owner = "", repo = ""] = thread.repoFullName.split("/")
   const number = pr?.number ?? null
   const enabled = Boolean(owner && repo && number !== null)
 
-  const detail = useQuery({
-    queryKey: ["review", owner, repo, number],
-    queryFn: () =>
-      api.getReview(owner as string, repo as string, number as number),
-    enabled,
-    refetchInterval: (query) =>
-      query.state.data?.status === "running" ? 5000 : false,
-  })
-  const diff = useQuery({
-    queryKey: ["reviewDiff", owner, repo, number],
-    queryFn: () =>
-      api.getReviewDiff(owner as string, repo as string, number as number),
-    enabled,
-  })
+  const detail = useReviewDetail(owner, repo, number ?? 0, { enabled })
+  const diff = useReviewDiff(owner, repo, number ?? 0, { enabled })
 
   if (!enabled) {
     return (
@@ -60,11 +47,7 @@ export function ReviewTab({ thread }: { thread: AgentThread }) {
       onExpand={() =>
         navigate({
           to: "/agents/reviews/$owner/$repo/$number",
-          params: {
-            owner: owner as string,
-            repo: repo as string,
-            number: String(number),
-          },
+          params: { owner, repo, number: String(number) },
         })
       }
     />

@@ -1,4 +1,3 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   Fragment,
   createContext,
@@ -61,7 +60,7 @@ import type {
   ReviewDiffFile,
   ReviewFinding,
   ReviewUserRef,
-} from "@/lib/api"
+} from "@/features/reviews/lib/api"
 import type {
   ReviewSidebarGroup,
   ReviewSidebarView,
@@ -92,7 +91,19 @@ import {
 import { IconButton } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
-import { api, reviewImageProxyUrl } from "@/lib/api"
+import { reviewImageProxyUrl } from "@/features/reviews/lib/api"
+import {
+  useCreateReviewComment,
+  useReReview,
+  useUpdateReviewComment,
+} from "@/features/reviews/lib/queries"
+import {
+  useDiffStylePref,
+  useReadFindings,
+  useReviewPanelWidth,
+  useReviewViewPref,
+  useViewedFiles,
+} from "@/features/reviews/lib/reviewPrefs"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
@@ -106,16 +117,7 @@ type ReviewAnnotation =
   | { kind: "draftComment"; path: string; range: SelectedLineRange }
   | { kind: "comment"; comment: PrReviewComment }
 
-const REVIEW_VIEW_STORAGE_KEY = "open-swe.review.view"
-const REVIEW_DIFF_STYLE_STORAGE_KEY = "open-swe.review.diffStyle"
 const FINDING_SCROLL_MAX_FRAMES = 120
-
-function readStoredDiffStyle(): DiffStyle {
-  if (typeof window === "undefined") return "unified"
-  return window.localStorage.getItem(REVIEW_DIFF_STYLE_STORAGE_KEY) === "split"
-    ? "split"
-    : "unified"
-}
 
 // One attachment for a single-side line range. Deletions resolve against the
 // original file, additions against the modified file.
@@ -648,15 +650,7 @@ function ReviewBodyInner({
   // The block pinned at the top of the diff (scroll-spy), highlighted in the
   // agenda sidebar.
   const [activeGroup, setActiveGroup] = useState<number | null>(null)
-  const [diffStyle, setDiffStyleState] = useState<DiffStyle>(() =>
-    readStoredDiffStyle()
-  )
-  const setDiffStyle = useCallback((next: DiffStyle) => {
-    setDiffStyleState(next)
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(REVIEW_DIFF_STYLE_STORAGE_KEY, next)
-    }
-  }, [])
+  const [diffStyle, setDiffStyle] = useDiffStylePref()
 
   useEffect(() => {
     void warmDiffHighlighter()
@@ -672,16 +666,12 @@ function ReviewBodyInner({
   const expandedFindingRef = useRef(expandedFinding)
   expandedFindingRef.current = expandedFinding
 
-  const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`
-  const [viewed, setViewed] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set()
-    try {
-      const raw = window.localStorage.getItem(viewedStorageKey)
-      return new Set(raw ? (JSON.parse(raw) as Array<string>) : [])
-    } catch {
-      return new Set()
-    }
-  })
+  const { viewed, setFileViewed } = useViewedFiles(
+    detail.owner,
+    detail.repo,
+    detail.number,
+    detail.head_sha
+  )
   const viewedRef = useRef(viewed)
   viewedRef.current = viewed
   const expandedRef = useRef(expandedFiles)
@@ -690,57 +680,19 @@ function ReviewBodyInner({
   const toggleViewed = useCallback(
     (path: string) => {
       const becomingViewed = !viewedRef.current.has(path)
-      setViewed((prev) => {
-        const next = new Set(prev)
-        if (becomingViewed) next.add(path)
-        else next.delete(path)
-        window.localStorage.setItem(
-          viewedStorageKey,
-          JSON.stringify(Array.from(next))
-        )
-        return next
-      })
+      setFileViewed(path, becomingViewed)
       if (becomingViewed && expandedFindingRef.current?.file === path)
         setExpandedId(null)
       setExpandedFiles((prev) => ({ ...prev, [path]: !becomingViewed }))
     },
-    [viewedStorageKey]
+    [setFileViewed]
   )
 
-  const readStorageKey = `open-swe.review.read.${detail.thread_id}`
-  const [read, setRead] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set()
-    try {
-      const raw = window.localStorage.getItem(readStorageKey)
-      return new Set(raw ? (JSON.parse(raw) as Array<string>) : [])
-    } catch {
-      return new Set()
-    }
-  })
-  const persistRead = useCallback(
-    (next: Set<string>) => {
-      window.localStorage.setItem(
-        readStorageKey,
-        JSON.stringify(Array.from(next))
-      )
-    },
-    [readStorageKey]
+  const { read, markRead, markAllRead } = useReadFindings(detail.thread_id)
+  const markAllFindingsRead = useCallback(
+    () => markAllRead(detail.findings.map((f) => f.id)),
+    [detail.findings, markAllRead]
   )
-  const markRead = useCallback(
-    (id: string) => {
-      setRead((prev) => {
-        const next = new Set(prev).add(id)
-        persistRead(next)
-        return next
-      })
-    },
-    [persistRead]
-  )
-  const markAllRead = useCallback(() => {
-    const next = new Set(detail.findings.map((f) => f.id))
-    setRead(next)
-    persistRead(next)
-  }, [detail.findings, persistRead])
 
   const findingsByFile = useMemo(() => {
     const byFile = new Map<string, Array<ReviewFinding>>()
@@ -818,21 +770,9 @@ function ReviewBodyInner({
   // one, after which the choice persists across PRs.
   const hasFreshGroups =
     detail.diff_groups.length > 0 && !detail.diff_groups_stale
-  const [explicitView, setExplicitView] = useState<ReviewSidebarView | null>(
-    () => {
-      if (typeof window === "undefined") return null
-      const stored = window.localStorage.getItem(REVIEW_VIEW_STORAGE_KEY)
-      return stored === "ai" || stored === "files" ? stored : null
-    }
-  )
+  const [explicitView, setView] = useReviewViewPref()
   const view: ReviewSidebarView =
     explicitView ?? (hasFreshGroups ? "ai" : "files")
-  const setView = useCallback((next: ReviewSidebarView) => {
-    setExplicitView(next)
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(REVIEW_VIEW_STORAGE_KEY, next)
-    }
-  }, [])
 
   const scrollToFile = useCallback((path: string) => {
     setSelectedFile(path)
@@ -1350,7 +1290,7 @@ function ReviewBodyInner({
             onTabChange={setSideTab}
             read={read}
             expandedId={expandedId}
-            onMarkAllRead={markAllRead}
+            onMarkAllRead={markAllFindingsRead}
             onFindingClick={openFromPanel}
           />
         )}
@@ -1978,27 +1918,14 @@ function CommentComposer({
   const [value, setValue] = useState("")
   const [mode, setMode] = useState<"write" | "preview">("write")
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const queryClient = useQueryClient()
   useEffect(() => {
     textareaRef.current?.focus()
   }, [])
-  const mutation = useMutation({
-    mutationFn: (body: string) =>
-      api.createReviewComment(
-        owner,
-        repo,
-        prNumber,
-        buildCommentPayload(path, range, body)
-      ),
-    onSuccess: () =>
-      queryClient.invalidateQueries({
-        queryKey: ["reviewComments", owner, repo, prNumber],
-      }),
-  })
+  const mutation = useCreateReviewComment(owner, repo, prNumber)
   const submit = () => {
     const body = value.trim()
     if (!body || mutation.isPending) return
-    mutation.mutate(body)
+    mutation.mutate(buildCommentPayload(path, range, body))
   }
   // Apply a toolbar action to the live textarea selection, then restore the
   // caret/selection on the next frame (after the controlled value re-renders).
@@ -2187,26 +2114,13 @@ function InlineComment({
 }) {
   const { registerAnnotation } = useExpandedFinding()
   const session = useSession()
-  const queryClient = useQueryClient()
   const [body, setBody] = useState(comment.body)
   const [draft, setDraft] = useState(comment.body)
   const [editing, setEditing] = useState(false)
   const sideLabel = comment.side === "LEFT" ? "L" : "R"
   const editable =
     session.data?.login.toLowerCase() === comment.author.toLowerCase()
-  const mutation = useMutation({
-    mutationFn: (next: string) =>
-      api.updateReviewComment(owner, repo, prNumber, comment.id, next),
-    onSuccess: (_, next) => {
-      setBody(next)
-      setDraft(next)
-      setEditing(false)
-      onUpdate?.({ ...comment, body: next })
-      void queryClient.invalidateQueries({
-        queryKey: ["reviewComments", owner, repo, prNumber],
-      })
-    },
-  })
+  const mutation = useUpdateReviewComment(owner, repo, prNumber, comment.id)
   useEffect(() => {
     setBody(comment.body)
     setDraft(comment.body)
@@ -2214,7 +2128,15 @@ function InlineComment({
   }, [comment.id, comment.body])
   const submit = () => {
     const next = draft.trim()
-    if (next && next !== body && !mutation.isPending) mutation.mutate(next)
+    if (!next || next === body || mutation.isPending) return
+    mutation.mutate(next, {
+      onSuccess: () => {
+        setBody(next)
+        setDraft(next)
+        setEditing(false)
+        onUpdate?.({ ...comment, body: next })
+      },
+    })
   }
   const cancel = () => {
     setDraft(body)
@@ -2444,37 +2366,6 @@ function Badgeish({ children }: { children: React.ReactNode }) {
   )
 }
 
-const REVIEW_PANEL_STORAGE_WIDTH = "open-swe.review-panel.width"
-const REVIEW_PANEL_DEFAULT_WIDTH = 420
-const REVIEW_PANEL_MIN_WIDTH = 360
-// Keep at least this much room for the PR content column so the panel can grow
-// wide without squeezing the diff/description below a usable width.
-const REVIEW_PANEL_MIN_MAIN_WIDTH = 480
-
-function reviewPanelMaxWidth(availableWidth?: number): number {
-  if (typeof window === "undefined") return REVIEW_PANEL_DEFAULT_WIDTH
-  const available = availableWidth ?? window.innerWidth
-  return Math.max(
-    REVIEW_PANEL_MIN_WIDTH,
-    available - REVIEW_PANEL_MIN_MAIN_WIDTH
-  )
-}
-
-function clampReviewPanelWidth(width: number, availableWidth?: number): number {
-  return Math.min(
-    reviewPanelMaxWidth(availableWidth),
-    Math.max(REVIEW_PANEL_MIN_WIDTH, width)
-  )
-}
-
-function readStoredReviewPanelWidth(): number {
-  if (typeof window === "undefined") return REVIEW_PANEL_DEFAULT_WIDTH
-  const raw = window.localStorage.getItem(REVIEW_PANEL_STORAGE_WIDTH)
-  const parsed = raw ? Number(raw) : NaN
-  if (!Number.isFinite(parsed)) return REVIEW_PANEL_DEFAULT_WIDTH
-  return clampReviewPanelWidth(parsed)
-}
-
 function ReviewPanelResizeHandle({
   width,
   onResize,
@@ -2549,36 +2440,9 @@ function SidePanel({
   onMarkAllRead: () => void
   onFindingClick: (finding: ReviewFinding) => void
 }) {
-  const qc = useQueryClient()
-  const reReview = useMutation({
-    mutationFn: () => api.reReview(detail.owner, detail.repo, detail.number),
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: ["review", detail.owner, detail.repo, detail.number],
-      })
-    },
-  })
-
+  const reReview = useReReview(detail.owner, detail.repo, detail.number)
   const panelRef = useRef<HTMLDivElement>(null)
-  const [width, setWidthState] = useState(() => readStoredReviewPanelWidth())
-  const setWidth = useCallback((next: number) => {
-    const available = panelRef.current?.parentElement?.clientWidth
-    const clamped = clampReviewPanelWidth(next, available)
-    setWidthState(clamped)
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(REVIEW_PANEL_STORAGE_WIDTH, String(clamped))
-    }
-  }, [])
-
-  // Re-clamp against the real container width on mount and on window resize so
-  // the panel can never squeeze the PR content below its minimum.
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const reclamp = () => setWidth(width)
-    reclamp()
-    window.addEventListener("resize", reclamp)
-    return () => window.removeEventListener("resize", reclamp)
-  }, [setWidth, width])
+  const [width, setWidth] = useReviewPanelWidth(panelRef)
 
   const bugs = detail.findings.filter((f) => f.group === "bug")
   const flags = detail.findings.filter((f) => f.group !== "bug")

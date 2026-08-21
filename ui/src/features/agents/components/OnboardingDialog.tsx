@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { api, slackConnectUrl } from "@/lib/api"
+import { settingsApi, slackConnectUrl } from "@/features/settings/lib/api"
 import {
   buildProfileUpdate,
   useOptions,
@@ -32,7 +32,10 @@ import { useSession } from "@/lib/session"
  */
 export function OnboardingDialog() {
   const session = useSession()
-  const mapping = useQuery({ queryKey: ["myMapping"], queryFn: api.myMapping })
+  const mapping = useQuery({
+    queryKey: ["myMapping"],
+    queryFn: settingsApi.myMapping,
+  })
   const profile = useProfile()
   const options = useOptions()
   const save = useSaveProfile()

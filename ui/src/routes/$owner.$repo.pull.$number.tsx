@@ -1,7 +1,6 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef } from "react"
 import { ArrowSquareOutIcon, GitPullRequestIcon } from "@phosphor-icons/react"
-import { useMutation, useQuery } from "@tanstack/react-query"
 
 import { buttonVariants } from "@/components/ui/button"
 import {
@@ -13,7 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
+import { useReReview, useReviewDetail } from "@/features/reviews/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
@@ -31,16 +30,12 @@ function PullRequestReviewLinkPage() {
     () => `https://github.com/${owner}/${repo}/pull/${number}`,
     [owner, repo, number]
   )
-  const existingReview = useQuery({
-    queryKey: ["review", owner, repo, prNumber],
-    queryFn: () => api.getReview(owner, repo, prNumber),
+  const existingReview = useReviewDetail(owner, repo, prNumber, {
     enabled: !!session.data && Number.isFinite(prNumber),
     retry: false,
   })
   const triggerRef = useRef<string | null>(null)
-  const triggerReview = useMutation({
-    mutationFn: () => api.reReview(owner, repo, prNumber),
-  })
+  const triggerReview = useReReview(owner, repo, prNumber)
 
   useEffect(() => {
     if (!session.data || !Number.isFinite(prNumber)) return

@@ -4,7 +4,7 @@ import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
 import { IoLogoGithub } from "react-icons/io5"
 
-import type { TeamSettings } from "@/lib/api"
+import type { TeamSettings } from "@/features/admin/lib/api"
 import {
   AppShell,
   SettingsNavRow,
@@ -15,7 +15,9 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { api } from "@/lib/api"
+import { adminApi } from "@/features/admin/lib/api"
+import { reviewsApi } from "@/features/reviews/lib/api"
+import { reviewKeys } from "@/features/reviews/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
@@ -43,7 +45,7 @@ function ReviewPage() {
   const qc = useQueryClient()
   const settings = useQuery({
     queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryFn: adminApi.getTeamSettings,
     enabled: !!session.data,
   })
   const [local, setLocal] = useState<TeamSettings>(DEFAULT_SETTINGS)
@@ -58,7 +60,7 @@ function ReviewPage() {
   }, [settings.data])
 
   const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    mutationFn: (body: TeamSettings) => adminApi.saveTeamSettings(body),
     onSuccess: (saved) => {
       qc.setQueryData(["teamSettings"], saved)
       setError(null)
@@ -193,8 +195,8 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
   const repos = useRepos()
 
   const autoReview = useQuery({
-    queryKey: ["autoReviewRepos"],
-    queryFn: api.listAutoReviewRepos,
+    queryKey: reviewKeys.autoReviewRepos,
+    queryFn: reviewsApi.listAutoReviewRepos,
   })
 
   const autoReviewSet = useMemo(
