@@ -5,6 +5,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any, TypedDict, cast
 
 from langgraph_sdk.errors import ConflictError
@@ -24,9 +25,8 @@ from .utils.github_ci import (
     list_check_runs,
     list_commit_statuses,
 )
-from .utils.github_comments import post_github_comment
-from .utils.linear import comment_on_linear_issue
-from .utils.slack import GitHubPrRef, post_slack_thread_reply
+from .utils.slack import GitHubPrRef
+from .utils.source_channel import notify_source_channel, source_context_from_watch
 
 logger = logging.getLogger(__name__)
 
@@ -218,46 +218,19 @@ async def _watch_token(watch: BabySitWatch) -> str | None:
     return await get_github_app_installation_token(installation_id=installation_id)
 
 
-def _slack_thread(watch: BabySitWatch) -> tuple[str, str] | None:
-    source_context = watch.get("source_context")
-    slack_thread = source_context.get("slack_thread") if isinstance(source_context, dict) else None
-    if not isinstance(slack_thread, dict):
-        return None
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
-    if isinstance(channel_id, str) and channel_id and isinstance(thread_ts, str) and thread_ts:
-        return channel_id, thread_ts
-    return None
-
-
 async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
-    source_context = watch.get("source_context")
-    source_context = source_context if isinstance(source_context, dict) else {}
-    destination = _slack_thread(watch)
-    try:
-        if destination is not None:
-            return await post_slack_thread_reply(destination[0], destination[1], message)
-        linear_issue = source_context.get("linear_issue")
-        issue_id = linear_issue.get("id") if isinstance(linear_issue, dict) else None
-        if isinstance(issue_id, str) and issue_id:
-            return await comment_on_linear_issue(issue_id, message)
-        github_issue = source_context.get("github_issue")
-        issue_number = github_issue.get("number") if isinstance(github_issue, dict) else None
-        if not isinstance(issue_number, int):
-            configured_number = (watch.get("run_config") or {}).get("pr_number")
-            issue_number = configured_number if isinstance(configured_number, int) else None
-        token = await _watch_token(watch)
-        if isinstance(issue_number, int) and token:
-            return await post_github_comment(
-                {"owner": watch["owner"], "name": watch["repo"]},
-                issue_number,
-                message,
-                token=token,
-            )
-    except Exception:
-        logger.warning("Failed to notify source for %s", watch.get("key"), exc_info=True)
-        return False
-    return False
+    """Report on the channel the watch was started from.
+
+    Runs from a cron outside any user's run, so the only GitHub credential is
+    the watch's own installation token, and the stored ``source_context`` is
+    the only Slack location on record.
+    """
+    return await notify_source_channel(
+        source_context_from_watch(watch),
+        message,
+        github_token=partial(_watch_token, watch),
+        agent_thread_id=watch["thread_id"],
+    )
 
 
 async def _finish_watch(watch: BabySitWatch, message: str) -> str:

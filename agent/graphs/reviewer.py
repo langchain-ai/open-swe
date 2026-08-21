@@ -44,7 +44,6 @@ from ..middleware import (
     settle_review_check_on_exit,
 )
 from ..middleware.prepare_run import PrepareRunState
-from ..middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from ..middleware.stack import core_stack, model_guard_middleware
 from ..review.diff import (
     changed_files,
@@ -96,6 +95,7 @@ from ..utils.model import DEFAULT_LLM_REASONING
 from ..utils.repo_prep import materialize_trusted_skills, prepare_review_repo
 from ..utils.sandbox_paths import aresolve_sandbox_work_dir
 from ..utils.sandbox_state import SandboxUnreachableError
+from ..utils.source_channel import post_sandbox_unreachable_notification
 from ..utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 from ._assembly import ModelSpec, cached_gateway_enabled, model_spec, prepare_config, stub_agent
 
