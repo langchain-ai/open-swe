@@ -72,11 +72,14 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
         "mem_bytes": 32 * 1024**3,
         "vcpus": 16,
         "fs_capacity_bytes": 512 * 1024**3,
+        "create_params": {"_internal_runtime": "v2"},
     }
     with patch.object(
         server, "resolve_environment", new_callable=AsyncMock, return_value=environment
     ):
-        snapshot_id, resources = await server._resolve_sandbox_create_config(None, "base")
+        snapshot_id, resources, create_params = await server._resolve_sandbox_create_config(
+            None, "base"
+        )
 
     assert snapshot_id == "env-snap"
     assert resources == {
@@ -84,6 +87,7 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
         "vcpus": 16,
         "fs_capacity_bytes": 512 * 1024**3,
     }
+    assert create_params == {"_internal_runtime": "v2"}
 
 
 def test_environment_slug_reads_the_run_config() -> None:
@@ -158,6 +162,7 @@ async def test_save_environment_persists_sandbox_sizing(monkeypatch: pytest.Monk
             "mem_bytes": 16 * 1024**3,
             "vcpus": 8,
             "fs_capacity_bytes": 256 * 1024**3,
+            "create_params": {"_internal_runtime": "v2"},
         }
     )
     with (
@@ -171,6 +176,7 @@ async def test_save_environment_persists_sandbox_sizing(monkeypatch: pytest.Monk
             mem_bytes=16 * 1024**3,
             vcpus=8,
             fs_capacity_bytes=256 * 1024**3,
+            create_params={"_internal_runtime": "v2"},
         )
 
     assert create.await_args is not None
@@ -178,7 +184,9 @@ async def test_save_environment_persists_sandbox_sizing(monkeypatch: pytest.Monk
     assert saved.mem_bytes == 16 * 1024**3
     assert saved.vcpus == 8
     assert saved.fs_capacity_bytes == 256 * 1024**3
+    assert saved.create_params == {"_internal_runtime": "v2"}
     assert result["environment"]["vcpus"] == 8
+    assert result["environment"]["create_params"] == {"_internal_runtime": "v2"}
 
 
 @pytest.mark.asyncio
@@ -193,6 +201,7 @@ async def test_save_environment_can_clear_sandbox_sizing(monkeypatch: pytest.Mon
             "mem_bytes": None,
             "vcpus": None,
             "fs_capacity_bytes": None,
+            "create_params": {},
         }
     )
     with (
@@ -205,7 +214,12 @@ async def test_save_environment_can_clear_sandbox_sizing(monkeypatch: pytest.Mon
         ),
         patch.object(env_tools.store, "update_environment", update),
     ):
-        result = await env_tools.save_environment("base", "prompt", clear_sizing=True)
+        result = await env_tools.save_environment(
+            "base",
+            "prompt",
+            clear_sizing=True,
+            clear_create_params=True,
+        )
 
     assert update.await_args is not None
     saved = update.await_args.args[1]
@@ -213,6 +227,8 @@ async def test_save_environment_can_clear_sandbox_sizing(monkeypatch: pytest.Mon
     assert saved.mem_bytes is None
     assert saved.vcpus is None
     assert saved.fs_capacity_bytes is None
+    assert saved.create_params == {}
+    assert "create_params" in saved.model_fields_set
     assert result["ok"] is True
 
 

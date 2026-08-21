@@ -32,6 +32,7 @@ PROXY_TOKEN_FALLBACK_TTL = timedelta(minutes=50)
 _PROXY_TOKEN_EXPIRY: dict[
     str, tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
 ] = {}
+_PROXY_BASE_CONFIGS: dict[str, dict[str, Any]] = {}
 ProxyTokenRecord = tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
 
 
@@ -66,6 +67,7 @@ def record_proxy_token_expiry(
     *,
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
+    base_proxy_config: dict[str, Any] | None = None,
 ) -> None:
     """Record when ``thread_id``'s proxy token expires and the repo scope it was minted with.
 
@@ -81,11 +83,16 @@ def record_proxy_token_expiry(
         scope,
         normalize_permissions(permissions),
     )
+    if base_proxy_config is not None:
+        _PROXY_BASE_CONFIGS[thread_id] = dict(base_proxy_config)
+    else:
+        _PROXY_BASE_CONFIGS.pop(thread_id, None)
 
 
 def clear_proxy_token_expiry(thread_id: str | None) -> None:
     if thread_id:
         _PROXY_TOKEN_EXPIRY.pop(thread_id, None)
+        _PROXY_BASE_CONFIGS.pop(thread_id, None)
 
 
 def _unpack_proxy_token_record(record: tuple[Any, ...]) -> ProxyTokenRecord:
@@ -141,12 +148,21 @@ async def refresh_proxy_token(
     from ..integrations.langsmith import _configure_github_proxy
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
-    await _configure_github_proxy(current_backend.id, token)
+    base_proxy_config = _PROXY_BASE_CONFIGS.get(thread_id)
+    if base_proxy_config is not None:
+        await _configure_github_proxy(
+            current_backend.id,
+            token,
+            base_proxy_config=base_proxy_config,
+        )
+    else:
+        await _configure_github_proxy(current_backend.id, token)
     record_proxy_token_expiry(
         thread_id,
         expires_at,
         repositories=effective_repositories,
         permissions=dict(permission_key) if permission_key else None,
+        base_proxy_config=base_proxy_config,
     )
     logger.info("Refreshed GitHub proxy token for thread %s", thread_id)
     return True

@@ -49,6 +49,7 @@ def _summary(record: dict[str, Any]) -> dict[str, Any]:
         "mem_bytes": record.get("mem_bytes"),
         "vcpus": record.get("vcpus"),
         "fs_capacity_bytes": record.get("fs_capacity_bytes"),
+        "create_params": record.get("create_params") or {},
         "snapshot_status": record.get("snapshot_status"),
         "snapshot_id": record.get("snapshot_id"),
         "snapshot_name": record.get("snapshot_name"),
@@ -85,6 +86,8 @@ async def save_environment(
     vcpus: int | None = None,
     fs_capacity_bytes: int | None = None,
     clear_sizing: bool = False,
+    create_params: dict[str, Any] | None = None,
+    clear_create_params: bool = False,
 ) -> dict[str, Any]:
     """Create an environment, or update an existing one's configuration.
 
@@ -109,6 +112,12 @@ async def save_environment(
             or preserve the existing values when updating one.
         clear_sizing: Restore provider defaults by clearing all three sizing overrides.
             Cannot be combined with a sizing value.
+        create_params: Additional LangSmith sandbox create-body fields, such as
+            ``_internal_runtime`` or ``proxy_config``. This object is persisted and
+            must never contain secrets or authentication credentials. Omit it when
+            updating to preserve the existing object.
+        clear_create_params: Clear all additional create parameters. Cannot be combined
+            with ``create_params``.
 
     Returns:
         ``{"ok": True, "environment": {...}, "created": bool}``.
@@ -122,6 +131,8 @@ async def save_environment(
     }
     if clear_sizing and any(value is not None for value in sizing.values()):
         return {"ok": False, "error": "clear_sizing cannot be combined with sizing values"}
+    if clear_create_params and create_params is not None:
+        return {"ok": False, "error": "clear_create_params cannot be combined with create_params"}
     try:
         slug = store.slugify(name)
     except ValueError as exc:
@@ -139,6 +150,7 @@ async def save_environment(
                     mem_bytes=mem_bytes,
                     vcpus=vcpus,
                     fs_capacity_bytes=fs_capacity_bytes,
+                    create_params=create_params or {},
                 ),
                 login if isinstance(login, str) else "open-swe",
             )
@@ -149,6 +161,10 @@ async def save_environment(
                 if clear_sizing
                 else {field: value for field, value in sizing.items() if value is not None}
             )
+            if create_params is not None:
+                update_values["create_params"] = create_params
+            elif clear_create_params:
+                update_values["create_params"] = {}
             record = await store.update_environment(
                 slug,
                 store.EnvironmentUpdate(**update_values),

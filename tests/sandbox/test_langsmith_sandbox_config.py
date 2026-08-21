@@ -19,6 +19,7 @@ from agent.integrations.langsmith import (
     _get_sandbox_create_extra_fields,
     _get_sandbox_snapshot_config,
     _install_create_extra_fields,
+    _merge_sandbox_create_extra_fields,
     _reuse_existing_sandbox,
     create_langsmith_sandbox,
 )
@@ -103,6 +104,7 @@ async def test_create_langsmith_sandbox_prefers_resource_overrides() -> None:
             mem_bytes=2_000,
             vcpus=8,
             fs_capacity_bytes=1_000,
+            create_params={"_internal_runtime": "v2"},
         )
 
     provider.get_or_create.assert_awaited_once_with(
@@ -113,6 +115,7 @@ async def test_create_langsmith_sandbox_prefers_resource_overrides() -> None:
         mem_bytes=2_000,
         idle_ttl_seconds=300,
         delete_after_stop_seconds=400,
+        create_params={"_internal_runtime": "v2"},
     )
 
 
@@ -254,6 +257,21 @@ def test_extra_fields_parsed() -> None:
         clear=True,
     ):
         assert _get_sandbox_create_extra_fields() == {"_internal_runtime": "v2"}
+
+
+def test_environment_create_params_override_deployment_defaults() -> None:
+    with patch.dict(
+        "os.environ",
+        {"SANDBOX_CREATE_EXTRA_JSON": '{"_internal_runtime": "v1", "shared": true}'},
+        clear=True,
+    ):
+        assert _merge_sandbox_create_extra_fields(
+            {"_internal_runtime": "v2", "proxy_config": {"rules": []}}
+        ) == {
+            "_internal_runtime": "v2",
+            "shared": True,
+            "proxy_config": {"rules": []},
+        }
 
 
 def test_extra_fields_rejects_invalid_json() -> None:

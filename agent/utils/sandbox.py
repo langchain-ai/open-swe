@@ -48,6 +48,7 @@ async def create_sandbox(
     mem_bytes: int | None = None,
     vcpus: int | None = None,
     fs_capacity_bytes: int | None = None,
+    create_params: dict[str, Any] | None = None,
 ) -> "SandboxBackendProtocol":
     """Create or reconnect to a sandbox using the configured provider.
 
@@ -67,6 +68,7 @@ async def create_sandbox(
         mem_bytes: Optional memory capacity override for a new LangSmith sandbox.
         vcpus: Optional virtual CPU count override for a new LangSmith sandbox.
         fs_capacity_bytes: Optional filesystem capacity override for a new LangSmith sandbox.
+        create_params: Optional additional LangSmith sandbox create-body fields.
 
     Returns:
         A sandbox backend implementing SandboxBackendProtocol.
@@ -81,6 +83,7 @@ async def create_sandbox(
                 "mem_bytes": mem_bytes,
                 "vcpus": vcpus,
                 "fs_capacity_bytes": fs_capacity_bytes,
+                "create_params": create_params,
             }.items()
             if value is not None
         }

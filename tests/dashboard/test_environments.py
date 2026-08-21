@@ -8,6 +8,7 @@ from agent.dashboard.environments import (
     EnvironmentCreate,
     EnvironmentUpdate,
     environment_prompt,
+    environment_sandbox_create_params,
     environment_sandbox_resources,
     environment_snapshot_id,
     slugify,
@@ -103,6 +104,58 @@ def test_environment_sandbox_resources_omits_invalid_stored_values() -> None:
     assert environment_sandbox_resources({"mem_bytes": -1, "vcpus": True}) == {}
 
 
+def test_create_params_accept_non_sensitive_runtime_and_proxy_settings() -> None:
+    params = {
+        "_internal_runtime": "v2",
+        "proxy_config": {
+            "rules": [{"name": "public-api", "match_hosts": ["example.com"]}],
+        },
+    }
+    create = EnvironmentCreate(name="env", create_params=params)
+
+    assert create.create_params == params
+    assert environment_sandbox_create_params({"create_params": params}) == params
+
+
+@pytest.mark.parametrize(
+    "create_params",
+    [
+        {"env_vars": {"API_TOKEN": "sensitive"}},
+        {"clientSecret": "sensitive"},
+        {
+            "proxy_config": {
+                "rules": [
+                    {"headers": [{"name": "Authorization", "type": "opaque", "value": "sensitive"}]}
+                ]
+            }
+        },
+    ],
+)
+def test_create_params_reject_persisted_secrets(create_params: dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match="must not contain secrets"):
+        EnvironmentCreate(name="env", create_params=create_params)
+
+
+@pytest.mark.parametrize(
+    "create_params",
+    [
+        {"proxy_config": "enabled"},
+        {"proxy_config": {"rules": {"name": "invalid"}}},
+    ],
+)
+def test_create_params_validate_proxy_config_shape(create_params: dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match="proxy_config"):
+        EnvironmentCreate(name="env", create_params=create_params)
+
+
+def test_create_params_enforce_serialized_size_limit() -> None:
+    with pytest.raises(ValueError, match="at most"):
+        EnvironmentCreate(
+            name="env",
+            create_params={"metadata": "x" * env_store.CREATE_PARAMS_MAX_CHARS},
+        )
+
+
 def test_snapshot_id_only_resolves_when_ready() -> None:
     assert environment_snapshot_id({"snapshot_status": "capturing", "snapshot_id": "s-1"}) is None
     assert environment_snapshot_id({"snapshot_status": "ready", "snapshot_id": "s-1"}) == "s-1"
@@ -152,6 +205,7 @@ async def test_update_writes_only_provided_fields() -> None:
                 mem_bytes=8 * 1024**3,
                 vcpus=4,
                 fs_capacity_bytes=128 * 1024**3,
+                create_params={"_internal_runtime": "v2"},
             ),
             "ramon",
         )
@@ -163,11 +217,16 @@ async def test_update_writes_only_provided_fields() -> None:
         assert updated["mem_bytes"] == 8 * 1024**3
         assert updated["vcpus"] == 8
         assert updated["fs_capacity_bytes"] == 128 * 1024**3
+        assert updated["create_params"] == {"_internal_runtime": "v2"}
 
-        cleared = await env_store.update_environment("base", EnvironmentUpdate(mem_bytes=None))
+        cleared = await env_store.update_environment(
+            "base",
+            EnvironmentUpdate(mem_bytes=None, create_params={}),
+        )
         assert cleared["mem_bytes"] is None
         assert cleared["vcpus"] == 8
         assert cleared["fs_capacity_bytes"] == 128 * 1024**3
+        assert cleared["create_params"] == {}
 
 
 @pytest.mark.asyncio
@@ -390,11 +449,16 @@ async def test_resolve_environment_prefers_the_selection() -> None:
 
 
 @pytest.mark.asyncio
-async def test_environment_options_omit_prompts() -> None:
+async def test_environment_options_omit_admin_only_settings() -> None:
     client, _ = _fake_client()
     with patch.object(env_store, "get_client", return_value=client):
         await env_store.create_environment(
-            EnvironmentCreate(name="default", prompt="secret-ish prompt"), "ramon"
+            EnvironmentCreate(
+                name="default",
+                prompt="secret-ish prompt",
+                create_params={"_internal_runtime": "v2"},
+            ),
+            "ramon",
         )
         await env_store._set_snapshot_state("default", "ready", extra={"snapshot_id": "snap-1"})
         options = await env_store.list_environment_options()

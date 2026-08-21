@@ -1,7 +1,7 @@
 """Tests for GitHub proxy auth configuration."""
 
 import base64
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -55,6 +55,7 @@ class TestSandboxFactoryLoading:
                 mem_bytes=16,
                 vcpus=8,
                 fs_capacity_bytes=128,
+                create_params={"_internal_runtime": "v2"},
             )
 
         module.create_langsmith_sandbox.assert_awaited_once_with(
@@ -63,6 +64,7 @@ class TestSandboxFactoryLoading:
             mem_bytes=16,
             vcpus=8,
             fs_capacity_bytes=128,
+            create_params={"_internal_runtime": "v2"},
         )
 
 
@@ -116,6 +118,29 @@ class TestConfigureGithubProxy:
             assert headers[0]["name"] == "Authorization"
             assert headers[0]["type"] == "opaque"
             assert headers[0]["value"] == f"Basic {expected_basic}"
+
+    async def test_preserves_custom_proxy_config_when_adding_github_auth(self) -> None:
+        custom_rule = {"name": "public-api", "match_hosts": ["example.com"]}
+        with (
+            patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
+        ):
+            mock_client = MagicMock()
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_client.patch = AsyncMock(return_value=mock_response)
+            _mock_async_client(mock_client_cls, mock_client)
+
+            await _configure_github_proxy(
+                "sandbox-abc123",
+                "token",
+                base_proxy_config={"rules": [custom_rule], "enabled": True},
+            )
+
+        proxy_config = mock_client.patch.call_args.kwargs["json"]["proxy_config"]
+        assert proxy_config["enabled"] is True
+        assert proxy_config["rules"][0] == custom_rule
+        assert [rule["name"] for rule in proxy_config["rules"][1:]] == ["github-api", "github"]
 
     async def test_sends_to_correct_url(self) -> None:
         """Verify the PATCH hits the right endpoint."""
@@ -387,12 +412,16 @@ class TestCreateSandboxWithProxy:
 
     @pytest.mark.asyncio
     async def test_passes_environment_resources_to_sandbox_creation(self) -> None:
-        environment = {
+        environment: dict[str, Any] = {
             "snapshot_status": "ready",
             "snapshot_id": "env-snap",
             "mem_bytes": 16,
             "vcpus": 8,
             "fs_capacity_bytes": 128,
+            "create_params": {
+                "_internal_runtime": "v2",
+                "proxy_config": {"rules": [{"name": "public-api", "match_hosts": ["example.com"]}]},
+            },
         }
         with (
             patch(
@@ -404,7 +433,9 @@ class TestCreateSandboxWithProxy:
                 new_callable=AsyncMock,
                 return_value=("ghs_install", None),
             ),
-            patch("agent.server._configure_github_proxy", new_callable=AsyncMock),
+            patch(
+                "agent.server._configure_github_proxy", new_callable=AsyncMock
+            ) as mock_configure_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             mock_create.return_value = MagicMock(id="sandbox-123")
@@ -418,6 +449,12 @@ class TestCreateSandboxWithProxy:
             mem_bytes=16,
             vcpus=8,
             fs_capacity_bytes=128,
+            create_params=environment["create_params"],
+        )
+        mock_configure_proxy.assert_awaited_once_with(
+            "sandbox-123",
+            "ghs_install",
+            base_proxy_config=environment["create_params"]["proxy_config"],
         )
 
     @pytest.mark.asyncio
@@ -507,6 +544,7 @@ class TestRefreshProxyOnSandboxReuse:
         config = self._execution_config()
         mock_sandbox = MagicMock(id="sandbox-cached")
         mock_sandbox.aexecute = AsyncMock()
+        base_proxy_config = {"rules": [{"name": "public-api", "match_hosts": ["example.com"]}]}
         captured: dict[str, object] = {}
 
         def fake_create_deep_agent(**kwargs):
@@ -518,6 +556,11 @@ class TestRefreshProxyOnSandboxReuse:
                 "agent.server.resolve_github_token",
                 new_callable=AsyncMock,
                 return_value=("ghp", None),
+            ),
+            patch(
+                "agent.server.resolve_environment",
+                new_callable=AsyncMock,
+                return_value={"create_params": {"proxy_config": base_proxy_config}},
             ),
             patch(
                 "agent.server.get_sandbox_id_from_metadata",
@@ -554,7 +597,11 @@ class TestRefreshProxyOnSandboxReuse:
                 cast(Runtime[None], MagicMock()),
             )
 
-            mock_proxy.assert_called_once_with("sandbox-cached", "ghs_fresh")
+            mock_proxy.assert_called_once_with(
+                "sandbox-cached",
+                "ghs_fresh",
+                base_proxy_config=base_proxy_config,
+            )
 
     @pytest.mark.asyncio
     async def test_refreshes_proxy_when_reconnecting_to_existing_langsmith_sandbox(self) -> None:

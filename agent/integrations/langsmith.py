@@ -153,6 +153,12 @@ def _get_sandbox_create_extra_fields() -> dict[str, Any]:
     return parsed
 
 
+def _merge_sandbox_create_extra_fields(
+    create_params: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {**_get_sandbox_create_extra_fields(), **(create_params or {})}
+
+
 def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, Any]) -> None:
     """Merge ``extra`` into the JSON body of the sandbox-create request.
 
@@ -366,7 +372,12 @@ async def _start_sandbox_best_effort(sandbox_name: str) -> None:
         await client.aclose()
 
 
-async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
+async def _configure_github_proxy(
+    sandbox_name: str,
+    github_token: str,
+    *,
+    base_proxy_config: dict[str, Any] | None = None,
+) -> None:
     """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
 
     Uses the LangSmith proxy-config API to set up header injection so that
@@ -376,6 +387,7 @@ async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     Args:
         sandbox_name: The sandbox name/ID returned by the LangSmith API.
         github_token: GitHub token to inject as Authorization header.
+        base_proxy_config: Additional persisted proxy settings to preserve.
     """
     api_key = _get_sandbox_api_key()
     if not api_key:
@@ -383,7 +395,17 @@ async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
         return
     langsmith_endpoint = _get_sandbox_endpoint()
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
-    payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
+    if base_proxy_config is None:
+        global_proxy_config = _get_sandbox_create_extra_fields().get("proxy_config")
+        proxy_config = dict(global_proxy_config) if isinstance(global_proxy_config, dict) else {}
+    else:
+        proxy_config = dict(base_proxy_config)
+    custom_rules = proxy_config.get("rules")
+    proxy_config["rules"] = [
+        *(custom_rules if isinstance(custom_rules, list) else []),
+        *_github_proxy_rules(github_token),
+    ]
+    payload = {"proxy_config": proxy_config}
     async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         try:
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
@@ -424,6 +446,7 @@ async def create_langsmith_sandbox(
     mem_bytes: int | None = None,
     vcpus: int | None = None,
     fs_capacity_bytes: int | None = None,
+    create_params: dict[str, Any] | None = None,
 ) -> SandboxBackendProtocol:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
 
@@ -441,6 +464,7 @@ async def create_langsmith_sandbox(
         mem_bytes: Optional memory capacity override for a newly-created sandbox.
         vcpus: Optional virtual CPU count override for a newly-created sandbox.
         fs_capacity_bytes: Optional filesystem capacity override for a newly-created sandbox.
+        create_params: Optional additional fields merged into the sandbox create body.
 
     Returns:
         SandboxBackendProtocol instance
@@ -474,10 +498,19 @@ async def create_langsmith_sandbox(
         mem_bytes=effective_mem_bytes,
         idle_ttl_seconds=idle_ttl_seconds,
         delete_after_stop_seconds=delete_after_stop_seconds,
+        create_params=create_params,
     )
 
     if sandbox_id is None and github_token:
-        await _configure_github_proxy(backend.id, github_token)
+        proxy_config = (create_params or {}).get("proxy_config")
+        if isinstance(proxy_config, dict):
+            await _configure_github_proxy(
+                backend.id,
+                github_token,
+                base_proxy_config=proxy_config,
+            )
+        else:
+            await _configure_github_proxy(backend.id, github_token)
 
     return backend
 
@@ -647,6 +680,7 @@ class LangSmithProvider(SandboxProvider):
         mem_bytes: int | None = None,
         idle_ttl_seconds: int | None = None,
         delete_after_stop_seconds: int | None = None,
+        create_params: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> SandboxBackendProtocol:
         """Get existing or create new LangSmith sandbox.
@@ -673,7 +707,10 @@ class LangSmithProvider(SandboxProvider):
                 )
                 raise ValueError(msg)
 
-            _install_create_extra_fields(client, _get_sandbox_create_extra_fields())
+            _install_create_extra_fields(
+                client,
+                _merge_sandbox_create_extra_fields(create_params),
+            )
 
             try:
                 sandbox = await _create_sandbox_with_retry(
