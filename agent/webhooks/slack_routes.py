@@ -16,13 +16,12 @@ from ..config import (
     slack_signing_secret,
 )
 from ..dashboard.workflow_approval import decide_workflow_push_approval
-from ..utils.slack import (
+from ..utils.slack_api import post_slack_thread_reply, update_slack_message
+from ..utils.slack_threads import (
     SlackThreadMappingError,
     lookup_slack_run_mapping,
     lookup_slack_thread_id,
-    post_slack_thread_reply,
     resolve_slack_thread_id,
-    update_slack_message,
 )
 from ..utils.thread_ops import thread_exists
 from . import slack as service

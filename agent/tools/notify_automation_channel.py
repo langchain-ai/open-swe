@@ -8,7 +8,8 @@ from langgraph.config import get_config
 
 from ..store import delete_value, get_value, now_iso, put_value
 from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.slack import append_slack_web_link_footer, post_slack_top_level_message_with_ts
+from ..utils.slack_api import post_slack_top_level_message_with_ts
+from ..utils.slack_format import append_slack_web_link_footer
 
 logger = logging.getLogger(__name__)
 

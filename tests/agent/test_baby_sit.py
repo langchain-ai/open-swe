@@ -11,7 +11,7 @@ from agent import baby_sit
 from agent import store as agent_store
 from agent.scheduling import tasks
 from agent.utils import source_channel
-from agent.utils.slack import GitHubPrRef
+from agent.utils.github_refs import GitHubPrRef
 
 
 class _Store:

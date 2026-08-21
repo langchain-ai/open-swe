@@ -31,7 +31,7 @@ from ..utils.github_http import (
     github_request,
     github_url,
 )
-from ..utils.slack import GitHubPrRef
+from ..utils.github_refs import GitHubPrRef
 from ..utils.thread_ops import ensure_thread_exists, fetch_thread_metadata
 from .findings import (
     REVIEWER_THREAD_KIND,

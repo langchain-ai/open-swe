@@ -27,7 +27,8 @@ from .github_token import (
 )
 from .http import DEFAULT_HTTP_TIMEOUT
 from .linear import comment_on_linear_issue
-from .slack import get_active_slack_thread, post_slack_thread_reply
+from .slack_api import post_slack_thread_reply
+from .slack_threads import get_active_slack_thread
 from .user_messages import WARNING_ICON, warning
 
 logger = logging.getLogger(__name__)

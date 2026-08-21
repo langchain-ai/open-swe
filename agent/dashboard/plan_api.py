@@ -10,7 +10,7 @@ from langgraph_sdk.schema import Run
 from pydantic import BaseModel
 
 from ..dispatch import dispatch_agent_run
-from ..utils.slack import post_slack_thread_reply
+from ..utils.slack_api import post_slack_thread_reply
 from .oauth import require_same_origin_for_mutations, require_session
 from .plan_store import (
     PLAN_STATUS_APPROVED,

@@ -38,7 +38,6 @@ from ..input_messages import (
     system_input,
     system_introduction,
 )
-from ..utils import slack as slack_utils
 from ..utils.auth import is_bot_token_only_mode
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
@@ -46,24 +45,32 @@ from ..utils.json_types import ThreadLike, as_json_object, as_thread_dict
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from ..utils.repo import extract_repo_from_text
-from ..utils.slack import (
+from ..utils.slack_api import (
     fetch_slack_thread_messages,
-    format_slack_messages_for_prompt,
     get_slack_channel_context,
-    get_slack_channel_context_description,
     get_slack_channel_description,
     get_slack_channel_info,
     get_slack_user_info,
     get_slack_user_names,
-    is_slack_channel_named,
-    lookup_slack_thread_id,
-    normalize_slack_channel_context,
     post_slack_thread_reply,
     resolve_slack_links_in_context,
-    resolve_slack_thread_id,
+)
+from ..utils.slack_format import (
+    format_slack_messages_for_prompt,
+    get_slack_channel_context_description,
+    is_own_slack_message,
+    is_slack_channel_named,
+    normalize_slack_channel_context,
+    parse_slack_ts,
     select_slack_context_messages,
-    store_slack_run_mapping,
+    slack_message_bot_id,
+    slack_message_bot_name,
     strip_bot_mention,
+)
+from ..utils.slack_threads import (
+    lookup_slack_thread_id,
+    resolve_slack_thread_id,
+    store_slack_run_mapping,
 )
 from ..utils.thread_ops import (
     fetch_thread_metadata,
@@ -378,12 +385,12 @@ async def _slack_thread_allows_untagged_reply(
 
     messages = await fetch_slack_thread_messages(channel_id, thread_ts)
     bot_last_ts = 0.0
-    current_ts = slack_utils._parse_ts(now_ts)
+    current_ts = parse_slack_ts(now_ts)
     latest_ts = current_ts
     last_message_ts: dict[str, float] = {}
     human_messages: list[tuple[float, str, str]] = []
     for message in messages:
-        message_ts = slack_utils._parse_ts(message.get("ts"))
+        message_ts = parse_slack_ts(message.get("ts"))
         latest_ts = max(latest_ts, message_ts)
         author = message.get("user")
         if author == bot_user_id:
@@ -565,7 +572,7 @@ def _slack_sender(
     Open SWE posts with a bot token, so its own replies carry a ``user`` id as well as a
     ``bot_id``; keying off ``user`` alone attributes them to a person.
     """
-    if slack_utils.is_own_slack_message(message, bot_user_id):
+    if is_own_slack_message(message, bot_user_id):
         identity: SystemIdentity = {
             "id": _OPEN_SWE_SENDER_ID,
             "display_name": slack_bot_username() or "Open SWE",
@@ -573,11 +580,11 @@ def _slack_sender(
             "sender_type": "self",
         }
         return identity["id"], identity, "system"
-    bot_id = slack_utils.slack_message_bot_id(message)
+    bot_id = slack_message_bot_id(message)
     if bot_id:
         bot: SystemIdentity = {
             "id": f"system:slack-bot-{bot_id}",
-            "display_name": slack_utils.slack_message_bot_name(message),
+            "display_name": slack_message_bot_name(message),
             "platform": "slack",
             "sender_type": "bot",
         }

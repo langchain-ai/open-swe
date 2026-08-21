@@ -20,8 +20,8 @@ from ..review.findings import (
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import derive_pr_state
 from ..utils.github_http import github_client, github_request, github_url
+from ..utils.github_refs import parse_github_pr_url
 from ..utils.json_types import ThreadLike, thread_metadata
-from ..utils.slack import parse_github_pr_url
 
 USAGE_THREAD_NAMESPACE: list[str] = ["agent_usage", "threads"]
 USAGE_PR_NAMESPACE: list[str] = ["agent_usage", "prs"]
