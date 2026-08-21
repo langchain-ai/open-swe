@@ -2358,7 +2358,7 @@ async def test_turn_diff_prefers_persisted_run_artifact(monkeypatch) -> None:
     create_sandbox.assert_not_awaited()
 
 
-async def test_working_tree_diff_prefers_live_sandbox_over_persisted_artifact(monkeypatch) -> None:
+async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) -> None:
     metadata = {
         "sandbox_id": "sandbox-1",
         "turn_checkpoints": [
@@ -2370,12 +2370,6 @@ async def test_working_tree_diff_prefers_live_sandbox_over_persisted_artifact(mo
             }
         ],
     }
-    stored = {
-        "status": "ready",
-        "files": [],
-        "truncated": False,
-        "summary": {"files": 0, "additions": 0, "deletions": 0},
-    }
     live = {
         "status": "ready",
         "files": [{"path": "new.py", "additions": 1, "deletions": 0}],
@@ -2383,7 +2377,8 @@ async def test_working_tree_diff_prefers_live_sandbox_over_persisted_artifact(mo
         "summary": {"files": 1, "additions": 1, "deletions": 0},
     }
     monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    monkeypatch.setattr("agent.dashboard.run_diffs.get_run_diff", AsyncMock(return_value=stored))
+    get_run_diff = AsyncMock()
+    monkeypatch.setattr("agent.dashboard.run_diffs.get_run_diff", get_run_diff)
     sandbox = object()
     monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
     read_diff = AsyncMock(return_value=live)
@@ -2392,10 +2387,11 @@ async def test_working_tree_diff_prefers_live_sandbox_over_persisted_artifact(mo
     result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner")
 
     assert result == live
+    get_run_diff.assert_not_awaited()
     read_diff.assert_awaited_once_with(
         sandbox,
         None,
-        "refs/open-swe/turns/msg-1",
+        "HEAD",
         None,
         max_files=200,
         include_content=True,
@@ -2403,37 +2399,27 @@ async def test_working_tree_diff_prefers_live_sandbox_over_persisted_artifact(mo
     )
 
 
-async def test_working_tree_diff_falls_back_to_persisted_artifact(monkeypatch) -> None:
+async def test_working_tree_diff_does_not_fall_back_to_persisted_artifact(monkeypatch) -> None:
     metadata = {
         "sandbox_id": "sandbox-1",
         "turn_checkpoints": [
             {"key": "msg-1", "ref": "refs/open-swe/turns/msg-1", "started_at": "t0"}
         ],
     }
-    stored = {
-        "status": "ready",
-        "files": [
-            {
-                "path": "persisted.py",
-                "originalContent": "before",
-                "modifiedContent": "after",
-            }
-        ],
-        "truncated": False,
-        "summary": {"files": 1, "additions": 1, "deletions": 1},
-    }
     monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    monkeypatch.setattr("agent.dashboard.run_diffs.get_run_diff", AsyncMock(return_value=stored))
+    get_run_diff = AsyncMock()
+    monkeypatch.setattr("agent.dashboard.run_diffs.get_run_diff", get_run_diff)
     monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(side_effect=RuntimeError))
 
-    result = await thread_api.get_dashboard_thread_turn_diff(
-        "thread-1", "owner", include_content=False
-    )
+    result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner")
 
     assert result == {
-        **stored,
-        "files": [{**stored["files"][0], "originalContent": None, "modifiedContent": None}],
+        "status": "missing",
+        "files": [],
+        "truncated": False,
+        "summary": {"files": 0, "additions": 0, "deletions": 0},
     }
+    get_run_diff.assert_not_awaited()
 
 
 async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
