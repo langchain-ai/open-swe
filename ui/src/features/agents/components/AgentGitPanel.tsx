@@ -5,7 +5,7 @@ import type { AgentThread } from "@/features/agents/lib/types"
 import { agentsApi } from "@/features/agents/lib/api"
 import {
   useAgentThreadBranchDiff,
-  useAgentThreadTurnDiff,
+  useAgentThreadWorkingTreeDiff,
 } from "@/features/agents/lib/queries"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
@@ -69,11 +69,9 @@ export function AgentGitPanel({
   )
   const diffVisible = !collapsed && activeSurfaceId === "diff"
 
-  const turnDiff = useAgentThreadTurnDiff(
+  const turnDiff = useAgentThreadWorkingTreeDiff(
     thread.id,
-    null,
     diffVisible && scope === "working-tree",
-    {},
     thread.status === "running"
   )
   const branchDiff = useAgentThreadBranchDiff(
