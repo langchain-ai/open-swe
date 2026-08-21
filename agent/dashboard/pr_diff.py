@@ -13,7 +13,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import HTTPException
 
-from ..utils.github_http import GITHUB_RAW_JSON_ACCEPT, github_request, github_url
+from ..github.api import GITHUB_RAW_JSON_ACCEPT, github_request, github_url
 
 PR_DIFF_MAX_FILES = 50
 PR_DIFF_MAX_FILE_BYTES = 200_000

@@ -15,7 +15,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .github_http import github_error_message, github_request, github_url
+from .api import github_error_message, github_request, github_url
 
 logger = logging.getLogger(__name__)
 

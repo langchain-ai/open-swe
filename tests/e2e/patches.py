@@ -27,8 +27,10 @@ def apply() -> None:
 
     import importlib
 
+    from agent.github import api as github_api
+    from agent.github import auth, authorship
     from agent.graphs import _assembly
-    from agent.utils import auth, authorship, github_http, slack_api
+    from agent.utils import slack_api
 
     # NB: ``from agent.tools import open_pull_request`` returns the re-exported
     # *function* (the tools package __init__ shadows the submodule), so patch the
@@ -61,9 +63,9 @@ def apply() -> None:
     opr.__dict__["get_github_app_installation_token"] = _dummy_install_token
 
     # Point the real PR/Slack code at the in-process fakes. Every GitHub URL is
-    # built by ``github_http.github_url`` at call time, so repointing the base
-    # here redirects them all.
-    github_http.GITHUB_API_BASE = FAKE_GITHUB_API
+    # built by ``agent.github.api.github_url`` at call time, so repointing the
+    # base here redirects them all.
+    github_api.GITHUB_API_BASE = FAKE_GITHUB_API
     slack_api.SLACK_API_BASE_URL = FAKE_SLACK_API
 
     # Keep the triggering-user identity lookup offline; the real fallback to

@@ -10,8 +10,8 @@ from urllib.parse import quote
 import jwt
 
 from ..config import github_app_id, github_app_installation_id, github_app_private_key
-from .github_http import github_client, github_request, github_url
-from .timestamps import parse_expiry
+from ..utils.timestamps import parse_expiry
+from .api import github_client, github_request, github_url
 
 logger = logging.getLogger(__name__)
 

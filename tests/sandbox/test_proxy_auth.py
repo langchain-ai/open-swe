@@ -388,7 +388,7 @@ class TestCreateSandboxWithProxy:
         """Installation token should be used for proxy auth on langsmith sandboxes."""
         with (
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.github.proxy.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
                 return_value=("ghs_install", None),
             ) as mock_get_token,
@@ -413,7 +413,7 @@ class TestCreateSandboxWithProxy:
         """A full installation token mint failure prevents proxy configuration."""
         with (
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.github.proxy.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
                 return_value=(None, None),
             ) as mock_get_token,
@@ -455,7 +455,7 @@ class TestCreateSandboxWithProxy:
         with (
             patch("agent.runtime.sandbox.create_sandbox", new_callable=AsyncMock) as mock_create,
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.github.proxy.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
                 return_value=(None, None),
             ),
@@ -515,7 +515,7 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value="sandbox-cached",
             ),
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.github.proxy.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
                 return_value=("ghs_fresh", None),
             ),
@@ -577,7 +577,7 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value=mock_sandbox,
             ) as mock_create,
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.github.proxy.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
                 return_value=("ghs_fresh", None),
             ),
@@ -622,7 +622,7 @@ class TestRefreshProxyOnSandboxReuse:
 
         with (
             patch(
-                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                "agent.github.proxy.get_github_app_installation_token_with_expiry",
                 new_callable=AsyncMock,
                 return_value=("ghs_fresh", None),
             ),

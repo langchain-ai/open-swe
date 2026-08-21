@@ -16,16 +16,16 @@ from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from .github_app import (
+from ..utils.sandbox import sandbox_provider_uses_proxy
+from ..utils.sandbox_proxy import unwrap_sandbox_backend
+from ..utils.sandbox_registry import SANDBOX_BACKENDS
+from ..utils.timestamps import parse_expiry
+from .app import (
     PermissionKey,
     PermissionMap,
     get_github_app_installation_token_with_expiry,
     normalize_permissions,
 )
-from .sandbox import sandbox_provider_uses_proxy
-from .sandbox_proxy import unwrap_sandbox_backend
-from .sandbox_registry import SANDBOX_BACKENDS
-from .timestamps import parse_expiry
 
 logger = logging.getLogger(__name__)
 

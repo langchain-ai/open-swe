@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from agent.dashboard import oauth
-from agent.utils import github_org_membership
+from agent.github import org_membership as github_org_membership
 
 
 def _stub_membership(monkeypatch, members: dict[str, set[str]]) -> dict[str, list[tuple[str, str]]]:

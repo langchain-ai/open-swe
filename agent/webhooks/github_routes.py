@@ -7,13 +7,13 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from ..config import github_webhook_secret, public_repo_org_gate
-from ..review.dispatch import auto_review_enabled
-from ..utils.github_comments import describe_open_swe_tags, mentions_open_swe
-from ..utils.github_org_membership import (
+from ..github.comments import describe_open_swe_tags, mentions_open_swe
+from ..github.org_membership import (
     internal_bot_logins,
     is_repo_allowed,
     is_user_active_org_member,
 )
+from ..review.dispatch import auto_review_enabled
 from . import github as service
 from .signatures import verify_github_signature
 

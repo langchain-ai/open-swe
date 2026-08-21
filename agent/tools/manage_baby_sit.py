@@ -6,10 +6,10 @@ from typing import Any, Literal
 from langgraph.config import get_config
 
 from ..baby_sit import record_retry, start_watch, stop_watch, watch_key
-from ..utils.auth import resolve_github_token
-from ..utils.github_app import get_github_app_installation_id_for_repo
-from ..utils.github_ci import fetch_pr
-from ..utils.github_refs import parse_github_pr_url
+from ..github.app import get_github_app_installation_id_for_repo
+from ..github.auth import resolve_github_token
+from ..github.ci import fetch_pr
+from ..github.refs import parse_github_pr_url
 
 
 def _configurable() -> tuple[dict[str, Any], Mapping[str, Any]]:

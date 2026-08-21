@@ -17,9 +17,9 @@ from typing import Any, TypedDict
 from langgraph_sdk.client import LangGraphClient
 
 from ..config import langgraph_client
-from .github_app import get_github_app_installation_token
-from .github_comments import post_github_comment
-from .github_token import get_github_token
+from ..github.app import get_github_app_installation_token
+from ..github.comments import post_github_comment
+from ..github.token import get_github_token
 from .linear import comment_on_linear_issue
 from .slack_api import post_slack_thread_reply
 from .slack_threads import get_active_slack_thread
@@ -177,7 +177,7 @@ def in_graph_github_token(config: Mapping[str, Any]) -> GitHubTokenResolver:
     cache, which keeps the comment attributed to them and scoped to the repos
     they can already reach; the app installation is only the fallback. Callers
     outside the graph runtime have no such cache, so they pass
-    :func:`~agent.utils.github_app.get_github_app_installation_token` directly.
+    :func:`~agent.github.app.get_github_app_installation_token` directly.
     """
 
     async def resolve() -> str | None:

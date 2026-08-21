@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException, Request
 
-from ..utils.github_http import github_client, github_request, github_url
+from ..github.api import github_client, github_request, github_url
 from .admin import is_admin
 
 logger = logging.getLogger(__name__)

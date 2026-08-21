@@ -5,11 +5,11 @@ from typing import Any
 
 import httpx
 
+from ..github.api import github_client, github_error_message, github_request, github_url
+from ..github.app import get_github_app_installation_token
+from ..github.pr import PullRequestAttempt, head_branch_for_repo, preflight_pr_access
+from ..github.run_references import append_references, run_configurable
 from ..settings.agent_usage import record_pr_opened
-from ..utils.github_app import get_github_app_installation_token
-from ..utils.github_http import github_client, github_error_message, github_request, github_url
-from ..utils.github_pr import PullRequestAttempt, head_branch_for_repo, preflight_pr_access
-from ..utils.run_references import append_references, run_configurable
 
 logger = logging.getLogger(__name__)
 

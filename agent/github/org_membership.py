@@ -8,11 +8,11 @@ from ..config import (
     allowed_github_repos,
     extra_internal_bot_logins,
 )
-from .github_app import (
+from .api import github_client, github_request, github_url
+from .app import (
     get_github_app_installation_id_for_org,
     get_github_app_installation_token,
 )
-from .github_http import github_client, github_request, github_url
 
 logger = logging.getLogger(__name__)
 

@@ -6,6 +6,11 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from ..github.token import (
+    GitHubAuthError,
+    get_github_token,
+    invalidate_cached_github_token,
+)
 from ..review.findings import (
     REVIEW_FINDING_CAP,
     SEVERITIES,
@@ -17,11 +22,6 @@ from ..review.findings import (
 )
 from ..review.publish_flow import publish_review as publish_review_flow
 from ..review.publish_flow import publish_review_dry_run
-from ..utils.github_token import (
-    GitHubAuthError,
-    get_github_token,
-    invalidate_cached_github_token,
-)
 
 
 async def publish_review(

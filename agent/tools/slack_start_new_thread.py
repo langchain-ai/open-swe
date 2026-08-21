@@ -9,8 +9,8 @@ from langgraph.config import get_config
 from ..config import langgraph_client
 from ..dashboard.repo_access import require_repo_access_for_user
 from ..dispatch import dispatch_agent_run
+from ..github.org_membership import is_repo_allowed
 from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.github_org_membership import is_repo_allowed
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack_api import (
     post_slack_thread_reply_with_ts,

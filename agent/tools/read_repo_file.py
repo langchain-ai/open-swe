@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 from langgraph.config import get_config
 
-from ..utils.github_http import github_client, github_request, github_url
+from ..github.api import github_client, github_request, github_url
 
 _MAX_FILE_BYTES = 256 * 1024
 

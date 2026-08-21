@@ -19,18 +19,18 @@ from ..config import (
     service_auth_jwt_secret,
     user_id_api_key_map,
 )
-from .dashboard_links import build_settings_url
-from .github_app import get_github_app_installation_token_with_expiry
-from .github_token import (
+from ..utils.dashboard_links import build_settings_url
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
+from ..utils.linear import comment_on_linear_issue
+from ..utils.slack_api import post_slack_thread_reply
+from ..utils.slack_threads import get_active_slack_thread
+from ..utils.user_messages import WARNING_ICON, warning
+from .app import get_github_app_installation_token_with_expiry
+from .token import (
     cache_github_token_for_thread,
     get_github_token_from_thread,
     github_token_principal,
 )
-from .http import DEFAULT_HTTP_TIMEOUT
-from .linear import comment_on_linear_issue
-from .slack_api import post_slack_thread_reply
-from .slack_threads import get_active_slack_thread
-from .user_messages import WARNING_ICON, warning
 
 logger = logging.getLogger(__name__)
 

@@ -9,13 +9,13 @@ from typing import Any
 import httpx
 
 from ..config import open_swe_mention_tags
-from .github_http import (
+from .api import (
     github_client,
     github_graphql,
     github_request,
     github_url,
 )
-from .github_token import GitHubAuthError
+from .token import GitHubAuthError
 
 logger = logging.getLogger(__name__)
 
@@ -464,7 +464,7 @@ def build_pr_prompt(
 async def _fetch_paginated(client: httpx.AsyncClient, path: str) -> list[dict[str, Any]]:
     """Fetch every page of a GitHub comment endpoint, tolerating a bad page.
 
-    Deliberately not :func:`~agent.utils.github_http.github_paginate`: comment
+    Deliberately not :func:`~agent.github.api.github_paginate`: comment
     fetches are best-effort context for a prompt, so a failing page keeps the
     pages already collected instead of aborting the whole webhook. A 401 still
     propagates as :class:`GitHubAuthError` so the caller can refresh the token.

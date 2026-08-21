@@ -15,10 +15,10 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from ..settings.plan_store import get_plan_content
-from .dashboard_links import dashboard_plan_url
-from .github_pr import is_private_repo
-from .slack_api import get_slack_permalink
-from .slack_threads import get_active_slack_thread
+from ..utils.dashboard_links import dashboard_plan_url
+from ..utils.slack_api import get_slack_permalink
+from ..utils.slack_threads import get_active_slack_thread
+from .pr import is_private_repo
 
 logger = logging.getLogger(__name__)
 

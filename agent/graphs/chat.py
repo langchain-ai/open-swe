@@ -24,6 +24,7 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 
+from ..github.app import get_github_app_installation_token
 from ..middleware import (
     BasePrepareRunMiddleware,
     DynamicContextMiddleware,
@@ -42,7 +43,6 @@ from ..tools import (
     web_search,
 )
 from ..utils import ttl_cache
-from ..utils.github_app import get_github_app_installation_token
 from ..utils.model import DEFAULT_LLM_REASONING
 from ..utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 from ._assembly import (

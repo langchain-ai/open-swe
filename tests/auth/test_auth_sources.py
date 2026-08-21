@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from agent.utils import auth
+from agent.github import auth
 
 
 def test_leave_failure_comment_posts_generic_token_free_slack_notice(

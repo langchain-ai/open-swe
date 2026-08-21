@@ -1,11 +1,11 @@
-"""Tests for agent.utils.repo and Linear webhook repo override behavior."""
+"""Tests for agent.github.refs and Linear webhook repo override behavior."""
 
 import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.utils.repo import extract_repo_from_text
+from agent.github.refs import extract_repo_from_text
 from agent.utils.slack_format import extract_channel_description_text
 
 

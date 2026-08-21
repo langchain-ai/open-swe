@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from agent.utils import agents_md
+from agent.github import agents_md
 
 
 def _make_response(status: int, text: str = "") -> MagicMock:

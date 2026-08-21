@@ -10,6 +10,10 @@ from typing import Any, Literal
 import httpx
 from langgraph_sdk import get_client
 
+from ..github.api import github_client, github_request, github_url
+from ..github.app import get_github_app_installation_token
+from ..github.comments import derive_pr_state
+from ..github.refs import parse_github_pr_url
 from ..review.findings import (
     REVIEWER_THREAD_KIND,
     coerce_finding,
@@ -17,10 +21,6 @@ from ..review.findings import (
     is_thread_resolved,
     resolved_thread_ids_for_finding,
 )
-from ..utils.github_app import get_github_app_installation_token
-from ..utils.github_comments import derive_pr_state
-from ..utils.github_http import github_client, github_request, github_url
-from ..utils.github_refs import parse_github_pr_url
 from ..utils.json_types import ThreadLike, thread_metadata
 
 USAGE_THREAD_NAMESPACE: list[str] = ["agent_usage", "threads"]

@@ -15,7 +15,7 @@ from typing import Literal
 
 import httpx
 
-from .github_http import github_client, github_request, github_url
+from .api import github_client, github_request, github_url
 
 logger = logging.getLogger(__name__)
 

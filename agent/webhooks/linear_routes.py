@@ -6,8 +6,8 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from ..config import linear_webhook_secret
-from ..utils.github_comments import describe_open_swe_tags, mentions_open_swe
-from ..utils.github_org_membership import is_repo_allowed
+from ..github.comments import describe_open_swe_tags, mentions_open_swe
+from ..github.org_membership import is_repo_allowed
 from ..utils.linear import fetch_issue_details
 from . import linear as service
 from .signatures import verify_linear_signature

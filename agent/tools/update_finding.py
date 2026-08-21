@@ -4,6 +4,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from ..github.token import get_github_token
 from ..review.findings import (
     CONFIDENCES,
     DEFAULT_FINDING_TITLE,
@@ -24,7 +25,6 @@ from ..review.findings import (
     update_finding_fields,
 )
 from ..review.thread_resolution import resolve_finding_on_github
-from ..utils.github_token import get_github_token
 from ..utils.reviewer_outcomes import emit_finding_status_outcome
 
 

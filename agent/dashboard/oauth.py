@@ -13,14 +13,13 @@ import jwt
 from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
 
-from agent.utils.github_org_membership import is_login_in_allowed_org
-
 from ..config import (
     allowed_github_orgs,
     dashboard_allowed_origins,
     dashboard_base_url,
     dashboard_jwt_secret,
 )
+from ..github.org_membership import is_login_in_allowed_org
 from ..utils.pkce import s256_challenge
 from .github_token_auth import bearer_github_token
 

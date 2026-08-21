@@ -14,9 +14,9 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from ...github.api import github_client
+from ...github.refs import parse_github_pr_url
 from ...settings.github_tokens import get_valid_access_token
-from ...utils.github_http import github_client
-from ...utils.github_refs import parse_github_pr_url
 from ...utils.recovery_patch import generate_recovery_patch
 from ..authz import get_owned_thread_metadata, get_readable_thread_metadata
 from ..pr_diff import build_pr_diff_files

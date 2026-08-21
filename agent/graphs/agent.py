@@ -33,6 +33,9 @@ from ..config import (
 )
 from ..dashboard.admin import is_admin, is_observability_authorized
 from ..dashboard.run_diffs import THREAD_DIFF_KEY, save_run_diff
+from ..github.auth import resolve_github_token
+from ..github.authorship import resolve_triggering_user_identity
+from ..github.org_membership import is_login_in_allowed_org
 from ..input_messages import append_message_data
 from ..integrations.corridor_mcp import load_corridor_tools
 from ..integrations.currents_tools import load_currents_tools
@@ -119,10 +122,7 @@ from ..tools import (
     web_search,
 )
 from ..utils import ttl_cache
-from ..utils.auth import resolve_github_token
-from ..utils.authorship import resolve_triggering_user_identity
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
-from ..utils.github_org_membership import is_login_in_allowed_org
 from ..utils.json_types import as_json_object
 from ..utils.model import DEFAULT_LLM_REASONING, ModelKwargs, fallback_model_id_for
 from ..utils.sandbox import SandboxUnreachableError

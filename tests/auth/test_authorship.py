@@ -1,4 +1,4 @@
-from agent.utils.authorship import (
+from agent.github.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
     add_bot_coauthor_trailer,

@@ -13,6 +13,7 @@ from ..config import (
     default_repo_owner,
 )
 from ..dispatch import dispatch_agent_run
+from ..github.refs import extract_repo_from_text
 from ..input_messages import (
     PersonIdentity,
     RunInput,
@@ -29,7 +30,6 @@ from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.linear import fetch_issue_details, post_linear_trace_comment, react_to_linear_comment
 from ..utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
-from ..utils.repo import extract_repo_from_text
 from ..utils.thread_ops import upsert_agent_thread_owner_metadata
 from .repo_config import profile_default_repo_for_email
 

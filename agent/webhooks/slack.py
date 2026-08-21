@@ -18,6 +18,8 @@ from ..config import (
     slack_repo_owner,
 )
 from ..dispatch import dispatch_agent_run
+from ..github.auth import is_bot_token_only_mode
+from ..github.refs import extract_repo_from_text
 from ..input_messages import (
     InputMessageContext,
     MessageKind,
@@ -37,13 +39,11 @@ from ..settings.options import default_vision_model_pair, model_supports_images
 from ..settings.team_settings import get_team_default_repo
 from ..settings.user_mappings import login_for_email, login_for_slack_id
 from ..settings.user_mappings import refresh_cache as refresh_user_mapping_cache
-from ..utils.auth import is_bot_token_only_mode
 from ..utils.dashboard_links import build_settings_url, dashboard_thread_url
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.json_types import ThreadLike, as_json_object, as_thread_dict
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
-from ..utils.repo import extract_repo_from_text
 from ..utils.slack_api import (
     fetch_slack_thread_messages,
     get_slack_channel_context,

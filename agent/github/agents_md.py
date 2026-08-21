@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .github_http import GITHUB_RAW_ACCEPT, github_client, github_request, github_url
+from .api import GITHUB_RAW_ACCEPT, github_client, github_request, github_url
 
 logger = logging.getLogger(__name__)
 

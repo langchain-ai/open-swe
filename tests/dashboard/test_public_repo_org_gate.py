@@ -341,7 +341,7 @@ def test_gate_allows_internal_bot_sender(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_is_user_active_org_member_returns_false_when_no_token(monkeypatch) -> None:
-    from agent.utils import github_org_membership
+    from agent.github import org_membership as github_org_membership
 
     async def fake_installation(_org: str) -> int:
         return 1
@@ -381,7 +381,8 @@ class _FakeResponse:
 
 
 def _patch_membership_http(monkeypatch, response: _FakeResponse) -> dict[str, Any]:
-    from agent.utils import github_http, github_org_membership
+    from agent.github import api as github_api
+    from agent.github import org_membership as github_org_membership
 
     seen: dict[str, Any] = {}
 
@@ -400,13 +401,13 @@ def _patch_membership_http(monkeypatch, response: _FakeResponse) -> dict[str, An
     def factory(*_args, **_kwargs) -> _FakeAsyncClient:
         return _FakeAsyncClient(response)
 
-    monkeypatch.setattr(github_http.httpx, "AsyncClient", factory)
+    monkeypatch.setattr(github_api.httpx, "AsyncClient", factory)
     return seen
 
 
 @pytest.mark.asyncio
 async def test_is_user_active_org_member_handles_404(monkeypatch) -> None:
-    from agent.utils import github_org_membership
+    from agent.github import org_membership as github_org_membership
 
     _patch_membership_http(monkeypatch, _FakeResponse(404))
 
@@ -415,7 +416,7 @@ async def test_is_user_active_org_member_handles_404(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_is_user_active_org_member_active(monkeypatch) -> None:
-    from agent.utils import github_org_membership
+    from agent.github import org_membership as github_org_membership
 
     seen = _patch_membership_http(monkeypatch, _FakeResponse(200, {"state": "active"}))
 
@@ -425,7 +426,7 @@ async def test_is_user_active_org_member_active(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_is_user_active_org_member_pending_returns_false(monkeypatch) -> None:
-    from agent.utils import github_org_membership
+    from agent.github import org_membership as github_org_membership
 
     _patch_membership_http(monkeypatch, _FakeResponse(200, {"state": "pending"}))
 
