@@ -1,8 +1,10 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from unittest.mock import patch
 
 import pytest
-from blockbuster import blockbuster_ctx
+from blockbuster import BlockBuster
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai.chat_models.codex import (  # noqa: PLC2701
     CHATGPT_CODEX_BASE_URL,
@@ -10,6 +12,17 @@ from langchain_openai.chat_models.codex import (  # noqa: PLC2701
 )
 
 from agent.utils import model, openai_oauth
+
+
+@contextmanager
+def detect_blocking_calls() -> Iterator[None]:
+    """Leak-proof ``blockbuster_ctx``: deactivates even when the body raises."""
+    blockbuster = BlockBuster()
+    blockbuster.activate()
+    try:
+        yield
+    finally:
+        blockbuster.deactivate()
 
 
 @pytest.fixture(autouse=True)
@@ -39,7 +52,7 @@ def test_oauth_model_uses_dedicated_account_transport(monkeypatch: pytest.Monkey
 
     with (
         patch.object(model, "build_desktop_openai_oauth_model", fake_model),
-        blockbuster_ctx(),
+        detect_blocking_calls(),
     ):
         result = model.make_model("openai:gpt-5.6-sol", use_gateway=False, max_tokens=123)
 
