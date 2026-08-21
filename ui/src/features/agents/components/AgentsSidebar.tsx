@@ -932,16 +932,6 @@ function ThreadRow({
     thread.threadCategory === "automation" || thread.source === "schedule"
   const showFinishedIndicator = thread.status === "finished" && !thread.viewed
 
-  const openTrace = () => {
-    if (!thread.traceUrl) return
-    window.open(thread.traceUrl, "_blank", "noopener,noreferrer")
-  }
-
-  const openSource = () => {
-    if (!thread.sourceUrl) return
-    window.open(thread.sourceUrl, "_blank", "noopener,noreferrer")
-  }
-
   const copySandboxId = () => {
     if (!thread.sandboxId) return
     void navigator.clipboard.writeText(thread.sandboxId)
@@ -1037,22 +1027,29 @@ function ThreadRow({
               className="z-50 outline-none"
             >
               <Menu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-                <Menu.Item
-                  disabled={!thread.traceUrl}
-                  onClick={openTrace}
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                >
-                  <TreeStructureIcon className="size-3.5" />
-                  Open trace
-                </Menu.Item>
+                {thread.traceUrl && (
+                  <Menu.LinkItem
+                    href={thread.traceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    closeOnClick
+                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
+                  >
+                    <TreeStructureIcon className="size-3.5" />
+                    Open trace
+                  </Menu.LinkItem>
+                )}
                 {thread.sourceUrl && (
-                  <Menu.Item
-                    onClick={openSource}
-                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
+                  <Menu.LinkItem
+                    href={thread.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    closeOnClick
+                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
                   >
                     <IoLogoSlack className="size-3.5" />
                     Open Slack thread
-                  </Menu.Item>
+                  </Menu.LinkItem>
                 )}
                 <Menu.Item
                   disabled={!thread.sandboxId}
