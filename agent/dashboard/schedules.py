@@ -21,7 +21,6 @@ from ..scheduling.agent_schedules import (
     get_agent_schedule,
     get_run_state,
     launch_agent_schedule_record,
-    normalize_model_choice,
     put_agent_schedule,
     repo_full_name,
     slack_notification_mode,
@@ -30,6 +29,7 @@ from ..scheduling.crons import delete_scheduler_crons, ensure_scheduler_cron
 from ..store import delete_value, now_iso, search_all_values
 from ..utils.run_metadata import resolve_run_email
 from .github_tokens import get_valid_access_token
+from .options import normalize_model_choice
 from .profiles import get_profile
 from .repo_access import repo_config_for_user
 from .schedule_models import ScheduleCreateBody, ScheduleUpdateBody

@@ -280,6 +280,27 @@ def canonical_model_pair(model_id: object, effort: object = None) -> tuple[str, 
     return None
 
 
+def normalize_model_choice(
+    model_id: object, effort: object = None
+) -> tuple[str, str] | tuple[None, None]:
+    """A caller-supplied model selection, or ``(None, None)`` to fall back.
+
+    The one rule every surface applies to a model pair it did not choose itself
+    — a browser configurable, a schedule record, a chat request. The pair is
+    kept only when both halves are supported together; a retired id migrates
+    onto its replacement. Anything else is discarded rather than half-honoured,
+    so the caller resolves its own default instead of sending the model an
+    effort it would reject.
+    """
+    if not isinstance(model_id, str):
+        return None, None
+    if model_id in SUPPORTED_MODEL_IDS:
+        if isinstance(effort, str) and model_supports_effort(model_id, effort):
+            return model_id, effort
+        return None, None
+    return canonical_model_pair(model_id, effort) or (None, None)
+
+
 def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
     """Newest supported ``(model_id, effort)`` for the same provider/family.
 

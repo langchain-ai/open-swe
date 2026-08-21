@@ -5,12 +5,13 @@ from unittest.mock import AsyncMock
 
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.dashboard import thread_api
+from agent.dashboard import authz
+from agent.dashboard.threads import sandbox as thread_sandbox
 
 
 def _install_thread(monkeypatch, metadata: dict[str, Any]) -> FakeLangGraphClient:
     client = FakeLangGraphClient(thread_metadata=metadata)
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(authz, "langgraph_client", lambda: client)
     return client
 
 
@@ -43,9 +44,9 @@ async def test_turn_diff_prefers_persisted_run_artifact(monkeypatch) -> None:
     }
     monkeypatch.setattr("agent.dashboard.run_diffs.get_run_diff", AsyncMock(return_value=stored))
     create_sandbox = AsyncMock()
-    monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
+    monkeypatch.setattr(thread_sandbox, "create_sandbox", create_sandbox)
 
-    result = await thread_api.get_dashboard_thread_turn_diff(
+    result = await thread_sandbox.get_dashboard_thread_turn_diff(
         "thread-1", "owner", turn_key="msg-1", max_files=2, include_content=False
     )
 
@@ -78,9 +79,11 @@ async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
         },
     )
     create_sandbox = AsyncMock()
-    monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
+    monkeypatch.setattr(thread_sandbox, "create_sandbox", create_sandbox)
 
-    result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+    result = await thread_sandbox.get_dashboard_thread_turn_diff(
+        "thread-1", "owner", turn_key="msg-1"
+    )
 
     assert result == {**_EMPTY_DIFF, "status": "ready"}
     create_sandbox.assert_not_awaited()
@@ -104,11 +107,11 @@ async def test_turn_diff_preserves_changes_before_mid_run_plan_mode(monkeypatch)
         },
     )
     sandbox = object()
-    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
+    monkeypatch.setattr(thread_sandbox, "create_sandbox", AsyncMock(return_value=sandbox))
     read_diff = AsyncMock(return_value={"status": "ready", "files": [], "truncated": False})
     monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
 
-    await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+    await thread_sandbox.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
 
     read_diff.assert_awaited_once_with(
         sandbox,
@@ -143,11 +146,11 @@ async def test_turn_diff_reads_the_checkpoint_repository(monkeypatch) -> None:
         },
     )
     sandbox = object()
-    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
+    monkeypatch.setattr(thread_sandbox, "create_sandbox", AsyncMock(return_value=sandbox))
     read_diff = AsyncMock(return_value={"status": "ready", "files": [], "truncated": False})
     monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
 
-    await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+    await thread_sandbox.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
 
     read_diff.assert_awaited_once_with(
         sandbox,
@@ -182,9 +185,11 @@ async def test_turn_diff_rejects_checkpoints_from_different_repositories(monkeyp
         },
     )
     create_sandbox = AsyncMock()
-    monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
+    monkeypatch.setattr(thread_sandbox, "create_sandbox", create_sandbox)
 
-    result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+    result = await thread_sandbox.get_dashboard_thread_turn_diff(
+        "thread-1", "owner", turn_key="msg-1"
+    )
 
     assert result == _EMPTY_DIFF
     create_sandbox.assert_not_awaited()
@@ -200,13 +205,13 @@ async def test_pr_diff_uses_repository_from_pr_url(monkeypatch) -> None:
             "pr_url": "https://github.com/langchain-ai/open-swe/pull/1925",
         },
     )
-    monkeypatch.setattr(thread_api, "get_valid_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(thread_sandbox, "get_valid_access_token", AsyncMock(return_value="token"))
     build_diff = AsyncMock(
         return_value={"base_sha": "base", "head_sha": "head", "truncated": False, "files": []}
     )
-    monkeypatch.setattr(thread_api, "build_pr_diff_files", build_diff)
+    monkeypatch.setattr(thread_sandbox, "build_pr_diff_files", build_diff)
 
-    await thread_api.get_dashboard_thread_pr_diff("thread-1", "owner")
+    await thread_sandbox.get_dashboard_thread_pr_diff("thread-1", "owner")
 
     assert build_diff.await_args is not None
     assert build_diff.await_args.args[1:] == ("langchain-ai/open-swe", 1925)

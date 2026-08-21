@@ -10,7 +10,7 @@ was killed) to ``failed``.
 
 import logging
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import cast
 
 from agent.config import configured_langgraph_url, eval_langsmith_project
 from agent.review.eval_config import (
@@ -95,7 +95,7 @@ def _is_heartbeat_fresh(record: ReviewerEvalRecord) -> bool:
     return age is not None and age <= HEARTBEAT_STALE_SECONDS
 
 
-async def get_reviewer_eval_status() -> dict[str, Any]:
+async def get_reviewer_eval_status() -> ReviewerEvalRecord:
     """Return the latest reviewer-eval status, reconciling a stale ``running``.
 
     The GitHub Action refreshes the record's heartbeat while it runs. A poll
@@ -105,11 +105,11 @@ async def get_reviewer_eval_status() -> dict[str, Any]:
     """
     record = await _get_record()
     if record is None:
-        return dict(_idle_record())
+        return _idle_record()
     if record.get("status") != "running" or _is_heartbeat_fresh(record):
-        return dict(record)
+        return record
     stale = record.copy()
     stale["status"] = "failed"
     stale["finished_at"] = record.get("finished_at") or now_iso()
     stale["error"] = "Eval process is no longer tracked (GitHub Action stopped?)."
-    return dict(await _put_record(stale))
+    return await _put_record(stale)

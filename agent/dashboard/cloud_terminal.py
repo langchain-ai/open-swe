@@ -20,7 +20,7 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 from ..config import is_langsmith_sandbox, langgraph_url
 from .oauth import decode_terminal_ticket
-from .thread_api import get_dashboard_terminal_sandbox
+from .threads.sandbox import get_dashboard_terminal_sandbox
 
 logger = logging.getLogger(__name__)
 

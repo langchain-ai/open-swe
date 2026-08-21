@@ -13,7 +13,7 @@ from ..cloud_terminal import (
     run_cloud_terminal,
 )
 from ..oauth import issue_terminal_ticket
-from ..thread_api import get_dashboard_terminal_sandbox
+from ..threads.sandbox import get_dashboard_terminal_sandbox
 
 router = APIRouter()
 

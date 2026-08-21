@@ -73,13 +73,16 @@ def apply() -> None:
     # OAuth-token store is an external credential boundary. Stub it so a web
     # follow-up (dashboard run.start) and PR-as-user resolution have a token;
     # the real ownership/authorization checks still run.
-    from agent.dashboard import github_tokens, thread_api
+    from agent.dashboard import github_tokens
+    from agent.dashboard.threads import runs as thread_runs
+    from agent.dashboard.threads import sandbox as thread_sandbox
 
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:  # noqa: ARG001
         return "dummy-user-oauth-token"
 
     github_tokens.get_valid_access_token = _dummy_user_token
-    thread_api.get_valid_access_token = _dummy_user_token
+    thread_runs.get_valid_access_token = _dummy_user_token
+    thread_sandbox.get_valid_access_token = _dummy_user_token
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox
     # provider, so there is nothing to capture from — record the request in the

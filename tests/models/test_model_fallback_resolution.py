@@ -16,14 +16,14 @@ from agent.dashboard.options import (
     models_with_profile_context_windows,
     provider_fallback_pair,
 )
+from agent.dashboard.options import (
+    normalize_model_choice as normalize_schedule_model_choice,
+)
 from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_response
 from agent.dashboard.team_settings import (
     TeamSettingsUpdate,
     get_team_default_model,
     normalize_team_settings_for_response,
-)
-from agent.scheduling.agent_schedules import (
-    normalize_model_choice as normalize_schedule_model_choice,
 )
 
 STALE_ANTHROPIC = "anthropic:claude-opus-4-7"

@@ -17,15 +17,17 @@ from fastapi import HTTPException
 from support.httpx_fakes import FakeHttpx
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.dashboard import thread_api
+from agent.dashboard import authz
+from agent.dashboard.threads import proxy as thread_proxy
+from agent.dashboard.threads import runs as thread_runs
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
 _RUN_STARTED = b'{"type":"success","id":1,"result":{"run_id":"run-1"}}'
 
 
-def _image() -> thread_api.DashboardImageBody:
-    return thread_api.DashboardImageBody(
+def _image() -> thread_runs.DashboardImageBody:
+    return thread_runs.DashboardImageBody(
         base64=base64.b64encode(b"image").decode("ascii"),
         mimeType="image/png",
     )
@@ -33,13 +35,14 @@ def _image() -> thread_api.DashboardImageBody:
 
 def _install_client(monkeypatch, **kwargs: Any) -> FakeLangGraphClient:
     client = FakeLangGraphClient(**kwargs)
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    for module in (authz, thread_runs):
+        monkeypatch.setattr(module, "langgraph_client", lambda: client)
     return client
 
 
 def _install_proxy(monkeypatch) -> FakeHttpx:
     proxy = FakeHttpx(content=_RUN_STARTED)
-    monkeypatch.setattr(thread_api.httpx, "AsyncClient", proxy.client)
+    monkeypatch.setattr(thread_proxy.httpx, "AsyncClient", proxy.client)
     return proxy
 
 
@@ -52,7 +55,7 @@ async def _run_start(
     email: str | None = None,
 ) -> dict[str, Any]:
     """Post ``command`` and return the enriched command the proxy forwarded."""
-    status, body, _ = await thread_api.proxy_dashboard_thread_commands(
+    status, body, _ = await thread_runs.proxy_dashboard_thread_commands(
         thread_id, login, json.dumps(command).encode(), email=email
     )
     assert (status, body) == (200, _RUN_STARTED)
@@ -87,9 +90,9 @@ def _patch_enrich_deps(monkeypatch, *, profile: dict[str, object] | None = None)
     async def fake_resolve_email(login: str, prof: dict[str, object]) -> str:
         return f"{login}@example.com"
 
-    monkeypatch.setattr(thread_api, "get_profile", fake_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "resolve_run_email", fake_resolve_email)
+    monkeypatch.setattr(thread_runs, "get_profile", fake_profile)
+    monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(thread_runs, "resolve_run_email", fake_resolve_email)
 
 
 def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
@@ -98,7 +101,7 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
         return _VISION_MODEL, "medium"
 
     _patch_enrich_deps(monkeypatch, profile=profile)
-    monkeypatch.setattr(thread_api, "get_team_default_model", fake_team_default)
+    monkeypatch.setattr(thread_runs, "get_team_default_model", fake_team_default)
 
 
 async def test_run_start_creates_and_stamps_new_thread(monkeypatch) -> None:
@@ -424,9 +427,9 @@ async def test_run_start_allowlists_client_configurable(monkeypatch) -> None:
         assert login == "octocat"
         return "octocat@example.com"
 
-    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "resolve_run_email", fake_resolve_email)
+    monkeypatch.setattr(thread_runs, "get_profile", fake_get_profile)
+    monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(thread_runs, "resolve_run_email", fake_resolve_email)
     proxy = _install_proxy(monkeypatch)
 
     enriched = await _run_start(
@@ -476,7 +479,7 @@ async def test_run_start_unresolves_thread(monkeypatch) -> None:
     async def fake_build(thread_id, login, metadata, *, overrides):
         return {"github_login": login, "source": "dashboard"}
 
-    monkeypatch.setattr(thread_api, "_build_dashboard_configurable", fake_build)
+    monkeypatch.setattr(thread_runs, "build_thread_configurable", fake_build)
 
     await _run_start(
         proxy,
@@ -523,9 +526,9 @@ async def test_run_start_from_slack_thread_updates_trace_reply(monkeypatch) -> N
         return True
 
     _patch_enrich_deps(monkeypatch)
-    monkeypatch.setattr(thread_api, "_now_ms", lambda: 123_456)
+    monkeypatch.setattr(thread_runs, "now_ms", lambda: 123_456)
     monkeypatch.setattr(
-        thread_api, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
+        thread_runs, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
     )
     proxy = _install_proxy(monkeypatch)
 
@@ -565,8 +568,8 @@ def _patch_queue(monkeypatch, captured: dict[str, object]) -> None:
         captured["payload"] = payload
         return True
 
-    monkeypatch.setattr(thread_api, "get_thread_active_status", active)
-    monkeypatch.setattr(thread_api, "queue_message_for_thread", fake_queue)
+    monkeypatch.setattr(thread_runs, "get_thread_active_status", active)
+    monkeypatch.setattr(thread_runs, "queue_message_for_thread", fake_queue)
 
 
 async def test_queued_message_returns_502_when_activity_unknown(monkeypatch) -> None:
@@ -576,11 +579,11 @@ async def test_queued_message_returns_502_when_activity_unknown(monkeypatch) -> 
         assert thread_id == "tid"
         return None
 
-    monkeypatch.setattr(thread_api, "get_thread_active_status", unknown_activity)
+    monkeypatch.setattr(thread_runs, "get_thread_active_status", unknown_activity)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
-            "tid", "octocat", thread_api.ThreadMessageBody(content="hello")
+        await thread_runs.send_dashboard_message(
+            "tid", "octocat", thread_runs.ThreadMessageBody(content="hello")
         )
 
     assert exc_info.value.status_code == 502
@@ -598,8 +601,8 @@ async def test_queued_message_rejects_non_admin_on_admin_thread(monkeypatch) -> 
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
-            "tid", "teammate", thread_api.ThreadMessageBody(content="ship it")
+        await thread_runs.send_dashboard_message(
+            "tid", "teammate", thread_runs.ThreadMessageBody(content="ship it")
         )
 
     assert exc_info.value.status_code == 403
@@ -620,8 +623,8 @@ async def test_queued_message_accepts_configured_admin_on_admin_thread(monkeypat
     captured: dict[str, object] = {}
     _patch_queue(monkeypatch, captured)
 
-    await thread_api.send_dashboard_message(
-        "tid", "workspace-admin", thread_api.ThreadMessageBody(content="ship it")
+    await thread_runs.send_dashboard_message(
+        "tid", "workspace-admin", thread_runs.ThreadMessageBody(content="ship it")
     )
 
     payload = cast(dict[str, object], captured["payload"])
@@ -633,8 +636,8 @@ async def test_queued_message_attributes_non_owner(monkeypatch) -> None:
     _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "owner"})
     _patch_queue(monkeypatch, captured)
 
-    await thread_api.send_dashboard_message(
-        "tid", "teammate", thread_api.ThreadMessageBody(content="ship it")
+    await thread_runs.send_dashboard_message(
+        "tid", "teammate", thread_runs.ThreadMessageBody(content="ship it")
     )
 
     payload = cast(dict[str, object], captured["payload"])
@@ -648,8 +651,8 @@ async def test_queued_message_does_not_attribute_owner(monkeypatch) -> None:
     _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "owner"})
     _patch_queue(monkeypatch, captured)
 
-    await thread_api.send_dashboard_message(
-        "tid", "owner", thread_api.ThreadMessageBody(content="ship it")
+    await thread_runs.send_dashboard_message(
+        "tid", "owner", thread_runs.ThreadMessageBody(content="ship it")
     )
 
     payload = cast(dict[str, object], captured["payload"])
@@ -669,10 +672,10 @@ async def test_queued_message_rejects_images_for_text_only_model(monkeypatch) ->
     _patch_queue(monkeypatch, {})
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
+        await thread_runs.send_dashboard_message(
             "tid",
             "owner",
-            thread_api.ThreadMessageBody(content="see attached", images=[_image()]),
+            thread_runs.ThreadMessageBody(content="see attached", images=[_image()]),
         )
 
     assert exc_info.value.status_code == 422
@@ -687,10 +690,10 @@ async def test_queued_message_allows_images_for_vision_model(monkeypatch) -> Non
     captured: dict[str, object] = {}
     _patch_queue(monkeypatch, captured)
 
-    await thread_api.send_dashboard_message(
+    await thread_runs.send_dashboard_message(
         "tid",
         "owner",
-        thread_api.ThreadMessageBody(content="see attached", images=[_image()]),
+        thread_runs.ThreadMessageBody(content="see attached", images=[_image()]),
     )
 
     payload = cast(dict[str, object], captured["payload"])

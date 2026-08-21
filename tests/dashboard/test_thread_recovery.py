@@ -14,8 +14,10 @@ import pytest
 from fastapi import HTTPException
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.dashboard import authz, thread_api
+from agent.dashboard import authz
 from agent.dashboard.routes import admin as admin_routes
+from agent.dashboard.threads import runs as thread_runs
+from agent.dashboard.threads import sandbox as thread_sandbox
 
 # The endpoint's own guardrails on the generated patch.
 _PATCH_TIMEOUT_SECONDS = 120
@@ -33,7 +35,8 @@ _OWNED_SANDBOX_THREAD = {
 
 def _install_client(monkeypatch, **kwargs: Any) -> FakeLangGraphClient:
     client = FakeLangGraphClient(**kwargs)
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
+    monkeypatch.setattr(authz, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_runs, "langgraph_client", lambda: client)
     return client
 
 
@@ -64,7 +67,7 @@ class _RecoverySandbox:
 
 
 def _install_sandbox(monkeypatch, sandbox: _RecoverySandbox) -> _RecoverySandbox:
-    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
+    monkeypatch.setattr(thread_sandbox, "create_sandbox", AsyncMock(return_value=sandbox))
     return sandbox
 
 
@@ -75,7 +78,7 @@ async def test_recovery_patch_requires_thread_owner(monkeypatch) -> None:
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_recovery_patch("tid", "intruder")
+        await thread_sandbox.get_dashboard_thread_recovery_patch("tid", "intruder")
 
     assert exc_info.value.status_code == 404
 
@@ -84,7 +87,7 @@ async def test_recovery_patch_requires_sandbox(monkeypatch) -> None:
     _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "octocat"})
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+        await thread_sandbox.get_dashboard_thread_recovery_patch("tid", "octocat")
 
     assert exc_info.value.status_code == 404
     assert "sandbox" in exc_info.value.detail
@@ -94,7 +97,7 @@ async def test_recovery_patch_downloads_generated_patch(monkeypatch) -> None:
     _install_client(monkeypatch, thread_metadata=dict(_OWNED_SANDBOX_THREAD))
     sandbox = _install_sandbox(monkeypatch, _RecoverySandbox())
 
-    content, filename = await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+    content, filename = await thread_sandbox.get_dashboard_thread_recovery_patch("tid", "octocat")
 
     assert content == b"patch bytes"
     assert filename == "open-swe-tid.patch"
@@ -107,11 +110,11 @@ async def test_recovery_patch_searches_command_cwd_before_workspace_fallback(mon
     _install_client(monkeypatch, thread_metadata=dict(_OWNED_SANDBOX_THREAD))
     sandbox = _install_sandbox(monkeypatch, _RecoverySandbox())
 
-    await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+    await thread_sandbox.get_dashboard_thread_recovery_patch("tid", "octocat")
 
     command = sandbox.commands[0]
     assert "Path.cwd().resolve()" in command
-    assert "WORKSPACE_FALLBACK = Path('/workspace')" in command
+    assert 'WORKSPACE_FALLBACK = Path("/workspace")' in command
     assert "roots = [Path.cwd().resolve(), WORKSPACE_FALLBACK]" in command
 
 
@@ -120,7 +123,7 @@ async def test_recovery_patch_rejects_empty_patch(monkeypatch) -> None:
     _install_sandbox(monkeypatch, _RecoverySandbox(size=0))
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+        await thread_sandbox.get_dashboard_thread_recovery_patch("tid", "octocat")
 
     assert exc_info.value.status_code == 404
     assert "changes" in exc_info.value.detail
@@ -131,7 +134,7 @@ async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
     _install_sandbox(monkeypatch, _RecoverySandbox(size=_PATCH_LIMIT_BYTES + 1))
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_recovery_patch("tid", "octocat")
+        await thread_sandbox.get_dashboard_thread_recovery_patch("tid", "octocat")
 
     assert exc_info.value.status_code == 413
 
@@ -165,7 +168,7 @@ async def test_cancel_thread_interrupts_runs_it_did_not_start(monkeypatch) -> No
         runs={"thread-1": _ACTIVE_RUNS},
     )
 
-    result = await thread_api.cancel_dashboard_thread("thread-1", "owner")
+    result = await thread_runs.cancel_dashboard_thread("thread-1", "owner")
 
     assert client.runs.cancelled == [_INTERRUPT_ALL_ACTIVE]
     # Reported as interrupted even though the platform still says busy.
@@ -186,7 +189,7 @@ async def test_cancel_thread_rejects_non_owner(monkeypatch) -> None:
     )
 
     with pytest.raises(HTTPException):
-        await thread_api.cancel_dashboard_thread("thread-1", "someone-else")
+        await thread_runs.cancel_dashboard_thread("thread-1", "someone-else")
 
     assert client.runs.cancelled == []
     assert client.threads.updates == []
@@ -204,7 +207,7 @@ async def test_admin_cancel_thread_interrupts_all_active_runs(monkeypatch) -> No
     }
     client = _install_client(monkeypatch, threads=[thread], runs={"thread-1": _ACTIVE_RUNS})
 
-    result = await thread_api.admin_cancel_dashboard_thread("thread-1")
+    result = await thread_runs.admin_cancel_dashboard_thread("thread-1")
 
     assert client.runs.cancelled == [_INTERRUPT_ALL_ACTIVE]
     # The metadata write lands only after the cancel succeeds.
@@ -222,7 +225,7 @@ async def test_admin_cancel_thread_does_not_update_on_cancel_failure(monkeypatch
     client.runs.cancel_error = RuntimeError("runtime unavailable")
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.admin_cancel_dashboard_thread("thread-1")
+        await thread_runs.admin_cancel_dashboard_thread("thread-1")
 
     assert exc_info.value.status_code == 502
     assert client.threads.updates == []

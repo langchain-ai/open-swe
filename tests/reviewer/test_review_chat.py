@@ -597,13 +597,13 @@ async def test_enrich_chat_command_ignores_non_run_start(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_proxy_state_normalizes_missing_thread(monkeypatch) -> None:
-    async def fake_passthrough(method, thread_id, suffix, body, content_type):
+    async def fake_passthrough(method, thread_id, suffix, **kwargs):
         return 404, b"not found", "text/plain"
 
     async def no_thread(thread_id: str) -> None:
         return None
 
-    monkeypatch.setattr(review_chat_api, "_proxy_passthrough", fake_passthrough)
+    monkeypatch.setattr(review_chat_api, "passthrough", fake_passthrough)
     monkeypatch.setattr(review_chat_api, "_get_chat_thread_metadata", no_thread)
     status, content, media_type = await review_chat_api.proxy_review_chat_state(
         "acme", "repo", 7, "octocat", "ct-1"
@@ -614,13 +614,13 @@ async def test_proxy_state_normalizes_missing_thread(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_proxy_history_normalizes_missing_thread(monkeypatch) -> None:
-    async def fake_passthrough(method, thread_id, suffix, body, content_type):
+    async def fake_passthrough(method, thread_id, suffix, **kwargs):
         return 404, b"not found", "text/plain"
 
     async def no_thread(thread_id: str) -> None:
         return None
 
-    monkeypatch.setattr(review_chat_api, "_proxy_passthrough", fake_passthrough)
+    monkeypatch.setattr(review_chat_api, "passthrough", fake_passthrough)
     monkeypatch.setattr(review_chat_api, "_get_chat_thread_metadata", no_thread)
     status, content, _ = await review_chat_api.proxy_review_chat_history(
         "acme", "repo", 7, "octocat", "ct-1", b"{}"
@@ -644,7 +644,7 @@ async def test_proxy_state_rejects_foreign_thread(monkeypatch) -> None:
         raise AssertionError("must not proxy a thread the caller doesn't own")
 
     monkeypatch.setattr(review_chat_api, "_get_chat_thread_metadata", other_owner)
-    monkeypatch.setattr(review_chat_api, "_proxy_passthrough", fake_passthrough)
+    monkeypatch.setattr(review_chat_api, "passthrough", fake_passthrough)
     with pytest.raises(Exception):  # noqa: B017,PT011 - HTTPException(404)
         await review_chat_api.proxy_review_chat_state("acme", "repo", 7, "octocat", "ct-1")
 
