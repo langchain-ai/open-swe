@@ -7,6 +7,7 @@ const path = require("node:path")
 const HOST = "127.0.0.1"
 const START_TIMEOUT_MS = 60_000
 const STOP_TIMEOUT_MS = 5_000
+const THREAD_STATUS = { busy: "running", error: "error" }
 const PROVIDER_KEYS = {
   anthropic: ["ANTHROPIC_API_KEY"],
   fireworks: ["FIREWORKS_API_KEY"],
@@ -215,6 +216,32 @@ class BackendSupervisor {
     headers.set("authorization", `Bearer ${this.token}`)
     headers.set("accept-encoding", "identity")
     return this.fetch(`http://${HOST}:${this.port}${pathname}`, { ...init, headers })
+  }
+
+  async threadActivity() {
+    if (!this.child || !this.port || !this.token) return {}
+    try {
+      const response = await this.fetch(`http://${HOST}:${this.port}/threads/search`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${this.token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ limit: 1_000 }),
+        signal: AbortSignal.timeout(2_000),
+      })
+      if (!response.ok) return null
+      const threads = await response.json()
+      if (!Array.isArray(threads)) return null
+      const activity = {}
+      for (const thread of threads) {
+        const status = THREAD_STATUS[thread?.status]
+        if (status && typeof thread.thread_id === "string") activity[thread.thread_id] = status
+      }
+      return activity
+    } catch {
+      return null
+    }
   }
 
   async createThread(threadId) {

@@ -200,12 +200,18 @@ def create_pull(
         "owner": owner,
         "repo": repo,
         "head": head,
+        "head_sha": f"{number:040x}",
         "base": base,
         "title": title,
         "body": body,
         "draft": draft,
         "state": "open",
         "merged": False,
+        "mergeable": True,
+        "mergeable_state": "clean",
+        "check_runs": [],
+        "statuses": [],
+        "review_threads": [],
         "author": "open-swe[bot]",
         "created_at": time.strftime(
             "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 5 * 24 * 60 * 60)
@@ -218,8 +224,85 @@ def create_pull(
     return pr
 
 
-def find_pull(number: int) -> dict[str, Any] | None:
-    return next((p for p in PULLS if p["number"] == number), None)
+def find_pull(
+    number: int, owner: str | None = None, repo: str | None = None
+) -> dict[str, Any] | None:
+    return next(
+        (
+            pull
+            for pull in PULLS
+            if pull["number"] == number
+            and (owner is None or pull["owner"] == owner)
+            and (repo is None or pull["repo"] == repo)
+        ),
+        None,
+    )
+
+
+def find_pull_by_sha(owner: str, repo: str, sha: str) -> dict[str, Any] | None:
+    return next(
+        (
+            pull
+            for pull in PULLS
+            if pull["owner"] == owner and pull["repo"] == repo and pull["head_sha"] == sha
+        ),
+        None,
+    )
+
+
+def update_pull_health(number: int, values: dict[str, Any]) -> dict[str, Any] | None:
+    pull = find_pull(number)
+    if pull is None:
+        return None
+    allowed = {
+        "draft",
+        "state",
+        "merged",
+        "mergeable",
+        "mergeable_state",
+        "head_sha",
+        "check_runs",
+        "statuses",
+        "review_threads",
+    }
+    pull.update({key: value for key, value in values.items() if key in allowed})
+    return pull
+
+
+def review_thread_graphql(thread: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "isResolved": bool(thread.get("is_resolved", False)),
+        "path": thread.get("path", ""),
+        "line": thread.get("line"),
+        "originalLine": thread.get("original_line"),
+        "comments": {
+            "nodes": [
+                {
+                    "author": {"login": thread.get("author")},
+                    "body": thread.get("body", ""),
+                    "url": thread.get("url"),
+                }
+            ]
+        },
+    }
+
+
+def pull_health_json(pull: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: pull[key]
+        for key in (
+            "number",
+            "draft",
+            "state",
+            "merged",
+            "mergeable",
+            "mergeable_state",
+            "head_sha",
+            "check_runs",
+            "statuses",
+            "review_threads",
+        )
+    }
 
 
 def set_repo_private(value: bool) -> None:

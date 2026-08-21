@@ -180,8 +180,8 @@ const STATUS_GROUP_LABEL: Record<AgentStatus, string> = {
   idle: "Idle",
 }
 
-function sortedByRecency(threads: Array<AgentThread>): Array<AgentThread> {
-  return [...threads].sort((a, b) => b.updatedAt - a.updatedAt)
+function sortedByCreation(threads: Array<AgentThread>): Array<AgentThread> {
+  return [...threads].sort((a, b) => b.createdAt - a.createdAt)
 }
 
 /** Split threads into ordered, labelled sections according to the group mode. */
@@ -196,7 +196,7 @@ export function groupThreadsByMode(
       {
         key: "all",
         label: "All",
-        threads: sortedByRecency(threads),
+        threads: sortedByCreation(threads),
         defaultCollapsed: false,
       },
     ]
@@ -205,12 +205,13 @@ export function groupThreadsByMode(
   if (mode === "focus") {
     return groupThreadsForView(threads, "focus").map((group) => ({
       ...group,
+      threads: sortedByCreation(group.threads),
       defaultCollapsed: false,
     }))
   }
 
   if (mode === "date") {
-    const groups = groupThreads(threads)
+    const groups = groupThreads(threads, "createdAt")
     return (
       [
         {
@@ -259,7 +260,7 @@ export function groupThreadsByMode(
       (status) => ({
         key: status,
         label: STATUS_GROUP_LABEL[status],
-        threads: sortedByRecency(byStatus.get(status) ?? []),
+        threads: sortedByCreation(byStatus.get(status) ?? []),
         defaultCollapsed: false,
       })
     )
@@ -277,7 +278,7 @@ export function groupThreadsByMode(
     .map((repo) => ({
       key: repo,
       label: repo,
-      threads: sortedByRecency(byRepo.get(repo) ?? []),
+      threads: sortedByCreation(byRepo.get(repo) ?? []),
       defaultCollapsed: false,
     }))
 }

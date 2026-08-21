@@ -37,11 +37,7 @@ from .agent_instructions import (
     list_agent_instructions,
     set_agent_instructions,
 )
-from .agent_usage import (
-    list_agent_usage_leaderboard,
-    refresh_reviewer_stats_cache,
-    refresh_usage_leaderboard_cache,
-)
+from .agent_usage import list_agent_usage_leaderboard
 from .analyzer_cron import remove_continual_cron
 from .enabled_repos import (
     list_enabled_review_repos,
@@ -228,9 +224,11 @@ from .thread_api import (
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
     get_dashboard_thread_branch_diff,
+    get_dashboard_thread_pull_request_status,
     get_dashboard_thread_recovery_patch,
+    get_dashboard_thread_run_diff,
     get_dashboard_thread_state,
-    get_dashboard_thread_turn_diff,
+    get_dashboard_thread_working_tree_diff,
     list_dashboard_threads,
     list_dashboard_threads_page,
     list_dashboard_threads_sidebar,
@@ -492,7 +490,10 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     state_payload = decode_state(state)
     state_nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)
-    if (
+    is_desktop = isinstance(state_payload.get("handoff_challenge"), str) and isinstance(
+        state_payload.get("handoff_port"), int
+    )
+    if not is_desktop and (
         not isinstance(state_nonce_hash, str)
         or not cookie_nonce
         or not hmac.compare_digest(hash_state_nonce(cookie_nonce), state_nonce_hash)
@@ -1852,7 +1853,6 @@ async def api_delete_organization_skill(
 
 @router.get("/agent-usage-leaderboard")
 async def api_agent_usage_leaderboard(
-    background_tasks: BackgroundTasks,
     period: str | None = "30d",
     limit: int = 10,
     session: dict[str, Any] = _SESSION_DEP,
@@ -1862,12 +1862,6 @@ async def api_agent_usage_leaderboard(
         limit=limit,
         current_login=session["sub"],
         current_email=session.get("email"),
-        schedule_usage_refresh=lambda cache_period: background_tasks.add_task(
-            refresh_usage_leaderboard_cache, cache_period
-        ),
-        schedule_reviewer_refresh=lambda cache_period: background_tasks.add_task(
-            refresh_reviewer_stats_cache, cache_period
-        ),
     )
 
 
@@ -1976,6 +1970,7 @@ async def api_list_threads_page(
     q: str | None = None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    sort_by: Literal["created_at", "updated_at"] = "updated_at",
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not _session_is_admin(session):
@@ -1993,6 +1988,19 @@ async def api_list_threads_page(
         query=q,
         scope=scope,
         automation_id=automation_id,
+        sort_by=sort_by,
+    )
+
+
+@router.get("/threads/{thread_id}/pull-request-status")
+async def api_get_thread_pull_request_status(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_pull_request_status(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
     )
 
 
@@ -2175,15 +2183,25 @@ async def api_get_thread_recovery_patch(
     )
 
 
-@router.get("/threads/{thread_id}/turn-diff")
-async def api_get_thread_turn_diff(
+@router.get("/threads/{thread_id}/working-tree-diff")
+async def api_get_thread_working_tree_diff(
     thread_id: str,
-    turn_key: str | None = None,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_working_tree_diff(
+        thread_id, session["sub"], email=session.get("email")
+    )
+
+
+@router.get("/threads/{thread_id}/run-diff")
+async def api_get_thread_run_diff(
+    thread_id: str,
+    turn_key: str,
     max_files: int = Query(200, ge=1, le=200),
     include_content: bool = True,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await get_dashboard_thread_turn_diff(
+    return await get_dashboard_thread_run_diff(
         thread_id,
         session["sub"],
         turn_key=turn_key,

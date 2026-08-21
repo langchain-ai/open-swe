@@ -8,36 +8,15 @@ metadata says "admin" cannot act on behalf of someone who is not one.
 import logging
 from typing import Any
 
-from langgraph.config import get_config
-
 from ..dashboard import environments as store
-from ..dashboard.admin import is_admin
+from .admin_gate import configurable as _configurable
+from .admin_gate import require_admin
 
 logger = logging.getLogger(__name__)
 
-_NOT_ADMIN = "Only workspace admins can manage environments."
-
-
-def _configurable() -> dict[str, Any]:
-    try:
-        config = get_config()
-    except Exception:
-        return {}
-    configurable = config.get("configurable") if isinstance(config, dict) else None
-    return configurable if isinstance(configurable, dict) else {}
-
 
 def _require_admin() -> str | None:
-    """Return an error message when the triggering user is not an admin."""
-    configurable = _configurable()
-    login = configurable.get("github_login")
-    email = configurable.get("user_email")
-    if is_admin(
-        email if isinstance(email, str) else None,
-        login=login if isinstance(login, str) else None,
-    ):
-        return None
-    return _NOT_ADMIN
+    return require_admin("manage environments")
 
 
 def _summary(record: dict[str, Any]) -> dict[str, Any]:

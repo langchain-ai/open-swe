@@ -169,6 +169,8 @@ _THREAD_TOOLS_RE = re.compile(
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
 )
 _THREAD_TOOLS_TARGET_TITLE = "E2E Thread Tools Target"
+DELEGATE_MARKER = "E2E_DELEGATE"
+SUBAGENT_TASK_MARKER = "E2E_SUBAGENT_TASK"
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -600,6 +602,51 @@ def _resolve_thread_step(messages: list[BaseMessage]) -> AIMessage:
 
 
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    # Parent turn: delegate to two general-purpose subagents in one step so the
+    # transcript renders a subagent card grid. The subagents run this same fake
+    # model; their task description carries the marker that selects the
+    # ``subagent_task`` script below.
+    "delegate": (
+        StepSpec(
+            content="Delegating the investigation to two subagents.",
+            tool_calls=(
+                _tool_call(
+                    "task",
+                    {
+                        "description": f"{SUBAGENT_TASK_MARKER} inspect the repository layout",
+                        "subagent_type": "general-purpose",
+                    },
+                    "call-subagent-layout",
+                ),
+                _tool_call(
+                    "task",
+                    {
+                        "description": f"{SUBAGENT_TASK_MARKER} list the top-level files",
+                        "subagent_type": "general-purpose",
+                    },
+                    "call-subagent-files",
+                ),
+            ),
+        ),
+        StepSpec(content="Both subagents finished their investigation."),
+    ),
+    # Subagent turn: a slow shell step first so a spec that opens the thread
+    # right after the run starts can watch the nested activity live.
+    "subagent_task": (
+        _tool_step(
+            "Looking around the workspace.",
+            "execute",
+            {"command": "sleep 12 && ls"},
+            "call-subagent-ls",
+        ),
+        _tool_step(
+            "Confirming the listing.",
+            "execute",
+            {"command": "echo subagent-done"},
+            "call-subagent-echo",
+        ),
+        StepSpec(content="Subagent finished: listed the workspace."),
+    ),
     "thread_tools": (
         _dynamic_step(_list_threads_step),
         _dynamic_step(_get_thread_step),
@@ -869,6 +916,11 @@ def _is_revision(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule(
+        "subagent_task",
+        lambda ctx: ctx.human_count <= 1 and SUBAGENT_TASK_MARKER in ctx.first_text,
+    ),
+    ScriptRule("delegate", lambda ctx: ctx.human_count <= 1 and DELEGATE_MARKER in ctx.first_text),
     ScriptRule(
         "thread_tools",
         lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),

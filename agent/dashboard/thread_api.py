@@ -58,6 +58,7 @@ from .options import (
 )
 from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
+from .pull_request_status import get_pull_request_statuses
 from .team_settings import get_team_default_model, get_team_fable_enabled
 from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from .user_mappings import email_for_login
@@ -511,7 +512,11 @@ async def _thread_summary(
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
     created_at = metadata.get("created_at_ms")
+    if not isinstance(created_at, (int, float)):
+        created_at = _thread_timestamp_ms(thread, "created_at")
     updated_at = metadata.get("updated_at_ms")
+    if not isinstance(updated_at, (int, float)):
+        updated_at = _thread_timestamp_ms(thread, "updated_at")
     raw_title = metadata.get("title")
     title: str = raw_title if isinstance(raw_title, str) else "Untitled agent"
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
@@ -559,6 +564,10 @@ async def _thread_summary(
         "triggerKind": trigger_kind,
         "automationId": _metadata_string(metadata, "schedule_id"),
         "automationName": _metadata_string(metadata, "schedule_name"),
+        "automationActionPosted": (
+            thread_category == "automation"
+            and _metadata_string(metadata, "automation_action_posted_at") is not None
+        ),
         "status": status,
         "viewed": _is_thread_viewed(metadata, latest_run_id),
         "viewedAt": (
@@ -677,9 +686,10 @@ async def _refresh_latest_run_metadata(
 
 _THREADS_SEARCH_PAGE = 500
 _THREADS_PAGE_SCAN_CAP = 5000
-_THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
+_THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+_ThreadSortBy = Literal["created_at", "updated_at"]
 
 
 def _thread_id(thread: ThreadLike) -> str | None:
@@ -720,32 +730,41 @@ def _search_metadata_filter(
 
 
 async def _search_threads_batch(
-    client: Any, metadata: JsonObject, *, limit: int, offset: int
+    client: Any,
+    metadata: JsonObject,
+    *,
+    limit: int,
+    offset: int,
+    sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     batch = await client.threads.search(
         metadata=metadata,
         limit=limit,
         offset=offset,
-        sort_by="updated_at",
+        sort_by=sort_by,
         sort_order="desc",
         select=_THREAD_LIST_SELECT,
     )
     return [thread for thread in batch or [] if isinstance(thread, Mapping)]
 
 
-def _thread_updated_ms(thread: ThreadLike) -> int:
+def _thread_timestamp_ms(thread: ThreadLike, field: _ThreadSortBy) -> int:
     metadata = _thread_metadata(thread)
-    value = metadata.get("updated_at_ms")
+    value = metadata.get(f"{field}_ms")
     if isinstance(value, (int, float)):
         return int(value)
-    updated_at = thread.get("updated_at")
-    if isinstance(updated_at, str) and updated_at:
+    timestamp = thread.get(field)
+    if isinstance(timestamp, str) and timestamp:
         try:
-            parsed = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         except ValueError:
             return 0
         return int(parsed.timestamp() * 1000)
     return 0
+
+
+def _thread_updated_ms(thread: ThreadLike) -> int:
+    return _thread_timestamp_ms(thread, "updated_at")
 
 
 def _metadata_matches_filters(
@@ -877,6 +896,7 @@ async def _collect_thread_candidates(
     automation_id: str | None = None,
     target_per_search: int | None = None,
     surfaced_only: bool = False,
+    sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     for owner_filter in searches:
@@ -894,6 +914,7 @@ async def _collect_thread_candidates(
                 metadata_filter,
                 limit=_THREADS_SEARCH_PAGE,
                 offset=offset,
+                sort_by=sort_by,
             )
             if not batch:
                 break
@@ -922,7 +943,9 @@ async def _collect_thread_candidates(
             if target_per_search is not None and matched_for_search >= target_per_search:
                 break
             offset += _THREADS_SEARCH_PAGE
-    return sorted(seen.values(), key=_thread_updated_ms, reverse=True)
+    return sorted(
+        seen.values(), key=lambda thread: _thread_timestamp_ms(thread, sort_by), reverse=True
+    )
 
 
 async def list_dashboard_threads(
@@ -1126,6 +1149,7 @@ async def list_dashboard_threads_page(
     automation_id: str | None = None,
     filter_owner_login: str | None = None,
     surfaced_only: bool = False,
+    sort_by: _ThreadSortBy = "updated_at",
 ) -> dict[str, Any]:
     client = langgraph_client()
     search_login = filter_owner_login or login
@@ -1149,6 +1173,7 @@ async def list_dashboard_threads_page(
         automation_id=automation_id,
         target_per_search=target,
         surfaced_only=surfaced_only,
+        sort_by=sort_by,
     )
 
     if summary_filters:
@@ -1170,7 +1195,8 @@ async def list_dashboard_threads_page(
                 query=query,
             )
         ]
-        filtered.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
+        summary_sort_field = "createdAt" if sort_by == "created_at" else "updatedAt"
+        filtered.sort(key=lambda item: item.get(summary_sort_field, 0), reverse=True)
         items = filtered[safe_offset : safe_offset + safe_limit]
         has_more = len(filtered) > safe_offset + safe_limit
     else:
@@ -1974,6 +2000,29 @@ async def _authorized_thread_metadata(
     return metadata
 
 
+async def get_dashboard_thread_pull_request_status(
+    thread_id: str, login: str, *, email: str | None = None
+) -> dict[str, Any]:
+    """Return live GitHub health for every pull request tracked by the thread."""
+    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    records = metadata.get("pull_requests")
+    tracked = list(records) if isinstance(records, list) else []
+    if not tracked:
+        pr_url = metadata.get("pr_url")
+        pr_ref = parse_github_pr_url(pr_url) if isinstance(pr_url, str) else None
+        if pr_ref:
+            tracked = [
+                {
+                    "repo_full_name": f"{pr_ref.owner}/{pr_ref.repo}",
+                    "number": pr_ref.number,
+                }
+            ]
+    if not tracked:
+        return {"pullRequests": []}
+    token = await _github_token_for_login(login)
+    return {"pullRequests": await get_pull_request_statuses(tracked, token)}
+
+
 async def _authorized_thread(thread_id: str, login: str, *, email: str | None = None) -> ThreadLike:
     try:
         thread = await langgraph_client().threads.get(thread_id)
@@ -2297,62 +2346,91 @@ async def _github_token_for_login(login: str) -> str:
     return token
 
 
-async def get_dashboard_thread_turn_diff(
+def _missing_diff() -> dict[str, Any]:
+    return {
+        "status": "missing",
+        "files": [],
+        "truncated": False,
+        "summary": {"files": 0, "additions": 0, "deletions": 0},
+    }
+
+
+def _ready_empty_diff() -> dict[str, Any]:
+    return {**_missing_diff(), "status": "ready"}
+
+
+async def get_dashboard_thread_working_tree_diff(
+    thread_id: str, login: str, *, email: str | None = None
+) -> dict[str, Any]:
+    """Return the sandbox's live working tree against HEAD."""
+    from ..utils.sandbox_paths import aresolve_sandbox_work_dir
+    from ..utils.turn_checkpoint import read_turn_diff
+
+    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    sandbox_id = metadata.get("sandbox_id")
+    if not isinstance(sandbox_id, str) or not sandbox_id:
+        return _missing_diff()
+    try:
+        sandbox = await create_sandbox(sandbox_id)
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "Could not connect to sandbox %s for working tree diff", sandbox_id, exc_info=True
+        )
+        return _missing_diff()
+    work_dir = await aresolve_sandbox_work_dir(sandbox)
+    checkpoints = metadata.get("turn_checkpoints")
+    repo_path = next(
+        (
+            entry["repo_path"]
+            for entry in reversed(checkpoints if isinstance(checkpoints, list) else [])
+            if isinstance(entry, Mapping) and isinstance(entry.get("repo_path"), str)
+        ),
+        None,
+    )
+    if repo_path is None:
+        _, repo_name, _ = _metadata_repo(metadata)
+        repo_path = posixpath.join(work_dir, repo_name) if repo_name else None
+    return await read_turn_diff(sandbox, work_dir, "HEAD", None, repo_path=repo_path)
+
+
+async def get_dashboard_thread_run_diff(
     thread_id: str,
     login: str,
     *,
-    turn_key: str | None = None,
+    turn_key: str,
     max_files: int = 200,
     include_content: bool = True,
     email: str | None = None,
 ) -> dict[str, Any]:
-    """Return the live working tree or a persisted diff for one completed turn."""
+    """Return a persisted diff for one completed run, with checkpoint fallback."""
     from ..utils.turn_checkpoint import read_turn_diff
     from .run_diffs import get_run_diff, project_run_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
-    checkpoints = metadata.get("turn_checkpoints")
+    stored = await get_run_diff(thread_id, turn_key)
+    if stored is not None:
+        return project_run_diff(stored, max_files=max_files, include_content=include_content)
+
+    raw_checkpoints = metadata.get("turn_checkpoints")
     checkpoints = [
         entry
-        for entry in (checkpoints if isinstance(checkpoints, list) else [])
+        for entry in (raw_checkpoints if isinstance(raw_checkpoints, list) else [])
         if isinstance(entry, Mapping) and isinstance(entry.get("ref"), str)
     ]
-    index = (
-        next((i for i, entry in enumerate(checkpoints) if entry.get("key") == turn_key), -1)
-        if turn_key is not None
-        else 0
-    )
+    index = next((i for i, entry in enumerate(checkpoints) if entry.get("key") == turn_key), -1)
     sandbox_id = metadata.get("sandbox_id")
-    if index < 0 or not checkpoints or not isinstance(sandbox_id, str) or not sandbox_id:
-        return {
-            "status": "missing",
-            "files": [],
-            "truncated": False,
-            "summary": {"files": 0, "additions": 0, "deletions": 0},
-        }
+    if index < 0 or not isinstance(sandbox_id, str) or not sandbox_id:
+        return _missing_diff()
 
     checkpoint = checkpoints[index]
-    stored = None
-    if turn_key is not None:
-        stored = await get_run_diff(thread_id, turn_key)
-        if stored is not None:
-            return project_run_diff(stored, max_files=max_files, include_content=include_content)
-
     plan_ref = checkpoint.get("plan_ref")
-    if (
-        turn_key is not None
-        and checkpoint.get("plan_mode") is True
-        and (not isinstance(plan_ref, str) or plan_ref == checkpoint.get("ref"))
+    if checkpoint.get("plan_mode") is True and (
+        not isinstance(plan_ref, str) or plan_ref == checkpoint.get("ref")
     ):
-        return {
-            "status": "ready",
-            "files": [],
-            "truncated": False,
-            "summary": {"files": 0, "additions": 0, "deletions": 0},
-        }
+        return _ready_empty_diff()
 
-    head = plan_ref if turn_key is not None and isinstance(plan_ref, str) else None
-    if head is None and turn_key and index + 1 < len(checkpoints):
+    head = plan_ref if isinstance(plan_ref, str) else None
+    if head is None and index + 1 < len(checkpoints):
         next_checkpoint = checkpoints[index + 1]
         repo_path = checkpoint.get("repo_path")
         next_repo_path = next_checkpoint.get("repo_path")
@@ -2361,40 +2439,25 @@ async def get_dashboard_thread_turn_diff(
             and isinstance(next_repo_path, str)
             and repo_path != next_repo_path
         ):
-            return {
-                "status": "missing",
-                "files": [],
-                "truncated": False,
-                "summary": {"files": 0, "additions": 0, "deletions": 0},
-            }
+            return _missing_diff()
         head = next_checkpoint["ref"]
 
     try:
         sandbox = await create_sandbox(sandbox_id)
     except Exception:  # noqa: BLE001
-        logger.debug("Could not connect to sandbox %s for turn diff", sandbox_id, exc_info=True)
-        if stored is not None:
-            return project_run_diff(stored, max_files=max_files, include_content=include_content)
-        return {
-            "status": "missing",
-            "files": [],
-            "truncated": False,
-            "summary": {"files": 0, "additions": 0, "deletions": 0},
-        }
+        logger.debug("Could not connect to sandbox %s for run diff", sandbox_id, exc_info=True)
+        return _missing_diff()
 
     repo_path = checkpoint.get("repo_path")
-    live = await read_turn_diff(
+    return await read_turn_diff(
         sandbox,
         None,
-        "HEAD" if turn_key is None else str(checkpoint["ref"]),
+        str(checkpoint["ref"]),
         head,
         max_files=max_files,
         include_content=include_content,
         repo_path=repo_path if isinstance(repo_path, str) else None,
     )
-    if live.get("status") != "ready" and stored is not None:
-        return project_run_diff(stored, max_files=max_files, include_content=include_content)
-    return live
 
 
 _UNSAFE_REF_CHARACTERS = set(" ~^:?*[\\\x7f") | {chr(code) for code in range(32)}
