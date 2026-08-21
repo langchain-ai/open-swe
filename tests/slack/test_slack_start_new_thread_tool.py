@@ -3,6 +3,7 @@ import uuid
 from typing import Any
 
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient
 
 slack_breakout_tool = importlib.import_module("agent.tools.slack_start_new_thread")
 
@@ -29,26 +30,6 @@ def _config() -> dict[str, Any]:
             },
         }
     }
-
-
-class _FakeThreadsClient:
-    def __init__(self, captured: dict[str, Any]) -> None:
-        self.captured = captured
-
-    async def create(self, *, thread_id: str, if_exists: str, metadata: dict[str, Any]) -> None:
-        self.captured["thread_create"] = {
-            "thread_id": thread_id,
-            "if_exists": if_exists,
-            "metadata": metadata,
-        }
-
-    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
-        self.captured["thread_update"] = {"thread_id": thread_id, "metadata": metadata}
-
-
-class _FakeClient:
-    def __init__(self, captured: dict[str, Any]) -> None:
-        self.threads = _FakeThreadsClient(captured)
 
 
 async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,7 +123,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         }
         return thread_id
 
-    fake_client = _FakeClient(captured)
+    fake_client = FakeLangGraphClient()
     monkeypatch.setattr(slack_breakout_tool, "get_config", _config)
     monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", fake_bind)
     monkeypatch.setattr(slack_breakout_tool, "get_client", lambda url: fake_client)
@@ -166,7 +147,8 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         "Use the same repo and investigate the follow-up aspect in detail.",
     )
 
-    expected_thread_id = captured["thread_create"]["thread_id"]
+    (thread_create,) = fake_client.threads.created
+    expected_thread_id = thread_create["thread_id"]
     assert uuid.UUID(expected_thread_id).version == 4
     assert result == {
         "success": True,
@@ -192,12 +174,11 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         "blocks": None,
         "usage": None,
     }
-    assert captured["thread_create"]["if_exists"] == "do_nothing"
-    assert captured["thread_create"]["thread_id"] == expected_thread_id
+    assert thread_create["if_exists"] == "do_nothing"
     assert captured["binding"]["thread_id"] == expected_thread_id
     assert captured["binding"]["channel_id"] == "C1"
     assert captured["binding"]["thread_ts"] == new_ts
-    metadata = captured["thread_update"]["metadata"]
+    metadata = fake_client.threads.updates[-1]
     assert metadata["source"] == "slack"
     assert metadata["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert metadata["github_login"] == "alice"

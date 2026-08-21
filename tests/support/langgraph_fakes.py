@@ -286,6 +286,7 @@ class FakeStore(_SubClient):
         self.missing = missing
         self.puts: list[tuple[Namespace, str, dict[str, Any]]] = []
         self.deleted: list[tuple[Namespace, str]] = []
+        self.delete_error: BaseException | None = None
 
     async def get_item(self, namespace: Sequence[str], key: str) -> dict[str, Any] | None:
         self._record("get_item", namespace=tuple(namespace), key=key)
@@ -303,6 +304,8 @@ class FakeStore(_SubClient):
 
     async def delete_item(self, namespace: Sequence[str], key: str) -> None:
         self._record("delete_item", namespace=tuple(namespace), key=key)
+        if self.delete_error is not None:
+            raise self.delete_error
         self.deleted.append((tuple(namespace), key))
         self.items.pop((tuple(namespace), key), None)
 

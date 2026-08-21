@@ -3,6 +3,7 @@ from typing import Any, cast
 
 import pytest
 from fastapi import BackgroundTasks, Request
+from support.langgraph_fakes import FakeLangGraphClient
 
 from agent.utils import github_feedback
 from agent.utils.github_feedback import (
@@ -11,25 +12,6 @@ from agent.utils.github_feedback import (
 )
 from agent.webhooks import common as webhook_common
 from agent.webhooks import github_routes
-
-
-class _FakeStore:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-
-    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
-        return self.items.get((namespace, key))
-
-    async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
-        self.items[(namespace, key)] = {"value": value}
-
-    async def delete_item(self, namespace: tuple[str, ...], key: str) -> None:
-        self.items.pop((namespace, key), None)
-
-
-class _FakeClient:
-    def __init__(self) -> None:
-        self.store = _FakeStore()
 
 
 class _FakeBackgroundTasks:
@@ -68,7 +50,7 @@ def _reaction_payload(content: str = "+1", action: str = "created") -> dict[str,
 async def test_github_reaction_added_creates_langsmith_feedback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient()
+    client = FakeLangGraphClient()
     created: dict[str, Any] = {}
 
     async def fake_create_feedback(
@@ -121,16 +103,14 @@ async def test_github_reaction_added_creates_langsmith_feedback(
 async def test_github_reaction_removed_deletes_langsmith_feedback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient()
+    client = FakeLangGraphClient()
     client.store.items[
         (("github_reaction_state", "langchain-ai/open-swe"), "run-1:reviewer:123")
     ] = {
-        "value": {
-            "run_id": "run-1",
-            "user_login": "reviewer",
-            "comment_id": 123,
-            "reactions": ["+1"],
-        }
+        "run_id": "run-1",
+        "user_login": "reviewer",
+        "comment_id": 123,
+        "reactions": ["+1"],
     }
     deleted: dict[str, str] = {}
 
