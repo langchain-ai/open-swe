@@ -2,7 +2,7 @@ const fs = require("node:fs")
 const path = require("node:path")
 const { randomUUID } = require("node:crypto")
 
-const MUTABLE_FIELDS = new Set(["title", "modelId", "effort"])
+const MUTABLE_FIELDS = new Set(["title", "modelId", "effort", "viewed"])
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 function isRecord(value) {
@@ -71,8 +71,9 @@ function normalizeThread(value) {
     ? {
         repo: stringOrNull(value.checkpoint.repo, 8_192),
         ref: stringOrNull(value.checkpoint.ref, 1_024),
+        branch: stringOrNull(value.checkpoint.branch, 1_024),
       }
-    : { repo: null, ref: null }
+    : { repo: null, ref: null, branch: null }
   const pending = isRecord(value.pending)
     ? {
         prompt: stringOrNull(value.pending.prompt, 2_000_000) || "",
@@ -86,6 +87,7 @@ function normalizeThread(value) {
     title: value.title.slice(0, 80) || "New local agent",
     modelId: stringOrNull(value.modelId),
     effort: stringOrNull(value.effort),
+    viewed: value.viewed !== false,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     checkpoint,
@@ -157,9 +159,10 @@ class LocalThreadStore {
       title: sessionTitle(prompt),
       modelId: stringOrNull(input.modelId),
       effort: stringOrNull(input.effort),
+      viewed: true,
       createdAt: now,
       updatedAt: now,
-      checkpoint: { repo: null, ref: null },
+      checkpoint: { repo: null, ref: null, branch: null },
       pending: { prompt, images: cleanImages(input.images), skills: cleanSkills(input.skills) },
     }
     this.threads.set(thread.id, thread)
@@ -181,7 +184,11 @@ class LocalThreadStore {
     }
     if ("modelId" in patch) next.modelId = stringOrNull(patch.modelId)
     if ("effort" in patch) next.effort = stringOrNull(patch.effort)
-    next.updatedAt = this.now()
+    if ("viewed" in patch) {
+      if (typeof patch.viewed !== "boolean") throw new Error("Invalid viewed state")
+      next.viewed = patch.viewed
+    }
+    if (Object.keys(patch).some((key) => key !== "viewed")) next.updatedAt = this.now()
     this.threads.set(id, next)
     this.persist()
     return this.get(id)
@@ -192,7 +199,11 @@ class LocalThreadStore {
     if (!current) return null
     const next = {
       ...current,
-      checkpoint: { repo: checkpoint.repo, ref: checkpoint.ref },
+      checkpoint: {
+        repo: checkpoint.repo,
+        ref: checkpoint.ref,
+        branch: stringOrNull(checkpoint.branch, 1_024),
+      },
       updatedAt: this.now(),
     }
     this.threads.set(id, next)

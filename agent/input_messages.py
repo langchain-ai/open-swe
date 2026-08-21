@@ -22,6 +22,7 @@ class PersonIdentity(TypedDict):
     github_login: NotRequired[str]
     email: NotRequired[str]
     timezone: NotRequired[str]
+    open_swe_account: NotRequired[str]
 
 
 class ChannelIdentity(TypedDict):
@@ -37,6 +38,7 @@ class SystemIdentity(TypedDict):
     id: str
     display_name: str
     platform: NotRequired[str]
+    sender_type: NotRequired[str]
 
 
 Identity = PersonIdentity | ChannelIdentity | SystemIdentity
@@ -53,6 +55,7 @@ class InputMessageContext(TypedDict):
 class RunMessage(TypedDict):
     role: Literal["user", "system"]
     content: str | list[dict[str, Any]]
+    id: NotRequired[str]
 
 
 class RunInput(TypedDict):
@@ -61,9 +64,17 @@ class RunInput(TypedDict):
 
 
 _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
-    "person": ("display_name", "handle", "platform", "github_login", "email", "timezone"),
+    "person": (
+        "display_name",
+        "handle",
+        "platform",
+        "github_login",
+        "email",
+        "timezone",
+        "open_swe_account",
+    ),
     "channel": ("platform", "name", "thread_id", "topic", "purpose"),
-    "system": ("display_name", "platform"),
+    "system": ("display_name", "platform", "sender_type"),
 }
 _UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose"})
 _SYSTEM_ENTITY_ID = "system:open-swe"

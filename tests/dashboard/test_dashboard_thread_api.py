@@ -237,6 +237,8 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
+    assert configurable["prepare_run_id"] == enriched["params"]["metadata"]["prepare_run_id"]
+    assert configurable["prepare_run_id"]
     # Dashboard-only creation hints must not leak into the run config.
     assert "repo_explicitly_none" not in configurable
     assert enriched["params"]["assistant_id"] == "agent"
@@ -324,6 +326,58 @@ async def test_thread_summary_includes_pr_and_diff_stats() -> None:
         "url": "https://github.com/langchain-ai/open-swe/pull/42",
     }
     assert summary["diffStats"] == {"files": 3, "additions": 10, "deletions": 2}
+    assert summary["pullRequests"][0]["repoFullName"] == "langchain-ai/open-swe"
+
+
+async def test_thread_summary_includes_pull_requests_across_repositories() -> None:
+    summary = await thread_api._thread_summary(
+        _thread_with_metadata(
+            {
+                "repo_full_name": "langchain-ai/open-swe",
+                "title": "Cross-repo change",
+                "pull_requests": [
+                    {
+                        "repo_full_name": "langchain-ai/open-swe",
+                        "number": 42,
+                        "url": "https://github.com/langchain-ai/open-swe/pull/42",
+                        "title": "feat: dashboard",
+                        "state": "draft",
+                        "head_ref": "feature/dashboard",
+                        "base_ref": "main",
+                        "author": "octocat",
+                        "author_avatar_url": "https://avatars.example/octocat.png",
+                        "created_at": "2026-08-18T10:00:00Z",
+                        "diff_stats": {"files": 3, "additions": 10, "deletions": 2},
+                    },
+                    {
+                        "repo_full_name": "langchain-ai/langchain",
+                        "number": 9,
+                        "url": "https://github.com/langchain-ai/langchain/pull/9",
+                        "title": "feat: integration",
+                        "state": "open",
+                        "head_ref": "feature/integration",
+                        "base_ref": "master",
+                        "author": "hubot",
+                        "diff_stats": {"files": 1, "additions": 4, "deletions": 0},
+                    },
+                ],
+            }
+        )
+    )
+
+    assert [item["repoFullName"] for item in summary["pullRequests"]] == [
+        "langchain-ai/open-swe",
+        "langchain-ai/langchain",
+    ]
+    assert summary["pr"] == {
+        "number": 9,
+        "title": "feat: integration",
+        "state": "open",
+        "headRef": "feature/integration",
+        "baseRef": "master",
+        "url": "https://github.com/langchain-ai/langchain/pull/9",
+    }
+    assert summary["diffStats"] == {"files": 1, "additions": 4, "deletions": 0}
 
 
 async def test_thread_summary_uses_configured_repo_for_display() -> None:
@@ -630,6 +684,9 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
 
 async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkeypatch) -> None:
     class FakeThreads:
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            return {"values": {"messages": [{"id": "existing-message"}]}}
+
         async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
             pass
 
@@ -652,7 +709,11 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
 
     command = {
         "method": "run.start",
-        "params": {"input": {"messages": [{"role": "user", "content": "continue here"}]}},
+        "params": {
+            "input": {
+                "messages": [{"role": "user", "content": "continue here", "id": "existing-message"}]
+            }
+        },
     }
 
     enriched = await thread_api._enrich_run_start_command(
@@ -674,6 +735,7 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
     assert "conversation has moved to Web" in (handoff.findtext("content") or "")
     assert user_message.attrib["sender"] == "github:teammate"
     assert user_message.findtext("content") == "continue here"
+    assert "id" not in messages[-1]
     assert enriched["params"]["config"]["configurable"]["source"] == "dashboard"
 
 
@@ -1070,6 +1132,91 @@ async def test_proxy_commands_non_run_start_by_non_owner_is_rejected(monkeypatch
     assert exc_info.value.status_code == 404
 
 
+async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
+    class AdminThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "workspace-admin",
+                    "admin_thread": True,
+                },
+            }
+
+    class AdminClient:
+        threads = AdminThreads()
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: AdminClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.proxy_dashboard_thread_commands(
+            "tid", "teammate", b'{"method": "run.start"}'
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "only admins can send messages in admin threads"
+
+
+async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch) -> None:
+    class AdminThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "workspace-admin",
+                    "admin_thread": True,
+                },
+            }
+
+    class AdminClient:
+        threads = AdminThreads()
+
+    class FakeResponse:
+        status_code = 200
+        content = b"{}"
+        headers: dict[str, str] = {}
+
+    posted: list[bytes] = []
+
+    class FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        async def post(self, url: str, *, content: bytes, headers: dict[str, str]) -> FakeResponse:
+            posted.append(content)
+            return FakeResponse()
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin,another-admin")
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: AdminClient())
+    monkeypatch.setattr(thread_api.httpx, "AsyncClient", FakeAsyncClient)
+
+    status_code, _, _ = await thread_api.proxy_dashboard_thread_commands(
+        "tid", "another-admin", b'{"method": "input.respond"}'
+    )
+
+    assert status_code == 200
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "another-admin")
+    status_code, _, _ = await thread_api.proxy_dashboard_thread_commands(
+        "tid", "workspace-admin", b'{"method": "agent.getTree"}'
+    )
+
+    assert status_code == 200
+    assert posted == [
+        b'{"method": "input.respond"}',
+        b'{"method": "agent.getTree"}',
+    ]
+
+
 async def test_run_cancel_enforces_thread_ownership(monkeypatch) -> None:
     """Cancelling a run still requires thread ownership (it is not "posting")."""
 
@@ -1240,6 +1387,47 @@ async def test_send_dashboard_message_returns_502_when_activity_unknown(monkeypa
         )
 
     assert exc_info.value.status_code == 502
+
+
+async def test_send_dashboard_message_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
+    class AdminThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "workspace-admin",
+                    "admin_thread": True,
+                },
+            }
+
+        async def update(self, **kwargs: object) -> None:
+            raise AssertionError("must not update")
+
+    class AdminClient:
+        threads = AdminThreads()
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: AdminClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_api.send_dashboard_message(
+            "tid",
+            "teammate",
+            thread_api.ThreadMessageBody(content="ship it"),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "only admins can send messages in admin threads"
+
+
+def test_assert_thread_postable_allows_configured_admin(monkeypatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
+
+    thread_api._assert_thread_postable(
+        {"source": "dashboard", "admin_thread": True},
+        "workspace-admin",
+    )
 
 
 async def test_send_dashboard_message_attributes_non_owner(monkeypatch) -> None:
@@ -1675,6 +1863,60 @@ async def test_list_dashboard_threads_page_scopes_automation_runs(monkeypatch) -
     assert automation["items"][0]["automationId"] == "schedule-1"
 
 
+async def test_list_dashboard_threads_page_separates_filter_owner_from_viewer(monkeypatch) -> None:
+    threads = [
+        {
+            "thread_id": "surfaced",
+            "metadata": {
+                "source": "dashboard",
+                "github_login": "other-user",
+                "latest_run_status": "success",
+                "updated_at_ms": 2,
+            },
+        },
+        {
+            "thread_id": "internal",
+            "metadata": {
+                "source": "reviewer",
+                "github_login": "other-user",
+                "latest_run_status": "success",
+                "updated_at_ms": 1,
+            },
+        },
+    ]
+    searches: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            searches.append(metadata)
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_page(
+        "admin-user",
+        email="admin@example.com",
+        filter_owner_login="other-user",
+        surfaced_only=True,
+    )
+
+    assert searches == [{"github_login": "other-user"}]
+    assert [item["id"] for item in result["items"]] == ["surfaced"]
+    assert result["items"][0]["ownerLogin"] == "other-user"
+    assert result["items"][0]["isOwner"] is False
+
+
 async def test_list_dashboard_threads_sidebar_fills_buckets_with_one_endpoint(monkeypatch) -> None:
     page_size = thread_api._THREADS_SEARCH_PAGE
     threads = _make_threads(page_size + 10, resolved_before=page_size)
@@ -2101,7 +2343,7 @@ async def test_turn_diff_prefers_persisted_run_artifact(monkeypatch) -> None:
     create_sandbox = AsyncMock()
     monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
 
-    result = await thread_api.get_dashboard_thread_turn_diff(
+    result = await thread_api.get_dashboard_thread_run_diff(
         "thread-1", "owner", turn_key="msg-1", max_files=2, include_content=False
     )
 
@@ -2114,6 +2356,48 @@ async def test_turn_diff_prefers_persisted_run_artifact(monkeypatch) -> None:
         "truncated": True,
     }
     create_sandbox.assert_not_awaited()
+
+
+async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) -> None:
+    metadata = {
+        "sandbox_id": "sandbox-1",
+        "turn_checkpoints": [{"repo_path": "/work/repo"}],
+    }
+    live = {
+        "status": "ready",
+        "files": [{"path": "new.py", "additions": 1, "deletions": 0}],
+        "truncated": False,
+        "summary": {"files": 1, "additions": 1, "deletions": 0},
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    sandbox = object()
+    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
+    monkeypatch.setattr(
+        "agent.utils.sandbox_paths.aresolve_sandbox_work_dir",
+        AsyncMock(return_value="/work"),
+    )
+    read_diff = AsyncMock(return_value=live)
+    monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
+
+    result = await thread_api.get_dashboard_thread_working_tree_diff("thread-1", "owner")
+
+    assert result == live
+    read_diff.assert_awaited_once_with(sandbox, "/work", "HEAD", None, repo_path="/work/repo")
+
+
+async def test_working_tree_diff_does_not_fall_back_to_persisted_artifact(monkeypatch) -> None:
+    metadata = {"sandbox_id": "sandbox-1"}
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(side_effect=RuntimeError))
+
+    result = await thread_api.get_dashboard_thread_working_tree_diff("thread-1", "owner")
+
+    assert result == {
+        "status": "missing",
+        "files": [],
+        "truncated": False,
+        "summary": {"files": 0, "additions": 0, "deletions": 0},
+    }
 
 
 async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
@@ -2134,7 +2418,7 @@ async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
     create_sandbox = AsyncMock()
     monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
 
-    result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+    result = await thread_api.get_dashboard_thread_run_diff("thread-1", "owner", turn_key="msg-1")
 
     assert result == {
         "status": "ready",
@@ -2165,7 +2449,7 @@ async def test_turn_diff_preserves_changes_before_mid_run_plan_mode(monkeypatch)
     read_diff = AsyncMock(return_value={"status": "ready", "files": [], "truncated": False})
     monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
 
-    await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+    await thread_api.get_dashboard_thread_run_diff("thread-1", "owner", turn_key="msg-1")
 
     read_diff.assert_awaited_once_with(
         sandbox,
@@ -2202,7 +2486,7 @@ async def test_turn_diff_reads_the_checkpoint_repository(monkeypatch) -> None:
     read_diff = AsyncMock(return_value={"status": "ready", "files": [], "truncated": False})
     monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
 
-    await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+    await thread_api.get_dashboard_thread_run_diff("thread-1", "owner", turn_key="msg-1")
 
     read_diff.assert_awaited_once_with(
         sandbox,
@@ -2237,7 +2521,7 @@ async def test_turn_diff_rejects_checkpoints_from_different_repositories(monkeyp
     create_sandbox = AsyncMock()
     monkeypatch.setattr(thread_api, "create_sandbox", create_sandbox)
 
-    result = await thread_api.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
+    result = await thread_api.get_dashboard_thread_run_diff("thread-1", "owner", turn_key="msg-1")
 
     assert result == {
         "status": "missing",
@@ -2248,7 +2532,7 @@ async def test_turn_diff_rejects_checkpoints_from_different_repositories(monkeyp
     create_sandbox.assert_not_awaited()
 
 
-async def test_pr_diff_uses_repository_from_pr_url(monkeypatch) -> None:
+async def test_branch_diff_uses_repository_from_pr_url(monkeypatch) -> None:
     metadata = {
         "repo_owner": "langchain-ai",
         "repo_name": "deepagents",
@@ -2262,10 +2546,55 @@ async def test_pr_diff_uses_repository_from_pr_url(monkeypatch) -> None:
     )
     monkeypatch.setattr(thread_api, "build_pr_diff_files", build_diff)
 
-    await thread_api.get_dashboard_thread_pr_diff("thread-1", "owner")
+    await thread_api.get_dashboard_thread_branch_diff("thread-1", "owner")
 
     assert build_diff.await_args is not None
     assert build_diff.await_args.args[1:] == ("langchain-ai/open-swe", 1925)
+
+
+async def test_branch_diff_without_a_pull_request_compares_against_the_base(monkeypatch) -> None:
+    metadata = {
+        "repo_owner": "langchain-ai",
+        "repo_name": "open-swe",
+        "base_branch": "main",
+        "branch_name": "open-swe/feature",
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    monkeypatch.setattr(thread_api, "_github_token_for_login", AsyncMock(return_value="token"))
+    build_compare = AsyncMock(
+        return_value={"base_sha": "merge-base", "head_sha": "head", "truncated": False, "files": []}
+    )
+    monkeypatch.setattr(thread_api, "build_compare_diff_files", build_compare)
+
+    result = await thread_api.get_dashboard_thread_branch_diff("thread-1", "owner")
+
+    assert build_compare.await_args is not None
+    assert build_compare.await_args.args[1:] == (
+        "langchain-ai/open-swe",
+        "main",
+        "open-swe/feature",
+    )
+    assert result["prNumber"] is None
+    assert result["baseSha"] == "merge-base"
+
+
+async def test_branch_diff_rejects_an_unsafe_branch_name(monkeypatch) -> None:
+    metadata = {
+        "repo_owner": "langchain-ai",
+        "repo_name": "open-swe",
+        "base_branch": "main",
+        "branch_name": "../../etc/passwd",
+    }
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
+    monkeypatch.setattr(thread_api, "_github_token_for_login", AsyncMock(return_value="token"))
+    build_compare = AsyncMock()
+    monkeypatch.setattr(thread_api, "build_compare_diff_files", build_compare)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await thread_api.get_dashboard_thread_branch_diff("thread-1", "owner")
+
+    assert excinfo.value.status_code == 404
+    build_compare.assert_not_awaited()
 
 
 async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypatch) -> None:

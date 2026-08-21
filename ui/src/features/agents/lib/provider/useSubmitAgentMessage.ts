@@ -6,7 +6,7 @@ import type { AgentThread } from "@/features/agents/lib/types"
 import { AgentsApiError, agentsApi } from "@/features/agents/lib/api"
 import {
   agentThreadKeys,
-  invalidateAgentThreadLists,
+  setAgentThreadStatus,
 } from "@/features/agents/lib/queries"
 
 /**
@@ -149,17 +149,11 @@ export function useSubmitAgentMessage(threadId: string) {
           // 409 active-run race), but `onSuccess` already optimistically set
           // `status: "running"`. Surface the failure and clear the busy state
           // instead of leaving the thread falsely running.
-          queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
-            prev ? { ...prev, status: "error" as const } : prev
-          )
-          invalidateAgentThreadLists(queryClient)
+          setAgentThreadStatus(queryClient, threadId, "error")
         })
     },
     onSuccess: () => {
-      queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
-        prev ? { ...prev, status: "running" as const } : prev
-      )
-      invalidateAgentThreadLists(queryClient)
+      setAgentThreadStatus(queryClient, threadId, "running")
     },
   })
 }

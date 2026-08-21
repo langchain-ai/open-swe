@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from typing import cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langsmith.sandbox import AsyncSandboxClient, ResourceNotFoundError
@@ -19,7 +19,9 @@ from agent.integrations.langsmith import (
     _get_sandbox_create_extra_fields,
     _get_sandbox_snapshot_config,
     _install_create_extra_fields,
+    _merge_sandbox_create_extra_fields,
     _reuse_existing_sandbox,
+    create_langsmith_sandbox,
 )
 from agent.utils.sandbox import SandboxGoneError
 
@@ -84,6 +86,69 @@ def test_overrides_from_env() -> None:
         _, _, _, _, idle, delete_after = _get_sandbox_snapshot_config()
     assert idle == 120
     assert delete_after == 3600
+
+
+@pytest.mark.asyncio
+async def test_create_langsmith_sandbox_prefers_resource_overrides() -> None:
+    provider = MagicMock()
+    provider.get_or_create = AsyncMock(return_value=MagicMock())
+    with (
+        patch(
+            "agent.integrations.langsmith._get_sandbox_snapshot_config",
+            return_value=("default-snap", 100, 2, 200, 300, 400),
+        ),
+        patch("agent.integrations.langsmith.LangSmithProvider", return_value=provider),
+    ):
+        await create_langsmith_sandbox(
+            snapshot_id="env-snap",
+            mem_bytes=2_000,
+            vcpus=8,
+            fs_capacity_bytes=1_000,
+            create_params={"_internal_runtime": "v2"},
+        )
+
+    provider.get_or_create.assert_awaited_once_with(
+        sandbox_id=None,
+        snapshot_id="env-snap",
+        fs_capacity_bytes=1_000,
+        vcpus=8,
+        mem_bytes=2_000,
+        idle_ttl_seconds=300,
+        delete_after_stop_seconds=400,
+        create_params={"_internal_runtime": "v2"},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("overrides", "expected_vcpus", "expected_mem_bytes"),
+    [
+        ({"vcpus": 8}, 8, None),
+        ({"mem_bytes": 8_000}, None, 8_000),
+    ],
+)
+async def test_create_langsmith_sandbox_derives_partial_cpu_memory_overrides(
+    overrides: dict[str, int],
+    expected_vcpus: int | None,
+    expected_mem_bytes: int | None,
+) -> None:
+    provider = MagicMock()
+    provider.get_or_create = AsyncMock(return_value=MagicMock())
+    with (
+        patch(
+            "agent.integrations.langsmith._get_sandbox_snapshot_config",
+            return_value=("default-snap", 100, 2, 200, 300, 400),
+        ),
+        patch("agent.integrations.langsmith.LangSmithProvider", return_value=provider),
+    ):
+        await create_langsmith_sandbox(
+            mem_bytes=overrides.get("mem_bytes"),
+            vcpus=overrides.get("vcpus"),
+        )
+
+    assert provider.get_or_create.await_args is not None
+    assert provider.get_or_create.await_args.kwargs["vcpus"] == expected_vcpus
+    assert provider.get_or_create.await_args.kwargs["mem_bytes"] == expected_mem_bytes
 
 
 def test_zero_disables_ttls() -> None:
@@ -192,6 +257,21 @@ def test_extra_fields_parsed() -> None:
         clear=True,
     ):
         assert _get_sandbox_create_extra_fields() == {"_internal_runtime": "v2"}
+
+
+def test_environment_create_params_override_deployment_defaults() -> None:
+    with patch.dict(
+        "os.environ",
+        {"SANDBOX_CREATE_EXTRA_JSON": '{"_internal_runtime": "v1", "shared": true}'},
+        clear=True,
+    ):
+        assert _merge_sandbox_create_extra_fields(
+            {"_internal_runtime": "v2", "proxy_config": {"rules": []}}
+        ) == {
+            "_internal_runtime": "v2",
+            "shared": True,
+            "proxy_config": {"rules": []},
+        }
 
 
 def test_extra_fields_rejects_invalid_json() -> None:

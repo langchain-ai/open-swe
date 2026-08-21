@@ -23,6 +23,10 @@ from e2e_env import (
     OWNER,
     PR_TITLE,
     REPO,
+    SECOND_FEATURE_BRANCH,
+    SECOND_OWNER,
+    SECOND_PR_TITLE,
+    SECOND_REPO,
 )
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel, ModelProfile
@@ -64,6 +68,37 @@ git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
 """.strip()
 
+_MULTI_REPO_SCRIPT = f"""
+set -e
+rm -rf repo companion
+git clone "$E2E_REMOTE" repo
+cd repo
+git config user.email "dev@example.com"
+git config user.name "Dev User"
+git checkout -b {FEATURE_BRANCH}
+cat > {FEATURE_FILE} <<'EOF'
+def greet(name):
+    return f"Hello, {{name}}!"
+EOF
+git add -A
+git commit -m "{PR_TITLE}"
+git push origin {FEATURE_BRANCH}
+cd ..
+git clone "$E2E_SECOND_REMOTE" companion
+cd companion
+git config user.email "dev@example.com"
+git config user.name "Dev User"
+git checkout -b {SECOND_FEATURE_BRANCH}
+cat > integration.py <<'EOF'
+def connect():
+    return "connected"
+EOF
+git add -A
+git commit -m "{SECOND_PR_TITLE}"
+git push origin {SECOND_FEATURE_BRANCH}
+echo BOTH_PUSHED_OK
+""".strip()
+
 _MANY_FILES_IMPLEMENT_SCRIPT = f"""
 set -e
 cd repo
@@ -80,25 +115,21 @@ echo PUSHED_OK
 """.strip()
 
 _IFRAME_HTML_PATH = "/workspace/iframe-output.html"
-_IFRAME_DATA_PATH = "/workspace/iframe-data.json"
-_IFRAME_CSS_PATH = "/workspace/iframe-theme.css"
 _IFRAME_HTML = """<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>Iframe E2E Preview</title></head>
+<head>
+  <meta charset="utf-8">
+  <title>Iframe E2E Preview</title>
+  <style>body { min-height: 420px; margin: 0; color: rebeccapurple; }</style>
+</head>
 <body>
   <main>
     <h1>Iframe preview</h1>
-    <p id="output-data">Loading bundled data...</p>
+    <p id="output-data">Prototype loaded</p>
   </main>
-  <script>
-    const data = JSON.parse(window.__FILES__["data.json"]);
-    document.getElementById("output-data").textContent = data.label;
-  </script>
 </body>
 </html>
 """
-_IFRAME_DATA = '{"label":"Bundled data loaded"}'
-_IFRAME_CSS = "body { min-height: 420px; margin: 0; color: rebeccapurple; }"
 
 _DESKTOP_PR_PAYLOAD = json.dumps(
     {
@@ -133,6 +164,11 @@ LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
+_THREAD_TOOLS_RE = re.compile(
+    r"E2E_THREAD_TOOLS:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+)
+_THREAD_TOOLS_TARGET_TITLE = "E2E Thread Tools Target"
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -200,13 +236,24 @@ def _text(content: Any) -> str:
     return str(content)
 
 
+_FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff")
+
+
+def _is_framing_block(header: str) -> bool:
+    """A system envelope that describes where the next turn came from."""
+    return 'kind="system"' in header and any(
+        f'sender="{sender}"' in header for sender in _FRAMING_SENDER_IDS
+    )
+
+
 def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
     """The user turns a script routes on, recovered from the structured stream.
 
     A Slack dispatch replays the thread's earlier messages as context before the
     system block that frames the mention, so only the message after that block is
     the turn. An instruction Open SWE dispatches to itself — a plan decision, a
-    scheduled wake-up — carries no Slack timestamp and is always a turn.
+    scheduled wake-up — carries no Slack timestamp and is always a turn, even
+    though it too arrives as a system envelope.
     """
     selected: list[HumanMessage] = []
     slack_request_pending = False
@@ -218,7 +265,7 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
             continue
         if text.startswith("<input-message "):
             header = text.split(">", 1)[0]
-            if 'kind="system"' in header:
+            if _is_framing_block(header):
                 slack_request_pending = 'surface="slack"' in header
                 continue
             if 'surface="slack"' in header and "<timestamp>" in text:
@@ -279,6 +326,25 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
             "output_tokens": 345,
             "total_tokens": 12_345,
         },
+    )
+
+
+def _multi_pr_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    return AIMessage(
+        content="Replying in the Slack thread with the cross-repository PRs.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {
+                    "message": (
+                        f"Opened pull requests in `{OWNER}/{REPO}` and "
+                        f"`{SECOND_OWNER}/{SECOND_REPO}`; latest: <{url}|{SECOND_PR_TITLE}>."
+                    )
+                },
+                "id": "call-multi-pr-reply",
+            }
+        ],
     )
 
 
@@ -462,7 +528,84 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
 
 
+def _tool_payload(messages: list[BaseMessage], tool_name: str) -> dict[str, Any]:
+    for message in reversed(messages):
+        if not isinstance(message, ToolMessage) or message.name != tool_name:
+            continue
+        payload = (
+            json.loads(message.content) if isinstance(message.content, str) else message.content
+        )
+        if isinstance(payload, dict):
+            return payload
+    raise ValueError(f"{tool_name} result is missing")
+
+
+def _listed_thread_id(messages: list[BaseMessage]) -> str:
+    items = _tool_payload(messages, "list_threads").get("items")
+    matches = [
+        item.get("id")
+        for item in items or []
+        if isinstance(item, dict) and item.get("title") == _THREAD_TOOLS_TARGET_TITLE
+    ]
+    if len(matches) != 1 or not isinstance(matches[0], str):
+        raise ValueError("list_threads did not return exactly one target thread")
+    return matches[0]
+
+
+def _inspected_thread_id(messages: list[BaseMessage]) -> str:
+    thread = _tool_payload(messages, "get_thread").get("thread")
+    thread_id = thread.get("id") if isinstance(thread, dict) else None
+    if not isinstance(thread_id, str):
+        raise ValueError("get_thread did not return the target thread")
+    return thread_id
+
+
+def _list_threads_step(_messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Finding the target thread.",
+        tool_calls=[
+            {
+                "name": "list_threads",
+                "args": {"query": _THREAD_TOOLS_TARGET_TITLE, "resolved": False},
+                "id": "call-list-threads",
+            }
+        ],
+    )
+
+
+def _get_thread_step(messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Inspecting the target thread.",
+        tool_calls=[
+            {
+                "name": "get_thread",
+                "args": {"thread_id": _listed_thread_id(messages)},
+                "id": "call-get-thread",
+            }
+        ],
+    )
+
+
+def _resolve_thread_step(messages: list[BaseMessage]) -> AIMessage:
+    return AIMessage(
+        content="Resolving the target thread.",
+        tool_calls=[
+            {
+                "name": "manage_thread",
+                "args": {"thread_id": _inspected_thread_id(messages), "action": "resolve"},
+                "id": "call-manage-thread",
+            }
+        ],
+    )
+
+
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    "thread_tools": (
+        _dynamic_step(_list_threads_step),
+        _dynamic_step(_get_thread_step),
+        _dynamic_step(_resolve_thread_step),
+        StepSpec(content="Resolved the target thread through the thread tools."),
+    ),
     "iframe": (
         _tool_step(
             "Acknowledging the iframe preview request.",
@@ -477,24 +620,11 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-iframe-html",
         ),
         _tool_step(
-            "Writing the iframe data.",
-            "write_file",
-            {"file_path": _IFRAME_DATA_PATH, "content": _IFRAME_DATA},
-            "call-iframe-data",
-        ),
-        _tool_step(
-            "Writing the iframe stylesheet.",
-            "write_file",
-            {"file_path": _IFRAME_CSS_PATH, "content": _IFRAME_CSS},
-            "call-iframe-css",
-        ),
-        _tool_step(
             "Rendering the iframe preview.",
             "output_iframe",
             {
                 "path": _IFRAME_HTML_PATH,
                 "title": "Iframe E2E Preview",
-                "files": {"data.json": _IFRAME_DATA_PATH, "theme.css": _IFRAME_CSS_PATH},
             },
             "call-output-iframe",
         ),
@@ -553,6 +683,49 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-pr",
         ),
         _dynamic_step(_reply_step),
+    ),
+    "multi_pr": (
+        _tool_step(
+            "Acknowledging the cross-repository request before starting work.",
+            "slack_thread_reply",
+            {"message": "On it!"},
+            "call-multi-ack",
+        ),
+        _tool_step(
+            "Implementing and pushing both repository changes.",
+            "execute",
+            {"command": _MULTI_REPO_SCRIPT},
+            "call-multi-repos",
+        ),
+        _tool_step(
+            "Opening the primary pull request.",
+            "open_pull_request",
+            {
+                "owner": OWNER,
+                "repo": REPO,
+                "head": FEATURE_BRANCH,
+                "base": BASE_BRANCH,
+                "title": PR_TITLE,
+                "body": "Adds a `greet()` helper as requested.",
+                "draft": True,
+            },
+            "call-multi-first-pr",
+        ),
+        _tool_step(
+            "Opening the companion pull request.",
+            "open_pull_request",
+            {
+                "owner": SECOND_OWNER,
+                "repo": SECOND_REPO,
+                "head": SECOND_FEATURE_BRANCH,
+                "base": BASE_BRANCH,
+                "title": SECOND_PR_TITLE,
+                "body": "Adds the companion integration as requested.",
+                "draft": False,
+            },
+            "call-multi-second-pr",
+        ),
+        _dynamic_step(_multi_pr_reply_step),
     ),
     "many_files": (
         _tool_step(
@@ -654,6 +827,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
 }
 
 
+def _is_thread_tools_request(text: str) -> bool:
+    return _THREAD_TOOLS_RE.search(text) is not None
+
+
 def _is_iframe_request(text: str) -> bool:
     return "E2E_IFRAME" in text
 
@@ -681,7 +858,9 @@ def _is_move_followup(text: str) -> bool:
 
 def _is_approval(text: str) -> bool:
     t = text.lower()
-    return "approved" in t and "implement" in t
+    return "the plan has been approved" in t or (
+        ("approve" in t or "approved" in t) and "implement" in t
+    )
 
 
 def _is_revision(text: str) -> bool:
@@ -690,6 +869,10 @@ def _is_revision(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule(
+        "thread_tools",
+        lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
+    ),
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(
         "desktop",
@@ -705,6 +888,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule("plan", lambda ctx: ctx.human_count <= 1 and _is_plan_request(ctx.first_text)),
     ScriptRule(
         "breakout", lambda ctx: ctx.human_count <= 1 and _is_breakout_request(ctx.first_text)
+    ),
+    ScriptRule(
+        "multi_pr",
+        lambda ctx: ctx.human_count <= 1 and "E2E_MULTI_PR" in f"{ctx.first_text}\n{ctx.last_text}",
     ),
     ScriptRule(
         "many_files", lambda ctx: ctx.human_count <= 1 and "E2E_MANY_FILES" in ctx.first_text

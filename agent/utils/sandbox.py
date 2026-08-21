@@ -45,6 +45,10 @@ async def create_sandbox(
     sandbox_id: str | None = None,
     *,
     snapshot_id: str | None = None,
+    mem_bytes: int | None = None,
+    vcpus: int | None = None,
+    fs_capacity_bytes: int | None = None,
+    create_params: dict[str, Any] | None = None,
 ) -> "SandboxBackendProtocol":
     """Create or reconnect to a sandbox using the configured provider.
 
@@ -61,14 +65,29 @@ async def create_sandbox(
         snapshot_id: Optional snapshot to boot a new sandbox from. Only the
             langsmith provider honors this; others ignore it. When omitted the
             langsmith provider falls back to DEFAULT_SANDBOX_SNAPSHOT_ID.
+        mem_bytes: Optional memory capacity override for a new LangSmith sandbox.
+        vcpus: Optional virtual CPU count override for a new LangSmith sandbox.
+        fs_capacity_bytes: Optional filesystem capacity override for a new LangSmith sandbox.
+        create_params: Optional additional LangSmith sandbox create-body fields.
 
     Returns:
         A sandbox backend implementing SandboxBackendProtocol.
     """
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     factory = _load_sandbox_factory(sandbox_type)
-    if sandbox_type == "langsmith" and snapshot_id is not None:
-        return await factory(sandbox_id, snapshot_id=snapshot_id)
+    if sandbox_type == "langsmith":
+        options = {
+            key: value
+            for key, value in {
+                "snapshot_id": snapshot_id,
+                "mem_bytes": mem_bytes,
+                "vcpus": vcpus,
+                "fs_capacity_bytes": fs_capacity_bytes,
+                "create_params": create_params,
+            }.items()
+            if value is not None
+        }
+        return await factory(sandbox_id, **options)
     if inspect.iscoroutinefunction(factory):
         return await factory(sandbox_id)
     return await asyncio.to_thread(factory, sandbox_id)

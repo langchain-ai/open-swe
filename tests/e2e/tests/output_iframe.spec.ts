@@ -9,9 +9,13 @@ async function login(page: Page) {
 }
 
 test.describe("output_iframe", () => {
+  test.skip(
+    process.env.SANDBOX_TYPE !== "langsmith",
+    "requires LangSmith sandbox download URLs",
+  );
+
   test("renders and controls sandboxed HTML from a real tool artifact", async ({
     page,
-    context,
   }) => {
     await login(page);
     await page.goto("/mock/slack");
@@ -38,7 +42,7 @@ test.describe("output_iframe", () => {
 
     const preview = page.frameLocator(`iframe[title="${TITLE}"]`);
     await expect(preview.locator("#output-data")).toHaveText(
-      "Bundled data loaded",
+      "Prototype loaded",
     );
     await expect(preview.locator("body")).toHaveCSS(
       "color",
@@ -56,7 +60,7 @@ test.describe("output_iframe", () => {
     await toggle.click();
     await expect(iframe).toBeVisible();
     await expect(preview.locator("#output-data")).toHaveText(
-      "Bundled data loaded",
+      "Prototype loaded",
     );
 
     const downloadPromise = page.waitForEvent("download");
@@ -64,18 +68,8 @@ test.describe("output_iframe", () => {
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("iframe-output.html");
 
-    const popupPromise = context.waitForEvent("page");
-    await page.getByRole("button", { name: "Open in new tab" }).click();
-    const popup = await popupPromise;
-    await popup.waitForLoadState("domcontentloaded");
-    const popupIframe = popup.locator("iframe");
-    await expect(popupIframe).toHaveAttribute(
-      "sandbox",
-      "allow-scripts allow-downloads",
-    );
-    await expect(popupIframe).toHaveAttribute("allow", "clipboard-write");
     await expect(
-      popup.frameLocator("iframe").locator("#output-data"),
-    ).toHaveText("Bundled data loaded");
+      page.getByRole("button", { name: "Open in new tab" }),
+    ).toHaveCount(0);
   });
 });

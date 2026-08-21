@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { agentsApi } from "./api"
 import { apiWarmupScript } from "./apiWarmup"
-import { SIDEBAR_ACTIVE_LIMIT, SIDEBAR_RESOLVED_LIMIT } from "./queries"
+import { SIDEBAR_PAGE_SIZE } from "./queries"
 
 const THREAD_ID = "1dd69115-f4b9-507f-b4d5-9f355f9f5ba0"
 const STATE_PATH = `/dashboard/api/threads/${THREAD_ID}/state`
@@ -30,17 +30,16 @@ function stubFetch() {
 }
 
 /** What the app itself requests, captured through the real api client. */
-async function recordedSidebarUrl(params: {
-  activeThreadId?: string
+async function recordedSidebarUrl(
   includeAutomations: boolean
-}): Promise<string> {
+): Promise<string> {
   const spy = stubFetch()
   await agentsApi
-    .listSidebarThreads({
-      activeLimit: SIDEBAR_ACTIVE_LIMIT,
-      resolvedLimit: SIDEBAR_RESOLVED_LIMIT,
-      activeThreadId: params.activeThreadId,
-      includeAutomations: params.includeAutomations,
+    .listThreadsPage({
+      limit: SIDEBAR_PAGE_SIZE,
+      offset: 0,
+      resolved: false,
+      scope: includeAutomations ? "all" : "interactive",
     })
     .catch(() => undefined)
   const called = spy.mock.calls[0]?.[0]
@@ -68,7 +67,7 @@ describe("apiWarmupScript", () => {
     expect(apiWarmupScript("/agents/threads")).toBeNull()
     expect(apiWarmupScript(`/agents/local/${THREAD_ID}`)).toBeNull()
     expect(apiWarmupScript(`/agents/${THREAD_ID}/plan`)).toBeNull()
-    expect(apiWarmupScript("/agents")).toContain("/threads/sidebar")
+    expect(apiWarmupScript("/agents")).toContain("/threads/page")
     expect(apiWarmupScript(`/agents/${THREAD_ID}`)).toContain(STATE_PATH)
   })
 
@@ -79,7 +78,7 @@ describe("apiWarmupScript", () => {
     run(apiWarmupScript("/agents")!)
 
     expect(original).toHaveBeenCalledTimes(1)
-    expect(String(original.mock.calls[0]?.[0])).toContain("/threads/sidebar")
+    expect(String(original.mock.calls[0]?.[0])).toContain("/threads/page")
   })
 
   it("warms both state and sidebar on a thread route, and hands each over once", async () => {
@@ -92,7 +91,7 @@ describe("apiWarmupScript", () => {
     const warmedState = await window.fetch(absolute(STATE_PATH))
     const sidebarUrl = String(
       original.mock.calls.find((c) =>
-        String(c[0]).includes("/threads/sidebar")
+        String(c[0]).includes("/threads/page")
       )?.[0]
     )
     const warmedSidebar = await window.fetch(sidebarUrl)
@@ -142,7 +141,7 @@ describe("apiWarmupScript", () => {
   ])(
     "warms the exact sidebar URL the app requests (automations: $includeAutomations)",
     async ({ includeAutomations, prefs }) => {
-      const expected = await recordedSidebarUrl({ includeAutomations })
+      const expected = await recordedSidebarUrl(includeAutomations)
 
       setReadyState("loading")
       stubPrefs(prefs)
@@ -154,17 +153,14 @@ describe("apiWarmupScript", () => {
   )
 
   it("warms the exact sidebar URL the app requests on a thread route", async () => {
-    const expected = await recordedSidebarUrl({
-      activeThreadId: THREAD_ID,
-      includeAutomations: false,
-    })
+    const expected = await recordedSidebarUrl(false)
 
     setReadyState("loading")
     const original = stubFetch()
     run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
 
     const sidebarCall = original.mock.calls.find((c) =>
-      String(c[0]).includes("/threads/sidebar")
+      String(c[0]).includes("/threads/page")
     )
     expect(String(sidebarCall?.[0])).toBe(expected)
   })

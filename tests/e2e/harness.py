@@ -76,7 +76,7 @@ LAST_SLACK_EVENT: dict[str, Any] = {"payload": None}
 # a rerun's mentions look like redeliveries of the previous run's.
 EVENT_ID_SALT = uuid.uuid4().hex[:8]
 
-fakes.seed_bare_remote()
+fakes.seed_bare_remotes()
 
 
 # --- control + Slack compose (the test driver) -----------------------------
@@ -502,6 +502,11 @@ async def ui_logo_mark() -> FileResponse:
 # App routes used by the handoff tests. Kept explicit (no catch-all) so
 # LangGraph's own root routes — which the dashboard proxy calls server-side —
 # are untouched.
+@app.get("/my-settings", response_class=HTMLResponse)
+async def ui_settings(request: Request) -> Response:
+    return await _render_app_route(request)
+
+
 @app.get("/agents", response_class=HTMLResponse)
 async def ui_agents_home(request: Request) -> Response:
     return await _render_app_route(request)
@@ -632,12 +637,16 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "merged": pr["merged"],
         "title": pr["title"],
         "body": pr["body"],
-        "user": {"login": pr["author"]},
+        "user": {
+            "login": pr["author"],
+            "avatar_url": f"{BASE_URL}/logo-mark.png",
+        },
         "head": {"ref": pr["head"]},
         "base": {"ref": pr["base"], "repo": {"private": fakes.repo_private()}},
         "additions": pr["additions"],
         "deletions": pr["deletions"],
         "changed_files": len(pr["files"]),
+        "created_at": pr["created_at"],
     }
 
 
@@ -648,7 +657,7 @@ async def gh_get_repo(owner: str, repo: str) -> JSONResponse:
 
 @app.get("/fake-gh/repos/{owner}/{repo}/branches/{branch:path}")
 async def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
-    if not fakes.branch_exists(branch):
+    if not fakes.branch_exists(owner, repo, branch):
         return JSONResponse({"message": "Branch not found"}, status_code=404)
     return JSONResponse({"name": branch, "commit": {"sha": "deadbeef"}})
 

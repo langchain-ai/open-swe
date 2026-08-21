@@ -55,6 +55,10 @@ class PlanUpdate(BaseModel):
     markdown: str | None = None
 
 
+class PlanRejection(BaseModel):
+    dispatch: bool = True
+
+
 async def _thread_metadata(thread_id: str) -> dict[str, Any]:
     client = get_client()
     try:
@@ -269,14 +273,28 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
 
 
 @plan_router.post("/{thread_id}/reject")
-async def reject_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
+async def reject_plan(
+    thread_id: str,
+    rejection: PlanRejection | None = None,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
     metadata = await _thread_metadata(thread_id)
     if not _thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
-    content = await get_plan_content(thread_id, raise_on_error=True) or {}
-    _reject_shared_content(content)
+    lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
+    async with lock:
+        metadata = await _thread_metadata(thread_id)
+        content = await get_plan_content(thread_id, raise_on_error=True) or {}
+        _reject_shared_content(content)
+        if (
+            metadata.get("plan_status") != PLAN_STATUS_READY
+            or content.get("status") != PLAN_STATUS_READY
+        ):
+            raise HTTPException(409, "plan is no longer ready for review")
+        await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
+    if rejection is not None and not rejection.dispatch:
+        return {"status": PLAN_STATUS_REVISING}
     feedback = _format_comments(await list_plan_comments(thread_id, raise_on_error=True))
-    await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
     text = (
         "The plan needs changes before implementation. Address this reviewer feedback in the "
         "existing self-contained HTML file under /workspace/plans/, then publish an updated "

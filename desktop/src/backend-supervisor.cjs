@@ -87,12 +87,17 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
-function modelCredentialStatus(modelId, env) {
+function modelCredentialStatus(modelId, env, options = {}) {
   const provider = typeof modelId === "string" ? modelId.split(":", 1)[0] : ""
   const variables = PROVIDER_KEYS[provider]
   if (!variables) return { available: true, variable: null }
   const variable = variables.find((key) => env[key])
-  return { available: Boolean(variable), variable: variable || variables[0] }
+  const oauthAvailable = provider === "openai" && options.openAiOAuth === true
+  return {
+    available: Boolean(variable) || oauthAvailable,
+    variable: variable || (oauthAvailable ? null : variables[0]),
+    ...(provider === "openai" && !variable ? { canSignIn: true } : {}),
+  }
 }
 
 class BackendSupervisor {
@@ -136,8 +141,12 @@ class BackendSupervisor {
       env: {
         ...process.env,
         ...this.options.env,
+        ...(this.options.providerEnv?.() || {}),
         OPEN_SWE_LOCAL_AUTH_TOKEN: this.token,
         OPEN_SWE_LOCAL_PROJECTS_FILE: this.options.projectsFile,
+        ...(this.options.stateDir
+          ? { OPEN_SWE_LOCAL_ARTIFACTS_DIR: path.join(this.options.stateDir, "artifacts") }
+          : {}),
         PYTHONUNBUFFERED: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -190,7 +199,11 @@ class BackendSupervisor {
   }
 
   credentialStatus(modelId) {
-    return modelCredentialStatus(modelId, { ...process.env, ...this.options.env })
+    return modelCredentialStatus(
+      modelId,
+      { ...process.env, ...this.options.env },
+      { openAiOAuth: this.options.openAiOAuthAvailable?.() === true }
+    )
   }
 
   publicConfig() {

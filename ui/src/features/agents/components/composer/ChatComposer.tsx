@@ -450,6 +450,7 @@ export const ChatComposer = memo(function ChatComposer({
     setIsSubmitting(true)
     applyPrompt("", 0)
     setPendingImages([])
+    setDictationError(null)
     try {
       await onSubmit?.(trimmed, images)
     } catch {
@@ -812,11 +813,7 @@ export const ChatComposer = memo(function ChatComposer({
               render={
                 <ComposerControl
                   aria-label="More composer options"
-                  className={cn(
-                    "size-7 px-0",
-                    adminThread &&
-                      "bg-destructive/10 text-foreground hover:bg-destructive/10 hover:text-foreground"
-                  )}
+                  className="size-7 px-0"
                   type="button"
                 />
               }
@@ -837,12 +834,6 @@ export const ChatComposer = memo(function ChatComposer({
                   {planMode ? "Disable plan mode" : "Enable plan mode"}
                 </MenuItem>
               )}
-              {onAdminThreadChange && (
-                <MenuItem onClick={() => onAdminThreadChange(!adminThread)}>
-                  <ServerCogIcon />
-                  {adminThread ? "Disable admin mode" : "Enable admin mode"}
-                </MenuItem>
-              )}
             </MenuPopup>
           </Menu>
 
@@ -857,6 +848,32 @@ export const ChatComposer = memo(function ChatComposer({
                 selection={selection}
                 triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
               />
+            )}
+
+            {onAdminThreadChange && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <ComposerControl
+                      aria-label="Admin mode"
+                      aria-pressed={adminThread}
+                      className={cn(
+                        adminThread &&
+                          "bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive"
+                      )}
+                      disabled={disabled}
+                      onClick={() => onAdminThreadChange(!adminThread)}
+                      type="button"
+                    />
+                  }
+                >
+                  <ComposerControlIcon icon={ServerCogIcon} />
+                  <span>Admin</span>
+                </TooltipTrigger>
+                <TooltipPopup side="top">
+                  {adminThread ? "Disable admin mode" : "Enable admin mode"}
+                </TooltipPopup>
+              </Tooltip>
             )}
 
             {planMode && onPlanModeChange && (

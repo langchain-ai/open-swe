@@ -47,10 +47,16 @@ test("reports whether the selected provider is configured", () => {
   assert.deepEqual(modelCredentialStatus("openai:gpt-test", {}), {
     available: false,
     variable: "OPENAI_API_KEY",
+    canSignIn: true,
   })
   assert.deepEqual(modelCredentialStatus("openai:gpt-test", { OPENAI_API_KEY: "secret" }), {
     available: true,
     variable: "OPENAI_API_KEY",
+  })
+  assert.deepEqual(modelCredentialStatus("openai:gpt-test", {}, { openAiOAuth: true }), {
+    available: true,
+    variable: null,
+    canSignIn: true,
   })
   assert.deepEqual(modelCredentialStatus("google_genai:test", { GEMINI_API_KEY: "secret" }), {
     available: true,

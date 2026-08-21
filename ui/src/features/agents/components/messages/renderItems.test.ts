@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import { buildRenderItems, splitWorkAndReply } from "./renderItems"
-import type { ToolExecutionChunk } from "@/features/agents/lib/types"
+import {
+  buildRenderItems,
+  countWorkActions,
+  selectCollapsedTurnItems,
+  splitWorkAndReply,
+} from "./renderItems"
+import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
 
 function iframeChunk(): ToolExecutionChunk {
   return {
@@ -14,7 +19,8 @@ function iframeChunk(): ToolExecutionChunk {
     output: "Displayed the HTML output in the dashboard.",
     display: {
       type: "output_iframe",
-      html: "<h1>Chart</h1>",
+      previewUrl: "https://downloads.example/preview?token=secret",
+      downloadUrl: "https://downloads.example/download?token=secret",
       title: "Chart",
       filename: "chart.html",
     },
@@ -61,5 +67,94 @@ describe("buildRenderItems", () => {
       "iframe-item",
       "text-chunk",
     ])
+  })
+
+  it("keeps tool failures collapsed while preserving approvals and final output", () => {
+    const chunks: Array<Chunk> = [
+      { kind: "reasoning", text: "Inspecting the code" },
+      {
+        kind: "tool-execution",
+        toolCallId: "read-1",
+        title: "read_file",
+        toolKind: "read",
+        status: "completed",
+      },
+      {
+        kind: "tool-execution",
+        toolCallId: "shell-1",
+        title: "shell",
+        toolKind: "execute",
+        status: "error",
+      },
+      {
+        kind: "tool-execution",
+        toolCallId: "search-1",
+        title: "search",
+        toolKind: "search",
+        status: "pending",
+      },
+      { kind: "text", text: "Done" },
+    ]
+    const items = buildRenderItems(chunks)
+
+    const collapsed = selectCollapsedTurnItems(items)
+
+    expect(collapsed.map((item) => item.type)).toEqual([
+      "tool-item",
+      "text-chunk",
+    ])
+    expect(
+      collapsed.flatMap((item) =>
+        "chunk" in item && item.chunk.kind === "tool-execution"
+          ? [item.chunk.toolCallId]
+          : []
+      )
+    ).toEqual(["search-1"])
+  })
+
+  it("keeps unfinished work visible after a turn is interrupted", () => {
+    const items = buildRenderItems([
+      {
+        kind: "tool-execution",
+        toolCallId: "approval-1",
+        title: "edit_file",
+        toolKind: "edit",
+        status: "in_progress",
+      },
+    ])
+
+    expect(selectCollapsedTurnItems(items)).toEqual([])
+    expect(selectCollapsedTurnItems(items, true)).toEqual(items)
+  })
+
+  it("counts tool actions without counting reasoning or final output", () => {
+    const items = buildRenderItems([
+      { kind: "reasoning", text: "Inspecting" },
+      {
+        kind: "tool-execution",
+        toolCallId: "read-1",
+        title: "read_file",
+        toolKind: "read",
+        status: "completed",
+      },
+      {
+        kind: "tool-execution",
+        toolCallId: "read-2",
+        title: "read_file",
+        toolKind: "read",
+        status: "completed",
+      },
+      {
+        kind: "tool-execution",
+        toolCallId: "shell-1",
+        title: "shell",
+        toolKind: "execute",
+        status: "completed",
+      },
+      { kind: "text", text: "Done" },
+    ])
+    const { workItems } = splitWorkAndReply(items)
+
+    expect(countWorkActions(workItems)).toBe(3)
   })
 })

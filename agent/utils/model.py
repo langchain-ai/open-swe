@@ -6,6 +6,7 @@ from langchain.chat_models import init_chat_model
 
 from ..dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
 from .gateway import gateway_env_default, gateway_overrides
+from .openai_oauth import build_desktop_openai_oauth_model, desktop_openai_oauth_available
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 
@@ -142,12 +143,26 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
         model_kwargs["use_responses_api"] = True
 
     enabled = gateway_env_default() if use_gateway is None else use_gateway
+    gateway_applied = False
+    oauth_applied = False
     if enabled:
         overrides = gateway_overrides(model_id)
         if overrides is not None:
             model_kwargs.update(overrides)
+            gateway_applied = True
+
+    if (
+        model_id.startswith("openai:")
+        and not gateway_applied
+        and not os.environ.get("OPENAI_API_KEY")
+        and desktop_openai_oauth_available()
+    ):
+        model_kwargs.pop("base_url", None)
+        oauth_applied = True
 
     if model_id.startswith("openai:"):
+        if oauth_applied:
+            model_kwargs.pop("max_tokens", None)
         _configure_openai_responses_kwargs(model_kwargs)
         _coerce_openai_chat_completions_kwargs(model_kwargs)
 
@@ -167,7 +182,12 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     cached = _MODEL_CACHE.get(key)
     if cached is not None:
         return cached
-    model = init_chat_model(model=model_id, **cast(dict[str, Any], model_kwargs))
+    if oauth_applied:
+        model = build_desktop_openai_oauth_model(
+            model_id.split(":", 1)[1], **cast(dict[str, Any], model_kwargs)
+        )
+    else:
+        model = init_chat_model(model=model_id, **cast(dict[str, Any], model_kwargs))
     _MODEL_CACHE[key] = model
     return model
 
@@ -317,7 +337,11 @@ def validate_local_dev_llm_config() -> None:
 
     model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_MODEL_ID)
 
-    if model_id.startswith("openai:") and not os.environ.get("OPENAI_API_KEY"):
+    if (
+        model_id.startswith("openai:")
+        and not os.environ.get("OPENAI_API_KEY")
+        and not desktop_openai_oauth_available()
+    ):
         raise ValueError(f"OPENAI_API_KEY is required for configured model {model_id}")
     elif model_id.startswith("anthropic:") and not os.environ.get("ANTHROPIC_API_KEY"):
         raise ValueError(f"ANTHROPIC_API_KEY is required for configured model {model_id}")

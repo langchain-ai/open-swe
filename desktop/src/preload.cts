@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
   localModelCredentialStatus: (modelId) =>
     ipcRenderer.invoke("desktop:local-model-credential-status", modelId),
+  signInLocalOpenAI: () => ipcRenderer.invoke("desktop:local-openai-sign-in"),
   startLocalThread: (input) => ipcRenderer.invoke("desktop:start-local-thread", input),
   getLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:get-local-prompt", threadId),
   clearLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:clear-local-prompt", threadId),
@@ -40,6 +41,7 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   updateLocalThread: (input) => ipcRenderer.invoke("desktop:update-local-thread", input),
   deleteLocalThread: (threadId) => ipcRenderer.invoke("desktop:delete-local-thread", threadId),
   getLocalDiff: (threadId) => ipcRenderer.invoke("desktop:get-local-diff", threadId),
+  getLocalPrDiff: (threadId) => ipcRenderer.invoke("desktop:get-local-pr-diff", threadId),
   onProjectsChanged: (callback) => {
     const listener = (_event, projects) => callback(projects)
     ipcRenderer.on("desktop:projects-changed", listener)
@@ -74,6 +76,10 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
 
 const DRAG_REGION_ID = "open-swe-desktop-drag-region"
 
+ipcRenderer.on("desktop:fullscreen-change", (_event, fullscreen) => {
+  document.documentElement.classList.toggle("desktop-fullscreen", fullscreen)
+})
+
 window.addEventListener("DOMContentLoaded", () => {
   if (process.platform !== "darwin") return
 
@@ -101,6 +107,10 @@ window.addEventListener("DOMContentLoaded", () => {
     [data-sidebar-expand] {
       -webkit-app-region: no-drag;
       left: 90px !important;
+    }
+
+    .desktop-fullscreen :is([data-sidebar-collapse], [data-sidebar-expand]) {
+      left: 12px !important;
     }
   `
   document.head.append(style)

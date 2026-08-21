@@ -1,5 +1,5 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
-import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
+import type { AgentPullRequest, ImageChunk } from "@/features/agents/lib/types"
 import type { Skill } from "@/lib/api"
 
 export type DesktopCommandId =
@@ -19,10 +19,12 @@ export interface DesktopLocalThreadSummary {
   id: string
   cwd: string
   title: string
+  viewed: boolean
   createdAt: number
   updatedAt: number
   modelId: string | null
   effort: string | null
+  pending?: DesktopLocalPromptInput | null
 }
 
 export type DesktopLocalActivity = Record<string, "running" | "error">
@@ -31,7 +33,7 @@ export interface DesktopLocalDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
   files: Array<ThreadPrDiffFile>
-  repository?: { branch: string | null; pr: AgentThread["pr"] | null }
+  repository?: { branch: string | null; pr: AgentPullRequest | null }
 }
 
 export interface DesktopLocalPromptInput {
@@ -156,9 +158,12 @@ declare global {
         localSessionId: string
         path: string
       }) => Promise<string | null>
-      localModelCredentialStatus: (
-        modelId?: string
-      ) => Promise<{ available: boolean; variable: string | null }>
+      localModelCredentialStatus: (modelId?: string) => Promise<{
+        available: boolean
+        variable: string | null
+        canSignIn?: boolean
+      }>
+      signInLocalOpenAI: () => Promise<{ signedIn: boolean }>
       startLocalThread: (
         input: DesktopLocalPromptInput & {
           cwd: string
@@ -169,7 +174,9 @@ declare global {
       getLocalPrompt: (
         threadId: string
       ) => Promise<DesktopLocalPromptInput | null>
-      clearLocalPrompt: (threadId: string) => Promise<boolean>
+      clearLocalPrompt: (
+        threadId: string
+      ) => Promise<DesktopLocalThreadSummary | null>
       getLocalThread: (
         threadId: string
       ) => Promise<DesktopLocalThreadSummary | null>
@@ -177,11 +184,13 @@ declare global {
       localActivity: () => Promise<DesktopLocalActivity>
       updateLocalThread: (input: {
         threadId: string
+        viewed?: boolean
         modelId?: string
         effort?: string
       }) => Promise<DesktopLocalThreadSummary | null>
       deleteLocalThread: (threadId: string) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
+      getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
       terminal: DesktopTerminalBridge
     }
   }

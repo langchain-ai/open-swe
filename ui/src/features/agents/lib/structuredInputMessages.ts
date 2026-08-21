@@ -7,12 +7,15 @@ export type ParsedStructuredInput =
       kind: string
       displayName?: string
       handle?: string
+      senderType?: string
+      openSweAccount?: string
     }
   | {
       type: "message"
       content: string
       sender: string
       senderKind: StructuredSenderKind
+      surface?: string
     }
   | { type: "legacy"; content: string }
 
@@ -20,6 +23,8 @@ export interface StructuredEntity {
   kind: string
   displayName?: string
   handle?: string
+  senderType?: string
+  openSweAccount?: string
 }
 
 const ENTITY_PATTERN =
@@ -161,6 +166,8 @@ export function parseStructuredInput(
         kind: kind.toLowerCase(),
         displayName: childText(body, "display_name"),
         handle: childText(body, "handle") ?? childText(body, "github_login"),
+        senderType: childText(body, "sender_type"),
+        openSweAccount: childText(body, "open_swe_account"),
       }
     }
   }
@@ -175,6 +182,7 @@ export function parseStructuredInput(
         content: decodeXmlText(split.content),
         sender: attributes.sender,
         senderKind: senderKind(attributes, entities),
+        surface: attributes.surface,
       }
     }
   }
@@ -193,6 +201,8 @@ export function collectStructuredEntities(
       kind: parsed.kind,
       displayName: parsed.displayName,
       handle: parsed.handle,
+      senderType: parsed.senderType,
+      openSweAccount: parsed.openSweAccount,
     })
   }
   return entities

@@ -1,180 +1,121 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import {
-  CheckIcon,
-  ChevronDownIcon,
-  DownloadIcon,
-  EllipsisIcon,
-  GitPullRequestIcon,
-  RefreshCwIcon,
-  TextAlignStartIcon,
-} from "lucide-react"
+import { DownloadIcon } from "lucide-react"
 
 import type { AgentThread } from "@/features/agents/lib/types"
-import type { PanelTabKind } from "@/features/agents/lib/panelTabs"
 import { agentsApi } from "@/features/agents/lib/api"
-import { useAgentThreadTurnDiff } from "@/features/agents/lib/queries"
-import { ReviewTab } from "@/features/reviews/components/ReviewTab"
-import { AgentPanelShell } from "@/features/agents/components/AgentPanelShell"
 import {
-  Menu,
-  MenuItem,
-  MenuPopup,
-  MenuSeparator,
-  MenuTrigger,
-} from "@/components/ui/menu"
-import { useDiffWrap } from "@/features/agents/utils/diffUtils"
+  useAgentThreadBranchDiff,
+  useAgentThreadWorkingTreeDiff,
+} from "@/features/agents/lib/queries"
+import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
+import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
+import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import {
-  DiffFilesView,
-  toPanelFiles,
-} from "@/features/agents/components/DiffFilesView"
-import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
-import { usePanelTabs } from "@/features/agents/lib/panelTabs"
+  selectThreadDiffScope,
+  useDiffPanelStore,
+} from "@/features/agents/lib/diffPanelStore"
+import {
+  selectThreadRightPanelState,
+  useRightPanelStore,
+} from "@/features/agents/lib/rightPanelStore"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
-import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
-import { useRegisterAppCommands } from "@/lib/appCommands"
-import { cn } from "@/lib/utils"
-
-export type AgentPanelTab = "git"
 
 interface AgentGitPanelProps {
   thread: AgentThread
-  /** Path to select and scroll to, set when a transcript row is clicked. */
   revealFilePath?: string | null
+  revealChangesKey?: number
   collapsed: boolean
-  requestedTab: AgentPanelTab
   onCollapsedChange: (next: boolean) => void
-  onTabChange: (tab: AgentPanelTab) => void
 }
 
 export function AgentGitPanel({
   thread,
   revealFilePath,
+  revealChangesKey = 0,
   collapsed,
-  requestedTab,
   onCollapsedChange,
-  onTabChange,
 }: AgentGitPanelProps) {
-  const [tab, setTab] = useState<"diff" | "review" | "commits">("diff")
-  const [wrap, setWrap] = useDiffWrap()
-  const panel = usePanelTabs(`cloud:${thread.id}`)
+  const threadRef = useMemo(
+    () => ({ scope: "cloud" as const, threadId: thread.id }),
+    [thread.id]
+  )
   const terminals = useTerminalGroups(
     { kind: "cloud", threadId: thread.id },
     ""
   )
-  const topTab =
-    panel.activeTab?.kind === "terminal" ? panel.activeTab.id : requestedTab
-  const handleOpenKind = useCallback(
-    (kind: PanelTabKind) => {
-      if (kind !== "terminal") return
-      onTabChange("git")
-      panel.open({ id: terminals.addGroup(), kind })
-    },
-    [onTabChange, panel, terminals]
+  const openSurface = useRightPanelStore((state) => state.open)
+  const activeSurfaceId = useRightPanelStore(
+    (state) =>
+      selectThreadRightPanelState(state.byThreadKey, threadRef).activeSurfaceId
   )
-  const handleSelectTab = useCallback(
-    (id: string) => {
-      if (id === "git") {
-        onTabChange(id)
-        panel.select("")
-        return
-      }
-      panel.select(id)
-      const terminalId = terminals.state.terminalGroups.find(
-        (group) => group.id === id
-      )?.terminalIds[0]
-      if (terminalId) terminals.focus(terminalId)
-    },
-    [onTabChange, panel, terminals]
-  )
-  const handleCloseTab = useCallback(
-    async (id: string) => {
-      if (id === "git") {
-        onCollapsedChange(true)
-        return
-      }
-      if (await terminals.closeGroup(id)) panel.close(id)
-    },
-    [onCollapsedChange, panel, terminals]
-  )
+  useEffect(() => {
+    if (revealChangesKey > 0) openSurface(threadRef, "diff")
+  }, [openSurface, revealChangesKey, threadRef])
+
   const terminalAvailable =
     thread.isOwner !== false && Boolean(thread.sandboxId)
-  const toggleTerminal = useCallback(() => {
-    if (!collapsed && panel.activeTab?.kind === "terminal") {
-      onCollapsedChange(true)
-      return
-    }
-    onCollapsedChange(false)
-    onTabChange("git")
-    const existing = panel.tabs.find(
-      (candidate) => candidate.kind === "terminal"
+
+  // Served from GitHub, so it needs a repository — with or without a PR.
+  const branchScopeAvailable =
+    Boolean(thread.repoFullName) && Boolean(thread.branch)
+  const selectScope = useDiffPanelStore((state) => state.selectScope)
+  const scope = useDiffPanelStore((state) =>
+    selectThreadDiffScope(
+      state.byThreadKey,
+      threadRef,
+      branchScopeAvailable,
+      Boolean(thread.pr)
     )
-    if (existing) handleSelectTab(existing.id)
-    else handleOpenKind("terminal")
-  }, [
-    collapsed,
-    handleOpenKind,
-    handleSelectTab,
-    onCollapsedChange,
-    onTabChange,
-    panel.activeTab?.kind,
-    panel.tabs,
-  ])
-  const panelCommands = useMemo(
-    () => [
-      {
-        id: "toggle-work-panel",
-        label: "Toggle work panel",
-        aliases: ["show panel", "hide panel", "review panel"],
-        shortcuts: ["mod+alt+b"],
-        group: "Workspace",
-        run: () => onCollapsedChange(!collapsed),
-      },
-      ...(terminalAvailable
-        ? [
-            {
-              id: "toggle-terminal",
-              label: "Toggle terminal",
-              aliases: ["open terminal", "hide terminal"],
-              shortcuts: ["ctrl+`"],
-              group: "Workspace",
-              run: toggleTerminal,
-            },
-          ]
-        : []),
-    ],
-    [collapsed, onCollapsedChange, terminalAvailable, toggleTerminal]
   )
-  useRegisterAppCommands(panelCommands)
-  const terminalGroupIds = terminals.state.terminalGroups
-    .map((group) => group.id)
-    .join(",")
-  const syncTerminals = panel.syncTerminals
+  const diffVisible = !collapsed && activeSurfaceId === "diff"
+
+  const turnDiff = useAgentThreadWorkingTreeDiff(
+    thread.id,
+    diffVisible && scope === "working-tree",
+    thread.status === "running"
+  )
+  const branchDiff = useAgentThreadBranchDiff(
+    thread.id,
+    diffVisible && scope === "branch"
+  )
+  const diff =
+    scope === "branch"
+      ? {
+          files: branchDiff.data?.files ?? [],
+          // The branch endpoint answers from GitHub: a successful response is
+          // always a real diff, and a failure surfaces through `error`.
+          status: branchDiff.data ? ("ready" as const) : undefined,
+          truncated: branchDiff.data?.truncated,
+          isPending: branchDiff.isPending,
+          isFetching: branchDiff.isFetching,
+          error: branchDiff.error,
+          refetch: branchDiff.refetch,
+        }
+      : {
+          files: turnDiff.data?.files ?? [],
+          status: turnDiff.data?.status,
+          truncated: turnDiff.data?.truncated,
+          isPending: turnDiff.isPending,
+          isFetching: turnDiff.isFetching,
+          error: turnDiff.error,
+          refetch: turnDiff.refetch,
+        }
+  const files = useMemo(() => toPanelFiles(diff.files), [diff.files])
+
+  // Refresh whenever the window regains focus: the diff is read live, so a
+  // push or a review landing elsewhere should be visible on return.
+  const refetchDiff = diff.refetch
   useEffect(() => {
-    syncTerminals(terminalGroupIds ? terminalGroupIds.split(",") : [])
-  }, [syncTerminals, terminalGroupIds])
-  // Collapsed state is owned and persisted by the parent.
-  const setCollapsed = onCollapsedChange
+    if (!diffVisible) return
+    const onFocus = () => void refetchDiff()
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [diffVisible, refetchDiff])
 
-  const pr = thread.pr
-
-  // The open/closed state is persisted to localStorage, so it carries across
-  // threads and reloads. Still uncollapse when a PR lands mid-session.
-  const [prSeen, setPrSeen] = useState<{ threadId: string; hadPr: boolean }>(
-    () => ({ threadId: thread.id, hadPr: Boolean(pr) })
-  )
-  if (prSeen.threadId !== thread.id) {
-    setPrSeen({ threadId: thread.id, hadPr: Boolean(pr) })
-  } else if (pr && !prSeen.hadPr) {
-    setPrSeen({ threadId: thread.id, hadPr: true })
-    setCollapsed(false)
-  }
-
-  const turnDiff = useAgentThreadTurnDiff(thread.id, null, !collapsed)
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const canDownloadRecovery =
     thread.status !== "running" && thread.isOwner !== false
-
   const downloadRecoveryPatch = useCallback(async () => {
     setRecoveringPatch(true)
     setRecoveryError(null)
@@ -199,191 +140,48 @@ export function AgentGitPanel({
     }
   }, [thread.id])
 
-  const files = useMemo(
-    () => toPanelFiles(turnDiff.data?.files ?? []),
-    [turnDiff.data]
-  )
-
-  const totals = useMemo(
-    () =>
-      files.reduce(
-        (sum, file) => ({
-          additions: sum.additions + file.additions,
-          deletions: sum.deletions + file.deletions,
-        }),
-        { additions: 0, deletions: 0 }
-      ),
-    [files]
-  )
-  const truncated = turnDiff.data?.truncated
-  const tabLabels = { diff: "Thread", review: "Review", commits: "Committed" }
-  const refreshDiff = () => void turnDiff.refetch()
-
-  const reviewHeader = (
-    <div className="shrink-0 px-3 pb-2">
-      <div className="@container flex min-h-9 items-center gap-2">
-        <Menu>
-          <MenuTrigger className="flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-foreground transition-colors hover:bg-accent">
-            {tabLabels[tab]}
-            <ChevronDownIcon className="size-3.5 text-muted-foreground" />
-          </MenuTrigger>
-          <MenuPopup align="start" className="w-44">
-            {(
-              [
-                ["diff", "Branch"],
-                ["review", "Review"],
-                ["commits", "Committed"],
-              ] as const
-            ).map(([id, label]) => (
-              <MenuItem key={id} onClick={() => setTab(id)}>
-                <span className="flex-1">{label}</span>
-                {tab === id && <CheckIcon />}
-              </MenuItem>
-            ))}
-          </MenuPopup>
-        </Menu>
-        {files.length > 0 && (
-          <span className="flex items-center gap-2 text-sm">
-            <span
-              title={truncated ? "Only the first files are shown" : undefined}
-              className="text-xs text-muted-foreground"
-            >
-              {truncated ? "first " : ""}
-              {files.length} file{files.length === 1 ? "" : "s"}
-            </span>
-            <span className="text-success-foreground">+{totals.additions}</span>
-            <span className="text-destructive">-{totals.deletions}</span>
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-2">
-          {recoveryError && (
-            <span
-              title={recoveryError}
-              className="max-w-32 truncate text-[11px] text-destructive"
-            >
-              {recoveryError}
-            </span>
-          )}
-          {pr && (
-            <a
-              href={pr.url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="View PR"
-              className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-            >
-              <GitPullRequestIcon className="size-3.5" />
-              <span className="hidden @[700px]:inline">View PR</span>
-            </a>
-          )}
-          <Menu>
-            <MenuTrigger
-              aria-label="Review options"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <EllipsisIcon className="size-4" />
-            </MenuTrigger>
-            <MenuPopup align="end" className="w-48">
-              <MenuItem onClick={refreshDiff}>
-                <RefreshCwIcon />
-                Refresh
-              </MenuItem>
-              <MenuItem onClick={() => setWrap(!wrap)}>
-                <TextAlignStartIcon />
-                {wrap ? "Disable" : "Enable"} word wrap
-              </MenuItem>
-              {canDownloadRecovery && (
-                <>
-                  <MenuSeparator />
-                  <MenuItem
-                    disabled={recoveringPatch}
-                    onClick={downloadRecoveryPatch}
-                  >
-                    <DownloadIcon />
-                    {recoveringPatch ? "Preparing…" : "Download patch"}
-                  </MenuItem>
-                </>
-              )}
-            </MenuPopup>
-          </Menu>
-        </div>
-      </div>
-    </div>
-  )
-
   return (
-    <AgentPanelShell
-      tabs={[
-        { id: "git", kind: "review" as const, closable: false },
-        ...panel.tabs.map((panelTab) => ({
-          ...panelTab,
-          title: terminalTabTitle(terminals, panelTab.id),
-        })),
-      ]}
-      activeTabId={topTab}
-      onSelectTab={handleSelectTab}
-      onCloseTab={handleCloseTab}
-      onOpenKind={
-        thread.isOwner !== false && thread.sandboxId
-          ? handleOpenKind
-          : undefined
-      }
-      menuKinds={
-        thread.isOwner !== false && thread.sandboxId ? ["terminal"] : []
-      }
+    <AgentRightPanel
+      threadRef={threadRef}
+      terminals={terminals}
+      terminalTarget={{ kind: "cloud", threadId: thread.id }}
+      cwd=""
+      terminalAvailable={terminalAvailable}
+      diffAvailable
       collapsed={collapsed}
-      onCollapsedChange={setCollapsed}
-      seamlessHeader={topTab === "git"}
-    >
-      {({ fullScreen }) => (
-        <>
-          {topTab === "git" ? (
-            <>
-              {reviewHeader}
-              {tab === "diff" ? (
-                <DiffFilesView
-                  files={files}
-                  revealFilePath={revealFilePath}
-                  fullScreen={fullScreen}
-                  hideHeader
-                  emptyLabel={
-                    turnDiff.isLoading
-                      ? "Loading thread diff…"
-                      : "No diff available."
-                  }
-                  truncated={truncated}
-                />
-              ) : (
-                <div className="flex min-h-0 flex-1">
-                  {tab === "review" ? (
-                    <ReviewTab thread={thread} />
-                  ) : (
-                    <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
-                      Coming Soon
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          ) : null}
-          {panel.tabs.map((terminalTab) => (
-            <div
-              key={terminalTab.id}
-              className={cn(
-                "min-h-0 flex-1",
-                terminalTab.id !== topTab && "hidden"
-              )}
-            >
-              <TerminalPanel
-                target={{ kind: "cloud", threadId: thread.id }}
-                cwd=""
-                groupId={terminalTab.id}
-                terminals={terminals}
-              />
-            </div>
-          ))}
-        </>
+      onCollapsedChange={onCollapsedChange}
+      renderDiff={({ fullScreen }) => (
+        <ChangesPanel
+          files={files}
+          status={diff.status}
+          isLoading={diff.isPending}
+          isFetching={diff.isFetching}
+          error={diff.error}
+          truncated={diff.truncated}
+          branch={thread.branch}
+          pr={thread.pr}
+          revealFilePath={revealFilePath}
+          fullScreen={fullScreen}
+          onRefresh={() => void diff.refetch()}
+          scope={scope}
+          branchScopeAvailable={branchScopeAvailable}
+          onScopeChange={(next) => selectScope(threadRef, next)}
+          extraActions={
+            canDownloadRecovery ? (
+              <button
+                type="button"
+                aria-label="Download recovery patch"
+                title={recoveryError ?? "Download recovery patch"}
+                disabled={recoveringPatch}
+                onClick={() => void downloadRecoveryPatch()}
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+              >
+                <DownloadIcon className="size-3.5" />
+              </button>
+            ) : undefined
+          }
+        />
       )}
-    </AgentPanelShell>
+    />
   )
 }

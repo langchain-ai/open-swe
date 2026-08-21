@@ -1,6 +1,6 @@
 import { agentsLangGraphApiUrl } from "./api"
 import { SIDEBAR_PREFS_STORAGE_KEY } from "./sidebarPrefs"
-import { SIDEBAR_ACTIVE_LIMIT, SIDEBAR_RESOLVED_LIMIT } from "./queries"
+import { SIDEBAR_PAGE_SIZE } from "./queries"
 
 const THREAD_PATH_RE =
   /^\/agents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
@@ -10,18 +10,18 @@ const AGENTS_HOME_RE = /^\/agents\/?$/
  * Serialized into the document with `toString()`, so it may not reference
  * imports, module scope, or any syntax the build lowers with a helper.
  *
- * `sidebarUrl` is a template because `include_automations` comes from a
- * localStorage preference that only the browser can read.
+ * `sidebarUrl` is a template because its scope comes from a localStorage
+ * preference that only the browser can read.
  */
 function warmApiRequests(
   urls: Array<string>,
-  sidebarUrlTemplate: string | null,
+  sidebarUrl: string | null,
   prefsKey: string
 ) {
   if (document.readyState !== "loading") return
 
   const targets = urls.slice()
-  if (sidebarUrlTemplate) {
+  if (sidebarUrl) {
     let includeAutomations = false
     try {
       const raw = localStorage.getItem(prefsKey)
@@ -36,9 +36,9 @@ function warmApiRequests(
       // An unreadable preference just means the default (false).
     }
     targets.push(
-      sidebarUrlTemplate.replace(
-        "__INCLUDE_AUTOMATIONS__",
-        String(includeAutomations)
+      sidebarUrl.replace(
+        "__SIDEBAR_SCOPE__",
+        includeAutomations ? "all" : "interactive"
       )
     )
   }
@@ -64,14 +64,17 @@ function warmApiRequests(
     input: RequestInfo | URL,
     init?: RequestInit
   ): Promise<Response> {
+    const request = input instanceof Request ? input : null
     const method = String(
-      init?.method ?? (input as Request).method ?? "GET"
+      init?.method ?? request?.method ?? "GET"
     ).toUpperCase()
     if (pending.size > 0 && method === "GET") {
       const href =
         typeof input === "string"
           ? input
-          : ((input as Request).url ?? String(input))
+          : input instanceof URL
+            ? input.href
+            : input.url
       try {
         const resolved = new URL(href, location.href).href
         const warmed = pending.get(resolved)
@@ -90,14 +93,14 @@ function warmApiRequests(
   window.fetch = patched
 }
 
-/** The sidebar request `useSidebarThreads` will make, minus the localStorage-dependent flag. */
-function sidebarUrlTemplate(activeThreadId?: string): string {
+/** The first sidebar page request, minus the localStorage-dependent scope. */
+function sidebarUrlTemplate(): string {
   const search = new URLSearchParams()
-  search.set("active_limit", String(SIDEBAR_ACTIVE_LIMIT))
-  search.set("resolved_limit", String(SIDEBAR_RESOLVED_LIMIT))
-  if (activeThreadId) search.set("active_thread_id", activeThreadId)
-  search.set("include_automations", "__INCLUDE_AUTOMATIONS__")
-  return `${agentsLangGraphApiUrl}/threads/sidebar?${search.toString()}`
+  search.set("limit", String(SIDEBAR_PAGE_SIZE))
+  search.set("offset", "0")
+  search.set("resolved", "false")
+  search.set("scope", "__SIDEBAR_SCOPE__")
+  return `${agentsLangGraphApiUrl}/threads/page?${search.toString()}`
 }
 
 /**
@@ -116,7 +119,7 @@ export function apiWarmupScript(pathname: string): string | null {
     : []
   const args = [
     JSON.stringify(urls),
-    JSON.stringify(sidebarUrlTemplate(threadId)),
+    JSON.stringify(sidebarUrlTemplate()),
     JSON.stringify(SIDEBAR_PREFS_STORAGE_KEY),
   ].join(",")
   return `(${warmApiRequests.toString()})(${args});`

@@ -4,16 +4,16 @@ import { CircleAlert as CircleAlertIcon, FolderOpen } from "lucide-react"
 
 import type {
   AgentThread,
+  ImageChunk,
   Message,
-  QueuedThreadMessage,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import type { AgentPanelTab } from "@/features/agents/components/AgentGitPanel"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
-import { PANEL_MIN_CHAT_WIDTH } from "@/features/agents/components/AgentPanelShell"
+import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import {
   readStoredPanelCollapsed,
@@ -26,18 +26,15 @@ import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useAgentSkills } from "@/features/agents/lib/queries"
+import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
+import { rejectPlan } from "@/lib/plan"
+import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
 interface AgentThreadViewProps {
   thread: AgentThread
-}
-
-function messageText(message: Message): string {
-  return message.chunks
-    .map((chunk) => (chunk.kind === "text" ? chunk.text : ""))
-    .join("\n")
-    .trim()
+  autoFocusComposer?: boolean
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -53,40 +50,12 @@ function editedPaths(messages: Array<Message>): Array<string> {
   return [...paths]
 }
 
-function visibleQueuedMessages(
-  queuedMessages: Array<QueuedThreadMessage> | undefined,
-  messages: Array<Message>
-): Array<QueuedThreadMessage> {
-  const queued = queuedMessages ?? []
-  if (queued.length === 0) return queued
-
-  const userMessages = messages
-    .filter((message) => message.author === "user")
-    .map((message) => ({
-      text: messageText(message),
-      timestamp: Date.parse(message.timestamp),
-      consumed: false,
-    }))
-
-  return queued.filter((queuedMessage) => {
-    const queuedText = queuedMessage.content.trim()
-    if (!queuedText) return true
-
-    const match = userMessages.find((message) => {
-      if (message.consumed || !message.text.includes(queuedText)) return false
-      if (!Number.isFinite(message.timestamp)) return true
-      return message.timestamp >= queuedMessage.createdAt - 1000
-    })
-    if (!match) return true
-
-    match.consumed = true
-    return false
-  })
-}
-
 // The stream lives at the `/agents` layout (one persistent provider that
 // survives the home → thread navigation), so this view only consumes it.
-export function AgentThreadView({ thread }: AgentThreadViewProps) {
+export function AgentThreadView({
+  thread,
+  autoFocusComposer = false,
+}: AgentThreadViewProps) {
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadStream()
   const isMobile = useIsMobile()
@@ -94,6 +63,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const sidebarCollapsed = useSidebarCollapsed()
   const skills = useAgentSkills()
+  const session = useSession()
+  const canPost = !thread.adminThread || session.data?.is_admin === true
 
   const { models, defaultSelection } = useModelOptions()
   const threadSelection = useMemo<ModelSelection | null>(() => {
@@ -107,9 +78,32 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const [planMode, setPlanMode] = useState<boolean | null>(null)
+  const [planFeedbackPending, setPlanFeedbackPending] =
+    useState(autoFocusComposer)
   const activePlanMode = planMode ?? thread.planMode ?? false
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
+  )
+  const submitMessage = useCallback(
+    async (content: string, images: Array<ImageChunk>) => {
+      if (planFeedbackPending) await rejectPlan(thread.id, false)
+      await sendMessage.mutateAsync({
+        content,
+        images,
+        model_id: activeSelection?.modelId ?? null,
+        effort: activeSelection?.effort ?? null,
+        plan_mode: activePlanMode,
+      })
+      setPlanFeedbackPending(false)
+    },
+    [
+      activePlanMode,
+      activeSelection?.effort,
+      activeSelection?.modelId,
+      planFeedbackPending,
+      sendMessage,
+      thread.id,
+    ]
   )
   const usedTokens = useMemo(
     () => latestContextTokens(stream.messages),
@@ -120,7 +114,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
     readStoredPanelCollapsed(thread.id)
   )
-  const [panelTab, setPanelTab] = useState<AgentPanelTab>("git")
   const handlePanelCollapsedChange = useCallback(
     (next: boolean) => {
       setPanelCollapsed(next)
@@ -129,31 +122,29 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     [thread.id]
   )
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
+  const [revealChangesKey, setRevealChangesKey] = useState(0)
   const handleOpenFile = useCallback(
     (filePath: string) => {
       setRevealFilePath(filePath)
-      setPanelTab("git")
+      setRevealChangesKey((key) => key + 1)
       handlePanelCollapsedChange(false)
     },
     [handlePanelCollapsedChange]
   )
 
   const baseMessages = useMemo<Array<Message>>(() => {
-    const live = streamMessagesToUi(
+    if (thread.messages.length > 0) return thread.messages
+    return streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
       messageArrivalTimestamp
     )
-    if (live.length > 0) return live
-    // Optimistic transcript seeded by `AgentsHome` on thread creation (the
-    // only case where a fetched thread carries messages — `getThread` returns
-    // none). Bridges the brief gap before the SDK's optimistic `submit` echo
-    // lands in `stream.messages`.
-    if (thread.messages.length > 0) return thread.messages
-    return live
   }, [stream.messages, stream.toolCalls, thread.messages])
 
-  const isStreaming = thread.status === "running" || stream.isLoading
+  const isStreaming =
+    thread.status === "running" ||
+    stream.isLoading ||
+    thread.messages.length > 0
   const activeRun = useMemo(
     () => ({ threadId: thread.id, running: thread.status === "running" }),
     [thread.id, thread.status]
@@ -195,7 +186,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           "flex min-w-0 flex-1 flex-col",
           thread.adminThread && "bg-destructive/4"
         )}
-        style={isMobile ? undefined : { minWidth: PANEL_MIN_CHAT_WIDTH }}
+        style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <header className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent">
           <div
@@ -265,20 +256,19 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             />
             <div className="shrink-0 px-4 pb-4">
               <div className="mx-auto w-full max-w-3xl min-w-0">
+                <ThreadPullRequests pullRequests={thread.pullRequests ?? []} />
                 <AgentPromptBar
-                  placeholder="Add a follow up"
+                  placeholder={
+                    canPost
+                      ? "Add a follow up"
+                      : "Only workspace admins can send messages in this thread"
+                  }
+                  autoFocus={autoFocusComposer}
                   compact
+                  disabled={!canPost}
                   busy={isStreaming}
                   activeRun={activeRun}
-                  onSubmit={(content, images) =>
-                    sendMessage.mutateAsync({
-                      content,
-                      images,
-                      model_id: activeSelection?.modelId ?? null,
-                      effort: activeSelection?.effort ?? null,
-                      plan_mode: activePlanMode,
-                    })
-                  }
+                  onSubmit={submitMessage}
                   models={models}
                   selection={activeSelection}
                   onSelectionChange={setSelection}
@@ -320,9 +310,16 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               </p>
             )}
             <div className="w-full max-w-3xl">
+              <ThreadPullRequests pullRequests={thread.pullRequests ?? []} />
               <AgentPromptBar
-                placeholder="Send the first message"
+                placeholder={
+                  canPost
+                    ? "Send the first message"
+                    : "Only workspace admins can send messages in this thread"
+                }
+                autoFocus={autoFocusComposer}
                 compact
+                disabled={!canPost}
                 busy={isStreaming}
                 activeRun={activeRun}
                 onSubmit={(content, images) =>
@@ -349,10 +346,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       <AgentGitPanel
         thread={thread}
         revealFilePath={revealFilePath}
+        revealChangesKey={revealChangesKey}
         collapsed={panelCollapsed}
-        requestedTab={panelTab}
         onCollapsedChange={handlePanelCollapsedChange}
-        onTabChange={setPanelTab}
       />
     </div>
   )

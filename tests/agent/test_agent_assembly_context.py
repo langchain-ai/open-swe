@@ -245,6 +245,21 @@ async def test_agent_includes_read_user_settings_only_on_parent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_includes_thread_tools_only_on_parent() -> None:
+    from agent.tools import get_thread, list_threads, manage_thread
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    subagents = captured["subagents"]
+    assert isinstance(tools, list)
+    assert isinstance(subagents, list)
+    thread_tools = (get_thread, list_threads, manage_thread)
+    assert all(tool in tools for tool in thread_tools)
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    assert all(tool not in general_purpose["tools"] for tool in thread_tools)
+
+
+@pytest.mark.asyncio
 async def test_agent_includes_recreate_sandbox_tool() -> None:
     from agent.tools import recreate_sandbox
 
@@ -255,13 +270,14 @@ async def test_agent_includes_recreate_sandbox_tool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_includes_sandbox_file_download_url_tool() -> None:
-    from agent.tools import create_sandbox_file_download_url
+async def test_agent_includes_sandbox_file_download_url_tools() -> None:
+    from agent.tools import create_sandbox_file_download_url, output_iframe
 
     captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert create_sandbox_file_download_url in tools
+    assert output_iframe in tools
 
 
 @pytest.mark.asyncio
@@ -271,7 +287,7 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 
     from agent.prompt import OPEN_SWE_SHARED_BASE
-    from agent.tools import create_sandbox_file_download_url
+    from agent.tools import create_sandbox_file_download_url, output_iframe
 
     monkeypatch.setenv("SANDBOX_TYPE", "modal")
     captured = await _capture_create_deep_agent_kwargs()
@@ -280,8 +296,10 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     assert isinstance(tools, list)
     assert isinstance(subagents, list)
     assert create_sandbox_file_download_url not in tools
+    assert output_iframe not in tools
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
     assert create_sandbox_file_download_url not in general_purpose["tools"]
+    assert output_iframe not in general_purpose["tools"]
     assert general_purpose["system_prompt"] == (
         f"{OPEN_SWE_SHARED_BASE}\n\n{GENERAL_PURPOSE_SUBAGENT['system_prompt']}"
     )
@@ -426,6 +444,9 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         *slack_names,
         "background_execute",
         "background_task",
+        "get_thread",
+        "list_threads",
+        "manage_thread",
         "read_user_settings",
     }
     assert parent_only_names <= parent_names

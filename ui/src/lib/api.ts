@@ -413,37 +413,6 @@ export interface RepoSnapshot {
   updated_at?: string
 }
 
-export type EnvironmentSnapshotStatus =
-  "none" | "capturing" | "ready" | "failed"
-
-export interface Environment {
-  slug: string
-  name: string
-  prompt: string
-  repos: Array<string>
-  snapshot_id: string | null
-  snapshot_name: string | null
-  snapshot_status: EnvironmentSnapshotStatus
-  status_message: string | null
-  source_sandbox_id: string | null
-  last_captured_at: string | null
-  created_by?: string
-  created_at?: string
-  updated_at?: string
-}
-
-export interface EnvironmentList {
-  environments: Array<Environment>
-  /** Slug of the environment runs boot from — the one literally named "default". */
-  default_slug: string
-}
-
-export interface EnvironmentUpdateBody {
-  name?: string
-  prompt?: string
-  repos?: Array<string>
-}
-
 /** What a non-admin needs to pick an environment for a new thread. */
 export interface EnvironmentOption {
   slug: string
@@ -835,18 +804,8 @@ export const api = {
     request<void>(`/repo-snapshots/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
-  listEnvironments: () => request<EnvironmentList>("/environments"),
   listEnvironmentOptions: () =>
     request<EnvironmentOptionList>("/environments/options"),
-  saveEnvironment: (slug: string, body: EnvironmentUpdateBody) =>
-    request<Environment>(`/environments/${encodeURIComponent(slug)}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  deleteEnvironment: (slug: string) =>
-    request<void>(`/environments/${encodeURIComponent(slug)}`, {
-      method: "DELETE",
-    }),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   saveTeamSettings: (body: TeamSettings) =>
     request<TeamSettings>("/team-settings", {
