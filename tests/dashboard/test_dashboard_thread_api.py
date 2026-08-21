@@ -2160,7 +2160,7 @@ async def test_list_dashboard_threads_page_can_sort_by_creation_time(monkeypatch
             field = f"{sort_by}_ms"
             ordered = sorted(
                 threads,
-                key=lambda thread: cast(dict[str, object], thread["metadata"])[field],
+                key=lambda thread: cast(int, cast(dict[str, object], thread["metadata"])[field]),
                 reverse=True,
             )
             return ordered[offset : offset + limit]

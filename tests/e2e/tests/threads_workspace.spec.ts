@@ -712,7 +712,7 @@ test.describe("threads workspace", () => {
     await expect(progress.locator("> button > span").last()).toHaveText("1");
     await expect(ready).toContainText(TITLES.ready);
     await expect(ready.locator("> button > span").last()).toHaveText("1");
-    await expect(done).toContainText("E2E Workspace Resolved overflow 01");
+    await expect(done).toContainText("E2E Workspace Resolved overflow 21");
     await expect(done.locator("> button > span").last()).toHaveText("10+");
     const loadMore = sidebar.getByRole("button", {
       name: "Load more resolved threads",
