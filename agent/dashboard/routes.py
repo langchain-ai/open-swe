@@ -69,6 +69,7 @@ from .eval_jobs import (
     get_reviewer_eval_status,
 )
 from .github_token_auth import admin_session_for_github_token, bearer_github_token
+from .github_tokens import get_valid_access_token, upsert_access_token_from_github_response
 from .notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
@@ -109,9 +110,7 @@ from .options import (
 from .profiles import (
     ProfileUpdate,
     get_profile,
-    get_valid_access_token,
     normalize_profile_for_response,
-    upsert_access_token_from_github_response,
     upsert_profile,
 )
 from .repo_access import require_repo_access_for_user

@@ -43,6 +43,7 @@ from ..utils.timing import phase
 from .admin import is_admin
 from .agent_overrides import normalize_profile_overrides
 from .environments import get_environment, slugify
+from .github_tokens import get_valid_access_token
 from .options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -52,7 +53,7 @@ from .options import (
     model_supports_images,
 )
 from .pr_diff import build_pr_diff_files
-from .profiles import get_profile, get_valid_access_token
+from .profiles import get_profile
 from .team_settings import get_team_default_model, get_team_fable_enabled
 from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from .user_mappings import email_for_login

@@ -4,7 +4,7 @@ import httpx
 from fastapi import HTTPException
 
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
-from .profiles import get_valid_access_token
+from .github_tokens import get_valid_access_token
 from .review_styles import normalize_repo_full_name
 
 

@@ -1,9 +1,7 @@
 """Per-user third-party service credentials."""
 
-import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -12,6 +10,7 @@ from ..encryption import decrypt_token, encrypt_token
 from ..store import delete_value, get_value, now_iso, put_value
 from .notion_oauth import is_reauth_required_error, refresh_notion_access_token
 from .team_credentials import DEFAULT_LANGSMITH_ENDPOINT, LangSmithCredentials
+from .token_vault import TokenFields, TokenVault, expires_at_from_response
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +20,6 @@ LANGSMITH_KEY = "langsmith"
 NOTION_KEY = "notion"
 
 CURRENTS_API_BASE = "https://api.currents.dev/v1"
-_NOTION_TOKEN_EXPIRY_SKEW_SECONDS = 300
 
 
 def _last4(value: str) -> str:
@@ -94,27 +92,6 @@ class NotionCredentials:
     client_secret: str | None = None
 
 
-def _expires_at_from_response(data: dict[str, Any], *, field: str = "expires_in") -> str | None:
-    raw = data.get(field)
-    if not isinstance(raw, int | float) or raw <= 0:
-        return None
-    return (datetime.now(UTC) + timedelta(seconds=int(raw))).isoformat()
-
-
-def _token_expired(
-    expires_at: str | None, *, skew_seconds: int = _NOTION_TOKEN_EXPIRY_SKEW_SECONDS
-) -> bool:
-    if not isinstance(expires_at, str) or not expires_at:
-        return False
-    try:
-        exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-        if exp.tzinfo is None:
-            exp = exp.replace(tzinfo=UTC)
-    except ValueError:
-        return False
-    return datetime.now(UTC) + timedelta(seconds=skew_seconds) >= exp
-
-
 async def get_notion_status(login: str) -> dict[str, Any]:
     """Return a redacted view of the user's Notion MCP connection."""
     notion = await _get_provider(login, NOTION_KEY)
@@ -154,12 +131,12 @@ def _notion_record_from_response(
     scope = data.get("scope")
     if isinstance(scope, str):
         record["scope"] = scope
-    token_expires_at = _expires_at_from_response(data)
+    token_expires_at = expires_at_from_response(data)
     if token_expires_at:
         record["token_expires_at"] = token_expires_at
     elif existing.get("token_expires_at"):
         record["token_expires_at"] = existing["token_expires_at"]
-    refresh_token_expires_at = _expires_at_from_response(data, field="refresh_token_expires_in")
+    refresh_token_expires_at = expires_at_from_response(data, field="refresh_token_expires_in")
     if refresh_token_expires_at:
         record["refresh_token_expires_at"] = refresh_token_expires_at
     elif existing.get("refresh_token_expires_at"):
@@ -201,54 +178,47 @@ async def disconnect_notion(login: str) -> dict[str, Any]:
     return await get_notion_status(login)
 
 
-def _decrypt_notion_access_token(record: dict[str, Any]) -> str | None:
-    token = decrypt_token(record.get("encrypted_access_token", ""))
-    return token or None
-
-
-def _decrypt_notion_refresh_token(record: dict[str, Any]) -> str | None:
-    token = decrypt_token(record.get("encrypted_refresh_token", ""))
-    return token or None
-
-
 def _decrypt_notion_client_secret(record: dict[str, Any]) -> str | None:
     token = decrypt_token(record.get("encrypted_client_secret", ""))
     return token or None
 
 
-_notion_refresh_locks: dict[str, asyncio.Lock] = {}
-
-
-def _notion_refresh_lock(login: str) -> asyncio.Lock:
-    lock = _notion_refresh_locks.get(login)
-    if lock is None:
-        lock = asyncio.Lock()
-        _notion_refresh_locks[login] = lock
-    return lock
-
-
-async def _refresh_stored_notion_token(
-    login: str,
-    record: dict[str, Any],
-) -> tuple[str | None, bool]:
-    refresh_token = _decrypt_notion_refresh_token(record)
+async def _refresh_notion_tokens(
+    *, login: str, refresh_token: str, record: dict[str, Any]
+) -> dict[str, Any]:
     token_endpoint = record.get("token_endpoint")
     client_id = record.get("client_id")
-    if not refresh_token or not isinstance(token_endpoint, str) or not isinstance(client_id, str):
-        return None, False
-    try:
-        data = await refresh_notion_access_token(
-            refresh_token=refresh_token,
-            token_endpoint=token_endpoint,
-            client_id=client_id,
-            client_secret=_decrypt_notion_client_secret(record),
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Notion token refresh failed for %s", login, exc_info=True)
-        return None, is_reauth_required_error(exc)
-    await _put_provider(login, NOTION_KEY, _notion_record_from_response(data, existing=record))
-    access_token = data.get("access_token")
-    return (access_token if isinstance(access_token, str) else None), False
+    if not isinstance(token_endpoint, str) or not isinstance(client_id, str):
+        raise ValueError(f"stored Notion credentials for {login} are incomplete")
+    data = await refresh_notion_access_token(
+        refresh_token=refresh_token,
+        token_endpoint=token_endpoint,
+        client_id=client_id,
+        client_secret=_decrypt_notion_client_secret(record),
+    )
+    return _notion_record_from_response(data, existing=record)
+
+
+_notion_vault = TokenVault(
+    "Notion",
+    locate=lambda login: (_namespace(login), NOTION_KEY),
+    fields=TokenFields(access="encrypted_access_token", refresh="encrypted_refresh_token"),
+    refresh=_refresh_notion_tokens,
+    is_permanently_dead=is_reauth_required_error,
+)
+
+
+def _notion_credentials(record: dict[str, Any]) -> NotionCredentials | None:
+    access_token = _notion_vault.access_token(record)
+    if not access_token:
+        return None
+    return NotionCredentials(
+        access_token=access_token,
+        refresh_token=_notion_vault.refresh_token(record),
+        token_endpoint=record.get("token_endpoint", ""),
+        client_id=record.get("client_id", ""),
+        client_secret=_decrypt_notion_client_secret(record),
+    )
 
 
 async def get_notion_credentials(
@@ -261,80 +231,11 @@ async def get_notion_credentials(
     rather than the run itself.
     """
     try:
-        return await _load_notion_credentials(login, force_refresh=force_refresh)
+        record = await _notion_vault.get_valid(login, force_refresh=force_refresh)
     except Exception:
         logger.warning("Notion credential lookup failed for %s", login, exc_info=True)
         return None
-
-
-async def _load_notion_credentials(
-    login: str, *, force_refresh: bool = False
-) -> NotionCredentials | None:
-    record = await _get_provider(login, NOTION_KEY)
-    if not record:
-        return None
-    access_token = _decrypt_notion_access_token(record)
-    if not access_token:
-        return None
-    if not force_refresh and not _token_expired(record.get("token_expires_at")):
-        return NotionCredentials(
-            access_token=access_token,
-            refresh_token=_decrypt_notion_refresh_token(record),
-            token_endpoint=record.get("token_endpoint", ""),
-            client_id=record.get("client_id", ""),
-            client_secret=_decrypt_notion_client_secret(record),
-        )
-    if not _decrypt_notion_refresh_token(record):
-        return None
-    async with _notion_refresh_lock(login):
-        record = await _get_provider(login, NOTION_KEY)
-        if not record:
-            return None
-        access_token = _decrypt_notion_access_token(record)
-        if not access_token:
-            return None
-        if not force_refresh and not _token_expired(record.get("token_expires_at")):
-            return NotionCredentials(
-                access_token=access_token,
-                refresh_token=_decrypt_notion_refresh_token(record),
-                token_endpoint=record.get("token_endpoint", ""),
-                client_id=record.get("client_id", ""),
-                client_secret=_decrypt_notion_client_secret(record),
-            )
-        refreshed, refresh_token_dead = await _refresh_stored_notion_token(login, record)
-        if refreshed:
-            refreshed_record = await _get_provider(login, NOTION_KEY) or record
-            return NotionCredentials(
-                access_token=refreshed,
-                refresh_token=_decrypt_notion_refresh_token(refreshed_record),
-                token_endpoint=refreshed_record.get("token_endpoint", ""),
-                client_id=refreshed_record.get("client_id", ""),
-                client_secret=_decrypt_notion_client_secret(refreshed_record),
-            )
-        if refresh_token_dead:
-            latest = await _get_provider(login, NOTION_KEY)
-            if latest and latest.get("encrypted_refresh_token") != record.get(
-                "encrypted_refresh_token"
-            ):
-                latest_access_token = _decrypt_notion_access_token(latest)
-                if latest_access_token:
-                    return NotionCredentials(
-                        access_token=latest_access_token,
-                        refresh_token=_decrypt_notion_refresh_token(latest),
-                        token_endpoint=latest.get("token_endpoint", ""),
-                        client_id=latest.get("client_id", ""),
-                        client_secret=_decrypt_notion_client_secret(latest),
-                    )
-            logger.info("Dropping dead Notion authorization for %s; reconnect required", login)
-            await disconnect_notion(login)
-            return None
-        return NotionCredentials(
-            access_token=access_token,
-            refresh_token=_decrypt_notion_refresh_token(record),
-            token_endpoint=record.get("token_endpoint", ""),
-            client_id=record.get("client_id", ""),
-            client_secret=_decrypt_notion_client_secret(record),
-        )
+    return _notion_credentials(record) if record else None
 
 
 async def get_notion_access_token(login: str) -> str | None:

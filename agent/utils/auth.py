@@ -394,7 +394,7 @@ async def _resolve_dashboard_user_token(
     if not login:
         raise ValueError("missing github_login")
 
-    from ..dashboard.profiles import get_oauth_token_record, get_valid_access_token
+    from ..dashboard.github_tokens import get_oauth_token_record, get_valid_access_token
 
     token = await get_valid_access_token(login)
     if not token:

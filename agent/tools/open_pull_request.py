@@ -44,7 +44,7 @@ async def _resolve_pr_author_token() -> tuple[str | None, str]:
     github_login = configurable.get("github_login")
 
     if source in _USER_TOKEN_SOURCES and isinstance(github_login, str) and github_login.strip():
-        from ..dashboard.profiles import get_valid_access_token
+        from ..dashboard.github_tokens import get_valid_access_token
 
         user_token = await get_valid_access_token(github_login.strip())
         if user_token:

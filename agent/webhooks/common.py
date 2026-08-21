@@ -30,13 +30,13 @@ from ..dashboard.agent_overrides import (
     resolve_login_from_email_async,
 )
 from ..dashboard.enabled_repos import is_review_repo_enabled
-from ..dashboard.oauth import build_settings_url
-from ..dashboard.options import default_vision_model_pair, model_supports_images  # noqa: F401
-from ..dashboard.profiles import (  # noqa: F401
-    get_profile,
+from ..dashboard.github_tokens import (  # noqa: F401
     get_valid_access_token,
     has_access_token_record,
 )
+from ..dashboard.oauth import build_settings_url
+from ..dashboard.options import default_vision_model_pair, model_supports_images  # noqa: F401
+from ..dashboard.profiles import get_profile
 from ..dashboard.team_settings import (
     get_team_default_repo,
     get_team_settings,
