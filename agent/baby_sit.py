@@ -2,7 +2,6 @@
 
 import hashlib
 import logging
-import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -13,6 +12,7 @@ from langgraph_sdk.errors import ConflictError
 
 from .dispatch import dispatch_agent_run
 from .store import delete_value, get_value, now_iso, put_value, search_all_values
+from .thread_ids import baby_sit_lock_thread_id
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_ci import (
     FAILING_CONCLUSIONS,
@@ -44,7 +44,7 @@ WATCH_LOCK_TTL_MINUTES = 5
 @asynccontextmanager
 async def _watch_lock(key: str) -> AsyncIterator[bool]:
     client = get_client()
-    lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:baby-sit-lock:{key}"))
+    lock_id = baby_sit_lock_thread_id(key)
     try:
         await client.threads.create(
             thread_id=lock_id, if_exists="raise", ttl=WATCH_LOCK_TTL_MINUTES
