@@ -286,7 +286,6 @@ async def test_create_langsmith_sandbox_uses_repo_snapshot_override() -> None:
     with (
         patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-default"}, clear=True),
         patch.object(langsmith, "LangSmithProvider", return_value=provider),
-        patch.object(langsmith, "_update_thread_sandbox_metadata", new_callable=AsyncMock),
     ):
         await langsmith.create_langsmith_sandbox(snapshot_id="repo-snap")
 
@@ -304,7 +303,6 @@ async def test_create_langsmith_sandbox_falls_back_to_default() -> None:
     with (
         patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-default"}, clear=True),
         patch.object(langsmith, "LangSmithProvider", return_value=provider),
-        patch.object(langsmith, "_update_thread_sandbox_metadata", new_callable=AsyncMock),
     ):
         await langsmith.create_langsmith_sandbox()
 

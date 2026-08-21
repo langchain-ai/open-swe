@@ -82,10 +82,11 @@ function SendButton({
   canSubmit,
   submitting,
   onSubmit,
-}: ComposerPrimaryActionsProps) {
+  label = "Send message",
+}: ComposerPrimaryActionsProps & { label?: string }) {
   return (
     <button
-      aria-label="Send message"
+      aria-label={label}
       className={cn(
         "relative isolate flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/90 text-primary-foreground shadow-xs shadow-primary/25 transition-all duration-150",
         "hover:scale-105 hover:bg-primary active:shadow-none enabled:cursor-pointer",
@@ -181,13 +182,20 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
     }
   }
 
+  const running = stream.isLoading || props.activeRun?.running
+  useEscapeToStop(
+    Boolean(running && props.canSubmit && props.stopOnEscape !== false),
+    () => void handleStop()
+  )
+
   // Server truth (`activeRun.running`) matters as much as the client stream:
   // this browser only sees `isLoading` once it observes a lifecycle event, so a
   // run it never joined would otherwise render an unusable send button.
-  if (!stream.isLoading && !props.activeRun?.running)
-    return <SendButton {...props} />
+  if (!running) return <SendButton {...props} />
 
-  return (
+  return props.canSubmit ? (
+    <SendButton {...props} canSubmit={!stopping} label="Steer agent" />
+  ) : (
     <StopButton
       disabled={stopping}
       onStop={() => void handleStop()}
@@ -198,9 +206,9 @@ function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
 
 function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
   const [stopping, setStopping] = useState(false)
-  if (!props.activeRun?.running || !props.onStop)
-    return <SendButton {...props} />
+  const running = Boolean(props.activeRun?.running && props.onStop)
   const stop = async () => {
+    if (stopping) return
     setStopping(true)
     try {
       await props.onStop?.()
@@ -208,7 +216,14 @@ function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
       setStopping(false)
     }
   }
-  return (
+  useEscapeToStop(
+    Boolean(running && props.canSubmit && props.stopOnEscape !== false),
+    () => void stop()
+  )
+  if (!running) return <SendButton {...props} />
+  return props.canSubmit ? (
+    <SendButton {...props} canSubmit={!stopping} label="Steer agent" />
+  ) : (
     <StopButton
       disabled={stopping}
       onStop={() => void stop()}

@@ -1,15 +1,22 @@
+import { ChevronDown, ChevronRight } from "lucide-react"
+import { IoLogoSlack } from "react-icons/io5"
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 
+import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
+import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
 
 export function UserMessage({ message }: { message: Message }) {
+  const isSystem = message.structuredSenderKind === "system"
+  const isSlack = message.structuredSurface === "slack"
   const text = message.chunks
     .filter((c) => c.kind === "text")
     .map((c) => c.text)
     .join("")
 
   const images = message.chunks.filter((c) => c.kind === "image")
+  const [expanded, setExpanded] = useState(false)
   const textRef = useRef<HTMLDivElement>(null)
   const [scrolledFromTop, setScrolledFromTop] = useState(false)
   const [scrolledFromBottom, setScrolledFromBottom] = useState(false)
@@ -35,10 +42,57 @@ export function UserMessage({ message }: { message: Message }) {
       : undefined
 
   return (
-    <div className="group/turn my-4 flex flex-col items-end gap-1">
+    <div
+      className={`group/turn my-4 flex flex-col gap-1 ${isSystem ? "items-start" : "items-end"}`}
+      data-testid="user-message"
+      data-message-sender-kind={message.structuredSenderKind}
+      data-message-surface={message.structuredSurface}
+    >
       <div className="max-w-[80%]">
-        {(text || images.length > 0) && (
-          <div className="relative overflow-hidden rounded-2xl bg-accent p-3">
+        {isSystem ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+            data-testid="system-message-toggle"
+            className="flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/30"
+          >
+            {expanded ? (
+              <ChevronDown className="size-3" />
+            ) : (
+              <ChevronRight className="size-3" />
+            )}
+            <span>{message.structuredSenderName || "Context"}</span>
+            {message.structuredSenderNote && (
+              <span className="text-muted-foreground/70">
+                · {message.structuredSenderNote}
+              </span>
+            )}
+          </button>
+        ) : (
+          (message.structuredSenderName || isSlack) && (
+            <div className="mb-1 flex items-center gap-1 px-1 text-[11px] font-medium text-muted-foreground">
+              {isSlack && (
+                <IoLogoSlack className="size-3" role="img" aria-label="Slack" />
+              )}
+              {message.structuredSenderName && (
+                <span>{message.structuredSenderName}</span>
+              )}
+              {message.structuredSenderNote && (
+                <span className="font-normal text-muted-foreground/70">
+                  {" · "}
+                  {message.structuredSenderNote}
+                </span>
+              )}
+            </div>
+          )
+        )}
+        {(!isSystem || expanded) && (text || images.length > 0) && (
+          <div
+            className={`relative overflow-hidden rounded-2xl p-3 ${
+              isSystem ? "mt-1 border border-border bg-muted/50" : "bg-accent"
+            }`}
+          >
             {images.length > 0 && (
               <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                 {images.map((img, i) => (
@@ -65,15 +119,19 @@ export function UserMessage({ message }: { message: Message }) {
                   WebkitMaskImage: textEdgeMask,
                 }}
               >
-                {text}
+                {isSlack ? (
+                  <SlackMrkdwn text={text} />
+                ) : (
+                  <SkillPromptText text={text} />
+                )}
               </div>
             )}
           </div>
         )}
-        {!message.timestampIsFallback && (
+        {!message.timestampIsFallback && (!isSystem || expanded) && (
           <MessageTimestamp
             timestamp={message.timestamp}
-            align="right"
+            align={isSystem ? "left" : "right"}
             className="mt-1 pr-1"
           />
         )}

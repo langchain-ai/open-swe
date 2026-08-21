@@ -19,7 +19,11 @@ import {
 } from "./ComposerPromptEditor"
 import { ContextWindowMeter } from "./ContextWindowMeter"
 import { EnvironmentSelector } from "./EnvironmentSelector"
-import { RunTargetSelector } from "./RunTargetSelector"
+import {
+  LocalBranchSelector,
+  LocalProjectSelector,
+  RunTargetSelector,
+} from "./RunTargetSelector"
 import {
   COMPOSER_PATH_DRAG_MIME,
   detectComposerTrigger,
@@ -41,6 +45,7 @@ import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { useRegisterAppCommands } from "@/lib/appCommands"
 import { transcribeAudio } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -104,10 +109,13 @@ export interface ChatComposerProps {
   localProjects?: Array<DesktopProject>
   selectedLocalProjectPath?: string | null
   selectedLocalProjectBranch?: string | null
+  localProjectBranches?: Array<string>
   onSelectLocalProject?: (cwd: string) => void
   onAddLocalProject?: () => void
   onRemoveLocalProject?: (cwd: string) => void
   onRefreshLocalProjectBranch?: () => void
+  onSelectLocalProjectBranch?: (branch: string) => void
+  onCreateLocalProjectBranch?: (branch: string) => void
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
@@ -224,10 +232,13 @@ export const ChatComposer = memo(function ChatComposer({
   localProjects = [],
   selectedLocalProjectPath = null,
   selectedLocalProjectBranch = null,
+  localProjectBranches = [],
   onSelectLocalProject,
   onAddLocalProject,
   onRemoveLocalProject,
   onRefreshLocalProjectBranch,
+  onSelectLocalProjectBranch,
+  onCreateLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
   adminThread = false,
@@ -254,6 +265,37 @@ export const ChatComposer = memo(function ChatComposer({
     "idle" | "recording" | "transcribing"
   >("idle")
   const [dictationError, setDictationError] = useState<string | null>(null)
+  const composerShortcuts = useMemo(
+    () => [
+      {
+        id: "composer-send",
+        label: "Send message",
+        shortcuts: ["enter"],
+        group: "Composer",
+        showInPalette: false,
+      },
+      {
+        id: "composer-new-line",
+        label: "New line",
+        shortcuts: ["shift+enter"],
+        group: "Composer",
+        showInPalette: false,
+      },
+      ...(activeRun?.running
+        ? [
+            {
+              id: "composer-stop-run",
+              label: "Stop active run",
+              shortcuts: ["escape"],
+              group: "Composer",
+              showInPalette: false,
+            },
+          ]
+        : []),
+    ],
+    [activeRun?.running]
+  )
+  useRegisterAppCommands(composerShortcuts)
 
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -285,6 +327,10 @@ export const ChatComposer = memo(function ChatComposer({
     [cursor, value]
   )
   const triggerKey = trigger ? `${trigger.kind}:${trigger.rangeStart}` : null
+  const skillNames = useMemo(
+    () => new Set(skills.map((skill) => skill.name)),
+    [skills]
+  )
   const commandItems = useMemo(
     () =>
       trigger
@@ -404,6 +450,7 @@ export const ChatComposer = memo(function ChatComposer({
     setIsSubmitting(true)
     applyPrompt("", 0)
     setPendingImages([])
+    setDictationError(null)
     try {
       await onSubmit?.(trimmed, images)
     } catch {
@@ -616,6 +663,9 @@ export const ChatComposer = memo(function ChatComposer({
     >
       {(onRepoChange || onRunTargetChange || onEnvironmentChange) && (
         <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 px-1 text-xs">
+          {runTarget && onRunTargetChange && (
+            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
+          )}
           {runTarget !== "local" && onRepoChange && (
             <RepoSelector
               repos={repos}
@@ -630,23 +680,29 @@ export const ChatComposer = memo(function ChatComposer({
               onChange={onEnvironmentChange}
             />
           )}
-          {runTarget &&
-            onRunTargetChange &&
+          {runTarget === "local" &&
             onSelectLocalProject &&
             onAddLocalProject &&
-            onRemoveLocalProject &&
-            onRefreshLocalProjectBranch && (
-              <RunTargetSelector
-                localEnabled={Boolean(window.openSweDesktop)}
-                onChange={onRunTargetChange}
+            onRemoveLocalProject && (
+              <LocalProjectSelector
                 onAddProject={onAddLocalProject}
                 onRemoveProject={onRemoveLocalProject}
-                onRefreshBranch={onRefreshLocalProjectBranch}
                 onSelectProject={onSelectLocalProject}
                 projects={localProjects}
                 selectedProjectPath={selectedLocalProjectPath}
-                selectedProjectBranch={selectedLocalProjectBranch}
-                value={runTarget}
+              />
+            )}
+          {runTarget === "local" &&
+            onRefreshLocalProjectBranch &&
+            onSelectLocalProjectBranch &&
+            onCreateLocalProjectBranch && (
+              <LocalBranchSelector
+                branches={localProjectBranches}
+                disabled={!selectedLocalProjectPath}
+                onCreateBranch={onCreateLocalProjectBranch}
+                onRefresh={onRefreshLocalProjectBranch}
+                onSelectBranch={onSelectLocalProjectBranch}
+                selectedBranch={selectedLocalProjectBranch}
               />
             )}
         </div>
@@ -747,6 +803,7 @@ export const ChatComposer = memo(function ChatComposer({
           onCommandKeyDown={handleCommandKeyDown}
           onPaste={handlePaste}
           placeholder={busy ? "Send a message to queue next..." : placeholder}
+          skillNames={skillNames}
           value={value}
         />
 
@@ -756,11 +813,7 @@ export const ChatComposer = memo(function ChatComposer({
               render={
                 <ComposerControl
                   aria-label="More composer options"
-                  className={cn(
-                    "size-7 px-0",
-                    adminThread &&
-                      "bg-destructive/10 text-foreground hover:bg-destructive/10 hover:text-foreground"
-                  )}
+                  className="size-7 px-0"
                   type="button"
                 />
               }
@@ -781,12 +834,6 @@ export const ChatComposer = memo(function ChatComposer({
                   {planMode ? "Disable plan mode" : "Enable plan mode"}
                 </MenuItem>
               )}
-              {onAdminThreadChange && (
-                <MenuItem onClick={() => onAdminThreadChange(!adminThread)}>
-                  <ServerCogIcon />
-                  {adminThread ? "Disable admin mode" : "Enable admin mode"}
-                </MenuItem>
-              )}
             </MenuPopup>
           </Menu>
 
@@ -801,6 +848,32 @@ export const ChatComposer = memo(function ChatComposer({
                 selection={selection}
                 triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
               />
+            )}
+
+            {onAdminThreadChange && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <ComposerControl
+                      aria-label="Admin mode"
+                      aria-pressed={adminThread}
+                      className={cn(
+                        adminThread &&
+                          "bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive"
+                      )}
+                      disabled={disabled}
+                      onClick={() => onAdminThreadChange(!adminThread)}
+                      type="button"
+                    />
+                  }
+                >
+                  <ComposerControlIcon icon={ServerCogIcon} />
+                  <span>Admin</span>
+                </TooltipTrigger>
+                <TooltipPopup side="top">
+                  {adminThread ? "Disable admin mode" : "Enable admin mode"}
+                </TooltipPopup>
+              </Tooltip>
             )}
 
             {planMode && onPlanModeChange && (

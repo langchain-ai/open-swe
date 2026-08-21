@@ -1,10 +1,4 @@
-/**
- * Client for the plan-review API — plain HTTP, no realtime transport.
- *
- * The agent publishes the plan markdown; reviewers read it and leave
- * whole-document comments. On approve/reject the server reads those comments and
- * hands them to the agent as the instruction for the follow-up run.
- */
+/** Client for the sandboxed HTML plan-artifact review API. */
 
 import { dashboardApiBase } from "./api-base"
 import {
@@ -39,6 +33,7 @@ export interface PlanApprover {
 export interface PlanData {
   threadId: string
   status: PlanStatus
+  html: string
   markdown: string
   isOwner: boolean
   approvedBy: PlanApprover | null
@@ -127,11 +122,12 @@ export function deletePlanComment(
 
 export function updatePlan(
   threadId: string,
-  markdown: string
-): Promise<{ status: PlanStatus; markdown: string }> {
+  content: string,
+  format: "html" | "markdown"
+): Promise<{ status: PlanStatus; html?: string; markdown?: string }> {
   return req(`/plan/${encodeURIComponent(threadId)}`, {
     method: "PUT",
-    body: JSON.stringify({ markdown }),
+    body: JSON.stringify({ [format]: content }),
   })
 }
 
@@ -143,8 +139,12 @@ export function approvePlan(
   })
 }
 
-export function rejectPlan(threadId: string): Promise<{ status: string }> {
+export function rejectPlan(
+  threadId: string,
+  dispatch = true
+): Promise<{ status: string }> {
   return req(`/plan/${encodeURIComponent(threadId)}/reject`, {
     method: "POST",
+    body: JSON.stringify({ dispatch }),
   })
 }

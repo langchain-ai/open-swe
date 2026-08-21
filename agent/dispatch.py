@@ -29,11 +29,105 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 
+from .input_messages import (
+    ChannelIdentity,
+    InputMessageContext,
+    PersonIdentity,
+    RunInput,
+    Surface,
+    SystemIdentity,
+    build_run_input,
+)
+
 logger = logging.getLogger(__name__)
 
 ContentBlocks = str | list[dict[str, Any]]
-RunInput = dict[str, Any]
 RunConfig = dict[str, Any]
+
+
+def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str, Any]) -> RunInput:
+    surface: Surface = (
+        source
+        if source in {"slack", "linear", "github", "web", "desktop", "eval"}
+        else "automation"
+    )  # type: ignore[assignment]
+    people: list[PersonIdentity] = []
+    channels: list[ChannelIdentity] = []
+    systems: list[SystemIdentity] = []
+    login = configurable.get("github_login")
+    email = configurable.get("user_email")
+    slack_thread = configurable.get("slack_thread")
+    sender_id = ""
+    channel_id: str | None = None
+    if surface == "slack" and isinstance(slack_thread, dict):
+        user_id = slack_thread.get("triggering_user_id")
+        slack_channel_id = slack_thread.get("channel_id")
+        if isinstance(user_id, str) and user_id:
+            sender_id = f"slack:{user_id}"
+            person: PersonIdentity = {"id": sender_id, "platform": "slack"}
+            display_name = slack_thread.get("triggering_user_name")
+            timezone = slack_thread.get("triggering_user_timezone")
+            if isinstance(display_name, str) and display_name:
+                person["display_name"] = display_name
+            if isinstance(timezone, str) and timezone:
+                person["timezone"] = timezone
+            if isinstance(login, str) and login:
+                person["github_login"] = login
+            if isinstance(email, str) and email:
+                person["email"] = email
+            people.append(person)
+        if isinstance(slack_channel_id, str) and slack_channel_id:
+            channel_id = f"slack:{slack_channel_id}"
+            channel: ChannelIdentity = {"id": channel_id, "platform": "slack"}
+            channel_context = slack_thread.get("channel_context")
+            if isinstance(channel_context, dict):
+                name = channel_context.get("name") or channel_context.get("name_normalized")
+                topic = channel_context.get("topic")
+                purpose = channel_context.get("purpose")
+                if isinstance(name, str) and name:
+                    channel["name"] = name
+                if isinstance(topic, str) and topic:
+                    channel["topic"] = topic
+                if isinstance(purpose, str) and purpose:
+                    channel["purpose"] = purpose
+            thread_ts = slack_thread.get("thread_ts")
+            if isinstance(thread_ts, str) and thread_ts:
+                channel["thread_id"] = thread_ts
+            channels.append(channel)
+    if not sender_id and isinstance(login, str) and login:
+        sender_id = f"github:{login}"
+        person = {"id": sender_id, "platform": "github", "github_login": login}
+        if isinstance(email, str) and email:
+            person["email"] = email
+        people.append(person)
+    if not sender_id and surface == "linear" and isinstance(email, str) and email:
+        sender_id = f"linear:{email.lower()}"
+        people.append({"id": sender_id, "platform": "linear", "email": email})
+    kind = "human" if sender_id else "system"
+    if not sender_id:
+        sender_id = f"system:{source.replace('_', '-')}"
+        systems.append(
+            {
+                "id": sender_id,
+                "display_name": source.replace("-", " ").title(),
+                "platform": "open-swe",
+            }
+        )
+    context: InputMessageContext = {
+        "sender_id": sender_id,
+        "surface": surface,
+        "kind": kind,
+    }
+    if channel_id:
+        context["channel_id"] = channel_id
+    return build_run_input(
+        content,
+        context,
+        people=people,
+        channels=channels,
+        systems=systems,
+    )
+
 
 # FastAPI route the platform POSTs run completion/failure to. The platform
 # rejects loopback webhooks (relative URLs / localhost) — they bypass auth via
@@ -160,10 +254,15 @@ async def create_durable_run(
 
 async def dispatch_agent_run(
     thread_id: str,
-    content: ContentBlocks,
+    content: ContentBlocks | None,
     configurable: dict[str, Any],
     *,
     source: str,
+    input: RunInput | None = None,
+    context: InputMessageContext | None = None,
+    people: list[PersonIdentity] | None = None,
+    channels: list[ChannelIdentity] | None = None,
+    systems: list[SystemIdentity] | None = None,
     assistant_id: str = "agent",
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
@@ -175,10 +274,28 @@ async def dispatch_agent_run(
     contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
     the graph (``"agent"`` or ``"reviewer"``).
     """
+    if input is not None and any(
+        value is not None for value in (content, context, people, channels, systems)
+    ):
+        raise ValueError("prebuilt input cannot be combined with content or source identities")
+    if input is None:
+        if content is None:
+            raise ValueError("content is required when input is not provided")
+        input = (
+            build_run_input(
+                content,
+                context,
+                people=people,
+                channels=channels,
+                systems=systems,
+            )
+            if context is not None
+            else _dispatch_input(content, source, configurable)
+        )
     return await create_durable_run(
         thread_id,
         assistant_id,
-        input={"messages": [{"role": "user", "content": content}]},
+        input=input,
         config={"configurable": configurable},
         metadata=metadata or {},
         source=source,

@@ -20,6 +20,7 @@ from ..dashboard.agent_overrides import (
     resolve_agent_model_id,  # noqa: F401
     resolve_login_from_email_async,
 )
+from ..dashboard.agent_usage import update_agent_pr_usage_from_webhook
 from ..dashboard.enabled_repos import is_review_repo_enabled
 from ..dashboard.oauth import build_settings_url
 from ..dashboard.options import default_vision_model_pair, model_supports_images  # noqa: F401
@@ -270,6 +271,7 @@ __all__ = [
     "slack_event_already_seen",
     "store_slack_run_mapping",
     "strip_bot_mention",
+    "update_agent_pr_usage_from_webhook",
     "update_agent_thread_pr_state",
     "update_slack_message",
     "upsert_agent_thread_owner_metadata",
@@ -1117,13 +1119,14 @@ _SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
         "converted_to_draft",
         "closed",
         "reopened",
+        "synchronize",
     ]
 )
 _GH_PR_WATCH_TOGGLE_ACTIONS = frozenset(["closed", "reopened", "converted_to_draft"])
 _GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
 # PR lifecycle actions that should refresh the agent thread's tracked pr_state.
 _GH_PR_AGENT_STATE_ACTIONS = frozenset(
-    ["closed", "reopened", "converted_to_draft", "ready_for_review"]
+    ["closed", "reopened", "converted_to_draft", "ready_for_review", "synchronize"]
 )
 _SUPPORTED_GH_COMMENT_ACTIONS = {
     "issue_comment": frozenset(["created", "edited"]),
@@ -1151,6 +1154,7 @@ async def _trigger_or_queue_run(
     thread_id: str,
     prompt: str,
     *,
+    input: Any | None = None,
     github_login: str,
     github_user_id: int | None,
     repo_config: dict[str, str],
@@ -1168,7 +1172,7 @@ async def _trigger_or_queue_run(
     logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
     await dispatch_agent_run(
         thread_id,
-        prompt,
+        None if input is not None else prompt,
         {
             "source": "github",
             "github_login": github_login,
@@ -1177,6 +1181,7 @@ async def _trigger_or_queue_run(
             "pr_number": pr_number,
         },
         source="github",
+        input=input,
         metadata=_AGENT_VERSION_METADATA,
     )
     logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
@@ -1437,25 +1442,53 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         return
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
-    try:
-        threads = await langgraph_client.threads.search(metadata={"pr_url": pr_url}, limit=10)
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not search threads for PR %s state update", pr_url, exc_info=True)
-        return
+    matching_threads: dict[str, Any] = {}
+    page_size = 50
+    for metadata_filter in ({"pr_url": pr_url}, {"pr_urls": [pr_url]}):
+        offset = 0
+        while True:
+            try:
+                threads = await langgraph_client.threads.search(
+                    metadata=metadata_filter, limit=page_size, offset=offset
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "Could not search threads for PR %s state update", pr_url, exc_info=True
+                )
+                break
+            page = threads or []
+            for thread in page:
+                thread_id = (
+                    (thread.get("thread_id") or thread.get("id"))
+                    if isinstance(thread, dict)
+                    else None
+                )
+                if isinstance(thread_id, str) and thread_id:
+                    matching_threads[thread_id] = thread
+            if len(page) < page_size:
+                break
+            offset += page_size
 
-    for thread in threads or []:
-        metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    for thread_id, thread in matching_threads.items():
+        metadata = thread.get("metadata")
         if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
             continue
-        thread_id = thread.get("thread_id") or thread.get("id")
-        if not isinstance(thread_id, str) or not thread_id:
-            continue
-        if metadata.get("pr_state") == new_state:
+        metadata_update: dict[str, Any] = {}
+        pull_requests = metadata.get("pull_requests")
+        if isinstance(pull_requests, list):
+            updated = [
+                {**record, "state": new_state} if record.get("url") == pr_url else record
+                for record in pull_requests
+                if isinstance(record, dict)
+            ]
+            if updated != pull_requests:
+                metadata_update["pull_requests"] = updated
+        if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
+            metadata_update["pr_state"] = new_state
+        if not metadata_update:
             continue
         try:
-            await langgraph_client.threads.update(
-                thread_id=thread_id, metadata={"pr_state": new_state}
-            )
+            await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata_update)
         except Exception:  # noqa: BLE001
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
 

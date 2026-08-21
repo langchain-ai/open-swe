@@ -8,24 +8,26 @@ import { cn } from "@/lib/utils"
  */
 export function TurnFoldRow({
   label,
+  active,
   expanded,
   onToggle,
 }: {
   label: string
+  active: boolean
   expanded: boolean
   onToggle: () => void
 }) {
   const Icon = expanded ? ChevronDown : ChevronRight
 
   return (
-    <div className="border-b border-border/60 pt-1 pb-2">
+    <div className={cn("pt-1 pb-2", !active && "border-b border-border/60")}>
       <button
         type="button"
         aria-expanded={expanded}
         onClick={onToggle}
         className="flex cursor-pointer items-center gap-1 rounded-md px-1 text-[13px] text-muted-foreground tabular-nums transition-colors select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none focus-visible:ring-inset"
       >
-        <span>{label}</span>
+        <span className={active ? "shimmer-text" : undefined}>{label}</span>
         <Icon className="size-3.5" />
       </button>
     </div>

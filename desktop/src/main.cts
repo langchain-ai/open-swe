@@ -9,6 +9,7 @@ const {
   dialog,
   net,
   protocol,
+  safeStorage,
   session,
   shell,
 } = require("electron");
@@ -17,8 +18,11 @@ const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
   captureCheckpoint,
   checkpointRef,
+  checkoutBranch,
   currentBranch,
+  localBranches,
   deleteRefs,
+  readBranchDiff,
   readDiff,
   repoRoot,
   repositoryMetadata,
@@ -35,6 +39,8 @@ const {
   removeProject,
 } = require("./project-store.cjs");
 const { beginLogin } = require("./login-server.cjs");
+const { OpenAiOAuthManager } = require("./openai-oauth.cjs");
+const { isDesktopCommandId } = require("./commands.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
@@ -87,7 +93,15 @@ let setupWindow = null;
 let loginFlow = null;
 let quitting = false;
 let localThreadStore = null;
+let lastActivity = {};
 let backendSupervisor = null;
+let openAiOAuth = null;
+
+function sendDesktopCommand(commandId) {
+  if (!isDesktopCommandId(commandId) || !mainWindow || mainWindow.isDestroyed())
+    return;
+  mainWindow.webContents.send("desktop:command", commandId);
+}
 
 function requireTrustedDesktopIpc(event) {
   const senderUrl = event.senderFrame?.url || event.sender.getURL();
@@ -156,7 +170,33 @@ async function recordLocalCheckpoint(thread) {
   if (!repo) return thread;
   const ref = checkpointRef(thread.id);
   await captureCheckpoint(repo, ref);
-  return localThreadStore.setCheckpoint(thread.id, { repo, ref });
+  const branch = await currentBranch(repo);
+  return localThreadStore.setCheckpoint(thread.id, { repo, ref, branch });
+}
+
+/**
+ * Remember which branch this thread is working on. Sessions share one worktree,
+ * so the checked-out branch only belongs to a thread while that thread has it:
+ * record it then, and read the recorded value afterwards.
+ */
+async function syncThreadBranch(thread) {
+  if (!thread?.checkpoint.repo) return thread;
+  const branch = await currentBranch(thread.checkpoint.repo);
+  if (!branch || branch === thread.checkpoint.branch) return thread;
+  return (
+    localThreadStore.setCheckpoint(thread.id, {
+      ...thread.checkpoint,
+      branch,
+    }) ?? thread
+  );
+}
+
+/** A running thread owns the checkout, so its branch can still be changing. */
+async function diffThread(threadId) {
+  const thread = localThreadStore.get(threadId);
+  if (!thread) return thread;
+  const activity = await backendSupervisor.threadActivity();
+  return activity?.[threadId] === "running" ? syncThreadBranch(thread) : thread;
 }
 
 function configureDesktopIpc() {
@@ -165,10 +205,25 @@ function configureDesktopIpc() {
     return listProjects();
   });
 
-  ipcMain.handle("desktop:project-branch", async (event, cwd) => {
+  ipcMain.handle("desktop:project-branches", async (event, cwd) => {
     requireTrustedDesktopIpc(event);
     const project = typeof cwd === "string" ? registeredProject(cwd) : null;
-    return project ? currentBranch(project) : null;
+    if (!project) return { current: null, branches: [] };
+    const [current, branches] = await Promise.all([
+      currentBranch(project),
+      localBranches(project),
+    ]);
+    return { current, branches };
+  });
+
+  ipcMain.handle("desktop:checkout-project-branch", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    const project =
+      input && typeof input.cwd === "string"
+        ? registeredProject(input.cwd)
+        : null;
+    if (!project) throw new Error("Project is not registered");
+    return checkoutBranch(project, input.branch, input.create === true);
   });
 
   ipcMain.handle("desktop:add-project", async (event) => {
@@ -230,6 +285,11 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return backendSupervisor.credentialStatus(modelId);
   });
+  ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
+    requireTrustedDesktopIpc(event);
+    if (!openAiOAuth) throw new Error("OpenAI sign-in is unavailable");
+    return openAiOAuth.login((url) => shell.openExternal(url));
+  });
   ipcMain.handle("desktop:start-local-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
     const cwd =
@@ -270,15 +330,32 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return localThreadStore.list();
   });
-  ipcMain.handle("desktop:update-local-thread", (event, input) => {
+  ipcMain.handle("desktop:local-activity", async (event) => {
     requireTrustedDesktopIpc(event);
-    return localThreadStore.update(input?.threadId, { status: input?.status });
+    const activity = await backendSupervisor.threadActivity();
+    if (!activity) throw new Error("Could not read local agent activity");
+    for (const [threadId, status] of Object.entries(lastActivity)) {
+      if (status === "running" && activity[threadId] !== "running")
+        localThreadStore.update(threadId, { viewed: false });
+    }
+    lastActivity = activity;
+    return activity;
+  });
+  ipcMain.handle("desktop:update-local-thread", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    const updated = localThreadStore.update(input?.threadId, {
+      ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
+      ...(typeof input?.modelId === "string" ? { modelId: input.modelId } : {}),
+      ...(typeof input?.effort === "string" ? { effort: input.effort } : {}),
+    });
+    return syncThreadBranch(updated);
   });
   ipcMain.handle("desktop:delete-local-thread", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
     const thread = localThreadStore.get(threadId);
     if (!thread) return false;
-    if (thread.status === "running" || thread.status === "starting")
+    const activity = await backendSupervisor.threadActivity();
+    if (!activity || activity[threadId] === "running")
       throw new Error("Stop the local agent before deleting it");
     await closeThreadTerminals(threadId);
     try {
@@ -293,7 +370,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:get-local-diff", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(threadId);
+    const thread = await diffThread(threadId);
     if (
       !thread ||
       !registeredProject(thread.cwd) ||
@@ -304,8 +381,35 @@ function configureDesktopIpc() {
     try {
       const [diff, repository] = await Promise.all([
         readDiff(thread.checkpoint.repo, thread.checkpoint.ref),
-        repositoryMetadata(thread.checkpoint.repo),
+        repositoryMetadata(
+          thread.checkpoint.repo,
+          undefined,
+          thread.checkpoint.branch,
+        ),
       ]);
+      return { ...diff, repository };
+    } catch {
+      return { status: "error", files: [], truncated: false };
+    }
+  });
+  ipcMain.handle("desktop:get-local-pr-diff", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    const thread = await diffThread(threadId);
+    if (!thread || !registeredProject(thread.cwd) || !thread.checkpoint.repo)
+      return { status: "missing", files: [], truncated: false };
+    try {
+      const repository = await repositoryMetadata(
+        thread.checkpoint.repo,
+        undefined,
+        thread.checkpoint.branch,
+      );
+      if (!repository.pr)
+        return { status: "missing", files: [], truncated: false, repository };
+      const diff = await readBranchDiff(
+        thread.checkpoint.repo,
+        repository.pr.baseRef,
+        thread.checkpoint.branch,
+      );
       return { ...diff, repository };
     } catch {
       return { status: "error", files: [], truncated: false };
@@ -535,6 +639,12 @@ function createMenu() {
     label: "Backend URL…",
     click: () => createSetupWindow(),
   };
+  const settingsItem = {
+    id: "open-settings",
+    label: "Settings…",
+    accelerator: "CmdOrCtrl+,",
+    click: () => sendDesktopCommand("open-settings"),
+  };
   const template = [
     ...(process.platform === "darwin"
       ? [
@@ -542,6 +652,7 @@ function createMenu() {
             label: app.name,
             submenu: [
               { role: "about" },
+              settingsItem,
               backendSettingsItem,
               { type: "separator" },
               { role: "services" },
@@ -555,18 +666,27 @@ function createMenu() {
           },
         ]
       : []),
-    ...(process.platform === "darwin"
-      ? []
-      : [
-          {
-            label: "File",
-            submenu: [
-              backendSettingsItem,
-              { type: "separator" },
-              { role: "quit" },
-            ],
-          },
-        ]),
+    {
+      label: "File",
+      submenu: [
+        {
+          id: "new-thread",
+          label: "New Thread",
+          click: () => sendDesktopCommand("new-thread"),
+        },
+        {
+          id: "show-command-palette",
+          label: "Search Commands and Threads…",
+          accelerator: "CmdOrCtrl+K",
+          click: () => sendDesktopCommand("show-command-palette"),
+        },
+        ...(process.platform === "darwin"
+          ? []
+          : [{ type: "separator" }, settingsItem, backendSettingsItem]),
+        { type: "separator" },
+        { role: process.platform === "darwin" ? "close" : "quit" },
+      ],
+    },
     {
       label: "Edit",
       submenu: [
@@ -582,6 +702,13 @@ function createMenu() {
     {
       label: "View",
       submenu: [
+        {
+          id: "toggle-sidebar",
+          label: "Toggle Sidebar",
+          accelerator: "CmdOrCtrl+B",
+          click: () => sendDesktopCommand("toggle-sidebar"),
+        },
+        { type: "separator" },
         {
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
@@ -605,6 +732,13 @@ function createMenu() {
     {
       role: "help",
       submenu: [
+        {
+          id: "show-keyboard-shortcuts",
+          label: "Keyboard Shortcuts",
+          accelerator: "CmdOrCtrl+/",
+          click: () => sendDesktopCommand("show-keyboard-shortcuts"),
+        },
+        { type: "separator" },
         {
           label: "Open SWE on GitHub",
           click: () =>
@@ -704,7 +838,7 @@ function createWindow() {
     title: appRuntime.name,
     width: 1440,
     height: 900,
-    minWidth: 900,
+    minWidth: 480,
     minHeight: 600,
     backgroundColor: "#ffffff",
     icon: iconPath(),
@@ -745,6 +879,15 @@ function createWindow() {
   );
   window.webContents.on("will-attach-webview", (event) =>
     event.preventDefault(),
+  );
+  window.webContents.on("did-finish-load", () =>
+    window.webContents.send("desktop:fullscreen-change", window.isFullScreen()),
+  );
+  window.on("enter-full-screen", () =>
+    window.webContents.send("desktop:fullscreen-change", true),
+  );
+  window.on("leave-full-screen", () =>
+    window.webContents.send("desktop:fullscreen-change", false),
   );
   mainWindow = window;
   void loadApp(window);
@@ -841,7 +984,7 @@ if (!hasSingleInstanceLock) {
     window.focus();
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     try {
       backendUrl = resolveBackendUrl({
         argv: process.argv.slice(1),
@@ -862,12 +1005,29 @@ if (!hasSingleInstanceLock) {
     localThreadStore = new LocalThreadStore(
       path.join(app.getPath("userData"), "desktop-local-threads.json"),
     );
+    openAiOAuth = new OpenAiOAuthManager({
+      storagePath: path.join(app.getPath("userData"), "openai-auth.bin"),
+      encryptString: (value) => {
+        if (!safeStorage.isEncryptionAvailable()) {
+          throw new Error("Secure credential storage is unavailable");
+        }
+        return safeStorage.encryptString(value);
+      },
+      decryptString: (value) => safeStorage.decryptString(value),
+    });
+    await openAiOAuth.startBroker().catch((error) => {
+      console.warn("Could not start the local OpenAI credential broker", error);
+    });
     backendSupervisor = new BackendSupervisor({
       isPackaged: app.isPackaged,
       repoRoot: path.resolve(__dirname, "../.."),
       resourcesPath: process.resourcesPath,
       stateDir: path.join(app.getPath("userData"), "local-backend"),
       projectsFile: projectsPath(),
+      providerEnv: () => openAiOAuth?.backendEnv() || {},
+      openAiOAuthAvailable: () =>
+        openAiOAuth?.status().signedIn === true &&
+        Boolean(openAiOAuth?.backendEnv().OPEN_SWE_OPENAI_OAUTH_BROKER_URL),
     });
     protocol.handle("open-swe", serveBundledUi);
     configurePermissions();
@@ -896,10 +1056,12 @@ if (!hasSingleInstanceLock) {
     if (quitting) return;
     event.preventDefault();
     quitting = true;
-    void Promise.all([closeAllTerminals(), backendSupervisor?.close()]).finally(
-      () => {
-        app.quit();
-      },
-    );
+    void Promise.all([
+      closeAllTerminals(),
+      backendSupervisor?.close(),
+      openAiOAuth?.close(),
+    ]).finally(() => {
+      app.quit();
+    });
   });
 }

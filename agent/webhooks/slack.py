@@ -12,69 +12,24 @@ import httpx
 from langchain_core.messages.content import create_text_block
 
 from agent.dashboard.environments import get_environment, parse_environment_tag
+from agent.input_messages import (
+    InputMessageContext,
+    MessageKind,
+    PersonIdentity,
+    RunInput,
+    SystemIdentity,
+    channel_introduction,
+    human_input,
+    person_introduction,
+    system_input,
+    system_introduction,
+)
+from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 
 from ..utils.user_messages import warning
 from . import common
-
-_PLAN_APPROVAL_PHRASES = {
-    "approve",
-    "approve it",
-    "approve plan",
-    "approve the plan",
-    "approved",
-    "go ahead",
-    "go ahead and implement",
-    "go ahead and implement it",
-    "go ahead with implementation",
-    "i approve",
-    "i approve the plan",
-    "implement it",
-    "lgtm",
-    "looks good",
-    "looks good go ahead",
-    "looks good please proceed",
-    "looks good to me",
-    "please implement",
-    "please proceed",
-    "proceed",
-    "ship it",
-    "start implementation",
-    "this looks good",
-    "yeah",
-    "yep",
-    "yes",
-    "yes please",
-}
-_PLAN_APPROVAL_NEGATIONS = {
-    "cancel",
-    "change",
-    "changes",
-    "deny",
-    "denied",
-    "do not",
-    "don t",
-    "dont",
-    "hold",
-    "no",
-    "not",
-    "reject",
-    "revise",
-    "stop",
-    "wait",
-}
-
-
-def _is_natural_language_plan_approval(text: str) -> bool:
-    normalized = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
-    if not normalized:
-        return False
-    padded = f" {normalized} "
-    if any(f" {phrase} " in padded for phrase in _PLAN_APPROVAL_NEGATIONS):
-        return False
-    return any(f" {phrase} " in padded for phrase in _PLAN_APPROVAL_PHRASES)
-
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60
@@ -88,8 +43,9 @@ _UNTAGGED_REPLY_PREAMBLE = (
     "conversation, answers to your questions, and follow-up instructions are addressed to you. "
     "Someone thinking out loud, talking to another person, or commenting on the thread without "
     "expecting you to act is not.\n\n"
-    "If it is not addressed to you, call `no_op` and post nothing. Staying silent is the right "
-    "outcome; an unwanted reply from an untagged message is worse than no reply. If it is "
+    "If it is not addressed to you, call `no_op` and post nothing, including no reaction. Staying "
+    "silent is the right outcome; an unwanted reply or reaction from an untagged message is worse "
+    "than no reply. If it is "
     "addressed to you, handle it exactly as you would a direct mention.\n\n"
 )
 
@@ -209,18 +165,21 @@ async def _slack_thread_allows_untagged_reply(
 async def _dispatch_or_queue_slack_run(
     client: Any,
     thread_id: str,
-    content_blocks: list[dict[str, Any]],
+    run_input: RunInput | list[dict[str, Any]],
     configurable: dict[str, Any],
     *,
     explicitly_tagged: bool,
 ) -> dict[str, Any]:
     """Dispatch explicit requests immediately and enqueue other Slack follow-ups."""
+    if isinstance(run_input, list):
+        run_input = {"messages": cast(list[Any], run_input)}
     return as_json_object(
         await common.dispatch_agent_run(
             thread_id,
-            content_blocks,
+            None,
             configurable,
             source="slack",
+            input=run_input,
             metadata=common._AGENT_VERSION_METADATA,
             client=client,
             multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
@@ -296,6 +255,170 @@ async def _format_slack_run_links_section(thread_id: str) -> str:
     return "\n".join(lines)
 
 
+_OPEN_SWE_SENDER_ID = "system:open-swe"
+
+
+async def _slack_logins_by_user_id(user_ids: list[str]) -> dict[str, str]:
+    """Map Slack user ids to the GitHub logins of linked Open SWE accounts."""
+    logins: dict[str, str] = {}
+    for user_id in {value for value in user_ids if value}:
+        login = await common.login_for_slack_id(user_id)
+        if login:
+            logins[user_id] = login
+    return logins
+
+
+def _slack_person(user_id: str, name: str = "", github_login: str = "") -> PersonIdentity:
+    person: PersonIdentity = {
+        "id": f"slack:{user_id}",
+        "platform": "slack",
+        "open_swe_account": "linked" if github_login else "unlinked",
+    }
+    if name:
+        person["display_name"] = name
+    if github_login:
+        person["github_login"] = github_login
+    return person
+
+
+def _slack_sender(
+    message: dict[str, Any],
+    user_names_by_id: dict[str, str],
+    logins_by_user_id: dict[str, str],
+    bot_user_id: str,
+) -> tuple[str, PersonIdentity | SystemIdentity, MessageKind]:
+    """Resolve a thread message to its sender id, identity, and message kind.
+
+    Open SWE posts with a bot token, so its own replies carry a ``user`` id as well as a
+    ``bot_id``; keying off ``user`` alone attributes them to a person.
+    """
+    if slack_utils.is_own_slack_message(message, bot_user_id):
+        identity: SystemIdentity = {
+            "id": _OPEN_SWE_SENDER_ID,
+            "display_name": common.SLACK_BOT_USERNAME or "Open SWE",
+            "platform": "slack",
+            "sender_type": "self",
+        }
+        return identity["id"], identity, "system"
+    bot_id = slack_utils.slack_message_bot_id(message)
+    if bot_id:
+        bot: SystemIdentity = {
+            "id": f"system:slack-bot-{bot_id}",
+            "display_name": slack_utils.slack_message_bot_name(message),
+            "platform": "slack",
+            "sender_type": "bot",
+        }
+        return bot["id"], bot, "system"
+    user_id = str(message.get("user"))
+    person = _slack_person(
+        user_id, user_names_by_id.get(user_id, ""), logins_by_user_id.get(user_id, "")
+    )
+    return person["id"], person, "human"
+
+
+def _slack_message_text(message: dict[str, Any], bot_user_id: str) -> str:
+    forwarded = common.format_slack_messages_for_prompt(
+        [message], {}, bot_user_id=bot_user_id, bot_username=common.SLACK_BOT_USERNAME
+    )
+    _, separator, content = forwarded.partition(": ")
+    return content if separator else forwarded
+
+
+def _slack_context_input(
+    messages: list[dict[str, Any]],
+    user_names_by_id: dict[str, str],
+    logins_by_user_id: dict[str, str],
+    *,
+    channel_id: str,
+    bot_user_id: str,
+    event_ts: str,
+    request_text: str,
+    request_blocks: list[dict[str, Any]],
+    operational_context: str,
+) -> RunInput:
+    channel_entity_id = f"slack:{channel_id}"
+    run_messages = [channel_introduction({"id": channel_entity_id, "platform": "slack"})]
+    introduced: set[str] = {channel_entity_id}
+    for message in messages:
+        if str(message.get("ts", "")) == str(event_ts):
+            continue
+        sender_id, identity, kind = _slack_sender(
+            message, user_names_by_id, logins_by_user_id, bot_user_id
+        )
+        if sender_id not in introduced:
+            run_messages.append(
+                person_introduction(cast(PersonIdentity, identity))
+                if kind == "human"
+                else system_introduction(cast(SystemIdentity, identity))
+            )
+            introduced.add(sender_id)
+        message_context: InputMessageContext = {
+            "sender_id": sender_id,
+            "channel_id": channel_entity_id,
+            "surface": "slack",
+            "kind": kind,
+            "data": {"timestamp": str(message.get("ts", ""))},
+        }
+        text = _slack_message_text(message, bot_user_id)
+        run_messages.append(
+            human_input(text, message_context)
+            if kind == "human"
+            else system_input(text, message_context)
+        )
+    run_messages.append(
+        system_introduction(
+            {"id": "system:slack-context", "display_name": "Slack context", "platform": "slack"}
+        )
+    )
+    run_messages.append(
+        system_input(
+            operational_context,
+            {
+                "sender_id": "system:slack-context",
+                "channel_id": channel_entity_id,
+                "surface": "slack",
+                "kind": "system",
+            },
+        )
+    )
+    trigger_id = next(
+        (
+            str(message.get("user"))
+            for message in messages
+            if str(message.get("ts", "")) == str(event_ts) and message.get("user")
+        ),
+        "unknown",
+    )
+    trigger_person = _slack_person(
+        trigger_id,
+        user_names_by_id.get(trigger_id, ""),
+        logins_by_user_id.get(trigger_id, ""),
+    )
+    if trigger_person["id"] not in introduced:
+        run_messages.append(person_introduction(trigger_person))
+    current_message = next(
+        (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
+    )
+    rendered_request = _slack_message_text(current_message, bot_user_id)
+    _, separator, forwarded_context = rendered_request.partition("\n")
+    if separator and forwarded_context:
+        request_text = f"{request_text}\n{forwarded_context}"
+    request_blocks[0] = {**request_blocks[0], "text": request_text}
+    run_messages.append(
+        human_input(
+            request_blocks,
+            {
+                "sender_id": trigger_person["id"],
+                "channel_id": channel_entity_id,
+                "surface": "slack",
+                "kind": "human",
+                "data": {"timestamp": event_ts},
+            },
+        )
+    )
+    return {"messages": run_messages}
+
+
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
     """Process a Slack request by creating a run or queuing a mid-run message."""
     try:
@@ -305,48 +428,22 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         await _notify_slack_processing_error(event_data, repo_config)
 
 
-async def _maybe_approve_ready_plan_reply(
-    thread_id: str,
-    channel_id: str,
-    thread_ts: str,
-    user_id: str,
-    user_name: str,
-    text: str,
-) -> bool:
-    if not _is_natural_language_plan_approval(text):
-        return False
-
-    from agent.dashboard.plan_api import _thread_metadata, approve_plan_for_thread
-    from agent.dashboard.plan_store import make_plan_approver
-
-    try:
-        metadata = await _thread_metadata(thread_id)
-    except Exception:  # noqa: BLE001
-        return False
-    if metadata.get("plan_mode") is not True or metadata.get("plan_status") != "ready":
-        return False
-    result = await approve_plan_for_thread(
-        thread_id,
-        approver=make_plan_approver(
-            actor_id=user_id,
-            name=user_name or user_id or "Slack user",
-            source="slack",
-        ),
-    )
-    return result.get("already_approved") is not True
-
-
 async def process_slack_plan_approval(
     event_data: dict[str, Any], repo_config: dict[str, str]
 ) -> None:
+    from agent.dashboard.plan_api import approve_plan_for_thread
+    from agent.dashboard.plan_store import make_plan_approver
+
     try:
-        await _maybe_approve_ready_plan_reply(
+        user_id = str(event_data.get("user_id") or "")
+        user_name = str(event_data.get("user_name") or "")
+        await approve_plan_for_thread(
             str(event_data.get("thread_id") or ""),
-            str(event_data.get("channel_id") or ""),
-            str(event_data.get("thread_ts") or ""),
-            str(event_data.get("user_id") or ""),
-            str(event_data.get("user_name") or ""),
-            "approve",
+            approver=make_plan_approver(
+                actor_id=user_id,
+                name=user_name or user_id or "Slack user",
+                source="slack",
+            ),
         )
     except Exception:  # noqa: BLE001
         common.logger.exception("Unexpected error while processing Slack plan approval")
@@ -529,12 +626,7 @@ async def _process_slack_mention_impl(
     user_names_by_id = await common.get_slack_user_names(context_user_ids)
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
-    context_text = common.format_slack_messages_for_prompt(
-        context_messages,
-        user_names_by_id,
-        bot_user_id=bot_user_id,
-        bot_username=common.SLACK_BOT_USERNAME,
-    )
+    logins_by_user_id = await _slack_logins_by_user_id([*context_user_ids, user_id])
     context_source = "the beginning of the thread"
     if context_mode == "last_mention":
         context_source = (
@@ -546,10 +638,6 @@ async def _process_slack_mention_impl(
         common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
         or "(no text in mention)"
     )
-    if await _maybe_approve_ready_plan_reply(
-        thread_id, channel_id, thread_ts, user_id, user_name, clean_text
-    ):
-        return
     is_first_mention = not await common._thread_exists(thread_id)
     # `env:<name>` on the message that opens a thread picks the environment its
     # sandbox boots from. Only the opening message can: the sandbox is created
@@ -581,22 +669,17 @@ async def _process_slack_mention_impl(
     slack_thread_section = _format_slack_thread_section(
         channel_id, thread_ts, context_source, channel_context
     )
-    conversation_context_section = (
-        "" if message_update else f"## Conversation Context\n{context_text}\n\n"
-    )
-    prompt = (
+    operational_context = (
         _slack_prompt_preamble(untagged_reply, message_update) + "## Default Repository Hint\n"
         f"{repo_config.get('owner')}/{repo_config.get('name')}\n"
         "Use this only if the Slack conversation does not identify a different repository.\n\n"
         f"## Triggered by\n{trigger_user}\n\n"
         f"{trigger_user_timezone_section}"
         f"{slack_thread_section}\n\n"
-        f"{await _format_slack_run_links_section(thread_id)}\n\n"
-        f"{conversation_context_section}"
-        + f"{_slack_request_heading(untagged_reply, message_update)}\n{clean_text}"
+        f"{await _format_slack_run_links_section(thread_id)}"
         + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
     )
-    content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
+    content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
 
     image_urls = common.dedupe_urls(
         [url for msg in source_messages for url in common.extract_image_urls(msg.get("text", ""))]
@@ -706,6 +789,7 @@ async def _process_slack_mention_impl(
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
+        logins_by_user_id[user_id] = mapped_login
     # Later mentions carry no tag, so the thread's environment comes back from
     # metadata — a follow-up must not be told about `default` while its sandbox
     # was built from the environment the opening message picked.
@@ -745,10 +829,21 @@ async def _process_slack_mention_impl(
         treat_all_messages_as_mentions=treat_all_messages_as_mentions,
         message_update=message_update,
     )
+    run_input = _slack_context_input(
+        context_messages,
+        user_names_by_id,
+        logins_by_user_id,
+        channel_id=channel_id,
+        bot_user_id=bot_user_id,
+        event_ts=event_ts,
+        request_text=clean_text,
+        request_blocks=content_blocks,
+        operational_context=operational_context,
+    )
     run = await _dispatch_or_queue_slack_run(
         langgraph_client,
         thread_id,
-        content_blocks,
+        run_input,
         configurable,
         explicitly_tagged=explicitly_tagged,
     )

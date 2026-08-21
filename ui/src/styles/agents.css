@@ -139,15 +139,15 @@ html[data-agents-theme] * {
 html[data-agents-theme] .shimmer-text {
   background: linear-gradient(
     90deg,
-    var(--muted-foreground) 40%,
+    var(--muted-foreground) 35%,
     var(--foreground) 50%,
-    var(--muted-foreground) 60%
+    var(--muted-foreground) 65%
   );
-  background-size: 200% auto;
+  background-size: 150% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  animation: agents-shimmer 4s linear infinite;
+  animation: agents-shimmer 2s linear infinite;
 }
 
 @keyframes agents-shimmer {

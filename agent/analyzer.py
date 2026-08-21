@@ -34,6 +34,7 @@ from .dashboard.team_settings import get_effective_gateway_enabled
 from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     BasePrepareRunMiddleware,
+    DynamicContextMiddleware,
     PrepareRunState,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeToolInputsMiddleware,
@@ -201,6 +202,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
                 ),
                 ToolErrorMiddleware(),
                 TimeoutWrapupMiddleware(),
+                DynamicContextMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
             ],
         ),

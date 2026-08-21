@@ -11,6 +11,7 @@ from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
 from ..dispatch import create_durable_run
+from ..input_messages import InputMessageContext, build_run_input
 from ..utils.slack import (
     bind_slack_thread_id,
     post_slack_top_level_message_with_ts,
@@ -18,6 +19,7 @@ from ..utils.slack import (
 )
 from ..utils.thread_ops import langgraph_client
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
+from .admin import is_admin
 from .options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -64,6 +66,7 @@ class ScheduleCreateBody(BaseModel):
     effort: str | None = None
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode = _DEFAULT_SLACK_NOTIFICATION_MODE
+    admin_thread: bool = False
 
     @field_validator("schedule")
     @classmethod
@@ -86,6 +89,7 @@ class ScheduleUpdateBody(BaseModel):
     enabled: bool | None = None
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode | None = None
+    admin_thread: bool | None = None
 
     @field_validator("schedule")
     @classmethod
@@ -182,6 +186,7 @@ def _schedule_summary(
         "repo": _repo_full_name(repo),
         "slackChannelId": record.get("slack_channel_id"),
         "slackNotificationMode": _slack_notification_mode(record),
+        "adminThread": record.get("admin_thread") is True,
         "model": record.get("model"),
         "effort": record.get("effort"),
         "enabled": bool(record.get("enabled")),
@@ -345,8 +350,14 @@ async def _delete_cron(cron_id: str | None) -> None:
 
 
 async def create_agent_schedule(
-    login: str, body: ScheduleCreateBody, *, email: str | None = None
+    login: str,
+    body: ScheduleCreateBody,
+    *,
+    email: str | None = None,
+    allow_admin_thread: bool = False,
 ) -> dict[str, Any]:
+    if body.admin_thread and not allow_admin_thread:
+        raise HTTPException(403, "admin only")
     await _ensure_dashboard_github_token(login)
     profile = await get_profile(login) or {}
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
@@ -361,6 +372,7 @@ async def create_agent_schedule(
         "repo": repo,
         "slack_channel_id": body.slack_channel_id,
         "slack_notification_mode": body.slack_notification_mode,
+        "admin_thread": body.admin_thread,
         "model": chosen_model or profile.get("default_model") or "Default",
         "effort": chosen_effort or profile.get("reasoning_effort"),
         "base_branch": profile.get("base_branch") or "main",
@@ -389,11 +401,22 @@ async def create_agent_schedule(
 
 
 async def update_agent_schedule(
-    schedule_id: str, login: str, body: ScheduleUpdateBody, *, email: str | None = None
+    schedule_id: str,
+    login: str,
+    body: ScheduleUpdateBody,
+    *,
+    email: str | None = None,
+    allow_admin_thread: bool = False,
 ) -> dict[str, Any]:
     existing = await get_agent_schedule(schedule_id)
     _assert_schedule_owner(existing, login, email)
     assert existing is not None
+    if (
+        body.admin_thread is True
+        and existing.get("admin_thread") is not True
+        and not allow_admin_thread
+    ):
+        raise HTTPException(403, "admin only")
 
     patch: dict[str, Any] = {}
     if body.prompt is not None:
@@ -417,6 +440,8 @@ async def update_agent_schedule(
         patch["slack_notification_mode"] = (
             body.slack_notification_mode or _DEFAULT_SLACK_NOTIFICATION_MODE
         )
+    if body.admin_thread is not None:
+        patch["admin_thread"] = body.admin_thread
 
     updated = {**existing, **patch}
     schedule_changed = updated.get("schedule") != existing.get("schedule")
@@ -482,12 +507,22 @@ def _scheduled_prompt(record: dict[str, Any], slack_thread: dict[str, Any] | Non
     return prompt
 
 
+def _admin_thread_enabled(record: dict[str, Any]) -> bool:
+    email = record.get("user_email")
+    login = record.get("created_by")
+    return record.get("admin_thread") is True and is_admin(
+        email if isinstance(email, str) else None,
+        login=login if isinstance(login, str) else None,
+    )
+
+
 def _agent_run_metadata(
     record: dict[str, Any],
     thread_id: str,
     slack_thread: dict[str, Any] | None = None,
     *,
     test_run: bool = False,
+    admin_thread: bool = False,
 ) -> dict[str, Any]:
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     now_ms = _now_ms()
@@ -516,6 +551,8 @@ def _agent_run_metadata(
         metadata["repo_name"] = repo["name"]
     if slack_thread:
         metadata["source_context"] = {"slack_thread": slack_thread}
+    if admin_thread:
+        metadata["admin_thread"] = True
     return metadata
 
 
@@ -525,6 +562,7 @@ async def _agent_run_config(
     slack_thread: dict[str, Any] | None = None,
     *,
     test_run: bool = False,
+    admin_thread: bool = False,
 ) -> dict[str, Any]:
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
@@ -540,6 +578,8 @@ async def _agent_run_config(
         configurable["repo"] = repo
     if slack_thread:
         configurable["slack_thread"] = slack_thread
+    if admin_thread:
+        configurable["admin_thread"] = True
     slack_channel_id = record.get("slack_channel_id")
     if (
         _slack_notification_mode(record) == "on_action"
@@ -637,15 +677,50 @@ async def _launch_agent_schedule_record(
         }
         await bind_slack_thread_id(client, slack_channel_id, message_ts, thread_id)
 
-    metadata = _agent_run_metadata(record, thread_id, slack_thread, test_run=test_run)
+    admin_thread = _admin_thread_enabled(record)
+    metadata = _agent_run_metadata(
+        record,
+        thread_id,
+        slack_thread,
+        test_run=test_run,
+        admin_thread=admin_thread,
+    )
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
+    input_context: InputMessageContext = {
+        "sender_id": f"system:schedule:{schedule_id}",
+        "surface": "automation",
+        "kind": "system",
+    }
+    if isinstance(slack_channel_id, str) and slack_channel_id:
+        input_context["channel_id"] = f"slack:{slack_channel_id}"
     run = await create_durable_run(
         thread_id,
         _AGENT_ASSISTANT_ID,
-        input={"messages": [{"role": "user", "content": _scheduled_prompt(record, slack_thread)}]},
+        input=build_run_input(
+            _scheduled_prompt(record, slack_thread),
+            input_context,
+            systems=[
+                {
+                    "id": f"system:schedule:{schedule_id}",
+                    "display_name": record.get("name") or "Scheduled automation",
+                    "platform": "open-swe",
+                }
+            ],
+            channels=(
+                [{"id": f"slack:{slack_channel_id}", "platform": "slack"}]
+                if isinstance(slack_channel_id, str) and slack_channel_id
+                else None
+            ),
+        ),
         source="schedule",
-        config=await _agent_run_config(record, thread_id, slack_thread, test_run=test_run),
+        config=await _agent_run_config(
+            record,
+            thread_id,
+            slack_thread,
+            test_run=test_run,
+            admin_thread=admin_thread,
+        ),
         client=client,
         stream_mode=["values", "updates", "messages-tuple"],
         stream_resumable=True,

@@ -92,6 +92,41 @@ def _extract_slack_user_name(user: dict[str, Any]) -> str:
     return "unknown"
 
 
+def slack_message_bot_id(message: dict[str, Any]) -> str:
+    """The bot identifier on a Slack message, or "" when a person authored it."""
+    bot_id = message.get("bot_id")
+    if isinstance(bot_id, str) and bot_id.strip():
+        return bot_id.strip()
+    if message.get("subtype") == "bot_message":
+        username = message.get("username")
+        return username.strip() if isinstance(username, str) and username.strip() else "unknown"
+    user_id = message.get("user")
+    return "" if isinstance(user_id, str) and user_id.strip() else "unknown"
+
+
+def slack_message_bot_name(message: dict[str, Any]) -> str:
+    """The display name for a bot-authored Slack message."""
+    profile = message.get("bot_profile")
+    if isinstance(profile, dict):
+        name = profile.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    username = message.get("username")
+    if isinstance(username, str) and username.strip():
+        return username.strip()
+    return "Bot"
+
+
+def is_own_slack_message(message: dict[str, Any], bot_user_id: str) -> bool:
+    """Whether Open SWE itself posted this Slack message.
+
+    Only the authoring user id proves it. A display name cannot: any app may post
+    under our configured username, and treating that as proof would hide a third
+    party's message from the transcript and attribute it to us.
+    """
+    return bool(bot_user_id) and message.get("user") == bot_user_id
+
+
 def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username: str) -> str:
     """Replace Slack bot ID mention token with @username."""
     if not text:
@@ -302,17 +337,19 @@ def format_slack_messages_for_prompt(
             bot_username=bot_username,
         ).strip() or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
-        if isinstance(user_id, str) and user_id:
-            author_name = (user_names_by_id or {}).get(user_id) or user_id
-            author = f"@{author_name}({user_id})"
+        if is_own_slack_message(message, bot_user_id):
+            author = f"@{bot_username or 'Open SWE'}(self)"
+        elif slack_message_bot_id(message):
+            author = f"@{slack_message_bot_name(message)}(bot)"
         else:
-            bot_profile = message.get("bot_profile", {})
-            if isinstance(bot_profile, dict):
-                bot_name = bot_profile.get("name") or message.get("username") or "Bot"
-            else:
-                bot_name = message.get("username") or "Bot"
-            author = f"@{bot_name}(bot)"
-        line = f"{author}: {text}"
+            author_name = (user_names_by_id or {}).get(str(user_id)) or str(user_id)
+            author = f"@{author_name}({user_id})"
+        raw_message_ts = message.get("ts")
+        message_ts = raw_message_ts.strip() if isinstance(raw_message_ts, str) else ""
+        identifier = (
+            f" [message_ts={message_ts}]" if _SLACK_MESSAGE_TS_RE.fullmatch(message_ts) else ""
+        )
+        line = f"{author}{identifier}: {text}"
         if forwarded:
             line += f"\n{forwarded}"
         lines.append(line)
@@ -417,26 +454,30 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     if len(labels) > 3:
         model_text = f"{model_text} +{len(labels) - 3}"
     parts = [model_text] if model_text else []
-    if usage.main_agent_tokens is not None:
-        parts.append(f"{_format_token_count(usage.main_agent_tokens)} main-agent tokens")
     if usage.session_cost_usd is not None:
         parts.append(format_slack_session_cost(usage.session_cost_usd))
+    elif usage.main_agent_tokens is not None:
+        parts.append(f"{_format_token_count(usage.main_agent_tokens)} main-agent tokens")
     return " • ".join(parts)
 
 
-_SESSION_COST_LABEL_RE = re.compile(r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?) session cost$")
+_SESSION_COST_LABEL_RE = re.compile(
+    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)(?: session cost)?$"
+)
+_MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
 
 def format_slack_session_cost(cost: float) -> str:
     if 0 < cost < 0.01:
-        return "<$0.01 session cost"
-    return f"${cost:.2f} session cost"
+        return "<$0.01"
+    return f"${cost:.2f}"
 
 
 def _replace_slack_session_cost(text: str, cost: float, *, require_web_link: bool) -> str:
     if require_web_link and SLACK_WEB_LINK_FOOTER_LABEL not in text:
         return text
     cleaned = _SESSION_COST_LABEL_RE.sub("", text).rstrip()
+    cleaned = _MAIN_AGENT_TOKEN_LABEL_RE.sub("", cleaned).rstrip()
     return f"{cleaned} • {format_slack_session_cost(cost)}"
 
 

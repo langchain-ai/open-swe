@@ -51,6 +51,14 @@ interface ThreadSeed {
 const createdThreadIds = new Set<string>();
 const createdScheduleIds = new Set<string>();
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 async function loginAs(page: Page) {
   const response = await page.request.post("/control/login", { data: USER });
   expect(response.ok()).toBeTruthy();
@@ -197,6 +205,7 @@ function automationThreads(): Array<ThreadSeed> {
         trigger_kind: "schedule",
         schedule_id: SCHEDULE_IDS.daily,
         schedule_name: "E2E Daily Health",
+        automation_action_posted_at: "2026-08-21T12:00:00+00:00",
         latest_run_id: "e2e-run-daily-scheduled",
         latest_run_status: "success",
       }),
@@ -462,6 +471,91 @@ test.afterEach(async ({ request }) => {
 });
 
 test.describe("threads workspace", () => {
+  test("does not flash new-thread onboarding while a thread route loads", async ({
+    page,
+    request,
+  }) => {
+    const threadId = "75000000-0000-4000-8000-000000000001";
+    const title = "E2E Workspace Pending thread";
+    await seedThreads(request, [
+      {
+        id: threadId,
+        metadata: baseMetadata(Date.now(), title, 1_000, {
+          latest_run_id: "e2e-run-pending-thread",
+          latest_run_status: "success",
+        }),
+      },
+    ]);
+    await loginAs(page);
+
+    const profileGate = deferred();
+    const profileStarted = deferred();
+    const profileFinished = deferred();
+    await page.route("**/dashboard/api/profile", async (route) => {
+      profileStarted.resolve();
+      await profileGate.promise;
+      await route.fulfill({ json: {} });
+      profileFinished.resolve();
+    });
+
+    const threadChunkGate = deferred();
+    const threadChunkStarted = deferred();
+    await page.route(
+      /\/assets\/_threadId-(?!pendingComponent-)[^/]+\.js$/,
+      async (route) => {
+        threadChunkStarted.resolve();
+        await threadChunkGate.promise;
+        await route.continue();
+      },
+    );
+
+    await page.goto("/agents");
+    await expect(
+      page.getByText("Ask Open SWE to build, fix bugs, explore"),
+    ).toBeVisible();
+    await profileStarted.promise;
+
+    await page.evaluate(() => {
+      const seen = { value: false };
+      (window as unknown as Record<string, unknown>).__newThreadDialogSeen =
+        seen;
+      const detect = () => {
+        if (document.body.textContent?.includes("Choose your default model")) {
+          seen.value = true;
+        }
+      };
+      new MutationObserver(detect).observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+    });
+
+    await page.getByRole("link", { name: title }).click();
+    await threadChunkStarted.promise;
+    profileGate.resolve();
+    await profileFinished.promise;
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    threadChunkGate.resolve();
+
+    await expect(page).toHaveURL(`/agents/${threadId}`);
+    await expect(
+      page.getByText("This thread has no messages yet."),
+    ).toBeVisible();
+    const flashed = await page.evaluate(
+      () =>
+        (
+          (window as unknown as Record<string, unknown>)
+            .__newThreadDialogSeen as { value: boolean }
+        ).value,
+    );
+    expect(flashed).toBe(false);
+  });
+
   test("uses real thread metadata for focus and alternate groupings", async ({
     page,
     request,
@@ -654,13 +748,15 @@ test.describe("threads workspace", () => {
     await expect(ready).toContainText(TITLES.ready);
     await expect(ready.locator("> button > span").last()).toHaveText("1");
     await expect(done).toContainText("E2E Workspace Resolved overflow 01");
+    await expect(done.locator("> button > span").last()).toHaveText("10+");
+    const loadMore = sidebar.getByRole("button", {
+      name: "Load more resolved threads",
+    });
+    await loadMore.click();
     await expect(done.locator("> button > span").last()).toHaveText("20+");
-    const showAll = done.getByRole("link", { name: "Show all" });
-    await expect(showAll).toBeVisible();
-    await expect(showAll).toHaveAttribute(
-      "href",
-      /\/agents\/threads\?.*resolved=true.*group=focus/,
-    );
+    await loadMore.click();
+    await expect(done.locator("> button > span").last()).toHaveText("22");
+    await expect(loadMore).toHaveCount(0);
 
     const screenshotPath = testInfo.outputPath("focus-grouping-sidebar.png");
     await sidebar.screenshot({ path: screenshotPath });
@@ -830,8 +926,11 @@ test.describe("threads workspace", () => {
     ).toBeNull();
 
     await page.getByRole("checkbox", { name: "Needs attention" }).uncheck();
+    await expect(boardColumn(main, "Needs attention")).toHaveCount(0);
     await page.getByRole("checkbox", { name: "In progress" }).uncheck();
+    await expect(boardColumn(main, "In progress")).toHaveCount(0);
     await page.getByRole("checkbox", { name: "Ready" }).uncheck();
+    await expect(boardColumn(main, "Ready")).toHaveCount(0);
     const doneToggle = page.getByRole("checkbox", { name: "Done" });
     await expect(doneToggle).toBeChecked();
     await expect(doneToggle).toBeDisabled();
@@ -1077,8 +1176,10 @@ test.describe("automation run history", () => {
     });
     await expect(scheduledRun).toContainText("Finished");
     await expect(scheduledRun).toContainText("Scheduled run");
+    await expect(scheduledRun).toContainText("Posted to Slack");
     await expect(scheduledRun).toContainText("acme/alpha");
     await expect(testRun).toContainText("Error");
+    await expect(testRun).not.toContainText("Posted to Slack");
     await expect(testRun).toContainText("Test run");
     await expect(weekly).toContainText("Running");
     await expect(automations).not.toContainText(TITLES.attention);

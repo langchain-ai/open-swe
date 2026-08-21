@@ -1,16 +1,23 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 
 import { agentsApi } from "./api"
-import type { QueryClient } from "@tanstack/react-query"
+import type { InfiniteData, QueryClient } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
   SidebarThreads,
+  ThreadTurnDiffOptions,
   ThreadsPage,
   ThreadsPageParams,
 } from "./api"
 import type {
+  AgentStatus,
   AgentThread,
   Chunk,
   ImageChunk,
@@ -28,18 +35,65 @@ export const agentThreadKeys = {
     activeThreadId?: string
     includeAutomations: boolean
   }) => ["agent-threads", "lists", "sidebar", params] as const,
+  sidebarActive: (threadId: string) =>
+    ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
-  prDiff: (threadId: string) => ["agent-threads", threadId, "pr-diff"] as const,
-  turnDiff: (threadId: string, turnKey: string | null) =>
-    ["agent-threads", threadId, "turn-diff", turnKey] as const,
+  branchDiff: (threadId: string) =>
+    ["agent-threads", threadId, "branch-diff"] as const,
+  workingTreeDiff: (threadId: string) =>
+    ["agent-threads", threadId, "working-tree-diff"] as const,
+  runDiff: (
+    threadId: string,
+    turnKey: string,
+    options: ThreadTurnDiffOptions = {}
+  ) => ["agent-threads", threadId, "run-diff", turnKey, options] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
   page: (params: ThreadsPageParams) =>
     ["agent-threads", "lists", "page", params] as const,
+  infinitePages: (params: Omit<ThreadsPageParams, "offset">) =>
+    ["agent-threads", "lists", "infinite-pages", params] as const,
 }
 
 export function invalidateAgentThreadLists(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: agentThreadKeys.lists })
+}
+
+export function setAgentThreadStatus(
+  queryClient: QueryClient,
+  threadId: string,
+  status: AgentStatus
+): void {
+  const update = (thread: AgentThread) =>
+    thread.id === threadId ? { ...thread, status } : thread
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.detail(threadId),
+    (prev) => (prev ? update(prev) : prev)
+  )
+  queryClient.setQueriesData<SidebarThreads>(
+    { queryKey: ["agent-threads", "lists", "sidebar"] },
+    (prev) =>
+      prev && {
+        ...prev,
+        active: { ...prev.active, items: prev.active.items.map(update) },
+        resolved: { ...prev.resolved, items: prev.resolved.items.map(update) },
+      }
+  )
+  queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
+    { queryKey: ["agent-threads", "lists", "infinite-pages"] },
+    (prev) =>
+      prev && {
+        ...prev,
+        pages: prev.pages.map((page) => ({
+          ...page,
+          items: page.items.map(update),
+        })),
+      }
+  )
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.sidebarActive(threadId),
+    (prev) => (prev ? update(prev) : prev)
+  )
 }
 
 export function seedAgentThreadLists(
@@ -64,6 +118,7 @@ export function seedAgentThreadLists(
       }
     }
   )
+  queryClient.setQueryData(agentThreadKeys.sidebarActive(thread.id), thread)
 }
 
 export const agentScheduleKeys = {
@@ -75,16 +130,26 @@ export const agentSkillKeys = {
   organization: ["agent-skills", "organization"] as const,
 }
 
+const BUNDLED_SKILLS: Array<Skill> = [
+  {
+    name: "baby-sit",
+    description:
+      "Monitor a GitHub pull request until CI is green, diagnose failures, and rerun only evidence-backed flaky GitHub Actions jobs.",
+    instructions: "",
+  },
+]
+
 export const environmentOptionKeys = {
   all: ["environment-options"] as const,
 }
 
 /** Environments a new thread can boot from. Empty when none are configured. */
-export function useEnvironmentOptions() {
+export function useEnvironmentOptions(enabled = true) {
   return useQuery({
     queryKey: environmentOptionKeys.all,
     queryFn: api.listEnvironmentOptions,
     staleTime: 60_000,
+    enabled,
   })
 }
 
@@ -110,35 +175,51 @@ async function listOrganizationSkills() {
   return items
 }
 
-export function usePersonalAgentSkills() {
+export function usePersonalAgentSkills(enabled = true) {
   return useQuery({
     queryKey: agentSkillKeys.personal,
     queryFn: listPersonalSkills,
+    enabled,
   })
 }
 
-export function useOrganizationAgentSkills() {
+export function useOrganizationAgentSkills(enabled = true) {
   return useQuery({
     queryKey: agentSkillKeys.organization,
     queryFn: listOrganizationSkills,
+    enabled,
   })
 }
 
-export function useAgentSkills() {
-  const personal = usePersonalAgentSkills()
-  const organization = useOrganizationAgentSkills()
+export function useAgentSkills(options: { enabled?: boolean } = {}) {
+  const enabled = options.enabled ?? true
+  const personal = usePersonalAgentSkills(enabled)
+  const organization = useOrganizationAgentSkills(enabled)
   return {
     ...personal,
-    data:
-      personal.data || organization.data
-        ? [
-            ...new Map(
-              [...(personal.data ?? []), ...(organization.data ?? [])].map(
-                (skill) => [skill.name, skill]
-              )
-            ).values(),
-          ]
-        : undefined,
+    personal: personal.data ?? [],
+    organization: organization.data ?? [],
+    refetch: async () => {
+      const [personalResult, organizationResult] = await Promise.all([
+        personal.refetch(),
+        organization.refetch(),
+      ])
+      if (personalResult.error) throw personalResult.error
+      if (organizationResult.error) throw organizationResult.error
+      return {
+        personal: personalResult.data ?? [],
+        organization: organizationResult.data ?? [],
+      }
+    },
+    data: [
+      ...new Map(
+        [
+          ...BUNDLED_SKILLS,
+          ...(personal.data ?? []),
+          ...(organization.data ?? []),
+        ].map((skill) => [skill.name, skill])
+      ).values(),
+    ],
     error: personal.error ?? organization.error,
     isError: personal.isError || organization.isError,
     isLoading: personal.isLoading || organization.isLoading,
@@ -211,37 +292,88 @@ export function useSeedAgentThreadDetails(
   }, [activeThreadId, queryClient, threads])
 }
 
-const SIDEBAR_ACTIVE_LIMIT = 50
+export const SIDEBAR_PAGE_SIZE = 10
 
-function sidebarThreads(data?: SidebarThreads): Array<AgentThread> {
-  return [...(data?.active.items ?? []), ...(data?.resolved.items ?? [])]
+function infinitePageThreads(
+  data?: InfiniteData<ThreadsPage>
+): Array<AgentThread> {
+  const threads = data?.pages.flatMap((page) => page.items) ?? []
+  return [...new Map(threads.map((thread) => [thread.id, thread])).values()]
 }
 
-function sidebarRefetchInterval(query: { state: { data?: SidebarThreads } }) {
-  return sidebarThreads(query.state.data).some(
-    (thread) => thread.status === "running"
+export function useSidebarThreads({
+  activeThreadId,
+  includeAutomations = false,
+  includeResolved = false,
+  enabled = true,
+}: {
+  activeThreadId?: string
+  includeAutomations?: boolean
+  includeResolved?: boolean
+  enabled?: boolean
+}) {
+  const scope = includeAutomations ? "all" : "interactive"
+  const activeQuery = useInfiniteThreadsPages(
+    { limit: SIDEBAR_PAGE_SIZE, resolved: false, scope },
+    { enabled, pollWhileRunning: true }
   )
-    ? 2000
-    : false
-}
-
-export function useSidebarThreads(
-  resolvedLimit: number,
-  activeThreadId?: string,
-  includeAutomations = false
-) {
-  const params = {
-    activeLimit: SIDEBAR_ACTIVE_LIMIT,
-    resolvedLimit,
-    activeThreadId,
-    includeAutomations,
-  }
-  return useQuery({
-    queryKey: agentThreadKeys.sidebar(params),
-    queryFn: () => agentsApi.listSidebarThreads(params),
-    refetchInterval: sidebarRefetchInterval,
-    placeholderData: (prev) => prev,
+  const resolvedQuery = useInfiniteThreadsPages(
+    { limit: SIDEBAR_PAGE_SIZE, resolved: true, scope },
+    { enabled: enabled && includeResolved, pollWhileRunning: true }
+  )
+  const loadedActive = infinitePageThreads(activeQuery.data)
+  const loadedResolved = infinitePageThreads(resolvedQuery.data)
+  const activeThreadLoaded = [
+    ...loadedActive,
+    ...(includeResolved ? loadedResolved : []),
+  ].some((thread) => thread.id === activeThreadId)
+  const activeThreadQuery = useQuery({
+    queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
+    queryFn: () =>
+      agentsApi.getThread(activeThreadId as string, { markViewed: false }),
+    enabled:
+      enabled &&
+      Boolean(activeThreadId) &&
+      activeQuery.isSuccess &&
+      !activeThreadLoaded,
+    staleTime: 30_000,
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ? 2000 : false,
+    retry: false,
   })
+  const pinnedThread = activeThreadLoaded ? undefined : activeThreadQuery.data
+  const activeItems =
+    pinnedThread && (!pinnedThread.resolved || !includeResolved)
+      ? [
+          pinnedThread,
+          ...loadedActive.filter((thread) => thread.id !== pinnedThread.id),
+        ]
+      : loadedActive
+  const resolvedItems =
+    pinnedThread?.resolved && includeResolved
+      ? [
+          pinnedThread,
+          ...loadedResolved.filter((thread) => thread.id !== pinnedThread.id),
+        ]
+      : loadedResolved
+
+  return {
+    data: {
+      active: {
+        items: activeItems,
+        limit: SIDEBAR_PAGE_SIZE,
+        hasMore: activeQuery.hasNextPage,
+      },
+      resolved: {
+        items: resolvedItems,
+        limit: SIDEBAR_PAGE_SIZE,
+        hasMore: resolvedQuery.hasNextPage,
+      },
+    },
+    activeQuery,
+    resolvedQuery,
+    isPending: activeQuery.isPending,
+  }
 }
 
 export function useAgentThread(threadId: string) {
@@ -271,24 +403,58 @@ export function useAgentThread(threadId: string) {
   })
 }
 
-export function useAgentThreadPrDiff(threadId: string, enabled: boolean) {
+export function useAgentThreadBranchDiff(threadId: string, enabled: boolean) {
   return useQuery({
-    queryKey: agentThreadKeys.prDiff(threadId),
-    queryFn: () => agentsApi.getThreadPrDiff(threadId),
+    queryKey: agentThreadKeys.branchDiff(threadId),
+    queryFn: () => agentsApi.getThreadBranchDiff(threadId),
     enabled,
     staleTime: 30_000,
     retry: false,
   })
 }
 
-export function useAgentThreadTurnDiff(
+export function useAgentThreadWorkingTreeDiff(
   threadId: string,
-  turnKey: string | null,
-  enabled: boolean
+  enabled: boolean,
+  pollWhileRunning = false
+) {
+  const query = useQuery({
+    queryKey: agentThreadKeys.workingTreeDiff(threadId),
+    queryFn: () => agentsApi.getThreadWorkingTreeDiff(threadId),
+    enabled: enabled && Boolean(threadId),
+    staleTime: 30_000,
+    refetchInterval: pollWhileRunning
+      ? 3000
+      : (current) => (current.state.data?.status === "ready" ? false : 3000),
+    retry: false,
+  })
+
+  const { refetch } = query
+  const previous = useRef({ enabled: false, pollWhileRunning })
+  useEffect(() => {
+    const was = previous.current
+    previous.current = { enabled, pollWhileRunning }
+    if (was.enabled && was.pollWhileRunning && enabled && !pollWhileRunning) {
+      const timers = [0, 1000, 3000].map((delay) =>
+        window.setTimeout(() => void refetch(), delay)
+      )
+      return () => timers.forEach(window.clearTimeout)
+    }
+    if (!was.enabled && enabled && !pollWhileRunning) void refetch()
+  }, [enabled, pollWhileRunning, refetch])
+
+  return query
+}
+
+export function useAgentThreadRunDiff(
+  threadId: string,
+  turnKey: string,
+  enabled: boolean,
+  options: ThreadTurnDiffOptions = {}
 ) {
   return useQuery({
-    queryKey: agentThreadKeys.turnDiff(threadId, turnKey),
-    queryFn: () => agentsApi.getThreadTurnDiff(threadId, turnKey),
+    queryKey: agentThreadKeys.runDiff(threadId, turnKey, options),
+    queryFn: () => agentsApi.getThreadRunDiff(threadId, turnKey, options),
     enabled: enabled && Boolean(threadId),
     staleTime: 30_000,
     retry: false,
@@ -597,13 +763,103 @@ export function useSetAgentThreadFocusState() {
   })
 }
 
+export function useInfiniteThreadsPages(
+  params: Omit<ThreadsPageParams, "offset">,
+  options: {
+    enabled?: boolean
+    staleWhileRevalidate?: boolean
+    pollWhileRunning?: boolean
+  } = {}
+) {
+  const queryClient = useQueryClient()
+  const queryKey = agentThreadKeys.infinitePages(params)
+  const pagesQuery = useInfiniteQuery({
+    queryKey,
+    queryFn: ({ pageParam }) =>
+      agentsApi.listThreadsPage({ ...params, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (page) =>
+      page.hasMore ? page.offset + page.items.length : undefined,
+    enabled: options.enabled,
+    ...(options.staleWhileRevalidate
+      ? {
+          staleTime: 30_000,
+          gcTime: Infinity,
+          refetchOnWindowFocus: true,
+        }
+      : {}),
+  })
+  const runningOffsets =
+    pagesQuery.data?.pages
+      .filter((page) =>
+        page.items.some((thread) => thread.status === "running")
+      )
+      .map((page) => page.offset) ?? []
+  const pollOffsets =
+    runningOffsets.length > 0 ? [...new Set([0, ...runningOffsets])] : []
+  useQuery({
+    queryKey: ["agent-thread-page-poll", params, pollOffsets],
+    queryFn: async () => {
+      const refreshed = await Promise.all(
+        pollOffsets.map((offset) =>
+          agentsApi.listThreadsPage({ ...params, offset })
+        )
+      )
+      queryClient.setQueryData<InfiniteData<ThreadsPage>>(
+        queryKey,
+        (current) => {
+          if (!current) return current
+          const refreshedByOffset = new Map(
+            refreshed.map((page) => [page.offset, page])
+          )
+          const membershipChanged = refreshed.some((page) => {
+            const previous = current.pages.find(
+              (candidate) => candidate.offset === page.offset
+            )
+            return (
+              !previous ||
+              previous.items.map((thread) => thread.id).join("|") !==
+                page.items.map((thread) => thread.id).join("|")
+            )
+          })
+          if (membershipChanged) {
+            const firstPage = refreshedByOffset.get(0)
+            return firstPage
+              ? {
+                  ...current,
+                  pages: [firstPage],
+                  pageParams: current.pageParams.slice(0, 1),
+                }
+              : current
+          }
+          return {
+            ...current,
+            pages: current.pages.map(
+              (page) => refreshedByOffset.get(page.offset) ?? page
+            ),
+          }
+        }
+      )
+      return refreshed
+    },
+    enabled: Boolean(
+      options.enabled !== false &&
+      options.pollWhileRunning &&
+      pollOffsets.length > 0
+    ),
+    refetchInterval: 2000,
+  })
+  return pagesQuery
+}
+
 export function useThreadsPage(
   params: ThreadsPageParams,
-  options: { staleWhileRevalidate?: boolean } = {}
+  options: { enabled?: boolean; staleWhileRevalidate?: boolean } = {}
 ) {
   return useQuery({
     queryKey: agentThreadKeys.page(params),
     queryFn: () => agentsApi.listThreadsPage(params),
+    enabled: options.enabled,
     placeholderData: (prev) => prev,
     ...(options.staleWhileRevalidate
       ? {

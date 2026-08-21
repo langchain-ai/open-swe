@@ -1,5 +1,6 @@
 import importlib
 from typing import Any
+from xml.etree import ElementTree
 
 import pytest
 
@@ -49,15 +50,35 @@ def test_resolve_absolute_url_with_existing_query_left_as_is() -> None:
 class _FakeRuns:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
+        self.fail_next = False
 
     async def create(self, thread_id: str, assistant_id: str, **kwargs: Any) -> dict[str, str]:
         self.created.append({"thread_id": thread_id, "assistant_id": assistant_id, **kwargs})
+        if self.fail_next:
+            self.fail_next = False
+            raise RuntimeError("dispatch failed")
         return {"run_id": "run-1"}
+
+
+class _FakeThreads:
+    def __init__(self) -> None:
+        self.metadata: dict[str, Any] = {}
+        self.messages: list[dict[str, Any]] = []
+
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        return {"thread_id": thread_id, "metadata": self.metadata}
+
+    async def get_state(self, thread_id: str) -> dict[str, Any]:
+        return {"values": {"messages": self.messages}}
+
+    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
+        self.metadata = metadata
 
 
 class _FakeClient:
     def __init__(self) -> None:
         self.runs = _FakeRuns()
+        self.threads = _FakeThreads()
 
 
 @pytest.mark.asyncio
@@ -118,19 +139,51 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_stream_kwarg
 
 
 @pytest.mark.asyncio
-async def test_dispatch_agent_run_forwards_multitask_strategy(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_dispatch_accepts_prebuilt_input(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeClient()
-    monkeypatch.setattr(dispatch, "COMPLETION_WEBHOOK_URL", None)
+    run_input = {"messages": [{"role": "user", "content": "structured"}]}
 
     await dispatch.dispatch_agent_run(
         "thread-1",
-        "check CI",
-        {"thread_id": "thread-1"},
-        source="slack",
+        None,
+        {},
+        source="github",
+        input=run_input,
         client=client,
-        multitask_strategy="enqueue",
     )
 
-    assert client.runs.created[0]["multitask_strategy"] == "enqueue"
+    assert client.runs.created[0]["input"] == run_input
+
+
+def test_dispatch_slack_identity_includes_verified_context() -> None:
+    run_input = dispatch._dispatch_input(
+        "hello",
+        "slack",
+        {
+            "github_login": "mason-gh",
+            "user_email": "mason@example.com",
+            "slack_thread": {
+                "triggering_user_id": "U123",
+                "triggering_user_name": "Mason",
+                "triggering_user_timezone": "America/New_York",
+                "channel_id": "C123",
+                "thread_ts": "123.45",
+                "channel_context": {
+                    "name": "eng",
+                    "topic": "Ship <safely>",
+                    "purpose": "Engineering work",
+                },
+            },
+        },
+    )
+
+    person = ElementTree.fromstring(run_input["messages"][0]["content"])
+    channel = ElementTree.fromstring(run_input["messages"][1]["content"])
+    assert person.findtext("display_name") == "Mason"
+    assert person.findtext("timezone") == "America/New_York"
+    assert channel.findtext("name") == "eng"
+    assert channel.findtext("topic") == "Ship <safely>"
+    topic = channel.find("topic")
+    assert topic is not None
+    assert topic.attrib["trust"] == "untrusted"
+    assert channel.findtext("purpose") == "Engineering work"

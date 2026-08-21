@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import { describeWorkEntry } from "./workEntry"
-import type { DiffData, ToolExecutionChunk } from "@/features/agents/lib/types"
+import { describeWorkEntry, liveActivityLabel } from "./workEntry"
+import type {
+  Chunk,
+  DiffData,
+  ToolExecutionChunk,
+} from "@/features/agents/lib/types"
 
 const projectPath = "/workspace/open-swe"
 
@@ -135,5 +139,46 @@ describe("describeWorkEntry", () => {
     )
 
     expect(entry.expandedText).toBe("ls\n\na.ts\nb.ts")
+  })
+
+  it("keeps complete JSON tool output available for highlighted rendering", () => {
+    const output = JSON.stringify({ value: "x".repeat(5000) })
+    const entry = describeWorkEntry(chunk({ output }), projectPath)
+
+    expect(entry.expandedText).toBe(JSON.stringify(JSON.parse(output), null, 2))
+    expect(entry.expandedText).not.toContain("…")
+  })
+})
+
+describe("liveActivityLabel", () => {
+  it("describes only the latest tool activity", () => {
+    const chunks: Array<Chunk> = [
+      { kind: "reasoning", text: "Inspecting" },
+      chunk({
+        toolCallId: "call_read",
+        input: { file_path: `${projectPath}/ui/src/AGENTS.md` },
+        status: "in_progress",
+      }),
+    ]
+
+    expect(liveActivityLabel(chunks, projectPath)).toBe("Exploring · AGENTS.md")
+  })
+
+  it("switches to response status when final text starts streaming", () => {
+    expect(
+      liveActivityLabel([
+        chunk({ toolKind: "execute", input: { command: "pnpm test" } }),
+        { kind: "text", text: "The tests pass." },
+      ])
+    ).toBe("Writing response…")
+  })
+
+  it("surfaces approval and error states", () => {
+    expect(liveActivityLabel([chunk({ status: "pending" })])).toBe(
+      "Waiting for approval…"
+    )
+    expect(liveActivityLabel([chunk({ status: "error" })])).toBe(
+      "Recovering from an error…"
+    )
   })
 })

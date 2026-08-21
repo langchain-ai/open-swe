@@ -1,9 +1,29 @@
 const { contextBridge, ipcRenderer } = require("electron")
+const desktopCommandIds = new Set([
+  "new-thread",
+  "show-command-palette",
+  "open-settings",
+  "show-keyboard-shortcuts",
+  "toggle-sidebar",
+])
+
+function isDesktopCommandId(value) {
+  return typeof value === "string" && desktopCommandIds.has(value)
+}
 
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
+  onCommand: (callback) => {
+    const listener = (_event, commandId) => {
+      if (isDesktopCommandId(commandId)) callback(commandId)
+    }
+    ipcRenderer.on("desktop:command", listener)
+    return () => ipcRenderer.removeListener("desktop:command", listener)
+  },
   listProjects: () => ipcRenderer.invoke("desktop:projects"),
-  getProjectBranch: (cwd) => ipcRenderer.invoke("desktop:project-branch", cwd),
+  getProjectBranches: (cwd) => ipcRenderer.invoke("desktop:project-branches", cwd),
+  checkoutProjectBranch: (input) =>
+    ipcRenderer.invoke("desktop:checkout-project-branch", { ...input }),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
@@ -11,14 +31,17 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
   localModelCredentialStatus: (modelId) =>
     ipcRenderer.invoke("desktop:local-model-credential-status", modelId),
+  signInLocalOpenAI: () => ipcRenderer.invoke("desktop:local-openai-sign-in"),
   startLocalThread: (input) => ipcRenderer.invoke("desktop:start-local-thread", input),
   getLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:get-local-prompt", threadId),
   clearLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:clear-local-prompt", threadId),
   getLocalThread: (threadId) => ipcRenderer.invoke("desktop:get-local-thread", threadId),
   listLocalThreads: () => ipcRenderer.invoke("desktop:list-local-threads"),
+  localActivity: () => ipcRenderer.invoke("desktop:local-activity"),
   updateLocalThread: (input) => ipcRenderer.invoke("desktop:update-local-thread", input),
   deleteLocalThread: (threadId) => ipcRenderer.invoke("desktop:delete-local-thread", threadId),
   getLocalDiff: (threadId) => ipcRenderer.invoke("desktop:get-local-diff", threadId),
+  getLocalPrDiff: (threadId) => ipcRenderer.invoke("desktop:get-local-pr-diff", threadId),
   onProjectsChanged: (callback) => {
     const listener = (_event, projects) => callback(projects)
     ipcRenderer.on("desktop:projects-changed", listener)
@@ -53,6 +76,10 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
 
 const DRAG_REGION_ID = "open-swe-desktop-drag-region"
 
+ipcRenderer.on("desktop:fullscreen-change", (_event, fullscreen) => {
+  document.documentElement.classList.toggle("desktop-fullscreen", fullscreen)
+})
+
 window.addEventListener("DOMContentLoaded", () => {
   if (process.platform !== "darwin") return
 
@@ -80,6 +107,10 @@ window.addEventListener("DOMContentLoaded", () => {
     [data-sidebar-expand] {
       -webkit-app-region: no-drag;
       left: 90px !important;
+    }
+
+    .desktop-fullscreen :is([data-sidebar-collapse], [data-sidebar-expand]) {
+      left: 12px !important;
     }
   `
   document.head.append(style)

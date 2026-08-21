@@ -63,7 +63,7 @@ For `SANDBOX_TYPE=langsmith` (default), every sandbox creation/refresh also call
 
 Every run re-applies `git config --global user.name/email` for the bot identity, because reused/reconnected sandboxes can lose `--global` config and Vercel preview deploys reject commits whose author email doesn't resolve to a GitHub account.
 
-`PrepareAgentRunMiddleware` also snapshots the worktree into `refs/open-swe/turns/<user-message-id>` at run start (`utils/turn_checkpoint.py`), recording the refs in thread metadata. `GET /threads/{id}/turn-diff` reads them back so the dashboard's changed-files views come from git rather than from replaying edit tool calls — which is the only way to catch edits made through `execute` and to drop files that were later reverted.
+`PrepareAgentRunMiddleware` also snapshots the worktree into `refs/open-swe/turns/<user-message-id>` at run start (`utils/turn_checkpoint.py`), recording the refs in thread metadata. `GET /threads/{id}/run-diff` reads them back so the dashboard's changed-files views come from git rather than from replaying edit tool calls — which is the only way to catch edits made through `execute` and to drop files that were later reverted.
 
 ### Middleware stack (order matters)
 
@@ -91,8 +91,12 @@ There is intentionally no after-agent safety net that opens a PR for the agent. 
 
 All tools live in `agent/tools/` and are flat-imported via `agent/tools/__init__.py`. The set is intentionally small and curated — see README "Tools — Curated, Not Accumulated".
 
+Agent/UI parity is a product principle: anything users can do in the dashboard UI should generally also be possible through an agent tool, subject to the same authorization and safety boundaries. When adding a UI capability, add or extend the corresponding curated tool unless there is a documented reason not to.
+
 Wired into `get_agent`:
-`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `manage_baby_sit`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
+`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `list_threads`, `get_thread`, `manage_thread`, `manage_baby_sit`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
+
+`list_threads`, `get_thread`, and `manage_thread` are parent-agent-only; `manage_thread` is unavailable during plan mode while the two read-only tools remain available.
 
 Reviewer-only tools (in `agent/reviewer.py`): `add_finding`, `update_finding`, `list_findings`, `publish_review`. The review-style analyzer uses `save_review_style` (exported as `save_review_style_prompt`).
 
@@ -106,7 +110,7 @@ Model + reasoning effort are resolved per run in this precedence (highest wins):
 2. Per-user dashboard profile override (`agent/dashboard/agent_overrides.py:load_profile`), keyed by resolved GitHub login.
 3. Team default model (`agent/dashboard/team_settings.py:get_team_default_model("agent")`).
 
-Custom instructions are layered into the system prompt from two stores: per-repo (`agent/dashboard/agent_instructions.py`, edited on the Repository Instructions page) and per-user (`agent/dashboard/user_instructions.py`, edited in the dashboard Profile tab or by the agent itself via `save_user_instructions`). Repo instructions and `AGENTS.md` win over user-level ones on conflict.
+Custom instructions come from two stores: per-repo instructions (`agent/dashboard/agent_instructions.py`) are layered into the system prompt, while per-user instructions (`agent/dashboard/user_instructions.py`) are attached to each triggering user's message so multi-party threads do not inherit another participant's preferences. Repo instructions and `AGENTS.md` win over user-level ones on conflict.
 
 Supported model IDs and per-model effort/reasoning rules live in `agent/dashboard/options.py`. Profile preferences also control draft PRs and CI automation. Model construction goes through `agent/utils/model.py` (`make_model`, `provider_model_kwargs`, `fallback_model_id_for`).
 

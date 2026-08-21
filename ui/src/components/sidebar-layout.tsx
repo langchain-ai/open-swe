@@ -8,7 +8,6 @@ import {
 } from "react"
 import { SidebarSimpleIcon } from "@phosphor-icons/react"
 
-import { useHotkey } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
 
 const STORAGE_WIDTH = "open-swe.sidebar.width"
@@ -58,8 +57,6 @@ export function useSidebarLayout() {
     () => setCollapsed(!collapsed),
     [collapsed, setCollapsed]
   )
-
-  useHotkey("mod+b", toggle, { enableInFormFields: true, ignoreRepeat: true })
 
   const closeOnMobile = useCallback(() => {
     if (typeof window === "undefined") return
@@ -230,6 +227,7 @@ export function SidebarCollapseButton({
     <button
       type="button"
       aria-label="Collapse sidebar"
+      data-sidebar-collapse=""
       onClick={onToggle}
       className={cn(
         "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",

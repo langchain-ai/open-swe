@@ -3,14 +3,11 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import { COMPOSER_PATH_DRAG_MIME } from "@/features/agents/components/composer/composerTrigger"
-import { useAgentThreadTurnDiff } from "@/features/agents/lib/queries"
+import { useAgentThreadRunDiff } from "@/features/agents/lib/queries"
 
-/**
- * What a turn changed, according to git — not to the edit calls in the
- * transcript, which miss edits made through `execute` and still list files that
- * were later reverted. Older turns only fetch once opened; the newest turn is
- * the one people look at, so it loads with the transcript.
- */
+const INLINE_CHANGED_FILES_LIMIT = 10
+
+/** What a completed agent run changed, loaded from its persisted diff artifact. */
 export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
   threadId,
   turnKey,
@@ -23,8 +20,12 @@ export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
   onOpenFile?: (filePath: string) => void
 }) {
   const [open, setOpen] = useState(isLatestTurn)
-  const turnDiff = useAgentThreadTurnDiff(threadId, turnKey, open)
+  const turnDiff = useAgentThreadRunDiff(threadId, turnKey, open, {
+    maxFiles: INLINE_CHANGED_FILES_LIMIT,
+    includeContent: false,
+  })
   const files = turnDiff.data?.files ?? []
+  const summary = turnDiff.data?.summary
 
   if (
     turnDiff.data?.status === "missing" ||
@@ -33,11 +34,16 @@ export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
     return null
   }
 
-  const additions = files.reduce((total, file) => total + file.additions, 0)
-  const deletions = files.reduce((total, file) => total + file.deletions, 0)
+  const totalFiles = summary?.files ?? files.length
+  const additions = summary?.additions ?? 0
+  const deletions = summary?.deletions ?? 0
+  const omittedFiles = Math.max(0, totalFiles - files.length)
 
   return (
-    <div className="mt-3 overflow-hidden rounded-xl bg-muted/40">
+    <div
+      data-testid="turn-changed-files-card"
+      className="mt-3 overflow-hidden rounded-xl bg-muted/40"
+    >
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -51,10 +57,10 @@ export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
         )}
         {turnDiff.isPending && open ? (
           <span>Reading changed files…</span>
-        ) : files.length > 0 ? (
+        ) : totalFiles > 0 ? (
           <>
             <span>
-              {files.length} file{files.length === 1 ? "" : "s"} changed
+              {totalFiles} file{totalFiles === 1 ? "" : "s"} changed
             </span>
             <span className="text-success-foreground">+{additions}</span>
             <span className="text-destructive">-{deletions}</span>
@@ -72,6 +78,14 @@ export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
               onOpenFile={onOpenFile}
             />
           ))}
+          {omittedFiles > 0 && (
+            <div
+              data-testid="turn-changed-files-omitted"
+              className="px-3 py-1.5 text-xs text-muted-foreground"
+            >
+              {omittedFiles} more file{omittedFiles === 1 ? "" : "s"} not shown
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -88,6 +102,7 @@ function ChangedFileRow({
   return (
     <button
       type="button"
+      data-testid="turn-changed-file"
       onClick={() => onOpenFile?.(file.path)}
       // Dragging a row onto the composer inserts it as an `@file` mention.
       draggable

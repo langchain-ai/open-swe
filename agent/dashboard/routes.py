@@ -7,6 +7,7 @@ import logging
 import os
 import posixpath
 import shlex
+from time import perf_counter
 from typing import Any, Literal
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
@@ -21,10 +22,11 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import RedirectResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from ..utils.thread_ops import langgraph_url
+from ..utils.timing import server_timing_header
 from .admin import is_admin
 from .agent_instructions import (
     AgentInstructionsCreate,
@@ -35,11 +37,7 @@ from .agent_instructions import (
     list_agent_instructions,
     set_agent_instructions,
 )
-from .agent_usage import (
-    list_agent_usage_leaderboard,
-    refresh_reviewer_stats_cache,
-    refresh_usage_leaderboard_cache,
-)
+from .agent_usage import list_agent_usage_leaderboard
 from .analyzer_cron import remove_continual_cron
 from .enabled_repos import (
     list_enabled_review_repos,
@@ -136,6 +134,7 @@ from .review_api import (
     list_reviews,
     proxy_pr_image,
     trigger_re_review,
+    update_review_comment,
 )
 from .review_chat_api import (
     delete_review_chat_thread,
@@ -225,10 +224,11 @@ from .thread_api import (
     delete_dashboard_thread,
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
-    get_dashboard_thread_pr_diff,
+    get_dashboard_thread_branch_diff,
     get_dashboard_thread_recovery_patch,
+    get_dashboard_thread_run_diff,
     get_dashboard_thread_state,
-    get_dashboard_thread_turn_diff,
+    get_dashboard_thread_working_tree_diff,
     list_dashboard_threads,
     list_dashboard_threads_page,
     list_dashboard_threads_sidebar,
@@ -491,7 +491,10 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     state_payload = decode_state(state)
     state_nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)
-    if (
+    is_desktop = isinstance(state_payload.get("handoff_challenge"), str) and isinstance(
+        state_payload.get("handoff_port"), int
+    )
+    if not is_desktop and (
         not isinstance(state_nonce_hash, str)
         or not cookie_nonce
         or not hmac.compare_digest(hash_state_nonce(cookie_nonce), state_nonce_hash)
@@ -1475,6 +1478,37 @@ async def api_create_review_comment(
     )
 
 
+class ReviewCommentUpdate(BaseModel):
+    body: str
+
+
+@router.patch("/reviews/{owner}/{repo}/{pr_number}/comments/{comment_id}")
+async def api_update_review_comment(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    comment_id: int,
+    comment: ReviewCommentUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    body = comment.body.strip()
+    if not body:
+        raise HTTPException(422, "comment body is required")
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub re-auth required")
+    return await update_review_comment(
+        owner,
+        repo,
+        pr_number,
+        comment_id,
+        token=token,
+        viewer_login=session["sub"],
+        body=body,
+    )
+
+
 # --- PR chat (sandbox-less ``chat`` graph) -----------------------------------
 # The frontend points a LangGraph StreamProvider at the base
 # ``/reviews/{owner}/{repo}/{pr_number}/chat``; the SDK then issues the
@@ -1820,7 +1854,6 @@ async def api_delete_organization_skill(
 
 @router.get("/agent-usage-leaderboard")
 async def api_agent_usage_leaderboard(
-    background_tasks: BackgroundTasks,
     period: str | None = "30d",
     limit: int = 10,
     session: dict[str, Any] = _SESSION_DEP,
@@ -1830,12 +1863,6 @@ async def api_agent_usage_leaderboard(
         limit=limit,
         current_login=session["sub"],
         current_email=session.get("email"),
-        schedule_usage_refresh=lambda cache_period: background_tasks.add_task(
-            refresh_usage_leaderboard_cache, cache_period
-        ),
-        schedule_reviewer_refresh=lambda cache_period: background_tasks.add_task(
-            refresh_reviewer_stats_cache, cache_period
-        ),
     )
 
 
@@ -1851,7 +1878,12 @@ async def api_create_schedule(
     body: ScheduleCreateBody,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await create_agent_schedule(session["sub"], body, email=session.get("email"))
+    return await create_agent_schedule(
+        session["sub"],
+        body,
+        email=session.get("email"),
+        allow_admin_thread=_session_is_admin(session),
+    )
 
 
 @router.patch("/schedules/{schedule_id}")
@@ -1861,7 +1893,11 @@ async def api_update_schedule(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await update_agent_schedule(
-        schedule_id, session["sub"], body, email=session.get("email")
+        schedule_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        allow_admin_thread=_session_is_admin(session),
     )
 
 
@@ -1900,10 +1936,13 @@ async def api_list_threads_sidebar(
     include_automations: bool = False,
     all: bool = False,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
+) -> Response:
     if all and not _session_is_admin(session):
         raise HTTPException(403, "admin only")
-    return await list_dashboard_threads_sidebar(
+    timings: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    started = perf_counter()
+    payload = await list_dashboard_threads_sidebar(
         session["sub"],
         email=session.get("email"),
         active_limit=active_limit,
@@ -1911,7 +1950,13 @@ async def api_list_threads_sidebar(
         active_thread_id=active_thread_id,
         include_automations=include_automations,
         include_all=all,
+        timings=timings,
+        counts=counts,
     )
+    timings["total"] = (perf_counter() - started) * 1000
+    header = server_timing_header(timings, counts)
+    logger.info("thread sidebar timings login=%s %s", session["sub"], header)
+    return JSONResponse(payload, headers={"Server-Timing": header})
 
 
 @router.get("/threads/page")
@@ -2125,26 +2170,53 @@ async def api_get_thread_recovery_patch(
     )
 
 
-@router.get("/threads/{thread_id}/turn-diff")
-async def api_get_thread_turn_diff(
+@router.get("/threads/{thread_id}/working-tree-diff")
+async def api_get_thread_working_tree_diff(
     thread_id: str,
-    turn_key: str | None = None,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await get_dashboard_thread_turn_diff(
+    return await get_dashboard_thread_working_tree_diff(
+        thread_id, session["sub"], email=session.get("email")
+    )
+
+
+@router.get("/threads/{thread_id}/run-diff")
+async def api_get_thread_run_diff(
+    thread_id: str,
+    turn_key: str,
+    max_files: int = Query(200, ge=1, le=200),
+    include_content: bool = True,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_run_diff(
         thread_id,
         session["sub"],
         turn_key=turn_key,
+        max_files=max_files,
+        include_content=include_content,
         email=session.get("email"),
     )
 
 
+@router.get("/threads/{thread_id}/branch-diff")
+async def api_get_thread_branch_diff(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_branch_diff(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
+    )
+
+
+# The pre-branch-diff name, kept for desktop bundles already in the wild.
 @router.get("/threads/{thread_id}/pr-diff")
 async def api_get_thread_pr_diff(
     thread_id: str,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await get_dashboard_thread_pr_diff(
+    return await get_dashboard_thread_branch_diff(
         thread_id,
         session["sub"],
         email=session.get("email"),
@@ -2243,8 +2315,16 @@ async def api_delete_thread(
 async def api_get_thread_state(
     thread_id: str,
     session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    return await get_dashboard_thread_state(thread_id, session["sub"], email=session.get("email"))
+) -> Response:
+    timings: dict[str, float] = {}
+    started = perf_counter()
+    payload = await get_dashboard_thread_state(
+        thread_id, session["sub"], email=session.get("email"), timings=timings
+    )
+    timings["total"] = (perf_counter() - started) * 1000
+    header = server_timing_header(timings)
+    logger.info("thread state timings thread_id=%s %s", thread_id, header)
+    return JSONResponse(payload, headers={"Server-Timing": header})
 
 
 @router.post("/threads/{thread_id}/stream/events")

@@ -4,15 +4,19 @@ import {
   Scripts,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
 } from "@tanstack/react-router"
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools"
 import { TanStackDevtools } from "@tanstack/react-devtools"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
-import type { QueryClient } from "@tanstack/react-query"
 
 import appCss from "../styles.css?url"
+import type { QueryClient } from "@tanstack/react-query"
+import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
+import { ThemeSync } from "@/lib/ThemeSync"
+import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
 
 const themeInitScript = `(function(){try{var t=localStorage.getItem("open-swe-theme");var d=t==="dark"||((!t||t==="system")&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}})();`
 
@@ -51,15 +55,21 @@ export const Route = createRootRouteWithContext<{
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { queryClient } = useRouter().options.context
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const warmupScript = apiWarmupScript(pathname)
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        {warmupScript && (
+          <script dangerouslySetInnerHTML={{ __html: warmupScript }} />
+        )}
         <HeadContent />
       </head>
       <body>
+        <ThemeSync />
         <QueryClientProvider client={queryClient}>
-          {children ?? <Outlet />}
+          <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
           {import.meta.env.VITE_DEVTOOLS !== "false" && (
             <>
               <TanStackDevtools

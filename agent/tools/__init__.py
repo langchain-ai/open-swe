@@ -8,10 +8,12 @@ _TOOL_MODULES = {
     "background_execute": ".background_execute",
     "background_task": ".background_execute",
     "capture_environment_snapshot": ".environments",
+    "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_environment": ".environments",
     "enter_plan_mode": ".enter_plan_mode",
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
+    "get_thread": ".threads",
     "http_request": ".http_request",
     "linear_comment": ".linear_comment",
     "linear_create_issue": ".linear_create_issue",
@@ -24,7 +26,9 @@ _TOOL_MODULES = {
     "list_environments": ".environments",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
+    "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
+    "manage_thread": ".threads",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
@@ -58,10 +62,12 @@ __all__ = [
     "background_execute",
     "background_task",
     "capture_environment_snapshot",
+    "create_sandbox_file_download_url",
     "delete_environment",
     "enter_plan_mode",
     "fetch_review_diff",
     "fetch_url",
+    "get_thread",
     "http_request",
     "linear_comment",
     "linear_create_issue",
@@ -74,7 +80,9 @@ __all__ = [
     "list_environments",
     "list_findings",
     "list_review_findings",
+    "list_threads",
     "manage_baby_sit",
+    "manage_thread",
     "notify_automation_channel",
     "open_pull_request",
     "output_iframe",
@@ -106,6 +114,7 @@ if TYPE_CHECKING:
     from .add_finding import add_finding
     from .approve_plan import approve_plan
     from .background_execute import background_execute, background_task
+    from .create_sandbox_file_download_url import create_sandbox_file_download_url
     from .enter_plan_mode import enter_plan_mode
     from .environments import (
         capture_environment_snapshot,
@@ -147,6 +156,7 @@ if TYPE_CHECKING:
     from .slack_read_thread_messages import slack_read_thread_messages
     from .slack_start_new_thread import slack_start_new_thread
     from .slack_thread_reply import slack_thread_reply
+    from .threads import get_thread, list_threads, manage_thread
     from .update_finding import update_finding
     from .user_skills import delete_user_skill, save_user_skill
     from .web_search import web_search

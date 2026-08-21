@@ -16,12 +16,17 @@ def test_construct_system_prompt_gates_active_plan_mode(enabled: bool) -> None:
     assert ("### Plan Mode (ACTIVE)" in prompt) is enabled
 
 
-def test_dashboard_only_enters_plan_mode_on_explicit_request() -> None:
-    dashboard_prompt = construct_system_prompt(working_dir="/work", source="dashboard")
-    slack_prompt = construct_system_prompt(working_dir="/work", source="slack", slack_context=True)
+@pytest.mark.parametrize(
+    "source", ["dashboard", "slack", "linear", "github", "schedule", "desktop", "generic"]
+)
+def test_plan_mode_requires_an_explicit_request_for_every_source(source: str) -> None:
+    prompt = construct_system_prompt(
+        working_dir="/work", source=source, slack_context=source == "slack"
+    )
 
-    assert "call `enter_plan_mode` only when the user explicitly asks" in dashboard_prompt
-    assert "If a task would genuinely benefit from a structured plan" in slack_prompt
+    assert "Call `enter_plan_mode` only when the user explicitly asks" in prompt
+    assert "Do not infer plan mode from task complexity, size, or ambiguity" in prompt
+    assert "If a task would genuinely benefit from a structured plan" not in prompt
 
 
 def test_plan_mode_prompt_requests_slack_approval_options() -> None:
@@ -38,6 +43,7 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     for tool in (
         "task",
         "manage_baby_sit",
+        "manage_thread",
         "open_pull_request",
         "recreate_sandbox",
         "request_pr_review",
@@ -52,6 +58,8 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
         assert tool in excluded
     # Read-only tools, plan-file editing tools, and explicit plan approval stay available.
     assert "approve_plan" not in excluded
+    assert "list_threads" not in excluded
+    assert "get_thread" not in excluded
     assert "read_file" not in excluded
     assert "write_file" not in excluded
     assert "edit_file" not in excluded
@@ -314,7 +322,10 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
 
     async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
         assert raise_on_error is True
-        return {"markdown": "# Plan\n\nDo it", "status": "ready"}
+        return {
+            "html": "<html><head><title>Plan</title></head><body>Do it</body></html>",
+            "status": "ready",
+        }
 
     async def fake_list_comments(
         thread_id: str, *, raise_on_error: bool = False
@@ -359,7 +370,7 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     assert len(messages) == 1
     assert isinstance(messages[0], ToolMessage)
     assert messages[0].tool_call_id == "call-1"
-    assert "# Plan" in messages[0].content
+    assert "<title>Plan</title>" in messages[0].content
     assert "add tests" in messages[0].content
     assert "reasonable engineering judgment" in messages[0].content
     assert "source of truth" not in messages[0].content
@@ -488,38 +499,3 @@ async def test_approve_plan_tool_allows_non_owner_configurable_identity(
 
     assert isinstance(result, Command)
     assert saved["approved_by"] == {"id": "other", "name": "other", "source": "linear"}
-
-
-@pytest.mark.parametrize(
-    "reply",
-    [
-        "approve",
-        "Approve & implement",
-        "Approved!",
-        "Looks good to me.",
-        "go ahead",
-        "ship it",
-        "yes",
-    ],
-)
-def test_natural_language_plan_approval_accepts_affirmative_replies(reply: str) -> None:
-    from agent.webhooks.slack import _is_natural_language_plan_approval
-
-    assert _is_natural_language_plan_approval(reply) is True
-
-
-@pytest.mark.parametrize(
-    "reply",
-    [
-        "do not approve",
-        "No, revise the plan",
-        "approve after these changes",
-        "looks mostly good, but change the tests",
-        "cancel",
-        "what changed?",
-    ],
-)
-def test_natural_language_plan_approval_rejects_ambiguous_or_negative_replies(reply: str) -> None:
-    from agent.webhooks.slack import _is_natural_language_plan_approval
-
-    assert _is_natural_language_plan_approval(reply) is False

@@ -40,6 +40,7 @@ export interface ScheduleCreateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
+  admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
 }
@@ -51,6 +52,7 @@ export interface ScheduleUpdateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
+  admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
   enabled?: boolean | null
@@ -74,19 +76,31 @@ export interface ThreadPrDiffFile {
   unrenderable: boolean
 }
 
-export interface ThreadPrDiff {
-  prNumber: number
+export interface ThreadBranchDiff {
+  prNumber: number | null
+  baseRef: string
+  headRef: string | null
   baseSha: string
   headSha: string
   truncated: boolean
   files: Array<ThreadPrDiffFile>
 }
 
-/** Files a turn changed, read from the sandbox's git checkpoints. */
+/** Files changed by a thread run. */
 export interface ThreadTurnDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
+  summary: {
+    files: number
+    additions: number
+    deletions: number
+  }
   files: Array<ThreadPrDiffFile>
+}
+
+export interface ThreadTurnDiffOptions {
+  maxFiles?: number
+  includeContent?: boolean
 }
 
 export interface ThreadRecoveryPatch {
@@ -340,16 +354,30 @@ export const agentsApi = {
     agentsRequest<void>(`/threads/${encodeURIComponent(threadId)}`, {
       method: "DELETE",
     }),
-  getThreadPrDiff: (threadId: string) =>
-    agentsRequest<ThreadPrDiff>(
-      `/threads/${encodeURIComponent(threadId)}/pr-diff`
+  getThreadBranchDiff: (threadId: string) =>
+    agentsRequest<ThreadBranchDiff>(
+      `/threads/${encodeURIComponent(threadId)}/branch-diff`
     ),
-  getThreadTurnDiff: (threadId: string, turnKey?: string | null) =>
+  getThreadWorkingTreeDiff: (threadId: string) =>
     agentsRequest<ThreadTurnDiff>(
-      `/threads/${encodeURIComponent(threadId)}/turn-diff${
-        turnKey ? `?turn_key=${encodeURIComponent(turnKey)}` : ""
-      }`
+      `/threads/${encodeURIComponent(threadId)}/working-tree-diff`
     ),
+  getThreadRunDiff: (
+    threadId: string,
+    turnKey: string,
+    options: ThreadTurnDiffOptions = {}
+  ) => {
+    const params = new URLSearchParams({ turn_key: turnKey })
+    if (options.maxFiles != null) {
+      params.set("max_files", String(options.maxFiles))
+    }
+    if (options.includeContent != null) {
+      params.set("include_content", String(options.includeContent))
+    }
+    return agentsRequest<ThreadTurnDiff>(
+      `/threads/${encodeURIComponent(threadId)}/run-diff?${params.toString()}`
+    )
+  },
   downloadThreadRecoveryPatch: (threadId: string) =>
     agentsBlobRequest(
       `/threads/${encodeURIComponent(threadId)}/recovery.patch`

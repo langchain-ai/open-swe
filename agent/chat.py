@@ -125,6 +125,7 @@ with severity, confidence, and resolution notes.
 Guidance:
 - Be concrete and cite specific files and line numbers from the diff.
 - Ground claims about the review in the actual findings; don't invent issues.
+- If repository access fails, disclose it and qualify claims that require unread source.
 - When you propose a change, describe it precisely — you cannot apply it yourself.
 - Keep answers focused and skimmable. Match the depth of the question.
 """

@@ -6,34 +6,35 @@ import {
   CalendarBlankIcon,
   CaretDownIcon,
   CaretRightIcon,
-  ChartLineUpIcon,
   ChatCircleIcon,
   CheckCircleIcon,
   CircleNotchIcon,
   CopyIcon,
   DotsThreeVerticalIcon,
   FolderOpenIcon,
-  FolderPlusIcon,
   GitMergeIcon,
   GitPullRequestIcon,
-  KanbanIcon,
   LightningIcon,
+  MagnifyingGlassIcon,
   PlusIcon,
   SparkleIcon,
   TrashIcon,
   TreeStructureIcon,
 } from "@phosphor-icons/react"
+import { Kanban } from "lucide-react"
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
-import { useCallback, useState } from "react"
-import type { ComponentType, ReactNode, SVGProps } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import type { ComponentType, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import type { DesktopLocalThreadSummary, DesktopProject } from "@/desktop"
 import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import { DesktopThreadSourceToggle } from "@/features/agents/components/DesktopThreadSourceToggle"
 import { SidebarFilterMenu } from "@/features/agents/components/SidebarFilterMenu"
+import { SidebarProjectSelector } from "@/features/agents/components/SidebarProjectSelector"
 import { Button } from "@/components/ui/button"
 import {
   SidebarCollapseButton,
@@ -57,12 +58,31 @@ import {
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
   useDesktopLocalThreads,
+  useLocalThreadActivity,
   useRefreshLocalThreads,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
+import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { Kbd } from "@/components/ui/kbd"
+import { Skeleton } from "@/components/ui/skeleton"
+import {
+  useAppCommand,
+  useAppCommandControls,
+  useRegisterAppCommands,
+} from "@/lib/appCommands"
+import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
 
-const RESOLVED_SIDEBAR_LIMIT = 20
+function SidebarShortcut({ commandId }: { commandId: string }) {
+  const shortcut = useAppCommand(commandId)?.shortcuts?.[0] ?? ""
+  const label = useShortcutLabel(shortcut)
+  if (!shortcut) return null
+  return (
+    <Kbd className="ml-auto h-4 min-w-4 bg-transparent px-0 text-[10px]">
+      {label}
+    </Kbd>
+  )
+}
 
 type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -103,48 +123,47 @@ const PR_STATE_META: Record<
 }
 
 interface AgentsSidebarProps {
-  user: SessionUser
+  user: SessionUser | null
+  localOnly?: boolean
   activeThreadId?: string
   activeLocalSessionId?: string
   layout: SidebarLayout
 }
 
 const NAV = [
-  { to: "/agents/threads", label: "Threads", icon: KanbanIcon },
+  { to: "/agents/threads", label: "Kanban", icon: Kanban },
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
-  { to: "/my-settings", label: "Dashboard", icon: ChartLineUpIcon },
   { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
 ] as const
 
 export function AgentsSidebar({
   user,
+  localOnly = false,
   activeThreadId,
   activeLocalSessionId,
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
+  const { openPalette } = useAppCommandControls()
   const openThread = useCallback(
     (threadId: string) => {
       void navigate({ to: "/agents/$threadId", params: { threadId } })
     },
     [navigate]
   )
-  const {
-    prefs,
-    setGroup,
-    setCompact,
-    toggleSection,
-    setFilters,
-    resetFilters,
-  } = useSidebarPrefs()
-  const sidebar = useSidebarThreads(
-    RESOLVED_SIDEBAR_LIMIT,
+  const { prefs, setGroup, setCompact, setFilters, resetFilters } =
+    useSidebarPrefs()
+  const sidebar = useSidebarThreads({
     activeThreadId,
-    prefs.filters.includeAutomations ||
-      prefs.filters.sources.includes("schedule")
-  )
+    includeAutomations:
+      prefs.filters.includeAutomations ||
+      prefs.filters.sources.includes("schedule"),
+    includeResolved: prefs.filters.includeResolved,
+    enabled: !localOnly,
+  })
   const localSessions = useDesktopLocalThreads().data ?? []
+  const activity = useLocalThreadActivity()
   const refreshLocalThreads = useRefreshLocalThreads()
   const deleteLocalSession = async (sessionId: string) => {
     const deleted =
@@ -158,16 +177,42 @@ export function AgentsSidebar({
     removeProject: removeLocalProject,
   } = useDesktopProjects()
   const localGroups = groupLocalProjects(localProjects, localSessions)
+  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(
+    null
+  )
+  const activeProjectPath = localProjects.some(
+    (project) => project.cwd === selectedProjectPath
+  )
+    ? selectedProjectPath
+    : null
+  const visibleLocalGroups = activeProjectPath
+    ? localGroups.filter((group) => group.project.cwd === activeProjectPath)
+    : localGroups
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const activeThreads = sidebar.data?.active.items ?? []
-  const resolvedThreads = sidebar.data?.resolved.items ?? []
-  const resolvedHasMore = sidebar.data?.resolved.hasMore ?? false
+  const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
+  useEffect(() => {
+    if (!isDesktop) return
+    if (activeLocalSessionId) setDesktopThreadSource("local")
+    else if (activeThreadId) setDesktopThreadSource("cloud")
+  }, [activeLocalSessionId, activeThreadId, isDesktop, setDesktopThreadSource])
+  const activeThreads = sidebar.data.active.items
+  const resolvedThreads = sidebar.data.resolved.items
+  const activeHasMore = sidebar.data.active.hasMore
+  const resolvedHasMore = sidebar.data.resolved.hasMore
   const visibleThreads = [...activeThreads, ...resolvedThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
-  const facets = availableFacets(visibleThreads)
+  const loadedFacets = availableFacets(visibleThreads)
+  const facets = {
+    models: [
+      ...new Set([...prefs.filters.models, ...loadedFacets.models]),
+    ].sort((a, b) => a.localeCompare(b)),
+    repos: [...new Set([...prefs.filters.repos, ...loadedFacets.repos])].sort(
+      (a, b) => a.localeCompare(b)
+    ),
+  }
   const filteredActive = filterThreads(activeThreads, prefs.filters)
   const filteredResolved = filterThreads(resolvedThreads, prefs.filters)
   const showResolved = prefs.filters.includeResolved
@@ -176,16 +221,32 @@ export function AgentsSidebar({
       ? [...filteredActive, ...filteredResolved]
       : filteredActive
   const sections = groupThreadsByMode(groupedThreads, prefs.group)
-  const isEmpty =
-    localGroups.length === 0 &&
+  const resolvedLoading =
+    !sidebar.isPending && showResolved && sidebar.resolvedQuery.isLoading
+  const isCloudEmpty =
+    !sidebar.isPending &&
+    !resolvedLoading &&
     sections.length === 0 &&
     (!showResolved || filteredResolved.length === 0) &&
     hasActiveFilters(prefs.filters)
-  const localSessionCount = localGroups.reduce(
-    (total, group) => total + group.sessions.length,
-    0
-  )
-  const cloudCollapsed = isDesktop && prefs.collapsed.cloud
+  const cloudActivity = {
+    running: activeThreads.filter((thread) => thread.status === "running")
+      .length,
+    completed: activeThreads.filter(
+      (thread) => thread.status === "finished" && !thread.viewed
+    ).length,
+  }
+  const localActivity = {
+    running: localSessions.filter((thread) => activity[thread.id] === "running")
+      .length,
+    completed: localSessions.filter(
+      (thread) => !thread.viewed && activity[thread.id] !== "running"
+    ).length,
+  }
+  const showLocalThreads =
+    isDesktop && (localOnly || desktopThreadSource === "local")
+  const showCloudThreads =
+    !localOnly && (!isDesktop || desktopThreadSource === "cloud")
 
   return (
     <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
@@ -196,16 +257,30 @@ export function AgentsSidebar({
         )}
       >
         <Link
-          to="/my-settings"
+          to={localOnly ? "/agents" : "/my-settings"}
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
           <img src="/logo-mark.png" alt="" className="size-5" />
           Open SWE
         </Link>
-        <SidebarCollapseButton onToggle={layout.toggle} />
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            aria-label="Search"
+            title="Search"
+            onClick={() => {
+              layout.closeOnMobile()
+              openPalette()
+            }}
+            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <MagnifyingGlassIcon className="size-4" />
+          </button>
+          <SidebarCollapseButton onToggle={layout.toggle} />
+        </div>
       </div>
 
-      <div className="px-2 pb-1">
+      <div className="flex flex-col gap-0.5 px-2 pb-1">
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
@@ -213,124 +288,150 @@ export function AgentsSidebar({
         >
           <PlusIcon className="size-4" />
           New Thread
+          <SidebarShortcut commandId="new-thread" />
         </Link>
       </div>
 
-      <nav className="flex flex-col gap-0.5 px-2 pb-4">
-        {NAV.map((item) => {
-          const Icon = item.icon
-          return (
-            <Link
-              key={item.to}
-              to={item.to}
-              onClick={layout.closeOnMobile}
-              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-              activeProps={{
-                className: "bg-sidebar-row-hover !text-foreground font-medium",
-              }}
-            >
-              <Icon className="size-4" />
-              {item.label}
-            </Link>
-          )
-        })}
-      </nav>
+      {!localOnly && (
+        <nav
+          className={cn(
+            "flex flex-col gap-0.5 px-2",
+            isDesktop ? "pb-3" : "pb-4"
+          )}
+        >
+          {NAV.map((item) => {
+            const Icon = item.icon
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                onClick={layout.closeOnMobile}
+                className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+                activeProps={{
+                  className:
+                    "bg-sidebar-row-hover !text-foreground font-medium",
+                }}
+              >
+                <Icon className="size-4" />
+                {item.label}
+              </Link>
+            )
+          })}
+        </nav>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
-        {isDesktop && (
-          <div
-            className={cn(
-              "mb-3 flex min-h-0 flex-col",
-              prefs.collapsed.local
-                ? "shrink-0"
-                : cloudCollapsed
-                  ? "flex-1"
-                  : "max-h-1/2 shrink-0"
-            )}
-          >
-            <SectionHeader
-              label="Local"
-              count={localSessionCount}
-              collapsed={prefs.collapsed.local}
-              onToggle={() => toggleSection("local")}
-            >
-              <button
-                aria-label="Add project"
-                className="mr-1 flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-                onClick={() => void addLocalProject()}
-                title="Add project"
-                type="button"
-              >
-                <FolderPlusIcon className="size-3.5" />
-              </button>
-            </SectionHeader>
-            {!prefs.collapsed.local && (
-              <div className="min-h-0 overflow-y-auto">
-                {localGroups.map((group) => (
-                  <LocalThreadGroup
-                    key={group.project.cwd}
-                    project={group.project}
-                    sessions={group.sessions}
-                    activeSessionId={activeLocalSessionId}
-                    onNavigate={layout.closeOnMobile}
-                    onDelete={deleteLocalSession}
-                    onRemove={() => void removeLocalProject(group.project.cwd)}
-                    compact={prefs.compact}
-                  />
-                ))}
-                {localGroups.length === 0 && (
-                  <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
-                    No projects yet
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-        {isDesktop && (
-          <SectionHeader
-            label="Cloud"
-            count={
-              filteredActive.length +
-              (showResolved ? filteredResolved.length : 0)
-            }
-            collapsed={prefs.collapsed.cloud}
-            onToggle={() => toggleSection("cloud")}
+        {isDesktop && !localOnly && (
+          <DesktopThreadSourceToggle
+            source={desktopThreadSource}
+            localActivity={localActivity}
+            cloudActivity={cloudActivity}
+            onSourceChange={setDesktopThreadSource}
           />
         )}
-        {!cloudCollapsed && (
+        {showLocalThreads && (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <SidebarProjectSelector
+              projects={localProjects}
+              selectedProjectPath={activeProjectPath}
+              onSelectProject={setSelectedProjectPath}
+              onAddProject={() => void addLocalProject()}
+              onRemoveProject={(cwd) => void removeLocalProject(cwd)}
+            />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {activeProjectPath
+                ? visibleLocalGroups[0]?.sessions.map((session) => (
+                    <LocalThreadRow
+                      key={session.id}
+                      session={session}
+                      isActive={session.id === activeLocalSessionId}
+                      onNavigate={layout.closeOnMobile}
+                      onDelete={deleteLocalSession}
+                      compact={prefs.compact}
+                    />
+                  ))
+                : visibleLocalGroups.map((group) => (
+                    <LocalThreadGroup
+                      key={group.project.cwd}
+                      project={group.project}
+                      sessions={group.sessions}
+                      activeSessionId={activeLocalSessionId}
+                      onNavigate={layout.closeOnMobile}
+                      onDelete={deleteLocalSession}
+                      onRemove={() =>
+                        void removeLocalProject(group.project.cwd)
+                      }
+                      compact={prefs.compact}
+                    />
+                  ))}
+              {localGroups.length === 0 && (
+                <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
+                  No projects yet
+                </p>
+              )}
+              {activeProjectPath &&
+                visibleLocalGroups[0]?.sessions.length === 0 && (
+                  <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
+                    No threads yet
+                  </p>
+                )}
+            </div>
+          </div>
+        )}
+        {showCloudThreads && (
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {prefs.group === "none"
-              ? sections[0]?.threads.map((thread) => (
-                  <ThreadRow
-                    key={thread.id}
-                    thread={thread}
-                    isActive={thread.id === activeThreadId}
-                    onNavigate={layout.closeOnMobile}
-                    compact={prefs.compact}
-                  />
-                ))
-              : sections.map((section) => (
-                  <ThreadGroup
-                    key={`${prefs.group}:${section.key}`}
-                    label={section.label}
-                    threads={section.threads}
-                    activeThreadId={activeThreadId}
-                    onNavigate={layout.closeOnMobile}
-                    defaultCollapsed={section.defaultCollapsed}
-                    compact={prefs.compact}
-                    hasMore={
-                      prefs.group === "focus" && section.key === "done"
-                        ? resolvedHasMore
-                        : false
-                    }
-                    count={
-                      prefs.group === "focus" && section.key === "done"
-                        ? filteredResolved.length
-                        : section.threads.length
-                    }
-                  />
-                ))}
+            {sidebar.isPending && (
+              <ThreadListSkeleton compact={prefs.compact} />
+            )}
+            {!sidebar.isPending &&
+              (prefs.group === "none"
+                ? sections[0]?.threads.map((thread) => (
+                    <ThreadRow
+                      key={thread.id}
+                      thread={thread}
+                      isActive={thread.id === activeThreadId}
+                      onNavigate={layout.closeOnMobile}
+                      compact={prefs.compact}
+                    />
+                  ))
+                : sections.map((section) => (
+                    <ThreadGroup
+                      key={`${prefs.group}:${section.key}`}
+                      label={section.label}
+                      threads={section.threads}
+                      activeThreadId={activeThreadId}
+                      onNavigate={layout.closeOnMobile}
+                      defaultCollapsed={section.defaultCollapsed}
+                      compact={prefs.compact}
+                      hasMore={
+                        prefs.group === "focus" && section.key === "done"
+                          ? resolvedHasMore
+                          : false
+                      }
+                      count={
+                        prefs.group === "focus" && section.key === "done"
+                          ? filteredResolved.length
+                          : section.threads.length
+                      }
+                    />
+                  )))}
+            {!sidebar.isPending && activeHasMore && (
+              <LoadMoreThreadsButton
+                label="Load more threads"
+                loading={sidebar.activeQuery.isFetchingNextPage}
+                onClick={() => void sidebar.activeQuery.fetchNextPage()}
+              />
+            )}
+            {!sidebar.isPending &&
+              showResolved &&
+              prefs.group === "focus" &&
+              resolvedHasMore && (
+                <LoadMoreThreadsButton
+                  label="Load more resolved threads"
+                  loading={sidebar.resolvedQuery.isFetchingNextPage}
+                  onClick={() => void sidebar.resolvedQuery.fetchNextPage()}
+                />
+              )}
             {showResolved && prefs.group !== "focus" && (
               <ResolvedThreadGroup
                 threads={filteredResolved}
@@ -338,9 +439,17 @@ export function AgentsSidebar({
                 activeThreadId={activeThreadId}
                 onNavigate={layout.closeOnMobile}
                 compact={prefs.compact}
+                onLoadMore={() => void sidebar.resolvedQuery.fetchNextPage()}
+                isLoadingMore={sidebar.resolvedQuery.isFetchingNextPage}
               />
             )}
-            {isEmpty && (
+            {resolvedLoading && (
+              <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
+                <CircleNotchIcon className="size-3.5 animate-spin" />
+                Loading resolved threads…
+              </div>
+            )}
+            {isCloudEmpty && (
               <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
                 No threads match these filters.
               </p>
@@ -351,49 +460,29 @@ export function AgentsSidebar({
 
       <div className="flex items-center gap-1 p-2">
         <div className="min-w-0 flex-1">
-          <SidebarUserMenu user={user} showSettingsLink />
+          {user ? (
+            <SidebarUserMenu user={user} showSettingsLink />
+          ) : (
+            <Link
+              to="/login"
+              className="flex w-full items-center justify-center rounded-md border border-border px-2 py-1.5 text-xs font-medium hover:bg-sidebar-accent"
+            >
+              Sign in for cloud mode
+            </Link>
+          )}
         </div>
-        <SidebarFilterMenu
-          prefs={prefs}
-          facets={facets}
-          onGroupChange={setGroup}
-          onFiltersChange={setFilters}
-          onCompactChange={setCompact}
-          onResetFilters={resetFilters}
-        />
+        {showCloudThreads && (
+          <SidebarFilterMenu
+            prefs={prefs}
+            facets={facets}
+            onGroupChange={setGroup}
+            onFiltersChange={setFilters}
+            onCompactChange={setCompact}
+            onResetFilters={resetFilters}
+          />
+        )}
       </div>
     </SidebarFrame>
-  )
-}
-
-function SectionHeader({
-  label,
-  count,
-  collapsed,
-  onToggle,
-  children,
-}: {
-  label: string
-  count: number
-  collapsed: boolean
-  onToggle: () => void
-  children?: ReactNode
-}) {
-  return (
-    <div className="flex items-center">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left font-heading text-xs font-semibold tracking-wide text-foreground uppercase transition-colors hover:text-foreground/80"
-        aria-expanded={!collapsed}
-      >
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-        <span className="text-[10px] font-medium text-muted-foreground/70">
-          {count}
-        </span>
-      </button>
-      {children}
-    </div>
   )
 }
 
@@ -555,7 +644,7 @@ function LocalThreadRow({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const running = session.status === "running" || session.status === "starting"
+  const running = useLocalThreadActivity()[session.id] === "running"
 
   const confirmDelete = async () => {
     if (isDeleting) return
@@ -654,6 +743,44 @@ function LocalThreadRow({
   )
 }
 
+/**
+ * Mirrors the grouped thread list's shape so the sidebar reads as loading
+ * rather than as an account with no threads. Widths vary per row because a
+ * column of identical bars reads as a UI element, not as pending content.
+ */
+function ThreadListSkeleton({ compact = false }: { compact?: boolean }) {
+  const groups = [
+    [90, 64, 76],
+    [72, 84],
+  ]
+  return (
+    <div data-testid="sidebar-threads-skeleton">
+      <span className="sr-only" role="status">
+        Loading threads
+      </span>
+      {groups.map((widths, groupIndex) => (
+        <div key={groupIndex} className={compact ? "mb-2" : "mb-3"} aria-hidden>
+          <div className="flex items-center gap-1 px-2 py-1">
+            <Skeleton className="h-2 w-16 rounded-sm" />
+          </div>
+          {widths.map((width, rowIndex) => (
+            <div
+              key={rowIndex}
+              className={cn(
+                "mb-0.5 flex items-center gap-2 px-2.5",
+                compact ? "h-7 gap-1.5" : "h-8"
+              )}
+            >
+              <Skeleton className="size-3 shrink-0 rounded-full" />
+              <Skeleton className="h-2.5" style={{ width: `${width}%` }} />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ThreadGroup({
   label,
   threads,
@@ -704,7 +831,6 @@ function ThreadGroup({
               compact={compact}
             />
           ))}
-          {hasMore && <ShowAllResolvedLink onNavigate={onNavigate} />}
         </>
       )}
     </div>
@@ -717,18 +843,21 @@ function ResolvedThreadGroup({
   activeThreadId,
   onNavigate,
   compact = false,
+  onLoadMore,
+  isLoadingMore,
 }: {
   threads: Array<AgentThread>
   hasMore: boolean
   activeThreadId?: string
   onNavigate?: () => void
   compact?: boolean
+  onLoadMore: () => void
+  isLoadingMore: boolean
 }) {
   const [collapsed, setCollapsed] = useState(true)
-  if (threads.length === 0) return null
+  if (threads.length === 0 && !hasMore) return null
 
   const ToggleIcon = collapsed ? CaretRightIcon : CaretDownIcon
-  const visible = threads.slice(0, RESOLVED_SIDEBAR_LIMIT)
 
   return (
     <div className="mb-3">
@@ -747,7 +876,7 @@ function ResolvedThreadGroup({
       </button>
       {!collapsed && (
         <>
-          {visible.map((thread) => (
+          {threads.map((thread) => (
             <ThreadRow
               key={thread.id}
               thread={thread}
@@ -756,28 +885,38 @@ function ResolvedThreadGroup({
               compact={compact}
             />
           ))}
-          {hasMore && <ShowAllResolvedLink onNavigate={onNavigate} />}
+          {hasMore && (
+            <LoadMoreThreadsButton
+              label="Load more resolved threads"
+              loading={isLoadingMore}
+              onClick={onLoadMore}
+            />
+          )}
         </>
       )}
     </div>
   )
 }
 
-function ShowAllResolvedLink({ onNavigate }: { onNavigate?: () => void }) {
+function LoadMoreThreadsButton({
+  label,
+  loading,
+  onClick,
+}: {
+  label: string
+  loading: boolean
+  onClick: () => void
+}) {
   return (
-    <Link
-      to="/agents/threads"
-      search={{
-        resolved: true,
-        page: 1,
-        layout: "board",
-        group: "focus",
-      }}
-      onClick={onNavigate}
-      className="mt-0.5 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={loading}
+      className="mt-0.5 flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground disabled:cursor-wait disabled:opacity-60"
     >
-      Show all
-    </Link>
+      {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
+      {loading ? "Loading…" : label}
+    </button>
   )
 }
 
@@ -836,16 +975,6 @@ function ThreadRow({
     thread.threadCategory === "automation" || thread.source === "schedule"
   const showFinishedIndicator = thread.status === "finished" && !thread.viewed
 
-  const openTrace = () => {
-    if (!thread.traceUrl) return
-    window.open(thread.traceUrl, "_blank", "noopener,noreferrer")
-  }
-
-  const openSource = () => {
-    if (!thread.sourceUrl) return
-    window.open(thread.sourceUrl, "_blank", "noopener,noreferrer")
-  }
-
   const copySandboxId = () => {
     if (!thread.sandboxId) return
     void navigator.clipboard.writeText(thread.sandboxId)
@@ -897,6 +1026,14 @@ function ThreadRow({
           <span className="min-w-0 flex-1 truncate text-[13px]">
             {thread.title}
           </span>
+          {thread.automationActionPosted && (
+            <IoLogoSlack
+              className="size-3.5 shrink-0 text-success-foreground"
+              aria-label="Action posted to Slack"
+            >
+              <title>Action posted to Slack</title>
+            </IoLogoSlack>
+          )}
           {!compact && isAutomation && (
             <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground group-hover:hidden">
               Automation
@@ -941,22 +1078,29 @@ function ThreadRow({
               className="z-50 outline-none"
             >
               <Menu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-                <Menu.Item
-                  disabled={!thread.traceUrl}
-                  onClick={openTrace}
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                >
-                  <TreeStructureIcon className="size-3.5" />
-                  Open trace
-                </Menu.Item>
+                {thread.traceUrl && (
+                  <Menu.LinkItem
+                    href={thread.traceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    closeOnClick
+                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
+                  >
+                    <TreeStructureIcon className="size-3.5" />
+                    Open trace
+                  </Menu.LinkItem>
+                )}
                 {thread.sourceUrl && (
-                  <Menu.Item
-                    onClick={openSource}
-                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
+                  <Menu.LinkItem
+                    href={thread.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    closeOnClick
+                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
                   >
                     <IoLogoSlack className="size-3.5" />
                     Open Slack thread
-                  </Menu.Item>
+                  </Menu.LinkItem>
                 )}
                 <Menu.Item
                   disabled={!thread.sandboxId}
@@ -1009,21 +1153,41 @@ function ThreadRow({
 
 export function AgentsShell({
   user,
+  localOnly = false,
   activeThreadId,
   activeLocalSessionId,
   children,
 }: {
-  user: SessionUser
+  user: SessionUser | null
+  localOnly?: boolean
   activeThreadId?: string
   activeLocalSessionId?: string
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
+  const sidebarCommands = useMemo(
+    () => [
+      {
+        id: "toggle-sidebar",
+        label: "Toggle sidebar",
+        aliases: ["show sidebar", "hide sidebar"],
+        shortcuts: ["mod+b"],
+        group: "Workspace",
+        run: layout.toggle,
+        desktopId: "toggle-sidebar" as const,
+        desktopShortcuts: ["mod+b"],
+      },
+    ],
+    [layout.toggle]
+  )
+  useRegisterAppCommands(sidebarCommands)
+
   return (
     <SidebarLayoutProvider value={layout}>
       <div className="agents-ui flex h-svh overflow-hidden bg-background">
         <AgentsSidebar
           user={user}
+          localOnly={localOnly}
           activeThreadId={activeThreadId}
           activeLocalSessionId={activeLocalSessionId}
           layout={layout}

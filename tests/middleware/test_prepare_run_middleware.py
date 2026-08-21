@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any, cast
 from unittest.mock import MagicMock
+from xml.etree import ElementTree
 
 import pytest
 from langchain.agents.middleware import AgentState
@@ -8,7 +9,9 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.middleware.prepare_run import BasePrepareRunMiddleware
+from agent.input_messages import human_input
+from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
+from agent.server import PrepareAgentRunMiddleware
 from agent.utils import ttl_cache
 
 
@@ -89,7 +92,55 @@ async def test_prepare_prompt_injection():
         },
     )()
     await middleware.awrap_model_call(cast(ModelRequest[None], request), handler)
-    assert seen["system_prompt"] == "prepared prompt"
+    prompt = ElementTree.fromstring(seen["system_prompt"])
+    assert prompt.tag == "system-instructions"
+    entity = prompt.find("dynamic-context")
+    message = prompt.find("input-message")
+    assert entity is not None
+    assert message is not None
+    assert entity.attrib["id"] == "system:open-swe"
+    assert message.findtext("content") == "prepared prompt"
+
+
+def test_sender_context_updates_only_latest_human_message():
+    first = HumanMessage("first", id="first")
+    latest = HumanMessage(
+        content=[{"type": "text", "text": "second"}],
+        id="second",
+        name="participant",
+    )
+
+    updated = PrepareAgentRunMiddleware._sender_context_message(
+        cast(PrepareRunState, {"messages": [first, latest]}),
+        "sender",
+    )
+
+    assert updated is not None
+    assert updated.id == latest.id
+    assert updated.name == latest.name
+    assert first.content == "first"
+    assert updated.content == [
+        {"type": "text", "text": "second"},
+        {"type": "text", "text": "<sender_context>\nsender\n</sender_context>"},
+    ]
+
+
+def test_sender_context_goes_inside_the_envelope():
+    envelope = human_input(
+        "ship it <now> & fast",
+        {"sender_id": "slack:U1", "surface": "slack", "kind": "human"},
+    )
+    message = HumanMessage(content=cast(str, envelope["content"]), id="turn")
+
+    updated = PrepareAgentRunMiddleware._sender_context_message(
+        cast(PrepareRunState, {"messages": [message]}),
+        "identity: 'ramon' & <team>",
+    )
+
+    assert updated is not None
+    root = ElementTree.fromstring(cast(str, updated.content))
+    assert root.findtext("content") == "ship it <now> & fast"
+    assert root.findtext("sender_context") == "identity: 'ramon' & <team>"
 
 
 @pytest.mark.asyncio

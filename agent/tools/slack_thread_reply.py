@@ -134,7 +134,14 @@ def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[s
                 {
                     "type": "button",
                     "text": {"type": "plain_text", "text": option[:75], "emoji": True},
-                    "value": json.dumps({"type": "open_swe_option", "response": option}),
+                    "value": json.dumps(
+                        {
+                            "type": "plan_approval",
+                            "action": "approve" if option == "Approve & implement" else "revise",
+                        }
+                        if option in {"Approve & implement", "Request changes"}
+                        else {"type": "open_swe_option", "response": option}
+                    ),
                     "action_id": f"open_swe_option_select_{index}",
                 }
                 for index, option in enumerate(clean_options[:5])

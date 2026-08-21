@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatComposer, buildCommandItems } from "./ChatComposer"
+import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import { replaceTextRange } from "./composerTrigger"
 import type { ChatComposerProps } from "./ChatComposer"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
@@ -34,6 +35,10 @@ const cancelThread = vi.fn(async (threadId: string) => ({
 vi.mock("@/features/agents/lib/api", () => ({
   agentsApi: { cancelThread: (threadId: string) => cancelThread(threadId) },
   AgentsApiError: class AgentsApiError extends Error {},
+}))
+
+vi.mock("@/lib/appCommands", () => ({
+  useRegisterAppCommands: vi.fn(),
 }))
 
 afterEach(() => cleanup())
@@ -123,25 +128,85 @@ describe("ChatComposer stop button", () => {
     expect(cancelThread).not.toHaveBeenCalled()
   })
 
+  it("shows only the stop action while a live run has no queued message", () => {
+    renderComposer(true)
+
+    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Steer agent" })).toBeNull()
+  })
+
   it("shows the send button when no run is live", () => {
     renderComposer(false)
 
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Steer agent" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
+  })
+
+  it("stops a direct run on Escape while steer is shown", () => {
+    const onStop = vi.fn()
+    render(
+      <ComposerPrimaryActions
+        activeRun={{ threadId: "thread-1", running: true }}
+        canSubmit
+        onStop={onStop}
+        onSubmit={vi.fn()}
+        submitting={false}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Steer agent" })).toBeTruthy()
+    fireEvent.keyDown(document.body, { key: "Escape" })
+
+    expect(onStop).toHaveBeenCalledOnce()
   })
 })
 
 describe("ChatComposer admin mode", () => {
-  it("tints the composer options control when enabled", () => {
+  it("hides the toggle when admin mode is unavailable", () => {
+    renderComposer(false)
+
+    expect(screen.queryByRole("button", { name: "Admin mode" })).toBeNull()
+  })
+
+  it("shows a direct toggle for eligible admins", () => {
+    const onAdminThreadChange = vi.fn()
+    renderComposer(false, { onAdminThreadChange })
+
+    const toggle = screen.getByRole("button", { name: "Admin mode" })
+    expect(toggle.getAttribute("aria-pressed")).toBe("false")
+
+    fireEvent.click(toggle)
+
+    expect(onAdminThreadChange).toHaveBeenCalledWith(true)
+  })
+
+  it("shows the active state and can disable admin mode", () => {
+    const onAdminThreadChange = vi.fn()
     renderComposer(false, {
       adminThread: true,
-      onAdminThreadChange: vi.fn(),
+      onAdminThreadChange,
     })
 
-    const options = screen.getByRole("button", {
-      name: "More composer options",
-    })
-    expect(options.className.split(" ")).toContain("bg-destructive/10")
+    const toggle = screen.getByRole("button", { name: "Admin mode" })
+    expect(toggle.getAttribute("aria-pressed")).toBe("true")
+    expect(toggle.className.split(" ")).toContain("bg-destructive/10")
+
+    fireEvent.click(toggle)
+
+    expect(onAdminThreadChange).toHaveBeenCalledWith(false)
+  })
+
+  it("cannot change modes while the composer is disabled", () => {
+    const onAdminThreadChange = vi.fn()
+    renderComposer(false, { disabled: true, onAdminThreadChange })
+
+    const toggle = screen.getByRole("button", { name: "Admin mode" })
+    expect(toggle.hasAttribute("disabled")).toBe(true)
+
+    fireEvent.click(toggle)
+
+    expect(onAdminThreadChange).not.toHaveBeenCalled()
   })
 })
 

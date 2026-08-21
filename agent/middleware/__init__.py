@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
+    "DynamicContextMiddleware": ".dynamic_context",
     "DynamicToolMiddleware": ".dynamic_tools",
     "ensure_no_empty_msg": ".ensure_no_empty_msg",
     "ExcludeToolsMiddleware": ".exclude_tools",
@@ -28,10 +29,10 @@ _MIDDLEWARE_MODULES = {
     "TimeoutWrapupMiddleware": ".timeout_wrapup",
     "ToolErrorMiddleware": ".tool_error_handler",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
-    "WorkingRepoMiddleware": ".working_repo",
 }
 
 __all__ = [
+    "DynamicContextMiddleware",
     "DynamicToolMiddleware",
     "ExcludeToolsMiddleware",
     "ModelCallTimeoutMiddleware",
@@ -49,7 +50,6 @@ __all__ = [
     "ToolErrorMiddleware",
     "TimeoutWrapupMiddleware",
     "WorkflowPushGuardMiddleware",
-    "WorkingRepoMiddleware",
     "SandboxCircuitBreakerMiddleware",
     "check_message_queue_before_model",
     "ensure_no_empty_msg",
@@ -62,6 +62,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from .check_message_queue import check_message_queue_before_model
+    from .dynamic_context import DynamicContextMiddleware
     from .dynamic_tools import DynamicToolMiddleware
     from .ensure_no_empty_msg import ensure_no_empty_msg
     from .exclude_tools import ExcludeToolsMiddleware
@@ -84,7 +85,6 @@ if TYPE_CHECKING:
     from .timeout_wrapup import TimeoutWrapupMiddleware
     from .tool_error_handler import ToolErrorMiddleware
     from .workflow_push_guard import WorkflowPushGuardMiddleware
-    from .working_repo import WorkingRepoMiddleware
 
 
 def _load_export(name: str) -> Any:
