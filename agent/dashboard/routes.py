@@ -216,6 +216,7 @@ from .team_settings import (
     upsert_team_settings,
 )
 from .thread_api import (
+    ThreadFocusStateBody,
     ThreadMessageBody,
     ThreadResolveBody,
     admin_cancel_dashboard_thread,
@@ -237,6 +238,7 @@ from .thread_api import (
     proxy_dashboard_thread_stream_events,
     resolve_dashboard_thread,
     send_dashboard_message,
+    set_dashboard_thread_focus_state,
     stream_dashboard_thread,
 )
 from .user_credentials import (
@@ -2247,6 +2249,20 @@ async def api_resolve_thread(
         thread_id,
         session["sub"],
         resolved=body.resolved,
+        email=session.get("email"),
+    )
+
+
+@router.post("/threads/{thread_id}/focus-state")
+async def api_set_thread_focus_state(
+    thread_id: str,
+    body: ThreadFocusStateBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await set_dashboard_thread_focus_state(
+        thread_id,
+        session["sub"],
+        focus_state=body.focus_state,
         email=session.get("email"),
     )
 

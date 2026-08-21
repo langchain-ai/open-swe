@@ -4,6 +4,7 @@ import type {
   ImageChunk,
   Message,
   SlackNotificationMode,
+  ThreadFocusColumn,
   WorkflowPushApprovalsResponse,
 } from "./types"
 import { dashboardApiBase } from "@/lib/api-base"
@@ -274,6 +275,14 @@ export const agentsApi = {
       {
         method: "POST",
         body: JSON.stringify({ resolved }),
+      }
+    ),
+  setThreadFocusState: (threadId: string, focusState: ThreadFocusColumn) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/focus-state`,
+      {
+        method: "POST",
+        body: JSON.stringify({ focus_state: focusState }),
       }
     ),
   listSchedules: () => agentsRequest<Array<AgentSchedule>>("/schedules"),

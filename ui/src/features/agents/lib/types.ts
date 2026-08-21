@@ -15,6 +15,9 @@ export type TodoStatus = "pending" | "in_progress" | "completed"
 export type AgentStatus =
   "idle" | "running" | "finished" | "interrupted" | "error"
 
+export type ThreadFocusState = "attention" | "progress" | "ready"
+export type ThreadFocusColumn = ThreadFocusState | "done"
+
 export type AgentSource =
   "dashboard" | "github" | "slack" | "linear" | "schedule"
 
@@ -289,6 +292,7 @@ export interface AgentThread {
   viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null
+  boardFocusState?: ThreadFocusState | null
   isOwner?: boolean
   createdAt: number
   updatedAt: number

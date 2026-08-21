@@ -410,6 +410,40 @@ function boardColumn(main: Locator, name: string): Locator {
   return main.locator(`section:has(h2:text-is("${name}"))`);
 }
 
+async function dragThreadToFocusColumn(
+  page: Page,
+  main: Locator,
+  options: {
+    threadId: string;
+    title: string;
+    from: string;
+    to: string;
+    focusState: string;
+  },
+) {
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname ===
+        `/dashboard/api/threads/${options.threadId}/focus-state`,
+  );
+  const card = boardColumn(main, options.from)
+    .locator("article")
+    .filter({ hasText: options.title });
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await card.dispatchEvent("dragstart", { dataTransfer });
+  await boardColumn(main, options.to).dispatchEvent("dragover", {
+    dataTransfer,
+  });
+  await boardColumn(main, options.to).dispatchEvent("drop", { dataTransfer });
+  await dataTransfer.dispose();
+  const response = await responsePromise;
+  expect(response.ok(), await response.text()).toBeTruthy();
+  expect(response.request().postDataJSON()).toEqual({
+    focus_state: options.focusState,
+  });
+}
+
 function sidebarGroup(sidebar: Locator, name: string): Locator {
   return sidebar.locator(`div:has(> button > span:text-is("${name}"))`);
 }
@@ -732,10 +766,7 @@ test.describe("threads workspace", () => {
     });
   });
 
-  test("persists layout and column order and resolves threads", async ({
-    page,
-    request,
-  }) => {
+  test("persists layout and column order", async ({ page, request }) => {
     await seedThreads(request, workspaceThreads());
     await loginAs(page);
 
@@ -803,7 +834,9 @@ test.describe("threads workspace", () => {
       "Done",
     ]);
 
-    const doneHeader = boardColumn(main, "Done").locator('[draggable="true"]');
+    const doneHeader = boardColumn(main, "Done").locator(
+      ':scope > div[draggable="true"]',
+    );
     await doneHeader.dragTo(boardColumn(main, "Needs attention"));
     await expectBoardOrder(main, [
       "In progress",
@@ -838,32 +871,166 @@ test.describe("threads workspace", () => {
       "Ready",
     ]);
 
-    const readyCard = boardColumn(main, "Ready")
-      .locator("article")
-      .filter({ hasText: TITLES.ready });
-    const resolveResponse = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname ===
-          `/dashboard/api/threads/${THREAD_IDS.ready}/resolve`,
-    );
-    await readyCard.getByRole("button", { name: "Resolve thread" }).click();
-    expect((await resolveResponse).ok()).toBeTruthy();
-    await expect(boardColumn(main, "Done")).toContainText(TITLES.ready);
-    await expect(boardColumn(main, "Ready")).toHaveCount(0);
+    await expect(
+      main.getByRole("button", { name: "Resolve thread" }),
+    ).toHaveCount(0);
+    await expect(
+      main.getByRole("button", { name: "Reopen thread" }),
+    ).toHaveCount(0);
+  });
 
-    const resolvedCard = boardColumn(main, "Done")
+  test("toggles Focus columns and keeps one visible", async ({
+    page,
+    request,
+  }, testInfo) => {
+    await seedThreads(request, workspaceThreads());
+    await loginAs(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(
+      `/agents/threads?q=${encodeURIComponent(WORKSPACE_QUERY)}&layout=board&group=focus`,
+    );
+
+    const main = page.getByRole("main").last();
+    await expectBoardOrder(main, [
+      "Needs attention",
+      "In progress",
+      "Ready",
+      "Done",
+    ]);
+
+    await main.getByRole("button", { name: "Columns" }).click();
+    const readyToggle = page.getByRole("checkbox", { name: "Ready" });
+    await readyToggle.uncheck();
+    await expect(boardColumn(main, "Ready")).toHaveCount(0);
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("hidden"))
+      .toBe("ready");
+    expect(
+      await page.evaluate(() =>
+        window.localStorage.getItem("open-swe:thread-board-hidden:focus"),
+      ),
+    ).toBe("ready");
+
+    await page.reload();
+    await expect(boardColumn(main, "Ready")).toHaveCount(0);
+    await main.getByRole("button", { name: "Columns" }).click();
+    await page.getByRole("checkbox", { name: "Ready" }).check();
+    await expect(boardColumn(main, "Ready")).toContainText(TITLES.ready);
+    await expect
+      .poll(() => new URL(page.url()).searchParams.has("hidden"))
+      .toBe(false);
+    expect(
+      await page.evaluate(() =>
+        window.localStorage.getItem("open-swe:thread-board-hidden:focus"),
+      ),
+    ).toBeNull();
+
+    await page.getByRole("checkbox", { name: "Needs attention" }).uncheck();
+    await expect(boardColumn(main, "Needs attention")).toHaveCount(0);
+    await page.getByRole("checkbox", { name: "In progress" }).uncheck();
+    await expect(boardColumn(main, "In progress")).toHaveCount(0);
+    await page.getByRole("checkbox", { name: "Ready" }).uncheck();
+    await expect(boardColumn(main, "Ready")).toHaveCount(0);
+    const doneToggle = page.getByRole("checkbox", { name: "Done" });
+    await expect(doneToggle).toBeChecked();
+    await expect(doneToggle).toBeDisabled();
+    await expectBoardOrder(main, ["Done"]);
+
+    const screenshotPath = testInfo.outputPath("kanban-column-visibility.png");
+    await main.screenshot({ path: screenshotPath });
+    await testInfo.attach("kanban-column-visibility", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
+  });
+
+  test("moves Focus cards and persists manual states", async ({
+    page,
+    request,
+  }, testInfo) => {
+    await seedThreads(request, workspaceThreads());
+    await loginAs(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(
+      `/agents/threads?q=${encodeURIComponent(WORKSPACE_QUERY)}&layout=board&group=focus`,
+    );
+
+    const main = page.getByRole("main").last();
+    await expect(boardColumn(main, "Ready")).toContainText(TITLES.ready);
+    await expect(
+      main.getByRole("button", { name: "Resolve thread" }),
+    ).toHaveCount(0);
+    await expect(
+      main.getByRole("button", { name: "Reopen thread" }),
+    ).toHaveCount(0);
+
+    await dragThreadToFocusColumn(page, main, {
+      threadId: THREAD_IDS.ready,
+      title: TITLES.ready,
+      from: "Ready",
+      to: "In progress",
+      focusState: "progress",
+    });
+    const progressCard = boardColumn(main, "In progress")
       .locator("article")
       .filter({ hasText: TITLES.ready });
-    const reopenResponse = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname ===
-          `/dashboard/api/threads/${THREAD_IDS.ready}/resolve`,
+    await expect(progressCard).toContainText("Finished");
+
+    await page.reload();
+    await expect(boardColumn(main, "In progress")).toContainText(TITLES.ready);
+    await dragThreadToFocusColumn(page, main, {
+      threadId: THREAD_IDS.ready,
+      title: TITLES.ready,
+      from: "In progress",
+      to: "Done",
+      focusState: "done",
+    });
+    const doneCard = boardColumn(main, "Done")
+      .locator("article")
+      .filter({ hasText: TITLES.ready });
+    await expect(doneCard).toContainText("Finished");
+    await expect(doneCard).toContainText("Resolved");
+
+    const resolvedResponse = await page.request.get(
+      `/dashboard/api/threads/${THREAD_IDS.ready}?mark_viewed=false`,
     );
-    await resolvedCard.getByRole("button", { name: "Reopen thread" }).click();
-    expect((await reopenResponse).ok()).toBeTruthy();
-    await expect(boardColumn(main, "Ready")).toContainText(TITLES.ready);
+    expect(resolvedResponse.ok(), await resolvedResponse.text()).toBeTruthy();
+    expect(await resolvedResponse.json()).toMatchObject({
+      boardFocusState: null,
+      resolved: true,
+      status: "finished",
+    });
+
+    await dragThreadToFocusColumn(page, main, {
+      threadId: THREAD_IDS.ready,
+      title: TITLES.ready,
+      from: "Done",
+      to: "Needs attention",
+      focusState: "attention",
+    });
+    await page.reload();
+    const attentionCard = boardColumn(main, "Needs attention")
+      .locator("article")
+      .filter({ hasText: TITLES.ready });
+    await expect(attentionCard).toContainText("Finished");
+    await expect(attentionCard).not.toContainText("Resolved");
+
+    const reopenedResponse = await page.request.get(
+      `/dashboard/api/threads/${THREAD_IDS.ready}?mark_viewed=false`,
+    );
+    expect(reopenedResponse.ok(), await reopenedResponse.text()).toBeTruthy();
+    expect(await reopenedResponse.json()).toMatchObject({
+      boardFocusState: "attention",
+      resolved: false,
+      status: "finished",
+    });
+
+    const screenshotPath = testInfo.outputPath("kanban-manual-focus-state.png");
+    await main.screenshot({ path: screenshotPath });
+    await testInfo.attach("kanban-manual-focus-state", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
   });
 
   test("paginates the real list endpoint", async ({ page, request }) => {

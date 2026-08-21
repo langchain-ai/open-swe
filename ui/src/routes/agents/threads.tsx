@@ -76,6 +76,10 @@ export const Route = createFileRoute("/agents/threads")({
         typeof search.order === "string" && search.order
           ? search.order
           : undefined,
+      hidden:
+        typeof search.hidden === "string" && search.hidden
+          ? search.hidden
+          : undefined,
     }
   },
   component: AgentsThreadsRoute,
@@ -100,6 +104,7 @@ function AgentsThreadsRoute() {
             layout: next.layout,
             group: next.group,
             order: next.order,
+            hidden: next.hidden,
           },
         })
       }

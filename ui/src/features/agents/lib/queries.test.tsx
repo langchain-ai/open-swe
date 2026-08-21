@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render, waitFor } from "@testing-library/react"
+import { act, render, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { agentsApi } from "./api"
@@ -10,6 +10,7 @@ import {
   agentThreadKeys,
   setAgentThreadStatus,
   useAgentThreadWorkingTreeDiff,
+  useSetAgentThreadFocusState,
   useSidebarThreads,
   useThreadsPage,
 } from "./queries"
@@ -223,6 +224,67 @@ describe("useThreadsPage", () => {
     expect(seen.at(-1)?.data).toBe(page)
     expect(seen.at(-1)?.isLoading).toBe(false)
     expect(seen.at(-1)?.isFetching).toBe(true)
+  })
+})
+
+describe("useSetAgentThreadFocusState", () => {
+  it("updates and reconciles the cached thread", async () => {
+    const thread = {
+      id: "thread-1",
+      title: "Move me",
+      repo: "open-swe",
+      repoFullName: "langchain-ai/open-swe",
+      branch: "main",
+      model: "default",
+      status: "idle",
+      viewed: true,
+      createdAt: 1,
+      updatedAt: 1,
+      messages: [],
+    } satisfies AgentThread
+    const serverThread = {
+      ...thread,
+      boardFocusState: "progress" as const,
+      resolved: false,
+      resolvedAt: null,
+    }
+    let resolveRequest: ((value: AgentThread) => void) | undefined
+    vi.spyOn(agentsApi, "setThreadFocusState").mockReturnValue(
+      new Promise((resolve) => {
+        resolveRequest = resolve
+      })
+    )
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.page(params), {
+      ...page,
+      items: [thread],
+    })
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    const { result } = renderHook(() => useSetAgentThreadFocusState(), {
+      wrapper,
+    })
+
+    act(() =>
+      result.current.mutate({
+        threadId: thread.id,
+        focusState: "progress",
+      })
+    )
+    await waitFor(() =>
+      expect(
+        client.getQueryData<ThreadsPage>(agentThreadKeys.page(params))?.items[0]
+          ?.boardFocusState
+      ).toBe("progress")
+    )
+
+    resolveRequest?.(serverThread)
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(
+      client.getQueryData<ThreadsPage>(agentThreadKeys.page(params))?.items[0]
+    ).toEqual(serverThread)
   })
 })
 

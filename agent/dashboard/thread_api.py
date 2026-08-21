@@ -90,6 +90,9 @@ _THREAD_POST_COMMAND_METHODS = frozenset(
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
+_THREAD_FOCUS_STATES: frozenset[str] = frozenset({"attention", "progress", "ready"})
+
+ThreadFocusColumn = Literal["attention", "progress", "ready", "done"]
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
 _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
 _SANDBOX_CREATING_SENTINEL = "__creating__"
@@ -163,6 +166,10 @@ class ThreadMessageBody(BaseModel):
 
 class ThreadResolveBody(BaseModel):
     resolved: bool = True
+
+
+class ThreadFocusStateBody(BaseModel):
+    focus_state: ThreadFocusColumn
 
 
 def _normalize_model_choice(
@@ -404,6 +411,11 @@ def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("resolved") is True
 
 
+def _thread_focus_state(metadata: Mapping[str, Any]) -> str | None:
+    state = metadata.get("board_focus_state")
+    return state if isinstance(state, str) and state in _THREAD_FOCUS_STATES else None
+
+
 def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
     if metadata.get("repo_private") is not True:
         return None
@@ -576,6 +588,7 @@ async def _thread_summary(
             if isinstance(metadata.get("resolved_at_ms"), (int, float))
             else None
         ),
+        "boardFocusState": _thread_focus_state(metadata),
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "ownerLogin": _thread_owner_login(metadata),
@@ -1961,10 +1974,37 @@ async def resolve_dashboard_thread(
         "resolved": resolved,
         "resolved_at_ms": _now_ms() if resolved else None,
     }
+    if resolved:
+        metadata_update["board_focus_state"] = None
     try:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not update resolved state for thread %s", thread_id, exc_info=True)
+        raise HTTPException(502, "failed to update thread") from exc
+    thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
+    return await _thread_summary(thread)
+
+
+async def set_dashboard_thread_focus_state(
+    thread_id: str,
+    login: str,
+    *,
+    focus_state: ThreadFocusColumn,
+    email: str | None = None,
+) -> dict[str, Any]:
+    client = langgraph_client()
+    thread = await _authorized_thread(thread_id, login, email=email)
+    metadata = thread_metadata(thread)
+    resolved = focus_state == "done"
+    metadata_update: dict[str, Any] = {
+        "board_focus_state": None if resolved else focus_state,
+        "resolved": resolved,
+        "resolved_at_ms": _now_ms() if resolved else None,
+    }
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not update focus state for thread %s", thread_id, exc_info=True)
         raise HTTPException(502, "failed to update thread") from exc
     thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     return await _thread_summary(thread)

@@ -17,6 +17,7 @@ import type {
   AgentSource,
   AgentStatus,
   AgentThread,
+  ThreadFocusColumn,
 } from "@/features/agents/lib/types"
 import type {
   ThreadGrouping,
@@ -25,8 +26,10 @@ import type {
 } from "@/features/agents/lib/threadViews"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
 import {
   useResolveAgentThread,
+  useSetAgentThreadFocusState,
   useThreadsPage,
 } from "@/features/agents/lib/queries"
 import {
@@ -35,13 +38,18 @@ import {
   moveColumn,
   moveColumnBefore,
   parseColumnOrder,
+  parseHiddenColumns,
   reconcileColumnOrder,
+  reconcileHiddenColumns,
 } from "@/features/agents/lib/threadViews"
 import { cn, formatRelativeTime } from "@/lib/utils"
 
 const LIST_PAGE_SIZE = 25
 const BOARD_PAGE_SIZE = 100
 const COLUMN_ORDER_STORAGE_PREFIX = "open-swe:thread-board-order:"
+const HIDDEN_COLUMNS_STORAGE_PREFIX = "open-swe:thread-board-hidden:"
+const COLUMN_DRAG_TYPE = "application/x-open-swe-thread-column"
+const THREAD_DRAG_TYPE = "application/x-open-swe-thread-card"
 
 export interface ThreadsPageFilters {
   resolved?: boolean
@@ -53,6 +61,7 @@ export interface ThreadsPageFilters {
   layout: ThreadsLayout
   group: ThreadGrouping
   order?: string
+  hidden?: string
 }
 
 type TriState = "any" | "true" | "false"
@@ -106,6 +115,15 @@ function storedColumnOrder(grouping: ThreadGrouping): string | undefined {
   )
 }
 
+function storedHiddenColumns(grouping: ThreadGrouping): string | undefined {
+  if (typeof window === "undefined") return undefined
+  return (
+    window.localStorage.getItem(
+      `${HIDDEN_COLUMNS_STORAGE_PREFIX}${grouping}`
+    ) ?? undefined
+  )
+}
+
 export function AgentsThreadsPage({
   filters,
   onFiltersChange,
@@ -115,6 +133,8 @@ export function AgentsThreadsPage({
 }) {
   const [search, setSearch] = useState(filters.q ?? "")
   const [personalOrder, setPersonalOrder] = useState(filters.order)
+  const [personalHidden, setPersonalHidden] = useState(filters.hidden)
+  const moveThread = useSetAgentThreadFocusState()
   const pageSize = filters.layout === "board" ? BOARD_PAGE_SIZE : LIST_PAGE_SIZE
   const offset = (filters.page - 1) * pageSize
   const query = useThreadsPage(
@@ -134,7 +154,8 @@ export function AgentsThreadsPage({
   useEffect(() => setSearch(filters.q ?? ""), [filters.q])
   useEffect(() => {
     setPersonalOrder(filters.order ?? storedColumnOrder(filters.group))
-  }, [filters.group, filters.order])
+    setPersonalHidden(filters.hidden ?? storedHiddenColumns(filters.group))
+  }, [filters.group, filters.hidden, filters.order])
 
   const data = query.data
   const items = data?.items ?? []
@@ -142,18 +163,37 @@ export function AgentsThreadsPage({
   const exactTotal = data?.total
   const end = offset + items.length
   const groups = useMemo(
-    () => groupThreadsForView(items, filters.group),
-    [filters.group, items]
+    () =>
+      groupThreadsForView(items, filters.group, {
+        includeEmpty: filters.layout === "board" && filters.group === "focus",
+      }),
+    [filters.group, filters.layout, items]
+  )
+  const definitions = useMemo(
+    () => groups.map(({ key, label }) => ({ key, label })),
+    [groups]
   )
   const defaultKeys = groups.map((group) => group.key)
   const columnOrder = reconcileColumnOrder(
     defaultKeys,
     parseColumnOrder(filters.order ?? personalOrder)
   )
+  const reconciledHidden = reconcileHiddenColumns(
+    definitions.map((definition) => definition.key),
+    parseHiddenColumns(filters.hidden ?? personalHidden)
+  )
+  const hiddenColumns =
+    reconciledHidden.length === definitions.length && definitions.length > 0
+      ? reconciledHidden.slice(0, -1)
+      : reconciledHidden
+  const hiddenSet = new Set(hiddenColumns)
   const groupsByKey = new Map(groups.map((group) => [group.key, group]))
   const orderedGroups = columnOrder
     .map((key) => groupsByKey.get(key))
     .filter((group): group is ThreadViewGroup => Boolean(group))
+  const visibleBoardGroups = orderedGroups.filter(
+    (group) => !hiddenSet.has(group.key)
+  )
 
   const update = (patch: Partial<ThreadsPageFilters>) => {
     onFiltersChange({ ...filters, ...patch, page: patch.page ?? 1 })
@@ -165,7 +205,11 @@ export function AgentsThreadsPage({
   }
 
   const setGrouping = (group: ThreadGrouping) => {
-    update({ group, order: storedColumnOrder(group) })
+    update({
+      group,
+      order: storedColumnOrder(group),
+      hidden: storedHiddenColumns(group),
+    })
   }
 
   const setColumnOrder = (next: Array<string>) => {
@@ -178,6 +222,25 @@ export function AgentsThreadsPage({
       )
     }
     onFiltersChange({ ...filters, order: value })
+  }
+
+  const setVisibleColumnOrder = (next: Array<string>) => {
+    let visibleIndex = 0
+    const merged = columnOrder.map((key) =>
+      hiddenSet.has(key) ? key : (next[visibleIndex++] ?? key)
+    )
+    setColumnOrder(merged)
+  }
+
+  const setHiddenColumns = (next: Array<string>) => {
+    const value = next.join("|")
+    setPersonalHidden(value || undefined)
+    if (typeof window !== "undefined") {
+      const key = `${HIDDEN_COLUMNS_STORAGE_PREFIX}${filters.group}`
+      if (value) window.localStorage.setItem(key, value)
+      else window.localStorage.removeItem(key)
+    }
+    onFiltersChange({ ...filters, hidden: value || undefined })
   }
 
   return (
@@ -237,6 +300,13 @@ export function AgentsThreadsPage({
                 ))}
               </select>
             </label>
+            {filters.layout === "board" && definitions.length > 1 && (
+              <ColumnVisibilityMenu
+                definitions={definitions}
+                hidden={hiddenColumns}
+                onChange={setHiddenColumns}
+              />
+            )}
           </div>
         </header>
 
@@ -292,9 +362,16 @@ export function AgentsThreadsPage({
             <EmptyMessage>No threads match these filters.</EmptyMessage>
           ) : filters.layout === "board" ? (
             <ThreadsBoard
-              groups={orderedGroups}
-              order={columnOrder}
-              onOrderChange={setColumnOrder}
+              groups={visibleBoardGroups}
+              order={visibleBoardGroups.map((group) => group.key)}
+              grouping={filters.group}
+              movingThreadId={
+                moveThread.isPending ? moveThread.variables.threadId : null
+              }
+              onOrderChange={setVisibleColumnOrder}
+              onThreadMove={(threadId, focusState) =>
+                moveThread.mutate({ threadId, focusState })
+              }
             />
           ) : (
             <ThreadsList groups={orderedGroups} />
@@ -335,44 +412,124 @@ export function AgentsThreadsPage({
   )
 }
 
+function ColumnVisibilityMenu({
+  definitions,
+  hidden,
+  onChange,
+}: {
+  definitions: Array<{ key: string; label: string }>
+  hidden: Array<string>
+  onChange: (hidden: Array<string>) => void
+}) {
+  const hiddenSet = new Set(hidden)
+  const visibleCount = definitions.length - hidden.length
+
+  return (
+    <Popover>
+      <PopoverTrigger className="h-8 rounded-md border border-border bg-card px-2 text-xs text-muted-foreground outline-none hover:text-foreground">
+        Columns
+      </PopoverTrigger>
+      <PopoverPopup align="end" className="w-52 p-2">
+        <p className="px-1 pb-1.5 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+          Visible columns
+        </p>
+        <div className="space-y-0.5">
+          {definitions.map((definition) => {
+            const visible = !hiddenSet.has(definition.key)
+            return (
+              <label
+                key={definition.key}
+                className="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 text-xs text-foreground hover:bg-accent"
+              >
+                <input
+                  type="checkbox"
+                  checked={visible}
+                  disabled={visible && visibleCount === 1}
+                  onChange={() =>
+                    onChange(
+                      visible
+                        ? [...hidden, definition.key]
+                        : hidden.filter((key) => key !== definition.key)
+                    )
+                  }
+                  className="size-3.5 accent-primary"
+                />
+                <span className="truncate">{definition.label}</span>
+              </label>
+            )
+          })}
+        </div>
+      </PopoverPopup>
+    </Popover>
+  )
+}
+
 function ThreadsBoard({
   groups,
   order,
+  grouping,
+  movingThreadId,
   onOrderChange,
+  onThreadMove,
 }: {
   groups: Array<ThreadViewGroup>
   order: Array<string>
+  grouping: ThreadGrouping
+  movingThreadId: string | null
   onOrderChange: (order: Array<string>) => void
+  onThreadMove: (threadId: string, focusState: ThreadFocusColumn) => void
 }) {
-  const [draggedKey, setDraggedKey] = useState<string | null>(null)
+  const [draggedColumnKey, setDraggedColumnKey] = useState<string | null>(null)
+  const [draggedThreadId, setDraggedThreadId] = useState<string | null>(null)
 
   return (
     <div className="flex h-full min-h-0 gap-3 overflow-x-auto pb-3">
       {groups.map((group, index) => (
         <section
           key={group.key}
-          onDragOver={(event) => event.preventDefault()}
+          onDragOver={(event) => {
+            const types = Array.from(event.dataTransfer.types)
+            if (
+              types.includes(COLUMN_DRAG_TYPE) ||
+              (grouping === "focus" && types.includes(THREAD_DRAG_TYPE))
+            ) {
+              event.preventDefault()
+            }
+          }}
           onDrop={(event) => {
             event.preventDefault()
+            const threadId =
+              draggedThreadId || event.dataTransfer.getData(THREAD_DRAG_TYPE)
+            if (grouping === "focus" && threadId) {
+              const sourceGroup = groups.find((candidate) =>
+                candidate.threads.some((thread) => thread.id === threadId)
+              )
+              if (sourceGroup?.key !== group.key) {
+                onThreadMove(threadId, group.key as ThreadFocusColumn)
+              }
+              setDraggedThreadId(null)
+              return
+            }
             const source =
-              draggedKey || event.dataTransfer.getData("text/plain")
-            if (source)
+              draggedColumnKey || event.dataTransfer.getData(COLUMN_DRAG_TYPE)
+            if (source) {
               onOrderChange(moveColumnBefore(order, source, group.key))
-            setDraggedKey(null)
+            }
+            setDraggedColumnKey(null)
           }}
           className="flex min-h-0 w-[min(19rem,82vw)] shrink-0 flex-col rounded-xl border border-border bg-muted/35"
         >
           <div
             draggable
             onDragStart={(event) => {
-              setDraggedKey(group.key)
+              setDraggedColumnKey(group.key)
               event.dataTransfer.effectAllowed = "move"
-              event.dataTransfer.setData("text/plain", group.key)
+              event.dataTransfer.setData(COLUMN_DRAG_TYPE, group.key)
             }}
-            onDragEnd={() => setDraggedKey(null)}
+            onDragEnd={() => setDraggedColumnKey(null)}
             className={cn(
               "flex cursor-grab items-center gap-2 border-b border-border px-3 py-2.5 active:cursor-grabbing",
-              draggedKey === group.key && "opacity-50"
+              draggedColumnKey === group.key && "opacity-50"
             )}
           >
             <DotsSixVerticalIcon className="size-4 text-muted-foreground/60" />
@@ -403,7 +560,19 @@ function ThreadsBoard({
           </div>
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
             {group.threads.map((thread) => (
-              <ThreadCard key={thread.id} thread={thread} />
+              <ThreadCard
+                key={thread.id}
+                thread={thread}
+                movable={grouping === "focus"}
+                moveDisabled={movingThreadId !== null}
+                isMoving={movingThreadId === thread.id}
+                onDragStart={(event) => {
+                  setDraggedThreadId(thread.id)
+                  event.dataTransfer.effectAllowed = "move"
+                  event.dataTransfer.setData(THREAD_DRAG_TYPE, thread.id)
+                }}
+                onDragEnd={() => setDraggedThreadId(null)}
+              />
             ))}
           </div>
         </section>
@@ -432,14 +601,38 @@ function ThreadsList({ groups }: { groups: Array<ThreadViewGroup> }) {
   )
 }
 
-function ThreadCard({ thread }: { thread: AgentThread }) {
-  const resolveThread = useResolveAgentThread()
+function ThreadCard({
+  thread,
+  movable,
+  moveDisabled,
+  isMoving,
+  onDragStart,
+  onDragEnd,
+}: {
+  thread: AgentThread
+  movable: boolean
+  moveDisabled: boolean
+  isMoving: boolean
+  onDragStart: (event: React.DragEvent<HTMLElement>) => void
+  onDragEnd: () => void
+}) {
   const isResolved = thread.resolved === true
-  const isResolving =
-    resolveThread.isPending && resolveThread.variables.threadId === thread.id
 
   return (
-    <article className="group rounded-lg border border-border bg-card shadow-sm transition hover:border-muted-foreground/50 hover:shadow-md">
+    <article
+      draggable={movable && !moveDisabled}
+      aria-busy={isMoving}
+      onDragStart={(event) => {
+        event.stopPropagation()
+        onDragStart(event)
+      }}
+      onDragEnd={onDragEnd}
+      className={cn(
+        "group rounded-lg border border-border bg-card shadow-sm transition hover:border-muted-foreground/50 hover:shadow-md",
+        movable && !moveDisabled && "cursor-grab active:cursor-grabbing",
+        isMoving && "pointer-events-none opacity-50"
+      )}
+    >
       <Link
         to="/agents/$threadId"
         params={{ threadId: thread.id }}
@@ -480,27 +673,8 @@ function ThreadCard({ thread }: { thread: AgentThread }) {
           )}
         </div>
       </Link>
-      <div className="flex items-center justify-between border-t border-border/70 px-3 py-1.5">
-        <span className="text-[10px] text-muted-foreground/70">
-          {formatRelativeTime(thread.updatedAt)}
-        </span>
-        <button
-          type="button"
-          aria-label={isResolved ? "Reopen thread" : "Resolve thread"}
-          title={isResolved ? "Reopen thread" : "Resolve thread"}
-          disabled={isResolving}
-          onClick={() =>
-            resolveThread.mutate({ threadId: thread.id, resolved: !isResolved })
-          }
-          className="flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-        >
-          {isResolved ? (
-            <ArrowCounterClockwiseIcon className="size-3" />
-          ) : (
-            <CheckCircleIcon className="size-3" />
-          )}
-          {isResolved ? "Reopen" : "Resolve"}
-        </button>
+      <div className="border-t border-border/70 px-3 py-2 text-[10px] text-muted-foreground/70">
+        {formatRelativeTime(thread.updatedAt)}
       </div>
     </article>
   )
