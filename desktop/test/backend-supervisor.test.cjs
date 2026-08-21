@@ -20,6 +20,7 @@ test("development target runs the repository LangGraph app through uv", () => {
       "dev",
       "--no-browser",
       "--no-reload",
+      "--allow-blocking",
       "--host",
       "127.0.0.1",
       "--port",
@@ -97,6 +98,7 @@ test("packaged target runs the bundled backend", () => {
   const target = packagedBackendTarget({ resourcesPath, port: 50000, platform: "darwin" })
   assert.equal(target.command, path.join(resourcesPath, "local-backend/runtime/bin/python3"))
   assert.deepEqual(target.args.slice(0, 3), ["-m", "langgraph_cli", "dev"])
+  assert.ok(target.args.includes("--allow-blocking"))
   assert.equal(target.cwd, path.join(resourcesPath, "local-backend"))
   const stateDir = path.resolve("/tmp/open-swe-state")
   assert.equal(
