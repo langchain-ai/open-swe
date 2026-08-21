@@ -1,6 +1,6 @@
 import { groupThreads } from "./api"
 import { groupThreadsForView } from "./threadViews"
-import type { AgentSource, AgentStatus, AgentThread } from "./types"
+import type { AgentSource, AgentStatus, AgentThread } from "@/lib/agentTypes"
 
 export type SidebarGroupMode = "none" | "focus" | "date" | "status" | "repo"
 

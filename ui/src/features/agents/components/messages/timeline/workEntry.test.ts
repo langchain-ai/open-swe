@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { describeWorkEntry, liveActivityLabel } from "./workEntry"
-import type {
-  Chunk,
-  DiffData,
-  ToolExecutionChunk,
-} from "@/features/agents/lib/types"
+import type { Chunk, DiffData, ToolExecutionChunk } from "@/lib/agentTypes"
 
 const projectPath = "/workspace/open-swe"
 

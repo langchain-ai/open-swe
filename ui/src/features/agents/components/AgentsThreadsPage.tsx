@@ -13,11 +13,7 @@ import {
 } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
 
-import type {
-  AgentSource,
-  AgentStatus,
-  AgentThread,
-} from "@/features/agents/lib/types"
+import type { AgentSource, AgentStatus, AgentThread } from "@/lib/agentTypes"
 import type {
   ThreadGrouping,
   ThreadViewGroup,

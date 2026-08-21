@@ -5,7 +5,7 @@ import { renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useSubmitAgentMessage } from "./useSubmitAgentMessage"
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/lib/agentTypes"
 import { AgentsApiError } from "@/features/agents/lib/api"
 import type { SidebarThreads } from "@/features/agents/lib/api"
 import { agentThreadKeys } from "@/features/agents/lib/queries"

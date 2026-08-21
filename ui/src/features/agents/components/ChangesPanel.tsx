@@ -1,9 +1,9 @@
 import { useMemo } from "react"
 import { GitPullRequestIcon, RefreshCwIcon } from "lucide-react"
 
-import type { AgentThread } from "@/features/agents/lib/types"
-import type { PanelFile } from "@/features/agents/components/DiffFilesView"
-import { DiffFilesView } from "@/features/agents/components/DiffFilesView"
+import type { AgentThread } from "@/lib/agentTypes"
+import type { PanelFile } from "@/components/diff/DiffFilesView"
+import { DiffFilesView } from "@/components/diff/DiffFilesView"
 
 export type ChangesStatus = "ready" | "missing" | "error"
 

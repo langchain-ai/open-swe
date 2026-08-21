@@ -1,6 +1,6 @@
 import { TextAlignLeftIcon } from "@phosphor-icons/react"
 
-import { useDiffWrap } from "@/features/agents/utils/diffUtils"
+import { useDiffWrap } from "@/components/diff/diffUtils"
 import { cn } from "@/lib/utils"
 
 export function DiffWrapToggle({ className }: { className?: string }) {

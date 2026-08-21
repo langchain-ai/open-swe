@@ -7,7 +7,7 @@ import {
   parseColumnOrder,
   reconcileColumnOrder,
 } from "./threadViews"
-import type { AgentThread } from "./types"
+import type { AgentThread } from "@/lib/agentTypes"
 
 function thread(overrides: Partial<AgentThread> = {}): AgentThread {
   return {

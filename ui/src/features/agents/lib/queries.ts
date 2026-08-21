@@ -22,7 +22,7 @@ import type {
   Chunk,
   ImageChunk,
   Message,
-} from "./types"
+} from "@/lib/agentTypes"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
 

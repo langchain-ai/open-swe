@@ -5,7 +5,7 @@ import type {
   Message,
   SlackNotificationMode,
   WorkflowPushApprovalsResponse,
-} from "./types"
+} from "@/lib/agentTypes"
 import { dashboardApiBase } from "@/lib/api-base"
 import {
   dashboardApiUrl,

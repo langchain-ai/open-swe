@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import type { AgentSource, AgentStatus } from "@/features/agents/lib/types"
+import type { AgentSource, AgentStatus } from "@/lib/agentTypes"
 import type { ThreadsPageFilters } from "@/features/agents/components/AgentsThreadsPage"
 import type {
   ThreadGrouping,

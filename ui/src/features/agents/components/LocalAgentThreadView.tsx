@@ -8,13 +8,13 @@ import type {
   DesktopLocalPromptInput,
   DesktopLocalThreadSummary,
 } from "@/desktop"
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { ImageChunk } from "@/lib/agentTypes"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
+import { toPanelFiles } from "@/features/agents/lib/panelFiles"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
-import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"

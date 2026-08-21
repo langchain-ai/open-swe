@@ -1,8 +1,4 @@
-import type {
-  Message,
-  Project,
-  QueuedThreadMessage,
-} from "@/features/agents/lib/types"
+import type { Message, Project, QueuedThreadMessage } from "@/lib/agentTypes"
 
 export interface ApprovalCallbacks {
   onApprove?: (approvalRequestId: string) => void
