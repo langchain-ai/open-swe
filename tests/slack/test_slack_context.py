@@ -110,7 +110,7 @@ def test_source_context_does_not_reuse_permalink_for_different_slack_thread(
 def test_upsert_preserves_partially_initialized_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     owner_context = {"slack_thread": {"triggering_user_id": "UOWNER"}}
     threads = _FakeThreadsClient({"metadata": {"source_context": owner_context}})
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeClient(threads))
 
     async def upsert(github_login: str, user_email: str, slack_user_id: str) -> None:
         await webhook_common.upsert_agent_thread_owner_metadata(
@@ -691,7 +691,7 @@ def test_get_slack_repo_config_uses_existing_thread_repo(
         posted = True
         return True
 
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeClient(threads_client))
     monkeypatch.setattr(
         webhook_common, "post_slack_thread_reply", fake_post_slack_thread_reply, raising=False
     )
@@ -713,11 +713,11 @@ def test_get_slack_repo_config_new_thread_uses_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(raise_not_found=True)
-    monkeypatch.setattr(webhook_common, "SLACK_REPO_OWNER", "default-owner")
-    monkeypatch.setattr(webhook_common, "SLACK_REPO_NAME", "default-repo")
+    monkeypatch.setenv("SLACK_REPO_OWNER", "default-owner")
+    monkeypatch.setenv("SLACK_REPO_NAME", "default-repo")
     monkeypatch.setattr(webhook_common, "get_team_default_repo", _no_team_default_repo)
 
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeClient(threads_client))
 
     repo = asyncio.run(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
@@ -730,11 +730,11 @@ def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
-    monkeypatch.setattr(webhook_common, "SLACK_REPO_OWNER", "default-owner")
-    monkeypatch.setattr(webhook_common, "SLACK_REPO_NAME", "default-repo")
+    monkeypatch.setenv("SLACK_REPO_OWNER", "default-owner")
+    monkeypatch.setenv("SLACK_REPO_NAME", "default-repo")
     monkeypatch.setattr(webhook_common, "get_team_default_repo", _no_team_default_repo)
 
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeClient(threads_client))
 
     repo = asyncio.run(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
@@ -751,7 +751,7 @@ def test_get_slack_repo_config_ignores_repo_syntax_in_message(
         thread={"metadata": {"repo": {"owner": "saved-owner", "name": "saved-repo"}}}
     )
 
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeClient(threads_client))
 
     repo = asyncio.run(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
@@ -775,7 +775,7 @@ def test_get_slack_repo_config_applies_profile_default_repo(
         assert login == "mason"
         return {"owner": "profile-owner", "name": "profile-repo"}
 
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeClient(threads_client))
     monkeypatch.setattr(webhook_common, "get_slack_user_info", fake_get_slack_user_info)
     monkeypatch.setattr(
         webhook_common, "resolve_login_from_email_async", fake_resolve_login_from_email_async
@@ -799,10 +799,10 @@ def test_get_slack_repo_config_applies_team_default_repo(
     async def fake_get_team_default_repo() -> dict[str, str] | None:
         return {"owner": "team-owner", "name": "team-repo"}
 
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeClient(threads_client))
     monkeypatch.setattr(webhook_common, "get_team_default_repo", fake_get_team_default_repo)
-    monkeypatch.setattr(webhook_common, "SLACK_REPO_NAME", "")
-    monkeypatch.setattr(webhook_common, "DEFAULT_REPO_NAME", "")
+    monkeypatch.delenv("SLACK_REPO_NAME", raising=False)
+    monkeypatch.delenv("DEFAULT_REPO_NAME", raising=False)
 
     repo = asyncio.run(
         webhook_common.get_slack_repo_config("C123", "1.234", thread_id="mapped-thread")
@@ -872,7 +872,7 @@ def _setup_slack_mention_fakes(
 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
     monkeypatch.setattr(slack_webhooks, "get_langsmith_trace_url", _fake_trace_url)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(webhook_common, "get_slack_user_info", fake_get_slack_user_info)
     monkeypatch.setattr(
         webhook_common, "fetch_slack_thread_messages", fake_fetch_slack_thread_messages
@@ -902,7 +902,9 @@ def _setup_slack_mention_fakes(
 
     monkeypatch.setattr(webhook_common, "post_slack_trace_reply", fake_post_slack_trace_reply)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", fake_resolve_slack_thread_id)
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClientForProcess())
+    monkeypatch.setattr(
+        webhook_common, "langgraph_client", lambda: _FakeLangGraphClientForProcess()
+    )
     monkeypatch.setattr(webhook_common, "login_for_slack_id", fake_login_for_slack_id)
     monkeypatch.setattr(webhook_common, "login_for_email", fake_login_for_email)
     monkeypatch.setattr(webhook_common, "refresh_user_mapping_cache", fake_refresh_cache)
@@ -1418,7 +1420,7 @@ class _FakeAsyncClient:
 
 
 def test_get_slack_permalink_returns_link(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     link = "https://workspace.slack.com/archives/C123/p1700000000000100"
     monkeypatch.setattr(
         slack_utils.httpx,
@@ -1432,7 +1434,7 @@ def test_get_slack_permalink_returns_link(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_get_slack_permalink_returns_none_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setattr(
         slack_utils.httpx,
         "AsyncClient",
@@ -1445,7 +1447,7 @@ def test_get_slack_permalink_returns_none_on_error(monkeypatch: pytest.MonkeyPat
 
 
 def test_get_slack_permalink_without_token_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "")
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
 
     result = asyncio.run(get_slack_permalink("C123", "1700000000.000100"))
 
@@ -1461,7 +1463,7 @@ def test_thread_environment_round_trips_through_metadata(
     default environment while reusing the sandbox built from the tagged one.
     """
     threads = _FakeThreadsClient({"metadata": {}})
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeClient(threads))
 
     asyncio.run(
         webhook_common.upsert_agent_thread_owner_metadata(
@@ -1477,7 +1479,7 @@ def test_thread_environment_round_trips_through_metadata(
 
 def test_thread_environment_is_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     threads = _FakeThreadsClient({"metadata": {}})
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeClient(threads))
     assert asyncio.run(webhook_common._get_thread_environment("thread-id")) is None
 
 
@@ -1485,7 +1487,7 @@ def test_thread_environment_is_none_for_a_missing_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads = _FakeThreadsClient(raise_not_found=True)
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeClient(threads))
     assert asyncio.run(webhook_common._get_thread_environment("thread-id")) is None
 
 
@@ -1508,7 +1510,7 @@ def test_slack_context_attributes_own_replies_to_open_swe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Open SWE posts with a bot token, so its replies carry `user` *and* `bot_id`."""
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "Open SWE")
+    monkeypatch.setenv("SLACK_BOT_USERNAME", "Open SWE")
     contents = _context_input(
         [
             {"ts": "1.0", "text": "please fix it", "user": "U123"},
@@ -1594,7 +1596,7 @@ def test_slack_context_does_not_treat_a_lookalike_bot_as_open_swe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A third-party app may post under our own username; only the user id proves identity."""
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "Open SWE")
+    monkeypatch.setenv("SLACK_BOT_USERNAME", "Open SWE")
     contents = _context_input(
         [
             {

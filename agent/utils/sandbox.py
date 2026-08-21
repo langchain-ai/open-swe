@@ -1,9 +1,10 @@
 import asyncio
 import inspect
-import os
 from collections.abc import Callable
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
+
+from ..config import is_langsmith_sandbox, sandbox_provider
 
 if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
@@ -35,7 +36,7 @@ def sandbox_provider_uses_proxy() -> bool:
     Only LangSmith sandboxes have one; every other provider reaches GitHub
     directly, so there is nothing to configure or refresh.
     """
-    return os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
+    return is_langsmith_sandbox()
 
 
 def _load_sandbox_factory(sandbox_type: str) -> SandboxFactory:
@@ -74,7 +75,7 @@ async def create_sandbox(
     Returns:
         A sandbox backend implementing SandboxBackendProtocol.
     """
-    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+    sandbox_type = sandbox_provider()
     factory = _load_sandbox_factory(sandbox_type)
     if sandbox_type == "langsmith" and snapshot_id is not None:
         return await factory(sandbox_id, snapshot_id=snapshot_id)
@@ -90,7 +91,7 @@ def validate_sandbox_startup_config() -> None:
     Called from the FastAPI lifespan hook so errors surface at boot rather
     than on the first sandbox creation.
     """
-    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+    sandbox_type = sandbox_provider()
     if sandbox_type == "langsmith":
         from agent.integrations.langsmith import LangSmithProvider
 

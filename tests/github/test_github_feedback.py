@@ -90,7 +90,7 @@ async def test_github_reaction_added_creates_langsmith_feedback(
         )
         return True
 
-    monkeypatch.setattr(github_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(github_feedback, "langgraph_client", lambda: client)
 
     async def fake_list_findings(thread_id: str) -> list[dict[str, Any]]:
         return [
@@ -139,7 +139,7 @@ async def test_github_reaction_removed_deletes_langsmith_feedback(
         deleted["key"] = key
         return True
 
-    monkeypatch.setattr(github_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(github_feedback, "langgraph_client", lambda: client)
 
     async def fake_list_findings(thread_id: str) -> list[dict[str, Any]]:
         return [

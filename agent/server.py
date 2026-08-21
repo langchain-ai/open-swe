@@ -8,7 +8,6 @@ metadata; the agent itself is stateless.
 # ruff: noqa: E402
 
 import logging
-import os
 import posixpath
 import warnings
 from collections.abc import Mapping, Sequence
@@ -21,7 +20,6 @@ logger = logging.getLogger(__name__)
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
-from langgraph_sdk import get_client
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
@@ -42,6 +40,13 @@ from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
+from .config import (
+    dashboard_base_url,
+    fallback_llm_model_id,
+    is_langsmith_sandbox,
+    langgraph_client,
+    tool_loader_timeout_seconds,
+)
 from .dashboard.admin import is_admin, is_observability_authorized
 from .dashboard.agent_overrides import (
     load_profile,
@@ -163,9 +168,9 @@ from .tools import (
 from .utils import ttl_cache
 from .utils.auth import resolve_github_token
 from .utils.authorship import resolve_triggering_user_identity
-from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
+from .utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
-from .utils.github_org_membership import is_user_active_org_member
+from .utils.github_org_membership import is_login_in_allowed_org
 from .utils.json_types import as_json_object
 from .utils.model import (
     DEFAULT_LLM_REASONING,
@@ -188,8 +193,6 @@ from .utils.thread_settings import (
 )
 from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 from .utils.turn_checkpoint import merge_checkpoint, read_turn_diff, record_turn_checkpoint
-
-client = get_client()
 
 DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
@@ -215,21 +218,6 @@ def _registered_tool_name(value: Any) -> str:
     if not isinstance(name, str) or not name:
         raise TypeError(f"tool has no registered name: {value!r}")
     return name
-
-
-def _tool_loader_timeout_seconds() -> float:
-    raw_timeout = os.environ.get("TOOL_LOADER_TIMEOUT_SECONDS")
-    if not raw_timeout:
-        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
-    try:
-        timeout = float(raw_timeout)
-    except ValueError:
-        logger.warning("Invalid TOOL_LOADER_TIMEOUT_SECONDS=%r; using default", raw_timeout)
-        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
-    if timeout <= 0:
-        logger.warning("TOOL_LOADER_TIMEOUT_SECONDS must be positive; using default")
-        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
-    return timeout
 
 
 async def _resolve_repo_custom_instructions(
@@ -450,22 +438,14 @@ async def _allowed_org_member(config: RunnableConfig, profile_login: str | None)
     configurable = (config or {}).get("configurable") or {}
     config_login = configurable.get("github_login")
     login = profile_login or (config_login if isinstance(config_login, str) else None)
-    if not login:
-        return False
-    orgs = dict.fromkeys(
-        org.strip().lower()
-        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
-        if org.strip()
-    )
-    for org in orgs:
-        if await is_user_active_org_member(login, org):
-            return True
-    return False
+    return bool(login) and await is_login_in_allowed_org(login or "")
 
 
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
     async def load_with_timeout() -> list[Any]:
-        return await asyncio.wait_for(loader(), timeout=_tool_loader_timeout_seconds())
+        return await asyncio.wait_for(
+            loader(), timeout=tool_loader_timeout_seconds(DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS)
+        )
 
     try:
         return await ttl_cache.cached_stale_while_revalidate(key, ttl_seconds, load_with_timeout)
@@ -537,7 +517,7 @@ def _sandbox_file_downloads_enabled(configurable: dict[str, Any] | None = None) 
     """Return whether signed sandbox file downloads are available for this run."""
     resolved = configurable or {}
     return (
-        os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
+        is_langsmith_sandbox()
         and resolved.get("stop_summary") is not True
         and not is_desktop_run(resolved)
     )
@@ -634,7 +614,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         if not turn_key:
             return None
         try:
-            thread = await client.threads.get(thread_id=self._thread_id)
+            thread = await langgraph_client().threads.get(thread_id=self._thread_id)
             checkpoints = (thread.get("metadata") or {}).get("turn_checkpoints") or []
             checkpoint = next(
                 entry
@@ -695,7 +675,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             return None
         ref, repo_path = checkpoint
         try:
-            thread = await client.threads.get(thread_id=self._thread_id)
+            thread = await langgraph_client().threads.get(thread_id=self._thread_id)
             existing = (thread.get("metadata") or {}).get("turn_checkpoints")
         except Exception:
             logger.debug("Could not read turn checkpoints for %s", self._thread_id, exc_info=True)
@@ -746,7 +726,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             thread_id=self._thread_id,
             messages=state.get("messages") or [],
             model=self._title_model,
-            client=client,
+            client=langgraph_client(),
         )
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
@@ -803,7 +783,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             state, sandbox_backend, work_dir, preferred_repo_path
         )
         try:
-            await client.threads.update(
+            await langgraph_client().threads.update(
                 thread_id=self._thread_id,
                 metadata={
                     "agent_kind": "agent",
@@ -832,7 +812,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             **({"messages": [sender_message]} if sender_message else {}),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
-                dashboard_base_url=dashboard_base_url(),
+                dashboard_base_url=dashboard_base_url() or "",
                 linear_project_id=self._linear_project_id,
                 linear_issue_number=self._linear_issue_number,
                 default_repo=prompt_default_repo,
@@ -887,7 +867,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     local_run = is_desktop_run(configurable)
     profile_login = resolve_github_login(as_json_object(config))
     thread_settings, settings_changed = normalize_thread_settings(
-        {} if local_run else await load_thread_settings(client, thread_id)
+        {} if local_run else await load_thread_settings(langgraph_client(), thread_id)
     )
     settings_login = thread_settings.get("owner_login") or profile_login
     # Team/profile settings are accepted stale for a short TTL so graph factories
@@ -1000,7 +980,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if not local_run and (
         settings_changed or {**thread_settings, **resolved_settings} != thread_settings
     ):
-        await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
+        await store_thread_settings(
+            langgraph_client(), thread_id, {**thread_settings, **resolved_settings}
+        )
 
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -1028,7 +1010,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         max_tokens=TITLE_GENERATION_MAX_TOKENS,
     )
 
-    fallback_model_id = os.environ.get("LLM_FALLBACK_MODEL_ID") or fallback_model_id_for(model_id)
+    fallback_model_id = fallback_llm_model_id() or fallback_model_id_for(model_id)
     fallback_middleware: list[Any] = []
     if fallback_model_id and fallback_model_id != model_id:
         fallback_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}

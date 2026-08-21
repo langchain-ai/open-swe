@@ -8,6 +8,7 @@ from langchain_core.tools import StructuredTool
 from agent import server
 from agent.dashboard.team_credentials import DatadogCredentials, LangSmithCredentials
 from agent.integrations import datadog_mcp, langsmith_tools, notion_mcp
+from agent.utils import github_org_membership
 
 
 @pytest.fixture(autouse=True)
@@ -293,7 +294,7 @@ async def test_observability_authorized_allowlist(monkeypatch: pytest.MonkeyPatc
 async def test_allowed_org_member(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary,secondary")
     membership = AsyncMock(side_effect=[False, True])
-    monkeypatch.setattr(server, "is_user_active_org_member", membership)
+    monkeypatch.setattr(github_org_membership, "is_user_active_org_member", membership)
 
     config = cast(RunnableConfig, {"configurable": {"github_login": "dev"}})
     assert await server._allowed_org_member(config, "dev") is True

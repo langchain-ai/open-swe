@@ -2,17 +2,12 @@
 
 import asyncio
 import logging
-import os
 import uuid
 from collections import OrderedDict
 
-from langgraph_sdk import get_client
+from ..config import langgraph_client
 
 logger = logging.getLogger(__name__)
-
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
 
 _LOCAL_CLAIM_LIMIT = 2048
 _claimed_keys: OrderedDict[str, None] = OrderedDict()
@@ -31,7 +26,7 @@ def slack_message_claim_key(event_id: str, channel_id: str = "", event_ts: str =
 
 
 async def _claim_remotely(claim_key: str) -> bool | None:
-    client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     claim_thread_id = _claim_thread_id(claim_key)
     try:
         await client.threads.create(thread_id=claim_thread_id, if_exists="raise", ttl=10)

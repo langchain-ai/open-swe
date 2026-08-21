@@ -8,24 +8,13 @@ run that's already in flight" path (``thread_api.send_dashboard_message``).
 """
 
 import logging
-import os
 from typing import Any
 
-from langgraph_sdk import get_client
+from ..config import langgraph_client
 
 logger = logging.getLogger(__name__)
 
 MAX_QUEUED_MESSAGES = 100
-
-
-def langgraph_url() -> str:
-    return os.environ.get("LANGGRAPH_URL") or os.environ.get(
-        "LANGGRAPH_URL_PROD", "http://localhost:2024"
-    )
-
-
-def langgraph_client():
-    return get_client(url=langgraph_url())
 
 
 async def get_thread_active_status(thread_id: str) -> bool | None:

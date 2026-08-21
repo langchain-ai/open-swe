@@ -11,11 +11,10 @@ Best-effort: any failure (missing handle, no API key, SDK error) returns
 
 import asyncio
 import logging
-import os
+
+from ..config import api_standards_skill_handle
 
 logger = logging.getLogger(__name__)
-
-API_STANDARDS_SKILL_HANDLE = os.environ.get("API_STANDARDS_SKILL_HANDLE", "api-standards")
 
 
 def _pull_api_standards_skill_sync(handle: str) -> str | None:
@@ -33,7 +32,7 @@ def _pull_api_standards_skill_sync(handle: str) -> str | None:
 
 async def fetch_api_standards_skill(handle: str | None = None) -> str | None:
     """Return the API-standards ``SKILL.md`` content, or ``None`` on any failure."""
-    resolved = handle or API_STANDARDS_SKILL_HANDLE
+    resolved = handle or api_standards_skill_handle()
     if not resolved:
         return None
     try:

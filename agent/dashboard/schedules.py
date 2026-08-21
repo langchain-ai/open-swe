@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator
 
+from ..config import agent_version_metadata, langgraph_client
 from ..dispatch import create_durable_run
 from ..input_messages import InputMessageContext, build_run_input
 from ..store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
@@ -17,7 +18,6 @@ from ..utils.slack import (
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
-from ..utils.thread_ops import langgraph_client
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
 from .options import (
     SUPPORTED_MODEL_IDS,
@@ -28,7 +28,7 @@ from .options import (
 from .profiles import get_profile, get_valid_access_token
 from .repo_access import repo_config_for_user, require_repo_access_for_user
 from .team_settings import get_team_fable_enabled
-from .thread_api import _agent_version_metadata, _resolve_run_email
+from .thread_api import _resolve_run_email
 from .user_mappings import slack_id_for_login
 
 logger = logging.getLogger(__name__)
@@ -283,7 +283,7 @@ async def _create_cron(record: dict[str, Any]) -> str:
             "kind": "agent_schedule",
             "schedule_id": record["id"],
             "github_login": record.get("created_by"),
-            **_agent_version_metadata(),
+            **agent_version_metadata(),
         },
     )
     cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
@@ -516,7 +516,7 @@ async def _agent_run_config(
         )
         configurable["agent_model_id"] = model
         configurable["agent_effort"] = effort
-    return {"configurable": configurable, "metadata": _agent_version_metadata()}
+    return {"configurable": configurable, "metadata": agent_version_metadata()}
 
 
 async def _launch_agent_schedule_record(

@@ -4,12 +4,10 @@ import logging
 import shlex
 from typing import Any
 
-from langgraph_sdk import get_client
-
+from .config import langgraph_client
 from .dispatch import dispatch_agent_run
 from .tools.background_execute import TASK_ROOT, _control_script, _encoded, _execute
 from .utils.sandbox import create_sandbox
-from .utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +17,8 @@ TERMINAL_STATES = {"completed", "failed", "timed_out", "stopped", "lost"}
 MONITOR_LOCK = f"{TASK_ROOT}/monitor.lock"
 
 
-def _client():
-    return get_client(url=langgraph_url())
-
-
 async def ensure_background_task_cron(thread_id: str) -> str:
-    client = _client()
+    client = langgraph_client()
     crons = await client.crons.search(
         assistant_id="scheduler",
         metadata={"kind": CRON_KIND, "thread_id": thread_id},
@@ -54,7 +48,7 @@ async def ensure_background_task_cron(thread_id: str) -> str:
 
 
 async def _delete_crons(thread_id: str) -> None:
-    client = _client()
+    client = langgraph_client()
     crons = await client.crons.search(
         assistant_id="scheduler",
         metadata={"kind": CRON_KIND, "thread_id": thread_id},
@@ -125,7 +119,7 @@ async def _list_tasks(backend: Any) -> list[dict[str, Any]]:
 
 
 async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
-    client = _client()
+    client = langgraph_client()
     thread = await client.threads.get(thread_id)
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}

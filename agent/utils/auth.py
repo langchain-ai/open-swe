@@ -1,7 +1,6 @@
 """GitHub OAuth and LangSmith authentication utilities."""
 
 import logging
-import os
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -10,8 +9,16 @@ import httpx
 import jwt
 from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
-from langgraph_sdk import get_client
 
+from ..config import (
+    github_oauth_provider_id,
+    langgraph_client,
+    langsmith_credentials,
+    langsmith_host_api_url,
+    langsmith_prod_api_key,
+    service_auth_jwt_secret,
+    user_id_api_key_map,
+)
 from .github_app import get_github_app_installation_token_with_expiry
 from .github_token import (
     cache_github_token_for_thread,
@@ -20,12 +27,10 @@ from .github_token import (
 )
 from .http import DEFAULT_HTTP_TIMEOUT
 from .linear import comment_on_linear_issue
-from .slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
+from .slack import get_active_slack_thread, post_slack_thread_reply
 from .user_messages import WARNING_ICON, warning
 
 logger = logging.getLogger(__name__)
-
-client = get_client()
 
 
 class GitHubUserAuthRequired(RuntimeError):
@@ -42,23 +47,6 @@ class GitHubUserAuthRequired(RuntimeError):
         super().__init__(f"GitHub authentication required for {source} user '{github_login}'")
 
 
-LANGSMITH_API_KEY = os.environ.get("LANGSMITH_API_KEY_PROD", "")
-LANGSMITH_API_URL = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
-LANGSMITH_HOST_API_URL = os.environ.get("LANGSMITH_HOST_API_URL", "https://api.host.langchain.com")
-GITHUB_OAUTH_PROVIDER_ID = os.environ.get("GITHUB_OAUTH_PROVIDER_ID", "")
-X_SERVICE_AUTH_JWT_SECRET = os.environ.get("X_SERVICE_AUTH_JWT_SECRET", "")
-USER_ID_API_KEY_MAP = os.environ.get("USER_ID_API_KEY_MAP", "")
-
-logger.debug(
-    "Auth env snapshot: LANGSMITH_API_KEY_PROD=%s LANGSMITH_ENDPOINT=%s "
-    "LANGSMITH_HOST_API_URL=%s GITHUB_OAUTH_PROVIDER_ID=%s",
-    "set" if LANGSMITH_API_KEY else "missing",
-    "set" if LANGSMITH_API_URL else "missing",
-    "set" if LANGSMITH_HOST_API_URL else "missing",
-    "set" if GITHUB_OAUTH_PROVIDER_ID else "missing",
-)
-
-
 def is_bot_token_only_mode() -> bool:
     """Check if we're in bot-token-only mode.
 
@@ -67,7 +55,9 @@ def is_bot_token_only_mode() -> bool:
     can't resolve per-user GitHub OAuth tokens. In this mode the GitHub App
     installation token is used for all git operations instead.
     """
-    return bool(LANGSMITH_API_KEY and not X_SERVICE_AUTH_JWT_SECRET and not USER_ID_API_KEY_MAP)
+    return bool(
+        langsmith_prod_api_key() and not service_auth_jwt_secret() and not user_id_api_key_map()
+    )
 
 
 def _retry_instruction(source: str) -> str:
@@ -98,7 +88,8 @@ def get_secret_key_for_user(
     user_id: str, tenant_id: str, expiration_seconds: int = 300
 ) -> tuple[str, Literal["service", "api_key"]]:
     """Create a short-lived service JWT for authenticating as a specific user."""
-    if not X_SERVICE_AUTH_JWT_SECRET:
+    secret = service_auth_jwt_secret()
+    if not secret:
         msg = "X_SERVICE_AUTH_JWT_SECRET is not configured. Cannot generate service keys."
         raise ValueError(msg)
 
@@ -108,22 +99,24 @@ def get_secret_key_for_user(
         "user_id": user_id,
         "tenant_id": tenant_id,
     }
-    return jwt.encode(payload, X_SERVICE_AUTH_JWT_SECRET, algorithm="HS256"), "service"
+    return jwt.encode(payload, secret, algorithm="HS256"), "service"
 
 
 async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
     """Get the LangSmith user ID and tenant ID from a user's email."""
-    if not LANGSMITH_API_KEY:
+    credentials = langsmith_credentials("prod")
+    if credentials is None:
         logger.warning("LangSmith API key not configured; cannot resolve LS user for %s", email)
         return {"ls_user_id": None, "tenant_id": None}
 
-    url = f"{LANGSMITH_API_URL}/api/v1/workspaces/current/members/active"
+    api_key, api_url = credentials
+    url = f"{api_url}/api/v1/workspaces/current/members/active"
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         try:
             response = await client.get(
                 url,
-                headers={"X-API-Key": LANGSMITH_API_KEY},
+                headers={"X-API-Key": api_key},
                 params={"emails": [email]},
             )
             response.raise_for_status()
@@ -155,7 +148,8 @@ def _extract_expires_at(response_data: dict[str, Any]) -> str | None:
 
 async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str, Any]:
     """Get GitHub OAuth token for a user via LangSmith agent auth."""
-    if not GITHUB_OAUTH_PROVIDER_ID:
+    provider_id = github_oauth_provider_id()
+    if not provider_id:
         logger.error("GitHub auth failed: GITHUB_OAUTH_PROVIDER_ID is not configured")
         return {"error": "GITHUB_OAUTH_PROVIDER_ID not configured"}
 
@@ -171,7 +165,7 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
             headers["X-Service-Key"] = secret_key
 
         payload = {
-            "provider": GITHUB_OAUTH_PROVIDER_ID,
+            "provider": provider_id,
             "scopes": ["repo"],
             "user_id": ls_user_id,
             "ls_user_id": ls_user_id,
@@ -179,7 +173,7 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
 
         async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
             response = await client.post(
-                f"{LANGSMITH_HOST_API_URL}/v2/auth/authenticate",
+                f"{langsmith_host_api_url()}/v2/auth/authenticate",
                 json=payload,
                 headers=headers,
             )
@@ -258,7 +252,7 @@ async def leave_failure_comment(
         slack_thread = configurable.get("slack_thread", {})
         thread_id = configurable.get("thread_id")
         active = await get_active_slack_thread(
-            get_client(url=LANGGRAPH_URL),
+            langgraph_client(),
             thread_id if isinstance(thread_id, str) else None,
             slack_thread if isinstance(slack_thread, dict) else None,
         )

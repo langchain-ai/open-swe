@@ -24,6 +24,7 @@ from .github_app import (
 )
 from .sandbox import sandbox_provider_uses_proxy
 from .sandbox_state import SANDBOX_BACKENDS, unwrap_sandbox_backend
+from .timestamps import parse_expiry
 
 logger = logging.getLogger(__name__)
 
@@ -37,31 +38,6 @@ _PROXY_TOKEN_EXPIRY: dict[
     str, tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
 ] = {}
 ProxyTokenRecord = tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
-
-
-def _parse_expiry(expires_at: Any) -> datetime | None:
-    """Best-effort parse of a GitHub ``expires_at`` value to an aware datetime."""
-    if expires_at is None:
-        return None
-    if isinstance(expires_at, datetime):
-        return expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
-    if isinstance(expires_at, int | float):
-        try:
-            return datetime.fromtimestamp(float(expires_at), tz=UTC)
-        except (OverflowError, OSError, ValueError):
-            return None
-    if isinstance(expires_at, str):
-        raw = expires_at.strip()
-        if not raw:
-            return None
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        try:
-            parsed = datetime.fromisoformat(raw)
-        except ValueError:
-            return None
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-    return None
 
 
 def record_proxy_token_expiry(
@@ -80,7 +56,7 @@ def record_proxy_token_expiry(
         return
     scope = tuple(repositories) if repositories else None
     _PROXY_TOKEN_EXPIRY[thread_id] = (
-        _parse_expiry(expires_at),
+        parse_expiry(expires_at),
         datetime.now(UTC),
         scope,
         normalize_permissions(permissions),

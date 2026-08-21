@@ -83,7 +83,7 @@ class _Client:
 
 
 def _use_client(monkeypatch: pytest.MonkeyPatch, client: _Client) -> None:
-    monkeypatch.setattr(baby_sit, "get_client", lambda: client)
+    monkeypatch.setattr(baby_sit, "langgraph_client", lambda: client)
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
 
 

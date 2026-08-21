@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from agent.dashboard import oauth
+from agent.utils import github_org_membership
 
 
 def _stub_membership(monkeypatch, members: dict[str, set[str]]) -> dict[str, list[tuple[str, str]]]:
@@ -14,7 +15,9 @@ def _stub_membership(monkeypatch, members: dict[str, set[str]]) -> dict[str, lis
         seen["calls"].append((username, org))
         return username in members.get(org, set())
 
-    monkeypatch.setattr(oauth, "is_user_active_org_member", fake_is_user_active_org_member)
+    monkeypatch.setattr(
+        github_org_membership, "is_user_active_org_member", fake_is_user_active_org_member
+    )
     return seen
 
 

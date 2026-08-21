@@ -13,9 +13,9 @@ missing ids degrade dedupe instead of silencing failure replies.
 
 import hmac
 import logging
-import os
 from typing import Any
 
+from .config import langgraph_client, run_complete_webhook_secret
 from .review.findings import REVIEWER_THREAD_KIND
 from .review.publish import settle_review_check_run
 from .session_cost import schedule_session_cost_refresh
@@ -24,7 +24,6 @@ from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import post_github_comment
 from .utils.linear import comment_on_linear_issue
 from .utils.slack import post_slack_thread_reply
-from .utils.thread_ops import langgraph_client
 from .utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
@@ -42,17 +41,6 @@ _SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
 _SESSION_COST_REFRESH_RUN_IDS = "session_cost_refresh_scheduled_run_ids"
 _MAX_SESSION_COST_REFRESH_RUN_IDS = 20
 
-# Shared-secret bearer token proving a /webhooks/run-complete call came from our
-# own dispatch (which appends ?token= when this is set) rather than from an
-# attacker hitting the public route. Fail closed when unset: the route rejects
-# every call, so completion replies stay off until the secret is configured.
-RUN_COMPLETE_WEBHOOK_SECRET = os.environ.get("RUN_COMPLETE_WEBHOOK_SECRET")
-if not RUN_COMPLETE_WEBHOOK_SECRET:
-    logger.warning(
-        "RUN_COMPLETE_WEBHOOK_SECRET is not set; /webhooks/run-complete is fail-closed "
-        "(all calls rejected) and run-failure replies are disabled. Set it to enable them."
-    )
-
 
 def verify_run_complete_token(token: str | None) -> bool:
     """Return whether a run-completion webhook token is acceptable.
@@ -60,7 +48,7 @@ def verify_run_complete_token(token: str | None) -> bool:
     Fail closed: with no secret configured, reject every call rather than accept
     unauthenticated requests on a publicly reachable route.
     """
-    secret = RUN_COMPLETE_WEBHOOK_SECRET
+    secret = run_complete_webhook_secret()
     if not secret:
         return False
     return token is not None and hmac.compare_digest(token, secret)

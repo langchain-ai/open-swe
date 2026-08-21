@@ -94,7 +94,7 @@ async def test_reaction_added_creates_feedback(monkeypatch: pytest.MonkeyPatch) 
         )
         return True
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_feedback, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fake_create_feedback)
 
     await process_slack_reaction_added(_reaction_event(), event_id="Ev1")
@@ -115,7 +115,7 @@ async def test_reaction_added_skips_duplicate_event(monkeypatch: pytest.MonkeyPa
     async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("duplicate event should not create feedback")
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_feedback, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
 
     await process_slack_reaction_added(_reaction_event(), event_id="Ev1")
@@ -142,7 +142,7 @@ async def test_reaction_removed_deletes_feedback_when_last_reaction_removed(
         deleted["key"] = key
         return True
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_feedback, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_feedback, "delete_langsmith_feedback", fake_delete_feedback)
 
     await process_slack_reaction_removed(_reaction_event(), event_id="Ev2")
@@ -161,7 +161,7 @@ async def test_reaction_without_message_mapping_is_ignored(
     async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("unmapped message should not create feedback")
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_feedback, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
 
     await process_slack_reaction_added(_reaction_event(), event_id="Ev1")
@@ -177,7 +177,7 @@ async def test_reaction_from_non_triggering_user_is_ignored(
     async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("non-triggering user should not create feedback")
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_feedback, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
 
     await process_slack_reaction_added(_reaction_event(), event_id="Ev1")
@@ -207,7 +207,7 @@ async def test_conflicting_reactions_clear_feedback(
         deleted["key"] = key
         return True
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_feedback, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
     monkeypatch.setattr(slack_feedback, "delete_langsmith_feedback", fake_delete_feedback)
 

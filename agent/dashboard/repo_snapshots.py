@@ -12,7 +12,6 @@ runs BuildKit there, and captures the result. Nothing is executed on the host.
 """
 
 import logging
-import os
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,7 +19,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..config import (
+    repo_snapshot_base_image,
+    repo_snapshot_build_timeout_seconds,
+    repo_snapshot_stale_build_seconds,
+)
 from ..store import KeyedRecordStore, now_iso
+from ..utils.timestamps import parse_expiry
 from .review_styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)
@@ -55,7 +60,7 @@ _MAX_VCPUS = 16
 
 def _default_base_image() -> str:
     """Base image used to seed generated Dockerfile templates."""
-    image = os.environ.get("REPO_SNAPSHOT_BASE_IMAGE", "").strip()
+    image = repo_snapshot_base_image()
     if not image:
         raise RepoSnapshotConfigError(
             "REPO_SNAPSHOT_BASE_IMAGE must be set to the published Open SWE sandbox image"
@@ -137,33 +142,14 @@ class RepoSnapshotUpdate(BaseModel):
         return v
 
 
-def _parse_iso(value: object) -> datetime | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
-
-
 def _stale_build_seconds() -> int:
-    raw = os.environ.get("REPO_SNAPSHOT_STALE_BUILD_SECONDS")
-    if not raw:
-        return DEFAULT_STALE_BUILD_SECONDS
-    try:
-        value = int(raw)
-    except ValueError:
-        return DEFAULT_STALE_BUILD_SECONDS
-    return max(value, 0)
+    return repo_snapshot_stale_build_seconds(DEFAULT_STALE_BUILD_SECONDS)
 
 
 def is_repo_snapshot_build_stale(record: dict[str, Any]) -> bool:
     if record.get("status") != "building":
         return False
-    started_at = _parse_iso(record.get("build_started_at"))
+    started_at = parse_expiry(record.get("build_started_at"))
     if started_at is None:
         return True
     return (datetime.now(UTC) - started_at).total_seconds() > _stale_build_seconds()
@@ -318,9 +304,7 @@ def _build_snapshot_sync(record: dict[str, Any], snapshot_name: str) -> tuple[st
     def _on_log(line: str) -> None:
         logs.append(line)
 
-    timeout = int(
-        os.environ.get("REPO_SNAPSHOT_BUILD_TIMEOUT_SECONDS", DEFAULT_BUILD_TIMEOUT_SECONDS)
-    )
+    timeout = repo_snapshot_build_timeout_seconds(DEFAULT_BUILD_TIMEOUT_SECONDS)
     client = SandboxClient(api_key=api_key, api_endpoint=_get_sandbox_api_endpoint())
     try:
         with tempfile.TemporaryDirectory(prefix="openswe-snapshot-") as context_dir:

@@ -1,23 +1,18 @@
 """Slack reaction feedback handling."""
 
 import logging
-import os
 from collections.abc import Mapping
 from typing import Any
 
-from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from ..config import langgraph_client
 from .langsmith import create_langsmith_feedback, delete_langsmith_feedback
 from .reviewer_outcomes import outcome_from_score as _outcome_from_score
 from .reviewer_outcomes import upsert_run_outcome
 from .slack import lookup_slack_run_mapping
 
 logger = logging.getLogger(__name__)
-
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
 
 FEEDBACK_REACTIONS: dict[str, float] = {
     "+1": 1.0,
@@ -50,27 +45,23 @@ def _reaction_state_key(run_id: str, user_id: str, message_ts: str) -> str:
     return f"{run_id}:{user_id}:{message_ts}"
 
 
-async def _event_was_processed(
-    langgraph_client: LangGraphClient, channel_id: str, event_id: str
-) -> bool:
+async def _event_was_processed(client: LangGraphClient, channel_id: str, event_id: str) -> bool:
     if not event_id:
         return False
-    item = await langgraph_client.store.get_item((_REACTION_EVENT_NAMESPACE, channel_id), event_id)
+    item = await client.store.get_item((_REACTION_EVENT_NAMESPACE, channel_id), event_id)
     return bool(item)
 
 
-async def _mark_event_processed(
-    langgraph_client: LangGraphClient, channel_id: str, event_id: str
-) -> None:
+async def _mark_event_processed(client: LangGraphClient, channel_id: str, event_id: str) -> None:
     if not event_id:
         return
-    await langgraph_client.store.put_item(
+    await client.store.put_item(
         (_REACTION_EVENT_NAMESPACE, channel_id), event_id, {"event_id": event_id}
     )
 
 
 async def _update_reaction_state(
-    langgraph_client: LangGraphClient,
+    client: LangGraphClient,
     *,
     channel_id: str,
     run_id: str,
@@ -81,7 +72,7 @@ async def _update_reaction_state(
 ) -> set[str]:
     namespace = (_REACTION_STATE_NAMESPACE, channel_id)
     key = _reaction_state_key(run_id, user_id, message_ts)
-    item = await langgraph_client.store.get_item(namespace, key)
+    item = await client.store.get_item(namespace, key)
     active_reactions = _read_active_reactions(item)
 
     if added:
@@ -89,7 +80,7 @@ async def _update_reaction_state(
     else:
         active_reactions.discard(reaction)
 
-    await langgraph_client.store.put_item(
+    await client.store.put_item(
         namespace,
         key,
         {
@@ -143,11 +134,11 @@ async def process_slack_reaction(
     ):
         return
 
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    if await _event_was_processed(langgraph_client, channel_id, event_id):
+    client = langgraph_client()
+    if await _event_was_processed(client, channel_id, event_id):
         return
 
-    mapping = await lookup_slack_run_mapping(langgraph_client, channel_id, message_ts)
+    mapping = await lookup_slack_run_mapping(client, channel_id, message_ts)
     if not mapping:
         logger.debug(
             "No run mapping for Slack reaction on channel=%s message=%s",
@@ -172,7 +163,7 @@ async def process_slack_reaction(
         return
 
     active_reactions = await _update_reaction_state(
-        langgraph_client,
+        client,
         channel_id=channel_id,
         run_id=run_id,
         user_id=user_id,
@@ -211,7 +202,7 @@ async def process_slack_reaction(
         )
 
     if success:
-        await _mark_event_processed(langgraph_client, channel_id, event_id)
+        await _mark_event_processed(client, channel_id, event_id)
 
 
 async def process_slack_reaction_added(event: dict[str, Any], event_id: str = "") -> None:

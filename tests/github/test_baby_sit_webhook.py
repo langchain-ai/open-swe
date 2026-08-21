@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent.api.app import app
-from agent.webhooks import common, github
+from agent.webhooks import github
 
 _SECRET = "baby-sit-webhook-secret"
 
@@ -36,8 +36,9 @@ def test_signed_ci_events_route_without_mention(
     async def process(payload: dict[str, Any], kind: str, delivery_id: str | None) -> None:
         captured.update({"payload": payload, "event_type": kind, "delivery_id": delivery_id})
 
-    monkeypatch.setattr(common, "GITHUB_WEBHOOK_SECRET", _SECRET)
-    monkeypatch.setattr(common, "_is_repo_allowed", lambda _repo: True)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _SECRET)
+    monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
+    monkeypatch.delenv("ALLOWED_GITHUB_REPOS", raising=False)
     monkeypatch.setattr(github, "process_github_ci_event", process)
     payload = {"repository": {"owner": {"login": "acme"}, "name": "repo"}}
 
@@ -53,7 +54,7 @@ def test_signed_ci_events_route_without_mention(
 
 
 def test_ci_event_still_requires_valid_signature(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(common, "GITHUB_WEBHOOK_SECRET", _SECRET)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _SECRET)
     payload = {"repository": {"owner": {"login": "acme"}, "name": "repo"}}
     body = json.dumps(payload).encode()
 

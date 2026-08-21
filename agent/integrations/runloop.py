@@ -1,8 +1,9 @@
-import os
 from typing import Any, cast
 
 from langchain_runloop import RunloopSandbox
 from runloop_api_client import Client
+
+from ..config import runloop_api_key
 
 
 def create_runloop_sandbox(sandbox_id: str | None = None):
@@ -17,7 +18,7 @@ def create_runloop_sandbox(sandbox_id: str | None = None):
     Returns:
         RunloopSandbox instance implementing SandboxBackendProtocol.
     """
-    api_key = os.getenv("RUNLOOP_API_KEY")
+    api_key = runloop_api_key()
     if not api_key:
         raise ValueError("RUNLOOP_API_KEY environment variable is required")
 

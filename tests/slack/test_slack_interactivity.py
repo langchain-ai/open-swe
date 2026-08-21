@@ -87,7 +87,7 @@ async def test_option_interaction_schedules_update_before_agent_processing(
     update = AsyncMock()
     process = AsyncMock()
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
-    monkeypatch.setattr(slack_routes.common, "get_client", lambda **_kwargs: object())
+    monkeypatch.setattr(slack_routes.common, "langgraph_client", lambda: object())
     monkeypatch.setattr(
         slack_routes.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
     )

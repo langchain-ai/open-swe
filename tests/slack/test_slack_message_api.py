@@ -39,7 +39,7 @@ def _async_client_cm(post_response: MagicMock) -> AsyncMock:
 async def test_update_slack_message_calls_chat_update(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_ok_response())
     with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
@@ -63,7 +63,7 @@ async def test_update_slack_message_calls_chat_update(
 async def test_post_slack_thread_reply_with_ts_returns_missing_token_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "")
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
 
     client_cm = _async_client_cm(_ok_response())
     with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
@@ -77,7 +77,7 @@ async def test_post_slack_thread_reply_with_ts_returns_missing_token_error(
 async def test_post_slack_thread_reply_with_ts_returns_slack_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_err_response("msg_too_long"))
     with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
@@ -90,7 +90,7 @@ async def test_post_slack_thread_reply_with_ts_returns_slack_error(
 async def test_post_slack_thread_reply_with_ts_returns_rate_limited_with_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_rate_limited_response(retry_after="30"))
     with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
@@ -103,7 +103,7 @@ async def test_post_slack_thread_reply_with_ts_returns_rate_limited_with_retry_a
 async def test_post_slack_thread_reply_with_ts_returns_rate_limited_without_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_rate_limited_response())
     with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
@@ -116,7 +116,7 @@ async def test_post_slack_thread_reply_with_ts_returns_rate_limited_without_retr
 async def test_post_slack_thread_reply_with_ts_normalizes_ratelimited_body_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_err_response("ratelimited"))
     with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
@@ -129,7 +129,7 @@ async def test_post_slack_thread_reply_with_ts_normalizes_ratelimited_body_error
 async def test_post_slack_thread_reply_with_ts_returns_http_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_ok_response())
     client_cm.post = AsyncMock(side_effect=slack_utils.httpx.ConnectError("boom"))
@@ -144,7 +144,8 @@ async def test_post_slack_thread_reply_with_ts_returns_http_error(
 async def test_post_slack_thread_reply_with_ts_sends_blocks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
 
     blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "Pick"}}]
     client_cm = _async_client_cm(_ok_response())
@@ -167,7 +168,7 @@ async def test_post_slack_thread_reply_with_ts_sends_blocks(
 async def test_post_slack_top_level_message_with_ts_omits_thread_ts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_ok_response())
     with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
@@ -184,7 +185,7 @@ async def test_post_slack_top_level_message_with_ts_omits_thread_ts(
 async def test_post_slack_top_level_message_with_ts_returns_slack_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_err_response("msg_too_long"))
     with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
@@ -196,7 +197,7 @@ async def test_post_slack_top_level_message_with_ts_returns_slack_error(
 async def test_post_slack_thread_reply_preserves_bool_return_on_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
 
     client_cm = _async_client_cm(_err_response("channel_not_found"))
     with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):

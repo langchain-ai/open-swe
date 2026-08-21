@@ -28,6 +28,7 @@ from agent.utils import slack as slack_utils
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 
+from ..config import agent_version_metadata, slack_bot_username
 from ..utils.user_messages import warning
 from . import common
 
@@ -78,7 +79,7 @@ def _is_explicit_slack_request(
     return not message_update and bool(
         treat_all_messages_as_mentions
         or (bot_user_id and f"<@{bot_user_id}>" in text)
-        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+        or bool((username := slack_bot_username()) and f"@{username}" in text)
     )
 
 
@@ -136,8 +137,8 @@ async def _slack_thread_allows_untagged_reply(
         ):
             timeline.append((current_ts, sender, text))
         mention_tokens = [f"<@{bot_user_id}>"]
-        if common.SLACK_BOT_USERNAME:
-            mention_tokens.append(f"@{common.SLACK_BOT_USERNAME}")
+        if bot_username := slack_bot_username():
+            mention_tokens.append(f"@{bot_username}")
         mention_index = next(
             (
                 index
@@ -180,7 +181,7 @@ async def _dispatch_or_queue_slack_run(
             configurable,
             source="slack",
             input=run_input,
-            metadata=common._AGENT_VERSION_METADATA,
+            metadata=agent_version_metadata(),
             client=client,
             multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
         )
@@ -196,7 +197,7 @@ async def _slack_user_can_reply_to_ready_plan(
 
     try:
         thread_id = await common.lookup_slack_thread_id(
-            common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+            common.langgraph_client(), channel_id, thread_ts
         )
     except Exception:  # noqa: BLE001
         return False
@@ -295,7 +296,7 @@ def _slack_sender(
     if slack_utils.is_own_slack_message(message, bot_user_id):
         identity: SystemIdentity = {
             "id": _OPEN_SWE_SENDER_ID,
-            "display_name": common.SLACK_BOT_USERNAME or "Open SWE",
+            "display_name": slack_bot_username() or "Open SWE",
             "platform": "slack",
             "sender_type": "self",
         }
@@ -318,7 +319,7 @@ def _slack_sender(
 
 def _slack_message_text(message: dict[str, Any], bot_user_id: str) -> str:
     forwarded = common.format_slack_messages_for_prompt(
-        [message], {}, bot_user_id=bot_user_id, bot_username=common.SLACK_BOT_USERNAME
+        [message], {}, bot_user_id=bot_user_id, bot_username=slack_bot_username()
     )
     _, separator, content = forwarded.partition(": ")
     return content if separator else forwarded
@@ -466,7 +467,7 @@ async def _notify_slack_processing_error(
     if not isinstance(thread_id, str) or not thread_id:
         try:
             thread_id = await common.lookup_slack_thread_id(
-                common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+                common.langgraph_client(), channel_id, thread_ts
             )
         except Exception:  # noqa: BLE001
             thread_id = None
@@ -474,7 +475,7 @@ async def _notify_slack_processing_error(
         return
     try:
         clean_text = (
-            common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
+            common.strip_bot_mention(text, bot_user_id, bot_username=slack_bot_username())
             or "Slack request"
         )
         await common.upsert_agent_thread_owner_metadata(
@@ -497,7 +498,7 @@ async def _notify_slack_processing_error(
         )
 
     try:
-        await common.get_client(url=common.LANGGRAPH_URL).threads.update(
+        await common.langgraph_client().threads.update(
             thread_id=thread_id,
             metadata={
                 "latest_run_status": "error",
@@ -554,10 +555,10 @@ async def _process_slack_mention_impl(
         )
         return
 
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    client = common.langgraph_client()
     thread_id = event_data.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
-        thread_id = await common.resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
+        thread_id = await common.resolve_slack_thread_id(client, channel_id, thread_ts)
 
     # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
     try:
@@ -610,7 +611,7 @@ async def _process_slack_mention_impl(
         thread_messages,
         event_ts,
         bot_user_id,
-        common.SLACK_BOT_USERNAME,
+        slack_bot_username(),
         treat_all_messages_as_mentions=treat_all_messages_as_mentions,
     )
     source_messages = (
@@ -635,7 +636,7 @@ async def _process_slack_mention_impl(
             else "the previous message where I was tagged"
         )
     clean_text = (
-        common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
+        common.strip_bot_mention(text, bot_user_id, bot_username=slack_bot_username())
         or "(no text in mention)"
     )
     is_first_mention = not await common._thread_exists(thread_id)
@@ -805,8 +806,8 @@ async def _process_slack_mention_impl(
         configurable["plan_mode"] = thread_plan_mode
 
     is_first_mention = not await common._thread_exists(thread_id)
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    await common._upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
+    client = common.langgraph_client()
+    await common._upsert_slack_thread_repo_metadata(thread_id, repo_config, client)
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
@@ -841,7 +842,7 @@ async def _process_slack_mention_impl(
         operational_context=operational_context,
     )
     run = await _dispatch_or_queue_slack_run(
-        langgraph_client,
+        client,
         thread_id,
         run_input,
         configurable,
@@ -856,7 +857,7 @@ async def _process_slack_mention_impl(
     if is_first_mention:
         if isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(
-                langgraph_client,
+                client,
                 channel_id,
                 thread_ts,
                 run_id,
@@ -871,7 +872,7 @@ async def _process_slack_mention_impl(
         )
         if isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(
-                langgraph_client,
+                client,
                 channel_id,
                 thread_ts,
                 run_id,

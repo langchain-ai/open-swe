@@ -1,8 +1,7 @@
-import os
-
 import httpx
 from fastapi import HTTPException, Request
 
+from ..config import DEFAULT_OPENAI_BASE_URL, openai_api_key, openai_base_url
 from .team_settings import get_team_transcription_model
 
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
@@ -31,10 +30,10 @@ async def transcribe_audio(request: Request) -> str:
     if not size:
         raise HTTPException(400, "Audio recording is empty")
 
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    api_key = openai_api_key()
     if not api_key:
         raise HTTPException(503, "Voice dictation is not configured")
-    base_url = (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    base_url = (openai_base_url() or DEFAULT_OPENAI_BASE_URL).rstrip("/")
     model = await get_team_transcription_model()
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=5)) as client:

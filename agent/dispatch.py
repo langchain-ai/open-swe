@@ -20,15 +20,18 @@ busy-check and the custom store-queue) with one function that uses:
 """
 
 import logging
-import os
 import uuid
 from typing import Any
 from urllib.parse import urlparse
 
-from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 
+from .config import (
+    completion_webhook_base_url,
+    langgraph_client,
+    run_complete_webhook_secret,
+)
 from .input_messages import (
     ChannelIdentity,
     InputMessageContext,
@@ -139,10 +142,6 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
 # (completion.verify_run_complete_token). Secret unset, or URL relative/loopback
 # → no webhook attached (the completion reply is best-effort; it must never
 # break run creation).
-_COMPLETION_WEBHOOK_BASE = os.environ.get("COMPLETION_WEBHOOK_URL") or "/webhooks/run-complete"
-_RUN_COMPLETE_SECRET = os.environ.get("RUN_COMPLETE_WEBHOOK_SECRET")
-
-
 def _is_loopback_webhook(url: str) -> bool:
     """Whether a webhook URL is relative or points at localhost (platform-rejected)."""
     parsed = urlparse(url)
@@ -151,12 +150,14 @@ def _is_loopback_webhook(url: str) -> bool:
     return (parsed.hostname or "").lower() in {"localhost", "127.0.0.1", "::1"}
 
 
-def _resolve_completion_webhook_url(base: str, secret: str | None) -> str | None:
+def completion_webhook_url() -> str | None:
     """Resolve the completion webhook URL, or None to attach no webhook.
 
     Degrades to None (with a warning) for a relative/loopback URL rather than
     letting a rejected webhook poison every ``runs.create``.
     """
+    base = completion_webhook_base_url()
+    secret = run_complete_webhook_secret()
     if not secret:
         return None
     if _is_loopback_webhook(base):
@@ -171,21 +172,6 @@ def _resolve_completion_webhook_url(base: str, secret: str | None) -> str | None
     if "?" in base:
         return base
     return f"{base}?token={secret}"
-
-
-COMPLETION_WEBHOOK_URL: str | None = _resolve_completion_webhook_url(
-    _COMPLETION_WEBHOOK_BASE, _RUN_COMPLETE_SECRET
-)
-
-
-def _langgraph_url() -> str:
-    return os.environ.get("LANGGRAPH_URL") or os.environ.get(
-        "LANGGRAPH_URL_PROD", "http://localhost:2024"
-    )
-
-
-def dispatch_client() -> LangGraphClient:
-    return get_client(url=_langgraph_url())
 
 
 def prepare_run_config(
@@ -223,7 +209,7 @@ async def create_durable_run(
     after_seconds: int | float | None = None,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
-    client = client or dispatch_client()
+    client = client or langgraph_client()
     run_config = prepare_run_config(config, metadata)
     create_kwargs: dict[str, Any] = {
         "input": input,
@@ -234,8 +220,9 @@ async def create_durable_run(
         "if_not_exists": if_not_exists,
         "stream_resumable": stream_resumable,
     }
-    if COMPLETION_WEBHOOK_URL:
-        create_kwargs["webhook"] = COMPLETION_WEBHOOK_URL
+    webhook = completion_webhook_url()
+    if webhook:
+        create_kwargs["webhook"] = webhook
     if stream_mode is not None:
         create_kwargs["stream_mode"] = stream_mode
     if after_seconds is not None:
@@ -299,6 +286,6 @@ async def dispatch_agent_run(
         config={"configurable": configurable},
         metadata=metadata or {},
         source=source,
-        client=client or dispatch_client(),
+        client=client or langgraph_client(),
         multitask_strategy=multitask_strategy,
     )

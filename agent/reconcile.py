@@ -9,29 +9,13 @@ cancel the ones older than ``max_age_seconds`` so the thread frees up.
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
 
-from .utils.thread_ops import langgraph_client
+from .config import langgraph_client
+from .utils.timestamps import parse_expiry
 
 logger = logging.getLogger(__name__)
 
 _SEARCH_PAGE_SIZE = 100
-
-
-def _parse_created_at(value: Any) -> datetime | None:
-    """Parse a run's ``created_at`` into an aware UTC datetime, or None."""
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
-    if not isinstance(value, str) or not value:
-        return None
-    text = value.strip()
-    if text.endswith("Z"):
-        text = f"{text[:-1]}+00:00"
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 async def reconcile_stale_runs(*, max_age_seconds: int = 1800) -> dict[str, int]:
@@ -74,7 +58,7 @@ async def reconcile_stale_runs(*, max_age_seconds: int = 1800) -> dict[str, int]
                 runs = await client.runs.list(thread_id, status="pending")
                 stale_run_ids: list[str] = []
                 for run in runs:
-                    created = _parse_created_at(run.get("created_at"))
+                    created = parse_expiry(run.get("created_at"))
                     if created is None:
                         logger.warning(
                             "Reconcile sweep: unparseable created_at on run %s (thread %s)",

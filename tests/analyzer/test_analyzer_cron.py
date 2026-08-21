@@ -26,7 +26,7 @@ class _FakeClient:
 @pytest.fixture
 def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
     client = _FakeClient()
-    monkeypatch.setattr(analyzer_cron, "_client", lambda: client)
+    monkeypatch.setattr(analyzer_cron, "langgraph_client", lambda: client)
     return client
 
 

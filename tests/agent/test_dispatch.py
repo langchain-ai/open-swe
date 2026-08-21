@@ -22,29 +22,40 @@ def test_is_loopback_webhook_absolute() -> None:
     assert dispatch._is_loopback_webhook(_ABSOLUTE) is False
 
 
-def test_resolve_no_secret_attaches_nothing() -> None:
-    assert dispatch._resolve_completion_webhook_url(_ABSOLUTE, None) is None
-    assert dispatch._resolve_completion_webhook_url(_ABSOLUTE, "") is None
+def test_resolve_no_secret_attaches_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COMPLETION_WEBHOOK_URL", _ABSOLUTE)
+    monkeypatch.delenv("RUN_COMPLETE_WEBHOOK_SECRET", raising=False)
+    assert dispatch.completion_webhook_url() is None
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "")
+    assert dispatch.completion_webhook_url() is None
 
 
-def test_resolve_relative_url_degrades_to_none() -> None:
+def test_resolve_relative_url_degrades_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
     # Secret set but a loopback URL would 422 every run — attach nothing instead.
-    assert dispatch._resolve_completion_webhook_url("/webhooks/run-complete", "s3cret") is None
+    monkeypatch.delenv("COMPLETION_WEBHOOK_URL", raising=False)
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
+    assert dispatch.completion_webhook_url() is None
 
 
-def test_resolve_localhost_url_degrades_to_none() -> None:
-    assert dispatch._resolve_completion_webhook_url("http://localhost/x", "s3cret") is None
+def test_resolve_localhost_url_degrades_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COMPLETION_WEBHOOK_URL", "http://localhost/x")
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
+    assert dispatch.completion_webhook_url() is None
 
 
-def test_resolve_absolute_url_appends_token() -> None:
-    assert (
-        dispatch._resolve_completion_webhook_url(_ABSOLUTE, "s3cret") == f"{_ABSOLUTE}?token=s3cret"
-    )
+def test_resolve_absolute_url_appends_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COMPLETION_WEBHOOK_URL", _ABSOLUTE)
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
+    assert dispatch.completion_webhook_url() == f"{_ABSOLUTE}?token=s3cret"
 
 
-def test_resolve_absolute_url_with_existing_query_left_as_is() -> None:
+def test_resolve_absolute_url_with_existing_query_left_as_is(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     url = f"{_ABSOLUTE}?token=preset"
-    assert dispatch._resolve_completion_webhook_url(url, "s3cret") == url
+    monkeypatch.setenv("COMPLETION_WEBHOOK_URL", url)
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
+    assert dispatch.completion_webhook_url() == url
 
 
 class _FakeRuns:
@@ -84,7 +95,8 @@ class _FakeClient:
 @pytest.mark.asyncio
 async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeClient()
-    monkeypatch.setattr(dispatch, "COMPLETION_WEBHOOK_URL", "https://app/webhooks/run-complete")
+    monkeypatch.setenv("COMPLETION_WEBHOOK_URL", "https://app/webhooks/run-complete")
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
 
     run = await dispatch.create_durable_run(
         "thread-1",
@@ -100,7 +112,7 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["durability"] == "sync"
     assert created["multitask_strategy"] == "interrupt"
     assert created["if_not_exists"] == "create"
-    assert created["webhook"] == "https://app/webhooks/run-complete"
+    assert created["webhook"] == "https://app/webhooks/run-complete?token=s3cret"
     # Resumable by default so the dashboard can join (and stop) a run it did not start.
     assert created["stream_resumable"] is True
     prepare_run_id = created["config"]["configurable"]["prepare_run_id"]
@@ -118,7 +130,7 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_stream_kwarg
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _FakeClient()
-    monkeypatch.setattr(dispatch, "COMPLETION_WEBHOOK_URL", None)
+    monkeypatch.delenv("RUN_COMPLETE_WEBHOOK_SECRET", raising=False)
 
     await dispatch.create_durable_run(
         "thread-1",

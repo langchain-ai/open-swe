@@ -1,12 +1,10 @@
 """Kick off and sync per-repo review style analysis runs."""
 
 import logging
-import os
 import uuid
 from typing import Any
 
-from langgraph_sdk import get_client
-
+from ..config import langgraph_client
 from ..dispatch import create_durable_run
 from ..input_messages import RunInput, build_run_input
 from ..review.style_collector import (
@@ -27,14 +25,6 @@ from .review_styles import (
 logger = logging.getLogger(__name__)
 
 _ASSISTANT_ID = "analyzer"
-
-
-def _client():
-    """LangGraph SDK client for the current deployment (same resolution as webapp)."""
-    url = os.environ.get("LANGGRAPH_URL") or os.environ.get("LANGGRAPH_URL_PROD")
-    if url:
-        return get_client(url=url)
-    return get_client()
 
 
 def build_continual_run_input(full_name: str) -> RunInput:
@@ -102,7 +92,7 @@ async def start_bootstrap_analysis(
     samples_text = format_samples_for_analyzer(samples)
     thread_id = review_style_thread_id(owner, repo)
 
-    client = _client()
+    client = langgraph_client()
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "review_style_full_name": full_name,
@@ -184,7 +174,7 @@ async def start_continual_run(
     configurable = build_continual_run_configurable(full_name)
     thread_id = configurable["thread_id"]
     try:
-        client = _client()
+        client = langgraph_client()
         run = await create_durable_run(
             thread_id,
             _ASSISTANT_ID,
@@ -215,7 +205,7 @@ async def sync_review_style_run_status(full_name: str) -> dict[str, Any]:
     if not isinstance(thread_id, str) or not thread_id:
         return record
 
-    client = _client()
+    client = langgraph_client()
     run_status: str | None = None
     run_missing = False
     try:
@@ -252,7 +242,7 @@ async def cancel_review_style_analysis(full_name: str) -> dict[str, Any]:
     run_id = record.get("analysis_run_id")
     if isinstance(thread_id, str) and isinstance(run_id, str) and thread_id and run_id:
         try:
-            await _client().runs.cancel(thread_id, run_id, wait=False)
+            await langgraph_client().runs.cancel(thread_id, run_id, wait=False)
         except Exception:
             logger.debug("Could not cancel review style run for %s", full_name, exc_info=True)
 

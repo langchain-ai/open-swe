@@ -1,13 +1,14 @@
 """FastAPI application composition."""
 
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from ..config import dashboard_allowed_origins
 from ..dashboard import router as dashboard_router
+from ..dashboard.oauth import allowed_dashboard_origins
 from ..dashboard.plan_api import plan_router
 from ..dashboard.workflow_approval_api import workflow_approval_router
 from ..utils.event_loop import pin_single_event_loop
@@ -37,15 +38,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan)
-    allowed_origins = [
-        origin.strip()
-        for origin in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(",")
-        if origin.strip()
-    ]
-    if "*" in allowed_origins:
+    if "*" in dashboard_allowed_origins():
         raise RuntimeError(
             "DASHBOARD_ALLOWED_ORIGINS must not include '*' when allow_credentials=True"
         )
+    # Same normalized allow-list the dashboard uses for its own CSRF/redirect
+    # checks, so CORS can never be looser than those.
+    allowed_origins = sorted(allowed_dashboard_origins())
     if allowed_origins:
         app.add_middleware(
             CORSMiddleware,

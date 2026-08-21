@@ -5,13 +5,12 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from langgraph_sdk import get_client
-
+from ..config import langgraph_client
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import post_github_comment
 from ..utils.github_token import get_github_token
 from ..utils.linear import comment_on_linear_issue
-from ..utils.slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
+from ..utils.slack import get_active_slack_thread, post_slack_thread_reply
 from ..utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
@@ -67,7 +66,7 @@ async def _get_slack_target(configurable: Mapping[str, Any]) -> tuple[str, str] 
     slack_thread = configurable.get("slack_thread")
     thread_id = configurable.get("thread_id")
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
+        langgraph_client(),
         thread_id if isinstance(thread_id, str) else None,
         slack_thread if isinstance(slack_thread, Mapping) else None,
     )

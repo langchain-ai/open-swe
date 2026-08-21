@@ -326,7 +326,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         configurable,
         source="linear",
         input=run_input,
-        metadata=common._AGENT_VERSION_METADATA,
+        metadata=common.agent_version_metadata(),
     )
     common.logger.info(
         "LangGraph run dispatched for thread %s (run=%s)",

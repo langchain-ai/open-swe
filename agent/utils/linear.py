@@ -1,31 +1,30 @@
 """Linear API utilities."""
 
 import logging
-import os
 from typing import Any
 
 import httpx
 
 from agent.utils.langsmith import get_langsmith_trace_url
 
+from ..config import linear_api_key
 from .http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
-LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 LINEAR_API_URL = "https://api.linear.app/graphql"
 
 
 def _headers() -> dict[str, str]:
     return {
-        "Authorization": LINEAR_API_KEY,
+        "Authorization": linear_api_key(),
         "Content-Type": "application/json",
     }
 
 
 async def _graphql_request(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
     """Execute a GraphQL request against the Linear API."""
-    if not LINEAR_API_KEY:
+    if not linear_api_key():
         return {"error": "LINEAR_API_KEY is not set"}
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:

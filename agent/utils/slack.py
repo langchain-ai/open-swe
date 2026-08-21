@@ -5,7 +5,6 @@ import copy
 import hashlib
 import hmac
 import logging
-import os
 import re
 import time
 import uuid
@@ -21,6 +20,7 @@ from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.run_usage import RunUsageSummary
 
+from ..config import slack_bot_token
 from ..thread_ids import slack_thread_id
 from .http import DEFAULT_HTTP_TIMEOUT
 from .user_messages import WARNING_ICON
@@ -28,7 +28,6 @@ from .user_messages import WARNING_ICON
 logger = logging.getLogger(__name__)
 
 SLACK_API_BASE_URL = "https://slack.com/api"
-SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
 
@@ -37,9 +36,6 @@ _SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
 _SLACK_CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 _SLACK_MESSAGE_TS_RE = re.compile(r"^[0-9]{1,20}(?:\.[0-9]{1,12})?$")
 SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10
@@ -57,10 +53,11 @@ class GitHubPrRef:
 
 
 def _slack_headers() -> dict[str, str]:
-    if not SLACK_BOT_TOKEN:
+    token = slack_bot_token()
+    if not token:
         return {}
     return {
-        "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json; charset=utf-8",
     }
 
@@ -384,7 +381,7 @@ async def _post_slack_message_with_ts(
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
 ) -> tuple[str | None, str | None]:
-    if not SLACK_BOT_TOKEN:
+    if not slack_bot_token():
         return None, "missing_slack_bot_token"
 
     payload: dict[str, Any] = {
@@ -656,7 +653,7 @@ async def update_slack_message(
     blocks: list[dict[str, Any]] | None = None,
 ) -> tuple[bool, str | None]:
     """Update a Slack message and return success plus any Slack error."""
-    if not SLACK_BOT_TOKEN:
+    if not slack_bot_token():
         return False, "missing_slack_bot_token"
 
     payload: dict[str, Any] = {
@@ -716,7 +713,7 @@ async def post_slack_ephemeral_message(
     channel_id: str, user_id: str, text: str, thread_ts: str | None = None
 ) -> bool:
     """Post an ephemeral message visible only to one user."""
-    if not SLACK_BOT_TOKEN:
+    if not slack_bot_token():
         return False
 
     payload: dict[str, str] = {
@@ -747,7 +744,7 @@ async def post_slack_ephemeral_message(
 
 async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eyes") -> bool:
     """Add a reaction to a Slack message."""
-    if not SLACK_BOT_TOKEN:
+    if not slack_bot_token():
         return False
 
     payload = {
@@ -778,7 +775,7 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
 
 async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     """Get Slack user details by user ID."""
-    if not SLACK_BOT_TOKEN:
+    if not slack_bot_token():
         return None
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
@@ -826,7 +823,7 @@ def _cache_slack_channel_info(channel_id: str, channel: dict[str, Any]) -> None:
 
 async def get_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
     """Get Slack channel details (including topic/purpose) by channel ID."""
-    if not SLACK_BOT_TOKEN or not channel_id:
+    if not slack_bot_token() or not channel_id:
         return None
 
     cached = _cached_slack_channel_info(channel_id)
@@ -976,7 +973,7 @@ async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
 
 async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
     """Fetch messages for a Slack thread, keeping the most recent window."""
-    if not SLACK_BOT_TOKEN:
+    if not slack_bot_token():
         return []
 
     messages: list[dict[str, Any]] = []
@@ -1036,7 +1033,7 @@ async def fetch_slack_thread_message_by_ts(
     channel_id: str, thread_ts: str, message_ts: str
 ) -> dict[str, Any] | None:
     """Fetch an exact reply from a Slack thread."""
-    if not SLACK_BOT_TOKEN:
+    if not slack_bot_token():
         return None
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
@@ -1120,7 +1117,7 @@ def extract_slack_message_urls(text: str) -> list[tuple[str, str, str]]:
 
 async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[str, Any] | None:
     """Fetch a single Slack message by channel and timestamp."""
-    if not SLACK_BOT_TOKEN:
+    if not slack_bot_token():
         return None
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
@@ -1160,7 +1157,7 @@ async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[st
 
 async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
     """Return the public permalink for a Slack message, or None if unavailable."""
-    if not SLACK_BOT_TOKEN or not channel_id or not message_ts:
+    if not slack_bot_token() or not channel_id or not message_ts:
         return None
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:

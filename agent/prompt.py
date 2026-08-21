@@ -1,9 +1,9 @@
 import logging
-import os
 import shlex
 from importlib import resources
 from pathlib import Path
 
+from .config import allowed_github_orgs, default_prompt_path
 from .utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -14,17 +14,16 @@ from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROMPT_PATH = os.environ.get("DEFAULT_PROMPT_PATH")
-
 
 def _load_default_prompt() -> str:
     """Load custom prompt from the default prompt file.
 
     Returns empty string if the file doesn't exist or can't be read.
     """
+    prompt_path = default_prompt_path()
     try:
-        if DEFAULT_PROMPT_PATH:
-            content = Path(DEFAULT_PROMPT_PATH).read_text().strip()
+        if prompt_path:
+            content = Path(prompt_path).read_text().strip()
         else:
             content = (
                 resources.files("agent.resources")
@@ -42,7 +41,7 @@ def _load_default_prompt() -> str:
     except Exception:
         logger.warning(
             "Failed to read default prompt from %s",
-            DEFAULT_PROMPT_PATH or "agent.resources/default_prompt.md",
+            prompt_path or "agent.resources/default_prompt.md",
         )
     return ""
 
@@ -274,11 +273,7 @@ Do not create, edit, delete, commit, push, or open/update pull requests in any r
 
 def _render_repository_scope_section() -> str:
     """Render the configured organization boundary for repository edits."""
-    orgs = dict.fromkeys(
-        org.strip().lower()
-        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
-        if org.strip()
-    )
+    orgs = sorted(allowed_github_orgs())
     if not orgs:
         return ""
     allowed_orgs = ", ".join(f"`{org}`" for org in orgs)

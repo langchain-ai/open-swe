@@ -7,11 +7,11 @@ they are spelled out — the defaults, the env reader, the CLI and the validatio
 derived from it.
 """
 
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict, cast
 
+from agent.config import environ
 from agent.review.findings import REVIEW_FINDING_CAP, Severity
 
 DEFAULT_EVAL_PROJECT = "open-swe-evals"
@@ -103,9 +103,10 @@ def coerce_config(raw: Mapping[str, Any]) -> dict[str, Any]:
     return config
 
 
-def config_from_env(env: Mapping[str, str] = os.environ) -> dict[str, Any]:
+def config_from_env(env: Mapping[str, str] | None = None) -> dict[str, Any]:
+    source = environ() if env is None else env
     return coerce_config(
-        {field.name: env[field.env_var] for field in FIELDS if field.env_var in env}
+        {field.name: source[field.env_var] for field in FIELDS if field.env_var in source}
     )
 
 

@@ -9,10 +9,10 @@ was killed) to ``failed``.
 """
 
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from agent.config import configured_langgraph_url, eval_langsmith_project
 from agent.review.eval_config import (
     DEFAULT_EVAL_PROJECT,
     ReviewerEvalConfig,
@@ -29,19 +29,11 @@ from agent.store import get_value, now_iso, put_value
 logger = logging.getLogger(__name__)
 
 
-def _resolve_langgraph_url() -> str | None:
-    return os.environ.get("LANGGRAPH_URL") or os.environ.get("LANGGRAPH_URL_PROD")
-
-
-def _eval_project() -> str:
-    return os.environ.get("EVAL_LANGSMITH_PROJECT") or DEFAULT_EVAL_PROJECT
-
-
 def _resolve_eval_config() -> ReviewerEvalConfig:
     return resolve_config(
         {
-            "langsmith_project": _eval_project(),
-            "langgraph_url": _resolve_langgraph_url() or "",
+            "langsmith_project": eval_langsmith_project() or DEFAULT_EVAL_PROJECT,
+            "langgraph_url": configured_langgraph_url() or "",
         }
     )
 

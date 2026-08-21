@@ -21,12 +21,12 @@ the configured base snapshot.
 """
 
 import logging
-import os
 import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..config import environment_snapshot_prefix, sandbox_provider
 from ..store import KeyedRecordStore, now_iso
 from .review_styles import normalize_repo_full_name
 
@@ -65,7 +65,7 @@ def snapshot_name_prefix() -> str:
     A configured prefix carrying a colon would produce a name the platform
     rejects, so it is dropped rather than passed through.
     """
-    prefix = os.environ.get("ENVIRONMENT_SNAPSHOT_PREFIX", "").strip()
+    prefix = environment_snapshot_prefix()
     if ":" in prefix:
         logger.warning(
             "ENVIRONMENT_SNAPSHOT_PREFIX %r contains a colon, which snapshot names "
@@ -321,7 +321,7 @@ async def _set_snapshot_state(
 
 def _require_capture_support() -> None:
     """Only the langsmith provider has a snapshot API to capture into."""
-    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+    sandbox_type = sandbox_provider()
     if sandbox_type != "langsmith":
         raise RuntimeError(
             f"capturing an environment snapshot needs SANDBOX_TYPE=langsmith, not {sandbox_type!r}"

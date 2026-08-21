@@ -1,11 +1,15 @@
-"""GitHub organization membership checks for webhook gating."""
+"""Who and what this deployment may act on: GitHub orgs, repos, and its own bots."""
 
 import logging
-import os
 from urllib.parse import quote
 
 import httpx
 
+from ..config import (
+    allowed_github_orgs,
+    allowed_github_repos,
+    extra_internal_bot_logins,
+)
 from .github_app import (
     get_github_app_installation_id_for_org,
     get_github_app_installation_token,
@@ -13,14 +17,41 @@ from .github_app import (
 
 logger = logging.getLogger(__name__)
 
-INTERNAL_BOT_LOGINS: frozenset[str] = frozenset(
-    {"open-swe[bot]", "openswe-dev[bot]"}
-    | {
-        login.strip()
-        for login in os.environ.get("EXTRA_INTERNAL_BOT_LOGINS", "").split(",")
-        if login.strip()
-    }
-)
+_BUILT_IN_BOT_LOGINS = frozenset({"open-swe[bot]", "openswe-dev[bot]"})
+
+
+def internal_bot_logins() -> frozenset[str]:
+    """Bot accounts that are this deployment talking to itself."""
+    return _BUILT_IN_BOT_LOGINS | extra_internal_bot_logins()
+
+
+def is_repo_allowed(repo_config: dict[str, str]) -> bool:
+    """Whether the agent may act on a repository.
+
+    True when no allow-list is configured at all, when the owner is an allowed
+    org, or when ``owner/name`` is explicitly allowed.
+    """
+    orgs = allowed_github_orgs()
+    repos = allowed_github_repos()
+    if not orgs and not repos:
+        return True
+    owner = repo_config.get("owner", "").lower()
+    name = repo_config.get("name", "").lower()
+    return owner in orgs or f"{owner}/{name}" in repos
+
+
+async def is_login_in_allowed_org(login: str) -> bool:
+    """Whether ``login`` is an active member of any configured allowed org.
+
+    False when no orgs are configured; callers that treat "no allow-list" as
+    fail-open check :func:`agent.config.allowed_github_orgs` themselves.
+    """
+    if not login:
+        return False
+    for org in sorted(allowed_github_orgs()):
+        if await is_user_active_org_member(login, org):
+            return True
+    return False
 
 
 async def is_user_active_org_member(username: str, org: str) -> bool:

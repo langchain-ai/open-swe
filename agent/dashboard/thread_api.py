@@ -5,7 +5,6 @@ import base64
 import binascii
 import json
 import logging
-import os
 import posixpath
 import uuid
 from collections.abc import AsyncIterator, Mapping
@@ -17,6 +16,7 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..config import agent_version_metadata, langgraph_client, langgraph_url, langsmith_credentials
 from ..input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -37,12 +37,7 @@ from ..utils.slack import (
     parse_github_pr_url,
     update_slack_trace_reply_for_web_handoff,
 )
-from ..utils.thread_ops import (
-    get_thread_active_status,
-    langgraph_client,
-    langgraph_url,
-    queue_message_for_thread,
-)
+from ..utils.thread_ops import get_thread_active_status, queue_message_for_thread
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
 from ..utils.timing import phase
 from .admin import is_admin
@@ -102,11 +97,6 @@ async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
     return await _create_sandbox(*args, **kwargs)
 
 
-def _agent_version_metadata() -> dict[str, str]:
-    revision = os.environ.get("LANGCHAIN_REVISION_ID")
-    return {"LANGSMITH_AGENT_VERSION": revision} if revision else {}
-
-
 def _require_json_content_type(content_type: str) -> None:
     media_type = content_type.split(";", 1)[0].strip().lower()
     if media_type != "application/json":
@@ -119,13 +109,9 @@ def _langgraph_proxy_headers(
     headers = {"Content-Type": content_type}
     if accept:
         headers["Accept"] = accept
-    api_key = (
-        os.environ.get("LANGSMITH_API_KEY")
-        or os.environ.get("LANGCHAIN_API_KEY")
-        or os.environ.get("LANGSMITH_API_KEY_PROD")
-    )
-    if api_key:
-        headers["X-API-Key"] = api_key
+    credentials = langsmith_credentials("platform")
+    if credentials:
+        headers["X-API-Key"] = credentials[0]
     return headers
 
 
@@ -1729,7 +1715,7 @@ async def _enrich_run_start_command(
         run_metadata = {}
     run_metadata = {
         **run_metadata,
-        **_agent_version_metadata(),
+        **agent_version_metadata(),
         "prepare_run_id": prepare_run_id,
     }
 

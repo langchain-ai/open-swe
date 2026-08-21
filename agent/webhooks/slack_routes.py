@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter
 from langgraph_sdk.client import LangGraphClient
 
+from ..config import slack_bot_user_id, slack_bot_username, slack_signing_secret
 from . import common
 from . import slack as service
 
@@ -15,7 +16,7 @@ _MESSAGE_UPDATE_RETRY_DELAYS = (0.1, 0.2, 0.5, 1, 2, 4, 8, 14)
 
 
 async def _lookup_delivered_message_update(
-    langgraph_client: LangGraphClient,
+    client: LangGraphClient,
     channel_id: str,
     thread_ts: str,
     message_ts: str,
@@ -23,12 +24,10 @@ async def _lookup_delivered_message_update(
 ) -> tuple[str | None, dict[str, Any] | None]:
     for delay in (*_MESSAGE_UPDATE_RETRY_DELAYS, None):
         try:
-            thread_id = await common.lookup_slack_thread_id(langgraph_client, channel_id, thread_ts)
+            thread_id = await common.lookup_slack_thread_id(client, channel_id, thread_ts)
         except common.SlackThreadMappingError:
             return None, None
-        delivered_message = await common.lookup_slack_run_mapping(
-            langgraph_client, channel_id, message_ts
-        )
+        delivered_message = await common.lookup_slack_run_mapping(client, channel_id, message_ts)
         if thread_id and delivered_message:
             if (
                 delivered_message.get("thread_ts") != thread_ts
@@ -51,9 +50,8 @@ async def _process_slack_message_update(
     message_ts: str,
     user_id: str,
 ) -> None:
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     thread_id, delivered_message = await _lookup_delivered_message_update(
-        langgraph_client,
+        common.langgraph_client(),
         channel_id,
         thread_ts,
         message_ts,
@@ -92,7 +90,7 @@ async def slack_webhook(
         body=body,
         timestamp=timestamp,
         signature=signature,
-        secret=common.SLACK_SIGNING_SECRET,
+        secret=slack_signing_secret(),
     ):
         common.logger.warning("Invalid Slack signature")
         raise common.HTTPException(status_code=401, detail="Invalid signature")
@@ -143,7 +141,7 @@ async def slack_webhook(
         )
         return {"status": "ignored", "reason": "Duplicate Slack event delivery"}
 
-    bot_user_id = common.SLACK_BOT_USER_ID
+    bot_user_id = slack_bot_user_id()
     if not bot_user_id:
         authorizations = payload.get("authorizations", [])
         if isinstance(authorizations, list) and authorizations:
@@ -203,9 +201,8 @@ async def slack_webhook(
     )
     is_untagged_two_party_reply = False
     if event.get("type") != "app_mention" and not is_message_update:
-        has_username_mention = bool(
-            common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text
-        )
+        bot_username = slack_bot_username()
+        has_username_mention = bool(bot_username and f"@{bot_username}" in text)
         has_id_mention = bool(bot_user_id and f"<@{bot_user_id}>" in text)
         is_ready_plan_reply = bool(
             not is_direct_message
@@ -276,7 +273,7 @@ async def slack_webhook(
             return {"status": "accepted", "message": "Slack update queued"}
         return {"status": "ignored", "reason": "Duplicate Slack event delivery"}
 
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    client = common.langgraph_client()
     thread_id: str | None = None
     channel_context = await common._get_slack_channel_context(channel_id)
 
@@ -292,9 +289,7 @@ async def slack_webhook(
     else:
         if not is_message_update:
             try:
-                thread_id = await common.resolve_slack_thread_id(
-                    langgraph_client, channel_id, thread_ts
-                )
+                thread_id = await common.resolve_slack_thread_id(client, channel_id, thread_ts)
             except common.SlackThreadMappingError:
                 common.logger.exception("Could not resolve explicit Slack thread mapping")
                 await common.post_slack_thread_reply(
@@ -345,7 +340,7 @@ async def slack_interactivity(
         body=body,
         timestamp=timestamp,
         signature=signature,
-        secret=common.SLACK_SIGNING_SECRET,
+        secret=slack_signing_secret(),
     ):
         common.logger.warning("Invalid Slack interactivity signature")
         raise common.HTTPException(status_code=401, detail="Invalid signature")
@@ -382,7 +377,7 @@ async def slack_interactivity(
             return {"status": "ignored", "reason": "Missing workflow approval context"}
 
         thread_id = await common.lookup_slack_thread_id(
-            common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+            common.langgraph_client(), channel_id, thread_ts
         )
         if not thread_id:
             return {"status": "ignored", "reason": "Slack thread is not associated"}
@@ -450,7 +445,7 @@ async def slack_interactivity(
                     "The workflow-file push approval was approved. Retry the blocked "
                     "git push now; do not alter workflow files before pushing."
                 ),
-                "bot_user_id": common.SLACK_BOT_USER_ID,
+                "bot_user_id": slack_bot_user_id(),
                 "thread_id": thread_id,
             },
             repo_config,
@@ -472,7 +467,7 @@ async def slack_interactivity(
             return {"status": "ignored", "reason": "Missing Slack action context"}
 
         thread_id = await common.lookup_slack_thread_id(
-            common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+            common.langgraph_client(), channel_id, thread_ts
         )
         if not thread_id:
             return {"status": "ignored", "reason": "Slack thread is not associated"}
@@ -509,7 +504,7 @@ async def slack_interactivity(
                     "user_id": user_id,
                     "user_name": user_name,
                     "text": "approve",
-                    "bot_user_id": common.SLACK_BOT_USER_ID,
+                    "bot_user_id": slack_bot_user_id(),
                 },
                 repo_config,
             )
@@ -543,7 +538,7 @@ async def slack_interactivity(
         return {"status": "ignored", "reason": "Missing Slack action context"}
 
     thread_id = await common.lookup_slack_thread_id(
-        common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
+        common.langgraph_client(), channel_id, thread_ts
     )
     if not thread_id:
         return {"status": "ignored", "reason": "Slack thread is not associated"}
@@ -565,7 +560,7 @@ async def slack_interactivity(
             "event_ts": event_ts,
             "user_id": user_id,
             "text": response,
-            "bot_user_id": common.SLACK_BOT_USER_ID,
+            "bot_user_id": slack_bot_user_id(),
             "thread_id": thread_id,
         },
         repo_config,

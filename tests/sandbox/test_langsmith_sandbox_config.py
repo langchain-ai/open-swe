@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from langsmith.sandbox import AsyncSandboxClient, ResourceNotFoundError
 
+from agent.config import sandbox_create_extra_fields
 from agent.integrations.langsmith import (
     DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS,
     DEFAULT_SANDBOX_IDLE_TTL_SECONDS,
@@ -16,7 +17,6 @@ from agent.integrations.langsmith import (
     LangSmithProvider,
     _create_sandbox_with_retry,
     _get_sandbox_api_endpoint,
-    _get_sandbox_create_extra_fields,
     _get_sandbox_snapshot_config,
     _install_create_extra_fields,
     _reuse_existing_sandbox,
@@ -180,9 +180,9 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
 
 def test_extra_fields_unset_is_empty() -> None:
     with patch.dict("os.environ", {}, clear=True):
-        assert _get_sandbox_create_extra_fields() == {}
+        assert sandbox_create_extra_fields() == {}
     with patch.dict("os.environ", {"SANDBOX_CREATE_EXTRA_JSON": "  "}, clear=True):
-        assert _get_sandbox_create_extra_fields() == {}
+        assert sandbox_create_extra_fields() == {}
 
 
 def test_extra_fields_parsed() -> None:
@@ -191,19 +191,19 @@ def test_extra_fields_parsed() -> None:
         {"SANDBOX_CREATE_EXTRA_JSON": '{"_internal_runtime": "v2"}'},
         clear=True,
     ):
-        assert _get_sandbox_create_extra_fields() == {"_internal_runtime": "v2"}
+        assert sandbox_create_extra_fields() == {"_internal_runtime": "v2"}
 
 
 def test_extra_fields_rejects_invalid_json() -> None:
     with patch.dict("os.environ", {"SANDBOX_CREATE_EXTRA_JSON": "{not json"}, clear=True):
         with pytest.raises(ValueError, match="valid JSON"):
-            _get_sandbox_create_extra_fields()
+            sandbox_create_extra_fields()
 
 
 def test_extra_fields_rejects_non_object() -> None:
     with patch.dict("os.environ", {"SANDBOX_CREATE_EXTRA_JSON": "[1, 2]"}, clear=True):
         with pytest.raises(ValueError, match="JSON object"):
-            _get_sandbox_create_extra_fields()
+            sandbox_create_extra_fields()
 
 
 @pytest.mark.asyncio

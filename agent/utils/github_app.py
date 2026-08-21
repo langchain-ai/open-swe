@@ -1,7 +1,6 @@
 """GitHub App installation token generation."""
 
 import logging
-import os
 import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -11,13 +10,11 @@ from urllib.parse import quote
 import httpx
 import jwt
 
+from ..config import github_app_id, github_app_installation_id, github_app_private_key
 from .http import DEFAULT_HTTP_TIMEOUT
+from .timestamps import parse_expiry
 
 logger = logging.getLogger(__name__)
-
-GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID", "")
-GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY", "")
-GITHUB_APP_INSTALLATION_ID = os.environ.get("GITHUB_APP_INSTALLATION_ID", "")
 
 # Installation tokens are valid for 1 hour. Reuse a minted token until it is
 # within this window of expiring so chat/review requests don't pay a fresh
@@ -52,22 +49,6 @@ def _scope_key(
     return installation_id, ids, names, normalize_permissions(permissions)
 
 
-def _parse_expiry(expires_at: Any) -> datetime | None:
-    """Best-effort parse of a GitHub ``expires_at`` ISO timestamp to a UTC datetime."""
-    if not isinstance(expires_at, str):
-        return None
-    raw = expires_at.strip()
-    if not raw:
-        return None
-    if raw.endswith("Z"):
-        raw = raw[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(raw)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-
-
 def _cached_token(key: ScopeKey, *, now: datetime) -> tuple[str, str | None] | None:
     cached = _TOKEN_CACHE.get(key)
     if cached is None:
@@ -90,15 +71,15 @@ def _generate_app_jwt() -> str:
     payload = {
         "iat": now - 60,  # issued 60s ago to account for clock skew
         "exp": now + 540,  # expires in 9 minutes (max is 10)
-        "iss": GITHUB_APP_ID,
+        "iss": github_app_id(),
     }
-    private_key = GITHUB_APP_PRIVATE_KEY.replace("\\n", "\n")
+    private_key = github_app_private_key().replace("\\n", "\n")
     return jwt.encode(payload, private_key, algorithm="RS256")
 
 
 async def get_github_app_installation_id_for_org(org: str) -> int | None:
     """Resolve the GitHub App installation for an organization."""
-    if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not org.strip():
+    if not github_app_id() or not github_app_private_key() or not org.strip():
         return None
     try:
         async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
@@ -120,7 +101,7 @@ async def get_github_app_installation_id_for_org(org: str) -> int | None:
 
 async def get_github_app_installation_id_for_repo(owner: str, repo: str) -> int | None:
     """Resolve the GitHub App installation that can access a repository."""
-    if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not owner.strip() or not repo.strip():
+    if not github_app_id() or not github_app_private_key() or not owner.strip() or not repo.strip():
         return None
     url = (
         "https://api.github.com/repos/"
@@ -175,11 +156,11 @@ async def get_github_app_installation_token_with_expiry(
 ) -> tuple[str | None, str | None]:
     """Exchange the GitHub App JWT for an installation access token and its expiry."""
     resolved_installation_id = str(
-        GITHUB_APP_INSTALLATION_ID if installation_id is None else installation_id
+        github_app_installation_id() if installation_id is None else installation_id
     ).strip()
     if (
-        not GITHUB_APP_ID
-        or not GITHUB_APP_PRIVATE_KEY
+        not github_app_id()
+        or not github_app_private_key()
         or not resolved_installation_id.isdigit()
         or int(resolved_installation_id) <= 0
     ):
@@ -216,7 +197,7 @@ async def get_github_app_installation_token_with_expiry(
             response.raise_for_status()
             data = response.json()
             token, expires_at = data.get("token"), data.get("expires_at")
-            parsed = _parse_expiry(expires_at)
+            parsed = parse_expiry(expires_at)
             if isinstance(token, str) and token and parsed is not None:
                 _TOKEN_CACHE[key] = (token, expires_at, parsed - _TOKEN_CACHE_MARGIN)
             return token, expires_at

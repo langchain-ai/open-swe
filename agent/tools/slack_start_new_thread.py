@@ -1,16 +1,16 @@
 import asyncio
-import os
 import re
 import uuid
 from typing import Any
 
 from fastapi import HTTPException
 from langgraph.config import get_config
-from langgraph_sdk import get_client
 
+from ..config import langgraph_client
 from ..dashboard.repo_access import require_repo_access_for_user
 from ..dispatch import dispatch_agent_run
 from ..utils.dashboard_links import dashboard_thread_url
+from ..utils.github_org_membership import is_repo_allowed
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack import (
     bind_slack_thread_id,
@@ -18,11 +18,6 @@ from ..utils.slack import (
     post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
-)
-from ..webhooks.common import _is_repo_allowed
-
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
 )
 
 _TITLE_MAX_CHARS = 160
@@ -173,7 +168,7 @@ async def slack_start_new_thread(
     configured_slack_thread = configurable.get("slack_thread")
     if not isinstance(configured_slack_thread, dict):
         return {"success": False, "error": "Missing slack_thread config"}
-    client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     thread_id_value = configurable.get("thread_id")
     current_slack_thread = await get_active_slack_thread(
         client,
@@ -205,7 +200,7 @@ async def slack_start_new_thread(
         }
 
     if default_repo and default_repo.strip() and repo is not None:
-        if not _is_repo_allowed(repo):
+        if not is_repo_allowed(repo):
             return {
                 "success": False,
                 "error": (

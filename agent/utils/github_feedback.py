@@ -1,22 +1,17 @@
 import logging
-import os
 import re
 from collections.abc import Mapping
 from typing import Any
 
-from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from ..config import langgraph_client
 from ..review.findings import comment_ids_for_finding, list_findings
 from ..thread_ids import reviewer_thread_id
 from .langsmith import create_langsmith_feedback, delete_langsmith_feedback
 from .reviewer_outcomes import outcome_from_score, upsert_finding_outcome
 
 logger = logging.getLogger(__name__)
-
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
 
 GITHUB_FEEDBACK_REACTIONS: dict[str, float] = {
     "+1": 1.0,
@@ -74,27 +69,23 @@ def _extract_pr_number(payload: dict[str, Any]) -> int | None:
     return None
 
 
-async def _event_was_processed(
-    langgraph_client: LangGraphClient, repo_key: str, event_id: str
-) -> bool:
+async def _event_was_processed(client: LangGraphClient, repo_key: str, event_id: str) -> bool:
     if not event_id:
         return False
-    item = await langgraph_client.store.get_item((_REACTION_EVENT_NAMESPACE, repo_key), event_id)
+    item = await client.store.get_item((_REACTION_EVENT_NAMESPACE, repo_key), event_id)
     return bool(item)
 
 
-async def _mark_event_processed(
-    langgraph_client: LangGraphClient, repo_key: str, event_id: str
-) -> None:
+async def _mark_event_processed(client: LangGraphClient, repo_key: str, event_id: str) -> None:
     if not event_id:
         return
-    await langgraph_client.store.put_item(
+    await client.store.put_item(
         (_REACTION_EVENT_NAMESPACE, repo_key), event_id, {"event_id": event_id}
     )
 
 
 async def _update_reaction_state(
-    langgraph_client: LangGraphClient,
+    client: LangGraphClient,
     *,
     repo_key: str,
     run_id: str,
@@ -105,16 +96,16 @@ async def _update_reaction_state(
 ) -> set[str]:
     namespace = (_REACTION_STATE_NAMESPACE, repo_key)
     key = _reaction_state_key(run_id, user_login, comment_id)
-    item = await langgraph_client.store.get_item(namespace, key)
+    item = await client.store.get_item(namespace, key)
     active_reactions = _read_active_reactions(item)
     if added:
         active_reactions.add(reaction)
     else:
         active_reactions.discard(reaction)
     if not active_reactions:
-        await langgraph_client.store.delete_item(namespace, key)
+        await client.store.delete_item(namespace, key)
         return active_reactions
-    await langgraph_client.store.put_item(
+    await client.store.put_item(
         namespace,
         key,
         {
@@ -160,9 +151,9 @@ async def process_github_reaction(
     ):
         return
 
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     repo_key = f"{owner}/{repo_name}"
-    if await _event_was_processed(langgraph_client, repo_key, delivery_id):
+    if await _event_was_processed(client, repo_key, delivery_id):
         return
 
     thread_id = reviewer_thread_id(owner, repo_name, pr_number)
@@ -181,7 +172,7 @@ async def process_github_reaction(
         return
 
     active_reactions = await _update_reaction_state(
-        langgraph_client,
+        client,
         repo_key=repo_key,
         run_id=run_id,
         user_login=user_login,
@@ -227,7 +218,7 @@ async def process_github_reaction(
         )
 
     if success:
-        await _mark_event_processed(langgraph_client, repo_key, delivery_id)
+        await _mark_event_processed(client, repo_key, delivery_id)
 
 
 async def process_github_reaction_added(payload: dict[str, Any], delivery_id: str = "") -> None:

@@ -143,7 +143,7 @@ def test_github_webhook_skips_automatic_review_when_disabled(monkeypatch) -> Non
 
     monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(github_webhooks, "process_github_pr_ready", fake_process_github_pr_ready)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     client = TestClient(app)
     response = _post_github_webhook(
@@ -172,7 +172,7 @@ def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
         called["event_type"] = event_type
 
     monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     client = TestClient(app)
     response = _post_github_webhook(
@@ -204,7 +204,7 @@ def test_github_webhook_ignores_issue_events_without_body_or_title_change(monkey
         called = True
 
     monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     client = TestClient(app)
     response = _post_github_webhook(
@@ -237,7 +237,7 @@ def test_github_webhook_accepts_issue_comment_events(monkeypatch) -> None:
         called["event_type"] = event_type
 
     monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     client = TestClient(app)
     response = _post_github_webhook(
@@ -264,7 +264,7 @@ def test_github_webhook_ignores_unmentioned_comment_without_info_log(monkeypatch
     monkeypatch.setattr(
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     caplog.set_level(logging.INFO, logger=webhook_common.logger.name)
 
     client = TestClient(app)
@@ -312,7 +312,7 @@ def test_github_webhook_routes_review_comment_reply_without_tag(monkeypatch) -> 
         fake_process_github_review_finding_reply,
     )
     monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     client = TestClient(app)
     response = _post_github_webhook(
@@ -393,7 +393,7 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     monkeypatch.setattr(webhook_common, "list_reviewer_findings", fake_list_findings)
     monkeypatch.setattr(webhook_common, "append_finding_interaction", fake_append_interaction)
     monkeypatch.setattr(webhook_common, "_store_current_reviewer_run_id", fake_store_current_run_id)
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeLangGraphClient())
 
     asyncio.run(
         github_webhooks.process_github_review_finding_reply(
@@ -471,7 +471,7 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     monkeypatch.setattr(webhook_common, "list_reviewer_findings", fake_list_findings)
     monkeypatch.setattr(webhook_common, "append_finding_interaction", fake_append_interaction)
     monkeypatch.setattr(webhook_common, "_store_current_reviewer_run_id", fake_store_current_run_id)
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeLangGraphClient())
 
     asyncio.run(
         github_webhooks.process_github_review_finding_reply(
@@ -514,7 +514,7 @@ def test_github_webhook_ignores_unsupported_comment_action(monkeypatch) -> None:
     monkeypatch.setattr(
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     client = TestClient(app)
     response = _post_github_webhook(
@@ -542,7 +542,7 @@ def test_github_webhook_ignores_unsupported_comment_action(monkeypatch) -> None:
 
 
 def test_github_webhook_ignores_review_requested(monkeypatch) -> None:
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     client = TestClient(app)
     response = _post_github_webhook(
         client,
@@ -616,9 +616,9 @@ def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
     ) -> None:
         raise AssertionError("docs-plz gate should not start the agent")
 
-    monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(
         webhook_common, "_get_slack_channel_context", fake_get_slack_channel_context
@@ -689,9 +689,9 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
         captured["event_data"] = event_data
         captured["repo_config"] = repo_config
 
-    monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(
         webhook_common, "_get_slack_channel_context", fake_get_slack_channel_context
@@ -744,9 +744,9 @@ def test_slack_webhook_malformed_review_command_starts_agent(monkeypatch) -> Non
         captured["event_data"] = event_data
         captured["repo_config"] = repo_config
 
-    monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
@@ -795,19 +795,14 @@ def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
         captured["event_data"] = event_data
         captured["repo_config"] = repo_config
 
-    monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
-    monkeypatch.setattr(
-        webhook_common,
-        "_is_repo_allowed",
-        lambda repo_config: (_ for _ in ()).throw(
-            AssertionError("Slack webhook should not gate inferred repos with allowlists")
-        ),
-    )
+    # An allow-list that excludes the inferred repo: the Slack path must not consult it.
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "some-other-org")
 
     client = TestClient(app)
     response = _post_slack_webhook(
@@ -851,9 +846,9 @@ def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> N
         captured["event_data"] = event_data
         captured["repo_config"] = repo_config
 
-    monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
@@ -909,9 +904,9 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
         captured["event_data"] = event_data
         captured["repo_config"] = repo_config
 
-    monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
@@ -960,8 +955,8 @@ def test_slack_webhook_accepts_unmentioned_ready_plan_reply(monkeypatch) -> None
     ) -> None:
         captured["event_data"] = event_data
 
-    monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(
         slack_webhooks, "_slack_user_can_reply_to_ready_plan", fake_ready_plan_reply
@@ -995,8 +990,8 @@ def test_slack_webhook_ignores_unmentioned_non_plan_reply(monkeypatch) -> None:
     async def fake_ready_plan_reply(channel_id: str, thread_ts: str, user_id: str) -> bool:
         return False
 
-    monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(
         slack_webhooks, "_slack_user_can_reply_to_ready_plan", fake_ready_plan_reply
@@ -1072,7 +1067,7 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
     monkeypatch.setattr(
         webhook_common, "post_review_started_comment", fake_post_review_started_comment
     )
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeLangGraphClient())
 
     asyncio.run(
         github_webhooks.process_github_pr_ready(
@@ -1181,7 +1176,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     monkeypatch.setattr(
         webhook_common, "post_review_started_comment", fake_post_review_started_comment
     )
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeLangGraphClient())
 
     result = asyncio.run(
         github_webhooks.trigger_pr_review_from_ref(
@@ -1375,7 +1370,7 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
     )
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
     monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeLangGraphClient())
     monkeypatch.setattr(
         webhook_common,
         "email_for_login",
@@ -1454,7 +1449,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
     monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
-    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeLangGraphClient())
     monkeypatch.setattr(
         webhook_common,
         "email_for_login",
@@ -1506,8 +1501,8 @@ def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch) -> None:
         captured["event_type"] = event_type
 
     monkeypatch.setattr(github_webhooks, "process_github_pr_comment", fake_process_pr_comment)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "langchain-ai")
 
     client = TestClient(app)
     response = _post_github_webhook(
@@ -1539,8 +1534,8 @@ def test_github_webhook_routes_pr_review_request_comment_to_agent(monkeypatch) -
         captured["event_type"] = event_type
 
     monkeypatch.setattr(github_webhooks, "process_github_pr_comment", fake_process_pr_comment)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "langchain-ai")
 
     client = TestClient(app)
     response = _post_github_webhook(

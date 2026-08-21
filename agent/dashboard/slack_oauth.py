@@ -8,7 +8,6 @@ user can only ever link their own Slack identity (no self-asserted spoofing).
 """
 
 import logging
-import os
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
@@ -16,14 +15,10 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import HTTPException
 
+from ..config import slack_oauth_client, slack_team_id
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
-
-SLACK_CLIENT_ID = os.environ.get("SLACK_CLIENT_ID", "")
-SLACK_CLIENT_SECRET = os.environ.get("SLACK_CLIENT_SECRET", "")
-# Optional: restrict linking to a single workspace (the Slack team id, T...).
-SLACK_TEAM_ID = os.environ.get("SLACK_TEAM_ID", "")
 
 SLACK_STATE_COOKIE_NAME = "osw_slack_oauth_state"
 SLACK_OIDC_SCOPES = "openid email profile"
@@ -36,7 +31,7 @@ _TEAM_ID_CLAIM = "https://slack.com/team_id"
 
 
 def slack_oauth_configured() -> bool:
-    return bool(SLACK_CLIENT_ID and SLACK_CLIENT_SECRET)
+    return all(slack_oauth_client())
 
 
 @dataclass(frozen=True)
@@ -49,16 +44,17 @@ class SlackIdentity:
 
 
 def build_authorize_url(*, redirect_uri: str, state: str) -> str:
+    client_id, _ = slack_oauth_client()
     params = {
         "response_type": "code",
         "scope": SLACK_OIDC_SCOPES,
-        "client_id": SLACK_CLIENT_ID,
+        "client_id": client_id,
         "redirect_uri": redirect_uri,
         "state": state,
     }
-    if SLACK_TEAM_ID:
+    if team_id := slack_team_id():
         # Pre-selects the workspace so users can't accidentally sign in elsewhere.
-        params["team"] = SLACK_TEAM_ID
+        params["team"] = team_id
     return f"{_AUTHORIZE_URL}?{urlencode(params)}"
 
 
@@ -82,18 +78,20 @@ def parse_slack_identity(data: dict[str, Any]) -> SlackIdentity:
 
 def verify_team(identity: SlackIdentity) -> None:
     """Reject identities from a different workspace when one is configured."""
-    if SLACK_TEAM_ID and identity.team_id != SLACK_TEAM_ID:
+    team_id = slack_team_id()
+    if team_id and identity.team_id != team_id:
         raise HTTPException(403, "Slack account is not in the authorized workspace")
 
 
 async def exchange_slack_code(code: str, redirect_uri: str) -> str:
     """Exchange an authorization code for a user access token."""
+    client_id, client_secret = slack_oauth_client()
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = await client.post(
             _TOKEN_URL,
             data={
-                "client_id": SLACK_CLIENT_ID,
-                "client_secret": SLACK_CLIENT_SECRET,
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "code": code,
                 "grant_type": "authorization_code",
                 "redirect_uri": redirect_uri,
