@@ -164,6 +164,9 @@ model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort"
 
 # Google
 model = make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
+
+# OrcaRouter (OpenAI-compatible model gateway; set ORCAROUTER_API_KEY)
+model = make_model("orcarouter:auto", max_tokens=16_000, reasoning_effort="high")
 ```
 
 The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:

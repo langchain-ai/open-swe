@@ -56,6 +56,14 @@ test("reports whether the selected provider is configured", () => {
     available: true,
     variable: "GEMINI_API_KEY",
   })
+  assert.deepEqual(modelCredentialStatus("orcarouter:auto", {}), {
+    available: false,
+    variable: "ORCAROUTER_API_KEY",
+  })
+  assert.deepEqual(modelCredentialStatus("orcarouter:auto", { ORCAROUTER_API_KEY: "secret" }), {
+    available: true,
+    variable: "ORCAROUTER_API_KEY",
+  })
   assert.deepEqual(modelCredentialStatus("custom:test", {}), {
     available: true,
     variable: null,
