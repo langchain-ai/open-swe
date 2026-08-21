@@ -62,6 +62,62 @@ async def comment_on_linear_issue(
     return bool(result.get("commentCreate", {}).get("success"))
 
 
+async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
+    """Add an emoji reaction to a Linear comment."""
+    mutation = """
+    mutation ReactionCreate($commentId: String!, $emoji: String!) {
+        reactionCreate(input: { commentId: $commentId, emoji: $emoji }) {
+            success
+        }
+    }
+    """
+    result = await _graphql_request(mutation, {"commentId": comment_id, "emoji": emoji})
+    if "error" in result:
+        return False
+    return bool(result.get("reactionCreate", {}).get("success"))
+
+
+async def fetch_issue_details(issue_id: str) -> dict[str, Any] | None:
+    """Full issue details including description and comments, or None if unavailable."""
+    query = """
+    query GetIssue($issueId: String!) {
+        issue(id: $issueId) {
+            id
+            identifier
+            title
+            description
+            url
+            project {
+                id
+                name
+            }
+            team {
+                id
+                name
+                key
+            }
+            comments {
+                nodes {
+                    id
+                    body
+                    createdAt
+                    user {
+                        id
+                        name
+                        email
+                    }
+                }
+            }
+        }
+    }
+    """
+    result = await _graphql_request(query, {"issueId": issue_id})
+    if "error" in result:
+        return None
+    issue = result.get("issue")
+    return issue if isinstance(issue, dict) else None
+
+
 async def post_linear_trace_comment(
     issue_id: str, thread_id: str, triggering_comment_id: str
 ) -> None:

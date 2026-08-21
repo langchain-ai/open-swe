@@ -57,7 +57,7 @@ def _option_payload() -> dict[str, Any]:
 async def test_selected_option_updates_original_message(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = _option_payload()
     update = AsyncMock(return_value=(True, None))
-    monkeypatch.setattr(slack_routes.common, "update_slack_message", update)
+    monkeypatch.setattr(slack_routes, "update_slack_message", update)
 
     await slack_routes._update_selected_option_message(payload, payload["actions"][0], "Option B")
 
@@ -86,18 +86,16 @@ async def test_option_interaction_schedules_update_before_agent_processing(
     payload = _option_payload()
     update = AsyncMock()
     process = AsyncMock()
-    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
-    monkeypatch.setattr(slack_routes.common, "langgraph_client", lambda: object())
+    monkeypatch.setattr(slack_routes, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(slack_routes, "langgraph_client", lambda: object())
+    monkeypatch.setattr(slack_routes, "lookup_slack_thread_id", AsyncMock(return_value="thread-1"))
     monkeypatch.setattr(
-        slack_routes.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
-    )
-    monkeypatch.setattr(
-        slack_routes.common,
-        "_get_slack_channel_context",
+        slack_routes.service,
+        "resolve_slack_channel_context",
         AsyncMock(return_value={"name": "proj-open-swe"}),
     )
     monkeypatch.setattr(
-        slack_routes.common,
+        slack_routes.service,
         "get_slack_repo_config",
         AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"}),
     )

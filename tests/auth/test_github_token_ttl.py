@@ -17,7 +17,6 @@ import pytest
 
 from agent.utils import github_comments, github_token
 from agent.utils.timestamps import is_expired
-from agent.webhooks import common as webhook_common
 from agent.webhooks import github as github_webhooks
 
 _SKEW = github_token._GITHUB_TOKEN_EXPIRY_SKEW_SECONDS
@@ -299,14 +298,14 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     async def fake_trigger_or_queue_run(*args: Any, **kwargs: Any) -> None:
         return None
 
-    monkeypatch.setattr(webhook_common, "extract_pr_context", fake_extract_pr_context)
-    monkeypatch.setattr(webhook_common, "_get_or_resolve_thread_github_token", fake_get_or_resolve)
-    monkeypatch.setattr(webhook_common, "invalidate_cached_github_token", fake_invalidate)
-    monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react)
-    monkeypatch.setattr(webhook_common, "fetch_pr_comments_since_last_tag", fake_fetch_pr_comments)
-    monkeypatch.setattr(webhook_common, "_trigger_or_queue_run", fake_trigger_or_queue_run)
+    monkeypatch.setattr(github_webhooks, "extract_pr_context", fake_extract_pr_context)
+    monkeypatch.setattr(github_webhooks, "_get_or_resolve_thread_github_token", fake_get_or_resolve)
+    monkeypatch.setattr(github_webhooks, "invalidate_cached_github_token", fake_invalidate)
+    monkeypatch.setattr(github_webhooks, "react_to_github_comment", fake_react)
+    monkeypatch.setattr(github_webhooks, "fetch_pr_comments_since_last_tag", fake_fetch_pr_comments)
+    monkeypatch.setattr(github_webhooks, "_trigger_or_queue_run", fake_trigger_or_queue_run)
     monkeypatch.setattr(
-        webhook_common,
+        github_webhooks,
         "email_for_login",
         lambda login: asyncio.sleep(0, result="octo@example.com" if login == "octo" else None),
     )

@@ -18,6 +18,7 @@ import httpx
 from fastapi import HTTPException, Response
 
 from ..config import langgraph_client
+from ..review.dispatch import trigger_pr_review_from_ref
 from ..review.findings import (
     REVIEWER_THREAD_KIND,
     coerce_finding,
@@ -34,7 +35,6 @@ from ..utils.github_http import (
     github_url,
 )
 from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
-from ..webhooks.github import trigger_pr_review_from_ref
 from .pr_diff import build_pr_diff_files
 
 logger = logging.getLogger(__name__)

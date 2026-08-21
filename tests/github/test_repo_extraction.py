@@ -108,9 +108,9 @@ class TestLinearWebhookRepoOverride:
         from agent.webhooks.linear_routes import linear_webhook
 
         with (
-            patch("agent.webhooks.common.verify_linear_signature", return_value=True),
+            patch("agent.webhooks.linear_routes.verify_linear_signature", return_value=True),
             patch(
-                "agent.webhooks.common.fetch_linear_issue_details",
+                "agent.webhooks.linear_routes.fetch_issue_details",
                 new_callable=AsyncMock,
                 return_value={
                     "id": "issue-456",
@@ -123,7 +123,6 @@ class TestLinearWebhookRepoOverride:
                 },
             ),
             patch("agent.webhooks.linear_routes.is_repo_allowed", return_value=True),
-            patch("agent.webhooks.common.BackgroundTasks"),
         ):
             mock_request = AsyncMock()
             mock_request.body.return_value = json.dumps(_base_payload).encode()
@@ -158,9 +157,9 @@ class TestLinearWebhookRepoOverride:
         }
 
         with (
-            patch("agent.webhooks.common.verify_linear_signature", return_value=True),
+            patch("agent.webhooks.linear_routes.verify_linear_signature", return_value=True),
             patch(
-                "agent.webhooks.common.fetch_linear_issue_details",
+                "agent.webhooks.linear_routes.fetch_issue_details",
                 new_callable=AsyncMock,
                 return_value={
                     "id": "issue-456",

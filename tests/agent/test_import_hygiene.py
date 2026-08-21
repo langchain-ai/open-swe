@@ -2,12 +2,61 @@
 
 Slow imports of agent.webapp delay pod readiness on LangGraph Cloud and have
 caused runs to fail with "exceeded max attempts". These tests pin which heavy
-modules are allowed in each entrypoint's transitive import closure.
+modules are allowed in each entrypoint's transitive import closure, and which
+layers may depend on which.
 """
 
+import ast
 import json
 import subprocess
 import sys
+from pathlib import Path
+
+_AGENT_ROOT = Path(__file__).resolve().parents[2] / "agent"
+
+
+def _imported_packages(module_path: Path) -> set[str]:
+    """Every ``agent.*`` module named by an import in ``module_path``.
+
+    Absolute and relative, module-level and function-local alike — a lazy
+    import inside a function is still a dependency between the two layers.
+    """
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    package = ["agent", *module_path.relative_to(_AGENT_ROOT).parts[:-1]]
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = ".".join(package[: len(package) - (node.level - 1)])
+                imported.add(f"{base}.{node.module}" if node.module else base)
+            elif node.module:
+                imported.add(node.module)
+    return {name for name in imported if name.startswith("agent.")}
+
+
+def _modules_importing(package: str, forbidden_prefix: str) -> dict[str, set[str]]:
+    offenders: dict[str, set[str]] = {}
+    for path in sorted((_AGENT_ROOT / package).rglob("*.py")):
+        hits = {
+            name
+            for name in _imported_packages(path)
+            if name == forbidden_prefix or name.startswith(f"{forbidden_prefix}.")
+        }
+        if hits:
+            offenders[str(path.relative_to(_AGENT_ROOT))] = hits
+    return offenders
+
+
+def test_dashboard_does_not_import_the_webhook_layer() -> None:
+    """Webhooks adapt inbound events onto domain modules; nothing depends back on them."""
+    assert _modules_importing("dashboard", "agent.webhooks") == {}
+
+
+def test_tools_do_not_import_the_webhook_layer() -> None:
+    """Agent tools call the domain (``agent.review.dispatch``), never the webhook adapter."""
+    assert _modules_importing("tools", "agent.webhooks") == {}
 
 
 def _closure_check(entry: str, forbidden: list[str]) -> dict[str, bool]:

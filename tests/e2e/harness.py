@@ -204,7 +204,7 @@ async def control_forget_slack_events() -> JSONResponse:
     A redelivery normally lands on a different instance than the original, which
     only has the LangGraph store to dedupe on. Clearing the local cache lets the
     E2E exercise that path instead of the same-process fast path."""
-    from agent.utils.slack_events import reset_slack_event_claims
+    from agent.webhooks.slack_events import reset_slack_event_claims
 
     reset_slack_event_claims()
     return JSONResponse({"ok": True})
