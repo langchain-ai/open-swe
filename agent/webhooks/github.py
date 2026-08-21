@@ -57,18 +57,9 @@ from ..threads.ops import (
     thread_exists,
     upsert_agent_thread_owner_metadata,
 )
+from .bot_messages import is_own_bot_message
 
 logger = logging.getLogger(__name__)
-
-_GITHUB_BOT_MESSAGE_PREFIXES = (
-    "🔐 **GitHub Authentication Required**",
-    "✅ **Pull Request Created**",
-    "✅ **Pull Request Updated**",
-    "**Pull Request Created**",
-    "**Pull Request Updated**",
-    "🤖 **Agent Response**",
-    "❌ **Agent Error**",
-)
 
 
 def _repo_config_from_payload(payload: dict[str, Any]) -> dict[str, str]:
@@ -183,7 +174,7 @@ def _build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for comment in comments:
         body = comment.get("body", "")
-        if not body or any(body.startswith(prefix) for prefix in _GITHUB_BOT_MESSAGE_PREFIXES):
+        if not body or is_own_bot_message(body):
             continue
         author = comment.get("author", "unknown")
         formatted_body = format_github_comment_body_for_prompt(author, body)
