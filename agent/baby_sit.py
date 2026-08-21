@@ -9,7 +9,7 @@ from typing import Any, TypedDict, cast
 
 from langgraph_sdk.errors import ConflictError
 
-from .config import langgraph_client
+from .config import in_process_langgraph_client
 from .dispatch import dispatch_agent_run
 from .store import delete_value, get_value, now_iso, put_value, search_all_values
 from .thread_ids import baby_sit_lock_thread_id
@@ -43,7 +43,7 @@ WATCH_LOCK_TTL_MINUTES = 5
 
 @asynccontextmanager
 async def _watch_lock(key: str) -> AsyncIterator[bool]:
-    client = langgraph_client()
+    client = in_process_langgraph_client()
     lock_id = baby_sit_lock_thread_id(key)
     try:
         await client.threads.create(
@@ -122,7 +122,7 @@ async def list_active_watches(
 
 
 async def _create_watch_cron(key: str) -> str:
-    cron = await langgraph_client().crons.create(
+    cron = await in_process_langgraph_client().crons.create(
         "scheduler",
         schedule=WATCH_SCHEDULE,
         input={"task": "baby_sit", "watch_key": key},
@@ -137,7 +137,7 @@ async def _create_watch_cron(key: str) -> str:
 
 
 async def _ensure_watch_cron(key: str) -> str:
-    crons = await langgraph_client().crons.search(
+    crons = await in_process_langgraph_client().crons.search(
         assistant_id="scheduler",
         metadata={"kind": WATCH_CRON_KIND, "watch_key": key},
         limit=10,
@@ -150,7 +150,7 @@ async def _ensure_watch_cron(key: str) -> str:
     if cron_ids:
         for duplicate in cron_ids[1:]:
             try:
-                await langgraph_client().crons.delete(duplicate)
+                await in_process_langgraph_client().crons.delete(duplicate)
             except Exception:
                 logger.warning("Failed to delete duplicate baby-sit cron %s", duplicate)
         return cron_ids[0]
@@ -209,7 +209,7 @@ async def start_watch(
             cron_id = watch.get("cron_id")
             if isinstance(cron_id, str) and cron_id:
                 try:
-                    await langgraph_client().crons.delete(cron_id)
+                    await in_process_langgraph_client().crons.delete(cron_id)
                 except Exception:
                     logger.warning("Failed to roll back baby-sit cron %s", cron_id)
             await delete_value(WATCH_NAMESPACE, key)
@@ -223,7 +223,7 @@ async def stop_watch(key: str) -> bool:
     cron_id = watch.get("cron_id")
     if isinstance(cron_id, str) and cron_id:
         try:
-            await langgraph_client().crons.delete(cron_id)
+            await in_process_langgraph_client().crons.delete(cron_id)
         except Exception:
             logger.warning("Failed to delete baby-sit cron %s", cron_id, exc_info=True)
             watch["active"] = False

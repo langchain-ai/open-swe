@@ -43,8 +43,8 @@ from langchain_core.messages import HumanMessage
 from .config import (
     dashboard_base_url,
     fallback_llm_model_id,
+    in_process_langgraph_client,
     is_langsmith_sandbox,
-    langgraph_client,
     tool_loader_timeout_seconds,
 )
 from .dashboard.admin import is_admin, is_observability_authorized
@@ -614,7 +614,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         if not turn_key:
             return None
         try:
-            thread = await langgraph_client().threads.get(thread_id=self._thread_id)
+            thread = await in_process_langgraph_client().threads.get(thread_id=self._thread_id)
             checkpoints = (thread.get("metadata") or {}).get("turn_checkpoints") or []
             checkpoint = next(
                 entry
@@ -675,7 +675,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             return None
         ref, repo_path = checkpoint
         try:
-            thread = await langgraph_client().threads.get(thread_id=self._thread_id)
+            thread = await in_process_langgraph_client().threads.get(thread_id=self._thread_id)
             existing = (thread.get("metadata") or {}).get("turn_checkpoints")
         except Exception:
             logger.debug("Could not read turn checkpoints for %s", self._thread_id, exc_info=True)
@@ -726,7 +726,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             thread_id=self._thread_id,
             messages=state.get("messages") or [],
             model=self._title_model,
-            client=langgraph_client(),
+            client=in_process_langgraph_client(),
         )
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
@@ -783,7 +783,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             state, sandbox_backend, work_dir, preferred_repo_path
         )
         try:
-            await langgraph_client().threads.update(
+            await in_process_langgraph_client().threads.update(
                 thread_id=self._thread_id,
                 metadata={
                     "agent_kind": "agent",
@@ -867,7 +867,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     local_run = is_desktop_run(configurable)
     profile_login = resolve_github_login(as_json_object(config))
     thread_settings, settings_changed = normalize_thread_settings(
-        {} if local_run else await load_thread_settings(langgraph_client(), thread_id)
+        {} if local_run else await load_thread_settings(in_process_langgraph_client(), thread_id)
     )
     settings_login = thread_settings.get("owner_login") or profile_login
     # Team/profile settings are accepted stale for a short TTL so graph factories
@@ -981,7 +981,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         settings_changed or {**thread_settings, **resolved_settings} != thread_settings
     ):
         await store_thread_settings(
-            langgraph_client(), thread_id, {**thread_settings, **resolved_settings}
+            in_process_langgraph_client(), thread_id, {**thread_settings, **resolved_settings}
         )
 
     model_id, profile_effort = gate_fable_model(

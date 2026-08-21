@@ -138,8 +138,24 @@ def configured_langgraph_url() -> str | None:
 
 
 def langgraph_client() -> LangGraphClient:
-    """The one LangGraph SDK client factory; every caller routes through here."""
+    """HTTP client for the deployment at ``langgraph_url()``.
+
+    For callers outside the graph runtime (webhooks, dispatch, dashboard jobs).
+    Code that runs *inside* a graph — factories, middleware, tools — must use
+    :func:`in_process_langgraph_client` instead.
+    """
     return get_client(url=langgraph_url())
+
+
+def in_process_langgraph_client() -> LangGraphClient:
+    """Loopback client for code running inside the LangGraph server.
+
+    ``get_client()`` with no URL uses the server's in-process ASGI transport:
+    no network hop, no API-key auth, and a fast failure outside the server.
+    Routing in-graph calls over HTTP instead would make every run call its own
+    deployment (and, in tests, retry against a dead port for seconds).
+    """
+    return get_client()
 
 
 def is_local_dev() -> bool:
