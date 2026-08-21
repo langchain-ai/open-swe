@@ -1,31 +1,14 @@
 from typing import Any
 
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient
 
 from agent.dashboard import analyzer_cron
 
 
-class _FakeCrons:
-    def __init__(self) -> None:
-        self.created: list[dict[str, Any]] = []
-        self.deleted: list[str] = []
-
-    async def create(self, assistant_id: str, **kwargs: Any) -> dict[str, Any]:
-        self.created.append({"assistant_id": assistant_id, **kwargs})
-        return {"cron_id": "cron_123"}
-
-    async def delete(self, cron_id: str) -> None:
-        self.deleted.append(cron_id)
-
-
-class _FakeClient:
-    def __init__(self) -> None:
-        self.crons = _FakeCrons()
-
-
 @pytest.fixture
-def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
-    client = _FakeClient()
+def fake_client(monkeypatch) -> FakeLangGraphClient:  # noqa: ANN001
+    client = FakeLangGraphClient(cron_id="cron_123")
     monkeypatch.setattr(analyzer_cron, "langgraph_client", lambda: client)
     return client
 

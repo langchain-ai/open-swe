@@ -10,6 +10,7 @@ from xml.etree import ElementTree
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
+from support.langgraph_fakes import FakeLangGraphClient
 
 from agent.api.app import app
 from agent.thread_ids import github_issue_thread_id
@@ -373,15 +374,7 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     async def fake_store_current_run_id(_thread_id: str, _run: object) -> None:
         return None
 
-    class _FakeRunsClient:
-        async def create(self, thread_id: str, graph: str, **kwargs) -> dict[str, str]:
-            captured["thread_id"] = thread_id
-            captured["graph"] = graph
-            captured["kwargs"] = kwargs
-            return {"run_id": "run-1"}
-
-    class _FakeLangGraphClient:
-        runs = _FakeRunsClient()
+    client = FakeLangGraphClient()
 
     monkeypatch.setattr(webhook_common, "_get_thread_metadata_safe", fake_get_thread_metadata_safe)
     monkeypatch.setattr(
@@ -393,7 +386,7 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
     monkeypatch.setattr(webhook_common, "list_reviewer_findings", fake_list_findings)
     monkeypatch.setattr(webhook_common, "append_finding_interaction", fake_append_interaction)
     monkeypatch.setattr(webhook_common, "_store_current_reviewer_run_id", fake_store_current_run_id)
-    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeLangGraphClient())
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: client)
 
     asyncio.run(
         github_webhooks.process_github_review_finding_reply(
@@ -416,9 +409,8 @@ def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -
         )
     )
 
-    kwargs = captured["kwargs"]
-    assert isinstance(kwargs, dict)
-    config = kwargs["config"]["configurable"]
+    (run_create,) = client.runs.created
+    config = run_create["config"]["configurable"]
     assert config["reviewer_event"] == "finding_reply"
     assert config["re_review"] is True
     assert config["finding_reply_id"] == "f_1"
@@ -453,13 +445,7 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     async def fake_store_current_run_id(_thread_id: str, _run: object) -> None:
         return None
 
-    class _FakeRunsClient:
-        async def create(self, thread_id: str, graph: str, **kwargs) -> dict[str, str]:
-            captured["kwargs"] = kwargs
-            return {"run_id": "run-1"}
-
-    class _FakeLangGraphClient:
-        runs = _FakeRunsClient()
+    client = FakeLangGraphClient()
 
     monkeypatch.setattr(webhook_common, "_get_thread_metadata_safe", fake_get_thread_metadata_safe)
     monkeypatch.setattr(
@@ -471,7 +457,7 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     monkeypatch.setattr(webhook_common, "list_reviewer_findings", fake_list_findings)
     monkeypatch.setattr(webhook_common, "append_finding_interaction", fake_append_interaction)
     monkeypatch.setattr(webhook_common, "_store_current_reviewer_run_id", fake_store_current_run_id)
-    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeLangGraphClient())
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: client)
 
     asyncio.run(
         github_webhooks.process_github_review_finding_reply(
@@ -494,9 +480,8 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
         )
     )
 
-    kwargs = captured["kwargs"]
-    assert isinstance(kwargs, dict)
-    messages = kwargs["input"]["messages"]
+    (run_create,) = client.runs.created
+    messages = run_create["input"]["messages"]
     assert len(messages) == 2
     message_content = messages[-1]["content"]
     assert isinstance(message_content, str)
@@ -1032,19 +1017,7 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
         captured["cache_token"] = token
         captured["cache_expires_at"] = expires_at
 
-    class _FakeRunsClient:
-        async def create(self, thread_id: str, graph: str, **kwargs) -> None:
-            captured["thread_id"] = thread_id
-            captured["graph"] = graph
-            captured["kwargs"] = kwargs
-
-    class _FakeThreadsClient:
-        async def create(self, **kwargs) -> None:
-            captured["thread_create_kwargs"] = kwargs
-
-    class _FakeLangGraphClient:
-        runs = _FakeRunsClient()
-        threads = _FakeThreadsClient()
+    client = FakeLangGraphClient()
 
     async def fake_set_reviewer_thread_metadata(thread_id: str, **kwargs: object) -> None:
         captured["set_metadata_thread_id"] = thread_id
@@ -1067,7 +1040,7 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
     monkeypatch.setattr(
         webhook_common, "post_review_started_comment", fake_post_review_started_comment
     )
-    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeLangGraphClient())
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: client)
 
     asyncio.run(
         github_webhooks.process_github_pr_ready(
@@ -1085,16 +1058,15 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
         )
     )
 
-    kwargs = cast(dict[str, object], captured["kwargs"])
-    input_data = cast(dict[str, object], kwargs["input"])
+    (run_create,) = client.runs.created
+    input_data = cast(dict[str, object], run_create["input"])
     prompt = cast(list[dict[str, str]], input_data["messages"])[-1]["content"]
-    config = cast(dict[str, object], cast(dict[str, object], kwargs["config"])["configurable"])
+    config = cast(dict[str, object], cast(dict[str, object], run_create["config"])["configurable"])
 
-    assert captured["graph"] == "reviewer"
-    assert captured["thread_create_kwargs"] == {
-        "thread_id": captured["thread_id"],
-        "if_exists": "do_nothing",
-    }
+    assert run_create["assistant_id"] == "reviewer"
+    assert client.threads.created == [
+        {"thread_id": run_create["thread_id"], "if_exists": "do_nothing"}
+    ]
     assert "https://github.com/langchain-ai/open-swe/pull/1244" in prompt
     assert "<base_sha>base-sha</base_sha>" in prompt
     assert "<head_sha>head-sha</head_sha>" in prompt
@@ -1136,23 +1108,12 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         captured["cache_token"] = token
         captured["cache_expires_at"] = expires_at
 
-    class _FakeRunsClient:
-        async def create(self, thread_id: str, graph: str, **kwargs) -> None:
-            captured["thread_id"] = thread_id
-            captured["graph"] = graph
-            captured["kwargs"] = kwargs
-
-    class _FakeThreadsClient:
-        async def create(self, **kwargs) -> None:
-            captured["thread_create_kwargs"] = kwargs
-
-    class _FakeLangGraphClient:
-        runs = _FakeRunsClient()
-        threads = _FakeThreadsClient()
+    client = FakeLangGraphClient()
+    metadata_writes: list[dict[str, object]] = []
 
     async def fake_set_reviewer_thread_metadata(thread_id: str, **kwargs: object) -> None:
         captured["set_metadata_thread_id"] = thread_id
-        captured["set_metadata_kwargs"] = kwargs
+        metadata_writes.append(kwargs)
 
     monkeypatch.setattr(webhook_common, "_is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(
@@ -1176,7 +1137,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     monkeypatch.setattr(
         webhook_common, "post_review_started_comment", fake_post_review_started_comment
     )
-    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeLangGraphClient())
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: client)
 
     result = asyncio.run(
         github_webhooks.trigger_pr_review_from_ref(
@@ -1192,17 +1153,16 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         )
     )
 
-    kwargs = cast(dict[str, object], captured["kwargs"])
-    input_data = cast(dict[str, object], kwargs["input"])
+    (run_create,) = client.runs.created
+    input_data = cast(dict[str, object], run_create["input"])
     prompt = cast(list[dict[str, str]], input_data["messages"])[-1]["content"]
-    config = cast(dict[str, object], cast(dict[str, object], kwargs["config"])["configurable"])
+    config = cast(dict[str, object], cast(dict[str, object], run_create["config"])["configurable"])
     assert result["success"] is True
     assert auto_review_checked is False
-    assert captured["graph"] == "reviewer"
-    assert captured["thread_create_kwargs"] == {
-        "thread_id": captured["thread_id"],
-        "if_exists": "do_nothing",
-    }
+    assert run_create["assistant_id"] == "reviewer"
+    assert client.threads.created == [
+        {"thread_id": run_create["thread_id"], "if_exists": "do_nothing"}
+    ]
     assert captured["metadata_token"] == "app-token"
     assert "<base_sha>base-sha</base_sha>" in prompt
     assert "<head_sha>head-sha</head_sha>" in prompt
@@ -1216,8 +1176,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     }
     # The live head must be persisted to metadata so resolve_review_head_sha
     # doesn't return a stale head left by a prior push/ready dispatch.
-    metadata_kwargs = cast(dict[str, object], captured["set_metadata_kwargs"])
-    assert metadata_kwargs["head_sha"] == "head-sha"
+    assert [write.get("head_sha") for write in metadata_writes] == ["head-sha", None]
     # A live status comment is posted on dispatch so the PR shows "reviewing".
     status_comment_kwargs = cast(dict[str, object], captured["status_comment_kwargs"])
     assert status_comment_kwargs["pr_number"] == 1244
@@ -1350,12 +1309,7 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
         captured["fetch_token"] = token
         return []
 
-    class _FakeRunsClient:
-        async def create(self, *args, **kwargs) -> None:
-            captured["run_created"] = True
-
-    class _FakeLangGraphClient:
-        runs = _FakeRunsClient()
+    client = FakeLangGraphClient()
 
     monkeypatch.setattr(
         webhook_common,
@@ -1370,7 +1324,7 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
     )
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
     monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
-    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeLangGraphClient())
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: client)
     monkeypatch.setattr(
         webhook_common,
         "email_for_login",
@@ -1400,12 +1354,10 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
     assert captured["reaction_token"] == "user-token"
     assert captured["fetch_token"] == "user-token"
     assert captured["comment_id"] == 999
-    assert captured["run_created"] is True
+    assert len(client.runs.created) == 1
 
 
 def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
     async def fake_get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
         return "user-token"
 
@@ -1431,12 +1383,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     async def fake_thread_exists(thread_id: str) -> bool:
         return True
 
-    class _FakeRunsClient:
-        async def create(self, *args, **kwargs) -> None:
-            captured["messages"] = kwargs["input"]["messages"]
-
-    class _FakeLangGraphClient:
-        runs = _FakeRunsClient()
+    client = FakeLangGraphClient()
 
     monkeypatch.setattr(
         webhook_common,
@@ -1449,7 +1396,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     monkeypatch.setattr(webhook_common, "_thread_exists", fake_thread_exists)
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
     monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
-    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: _FakeLangGraphClient())
+    monkeypatch.setattr(webhook_common, "langgraph_client", lambda: client)
     monkeypatch.setattr(
         webhook_common,
         "email_for_login",
@@ -1484,7 +1431,8 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
         )
     )
 
-    messages = cast(list[dict[str, str]], captured["messages"])
+    (run_create,) = client.runs.created
+    messages = cast(list[dict[str, str]], run_create["input"]["messages"])
     assert len(messages) == 2
     entity = ElementTree.fromstring(messages[0]["content"])
     request = ElementTree.fromstring(messages[1]["content"])

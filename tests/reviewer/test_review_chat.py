@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from fastapi import HTTPException
+from support.exa_fakes import fake_exa_module
 
 from agent.dashboard import review_chat_api
 
@@ -673,17 +674,10 @@ def test_chat_general_purpose_subagent_is_read_only() -> None:
 
 @pytest.mark.asyncio
 async def test_chat_web_search_returns_inline_results_without_sandbox(monkeypatch) -> None:
-    class FakeExa:
-        def __init__(self, api_key: str) -> None:
-            self.api_key = api_key
-
-        def search_and_contents(self, *args: Any, **kwargs: Any) -> str:
-            return "chat search result"
-
     async def no_sandbox(tool_name: str, content: str, extension: str) -> str:
         raise ValueError("Missing sandbox_id in thread metadata for chat-thread")
 
-    monkeypatch.setitem(sys.modules, "exa_py", SimpleNamespace(Exa=FakeExa))
+    monkeypatch.setitem(sys.modules, "exa_py", fake_exa_module("chat search result"))
     monkeypatch.setenv("EXA_API_KEY", "test-key")
     monkeypatch.setattr(web_search, "write_sandbox_output", no_sandbox)
 

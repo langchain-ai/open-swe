@@ -1,8 +1,8 @@
 import importlib
-from typing import Any
 from xml.etree import ElementTree
 
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient
 
 dispatch = importlib.import_module("agent.dispatch")
 
@@ -58,43 +58,13 @@ def test_resolve_absolute_url_with_existing_query_left_as_is(
     assert dispatch.completion_webhook_url() == url
 
 
-class _FakeRuns:
-    def __init__(self) -> None:
-        self.created: list[dict[str, Any]] = []
-        self.fail_next = False
-
-    async def create(self, thread_id: str, assistant_id: str, **kwargs: Any) -> dict[str, str]:
-        self.created.append({"thread_id": thread_id, "assistant_id": assistant_id, **kwargs})
-        if self.fail_next:
-            self.fail_next = False
-            raise RuntimeError("dispatch failed")
-        return {"run_id": "run-1"}
-
-
-class _FakeThreads:
-    def __init__(self) -> None:
-        self.metadata: dict[str, Any] = {}
-        self.messages: list[dict[str, Any]] = []
-
-    async def get(self, thread_id: str) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": self.metadata}
-
-    async def get_state(self, thread_id: str) -> dict[str, Any]:
-        return {"values": {"messages": self.messages}}
-
-    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
-        self.metadata = metadata
-
-
-class _FakeClient:
-    def __init__(self) -> None:
-        self.runs = _FakeRuns()
-        self.threads = _FakeThreads()
+def _client() -> FakeLangGraphClient:
+    return FakeLangGraphClient(thread_metadata={})
 
 
 @pytest.mark.asyncio
 async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _FakeClient()
+    client = _client()
     monkeypatch.setenv("COMPLETION_WEBHOOK_URL", "https://app/webhooks/run-complete")
     monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
 
@@ -129,7 +99,7 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
 async def test_create_durable_run_preserves_existing_prepare_id_and_stream_kwargs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient()
+    client = _client()
     monkeypatch.delenv("RUN_COMPLETE_WEBHOOK_SECRET", raising=False)
 
     await dispatch.create_durable_run(
@@ -152,7 +122,7 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_stream_kwarg
 
 @pytest.mark.asyncio
 async def test_dispatch_accepts_prebuilt_input(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _FakeClient()
+    client = _client()
     run_input = {"messages": [{"role": "user", "content": "structured"}]}
 
     await dispatch.dispatch_agent_run(

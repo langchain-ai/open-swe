@@ -1,31 +1,11 @@
 import importlib
+from collections.abc import Callable
 from typing import Any
 
 import pytest
-
-from agent import store as agent_store
+from support.langgraph_fakes import FakeLangGraphClient
 
 notification_tool = importlib.import_module("agent.tools.notify_automation_channel")
-
-
-class _FakeStore:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-
-    async def get_item(self, namespace: list[str], key: str) -> dict[str, Any] | None:
-        value = self.items.get((tuple(namespace), key))
-        return {"value": value} if value is not None else None
-
-    async def put_item(self, namespace: list[str], key: str, value: dict[str, Any]) -> None:
-        self.items[(tuple(namespace), key)] = value
-
-    async def delete_item(self, namespace: list[str], key: str) -> None:
-        self.items.pop((tuple(namespace), key), None)
-
-
-class _FakeClient:
-    def __init__(self) -> None:
-        self.store = _FakeStore()
 
 
 def _config(thread_id: str = "thread_1") -> dict[str, Any]:
@@ -51,9 +31,11 @@ def test_notify_automation_channel_exported() -> None:
 
 
 @pytest.fixture
-def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
-    client = _FakeClient()
-    monkeypatch.setattr(agent_store, "store_client", lambda: client)
+def fake_client(
+    patched_langgraph_client: Callable[..., FakeLangGraphClient],
+    monkeypatch: pytest.MonkeyPatch,
+) -> FakeLangGraphClient:
+    client = patched_langgraph_client()
     monkeypatch.setattr(
         notification_tool,
         "dashboard_thread_url",
@@ -97,7 +79,7 @@ async def test_notify_automation_channel_rejects_nonconditional_schedule(
 
 
 async def test_notify_automation_channel_validates_message(
-    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
+    fake_client: FakeLangGraphClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(notification_tool, "get_config", _config)
 
@@ -113,7 +95,7 @@ async def test_notify_automation_channel_validates_message(
 
 
 async def test_notify_automation_channel_posts_to_trusted_destination(
-    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
+    fake_client: FakeLangGraphClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     posted: list[dict[str, Any]] = []
 
@@ -139,7 +121,7 @@ async def test_notify_automation_channel_posts_to_trusted_destination(
 
 
 async def test_notify_automation_channel_suppresses_duplicate_posts(
-    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
+    fake_client: FakeLangGraphClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     post_count = 0
 
@@ -164,7 +146,7 @@ async def test_notify_automation_channel_suppresses_duplicate_posts(
 
 
 async def test_notify_automation_channel_allows_retry_after_slack_failure(
-    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
+    fake_client: FakeLangGraphClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     responses: list[tuple[str | None, str | None]] = [
         (None, "not_in_channel"),

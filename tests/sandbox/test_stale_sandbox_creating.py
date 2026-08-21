@@ -9,13 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.runtime.sandbox import ensure_sandbox_for_thread
-from agent.utils.sandbox_state import SANDBOX_BACKENDS, get_or_create_sandbox_backend_proxy
+from agent.utils.sandbox_state import get_or_create_sandbox_backend_proxy
 
 
 @pytest.mark.asyncio
 async def test_ensure_sandbox_creates_new_when_no_metadata() -> None:
     thread_id = "thread-new"
-    SANDBOX_BACKENDS.clear()
     sandbox_backend = MagicMock()
     sandbox_backend.id = "sandbox-new"
 
@@ -44,13 +43,11 @@ async def test_ensure_sandbox_creates_new_when_no_metadata() -> None:
         "thread_id": thread_id,
         "metadata": {"sandbox_id": "sandbox-new"},
     }
-    SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
 async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
     thread_id = "thread-reconnect"
-    SANDBOX_BACKENDS.clear()
     existing_backend = MagicMock()
     existing_backend.id = "sandbox-existing"
 
@@ -91,13 +88,11 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
     assert refresh_proxy.await_count == 1
     # Metadata already holds this id, so no update is issued.
     update_thread.assert_not_awaited()
-    SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
 async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
     thread_id = "thread-unresolved-proxy"
-    SANDBOX_BACKENDS.clear()
     proxy = get_or_create_sandbox_backend_proxy(thread_id)
     existing_backend = MagicMock()
     existing_backend.id = "sandbox-existing"
@@ -139,4 +134,3 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
     connect_sandbox.assert_awaited_once_with("sandbox-existing")
     assert refresh_proxy.await_count == 1
     update_thread.assert_not_awaited()
-    SANDBOX_BACKENDS.clear()

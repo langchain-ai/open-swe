@@ -1,72 +1,10 @@
-import builtins
 from typing import Any
 
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient
 
 from agent.utils import slack_stop
 from agent.utils.slack_stop import process_slack_stop_reaction
-
-
-class FakeStore:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-        self.deleted: list[tuple[tuple[str, ...], str]] = []
-        self.fail_delete = False
-
-    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
-        return self.items.get((namespace, key))
-
-    async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
-        self.items[(namespace, key)] = {"value": value}
-
-    async def delete_item(self, namespace: tuple[str, ...], key: str) -> None:
-        if self.fail_delete:
-            raise RuntimeError("store unavailable")
-        self.deleted.append((namespace, key))
-        self.items.pop((namespace, key), None)
-
-
-class FakeThreads:
-    def __init__(self) -> None:
-        self.values: dict[str, dict[str, Any]] = {}
-        self.updates: list[tuple[str, dict[str, Any]]] = []
-
-    async def get(self, thread_id: str) -> dict[str, Any]:
-        if thread_id not in self.values:
-            raise RuntimeError("not found")
-        return self.values[thread_id]
-
-    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
-        self.updates.append((thread_id, metadata))
-        current = self.values[thread_id].setdefault("metadata", {})
-        current.update(metadata)
-
-
-class FakeRuns:
-    def __init__(self) -> None:
-        self.by_status: dict[str, list[dict[str, str]]] = {"pending": [], "running": []}
-        self.cancelled: list[dict[str, Any]] = []
-        self.fail_cancel = False
-
-    async def list(
-        self, thread_id: str, *, status: str, limit: int, offset: int
-    ) -> list[dict[str, str]]:
-        del thread_id
-        return self.by_status[status][offset : offset + limit]
-
-    async def cancel_many(
-        self, *, thread_id: str, run_ids: builtins.list[str], action: str
-    ) -> None:
-        if self.fail_cancel:
-            raise RuntimeError("cancel failed")
-        self.cancelled.append({"thread_id": thread_id, "run_ids": run_ids, "action": action})
-
-
-class FakeClient:
-    def __init__(self) -> None:
-        self.store = FakeStore()
-        self.threads = FakeThreads()
-        self.runs = FakeRuns()
 
 
 def _event(message_ts: str, *, user_id: str = "UOTHER") -> dict[str, Any]:
@@ -78,12 +16,14 @@ def _event(message_ts: str, *, user_id: str = "UOTHER") -> dict[str, Any]:
     }
 
 
-def _add_thread(client: FakeClient, thread_ts: str = "1.000") -> str:
+def _add_thread(client: FakeLangGraphClient, thread_ts: str = "1.000") -> str:
     thread_id = f"thread-{thread_ts}"
     client.store.items[(("slack_thread_map", "C123"), thread_ts)] = {
-        "value": {"thread_id": thread_id, "channel_id": "C123", "thread_ts": thread_ts}
+        "thread_id": thread_id,
+        "channel_id": "C123",
+        "thread_ts": thread_ts,
     }
-    client.threads.values[thread_id] = {
+    client.threads.threads[thread_id] = {
         "thread_id": thread_id,
         "metadata": {
             "source": "slack",
@@ -104,14 +44,15 @@ def _add_thread(client: FakeClient, thread_ts: str = "1.000") -> str:
     return thread_id
 
 
-def _map_reply(client: FakeClient, message_ts: str, thread_ts: str = "1.000") -> None:
+def _map_reply(client: FakeLangGraphClient, message_ts: str, thread_ts: str = "1.000") -> None:
     client.store.items[(("slack_run_map", "C123"), f"message:{message_ts}")] = {
-        "value": {"run_id": "run-old", "thread_ts": thread_ts}
+        "run_id": "run-old",
+        "thread_ts": thread_ts,
     }
 
 
 def _patch_handler(
-    monkeypatch: pytest.MonkeyPatch, client: FakeClient
+    monkeypatch: pytest.MonkeyPatch, client: FakeLangGraphClient
 ) -> tuple[list[dict[str, Any]], list[str]]:
     dispatched: list[dict[str, Any]] = []
     claimed: list[str] = []
@@ -127,7 +68,7 @@ def _patch_handler(
         *,
         source: str,
         metadata: dict[str, Any],
-        client: FakeClient,
+        client: FakeLangGraphClient,
     ) -> dict[str, str]:
         dispatched.append(
             {
@@ -150,11 +91,13 @@ def _patch_handler(
 async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_agent_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = FakeClient()
+    client = FakeLangGraphClient()
     thread_id = _add_thread(client)
     _map_reply(client, "2.000")
-    client.runs.by_status["pending"] = [{"run_id": "run-pending"}]
-    client.runs.by_status["running"] = [{"run_id": "run-running"}]
+    client.runs.runs = [
+        {"run_id": "run-pending", "status": "pending"},
+        {"run_id": "run-running", "status": "running"},
+    ]
     client.store.items[(("queue", thread_id), "pending_messages")] = {
         "value": {"messages": [{"content": "later"}]}
     }
@@ -173,7 +116,7 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     ]
     assert (("queue", thread_id), "pending_messages") in client.store.deleted
     assert (("autofix", thread_id), "pending_event") in client.store.deleted
-    assert client.threads.updates[0][1]["latest_run_status"] == "interrupted"
+    assert client.threads.updates[0]["latest_run_status"] == "interrupted"
     assert len(dispatched) == 1
     assert dispatched[0]["thread_id"] == thread_id
     assert dispatched[0]["source"] == "slack"
@@ -183,13 +126,13 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     assert "first and only user-facing action" in dispatched[0]["content"]
     assert "active runs were interrupted" in dispatched[0]["content"]
     thread_mapping = client.store.items[(("slack_run_map", "C123"), "thread:1.000")]
-    assert thread_mapping["value"]["run_id"] == "run-summary"
+    assert thread_mapping["run_id"] == "run-summary"
 
 
 async def test_stop_reaction_on_root_dispatches_no_active_run_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = FakeClient()
+    client = FakeLangGraphClient()
     thread_id = _add_thread(client)
     dispatched, claimed = _patch_handler(monkeypatch, client)
 
@@ -202,10 +145,10 @@ async def test_stop_reaction_on_root_dispatches_no_active_run_summary(
 
 
 async def test_stop_reaction_from_non_owner_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = FakeClient()
+    client = FakeLangGraphClient()
     _add_thread(client)
     _map_reply(client, "2.000")
-    client.runs.by_status["running"] = [{"run_id": "run-running"}]
+    client.runs.runs = [{"run_id": "run-running", "status": "running"}]
     dispatched, _ = _patch_handler(monkeypatch, client)
 
     await process_slack_stop_reaction(_event("2.000", user_id="UNRELATED"), event_id="EvOtherUser")
@@ -217,7 +160,7 @@ async def test_stop_reaction_from_non_owner_is_allowed(monkeypatch: pytest.Monke
 async def test_stop_reaction_ignores_unmapped_non_root_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = FakeClient()
+    client = FakeLangGraphClient()
     _add_thread(client)
     dispatched, claimed = _patch_handler(monkeypatch, client)
 
@@ -231,11 +174,11 @@ async def test_stop_reaction_ignores_unmapped_non_root_message(
 async def test_stop_reaction_ignores_mismatched_thread_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = FakeClient()
+    client = FakeLangGraphClient()
     thread_id = _add_thread(client)
-    client.threads.values[thread_id]["metadata"]["source_context"]["slack_thread"]["channel_id"] = (
-        "COTHER"
-    )
+    client.threads.threads[thread_id]["metadata"]["source_context"]["slack_thread"][
+        "channel_id"
+    ] = "COTHER"
     _map_reply(client, "2.000")
     dispatched, claimed = _patch_handler(monkeypatch, client)
 
@@ -248,7 +191,7 @@ async def test_stop_reaction_ignores_mismatched_thread_metadata(
 async def test_stop_reaction_without_event_id_has_no_side_effects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = FakeClient()
+    client = FakeLangGraphClient()
     _add_thread(client)
     _map_reply(client, "2.000")
     dispatched, claimed = _patch_handler(monkeypatch, client)
@@ -263,7 +206,7 @@ async def test_stop_reaction_without_event_id_has_no_side_effects(
 async def test_duplicate_stop_reaction_has_no_side_effects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = FakeClient()
+    client = FakeLangGraphClient()
     _add_thread(client)
     _map_reply(client, "2.000")
     dispatched, _ = _patch_handler(monkeypatch, client)
@@ -284,11 +227,11 @@ async def test_duplicate_stop_reaction_has_no_side_effects(
 async def test_failed_cancellation_does_not_dispatch_success_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = FakeClient()
+    client = FakeLangGraphClient()
     _add_thread(client)
     _map_reply(client, "2.000")
-    client.runs.by_status["running"] = [{"run_id": "run-running"}]
-    client.runs.fail_cancel = True
+    client.runs.runs = [{"run_id": "run-running", "status": "running"}]
+    client.runs.cancel_error = RuntimeError("cancel failed")
     dispatched, _ = _patch_handler(monkeypatch, client)
 
     await process_slack_stop_reaction(_event("2.000"), event_id="EvFailure")
@@ -301,10 +244,10 @@ async def test_failed_cancellation_does_not_dispatch_success_summary(
 async def test_failed_queue_cleanup_does_not_dispatch_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = FakeClient()
+    client = FakeLangGraphClient()
     _add_thread(client)
     _map_reply(client, "2.000")
-    client.store.fail_delete = True
+    client.store.delete_error = RuntimeError("store unavailable")
     dispatched, _ = _patch_handler(monkeypatch, client)
 
     await process_slack_stop_reaction(_event("2.000"), event_id="EvStoreFailure")

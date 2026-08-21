@@ -14,17 +14,12 @@ from langsmith.sandbox import SandboxClientError
 from agent.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
 from agent.runtime.sandbox import ensure_sandbox_for_thread
 from agent.utils.sandbox import SandboxGoneError
-from agent.utils.sandbox_state import (
-    SANDBOX_BACKENDS,
-    SandboxUnreachableError,
-    set_sandbox_backend,
-)
+from agent.utils.sandbox_state import SandboxUnreachableError, set_sandbox_backend
 
 
 @pytest.mark.asyncio
 async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
     thread_id = "thread-reviewer-dead-sandbox"
-    SANDBOX_BACKENDS.clear()
     replacement = MagicMock()
     replacement.id = "sandbox-replacement"
 
@@ -59,13 +54,11 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
         "thread_id": thread_id,
         "metadata": {"sandbox_id": "sandbox-replacement"},
     }
-    SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
 async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() -> None:
     thread_id = "thread-reviewer-dead-cache"
-    SANDBOX_BACKENDS.clear()
     dead = MagicMock()
     dead.id = "sandbox-cached-dead"
     proxy = set_sandbox_backend(thread_id, dead)
@@ -97,14 +90,11 @@ async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() ->
     # Replaced in place, so handles already built around the proxy stay valid.
     assert result is proxy
     assert proxy.current is replacement
-    SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
 async def test_failed_replacement_still_raises_sandbox_unreachable() -> None:
     thread_id = "thread-reviewer-replacement-fails"
-    SANDBOX_BACKENDS.clear()
-
     with (
         patch(
             "agent.runtime.sandbox.get_sandbox_id_from_metadata",
@@ -130,14 +120,11 @@ async def test_failed_replacement_still_raises_sandbox_unreachable() -> None:
     # Typed, so the reviewer still recognizes it and notifies on the PR.
     assert excinfo.value.sandbox_id == "sandbox-deleted"
     assert "sandbox API outage" in str(excinfo.value)
-    SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
 async def test_unreachable_sandbox_still_fails_by_default() -> None:
     thread_id = "thread-agent-dead-sandbox"
-    SANDBOX_BACKENDS.clear()
-
     with (
         patch(
             "agent.runtime.sandbox.get_sandbox_id_from_metadata",
@@ -160,7 +147,6 @@ async def test_unreachable_sandbox_still_fails_by_default() -> None:
         await ensure_sandbox_for_thread(thread_id)
 
     create_replacement.assert_not_awaited()
-    SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
@@ -216,7 +202,6 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
 @pytest.mark.asyncio
 async def test_deleted_sandbox_is_replaced_without_opting_in() -> None:
     thread_id = "thread-agent-gone-sandbox"
-    SANDBOX_BACKENDS.clear()
     replacement = MagicMock()
     replacement.id = "sandbox-replacement"
     order: list[str] = []
@@ -258,4 +243,3 @@ async def test_deleted_sandbox_is_replaced_without_opting_in() -> None:
     }
     # The thread binds to the sandbox only once it is initialized.
     assert order == ["init", "bind"]
-    SANDBOX_BACKENDS.clear()

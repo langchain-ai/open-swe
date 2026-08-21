@@ -1,100 +1,24 @@
 import uuid
+from collections.abc import Callable
 from typing import Any
 from xml.etree import ElementTree
 
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
+from support.langgraph_fakes import FakeLangGraphClient
 
-from agent import store as agent_store
 from agent.dashboard import schedules
 from agent.dashboard.schedules import ScheduleCreateBody, ScheduleUpdateBody
 
 
-class _FakeStore:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-        self.deleted: list[tuple[tuple[str, ...], str]] = []
-
-    async def get_item(self, namespace: list[str], key: str) -> dict[str, Any] | None:
-        value = self.items.get((tuple(namespace), key))
-        return {"value": value} if value is not None else None
-
-    async def put_item(self, namespace: list[str], key: str, value: dict[str, Any]) -> None:
-        self.items[(tuple(namespace), key)] = value
-
-    async def delete_item(self, namespace: list[str], key: str) -> None:
-        self.deleted.append((tuple(namespace), key))
-        self.items.pop((tuple(namespace), key), None)
-
-    async def search_items(
-        self,
-        namespace: list[str],
-        filter: dict[str, Any] | None = None,
-        limit: int = 1000,
-        offset: int = 0,
-    ) -> dict[str, Any]:
-        values = [
-            value
-            for (stored_namespace, _), value in self.items.items()
-            if stored_namespace == tuple(namespace)
-        ]
-        if filter:
-            values = [
-                value
-                for value in values
-                if all(value.get(key) == expected for key, expected in filter.items())
-            ]
-        return {"items": [{"value": value} for value in values[offset : offset + limit]]}
-
-
-class _FakeCrons:
-    def __init__(self) -> None:
-        self.created: list[dict[str, Any]] = []
-        self.deleted: list[str] = []
-
-    async def create(self, assistant_id: str, **kwargs: Any) -> dict[str, Any]:
-        self.created.append({"assistant_id": assistant_id, **kwargs})
-        return {"cron_id": f"cron_{len(self.created)}"}
-
-    async def delete(self, cron_id: str) -> None:
-        self.deleted.append(cron_id)
-
-
-class _FakeThreads:
-    def __init__(self) -> None:
-        self.created: list[dict[str, Any]] = []
-        self.updated: list[dict[str, Any]] = []
-
-    async def create(self, **kwargs: Any) -> None:
-        self.created.append(kwargs)
-
-    async def update(self, **kwargs: Any) -> None:
-        self.updated.append(kwargs)
-
-
-class _FakeRuns:
-    def __init__(self) -> None:
-        self.created: list[dict[str, Any]] = []
-
-    async def create(self, thread_id: str, assistant_id: str, **kwargs: Any) -> dict[str, Any]:
-        self.created.append({"thread_id": thread_id, "assistant_id": assistant_id, **kwargs})
-        return {"run_id": "run_123"}
-
-
-class _FakeClient:
-    def __init__(self) -> None:
-        self.store = _FakeStore()
-        self.crons = _FakeCrons()
-        self.threads = _FakeThreads()
-        self.runs = _FakeRuns()
-
-
 @pytest.fixture
-def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
-    client = _FakeClient()
-    monkeypatch.setattr(schedules, "langgraph_client", lambda: client)
-    monkeypatch.setattr(agent_store, "store_client", lambda: client)
+def fake_client(
+    patched_langgraph_client: Callable[..., FakeLangGraphClient],
+) -> FakeLangGraphClient:
+    client = patched_langgraph_client(schedules)
+    client.runs.run_id = "run_123"
+    client.crons.cron_id = "cron_{n}"
     return client
 
 

@@ -1,42 +1,21 @@
 from typing import cast
 
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+from support.sandbox_fakes import FakeSandboxBackend
 
 from agent.utils.repo_prep import materialize_trusted_skills, prepare_review_repo
 
 
-class _FakeSandboxBackend:
-    def __init__(
-        self,
-        *,
-        exit_code: int = 0,
-        raise_exc: bool = False,
-        output: str = "",
-        outputs: list[str] | None = None,
-    ) -> None:
-        self._exit_code = exit_code
-        self._raise = raise_exc
-        self._output = output
-        self._outputs = outputs
-        self.commands: list[str] = []
+def _quiet(exit_code: int = 0) -> FakeSandboxBackend:
+    return FakeSandboxBackend(default=ExecuteResponse(output="", exit_code=exit_code))
 
-    @property
-    def id(self) -> str:
-        return "fake-sandbox"
 
-    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        del timeout
-        if self._raise:
-            raise RuntimeError("sandbox unreachable")
-        self.commands.append(command)
-        output = self._output
-        if self._outputs is not None:
-            output = self._outputs[len(self.commands) - 1]
-        return ExecuteResponse(output=output, exit_code=self._exit_code, truncated=False)
+def _unreachable() -> FakeSandboxBackend:
+    return FakeSandboxBackend(default=RuntimeError("sandbox unreachable"))
 
 
 async def test_prepare_review_repo_clones_and_checks_out_head() -> None:
-    backend = _FakeSandboxBackend()
+    backend = _quiet()
     ok = await prepare_review_repo(
         cast(SandboxBackendProtocol, backend),
         work_dir="/work",
@@ -60,7 +39,7 @@ async def test_prepare_review_repo_clones_and_checks_out_head() -> None:
 
 
 async def test_prepare_review_repo_skips_pull_ref_without_pr_number() -> None:
-    backend = _FakeSandboxBackend()
+    backend = _quiet()
     ok = await prepare_review_repo(
         cast(SandboxBackendProtocol, backend),
         work_dir="/work",
@@ -73,7 +52,7 @@ async def test_prepare_review_repo_skips_pull_ref_without_pr_number() -> None:
 
 
 async def test_prepare_review_repo_skips_checkout_without_head() -> None:
-    backend = _FakeSandboxBackend()
+    backend = _quiet()
     ok = await prepare_review_repo(
         cast(SandboxBackendProtocol, backend),
         work_dir="/work",
@@ -86,7 +65,7 @@ async def test_prepare_review_repo_skips_checkout_without_head() -> None:
 
 
 async def test_prepare_review_repo_requires_owner_and_name() -> None:
-    backend = _FakeSandboxBackend()
+    backend = _quiet()
     ok = await prepare_review_repo(
         cast(SandboxBackendProtocol, backend),
         work_dir="/work",
@@ -99,7 +78,7 @@ async def test_prepare_review_repo_requires_owner_and_name() -> None:
 
 
 async def test_prepare_review_repo_returns_false_on_nonzero_exit() -> None:
-    backend = _FakeSandboxBackend(exit_code=1)
+    backend = _quiet(exit_code=1)
     ok = await prepare_review_repo(
         cast(SandboxBackendProtocol, backend),
         work_dir="/work",
@@ -111,7 +90,7 @@ async def test_prepare_review_repo_returns_false_on_nonzero_exit() -> None:
 
 
 async def test_prepare_review_repo_returns_false_on_exception() -> None:
-    backend = _FakeSandboxBackend(raise_exc=True)
+    backend = _unreachable()
     ok = await prepare_review_repo(
         cast(SandboxBackendProtocol, backend),
         work_dir="/work",
@@ -123,7 +102,7 @@ async def test_prepare_review_repo_returns_false_on_exception() -> None:
 
 
 async def test_materialize_trusted_skills_extracts_from_trusted_ref() -> None:
-    backend = _FakeSandboxBackend(outputs=["/work/.review-skills/.agents/skills\n", ""])
+    backend = FakeSandboxBackend(script=["/work/.review-skills/.agents/skills\n", ""])
     sources = await materialize_trusted_skills(
         cast(SandboxBackendProtocol, backend), repo_dir="/work/widget", trusted_ref="def456"
     )
@@ -135,7 +114,7 @@ async def test_materialize_trusted_skills_extracts_from_trusted_ref() -> None:
 
 
 async def test_materialize_trusted_skills_empty_without_ref() -> None:
-    backend = _FakeSandboxBackend()
+    backend = _quiet()
     sources = await materialize_trusted_skills(
         cast(SandboxBackendProtocol, backend), repo_dir="/work/widget", trusted_ref=""
     )
@@ -144,7 +123,7 @@ async def test_materialize_trusted_skills_empty_without_ref() -> None:
 
 
 async def test_materialize_trusted_skills_empty_when_none_exist() -> None:
-    backend = _FakeSandboxBackend(output="")
+    backend = _quiet()
     sources = await materialize_trusted_skills(
         cast(SandboxBackendProtocol, backend), repo_dir="/work/widget", trusted_ref="def456"
     )
@@ -152,7 +131,7 @@ async def test_materialize_trusted_skills_empty_when_none_exist() -> None:
 
 
 async def test_materialize_trusted_skills_handles_exception() -> None:
-    backend = _FakeSandboxBackend(raise_exc=True)
+    backend = _unreachable()
     sources = await materialize_trusted_skills(
         cast(SandboxBackendProtocol, backend), repo_dir="/work/widget", trusted_ref="def456"
     )

@@ -18,7 +18,6 @@ from agent.utils.sandbox_state import SANDBOX_BACKENDS, get_or_create_sandbox_ba
 @pytest.mark.parametrize("failing_step", ["_configure_git_identity", "client.threads.update"])
 async def test_initialization_failure_publishes_nothing(failing_step: str) -> None:
     thread_id = "thread-init-fails"
-    SANDBOX_BACKENDS.clear()
     proxy = get_or_create_sandbox_backend_proxy(thread_id)
     created = MagicMock()
     created.id = "sandbox-new"
@@ -50,4 +49,3 @@ async def test_initialization_failure_publishes_nothing(failing_step: str) -> No
     # the cached-backend fast path.
     assert not proxy.has_backend
     assert not SANDBOX_BACKENDS[thread_id].has_backend
-    SANDBOX_BACKENDS.clear()

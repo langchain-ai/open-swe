@@ -79,13 +79,6 @@ class _Request:
         return next_request
 
 
-@pytest.fixture(autouse=True)
-def _clear_backend_cache() -> Any:
-    guard.SANDBOX_BACKENDS.clear()
-    yield
-    guard.SANDBOX_BACKENDS.clear()
-
-
 def test_parse_git_push_supports_git_c_and_cd() -> None:
     assert guard._parse_git_push("git -C /repo push origin feature") == guard.ParsedGitPush(
         repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"

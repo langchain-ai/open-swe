@@ -1,51 +1,25 @@
 from typing import Any
 
+from support.langgraph_fakes import FakeLangGraphClient
+
 from agent.dashboard import thread_api
 
 
-class FakeThreads:
-    def __init__(self, metadata: dict[str, Any], *, status: str = "idle") -> None:
-        self.thread = {"thread_id": "tid", "status": status, "metadata": metadata.copy()}
-        self.updates: list[dict[str, Any]] = []
-
-    async def get(self, thread_id: str) -> dict[str, Any]:
-        assert thread_id == "tid"
-        return self.thread
-
-    async def get_state(self, thread_id: str) -> dict[str, Any]:
-        assert thread_id == "tid"
-        return {"values": {"messages": []}}
-
-    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
-        assert thread_id == "tid"
-        self.updates.append(metadata)
-        self.thread["metadata"] = {**self.thread["metadata"], **metadata}
-
-    async def search(self, **kwargs: Any) -> list[dict[str, Any]]:
-        return [self.thread]
+def _client(
+    metadata: dict[str, Any], run_status: str, *, thread_status: str = "idle"
+) -> FakeLangGraphClient:
+    return FakeLangGraphClient(
+        threads=[{"thread_id": "tid", "status": thread_status, "metadata": dict(metadata)}],
+        runs={"tid": [{"run_id": "run-1", "status": run_status}]},
+    )
 
 
-class FakeRuns:
-    def __init__(self, status: str, run_id: str = "run-1") -> None:
-        self.status = status
-        self.run_id = run_id
-
-    async def list(self, thread_id: str, limit: int = 1) -> list[dict[str, str]]:
-        assert thread_id == "tid"
-        assert limit == 1
-        return [{"run_id": self.run_id, "status": self.status}]
-
-
-class FakeClient:
-    def __init__(
-        self, metadata: dict[str, Any], run_status: str, *, thread_status: str = "idle"
-    ) -> None:
-        self.threads = FakeThreads(metadata, status=thread_status)
-        self.runs = FakeRuns(run_status)
+def _metadata(client: FakeLangGraphClient) -> dict[str, Any]:
+    return client.threads.threads["tid"]["metadata"]
 
 
 async def test_list_dashboard_threads_refreshes_finished_run_status(monkeypatch) -> None:
-    client = FakeClient(
+    client = _client(
         {
             "source": "dashboard",
             "github_login": "octocat",
@@ -60,11 +34,12 @@ async def test_list_dashboard_threads_refreshes_finished_run_status(monkeypatch)
 
     assert results[0]["status"] == "finished"
     assert results[0]["viewed"] is False
-    assert client.threads.thread["metadata"]["latest_run_status"] == "success"
+    assert _metadata(client)["latest_run_status"] == "success"
+    assert client.runs.list_calls == [{"thread_id": "tid", "limit": 1, "status": None}]
 
 
 async def test_get_dashboard_thread_marks_finished_thread_viewed(monkeypatch) -> None:
-    client = FakeClient(
+    client = _client(
         {
             "source": "dashboard",
             "github_login": "octocat",
@@ -80,11 +55,11 @@ async def test_get_dashboard_thread_marks_finished_thread_viewed(monkeypatch) ->
     assert result["status"] == "finished"
     assert result["viewed"] is True
     assert isinstance(result["viewedAt"], int)
-    assert client.threads.thread["metadata"]["last_viewed_run_id"] == "run-1"
+    assert _metadata(client)["last_viewed_run_id"] == "run-1"
 
 
 async def test_get_dashboard_thread_readable_by_non_owner(monkeypatch) -> None:
-    client = FakeClient(
+    client = _client(
         {
             "source": "slack",
             "github_login": "octocat",
@@ -98,11 +73,11 @@ async def test_get_dashboard_thread_readable_by_non_owner(monkeypatch) -> None:
     result = await thread_api.get_dashboard_thread("tid", "someone-else")
 
     assert result["status"] == "finished"
-    assert "last_viewed_run_id" not in client.threads.thread["metadata"]
+    assert "last_viewed_run_id" not in _metadata(client)
 
 
 async def test_get_dashboard_thread_skips_mark_viewed_when_disabled(monkeypatch) -> None:
-    client = FakeClient(
+    client = _client(
         {
             "source": "dashboard",
             "github_login": "octocat",
@@ -117,11 +92,11 @@ async def test_get_dashboard_thread_skips_mark_viewed_when_disabled(monkeypatch)
 
     assert result["status"] == "finished"
     assert result["viewed"] is False
-    assert "last_viewed_run_id" not in client.threads.thread["metadata"]
+    assert "last_viewed_run_id" not in _metadata(client)
 
 
 async def test_get_dashboard_thread_does_not_mark_running_thread_viewed(monkeypatch) -> None:
-    client = FakeClient(
+    client = _client(
         {
             "source": "dashboard",
             "github_login": "octocat",
@@ -137,4 +112,4 @@ async def test_get_dashboard_thread_does_not_mark_running_thread_viewed(monkeypa
 
     assert result["status"] == "running"
     assert result["viewed"] is False
-    assert "last_viewed_run_id" not in client.threads.thread["metadata"]
+    assert "last_viewed_run_id" not in _metadata(client)

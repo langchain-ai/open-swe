@@ -1,55 +1,19 @@
-from typing import Any
+from collections.abc import Callable
 
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient, FakeStore
 
-from agent import store as agent_store
 from agent.dashboard import user_mappings as um
 
 
-class _FakeStore:
-    """Minimal in-memory stand-in for the LangGraph Store."""
-
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-
-    async def get_item(self, namespace: list[str], key: str):
-        value = self.items.get((tuple(namespace), key))
-        return {"value": value} if value is not None else None
-
-    async def put_item(self, namespace: list[str], key: str, value: dict[str, Any]) -> None:
-        self.items[(tuple(namespace), key)] = value
-
-    async def delete_item(self, namespace: list[str], key: str) -> None:
-        self.items.pop((tuple(namespace), key), None)
-
-    async def search_items(
-        self,
-        namespace: list[str],
-        *,
-        filter: dict[str, Any] | None = None,
-        limit: int = 1000,
-        offset: int = 0,
-    ):
-        ns = tuple(namespace)
-        items = [{"value": v} for (n, _k), v in self.items.items() if n == ns]
-        return {"items": items[offset : offset + limit]}
-
-
-class _FakeClient:
-    def __init__(self, store: _FakeStore) -> None:
-        self.store = store
-
-
 @pytest.fixture()
-def fake_store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
-    store = _FakeStore()
-    monkeypatch.setattr(agent_store, "store_client", lambda: _FakeClient(store))
+def fake_store(patched_langgraph_client: Callable[..., FakeLangGraphClient]) -> FakeStore:
     um.clear_cache()
-    return store
+    return patched_langgraph_client().store
 
 
 @pytest.mark.asyncio
-async def test_upsert_and_bidirectional_lookup(fake_store: _FakeStore) -> None:
+async def test_upsert_and_bidirectional_lookup(fake_store: FakeStore) -> None:
     await um.upsert_mapping(
         github_login="Octocat",
         work_email="OCTO@example.com",
@@ -63,7 +27,7 @@ async def test_upsert_and_bidirectional_lookup(fake_store: _FakeStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cache_readers_after_refresh(fake_store: _FakeStore) -> None:
+async def test_cache_readers_after_refresh(fake_store: FakeStore) -> None:
     await um.upsert_mapping(github_login="dev", work_email="dev@x.com")
     um.clear_cache()
     await um.refresh_cache()
@@ -74,7 +38,7 @@ async def test_cache_readers_after_refresh(fake_store: _FakeStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_pending_status_not_trusted(fake_store: _FakeStore) -> None:
+async def test_pending_status_not_trusted(fake_store: FakeStore) -> None:
     await um.upsert_mapping(github_login="newbie", work_email="n@x.com", status="pending")
     um.clear_cache()
     await um.refresh_cache()
@@ -83,7 +47,7 @@ async def test_pending_status_not_trusted(fake_store: _FakeStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_removes_record_and_indexes(fake_store: _FakeStore) -> None:
+async def test_delete_removes_record_and_indexes(fake_store: FakeStore) -> None:
     await um.upsert_mapping(github_login="gone", work_email="g@x.com")
     assert await um.email_for_login("gone") == "g@x.com"
     deleted = await um.delete_mapping("gone")
@@ -94,7 +58,7 @@ async def test_delete_removes_record_and_indexes(fake_store: _FakeStore) -> None
 
 @pytest.mark.asyncio
 async def test_resolve_login_from_email_async_cold_cache(
-    fake_store: _FakeStore, monkeypatch: pytest.MonkeyPatch
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Mapped user must resolve even on a cold worker (cache not yet primed),
     # because repo-resolution call sites run before the cache is refreshed.
@@ -108,7 +72,7 @@ async def test_resolve_login_from_email_async_cold_cache(
 
 
 @pytest.mark.asyncio
-async def test_update_deindexes_stale_email_and_slack_id(fake_store: _FakeStore) -> None:
+async def test_update_deindexes_stale_email_and_slack_id(fake_store: FakeStore) -> None:
     # An update that changes the email/slack id must not leave the old aliases
     # resolving to this login in the in-process cache.
     await um.upsert_mapping(
@@ -129,7 +93,7 @@ async def test_update_deindexes_stale_email_and_slack_id(fake_store: _FakeStore)
 
 
 @pytest.mark.asyncio
-async def test_upsert_requires_login_and_email(fake_store: _FakeStore) -> None:
+async def test_upsert_requires_login_and_email(fake_store: FakeStore) -> None:
     with pytest.raises(ValueError):
         await um.upsert_mapping(github_login="", work_email="x@x.com")
     with pytest.raises(ValueError):
@@ -137,7 +101,7 @@ async def test_upsert_requires_login_and_email(fake_store: _FakeStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_mappings_sorted(fake_store: _FakeStore) -> None:
+async def test_list_mappings_sorted(fake_store: FakeStore) -> None:
     await um.upsert_mapping(github_login="zeta", work_email="z@x.com")
     await um.upsert_mapping(github_login="alpha", work_email="a@x.com")
     listed = await um.list_mappings()

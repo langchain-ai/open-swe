@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient
 
 wakeup_tool = importlib.import_module("agent.tools.schedule_thread_wakeup")
 
@@ -23,78 +24,27 @@ def _stub_purge(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(wakeup_tool, "_purge_expired_wakeups_best_effort", _noop)
     monkeypatch.setattr(wakeup_tool, "get_active_slack_thread", _active)
-    monkeypatch.setattr(wakeup_tool, "langgraph_client", lambda: _FakeClient([]))
+    monkeypatch.setattr(wakeup_tool, "langgraph_client", lambda: _client([]))
 
 
-class _FakeCrons:
-    def __init__(self, crons: list[dict[str, Any]]) -> None:
-        self._crons = list(crons)
-        self.created: list[dict[str, Any]] = []
-        self.deleted: list[str] = []
-        self.search_calls: list[dict[str, Any]] = []
-
-    async def create_for_thread(
-        self, thread_id: str, assistant_id: str, **kwargs: Any
-    ) -> dict[str, str]:
-        cron_id = f"cron-{len(self.created) + 1}"
-        self.created.append(
-            {"cron_id": cron_id, "thread_id": thread_id, "assistant_id": assistant_id, **kwargs}
-        )
-        return {"cron_id": cron_id}
-
-    async def search(
-        self,
-        *,
-        metadata: dict[str, Any] | None = None,
-        limit: int = 10,
-        offset: int = 0,
-        **_: Any,
-    ) -> list[dict[str, Any]]:
-        self.search_calls.append({"metadata": metadata, "limit": limit, "offset": offset})
-        items = [
-            c
-            for c in self._crons
-            if not metadata
-            or all((c.get("metadata") or {}).get(k) == v for k, v in metadata.items())
-        ]
-        return items[offset : offset + limit]
-
-    async def delete(self, cron_id: str) -> None:
-        self.deleted.append(cron_id)
-        self._crons = [c for c in self._crons if c.get("cron_id") != cron_id]
+def _client(
+    crons: list[dict[str, Any]],
+    *,
+    messages: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> FakeLangGraphClient:
+    return FakeLangGraphClient(
+        crons=crons,
+        messages=list(messages or []),
+        thread_metadata=dict(metadata or {}),
+    )
 
 
-class _FakeThreads:
-    def __init__(
-        self,
-        messages: list[dict[str, Any]] | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        self.messages = list(messages or [])
-        self.metadata = dict(metadata or {})
-        self.updates: list[dict[str, Any]] = []
-
-    async def get_state(self, thread_id: str) -> dict[str, Any]:
-        return {"values": {"messages": self.messages}}
-
-    async def get(self, thread_id: str) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": self.metadata}
-
-    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
-        self.updates.append({"thread_id": thread_id, "metadata": metadata})
-        self.metadata.update(metadata)
-
-
-class _FakeClient:
-    def __init__(
-        self,
-        crons: list[dict[str, Any]],
-        *,
-        messages: list[dict[str, Any]] | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        self.crons = _FakeCrons(crons)
-        self.threads = _FakeThreads(messages, metadata)
+def _metadata(client: FakeLangGraphClient) -> dict[str, Any]:
+    """The thread metadata `_client` seeded — always a dict, never the 404 sentinel."""
+    metadata = client.threads.metadata
+    assert metadata is not None
+    return metadata
 
 
 def _wakeup_cron(cron_id: str, end_time: datetime | None) -> dict[str, Any]:
@@ -261,7 +211,7 @@ async def test_schedule_thread_wakeup_returns_error_on_exception(
     ) -> dict[str, Any]:
         raise RuntimeError("connection refused")
 
-    client = _FakeClient([])
+    client = _client([])
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
     monkeypatch.setattr(wakeup_tool, "langgraph_client", lambda: client)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
@@ -270,7 +220,7 @@ async def test_schedule_thread_wakeup_returns_error_on_exception(
 
     assert result["success"] is False
     assert "connection refused" in result["error"]
-    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 1
+    assert _metadata(client)[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 1
 
 
 @pytest.mark.parametrize("prompt", [None, "   "])
@@ -307,7 +257,7 @@ async def test_schedule_thread_wakeup_defaults_prompt_and_omits_none_configurabl
 async def test_schedule_allows_ten_wakeups_then_rejects_the_eleventh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient(
+    client = _client(
         [],
         messages=[_input_message("user-1", kind="human", sender="slack:U1")],
     )
@@ -323,14 +273,14 @@ async def test_schedule_allows_ten_wakeups_then_rejects_the_eleventh(
     assert result["success"] is False
     assert "at most 10 wakeups" in result["error"]
     assert len(client.crons.created) == 10
-    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 10
+    assert _metadata(client)[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 10
 
 
 async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     human = _input_message("user-1", kind="human", sender="slack:U1")
-    client = _FakeClient([], messages=[human])
+    client = _client([], messages=[human])
     generation = wakeup_tool._latest_human_generation([human])
-    client.threads.metadata.update(
+    _metadata(client).update(
         {
             wakeup_tool._WAKEUP_GENERATION_METADATA_KEY: generation,
             wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 10,
@@ -348,13 +298,13 @@ async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyP
     result = await wakeup_tool.schedule_thread_wakeup(5)
 
     assert result["success"] is True
-    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 1
-    assert client.threads.metadata[wakeup_tool._WAKEUP_GENERATION_METADATA_KEY] != generation
+    assert _metadata(client)[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 1
+    assert _metadata(client)[wakeup_tool._WAKEUP_GENERATION_METADATA_KEY] != generation
 
 
 async def test_system_wakeup_does_not_reset_wakeup_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     human = _input_message("user-1", kind="human", sender="slack:U1")
-    client = _FakeClient(
+    client = _client(
         [],
         messages=[
             human,
@@ -379,7 +329,7 @@ async def test_system_wakeup_does_not_reset_wakeup_limit(monkeypatch: pytest.Mon
 async def test_schedule_does_not_create_cron_when_budget_cannot_be_recorded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient(
+    client = _client(
         [],
         messages=[_input_message("user-1", kind="human", sender="slack:U1")],
     )
@@ -401,7 +351,7 @@ async def test_schedule_does_not_create_cron_when_budget_cannot_be_recorded(
 async def test_parallel_schedules_share_one_wakeup_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     human = _input_message("user-1", kind="human", sender="slack:U1")
     generation = wakeup_tool._latest_human_generation([human])
-    client = _FakeClient(
+    client = _client(
         [],
         messages=[human],
         metadata={
@@ -419,7 +369,7 @@ async def test_parallel_schedules_share_one_wakeup_budget(monkeypatch: pytest.Mo
 
     assert sum(result["success"] is True for result in results) == 1
     assert len(client.crons.created) == 1
-    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 10
+    assert _metadata(client)[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 10
 
 
 def test_ceil_to_next_minute_keeps_exact_minute() -> None:
@@ -465,7 +415,7 @@ def test_build_one_shot_cron_handles_month_boundary() -> None:
 
 async def test_purge_deletes_only_expired_wakeups() -> None:
     now = datetime(2026, 6, 30, 22, 0, tzinfo=UTC)
-    client = _FakeClient(
+    client = _client(
         [
             _wakeup_cron("expired-1", now - timedelta(hours=1)),
             _wakeup_cron("expired-2", now - timedelta(days=1)),
@@ -485,7 +435,7 @@ async def test_purge_deletes_only_expired_wakeups() -> None:
 async def test_purge_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wakeup_tool, "_PURGE_PAGE_SIZE", 2)
     now = datetime(2026, 6, 30, 22, 0, tzinfo=UTC)
-    client = _FakeClient([_wakeup_cron(f"expired-{i}", now - timedelta(hours=1)) for i in range(3)])
+    client = _client([_wakeup_cron(f"expired-{i}", now - timedelta(hours=1)) for i in range(3)])
 
     deleted = await wakeup_tool.purge_expired_wakeup_crons(client, now=now)
 
