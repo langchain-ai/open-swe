@@ -354,7 +354,7 @@ async def test_publish_review_invalidates_cached_token_on_401(
     )
     monkeypatch.setattr(publish_review_module, "get_github_token", lambda: "revoked-token")
     monkeypatch.setattr(publish_review_module, "invalidate_cached_github_token", fake_invalidate)
-    monkeypatch.setattr(publish_review_module, "_publish_review_async", fake_publish)
+    monkeypatch.setattr(publish_review_module, "publish_review_flow", fake_publish)
     monkeypatch.setattr(publish_review_module, "get_thread_id_from_runtime", lambda: "thread-xyz")
 
     result = await publish_review_module.publish_review()

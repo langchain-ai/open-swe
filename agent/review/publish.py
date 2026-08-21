@@ -1,21 +1,17 @@
-"""GitHub Reviews API + GraphQL resolveReviewThread for the reviewer agent.
+"""Rendering findings for GitHub, and the GitHub review primitives themselves.
 
-The reviewer agent calls ``publish_review`` at the end of a run. That tool
-batches eligible findings (severity ≥ threshold, status=open, capped) into a
-single GitHub PR Review:
+Two halves and no orchestration — ``agent.review.publish_flow`` decides when
+any of this runs and what it does with the ids that come back:
 
-- Review body: a fixed, host-formatted summary line. The agent never writes
-  prose here — it's either "no issues found" or "found N potential issue(s)".
-- Inline comments: one per surfaced finding, anchored to ``path`` + ``line``
-  (+ ``start_line`` for ranges) + ``side``.
-- Suggestion: when ``finding.suggestion`` is set, appended to the comment body
-  as a fenced ```suggestion``` block — gives the user the "Commit suggestion"
-  button on GitHub.
-
-After publish, the returned per-comment IDs get stored back on each Finding as
-``github_review_comment_id``. On a re-review run, when a finding moves
-``open`` → ``resolved``, ``resolve_review_thread`` is called for that ID via
-the GraphQL ``resolveReviewThread`` mutation (REST doesn't expose this).
+- Rendering: the review body (a fixed, host-formatted summary line; the agent
+  never writes prose here), the inline comment for one finding — anchored to
+  ``path`` + ``line`` (+ ``start_line`` for ranges) + ``side``, carrying a
+  hidden marker keyed by finding id and, when ``finding.suggestion`` is set, a
+  fenced ```suggestion``` block so GitHub offers "Commit suggestion" — the
+  resolution reply, and the review-started status comment.
+- Primitives: posting a PR Review and reading its comments over REST; reading a
+  PR's review threads and resolving one over GraphQL (REST exposes neither);
+  settling the review check run.
 """
 
 import json

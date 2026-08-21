@@ -5,8 +5,12 @@ from typing import Any
 from langgraph.config import get_config
 
 from ..review.findings import (
+    CONFIDENCES,
     DEFAULT_FINDING_TITLE,
+    FINDING_STATUSES,
     MAX_SUGGESTION_LINES,
+    SEVERITIES,
+    TERMINAL_FINDING_STATUSES,
     Finding,
     ReviewerThreadMissingError,
     clip_suggestion,
@@ -19,6 +23,8 @@ from ..review.findings import (
     thread_missing_tool_result,
     update_finding_fields,
 )
+from ..review.thread_resolution import resolve_finding_on_github
+from ..utils.github_token import get_github_token
 from ..utils.reviewer_outcomes import emit_finding_status_outcome
 
 
@@ -71,14 +77,14 @@ async def update_finding(
     Returns:
         Dictionary with ``success`` and (on success) the updated ``finding``.
     """
-    if status is not None and status not in {"open", "resolved", "dismissed"}:
+    if status is not None and status not in FINDING_STATUSES:
         return {"success": False, "error": f"Invalid status: {status}"}
-    if severity is not None and severity not in {"low", "medium", "high", "critical"}:
+    if severity is not None and severity not in SEVERITIES:
         return {"success": False, "error": f"Invalid severity: {severity}"}
-    if confidence is not None and confidence not in {"low", "medium", "high"}:
+    if confidence is not None and confidence not in CONFIDENCES:
         return {"success": False, "error": f"Invalid confidence: {confidence}"}
     normalized_note = _normalize_note(note)
-    if status in {"resolved", "dismissed"} and normalized_note is None:
+    if status in TERMINAL_FINDING_STATUSES and normalized_note is None:
         return {
             "success": False,
             "error": "Resolving or dismissing a finding requires a note with the message to post.",
@@ -108,7 +114,7 @@ async def update_finding(
                 updates["suggestion"] = clipped
     if normalized_note is not None:
         updates["last_update_note"] = normalized_note
-        if status in {"resolved", "dismissed"}:
+        if status in TERMINAL_FINDING_STATUSES:
             updates["resolution_note"] = normalized_note
 
     config = get_config()
@@ -147,21 +153,28 @@ async def update_finding(
     delegated_resolution = False
     repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
     pr_number = configurable.get("pr_number") if isinstance(configurable, dict) else None
-    can_resolve_github_thread = (
-        isinstance(repo_config, dict)
-        and bool(repo_config.get("owner"))
-        and bool(repo_config.get("name"))
-        and isinstance(pr_number, int)
-    )
     if (
-        status in {"resolved", "dismissed"}
-        and can_resolve_github_thread
+        status in TERMINAL_FINDING_STATUSES
         and _has_published_github_surface(finding)
+        and isinstance(repo_config, dict)
+        and repo_config.get("owner")
+        and repo_config.get("name")
+        and isinstance(pr_number, int)
     ):
-        from .resolve_finding_thread import resolve_finding_thread
-
-        resolve_result = await resolve_finding_thread(
-            finding_id, status=status, note=normalized_note or ""
+        token = get_github_token(config)
+        resolve_result: dict[str, Any] = (
+            await resolve_finding_on_github(
+                thread_id=thread_id,
+                finding_id=finding_id,
+                status=status,
+                note=normalized_note or "",
+                owner=str(repo_config["owner"]),
+                repo=str(repo_config["name"]),
+                pr_number=pr_number,
+                token=token,
+            )
+            if token
+            else {"success": False, "error": "No GitHub token available"}
         )
         if not resolve_result.get("success"):
             return {
@@ -170,6 +183,10 @@ async def update_finding(
                 "github_resolution": resolve_result,
             }
         delegated_resolution = True
+        if isinstance(resolve_result.get("finding"), dict):
+            await emit_finding_status_outcome(
+                resolve_result["finding"], status, configurable=configurable, thread_id=thread_id
+            )
         updates.pop("status", None)
         updates.pop("last_update_note", None)
         updates.pop("resolution_note", None)
@@ -194,7 +211,7 @@ async def update_finding(
         return thread_missing_tool_result(exc)
     if updated is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
-    if status in {"resolved", "dismissed"} and not delegated_resolution:
+    if status in TERMINAL_FINDING_STATUSES and not delegated_resolution:
         await emit_finding_status_outcome(
             updated, status, configurable=configurable, thread_id=thread_id
         )
