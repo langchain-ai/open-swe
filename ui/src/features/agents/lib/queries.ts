@@ -37,6 +37,8 @@ export const agentThreadKeys = {
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
+  pullRequestStatus: (threadId: string) =>
+    ["agent-threads", threadId, "pull-request-status"] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
@@ -399,6 +401,21 @@ export function useAgentThread(threadId: string) {
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and bounce the route back to /agents.
     staleTime: 30_000,
+  })
+}
+
+export function useAgentThreadPullRequestStatus(
+  threadId: string,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.pullRequestStatus(threadId),
+    queryFn: () => agentsApi.getThreadPullRequestStatus(threadId),
+    enabled: enabled && Boolean(threadId),
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: "always",
+    retry: false,
   })
 }
 
