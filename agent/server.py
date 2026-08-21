@@ -51,7 +51,7 @@ from .dashboard.agent_overrides import (
     profile_draft_prs,
     resolve_github_login,
 )
-from .dashboard.agent_usage import record_agent_thread_usage
+from .dashboard.agent_usage import record_agent_run_usage
 from .dashboard.environments import (
     SandboxResources,
     environment_prompt,
@@ -1233,14 +1233,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     **({"turn_checkpoints": turn_checkpoints} if turn_checkpoints else {}),
                 },
             )
-            await record_agent_thread_usage(
-                thread_id=self._thread_id,
-                github_login=self._profile_login,
-                user_email=self._user_email,
-                model_id=self._model_id,
-                effort=self._effort,
-                source=self._source,
-            )
+            prepare_run_id = configurable.get("prepare_run_id")
+            if isinstance(prepare_run_id, str):
+                await record_agent_run_usage(
+                    run_id=prepare_run_id,
+                    thread_id=self._thread_id,
+                    github_login=self._profile_login,
+                    user_email=self._user_email,
+                    model_id=self._model_id,
+                    effort=self._effort,
+                    source=self._source,
+                )
         except Exception:
             logger.debug(
                 "Failed to record agent usage for thread %s", self._thread_id, exc_info=True
