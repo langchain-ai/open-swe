@@ -44,7 +44,6 @@ describe("app commands", () => {
       id: "local-1",
       title: "Fix local search",
       cwd: "/tmp/repo",
-      status: "idle",
       createdAt: 1,
       updatedAt: 2,
       modelId: null,

@@ -39,6 +39,7 @@ import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
   localThreadKeys,
   useDesktopLocalThread,
+  useLocalThreadActivity,
   useLocalThreadDiff,
 } from "@/features/agents/lib/desktopLocal"
 import {
@@ -224,7 +225,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     syncTerminals(terminalGroupIds ? terminalGroupIds.split(",") : [])
   }, [syncTerminals, terminalGroupIds])
 
-  const isRunning = stream.isLoading || thread?.status === "running"
+  const activity = useLocalThreadActivity()[sessionId]
+  const isRunning = stream.isLoading || activity === "running"
   const diff = useLocalThreadDiff(
     sessionId,
     !panelCollapsed && panel.activeTab?.kind === "review" && Boolean(thread),
@@ -270,15 +272,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [stream.messages, stream.toolCalls]
   )
 
-  const updateStatus = useCallback(
-    async (
-      status: "idle" | "running" | "error",
-      model?: ModelSelection | null
-    ) => {
+  const rememberSelection = useCallback(
+    async (model?: ModelSelection | null) => {
+      if (!model) return
       const updated = await window.openSweDesktop?.updateLocalThread({
         threadId: sessionId,
-        status,
-        ...(model && { modelId: model.modelId, effort: model.effort }),
+        modelId: model.modelId,
+        effort: model.effort,
       })
       if (!updated) return
       queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
@@ -310,7 +310,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         return false
       }
       try {
-        await updateStatus("running", activeSelection)
+        await rememberSelection(activeSelection)
         await stream.submit(
           {
             messages: [
@@ -331,15 +331,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             },
           }
         )
-        await updateStatus("idle")
         return true
       } catch (cause) {
         setError(errorMessage(cause))
-        await updateStatus("error")
         return false
       }
     },
-    [activeSelection, stream, thread, updateStatus]
+    [activeSelection, rememberSelection, stream, thread]
   )
 
   useEffect(() => {
@@ -359,22 +357,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       .catch((cause) => {
         initialPromptRef.current = null
         setError(errorMessage(cause))
-        void updateStatus("error")
       })
-  }, [
-    modelsLoading,
-    sessionId,
-    stream.hydrationPromise,
-    submit,
-    thread,
-    updateStatus,
-  ])
+  }, [modelsLoading, sessionId, stream.hydrationPromise, submit, thread])
 
   useEffect(() => {
-    if (!stream.error) return
-    setError(errorMessage(stream.error))
-    void updateStatus("error")
-  }, [stream.error, updateStatus])
+    if (stream.error) setError(errorMessage(stream.error))
+  }, [stream.error])
 
   if (!thread) {
     return (
@@ -421,7 +409,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             </span>
           </div>
         </header>
-        {(error || thread.status === "error") && (
+        {(error || activity === "error") && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
             <Alert variant="error">
               <CircleAlert />
@@ -480,10 +468,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 onStop={async () => {
                   try {
                     await stream.stop()
-                    await updateStatus("idle")
                   } catch (cause) {
                     setError(errorMessage(cause))
-                    await updateStatus("error")
                   }
                 }}
                 onSubmit={async (prompt, images) => {

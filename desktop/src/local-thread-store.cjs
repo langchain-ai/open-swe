@@ -2,8 +2,7 @@ const fs = require("node:fs")
 const path = require("node:path")
 const { randomUUID } = require("node:crypto")
 
-const STATUSES = new Set(["starting", "idle", "running", "error"])
-const MUTABLE_FIELDS = new Set(["title", "modelId", "effort", "status"])
+const MUTABLE_FIELDS = new Set(["title", "modelId", "effort"])
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 function isRecord(value) {
@@ -87,7 +86,6 @@ function normalizeThread(value) {
     title: value.title.slice(0, 80) || "New local agent",
     modelId: stringOrNull(value.modelId),
     effort: stringOrNull(value.effort),
-    status: STATUSES.has(value.status) ? value.status : "error",
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     checkpoint,
@@ -129,18 +127,10 @@ class LocalThreadStore {
       const parsed = JSON.parse(this.fs.readFileSync(this.filePath, "utf8"))
       values = Array.isArray(parsed) ? parsed : []
     } catch {}
-    let reconciled = false
     for (const value of values) {
       const thread = normalizeThread(value)
-      if (!thread) continue
-      if (thread.status === "running" || thread.status === "starting") {
-        thread.status = "error"
-        thread.updatedAt = this.now()
-        reconciled = true
-      }
-      this.threads.set(thread.id, thread)
+      if (thread) this.threads.set(thread.id, thread)
     }
-    if (reconciled) this.persist()
   }
 
   persist() {
@@ -167,7 +157,6 @@ class LocalThreadStore {
       title: sessionTitle(prompt),
       modelId: stringOrNull(input.modelId),
       effort: stringOrNull(input.effort),
-      status: "idle",
       createdAt: now,
       updatedAt: now,
       checkpoint: { repo: null, ref: null },
@@ -192,10 +181,6 @@ class LocalThreadStore {
     }
     if ("modelId" in patch) next.modelId = stringOrNull(patch.modelId)
     if ("effort" in patch) next.effort = stringOrNull(patch.effort)
-    if ("status" in patch) {
-      if (!STATUSES.has(patch.status)) throw new Error("Invalid local thread status")
-      next.status = patch.status
-    }
     next.updatedAt = this.now()
     this.threads.set(id, next)
     this.persist()

@@ -60,6 +60,7 @@ import {
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
   useDesktopLocalThreads,
+  useLocalThreadActivity,
   useRefreshLocalThreads,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
@@ -546,7 +547,7 @@ function LocalThreadRow({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const running = session.status === "running" || session.status === "starting"
+  const running = useLocalThreadActivity()[session.id] === "running"
 
   const confirmDelete = async () => {
     if (isDeleting) return

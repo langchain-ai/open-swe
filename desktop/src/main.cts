@@ -281,7 +281,7 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:clear-local-prompt", (event, threadId) => {
     requireTrustedDesktopIpc(event);
-    return localThreadStore.clearPrompt(threadId);
+    return Boolean(localThreadStore.clearPrompt(threadId));
   });
   ipcMain.handle("desktop:get-local-thread", async (event, threadId) => {
     requireTrustedDesktopIpc(event);
@@ -294,10 +294,13 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return localThreadStore.list();
   });
+  ipcMain.handle("desktop:local-activity", (event) => {
+    requireTrustedDesktopIpc(event);
+    return backendSupervisor.threadActivity();
+  });
   ipcMain.handle("desktop:update-local-thread", (event, input) => {
     requireTrustedDesktopIpc(event);
     return localThreadStore.update(input?.threadId, {
-      status: input?.status,
       ...(typeof input?.modelId === "string" ? { modelId: input.modelId } : {}),
       ...(typeof input?.effort === "string" ? { effort: input.effort } : {}),
     });
@@ -306,7 +309,8 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     const thread = localThreadStore.get(threadId);
     if (!thread) return false;
-    if (thread.status === "running" || thread.status === "starting")
+    const activity = await backendSupervisor.threadActivity();
+    if (activity[threadId] === "running")
       throw new Error("Stop the local agent before deleting it");
     await closeThreadTerminals(threadId);
     try {

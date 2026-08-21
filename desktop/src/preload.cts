@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   clearLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:clear-local-prompt", threadId),
   getLocalThread: (threadId) => ipcRenderer.invoke("desktop:get-local-thread", threadId),
   listLocalThreads: () => ipcRenderer.invoke("desktop:list-local-threads"),
+  localActivity: () => ipcRenderer.invoke("desktop:local-activity"),
   updateLocalThread: (input) => ipcRenderer.invoke("desktop:update-local-thread", input),
   deleteLocalThread: (threadId) => ipcRenderer.invoke("desktop:delete-local-thread", threadId),
   getLocalDiff: (threadId) => ipcRenderer.invoke("desktop:get-local-diff", threadId),

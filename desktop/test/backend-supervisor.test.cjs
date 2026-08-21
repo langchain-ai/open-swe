@@ -92,6 +92,30 @@ test("rejects a failed local LangGraph thread creation", async () => {
   )
 })
 
+test("derives thread activity from the backend without starting it", async () => {
+  const idle = new BackendSupervisor({
+    fetch: () => assert.fail("must not reach a backend that is not running"),
+  })
+  assert.deepEqual(await idle.threadActivity(), {})
+
+  const supervisor = new BackendSupervisor({
+    fetch: async () =>
+      Response.json([
+        { thread_id: "thread-1", status: "busy" },
+        { thread_id: "thread-2", status: "idle" },
+        { thread_id: "thread-3", status: "error" },
+      ]),
+  })
+  supervisor.child = {}
+  supervisor.port = 49152
+  supervisor.token = "token"
+
+  assert.deepEqual(await supervisor.threadActivity(), {
+    "thread-1": "running",
+    "thread-3": "error",
+  })
+})
+
 test("packaged target runs the bundled backend", () => {
   const resourcesPath = path.resolve("/Applications/Open SWE.app/Contents/Resources")
   const target = packagedBackendTarget({ resourcesPath, port: 50000, platform: "darwin" })
