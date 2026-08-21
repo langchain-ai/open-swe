@@ -68,9 +68,24 @@ def test_tools_do_not_import_the_webhook_layer() -> None:
     assert _modules_importing("tools", "agent.webhooks") == {}
 
 
-# What a run is built on: stored settings, shared helpers, the sandbox runtime,
-# the store client, the environment. Everything else is built on top of these.
-_FOUNDATION_LAYERS = ("settings", "utils", "runtime", "store", "config")
+# What a run is built on: the integrations it talks to (GitHub, Slack, Linear,
+# LangSmith), the sandboxes and models it runs on, the threads it runs in,
+# stored settings, shared helpers, the store client, the environment.
+# Everything else is built on top of these.
+_FOUNDATION_LAYERS = (
+    "config",
+    "github",
+    "langsmith",
+    "linear",
+    "models",
+    "runtime",
+    "sandboxes",
+    "settings",
+    "slack",
+    "store",
+    "threads",
+    "utils",
+)
 # The layers built on that foundation: the web surface, the inbound adapters,
 # the graphs, and the tools the graphs call.
 _LAYERS_BUILT_ON_THE_FOUNDATION = (
@@ -80,6 +95,11 @@ _LAYERS_BUILT_ON_THE_FOUNDATION = (
     "agent.tools",
     "agent.webhooks",
 )
+# ``agent.review`` is a domain built on the foundation too, but three settings
+# modules read review findings / eval config directly. Splitting those readers
+# out is the settings↔review follow-up; until then settings is the one layer
+# allowed to reach into it.
+_FOUNDATION_LAYERS_ALLOWED_TO_IMPORT_REVIEW = frozenset({"settings"})
 
 
 def test_the_foundation_does_not_import_what_is_built_on_it() -> None:
@@ -87,16 +107,36 @@ def test_the_foundation_does_not_import_what_is_built_on_it() -> None:
 
     ``agent.settings`` is where team/user/repo configuration lives, and every
     layer above reads it. If it — or ``agent.utils``/``agent.runtime``/the store
-    and config modules — imports the dashboard, a graph, a tool or a webhook,
-    the dependency runs backwards: importing a setting drags FastAPI and the
-    agent stack in with it, and the layers can no longer be reasoned about (or
-    loaded) separately. A lazy import inside a function is the same edge.
+    and config modules, or any of the per-integration packages — imports the
+    dashboard, a graph, a tool or a webhook, the dependency runs backwards:
+    importing a setting drags FastAPI and the agent stack in with it, and the
+    layers can no longer be reasoned about (or loaded) separately. A lazy import
+    inside a function is the same edge.
     """
     offenders = {
         layer: hits
         for layer in _FOUNDATION_LAYERS
         if (hits := _modules_importing(layer, *_LAYERS_BUILT_ON_THE_FOUNDATION))
     }
+    assert offenders == {}
+
+
+def test_the_foundation_does_not_import_the_review_domain() -> None:
+    """The reviewer is a domain above the foundation, not a peer of it."""
+    offenders = {
+        layer: hits
+        for layer in _FOUNDATION_LAYERS
+        if layer not in _FOUNDATION_LAYERS_ALLOWED_TO_IMPORT_REVIEW
+        and (hits := _modules_importing(layer, "agent.review"))
+    }
+    assert offenders == {}
+
+
+def test_the_review_domain_does_not_import_the_app_layers() -> None:
+    """The reviewer is driven by the webhook/dashboard/graph layers, not the reverse."""
+    offenders = _modules_importing(
+        "review", "agent.dashboard", "agent.graphs", "agent.tools", "agent.webhooks"
+    )
     assert offenders == {}
 
 
