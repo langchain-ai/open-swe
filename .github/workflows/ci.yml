@@ -120,7 +120,7 @@ jobs:
             exit 0
           fi
 
-          paths=(agent ui tests/e2e package.json pnpm-lock.yaml pyproject.toml uv.lock langgraph.json langgraph.desktop.json Makefile .github/workflows/ci.yml)
+          paths=(agent ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json langgraph.desktop.json Makefile .github/workflows/ci.yml)
           if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}"; then
             echo "browser=false" >> "$GITHUB_OUTPUT"
           else
