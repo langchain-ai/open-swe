@@ -1202,3 +1202,65 @@ async def test_reject_plan_rejects_shared_content(
         await plan_api.reject_plan("t1", session={"sub": "a", "email": None})
     assert exc.value.status_code == 409
     assert dispatched == []
+
+
+async def test_approval_dispatches_for_a_slack_thread_with_no_github_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Slack thread records only the triggering email, and the store rejects an
+    empty profile key — so the approval must not look a profile up at all."""
+    from agent.dashboard import plan_api
+    from agent.dashboard.threads import runs as thread_runs
+
+    metadata = {
+        "source": "slack",
+        "plan_mode": True,
+        "plan_status": "ready",
+        "triggering_user_email": "alice@example.com",
+        "repo_owner": "fakeorg",
+        "repo_name": "demo",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.1"}},
+    }
+    dispatched: dict[str, Any] = {}
+
+    async def fake_meta(thread_id: str) -> dict[str, Any]:
+        return dict(metadata)
+
+    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
+        return {"html": "<html><body>Plan</body></html>", "status": "ready"}
+
+    async def fake_list(thread_id: str, *, raise_on_error: bool = False) -> list[dict[str, Any]]:
+        return []
+
+    async def fake_get_profile(login: str) -> dict[str, Any] | None:
+        assert login, "the profile store rejects an empty key"
+        return None
+
+    async def fake_dispatch_agent_run(
+        thread_id: str, content: Any, configurable: dict[str, Any], *, source: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        dispatched.update(configurable=configurable, source=source)
+        return {"run_id": "run-1"}
+
+    monkeypatch.setattr(plan_api, "thread_metadata_or_404", fake_meta)
+    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
+    monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
+    monkeypatch.setattr(plan_api, "set_plan_status", AsyncMock())
+    monkeypatch.setattr(plan_api, "_maybe_post_plan_approved_to_slack", AsyncMock())
+    monkeypatch.setattr(thread_runs, "get_profile", fake_get_profile)
+    monkeypatch.setattr(thread_runs, "dispatch_agent_run", fake_dispatch_agent_run)
+
+    result = await plan_api.approve_plan_for_thread(
+        "t1", approver={"id": "bob", "name": "Bob", "source": "dashboard"}
+    )
+
+    assert result == {"status": "approved", "run_id": "run-1"}
+    assert dispatched["source"] == "slack"
+    assert dispatched["configurable"] == {
+        "thread_id": "t1",
+        "source": "slack",
+        "user_email": "alice@example.com",
+        "repo": {"owner": "fakeorg", "name": "demo"},
+        "slack_thread": {"channel_id": "C1", "thread_ts": "1.1"},
+        "plan_mode": False,
+    }

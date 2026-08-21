@@ -322,15 +322,19 @@ async def build_thread_configurable(
     workflow-push approval) goes through here, so none of them can quietly drop
     the environment, admin intent, or source context the others pass.
     """
-    profile = profile if profile is not None else await get_profile(login) or {}
+    # A Slack- or Linear-started thread often records no login at all, and the
+    # profile store rejects an empty key — so there is nothing to look up.
+    if profile is None:
+        profile = (await get_profile(login) if login else None) or {}
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "source": thread_source(metadata),
-        "github_login": login,
         # A thread started from Slack/Linear may know only the triggering email,
         # so it stands in when the login resolves to nothing.
         "user_email": await resolve_run_email(login, profile) or thread_owner_email(metadata),
     }
+    if login:
+        configurable["github_login"] = login
     repo_config = repo_config_from_metadata(metadata)
     if repo_config:
         configurable["repo"] = repo_config
