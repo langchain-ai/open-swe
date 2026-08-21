@@ -722,7 +722,6 @@ async def _launch_agent_schedule_record(
             admin_thread=admin_thread,
         ),
         client=client,
-        stream_mode=["values", "updates", "messages-tuple"],
         stream_resumable=True,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
