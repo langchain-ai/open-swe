@@ -53,25 +53,24 @@ def fake_langgraph_client() -> FakeLangGraphClient:
 
 @pytest.fixture
 def patched_langgraph_client(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, fake_langgraph_client: FakeLangGraphClient
 ) -> Callable[..., FakeLangGraphClient]:
-    """Install a fake client at the module seams that reach the platform.
+    """Install ``fake_langgraph_client`` at the module seams that reach the platform.
 
     ``agent.store.store_client`` -- the one way into the Store -- is always
     patched. Pass the modules that hold their own ``langgraph_client`` (or
-    ``get_client``, via ``attr=``) alongside it; any remaining keyword
-    arguments seed a fresh :class:`FakeLangGraphClient`::
+    ``get_client``, via ``attr=``) alongside it, and pass ``client=`` to install
+    a differently seeded one::
 
-        client = patched_langgraph_client(thread_api, thread_metadata={...})
+        client = patched_langgraph_client(thread_api)
     """
 
     def _install(
         *modules: Any,
         attr: str = "langgraph_client",
         client: FakeLangGraphClient | None = None,
-        **kwargs: Any,
     ) -> FakeLangGraphClient:
-        target = client if client is not None else FakeLangGraphClient(**kwargs)
+        target = client if client is not None else fake_langgraph_client
 
         def accessor(*_args: Any, **_kwargs: Any) -> FakeLangGraphClient:
             return target

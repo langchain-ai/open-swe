@@ -16,7 +16,10 @@ from agent.dashboard.schedules import ScheduleCreateBody, ScheduleUpdateBody
 def fake_client(
     patched_langgraph_client: Callable[..., FakeLangGraphClient],
 ) -> FakeLangGraphClient:
-    return patched_langgraph_client(schedules, run_id="run_123", cron_id="cron_{n}")
+    client = patched_langgraph_client(schedules)
+    client.runs.run_id = "run_123"
+    client.crons.cron_id = "cron_{n}"
+    return client
 
 
 @pytest.fixture
