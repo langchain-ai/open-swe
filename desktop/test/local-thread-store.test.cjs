@@ -10,11 +10,12 @@ function temporaryStore(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-local-threads-"))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   let now = 100
+  let nextId = 0
   return {
     path: path.join(root, "threads.json"),
     create: () => new LocalThreadStore(path.join(root, "threads.json"), {
       now: () => ++now,
-      uuid: () => "thread-1",
+      uuid: () => `thread-${++nextId}`,
     }),
   }
 }
@@ -46,6 +47,17 @@ test("persists a prompt until it is acknowledged", (t) => {
   const restored = fixture.create().get(thread.id)
   assert.equal(restored.pending, null)
   assert.equal(restored.modelId, "anthropic:test")
+})
+
+test("keeps threads in creation order when an older thread is updated", (t) => {
+  const fixture = temporaryStore(t)
+  const store = fixture.create()
+  const older = store.create({ cwd: path.resolve("/tmp/project"), prompt: "older" })
+  const newer = store.create({ cwd: path.resolve("/tmp/project"), prompt: "newer" })
+
+  store.update(older.id, { title: "older updated" })
+
+  assert.deepEqual(store.list().map((thread) => thread.id), [newer.id, older.id])
 })
 
 test("reconciles interrupted threads and retains checkpoint refs until deletion", (t) => {

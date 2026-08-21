@@ -511,7 +511,11 @@ async def _thread_summary(
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
     created_at = metadata.get("created_at_ms")
+    if not isinstance(created_at, (int, float)):
+        created_at = _thread_timestamp_ms(thread, "created_at")
     updated_at = metadata.get("updated_at_ms")
+    if not isinstance(updated_at, (int, float)):
+        updated_at = _thread_timestamp_ms(thread, "updated_at")
     raw_title = metadata.get("title")
     title: str = raw_title if isinstance(raw_title, str) else "Untitled agent"
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
@@ -677,9 +681,10 @@ async def _refresh_latest_run_metadata(
 
 _THREADS_SEARCH_PAGE = 500
 _THREADS_PAGE_SCAN_CAP = 5000
-_THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
+_THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+_ThreadSortBy = Literal["created_at", "updated_at"]
 
 
 def _thread_id(thread: ThreadLike) -> str | None:
@@ -720,32 +725,41 @@ def _search_metadata_filter(
 
 
 async def _search_threads_batch(
-    client: Any, metadata: JsonObject, *, limit: int, offset: int
+    client: Any,
+    metadata: JsonObject,
+    *,
+    limit: int,
+    offset: int,
+    sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     batch = await client.threads.search(
         metadata=metadata,
         limit=limit,
         offset=offset,
-        sort_by="updated_at",
+        sort_by=sort_by,
         sort_order="desc",
         select=_THREAD_LIST_SELECT,
     )
     return [thread for thread in batch or [] if isinstance(thread, Mapping)]
 
 
-def _thread_updated_ms(thread: ThreadLike) -> int:
+def _thread_timestamp_ms(thread: ThreadLike, field: _ThreadSortBy) -> int:
     metadata = _thread_metadata(thread)
-    value = metadata.get("updated_at_ms")
+    value = metadata.get(f"{field}_ms")
     if isinstance(value, (int, float)):
         return int(value)
-    updated_at = thread.get("updated_at")
-    if isinstance(updated_at, str) and updated_at:
+    timestamp = thread.get(field)
+    if isinstance(timestamp, str) and timestamp:
         try:
-            parsed = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         except ValueError:
             return 0
         return int(parsed.timestamp() * 1000)
     return 0
+
+
+def _thread_updated_ms(thread: ThreadLike) -> int:
+    return _thread_timestamp_ms(thread, "updated_at")
 
 
 def _metadata_matches_filters(
@@ -877,6 +891,7 @@ async def _collect_thread_candidates(
     automation_id: str | None = None,
     target_per_search: int | None = None,
     surfaced_only: bool = False,
+    sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     for owner_filter in searches:
@@ -894,6 +909,7 @@ async def _collect_thread_candidates(
                 metadata_filter,
                 limit=_THREADS_SEARCH_PAGE,
                 offset=offset,
+                sort_by=sort_by,
             )
             if not batch:
                 break
@@ -922,7 +938,9 @@ async def _collect_thread_candidates(
             if target_per_search is not None and matched_for_search >= target_per_search:
                 break
             offset += _THREADS_SEARCH_PAGE
-    return sorted(seen.values(), key=_thread_updated_ms, reverse=True)
+    return sorted(
+        seen.values(), key=lambda thread: _thread_timestamp_ms(thread, sort_by), reverse=True
+    )
 
 
 async def list_dashboard_threads(
@@ -1126,6 +1144,7 @@ async def list_dashboard_threads_page(
     automation_id: str | None = None,
     filter_owner_login: str | None = None,
     surfaced_only: bool = False,
+    sort_by: _ThreadSortBy = "updated_at",
 ) -> dict[str, Any]:
     client = langgraph_client()
     search_login = filter_owner_login or login
@@ -1149,6 +1168,7 @@ async def list_dashboard_threads_page(
         automation_id=automation_id,
         target_per_search=target,
         surfaced_only=surfaced_only,
+        sort_by=sort_by,
     )
 
     if summary_filters:
@@ -1170,7 +1190,8 @@ async def list_dashboard_threads_page(
                 query=query,
             )
         ]
-        filtered.sort(key=lambda item: item.get("updatedAt", 0), reverse=True)
+        summary_sort_field = "createdAt" if sort_by == "created_at" else "updatedAt"
+        filtered.sort(key=lambda item: item.get(summary_sort_field, 0), reverse=True)
         items = filtered[safe_offset : safe_offset + safe_limit]
         has_more = len(filtered) > safe_offset + safe_limit
     else:

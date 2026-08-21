@@ -151,7 +151,7 @@ class LocalThreadStore {
 
   list() {
     return [...this.threads.values()]
-      .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
+      .sort((left, right) => right.createdAt - left.createdAt || left.id.localeCompare(right.id))
       .map((thread) => structuredClone(thread))
   }
 

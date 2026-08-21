@@ -112,6 +112,7 @@ export interface CloudTerminalConnection {
 }
 
 export type ThreadScope = "all" | "interactive" | "automation"
+export type ThreadSortBy = "created_at" | "updated_at"
 
 export interface ThreadsPageParams {
   limit?: number
@@ -124,6 +125,7 @@ export interface ThreadsPageParams {
   q?: string
   scope?: ThreadScope
   automationId?: string
+  sortBy?: ThreadSortBy
 }
 
 export interface ThreadsPage {
@@ -226,6 +228,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.q) search.set("q", params.q)
   if (params.scope) search.set("scope", params.scope)
   if (params.automationId) search.set("automation_id", params.automationId)
+  if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -381,7 +384,8 @@ export const agentsApi = {
 export type ThreadGroup = "today" | "last7" | "last30" | "older"
 
 export function groupThreads(
-  threads: Array<AgentThread>
+  threads: Array<AgentThread>,
+  timestampField: "createdAt" | "updatedAt" = "updatedAt"
 ): Record<ThreadGroup, Array<AgentThread>> {
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
@@ -395,12 +399,15 @@ export function groupThreads(
     older: [],
   }
 
-  for (const thread of [...threads].sort((a, b) => b.updatedAt - a.updatedAt)) {
-    if (thread.updatedAt >= todayStart.getTime()) {
+  for (const thread of [...threads].sort(
+    (a, b) => b[timestampField] - a[timestampField]
+  )) {
+    const timestamp = thread[timestampField]
+    if (timestamp >= todayStart.getTime()) {
       groups.today.push(thread)
-    } else if (thread.updatedAt >= sevenDaysAgo) {
+    } else if (timestamp >= sevenDaysAgo) {
       groups.last7.push(thread)
-    } else if (thread.updatedAt >= thirtyDaysAgo) {
+    } else if (timestamp >= thirtyDaysAgo) {
       groups.last30.push(thread)
     } else {
       groups.older.push(thread)
