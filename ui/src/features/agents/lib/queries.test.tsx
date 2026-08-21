@@ -9,7 +9,7 @@ import {
   SIDEBAR_PAGE_SIZE,
   agentThreadKeys,
   setAgentThreadStatus,
-  useAgentThreadTurnDiff,
+  useAgentThreadWorkingTreeDiff,
   useSidebarThreads,
   useThreadsPage,
 } from "./queries"
@@ -47,7 +47,7 @@ function testClient() {
   return client
 }
 
-describe("useAgentThreadTurnDiff", () => {
+describe("useAgentThreadWorkingTreeDiff", () => {
   const diff: ThreadTurnDiff = {
     status: "ready",
     truncated: false,
@@ -62,7 +62,7 @@ describe("useAgentThreadTurnDiff", () => {
     running: boolean
     enabled?: boolean
   }) {
-    useAgentThreadTurnDiff("thread-1", null, enabled, {}, running)
+    useAgentThreadWorkingTreeDiff("thread-1", enabled, running)
     return null
   }
 
@@ -81,7 +81,7 @@ describe("useAgentThreadTurnDiff", () => {
   it("keeps polling ready cloud diffs while the run is active", async () => {
     vi.useFakeTimers()
     const getDiff = vi
-      .spyOn(agentsApi, "getThreadTurnDiff")
+      .spyOn(agentsApi, "getThreadWorkingTreeDiff")
       .mockResolvedValue(diff)
 
     renderProbe(true)
@@ -93,7 +93,7 @@ describe("useAgentThreadTurnDiff", () => {
   it("refreshes immediately and twice after a running cloud diff finishes", async () => {
     vi.useFakeTimers()
     const getDiff = vi
-      .spyOn(agentsApi, "getThreadTurnDiff")
+      .spyOn(agentsApi, "getThreadWorkingTreeDiff")
       .mockResolvedValue(diff)
     const view = renderProbe(true)
     await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))
@@ -114,7 +114,7 @@ describe("useAgentThreadTurnDiff", () => {
   it("refetches a fresh cached diff when enabled after the run finished", async () => {
     vi.useFakeTimers()
     const getDiff = vi
-      .spyOn(agentsApi, "getThreadTurnDiff")
+      .spyOn(agentsApi, "getThreadWorkingTreeDiff")
       .mockResolvedValue(diff)
     const view = renderProbe(true)
     await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))
@@ -144,12 +144,12 @@ describe("useAgentThreadTurnDiff", () => {
 
   it("refetches a fresh cached diff when remounted after the run finished", async () => {
     const getDiff = vi
-      .spyOn(agentsApi, "getThreadTurnDiff")
+      .spyOn(agentsApi, "getThreadWorkingTreeDiff")
       .mockResolvedValue(diff)
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
-    client.setQueryData(agentThreadKeys.turnDiff("thread-1", null, {}), diff)
+    client.setQueryData(agentThreadKeys.workingTreeDiff("thread-1"), diff)
     clients.push(client)
 
     render(
@@ -164,7 +164,7 @@ describe("useAgentThreadTurnDiff", () => {
   it("cleans delayed final refreshes on unmount", async () => {
     vi.useFakeTimers()
     const getDiff = vi
-      .spyOn(agentsApi, "getThreadTurnDiff")
+      .spyOn(agentsApi, "getThreadWorkingTreeDiff")
       .mockResolvedValue(diff)
     const view = renderProbe(true)
     await vi.waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1))

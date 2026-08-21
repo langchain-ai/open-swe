@@ -229,8 +229,9 @@ from .thread_api import (
     get_dashboard_thread,
     get_dashboard_thread_branch_diff,
     get_dashboard_thread_recovery_patch,
+    get_dashboard_thread_run_diff,
     get_dashboard_thread_state,
-    get_dashboard_thread_turn_diff,
+    get_dashboard_thread_working_tree_diff,
     list_dashboard_threads,
     list_dashboard_threads_page,
     list_dashboard_threads_sidebar,
@@ -2180,15 +2181,25 @@ async def api_get_thread_recovery_patch(
     )
 
 
-@router.get("/threads/{thread_id}/turn-diff")
-async def api_get_thread_turn_diff(
+@router.get("/threads/{thread_id}/working-tree-diff")
+async def api_get_thread_working_tree_diff(
     thread_id: str,
-    turn_key: str | None = None,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_working_tree_diff(
+        thread_id, session["sub"], email=session.get("email")
+    )
+
+
+@router.get("/threads/{thread_id}/run-diff")
+async def api_get_thread_run_diff(
+    thread_id: str,
+    turn_key: str,
     max_files: int = Query(200, ge=1, le=200),
     include_content: bool = True,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await get_dashboard_thread_turn_diff(
+    return await get_dashboard_thread_run_diff(
         thread_id,
         session["sub"],
         turn_key=turn_key,

@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import { COMPOSER_PATH_DRAG_MIME } from "@/features/agents/components/composer/composerTrigger"
-import { useAgentThreadTurnDiff } from "@/features/agents/lib/queries"
+import { useAgentThreadRunDiff } from "@/features/agents/lib/queries"
 
 const INLINE_CHANGED_FILES_LIMIT = 10
 
@@ -20,7 +20,7 @@ export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
   onOpenFile?: (filePath: string) => void
 }) {
   const [open, setOpen] = useState(isLatestTurn)
-  const turnDiff = useAgentThreadTurnDiff(threadId, turnKey, open, {
+  const turnDiff = useAgentThreadRunDiff(threadId, turnKey, open, {
     maxFiles: INLINE_CHANGED_FILES_LIMIT,
     includeContent: false,
   })
