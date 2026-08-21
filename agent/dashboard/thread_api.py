@@ -2332,14 +2332,13 @@ async def get_dashboard_thread_turn_diff(
         }
 
     checkpoint = checkpoints[index]
+    stored = None
     if turn_key is not None:
         stored = await get_run_diff(thread_id, turn_key)
         if stored is not None:
             return project_run_diff(stored, max_files=max_files, include_content=include_content)
     else:
         stored = await get_run_diff(thread_id, THREAD_DIFF_KEY)
-        if stored is not None:
-            return project_run_diff(stored, max_files=max_files, include_content=include_content)
 
     plan_ref = checkpoint.get("plan_ref")
     if (
@@ -2376,6 +2375,8 @@ async def get_dashboard_thread_turn_diff(
         sandbox = await create_sandbox(sandbox_id)
     except Exception:  # noqa: BLE001
         logger.debug("Could not connect to sandbox %s for turn diff", sandbox_id, exc_info=True)
+        if stored is not None:
+            return project_run_diff(stored, max_files=max_files, include_content=include_content)
         return {
             "status": "missing",
             "files": [],
@@ -2384,7 +2385,7 @@ async def get_dashboard_thread_turn_diff(
         }
 
     repo_path = checkpoint.get("repo_path")
-    return await read_turn_diff(
+    live = await read_turn_diff(
         sandbox,
         None,
         str(checkpoint["ref"]),
@@ -2393,6 +2394,9 @@ async def get_dashboard_thread_turn_diff(
         include_content=include_content,
         repo_path=repo_path if isinstance(repo_path, str) else None,
     )
+    if live.get("status") != "ready" and stored is not None:
+        return project_run_diff(stored, max_files=max_files, include_content=include_content)
+    return live
 
 
 _UNSAFE_REF_CHARACTERS = set(" ~^:?*[\\\x7f") | {chr(code) for code in range(32)}
