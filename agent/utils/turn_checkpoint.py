@@ -83,6 +83,13 @@ def _diff_command(
     repo_path: str | None = None,
 ) -> str:
     resolve_head = f"H={shlex.quote(head)}" if head else f"{_WRITE_WORKTREE_TREE}; H=$T"
+    resolve_trees = (
+        f"B_INPUT={shlex.quote(base)}; "
+        'if B=$(git rev-parse --verify "${B_INPUT}^{tree}" 2>/dev/null); then :; '
+        'elif [ "$B_INPUT" = HEAD ]; then B=$(git hash-object -t tree /dev/null); '
+        "else exit 4; fi; "
+        'H=$(git rev-parse --verify "${H}^{tree}" 2>/dev/null) || exit 4'
+    )
     script = r"""python3 - "$B" "$H" __MAX_FILES__ <<'PY'
 import json, subprocess, sys
 
@@ -109,6 +116,7 @@ for record in records:
     if parts[1].isdigit():
         deletions += int(parts[1])
 print(json.dumps({
+    'base': base,
     'head': head,
     'numstat': (b'\0'.join(records[:limit]) + (b'\0' if records else b'')).decode(errors='replace'),
     'nameStatus': (b'\0'.join(fields[:limit * 2]) + (b'\0' if fields else b'')).decode(errors='replace'),
@@ -116,7 +124,7 @@ print(json.dumps({
 }))
 PY"""
     script = script.replace("__MAX_FILES__", str(max_files))
-    return f"{_cd_repo(work_dir, repo_path)}; {resolve_head}; B={shlex.quote(base)}; {script}"
+    return f"{_cd_repo(work_dir, repo_path)}; {resolve_head}; {resolve_trees}; {script}"
 
 
 def _contents_command(
@@ -403,8 +411,11 @@ async def read_turn_diff(
         }
         numstat_raw = payload["numstat"]
         name_status_raw = payload["nameStatus"]
+        base_tree = payload["base"]
         head_tree = payload["head"]
-        if not all(isinstance(value, str) for value in (numstat_raw, name_status_raw, head_tree)):
+        if not all(
+            isinstance(value, str) for value in (numstat_raw, name_status_raw, base_tree, head_tree)
+        ):
             raise TypeError
     except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
         return {
@@ -421,7 +432,7 @@ async def read_turn_diff(
         try:
             blobs = await _execute(
                 sandbox,
-                _contents_command(work_dir, base, head_tree, paths, repo_path),
+                _contents_command(work_dir, base_tree, head_tree, paths, repo_path),
                 DIFF_TIMEOUT_SECONDS,
             )
             decoded = json.loads(_output(blobs).strip().splitlines()[-1])
