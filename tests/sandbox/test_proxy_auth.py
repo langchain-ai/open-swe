@@ -458,7 +458,7 @@ class TestRefreshProxyOnSandboxReuse:
 
         with (
             patch(
-                "agent.server.resolve_github_token",
+                "agent.graphs.agent.resolve_github_token",
                 new_callable=AsyncMock,
                 return_value=("ghp", None),
             ),
@@ -476,13 +476,13 @@ class TestRefreshProxyOnSandboxReuse:
                 "agent.integrations.langsmith.configure_github_proxy", new_callable=AsyncMock
             ) as mock_proxy,
             patch(
-                "agent.server.aresolve_sandbox_work_dir",
+                "agent.graphs.agent.aresolve_sandbox_work_dir",
                 new_callable=AsyncMock,
                 return_value="/workspace",
             ),
-            patch("agent.server.make_model", return_value=MagicMock()),
-            patch("agent.server.construct_system_prompt", return_value="prompt"),
-            patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
+            patch("agent.graphs.agent.make_model", return_value=MagicMock()),
+            patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
+            patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
             patch.dict(
                 "agent.utils.sandbox_state.SANDBOX_BACKENDS",
                 {"thread-123": SandboxBackendProxy(mock_sandbox, thread_id="thread-123")},
@@ -490,7 +490,7 @@ class TestRefreshProxyOnSandboxReuse:
             ),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
-            from agent.server import get_agent
+            from agent.graphs.agent import get_agent
 
             await get_agent(config)
             prepare = cast(AgentMiddleware, cast(list[object], captured["middleware"])[0])
@@ -515,7 +515,7 @@ class TestRefreshProxyOnSandboxReuse:
 
         with (
             patch(
-                "agent.server.resolve_github_token",
+                "agent.graphs.agent.resolve_github_token",
                 new_callable=AsyncMock,
                 return_value=("ghp", None),
             ),
@@ -538,17 +538,17 @@ class TestRefreshProxyOnSandboxReuse:
                 "agent.integrations.langsmith.configure_github_proxy", new_callable=AsyncMock
             ) as mock_proxy,
             patch(
-                "agent.server.aresolve_sandbox_work_dir",
+                "agent.graphs.agent.aresolve_sandbox_work_dir",
                 new_callable=AsyncMock,
                 return_value="/workspace",
             ),
-            patch("agent.server.make_model", return_value=MagicMock()),
-            patch("agent.server.construct_system_prompt", return_value="prompt"),
-            patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
+            patch("agent.graphs.agent.make_model", return_value=MagicMock()),
+            patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
+            patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
             patch.dict("agent.utils.sandbox_state.SANDBOX_BACKENDS", {}, clear=True),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
-            from agent.server import get_agent
+            from agent.graphs.agent import get_agent
 
             await get_agent(config)
             prepare = cast(AgentMiddleware, cast(list[object], captured["middleware"])[0])

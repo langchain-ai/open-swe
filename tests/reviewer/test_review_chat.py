@@ -653,13 +653,13 @@ async def test_proxy_state_rejects_foreign_thread(monkeypatch) -> None:
 
 
 def test_chat_excludes_mutating_filesystem_tools() -> None:
-    from agent.chat import _EXCLUDED_TOOLS
+    from agent.graphs.chat import _EXCLUDED_TOOLS
 
     assert {"write_file", "edit_file", "delete", "execute"} <= _EXCLUDED_TOOLS
 
 
 def test_chat_general_purpose_subagent_is_read_only() -> None:
-    from agent.chat import _chat_general_purpose_subagent
+    from agent.graphs.chat import _chat_general_purpose_subagent
 
     spec = _chat_general_purpose_subagent()
 
@@ -689,7 +689,7 @@ async def test_chat_web_search_returns_inline_results_without_sandbox(monkeypatc
 
 
 def test_get_chat_agent_returns_trivial_when_not_for_execution() -> None:
-    from agent.chat import get_chat_agent
+    from agent.graphs.chat import get_chat_agent
 
     graph = asyncio.run(get_chat_agent({"configurable": {"thread_id": None}}))
     assert graph is not None

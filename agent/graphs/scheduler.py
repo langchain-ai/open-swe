@@ -1,3 +1,62 @@
-from agent.scheduler import get_scheduler
+"""LangGraph entrypoint that fans cron ticks into fresh agent threads."""
 
-__all__ = ["get_scheduler"]
+import logging
+from typing import Any, TypedDict
+
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import RunnableConfig
+
+from ..baby_sit import evaluate_watch
+from ..background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
+from ..background_tasks import monitor_background_tasks
+from ..dashboard.schedules import launch_scheduled_agent_run
+from ..reconcile import reconcile_stale_runs
+from ..session_cost import run_session_cost_refresh
+
+logger = logging.getLogger(__name__)
+
+
+class SchedulerState(TypedDict, total=False):
+    schedule_id: str
+    task: str
+    watch_key: str
+    thread_id: str
+    agent_thread_id: str
+    run_id: str
+    prepare_run_id: str
+    channel_id: str
+    thread_ts: str
+    attempt: int
+    result: dict[str, Any]
+
+
+async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, Any]:
+    configurable = config.get("configurable") or {}
+    task = state.get("task") or configurable.get("task")
+    if task == "reconcile":
+        return {"result": await reconcile_stale_runs()}
+    if task == "baby_sit":
+        key = state.get("watch_key") or configurable.get("watch_key")
+        if not isinstance(key, str) or not key:
+            return {"result": {"status": "missing_watch_key"}}
+        return {"result": {"status": await evaluate_watch(key)}}
+    if task == BACKGROUND_TASK_CRON_KIND:
+        thread_id = state.get("thread_id") or configurable.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id:
+            return {"result": {"status": "missing_thread_id"}}
+        return {"result": await monitor_background_tasks(thread_id)}
+    if task == "session_cost":
+        return {"result": await run_session_cost_refresh(state)}
+    schedule_id = state.get("schedule_id") or configurable.get("schedule_id")
+    if not isinstance(schedule_id, str) or not schedule_id:
+        logger.warning("Scheduled agent tick missing schedule_id")
+        return {"result": {"status": "missing_schedule_id"}}
+    return {"result": await launch_scheduled_agent_run(schedule_id)}
+
+
+def get_scheduler(config: RunnableConfig | None = None):
+    builder = StateGraph(SchedulerState)
+    builder.add_node("launch", _launch)
+    builder.add_edge(START, "launch")
+    builder.add_edge("launch", END)
+    return builder.compile().with_config(config or {})

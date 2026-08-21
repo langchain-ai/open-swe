@@ -6,7 +6,7 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent import reviewer
+from agent.graphs import reviewer
 
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
@@ -71,23 +71,23 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("app-token", None),
         ) as mock_app_token,
-        patch("agent.reviewer.cache_github_token_for_thread") as mock_cache_token,
+        patch("agent.graphs.reviewer.cache_github_token_for_thread") as mock_cache_token,
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", return_value=dummy_agent) as create_agent,
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs.reviewer.create_deep_agent", return_value=dummy_agent) as create_agent,
     ):
         await reviewer.get_reviewer_agent(config)
         prepare = create_agent.call_args.kwargs["middleware"][0]
@@ -125,30 +125,34 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("app-token", "exp"),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ) as mock_sandbox,
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
-        patch("agent.reviewer.fetch_pr_diff", new_callable=AsyncMock, return_value=None),
-        patch("agent.reviewer.fetch_pr_metadata", new_callable=AsyncMock, return_value=None),
-        patch("agent.reviewer.fetch_pr_review_threads", new_callable=AsyncMock, return_value=[]),
+        patch("agent.graphs.reviewer.fetch_pr_diff", new_callable=AsyncMock, return_value=None),
+        patch("agent.graphs.reviewer.fetch_pr_metadata", new_callable=AsyncMock, return_value=None),
         patch(
-            "agent.reviewer.reconcile_findings_with_review_threads",
+            "agent.graphs.reviewer.fetch_pr_review_threads", new_callable=AsyncMock, return_value=[]
+        ),
+        patch(
+            "agent.graphs.reviewer.reconcile_findings_with_review_threads",
             new_callable=AsyncMock,
         ),
-        patch("agent.reviewer.fetch_agents_md", new_callable=AsyncMock, return_value=None),
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()) as create_agent,
+        patch("agent.graphs.reviewer.fetch_agents_md", new_callable=AsyncMock, return_value=None),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.graphs.reviewer.create_deep_agent", return_value=_DummyAgent()
+        ) as create_agent,
     ):
         await reviewer.get_reviewer_agent(config)
         prepare = create_agent.call_args.kwargs["middleware"][0]
@@ -177,17 +181,19 @@ async def test_reviewer_raises_when_app_installation_token_unavailable() -> None
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=(None, None),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ) as mock_sandbox,
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()) as create_agent,
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch(
+            "agent.graphs.reviewer.create_deep_agent", return_value=_DummyAgent()
+        ) as create_agent,
     ):
         await reviewer.get_reviewer_agent(config)
         prepare = create_agent.call_args.kwargs["middleware"][0]
@@ -219,19 +225,19 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
 
     with (
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
-        patch("agent.reviewer.make_model", return_value=MagicMock()) as make_model,
-        patch("agent.reviewer.create_deep_agent", return_value=dummy_agent),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()) as make_model,
+        patch("agent.graphs.reviewer.create_deep_agent", return_value=dummy_agent),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value=None,
         ),
@@ -267,19 +273,19 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
 
     with (
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
-        patch("agent.reviewer.make_model", return_value=MagicMock()) as make_model,
-        patch("agent.reviewer.create_deep_agent", return_value=dummy_agent),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()) as make_model,
+        patch("agent.graphs.reviewer.create_deep_agent", return_value=dummy_agent),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value=None,
         ),
@@ -323,17 +329,17 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
     fetch_threads = AsyncMock(return_value=[])
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
@@ -342,13 +348,13 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
             new_callable=AsyncMock,
             return_value="Flag table rerender regressions.",
         ),
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
-        patch("agent.reviewer.fetch_pr_review_threads", fetch_threads),
-        patch("agent.reviewer.fetch_pr_diff", new_callable=AsyncMock, return_value=None),
-        patch("agent.reviewer.fetch_pr_metadata", new_callable=AsyncMock, return_value=None),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.reviewer.fetch_pr_review_threads", fetch_threads),
+        patch("agent.graphs.reviewer.fetch_pr_diff", new_callable=AsyncMock, return_value=None),
+        patch("agent.graphs.reviewer.fetch_pr_metadata", new_callable=AsyncMock, return_value=None),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value=None,
         ),
@@ -390,22 +396,22 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.get_org_review_guidelines",
+            "agent.graphs.reviewer.get_org_review_guidelines",
             new_callable=AsyncMock,
             return_value="Never approve a PR that disables a CI gate.",
         ),
@@ -415,12 +421,12 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
             return_value=None,
         ),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
         middleware = captured["middleware"]
@@ -457,27 +463,27 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value="Always use the design system IconButton.",
         ) as mock_fetch_agents_md,
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
         middleware = captured["middleware"]
@@ -515,27 +521,27 @@ async def test_reviewer_inlines_claude_md_when_agents_md_absent() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value="# CLAUDE.md\nUse semantic tokens only.",
         ) as mock_fetch_agents_md,
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
         middleware = captured["middleware"]
@@ -870,32 +876,32 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "agent.reviewer.fetch_pr_review_threads",
+            "agent.graphs.reviewer.fetch_pr_review_threads",
             new_callable=AsyncMock,
             return_value=fake_threads,
         ) as mock_fetch_threads,
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
         middleware = captured["middleware"]
@@ -947,37 +953,37 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "agent.reviewer.fetch_pr_review_threads",
+            "agent.graphs.reviewer.fetch_pr_review_threads",
             new_callable=AsyncMock,
             return_value=fake_threads,
         ),
         patch(
-            "agent.reviewer.list_findings_async",
+            "agent.graphs.reviewer.list_findings_async",
             new_callable=AsyncMock,
             return_value=[],
         ),
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
         middleware = captured["middleware"]
@@ -1016,32 +1022,32 @@ async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "agent.reviewer.fetch_pr_review_threads",
+            "agent.graphs.reviewer.fetch_pr_review_threads",
             new_callable=AsyncMock,
             return_value=[],
         ),
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
         middleware = captured["middleware"]
@@ -1081,32 +1087,32 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "agent.reviewer.fetch_pr_review_threads",
+            "agent.graphs.reviewer.fetch_pr_review_threads",
             new_callable=AsyncMock,
             side_effect=RuntimeError("network down"),
         ),
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
         middleware = captured["middleware"]
@@ -1156,37 +1162,37 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "agent.reviewer.fetch_pr_review_threads",
+            "agent.graphs.reviewer.fetch_pr_review_threads",
             new_callable=AsyncMock,
             return_value=[],
         ),
         patch(
-            "agent.reviewer.fetch_pr_diff",
+            "agent.graphs.reviewer.fetch_pr_diff",
             new_callable=AsyncMock,
             return_value=pr_diff,
         ) as mock_fetch_diff,
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
         middleware = captured["middleware"]
@@ -1228,37 +1234,37 @@ async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> No
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "agent.reviewer.fetch_pr_review_threads",
+            "agent.graphs.reviewer.fetch_pr_review_threads",
             new_callable=AsyncMock,
             return_value=[],
         ),
         patch(
-            "agent.reviewer.fetch_pr_diff",
+            "agent.graphs.reviewer.fetch_pr_diff",
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
         middleware = captured["middleware"]
@@ -1294,42 +1300,42 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
 
     with (
         patch(
-            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            "agent.graphs.reviewer.get_github_app_installation_token_with_expiry",
             new_callable=AsyncMock,
             return_value=("gh-token", None),
         ),
         patch(
-            "agent.reviewer.ensure_sandbox_for_thread",
+            "agent.graphs.reviewer.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.reviewer.aresolve_sandbox_work_dir",
+            "agent.graphs.reviewer.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.fetch_agents_md",
+            "agent.graphs.reviewer.fetch_agents_md",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "agent.reviewer.fetch_pr_review_threads",
+            "agent.graphs.reviewer.fetch_pr_review_threads",
             new_callable=AsyncMock,
             return_value=[],
         ),
         patch(
-            "agent.reviewer.fetch_pr_diff",
+            "agent.graphs.reviewer.fetch_pr_diff",
             new_callable=AsyncMock,
             return_value="",
         ),
         patch(
-            "agent.reviewer.fetch_pr_metadata",
+            "agent.graphs.reviewer.fetch_pr_metadata",
             new_callable=AsyncMock,
             return_value=("Add retry logic for uploads", "Retries flaky uploads up to 3 times."),
         ) as mock_fetch_metadata,
-        patch("agent.reviewer.make_model", return_value=MagicMock()),
-        patch("agent.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
         middleware = captured["middleware"]
