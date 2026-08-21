@@ -406,6 +406,15 @@ async def _replace_findings_unlocked(thread_id: str, findings: list[Finding]) ->
         await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
     except LangGraphSDKNotFoundError as exc:
         raise ReviewerThreadMissingError(thread_id, exc) from exc
+    from ..dashboard.agent_usage import record_reviewer_finding_state
+
+    results = await asyncio.gather(
+        *(record_reviewer_finding_state(thread_id, finding) for finding in findings),
+        return_exceptions=True,
+    )
+    failures = [result for result in results if isinstance(result, Exception)]
+    if failures:
+        logger.debug("Failed to update reviewer usage telemetry: %s", failures[0])
 
 
 def thread_missing_tool_result(exc: ReviewerThreadMissingError) -> dict[str, Any]:

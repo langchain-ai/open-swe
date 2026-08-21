@@ -128,7 +128,7 @@ async def update_finding(
 
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    if status == "open":
+    if status is not None:
         try:
             head_sha = await resolve_review_head_sha(get_thread_id_from_runtime(), configurable)
         except ReviewerThreadMissingError as exc:

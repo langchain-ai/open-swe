@@ -1,11 +1,13 @@
 """Tool: ``publish_review``. Post the findings list to GitHub as a PR Review."""
 
+import logging
 from collections.abc import Mapping
 from typing import Annotated, Any
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from ..dashboard.agent_usage import record_reviewer_publication
 from ..dashboard.team_settings import get_team_review_trace_links_enabled
 from ..review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from ..review.findings import (
@@ -55,6 +57,15 @@ from ..utils.github_token import (
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.slack import post_slack_thread_reply
 from ..utils.tracing import REVIEW_TRACING_PROJECT
+
+logger = logging.getLogger(__name__)
+
+
+async def _record_reviewer_usage(**kwargs: Any) -> None:
+    try:
+        await record_reviewer_publication(**kwargs)
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to record reviewer usage", exc_info=True)
 
 
 async def publish_review(
@@ -337,6 +348,14 @@ async def _publish_review_async(
             findings=findings,
         )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+        await _record_reviewer_usage(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            findings=await list_findings_async(thread_id),
+        )
         await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
         conclusion, check_title, check_summary = review_check_conclusion(0)
         await settle_review_check_run(
@@ -523,6 +542,14 @@ async def _publish_review_async(
         )
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+    await _record_reviewer_usage(
+        thread_id=thread_id,
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        head_sha=head_sha,
+        findings=await list_findings_async(thread_id),
+    )
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
     conclusion, check_title, check_summary = review_check_conclusion(len(inline_comments))
     await settle_review_check_run(
