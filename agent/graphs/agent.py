@@ -126,11 +126,9 @@ from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from ..utils.github_org_membership import is_login_in_allowed_org
 from ..utils.json_types import as_json_object
 from ..utils.model import DEFAULT_LLM_REASONING, ModelKwargs, fallback_model_id_for
+from ..utils.sandbox import SandboxUnreachableError
 from ..utils.sandbox_paths import aresolve_sandbox_work_dir
-from ..utils.sandbox_state import (
-    SandboxUnreachableError,
-    get_or_create_sandbox_backend_proxy,
-)
+from ..utils.sandbox_registry import get_or_create_sandbox_backend_proxy
 from ..utils.thread_settings import ThreadSettings, normalize_thread_settings
 from ..utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 from ..utils.turn_checkpoint import merge_checkpoint, read_turn_diff, record_turn_checkpoint

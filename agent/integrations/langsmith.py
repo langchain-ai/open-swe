@@ -3,7 +3,6 @@
 import asyncio
 import base64
 import logging
-from abc import ABC, abstractmethod
 from typing import Any
 
 import httpx
@@ -29,7 +28,7 @@ from agent.config import (
     sandbox_mem_bytes,
     sandbox_vcpus,
 )
-from agent.utils.sandbox import SandboxGoneError
+from agent.utils.sandbox import SandboxGoneError, SandboxProvider
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +54,10 @@ PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 5
 PROXY_CONFIG_NOT_READY_STATUS = 400
 PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
+SANDBOX_CREATE_TIMEOUT_SECONDS = 180
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
+# Every snapshot Open SWE builds roots the agent's checkouts here.
+LANGSMITH_WORK_DIR = "/workspace"
 
 
 def _get_sandbox_api_key() -> str | None:
@@ -356,52 +358,6 @@ async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandbox
         raise
 
 
-async def create_langsmith_sandbox(
-    sandbox_id: str | None = None,
-    *,
-    snapshot_id: str | None = None,
-) -> SandboxBackendProtocol:
-    """Create or connect to a LangSmith sandbox without automatic cleanup.
-
-    This function directly uses the LangSmithProvider to create/connect to sandboxes
-    without the context manager cleanup, allowing sandboxes to persist across
-    multiple agent invocations.
-
-    Args:
-        sandbox_id: Optional existing sandbox ID to connect to.
-                   If None, creates a new sandbox.
-        snapshot_id: Optional repo-scoped snapshot to boot from. When omitted,
-                      falls back to DEFAULT_SANDBOX_SNAPSHOT_ID.
-
-    Returns:
-        SandboxBackendProtocol instance
-    """
-    api_key = _get_sandbox_api_key()
-    (
-        default_snapshot_id,
-        fs_capacity_bytes,
-        vcpus,
-        mem_bytes,
-        idle_ttl_seconds,
-        delete_after_stop_seconds,
-    ) = _get_sandbox_snapshot_config()
-
-    effective_snapshot_id = snapshot_id or default_snapshot_id
-
-    provider = LangSmithProvider(api_key=api_key)
-    backend = await provider.get_or_create(
-        sandbox_id=sandbox_id,
-        snapshot_id=effective_snapshot_id,
-        fs_capacity_bytes=fs_capacity_bytes,
-        vcpus=vcpus,
-        mem_bytes=mem_bytes,
-        idle_ttl_seconds=idle_ttl_seconds,
-        delete_after_stop_seconds=delete_after_stop_seconds,
-    )
-
-    return backend
-
-
 class TimeoutLangSmithSandbox(LangSmithSandbox):
     """LangSmith backend that enforces a client-side execution deadline.
 
@@ -416,10 +372,6 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     failures fall back to the base wait=True path, whose HTTP fallback carries
     its own request deadline.
     """
-
-    @property
-    def sandbox(self) -> Any:
-        return self._sandbox
 
     _WS_FALLBACK_ERRORS = (
         SandboxConnectionError,
@@ -489,43 +441,21 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         return self._result_to_response(result)
 
 
-class SandboxProvider(ABC):
-    """Interface for creating sandbox backends.
+class LangSmithProvider(SandboxProvider):
+    """LangSmith sandboxes: snapshot-booted, and reached through an auth proxy.
 
-    Intentionally has no delete. A sandbox holds the agent's only copy of its
-    working tree, and the thread metadata read fails open to "no sandbox", so a
-    delete keyed off it can destroy a live box. Reclamation is the platform's
-    job, via the idle TTL and delete-after-stop set at create time.
+    Provisioning runs natively async via ``AsyncSandboxClient``. The resulting
+    ``AsyncSandbox`` is converted to a sync ``Sandbox`` via ``to_sync()`` so it
+    satisfies the deepagents sync ``SandboxBackendProtocol`` that
+    ``TimeoutLangSmithSandbox`` and the agent's file/execute tools expect.
     """
 
-    @abstractmethod
-    async def get_or_create(
-        self,
-        *,
-        sandbox_id: str | None = None,
-        **kwargs: Any,
-    ) -> SandboxBackendProtocol:
-        """Get an existing sandbox, or create one if needed."""
-        raise NotImplementedError
+    uses_github_proxy = True
+    supports_snapshots = True
 
-
-class LangSmithProvider(SandboxProvider):
-    """LangSmith sandbox provider implementation."""
-
-    def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or _get_sandbox_api_key()
-        self._api_endpoint = _get_sandbox_api_endpoint()
-        if not self._api_key:
-            msg = "LANGSMITH_API_KEY (or LANGSMITH_API_KEY_PROD) not set"
-            raise ValueError(msg)
-
-    @classmethod
-    def validate_startup_config(cls) -> None:
-        """Validate env-var configuration at server startup. Raises ValueError if invalid.
-
-        Reading every setting is the validation: each accessor raises on a value
-        it cannot use.
-        """
+    def validate_startup_config(self) -> None:
+        """Reading every setting is the validation: each accessor raises on a
+        value it cannot use."""
         if not default_sandbox_snapshot_id():
             # Not fatal: an admin can set the base snapshot at runtime from the
             # dashboard, which is stored outside the environment.
@@ -537,58 +467,53 @@ class LangSmithProvider(SandboxProvider):
         _execute_client_grace_seconds()
         sandbox_create_extra_fields()
 
-    async def get_or_create(
-        self,
-        *,
-        sandbox_id: str | None = None,
-        timeout: int = 180,
-        snapshot_id: str | None = None,
-        fs_capacity_bytes: int | None = None,
-        vcpus: int | None = None,
-        mem_bytes: int | None = None,
-        idle_ttl_seconds: int | None = None,
-        delete_after_stop_seconds: int | None = None,
-        **kwargs: Any,
-    ) -> SandboxBackendProtocol:
-        """Get existing or create new LangSmith sandbox.
+    async def connect(self, sandbox_id: str) -> SandboxBackendProtocol:
+        async with self._client() as client:
+            sandbox = await _reuse_existing_sandbox(client, sandbox_id)
+            return TimeoutLangSmithSandbox(sandbox.to_sync())
 
-        Provisioning runs natively async via ``AsyncSandboxClient``. The
-        resulting ``AsyncSandbox`` is converted to a sync ``Sandbox`` via
-        ``to_sync()`` so it satisfies the deepagents sync ``SandboxBackendProtocol``
-        that ``TimeoutLangSmithSandbox`` and the agent's file/execute tools expect.
-        """
-        if kwargs:
-            msg = f"Received unsupported arguments: {list(kwargs.keys())}"
-            raise TypeError(msg)
-        async with AsyncSandboxClient(
-            api_key=self._api_key, api_endpoint=self._api_endpoint
-        ) as client:
-            if sandbox_id:
-                sandbox = await _reuse_existing_sandbox(client, sandbox_id)
-                return TimeoutLangSmithSandbox(sandbox.to_sync())
+    async def create(self, *, snapshot_id: str | None = None) -> SandboxBackendProtocol:
+        (
+            default_snapshot_id,
+            fs_capacity_bytes,
+            vcpus,
+            mem_bytes,
+            idle_ttl_seconds,
+            delete_after_stop_seconds,
+        ) = _get_sandbox_snapshot_config()
+        effective_snapshot_id = snapshot_id or default_snapshot_id
+        if not effective_snapshot_id:
+            msg = (
+                "No base snapshot configured: set it in admin settings or via "
+                "DEFAULT_SANDBOX_SNAPSHOT_ID"
+            )
+            raise ValueError(msg)
 
-            if not snapshot_id:
-                msg = (
-                    "No base snapshot configured: set it in admin settings or via "
-                    "DEFAULT_SANDBOX_SNAPSHOT_ID"
-                )
-                raise ValueError(msg)
-
+        async with self._client() as client:
             _install_create_extra_fields(client, sandbox_create_extra_fields())
-
             try:
                 sandbox = await _create_sandbox_with_retry(
                     client,
-                    snapshot_id=snapshot_id,
+                    snapshot_id=effective_snapshot_id,
                     fs_capacity_bytes=fs_capacity_bytes,
                     vcpus=vcpus,
                     mem_bytes=mem_bytes,
                     idle_ttl_seconds=idle_ttl_seconds,
                     delete_after_stop_seconds=delete_after_stop_seconds,
-                    timeout=timeout,
+                    timeout=SANDBOX_CREATE_TIMEOUT_SECONDS,
                 )
             except Exception as e:
-                msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
+                msg = f"Failed to create sandbox from snapshot '{effective_snapshot_id}': {e}"
                 raise RuntimeError(msg) from e
 
             return TimeoutLangSmithSandbox(sandbox.to_sync())
+
+    async def work_dir(self, backend: SandboxBackendProtocol) -> str:
+        return LANGSMITH_WORK_DIR
+
+    def _client(self) -> AsyncSandboxClient:
+        api_key = _get_sandbox_api_key()
+        if not api_key:
+            msg = "LANGSMITH_API_KEY (or LANGSMITH_API_KEY_PROD) not set"
+            raise ValueError(msg)
+        return AsyncSandboxClient(api_key=api_key, api_endpoint=_get_sandbox_api_endpoint())

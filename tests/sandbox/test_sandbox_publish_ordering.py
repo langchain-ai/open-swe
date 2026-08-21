@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.runtime.sandbox import ensure_sandbox_for_thread
-from agent.utils.sandbox_state import SANDBOX_BACKENDS, get_or_create_sandbox_backend_proxy
+from agent.utils.sandbox_registry import SANDBOX_BACKENDS, get_or_create_sandbox_backend_proxy
 
 
 @pytest.mark.asyncio

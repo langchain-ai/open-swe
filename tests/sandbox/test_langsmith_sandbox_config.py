@@ -111,7 +111,7 @@ def test_validate_startup_rejects_non_integer_ttl() -> None:
         clear=True,
     ):
         with pytest.raises(ValueError, match="DEFAULT_SANDBOX_IDLE_TTL_SECONDS"):
-            LangSmithProvider.validate_startup_config()
+            LangSmithProvider().validate_startup_config()
 
 
 def test_validate_startup_rejects_negative_ttl() -> None:
@@ -124,7 +124,7 @@ def test_validate_startup_rejects_negative_ttl() -> None:
         clear=True,
     ):
         with pytest.raises(ValueError, match=">= 0"):
-            LangSmithProvider.validate_startup_config()
+            LangSmithProvider().validate_startup_config()
 
 
 def test_validate_startup_accepts_valid_config() -> None:
@@ -137,7 +137,7 @@ def test_validate_startup_accepts_valid_config() -> None:
         },
         clear=True,
     ):
-        LangSmithProvider.validate_startup_config()
+        LangSmithProvider().validate_startup_config()
 
 
 class _RetryableCreateError(Exception):

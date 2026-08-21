@@ -13,7 +13,7 @@ from ..dashboard.plan_store import (
     PLAN_STATUS_SHARED,
     save_plan_content,
 )
-from ..utils.sandbox_state import get_sandbox_backend
+from ..utils.sandbox_registry import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
 

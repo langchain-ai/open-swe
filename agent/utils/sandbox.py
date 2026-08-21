@@ -1,15 +1,25 @@
-import asyncio
-import inspect
-from collections.abc import Callable
-from importlib import import_module
-from typing import TYPE_CHECKING, Any
+"""The sandbox provider contract, the provider registry, and the errors runs recover from.
 
-from ..config import is_langsmith_sandbox, sandbox_provider
+One provider class per platform, selected by ``SANDBOX_TYPE``. Everything the
+rest of the codebase needs to know about a platform — how to reach a sandbox,
+whether its traffic goes through a GitHub proxy, whether it can boot from a
+snapshot, where it keeps a writable tree — is answered by the provider rather
+than by branching on the provider's name.
+"""
+
+import logging
+from abc import ABC, abstractmethod
+from importlib import import_module
+from typing import TYPE_CHECKING, ClassVar
+
+from ..config import sandbox_provider
 
 if TYPE_CHECKING:
+    # Kept out of the runtime import graph: the webapp reaches this module for
+    # provider capabilities and must not pull the agent stack in with it.
     from deepagents.backends.protocol import SandboxBackendProtocol
 
-SandboxFactory = Callable[..., Any]
+logger = logging.getLogger(__name__)
 
 
 class SandboxGoneError(RuntimeError):
@@ -20,35 +30,104 @@ class SandboxGoneError(RuntimeError):
     """
 
 
-SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
-    "langsmith": ("agent.integrations.langsmith", "create_langsmith_sandbox"),
-    "daytona": ("agent.integrations.daytona", "create_daytona_sandbox"),
-    "modal": ("agent.integrations.modal", "create_modal_sandbox"),
-    "runloop": ("agent.integrations.runloop", "create_runloop_sandbox"),
-    "e2b": ("agent.integrations.e2b", "create_e2b_sandbox"),
-    "local": ("agent.integrations.local", "create_local_sandbox"),
+class SandboxUnreachableError(RuntimeError):
+    """The thread's sandbox did not answer this run.
+
+    Says nothing about whether it will answer the next one — a later run
+    reconnects to the same id and may well succeed. It is never resolved by
+    creating a replacement: the sandbox holds the agent's only copy of its
+    working tree, so a fresh one would discard uncommitted work while the agent
+    carried on believing it was still there.
+    """
+
+    def __init__(self, thread_id: str, sandbox_id: str | None, cause: str) -> None:
+        self.thread_id = thread_id
+        self.sandbox_id = sandbox_id
+        super().__init__(
+            f"Sandbox {sandbox_id or '<unknown>'} for thread {thread_id} is unreachable: {cause}"
+        )
+
+
+class SandboxProvider(ABC):
+    """One sandbox platform, as the rest of Open SWE sees it.
+
+    Intentionally has no delete. A sandbox holds the agent's only copy of its
+    working tree, and the thread metadata read fails open to "no sandbox", so a
+    delete keyed off it can destroy a live box. Reclamation is the platform's
+    job, via the idle TTL and delete-after-stop set at create time.
+    """
+
+    # Whether the platform fronts the sandbox's GitHub traffic with a proxy we
+    # configure with a token, instead of the sandbox reaching GitHub directly.
+    uses_github_proxy: ClassVar[bool] = False
+
+    # Whether `create` can boot a sandbox from an Open SWE snapshot id (the ids
+    # environments and repo snapshot builds produce).
+    supports_snapshots: ClassVar[bool] = False
+
+    @abstractmethod
+    async def connect(self, sandbox_id: str) -> "SandboxBackendProtocol":
+        """Reconnect to the sandbox ``sandbox_id`` names.
+
+        Raise ``SandboxGoneError`` when — and only when — the platform reports
+        that the sandbox does not exist. The lifecycle replaces a gone sandbox
+        and refuses to replace a merely unreachable one, so a not-found that
+        arrives as some other error type bricks the thread permanently.
+        """
+
+    @abstractmethod
+    async def create(self, *, snapshot_id: str | None = None) -> "SandboxBackendProtocol":
+        """Provision a fresh sandbox, booting it from ``snapshot_id`` when given.
+
+        A provider that cannot boot from Open SWE snapshots raises on a
+        non-``None`` ``snapshot_id`` rather than silently starting a sandbox
+        with contents the caller did not ask for.
+        """
+
+    def validate_startup_config(self) -> None:  # noqa: B027 - optional: most providers read no env
+        """Reject env-var configuration this provider cannot run with, at server boot."""
+
+    async def work_dir(self, backend: "SandboxBackendProtocol") -> str | None:
+        """The writable directory this platform gives its sandboxes.
+
+        ``None`` when the platform has nothing to say, which leaves the caller
+        to ask the sandbox's own shell.
+        """
+        return None
+
+
+_PROVIDERS: dict[str, tuple[str, str]] = {
+    "langsmith": ("agent.integrations.langsmith", "LangSmithProvider"),
+    "daytona": ("agent.integrations.daytona", "DaytonaProvider"),
+    "modal": ("agent.integrations.modal", "ModalProvider"),
+    "runloop": ("agent.integrations.runloop", "RunloopProvider"),
+    "e2b": ("agent.integrations.e2b", "E2BProvider"),
+    "local": ("agent.integrations.local", "LocalProvider"),
 }
 
 
-def sandbox_provider_uses_proxy() -> bool:
-    """Whether the configured provider fronts GitHub traffic with an auth proxy.
+def current_sandbox_provider() -> SandboxProvider:
+    """The provider ``SANDBOX_TYPE`` selects.
 
-    Only LangSmith sandboxes have one; every other provider reaches GitHub
-    directly, so there is nothing to configure or refresh.
+    Imported on demand: a deployment installs one platform's SDK, and importing
+    the other five would fail.
     """
-    return is_langsmith_sandbox()
+    name = sandbox_provider()
+    location = _PROVIDERS.get(name)
+    if location is None:
+        supported = ", ".join(sorted(_PROVIDERS))
+        raise ValueError(f"Invalid sandbox type: {name}. Supported types: {supported}")
+    module_name, class_name = location
+    provider_class = getattr(import_module(module_name), class_name)
+    return provider_class()
 
 
-def _load_sandbox_factory(sandbox_type: str) -> SandboxFactory:
-    factory_path = SANDBOX_FACTORIES.get(sandbox_type)
-    if factory_path is None:
-        supported = ", ".join(sorted(SANDBOX_FACTORIES))
-        raise ValueError(f"Invalid sandbox type: {sandbox_type}. Supported types: {supported}")
-    module_name, function_name = factory_path
-    factory = getattr(import_module(module_name), function_name)
-    if not callable(factory):
-        raise TypeError(f"Sandbox factory {module_name}.{function_name} is not callable")
-    return factory
+def sandbox_provider_uses_proxy() -> bool:
+    return current_sandbox_provider().uses_github_proxy
+
+
+def sandbox_provider_supports_snapshots() -> bool:
+    return current_sandbox_provider().supports_snapshots
 
 
 async def create_sandbox(
@@ -56,43 +135,23 @@ async def create_sandbox(
     *,
     snapshot_id: str | None = None,
 ) -> "SandboxBackendProtocol":
-    """Create or reconnect to a sandbox using the configured provider.
+    """Reconnect to ``sandbox_id``, or provision a new sandbox from ``snapshot_id``.
 
-    The provider is selected via the SANDBOX_TYPE environment variable.
-    Supported values: langsmith (default), daytona, modal, runloop, e2b, local.
-
-    langsmith and modal provision natively async. local stays on
-    ``asyncio.to_thread`` because ``LocalShellBackend`` setup performs synchronous
-    filesystem I/O. daytona, e2b and runloop stay there because their
-    ``langchain_*`` wrappers bind synchronous SDK handles.
-
-    Args:
-        sandbox_id: Optional existing sandbox ID to reconnect to.
-        snapshot_id: Optional snapshot to boot a new sandbox from. Only the
-            langsmith provider honors this; others ignore it. When omitted the
-            langsmith provider falls back to DEFAULT_SANDBOX_SNAPSHOT_ID.
-
-    Returns:
-        A sandbox backend implementing SandboxBackendProtocol.
+    The two are alternatives, not a pair: a snapshot only ever seeds a sandbox
+    being created, so passing both is a caller bug rather than a preference.
     """
-    sandbox_type = sandbox_provider()
-    factory = _load_sandbox_factory(sandbox_type)
-    if sandbox_type == "langsmith" and snapshot_id is not None:
-        return await factory(sandbox_id, snapshot_id=snapshot_id)
-    if inspect.iscoroutinefunction(factory):
-        return await factory(sandbox_id)
-    return await asyncio.to_thread(factory, sandbox_id)
+    if sandbox_id and snapshot_id:
+        raise ValueError("snapshot_id seeds a new sandbox; it cannot be applied to sandbox_id")
+    provider = current_sandbox_provider()
+    if sandbox_id:
+        return await provider.connect(sandbox_id)
+    return await provider.create(snapshot_id=snapshot_id)
 
 
 def validate_sandbox_startup_config() -> None:
-    """Validate the configured sandbox provider's env vars at server startup.
+    """Validate the configured provider's env vars at server startup.
 
-    Raises ValueError if the active provider's configuration is invalid.
-    Called from the FastAPI lifespan hook so errors surface at boot rather
-    than on the first sandbox creation.
+    Called from the FastAPI lifespan hook so errors surface at boot rather than
+    on the first sandbox creation.
     """
-    sandbox_type = sandbox_provider()
-    if sandbox_type == "langsmith":
-        from agent.integrations.langsmith import LangSmithProvider
-
-        LangSmithProvider.validate_startup_config()
+    current_sandbox_provider().validate_startup_config()

@@ -19,7 +19,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langsmith.sandbox import SandboxClientError
 
-from ..utils.sandbox_state import clear_sandbox_backend
+from ..utils.sandbox_registry import clear_sandbox_backend
 from .sandbox_circuit_breaker import (
     extract_sandbox_id,
     post_sandbox_unreachable_notification,

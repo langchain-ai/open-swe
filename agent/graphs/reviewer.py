@@ -94,8 +94,8 @@ from ..utils.github_app import get_github_app_installation_token_with_expiry
 from ..utils.github_token import cache_github_token_for_thread
 from ..utils.model import DEFAULT_LLM_REASONING
 from ..utils.repo_prep import materialize_trusted_skills, prepare_review_repo
+from ..utils.sandbox import SandboxUnreachableError
 from ..utils.sandbox_paths import aresolve_sandbox_work_dir
-from ..utils.sandbox_state import SandboxUnreachableError
 from ..utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 from ._assembly import ModelSpec, cached_gateway_enabled, model_spec, prepare_config, stub_agent
 

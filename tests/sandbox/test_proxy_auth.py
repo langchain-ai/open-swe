@@ -11,7 +11,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.integrations.langsmith import PROXY_GH_TOKEN_PLACEHOLDER, configure_github_proxy
-from agent.utils.sandbox_state import SandboxBackendProxy
+from agent.utils.sandbox_proxy import SandboxBackendProxy
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -21,23 +21,70 @@ def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
     mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
 
-class TestSandboxFactoryLoading:
-    async def test_create_sandbox_loads_only_selected_provider(self) -> None:
+class TestSandboxProviderLoading:
+    async def test_create_sandbox_loads_only_the_selected_provider(self) -> None:
+        provider = MagicMock()
+        provider.connect = AsyncMock(return_value=MagicMock(id="local"))
+        module = MagicMock()
+        module.LocalProvider.return_value = provider
+
         with (
-            patch("agent.utils.sandbox.import_module") as mock_import_module,
+            patch("agent.utils.sandbox.import_module", return_value=module) as mock_import_module,
             patch.dict("os.environ", {"SANDBOX_TYPE": "local"}),
         ):
-            module = MagicMock()
-            module.create_local_sandbox.return_value = MagicMock(id="local")
-            mock_import_module.return_value = module
-
             from agent.utils.sandbox import create_sandbox
 
             sandbox = await create_sandbox("existing")
 
         assert sandbox.id == "local"
         mock_import_module.assert_called_once_with("agent.integrations.local")
-        module.create_local_sandbox.assert_called_once_with("existing")
+        provider.connect.assert_awaited_once_with("existing")
+
+    async def test_create_sandbox_creates_from_a_snapshot_when_given_no_id(self) -> None:
+        provider = MagicMock()
+        provider.create = AsyncMock(return_value=MagicMock(id="fresh"))
+        module = MagicMock()
+        module.LocalProvider.return_value = provider
+
+        with (
+            patch("agent.utils.sandbox.import_module", return_value=module),
+            patch.dict("os.environ", {"SANDBOX_TYPE": "local"}),
+        ):
+            from agent.utils.sandbox import create_sandbox
+
+            sandbox = await create_sandbox(snapshot_id="snap-1")
+
+        assert sandbox.id == "fresh"
+        provider.create.assert_awaited_once_with(snapshot_id="snap-1")
+
+    async def test_create_sandbox_rejects_a_snapshot_for_an_existing_sandbox(self) -> None:
+        from agent.utils.sandbox import create_sandbox
+
+        with pytest.raises(ValueError, match="snapshot_id seeds a new sandbox"):
+            await create_sandbox("existing", snapshot_id="snap-1")
+
+    async def test_proxy_capability_comes_from_the_provider(self) -> None:
+        from agent.utils.sandbox import sandbox_provider_uses_proxy
+
+        with patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}):
+            assert sandbox_provider_uses_proxy() is True
+        with patch.dict("os.environ", {"SANDBOX_TYPE": "local"}):
+            assert sandbox_provider_uses_proxy() is False
+
+    async def test_snapshot_capability_comes_from_the_provider(self) -> None:
+        from agent.utils.sandbox import sandbox_provider_supports_snapshots
+
+        with patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}):
+            assert sandbox_provider_supports_snapshots() is True
+        with patch.dict("os.environ", {"SANDBOX_TYPE": "local"}):
+            assert sandbox_provider_supports_snapshots() is False
+
+    async def test_unknown_sandbox_type_names_the_supported_ones(self) -> None:
+        from agent.utils.sandbox import current_sandbox_provider
+
+        with patch.dict("os.environ", {"SANDBOX_TYPE": "nope"}):
+            with pytest.raises(ValueError, match="Invalid sandbox type: nope"):
+                current_sandbox_provider()
 
 
 class TestConfigureGithubProxy:
@@ -484,7 +531,7 @@ class TestRefreshProxyOnSandboxReuse:
             patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
             patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
             patch.dict(
-                "agent.utils.sandbox_state.SANDBOX_BACKENDS",
+                "agent.utils.sandbox_registry.SANDBOX_BACKENDS",
                 {"thread-123": SandboxBackendProxy(mock_sandbox, thread_id="thread-123")},
                 clear=True,
             ),
@@ -545,7 +592,7 @@ class TestRefreshProxyOnSandboxReuse:
             patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
             patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
             patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
-            patch.dict("agent.utils.sandbox_state.SANDBOX_BACKENDS", {}, clear=True),
+            patch.dict("agent.utils.sandbox_registry.SANDBOX_BACKENDS", {}, clear=True),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             from agent.graphs.agent import get_agent

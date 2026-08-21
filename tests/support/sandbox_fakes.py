@@ -12,7 +12,6 @@ tests need a backend that lacks it.
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
 
 from deepagents.backends.protocol import DeleteResult, ExecuteResponse, SandboxBackendProtocol
 
@@ -28,14 +27,12 @@ class FakeSandboxBackend(SandboxBackendProtocol):
         results: Mapping[str, Result] | None = None,
         script: Sequence[Result] | None = None,
         default: Result | None = None,
-        provider: Any = None,
     ) -> None:
         self._sandbox_id = sandbox_id
         self._respond = respond
         self._results = dict(results or {})
         self._script = list(script or [])
         self._default = default
-        self.sandbox = provider
         self.commands: list[str] = []
         self.timeouts: list[int | None] = []
         self.deleted: list[str] = []
