@@ -99,8 +99,8 @@
   "homepage": "https://github.com/langchain-ai/open-swe",
   "devDependencies": {
     "@electron/notarize": "3.1.1",
-    "@types/node": "22.20.1",
-    "electron": "41.10.3",
+    "@types/node": "26.2.0",
+    "electron": "43.4.1",
     "electron-builder": "26.15.3",
     "typescript": "5.9.3"
   },

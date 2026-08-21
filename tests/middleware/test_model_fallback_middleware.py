@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import anthropic
 import httpx
+import httpx2
 import openai
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -29,8 +30,8 @@ def _anthropic_overloaded() -> anthropic.APIStatusError:
 
 
 def _openai_5xx() -> openai.APIStatusError:
-    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
-    response = httpx.Response(503, request=request, json={"error": {"message": "unavailable"}})
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
+    response = httpx2.Response(503, request=request, json={"error": {"message": "unavailable"}})
     return openai.APIStatusError("unavailable", response=response, body=response.json())
 
 
