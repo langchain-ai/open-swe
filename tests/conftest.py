@@ -7,9 +7,9 @@ import pytest
 from support.langgraph_fakes import FakeLangGraphClient
 
 from agent import store as agent_store
+from agent.review import dispatch as review_dispatch
 from agent.utils import ttl_cache
 from agent.utils.sandbox_state import SANDBOX_BACKENDS
-from agent.webhooks import common as webhook_common
 
 
 @pytest.fixture(autouse=True)
@@ -36,13 +36,13 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
     is empty in the test environment because there is no live LangGraph Store.
 
     Tests targeting the automatic-review gate should override this fixture or set
-    ``monkeypatch.setattr(webhook_common, "is_review_repo_enabled", ...)`` to a stricter stub.
+    ``monkeypatch.setattr(review_dispatch, "is_review_repo_enabled", ...)`` to a stricter stub.
     """
 
     async def _enabled(_owner: str, _name: str) -> bool:
         return True
 
-    monkeypatch.setattr(webhook_common, "is_review_repo_enabled", _enabled)
+    monkeypatch.setattr(review_dispatch, "is_review_repo_enabled", _enabled)
 
 
 @pytest.fixture

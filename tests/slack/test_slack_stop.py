@@ -3,8 +3,8 @@ from typing import Any
 import pytest
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.utils import slack_stop
-from agent.utils.slack_stop import process_slack_stop_reaction
+from agent.webhooks import slack_stop
+from agent.webhooks.slack_stop import process_slack_stop_reaction
 
 
 def _event(message_ts: str, *, user_id: str = "UOTHER") -> dict[str, Any]:

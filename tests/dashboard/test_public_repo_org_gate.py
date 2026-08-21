@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 from httpx import Response
 
 from agent.api.app import app
-from agent.webhooks import common as webhook_common
 from agent.webhooks import github as github_webhooks
+from agent.webhooks import github_routes
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 
@@ -45,7 +45,7 @@ def _install_membership_stub(monkeypatch, members: set[str]) -> dict[str, list[s
         seen["calls"].append(username)
         return username in members
 
-    monkeypatch.setattr(webhook_common, "is_user_active_org_member", fake_is_user_active_org_member)
+    monkeypatch.setattr(github_routes, "is_user_active_org_member", fake_is_user_active_org_member)
     return seen
 
 

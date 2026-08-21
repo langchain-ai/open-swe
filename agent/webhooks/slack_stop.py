@@ -7,10 +7,13 @@ from typing import Any
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.dispatch import dispatch_agent_run
-
 from ..config import agent_version_metadata, langgraph_client
-from .slack import lookup_slack_run_mapping, lookup_slack_thread_id, store_slack_run_mapping
+from ..dispatch import dispatch_agent_run
+from ..utils.slack import (
+    lookup_slack_run_mapping,
+    lookup_slack_thread_id,
+    store_slack_run_mapping,
+)
 from .slack_events import claim_slack_event
 
 logger = logging.getLogger(__name__)

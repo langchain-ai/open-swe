@@ -2,8 +2,6 @@
 
 import asyncio
 import copy
-import hashlib
-import hmac
 import logging
 import re
 import time
@@ -137,34 +135,6 @@ def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username:
 def convert_mentions_to_slack_format(text: str) -> str:
     """Convert @Name(USER_ID) patterns to Slack's <@USER_ID> mention format."""
     return re.sub(r"@[^()]+\(([A-Z0-9]+)\)", r"<@\1>", text)
-
-
-def verify_slack_signature(
-    body: bytes,
-    timestamp: str,
-    signature: str,
-    secret: str,
-    max_age_seconds: int = 300,
-) -> bool:
-    """Verify Slack request signature."""
-    if not secret:
-        logger.warning("SLACK_SIGNING_SECRET is not configured — rejecting webhook request")
-        return False
-    if not timestamp or not signature:
-        return False
-    try:
-        request_timestamp = int(timestamp)
-    except ValueError:
-        return False
-    if abs(int(time.time()) - request_timestamp) > max_age_seconds:
-        return False
-
-    base_string = f"v0:{timestamp}:{body.decode('utf-8', errors='replace')}"
-    expected = (
-        "v0="
-        + hmac.new(secret.encode("utf-8"), base_string.encode("utf-8"), hashlib.sha256).hexdigest()
-    )
-    return hmac.compare_digest(expected, signature)
 
 
 def strip_bot_mention(text: str, bot_user_id: str, bot_username: str = "") -> str:
