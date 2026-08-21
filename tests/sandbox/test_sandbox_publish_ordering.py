@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.server import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-from agent.utils.sandbox_state import get_or_create_sandbox_backend_proxy
+from agent.runtime.sandbox import ensure_sandbox_for_thread
+from agent.utils.sandbox_state import SANDBOX_BACKENDS, get_or_create_sandbox_backend_proxy
 
 
 @pytest.mark.asyncio
@@ -31,17 +31,17 @@ async def test_initialization_failure_publishes_nothing(failing_step: str) -> No
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.runtime.sandbox.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "agent.server._create_sandbox_with_proxy",
+            "agent.runtime.sandbox._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=created,
         ),
-        patch("agent.server._configure_git_identity", steps["_configure_git_identity"]),
-        patch("agent.server.client.threads.update", steps["client.threads.update"]),
+        patch("agent.runtime.sandbox._configure_git_identity", steps["_configure_git_identity"]),
+        patch("agent.runtime.sandbox.client.threads.update", steps["client.threads.update"]),
         pytest.raises(RuntimeError, match="initialization failed"),
     ):
         await ensure_sandbox_for_thread(thread_id)

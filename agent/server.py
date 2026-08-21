@@ -1,10 +1,9 @@
 """Main entry point and graph factory for the Open SWE agent.
 
-Resolves the model, ensures one sandbox per thread (simplified
-get-or-create-then-reconnect, no cross-process ``__creating__`` sentinel),
-builds the curated tool list plus optional integrations, and wires the
-middleware stack. All per-thread state lives in the sandbox + thread metadata;
-the agent itself is stateless.
+Resolves the model, binds the run to its thread's sandbox (``agent.runtime.sandbox``
+owns that lifecycle), builds the curated tool list plus optional integrations, and
+wires the middleware stack. All per-thread state lives in the sandbox + thread
+metadata; the agent itself is stateless.
 """
 # ruff: noqa: E402
 
@@ -12,7 +11,7 @@ import logging
 import os
 import posixpath
 import warnings
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -52,25 +51,18 @@ from .dashboard.agent_overrides import (
     resolve_github_login,
 )
 from .dashboard.agent_usage import record_agent_thread_usage
-from .dashboard.environments import (
-    environment_prompt,
-    environment_snapshot_id,
-    resolve_environment,
-)
+from .dashboard.environments import environment_prompt, resolve_environment
 from .dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
-from .dashboard.repo_snapshots import resolve_repo_snapshot_id
 from .dashboard.run_diffs import THREAD_DIFF_KEY, save_run_diff
-from .dashboard.sandbox_settings import get_admin_base_snapshot_id
 from .dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from .dashboard.team_settings import (
     get_effective_gateway_enabled,
     get_team_default_model_pair,
-    get_team_default_repo,
     get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
@@ -80,7 +72,6 @@ from .input_messages import append_message_data
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
-from .integrations.langsmith import _configure_github_proxy
 from .integrations.langsmith_tools import load_langsmith_tools
 from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
@@ -119,6 +110,12 @@ from .runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
 )
 from .runtime.execution import graph_loaded_for_execution
+from .runtime.sandbox import (
+    ensure_sandbox_for_thread,
+    environment_slug,
+    get_cached_sandbox_backend,
+    resolve_default_repo,
+)
 from .thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from .tools import (
     approve_plan,
@@ -165,16 +162,10 @@ from .tools import (
 )
 from .utils import ttl_cache
 from .utils.auth import resolve_github_token
-from .utils.authorship import (
-    OPEN_SWE_BOT_EMAIL,
-    OPEN_SWE_BOT_NAME,
-    resolve_triggering_user_identity,
-)
+from .utils.authorship import resolve_triggering_user_identity
 from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
-from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_org_membership import is_user_active_org_member
-from .utils.github_proxy import record_proxy_token_expiry
 from .utils.json_types import as_json_object
 from .utils.model import (
     DEFAULT_LLM_REASONING,
@@ -184,16 +175,10 @@ from .utils.model import (
     provider_model_kwargs,
 )
 from .utils.read_only_backend import ReadOnlyBackend
-from .utils.sandbox import SandboxGoneError, create_sandbox
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
 from .utils.sandbox_state import (
-    SANDBOX_BACKENDS,
-    SandboxBackendProxy,
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
-    get_sandbox_id_from_metadata,
-    set_sandbox_backend,
-    unwrap_sandbox_backend,
 )
 from .utils.thread_settings import (
     ThreadSettings,
@@ -247,24 +232,6 @@ def _tool_loader_timeout_seconds() -> float:
     return timeout
 
 
-async def _resolve_prompt_default_repo(configurable: dict[str, Any]) -> dict[str, str] | None:
-    repo_config = configurable.get("repo")
-    if isinstance(repo_config, dict):
-        owner = repo_config.get("owner")
-        name = repo_config.get("name")
-        if isinstance(owner, str) and isinstance(name, str):
-            return {"owner": owner, "name": name}
-
-    if configurable.get("repo_explicitly_none") is True:
-        return None
-
-    try:
-        return await get_team_default_repo()
-    except Exception:
-        logger.debug("Failed to load team default repo for prompt", exc_info=True)
-        return None
-
-
 async def _resolve_repo_custom_instructions(
     default_repo: dict[str, str] | None,
 ) -> str | None:
@@ -291,312 +258,6 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
     except Exception:
         logger.debug("Failed to load user custom agent instructions", exc_info=True)
         return None
-
-
-async def _resolve_proxy_token(
-    github_proxy_token: str | None,
-) -> tuple[str | None, str | None, None]:
-    """Resolve the proxy token and its expiry."""
-    if github_proxy_token:
-        return github_proxy_token, None, None
-    token, expires_at = await get_github_app_installation_token_with_expiry()
-    return token, expires_at, None
-
-
-async def _resolve_snapshot_id(
-    repo: dict[str, str] | None,
-    environment_slug: str | None = None,
-) -> str | None:
-    """Resolve the snapshot a new sandbox boots from.
-
-    The run's environment (its selection, else ``default``) wins, then the repo's
-    built snapshot, then the admin-configured base snapshot. Never raises: any
-    failure resolves to ``None`` so sandbox creation falls back to the configured
-    ``DEFAULT_SANDBOX_SNAPSHOT_ID``.
-    """
-    environment_snapshot = environment_snapshot_id(await resolve_environment(environment_slug))
-    if environment_snapshot:
-        return environment_snapshot
-    if repo:
-        try:
-            repo_snapshot_id = await resolve_repo_snapshot_id(repo.get("owner"), repo.get("name"))
-        except Exception:  # noqa: BLE001
-            logger.debug("Failed to resolve repo-scoped snapshot", exc_info=True)
-            repo_snapshot_id = None
-        if repo_snapshot_id:
-            return repo_snapshot_id
-    return await get_admin_base_snapshot_id()
-
-
-async def _create_sandbox_with_proxy(
-    github_proxy_token: str | None = None,
-    *,
-    thread_id: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-    repo: dict[str, str] | None = None,
-    environment_slug: str | None = None,
-) -> SandboxBackendProtocol:
-    """Create a new sandbox with GitHub proxy auth configured."""
-    snapshot_id = await _resolve_snapshot_id(repo, environment_slug)
-    sandbox_backend = await create_sandbox(snapshot_id=snapshot_id)
-
-    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
-    if sandbox_type == "langsmith":
-        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
-        if not token:
-            msg = "Cannot configure proxy: GitHub App installation token is unavailable"
-            logger.error(msg)
-            raise ValueError(msg)
-        await _configure_github_proxy(sandbox_backend.id, token)
-        record_proxy_token_expiry(
-            thread_id,
-            expires_at,
-            repositories=github_proxy_repositories,
-            permissions=permissions,
-        )
-
-    return sandbox_backend
-
-
-async def _refresh_github_proxy(
-    sandbox_backend: SandboxBackendProtocol,
-    github_proxy_token: str | None = None,
-    *,
-    thread_id: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-) -> None:
-    """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
-        return
-
-    token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
-    if not token:
-        logger.warning(
-            "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
-            sandbox_backend.id,
-        )
-        return
-
-    current_backend = unwrap_sandbox_backend(sandbox_backend)
-    await _configure_github_proxy(current_backend.id, token)
-    record_proxy_token_expiry(
-        thread_id,
-        expires_at,
-        repositories=github_proxy_repositories,
-        permissions=permissions,
-    )
-
-
-async def _refresh_github_proxy_or_fail(
-    sandbox_backend: SandboxBackendProtocol,
-    thread_id: str,
-    github_proxy_token: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-) -> SandboxBackendProtocol:
-    """Refresh proxy credentials; a sandbox we can't reconfigure is unreachable."""
-    try:
-        await _refresh_github_proxy(
-            sandbox_backend,
-            github_proxy_token,
-            thread_id=thread_id,
-            github_proxy_repositories=github_proxy_repositories,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to refresh GitHub proxy for sandbox %s on thread %s",
-            sandbox_backend.id,
-            thread_id,
-            exc_info=True,
-        )
-        raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
-    return sandbox_backend
-
-
-async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
-    await sandbox_backend.aexecute(
-        f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
-        f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'",
-    )
-
-
-async def _connect_existing_sandbox(
-    thread_id: str,
-    *,
-    cached: SandboxBackendProtocol | None,
-    sandbox_id: str | None,
-    github_proxy_token: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-) -> SandboxBackendProtocol:
-    """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
-
-    A ``SandboxGoneError`` propagates untouched so the caller recreates. Nothing
-    pings the box first: refreshing the proxy below has to reach it anyway, and
-    raises the same unreachable error when it cannot.
-    """
-    if cached is not None:
-        logger.info("Using cached sandbox backend for thread %s", thread_id)
-        sandbox_backend = cached
-    else:
-        logger.info("Connecting to existing sandbox %s", sandbox_id)
-        try:
-            sandbox_backend = await create_sandbox(str(sandbox_id))
-        except SandboxGoneError:
-            raise
-        except Exception as exc:
-            logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
-            raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
-    return await _refresh_github_proxy_or_fail(
-        sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
-    )
-
-
-async def ensure_sandbox_for_thread(
-    thread_id: str,
-    *,
-    github_proxy_token: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-    repo: dict[str, str] | None = None,
-    environment_slug: str | None = None,
-    allow_replacement: bool = False,
-) -> SandboxBackendProtocol:
-    """Get-or-create a healthy sandbox bound to ``thread_id``.
-
-    Three cases (dispatch uses ``multitask_strategy="interrupt"``, so a thread
-    never provisions two sandboxes concurrently — no cross-process sentinel is
-    needed):
-
-    1. Cached in memory -> ping, then refresh proxy.
-    2. Metadata has an id -> reconnect, then refresh proxy.
-    3. No sandbox at all -> create one and persist the id.
-
-    A sandbox that exists but can't be reached raises ``SandboxUnreachableError``
-    instead of being replaced, because a replacement is empty and swapping one in
-    silently destroys whatever the agent had not yet committed. A *deleted* one
-    (``SandboxGoneError``) is always replaced: it holds nothing, and the stale id
-    in thread metadata is what every later run keeps reconnecting to, so refusing
-    would brick the thread permanently.
-
-    ``allow_replacement`` extends replacement to merely unreachable sandboxes,
-    for callers whose sandbox holds nothing but a re-derivable checkout — the
-    read-only reviewer, which re-preps the repo every run.
-
-    For LangSmith sandboxes, also refreshes the GitHub App proxy auth. When
-    ``repo`` has a ``ready`` repo-scoped snapshot, newly created sandboxes boot
-    from it; otherwise the base snapshot (admin setting, else
-    ``DEFAULT_SANDBOX_SNAPSHOT_ID``) is used.
-    Re-applies git identity every run because reused/reconnected sandboxes can
-    lose their ``--global`` config, and Vercel preview deploys reject commits
-    whose author email can't be resolved to a GitHub account.
-    """
-    cached_proxy = SANDBOX_BACKENDS.get(thread_id)
-    sandbox_backend = (
-        unwrap_sandbox_backend(cached_proxy)
-        if cached_proxy is not None and cached_proxy.has_backend
-        else None
-    )
-    sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-
-    if sandbox_backend is None and sandbox_id is None:
-        logger.info("Creating new sandbox for thread %s", thread_id)
-        sandbox_backend = await _create_sandbox_with_proxy(
-            github_proxy_token,
-            thread_id=thread_id,
-            github_proxy_repositories=github_proxy_repositories,
-            repo=repo,
-            environment_slug=environment_slug,
-        )
-        logger.info("Sandbox created: %s", sandbox_backend.id)
-    else:
-        try:
-            sandbox_backend = await _connect_existing_sandbox(
-                thread_id,
-                cached=sandbox_backend,
-                sandbox_id=sandbox_id,
-                github_proxy_token=github_proxy_token,
-                github_proxy_repositories=github_proxy_repositories,
-            )
-        except (SandboxGoneError, SandboxUnreachableError) as exc:
-            gone = isinstance(exc, SandboxGoneError)
-            if not (gone or allow_replacement):
-                raise
-            logger.warning(
-                "Replacing %s sandbox %s for thread %s",
-                "deleted" if gone else "unreachable",
-                sandbox_id,
-                thread_id,
-            )
-            try:
-                sandbox_backend = await _create_sandbox_with_proxy(
-                    github_proxy_token,
-                    thread_id=thread_id,
-                    github_proxy_repositories=github_proxy_repositories,
-                    repo=repo,
-                )
-            except Exception as create_exc:
-                # Keep the failure typed so callers still recognize "this run has no
-                # sandbox" and can notify the user.
-                logger.warning(
-                    "Failed to replace sandbox %s for thread %s",
-                    sandbox_id,
-                    thread_id,
-                    exc_info=True,
-                )
-                raise SandboxUnreachableError(
-                    thread_id, sandbox_id, str(create_exc)
-                ) from create_exc
-            logger.info("Replacement sandbox created: %s", sandbox_backend.id)
-
-    await _configure_git_identity(sandbox_backend)
-
-    # Bind the thread only once the sandbox is created and initialized: a run
-    # that dies earlier leaves no id to reconnect to, so the next run creates
-    # rather than adopting a half-built box.
-    if sandbox_id != sandbox_backend.id:
-        await client.threads.update(
-            thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id}
-        )
-
-    # Publishing last is what makes a failure above visible. Callers reach the
-    # proxy's cached backend without awaiting the startup task that produced it,
-    # so a backend published before this point would be used by the rest of the
-    # run while the initialization that failed is only logged.
-    return set_sandbox_backend(thread_id, sandbox_backend)
-
-
-async def recreate_sandbox_for_thread(
-    thread_id: str,
-    *,
-    repo: dict[str, str] | None = None,
-    environment_slug: str | None = None,
-) -> tuple[str, str]:
-    """Bind a thread to a fresh sandbox while preserving its previous sandbox."""
-    cached = SANDBOX_BACKENDS.get(thread_id)
-    metadata_sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-    old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
-    if not old_sandbox_id:
-        raise ValueError(f"Thread {thread_id} has no sandbox to recreate")
-
-    new_sandbox = await _create_sandbox_with_proxy(
-        thread_id=thread_id,
-        repo=repo,
-        environment_slug=environment_slug,
-    )
-    if new_sandbox.id == old_sandbox_id:
-        raise RuntimeError("Sandbox provider did not create a distinct sandbox")
-
-    await _configure_git_identity(new_sandbox)
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"sandbox_id": new_sandbox.id},
-    )
-    set_sandbox_backend(thread_id, new_sandbox)
-    logger.info(
-        "Rebound thread %s from sandbox %s to sandbox %s",
-        thread_id,
-        old_sandbox_id,
-        new_sandbox.id,
-    )
-    return old_sandbox_id, new_sandbox.id
 
 
 # Mutating external tools hidden from the model while plan mode is active so it
@@ -732,18 +393,6 @@ def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
     }
 
 
-def _get_cached_sandbox_backend(
-    thread_id: str,
-    *,
-    reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
-) -> SandboxBackendProxy:
-    return get_or_create_sandbox_backend_proxy(thread_id, reconnect=reconnect)
-
-
-get_cached_sandbox_backend = _get_cached_sandbox_backend
-configure_git_identity = _configure_git_identity
-
-
 async def _observability_authorized(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether the triggering user may use the team observability tools.
 
@@ -772,12 +421,6 @@ ENVIRONMENT_TOOLS = (
     capture_environment_snapshot,
     delete_environment,
 )
-
-
-def _environment_slug(configurable: Mapping[str, Any] | None) -> str | None:
-    """The environment this thread selected, if any."""
-    slug = (configurable or {}).get("environment")
-    return slug.strip() or None if isinstance(slug, str) else None
 
 
 async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -1118,7 +761,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 ),
             }
         github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
-        prompt_default_repo = await _resolve_prompt_default_repo(configurable)
+        prompt_default_repo = await resolve_default_repo(configurable)
         triggering_user_identity_task = asyncio.create_task(
             asyncio.to_thread(
                 resolve_triggering_user_identity, as_json_object(self._config), github_token
@@ -1141,7 +784,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             raise
         del github_token
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
-        environment = await resolve_environment(_environment_slug(configurable))
+        environment = await resolve_environment(environment_slug(configurable))
         sender_instructions = await _resolve_user_custom_instructions(self._profile_login)
         sender_context = construct_sender_context(
             triggering_user_identity,
@@ -1227,14 +870,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     ) -> SandboxBackendProtocol:
         if is_desktop_run(_configurable):
             return create_desktop_backend(_configurable)
-        prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
+        prompt_default_repo = await resolve_default_repo(_configurable)
         return await ensure_sandbox_for_thread(
             _thread_id,
             repo=prompt_default_repo,
-            environment_slug=_environment_slug(_configurable),
+            environment_slug=environment_slug(_configurable),
         )
 
-    backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
     backend.start()
 
     # `profile_login` is whoever sent the message that started this run; it drives
@@ -1342,7 +985,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         repo_instructions = thread_settings.get("repo_instructions")
     else:
         repo_instructions = await _resolve_repo_custom_instructions(
-            await _resolve_prompt_default_repo(configurable)
+            await resolve_default_repo(configurable)
         )
     # Stored before the Fable gate so a deployment-wide toggle still applies on
     # every run rather than being frozen into the thread.

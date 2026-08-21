@@ -101,7 +101,7 @@ class TestMaybeRefreshProxyToken:
                 new=AsyncMock(return_value=("ghs_new", new_expiry)),
             ),
             patch(
-                "agent.integrations.langsmith._configure_github_proxy",
+                "agent.integrations.langsmith.configure_github_proxy",
                 new_callable=AsyncMock,
             ) as mock_configure,
         ):
@@ -128,7 +128,7 @@ class TestMaybeRefreshProxyToken:
                 new=token_mock,
             ),
             patch(
-                "agent.integrations.langsmith._configure_github_proxy",
+                "agent.integrations.langsmith.configure_github_proxy",
                 new_callable=AsyncMock,
             ),
         ):
@@ -153,7 +153,7 @@ class TestMaybeRefreshProxyToken:
                 "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
                 new=AsyncMock(return_value=(None, None)),
             ),
-            patch("agent.integrations.langsmith._configure_github_proxy") as mock_configure,
+            patch("agent.integrations.langsmith.configure_github_proxy") as mock_configure,
         ):
             result = await maybe_refresh_proxy_token("thread-1", now=now)
 

@@ -42,6 +42,15 @@ def test_server_does_not_import_exa_or_dashboard_routes() -> None:
     assert not any(loaded.values()), f"forbidden modules imported by agent.server: {loaded}"
 
 
+def test_runtime_does_not_import_the_graph_factories() -> None:
+    """The shared runtime layer must not depend on the graphs that build on it."""
+    loaded = _closure_check(
+        "agent.runtime",
+        ["agent.server", "agent.reviewer", "agent.analyzer", "agent.chat", "agent.webapp"],
+    )
+    assert not any(loaded.values()), f"forbidden modules imported by agent.runtime: {loaded}"
+
+
 def test_lazy_names_all_resolve() -> None:
     code = """
 import importlib

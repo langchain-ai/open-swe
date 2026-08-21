@@ -366,7 +366,7 @@ async def _start_sandbox_best_effort(sandbox_name: str) -> None:
         await client.aclose()
 
 
-async def _configure_github_proxy(sandbox_name: str, github_token: str) -> None:
+async def configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
 
     Uses the LangSmith proxy-config API to set up header injection so that
@@ -418,7 +418,6 @@ async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandbox
 
 async def create_langsmith_sandbox(
     sandbox_id: str | None = None,
-    github_token: str | None = None,
     *,
     snapshot_id: str | None = None,
 ) -> SandboxBackendProtocol:
@@ -431,8 +430,6 @@ async def create_langsmith_sandbox(
     Args:
         sandbox_id: Optional existing sandbox ID to connect to.
                    If None, creates a new sandbox.
-        github_token: Optional GitHub token. Used to configure proxy auth on
-                      new sandboxes. Ignored when connecting to an existing sandbox.
         snapshot_id: Optional repo-scoped snapshot to boot from. When omitted,
                       falls back to DEFAULT_SANDBOX_SNAPSHOT_ID.
 
@@ -461,9 +458,6 @@ async def create_langsmith_sandbox(
         idle_ttl_seconds=idle_ttl_seconds,
         delete_after_stop_seconds=delete_after_stop_seconds,
     )
-
-    if sandbox_id is None and github_token:
-        await _configure_github_proxy(backend.id, github_token)
 
     return backend
 

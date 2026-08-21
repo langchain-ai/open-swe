@@ -11,7 +11,6 @@ on public repos even when the GitHub App is not installed on them.
 # ruff: noqa: E402
 
 import logging
-import os
 import warnings
 from typing import Any, cast
 
@@ -24,14 +23,12 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 from deepagents import create_deep_agent
 from deepagents.backends.composite import CompositeBackend
-from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
 from .dashboard.team_settings import get_effective_gateway_enabled
-from .integrations.langsmith import _configure_github_proxy
 from .middleware import (
     BasePrepareRunMiddleware,
     DynamicContextMiddleware,
@@ -56,9 +53,9 @@ from .utils import ttl_cache
 from .utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
 from .utils.deferred_model import make_deferred_error_model
 from .utils.github_app import get_github_app_installation_token
+from .utils.github_proxy import configure_proxy_for_sandbox
 from .utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from .utils.sandbox_paths import aresolve_sandbox_work_dir
-from .utils.sandbox_state import unwrap_sandbox_backend
 from .utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 
 logger = logging.getLogger(__name__)
@@ -88,16 +85,6 @@ evidence and what to save.
 
 {reviewer_themes}
 """
-
-
-async def _configure_sandbox_github_proxy(
-    sandbox_backend: SandboxBackendProtocol,
-    github_token: str,
-) -> None:
-    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
-        return
-    backend = unwrap_sandbox_backend(sandbox_backend)
-    await _configure_github_proxy(backend.id, github_token)
 
 
 async def _cached_gateway_enabled() -> bool:
@@ -146,7 +133,9 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
         if not (isinstance(github_token, str) and github_token):
             github_token = await get_github_app_installation_token()
         if isinstance(github_token, str) and github_token:
-            await _configure_sandbox_github_proxy(sandbox_backend, github_token)
+            await configure_proxy_for_sandbox(
+                sandbox_backend, thread_id=self._thread_id, github_token=github_token
+            )
         system_prompt = STYLE_ANALYZER_PROMPT.format(
             repo_owner=owner or "<owner>",
             repo_name=name or "<repo>",

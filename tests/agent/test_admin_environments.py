@@ -6,6 +6,7 @@ from langgraph.graph.state import RunnableConfig
 
 from agent import server
 from agent.prompt import construct_sender_context, construct_system_prompt
+from agent.runtime import sandbox
 from agent.tools import environments as env_tools
 
 _READY = {"slug": "base", "name": "Base", "snapshot_status": "ready", "snapshot_id": "env-snap"}
@@ -21,55 +22,57 @@ def _config(**configurable: object) -> RunnableConfig:
 @pytest.mark.asyncio
 async def test_default_environment_snapshot_wins_over_repo_and_base() -> None:
     with (
-        patch.object(server, "resolve_environment", new_callable=AsyncMock, return_value=_READY),
+        patch.object(sandbox, "resolve_environment", new_callable=AsyncMock, return_value=_READY),
         patch.object(
-            server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
+            sandbox, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
         ),
         patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
+            sandbox, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
         ),
     ):
-        assert await server._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "env-snap"
+        assert await sandbox._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "env-snap"
 
 
 @pytest.mark.asyncio
 async def test_environment_without_ready_snapshot_falls_back_to_repo() -> None:
     capturing = {**_READY, "snapshot_status": "capturing"}
     with (
-        patch.object(server, "resolve_environment", new_callable=AsyncMock, return_value=capturing),
         patch.object(
-            server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
+            sandbox, "resolve_environment", new_callable=AsyncMock, return_value=capturing
         ),
         patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
+            sandbox, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
+        ),
+        patch.object(
+            sandbox, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
         ),
     ):
-        assert await server._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "repo-snap"
+        assert await sandbox._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "repo-snap"
 
 
 @pytest.mark.asyncio
 async def test_snapshot_resolution_passes_the_threads_environment() -> None:
     resolve = AsyncMock(return_value={**_READY, "slug": "staging", "snapshot_id": "staging-snap"})
     with (
-        patch.object(server, "resolve_environment", resolve),
+        patch.object(sandbox, "resolve_environment", resolve),
         patch.object(
-            server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
+            sandbox, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
         ),
         patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
+            sandbox, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
         ),
     ):
-        snapshot_id = await server._resolve_snapshot_id(None, "staging")
+        snapshot_id = await sandbox._resolve_snapshot_id(None, "staging")
 
     assert snapshot_id == "staging-snap"
     resolve.assert_awaited_once_with("staging")
 
 
 def test_environment_slug_reads_the_run_config() -> None:
-    assert server._environment_slug({"environment": "staging"}) == "staging"
-    assert server._environment_slug({"environment": "  "}) is None
-    assert server._environment_slug({}) is None
-    assert server._environment_slug(None) is None
+    assert sandbox.environment_slug({"environment": "staging"}) == "staging"
+    assert sandbox.environment_slug({"environment": "  "}) is None
+    assert sandbox.environment_slug({}) is None
+    assert sandbox.environment_slug(None) is None
 
 
 # --- admin thread gate ---
