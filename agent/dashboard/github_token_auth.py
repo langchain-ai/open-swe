@@ -16,12 +16,11 @@ from typing import Any
 import httpx
 from fastapi import HTTPException, Request
 
+from ..utils.github_http import github_client, github_request, github_url
 from .admin import is_admin
 
 logger = logging.getLogger(__name__)
 
-_GITHUB_USER_URL = "https://api.github.com/user"
-_GITHUB_EMAILS_URL = "https://api.github.com/user/emails"
 _GITHUB_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 
 
@@ -43,17 +42,13 @@ async def _github_identity(token: str) -> tuple[str, str | None]:
     needs the token to be able to read email addresses; failure just leaves the
     email unresolved, and login matching still works.
     """
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-    }
     email: str | None = None
     try:
-        async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
-            response = await client.get(_GITHUB_USER_URL, headers=headers)
+        async with github_client(token=token, timeout=_GITHUB_TIMEOUT) as client:
+            response = await github_request(client, "GET", github_url("/user"))
             if response.status_code == 200:
                 email = _email_of(response) or _primary_email(
-                    await client.get(_GITHUB_EMAILS_URL, headers=headers)
+                    await github_request(client, "GET", github_url("/user/emails"))
                 )
     except httpx.HTTPError as e:
         raise HTTPException(502, f"could not verify GitHub token: {e}") from e

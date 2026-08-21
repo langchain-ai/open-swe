@@ -11,8 +11,13 @@ from typing import Any
 import httpx
 
 from ..config import open_swe_mention_tags
+from .github_http import (
+    github_client,
+    github_graphql,
+    github_request,
+    github_url,
+)
 from .github_token import GitHubAuthError
-from .http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +76,10 @@ _SANITIZED_UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "[blocked-untrusted-comment-tag-o
 _SANITIZED_UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG = "[blocked-untrusted-comment-tag-close]"
 
 # Reaction endpoint differs per comment type
-_REACTION_ENDPOINTS: dict[str, str] = {
-    "issue_comment": "https://api.github.com/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions",
-    "pull_request_review_comment": "https://api.github.com/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
-    "pull_request_review": "https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{comment_id}/reactions",
+_REACTION_PATHS: dict[str, str] = {
+    "issue_comment": "/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions",
+    "pull_request_review_comment": "/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
+    "pull_request_review": "/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{comment_id}/reactions",
 }
 
 PAGINATED_MAX_PAGES = 50
@@ -157,22 +162,14 @@ async def react_to_github_comment(
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
 
-    url_template = _REACTION_ENDPOINTS.get(event_type, _REACTION_ENDPOINTS["issue_comment"])
-    url = url_template.format(
-        owner=owner, repo=repo, comment_id=comment_id, pull_number=pull_number
+    path_template = _REACTION_PATHS.get(event_type, _REACTION_PATHS["issue_comment"])
+    url = github_url(
+        path_template.format(owner=owner, repo=repo, comment_id=comment_id, pull_number=pull_number)
     )
 
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with github_client(token=token) as http_client:
         try:
-            response = await http_client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-                json={"content": "eyes"},
-            )
+            response = await github_request(http_client, "POST", url, json={"content": "eyes"})
             if response.status_code == 401:
                 raise GitHubAuthError(f"GitHub returned 401 reacting to comment {comment_id}")
             # 200 = already reacted, 201 = just created
@@ -197,13 +194,9 @@ async def _react_via_graphql(node_id: str | None, *, token: str) -> bool:
     }
     }
     """
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with github_client(token=token) as http_client:
         try:
-            response = await http_client.post(
-                "https://api.github.com/graphql",
-                headers={"Authorization": f"Bearer {token}"},
-                json={"query": query, "variables": {"subjectId": node_id}},
-            )
+            response = await github_graphql(http_client, query, variables={"subjectId": node_id})
             if response.status_code == 401:
                 raise GitHubAuthError(
                     f"GitHub returned 401 reacting via GraphQL for node {node_id}"
@@ -230,17 +223,10 @@ async def post_github_comment(
     """Post a comment to a GitHub issue or PR."""
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
-    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments"
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    url = github_url(f"/repos/{owner}/{repo}/issues/{issue_number}/comments")
+    async with github_client(token=token) as client:
         try:
-            response = await client.post(
-                url,
-                json={"body": body},
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/vnd.github+json",
-                },
-            )
+            response = await github_request(client, "POST", url, json={"body": body})
             response.raise_for_status()
             return True
         except httpx.HTTPError:
@@ -254,16 +240,10 @@ async def fetch_github_thread_participants(
     """Return mapped-candidate GitHub logins that authored an issue or PR thread."""
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
     try:
-        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-            issue_response = await http_client.get(
-                f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}",
-                headers=headers,
+        async with github_client(token=token) as http_client:
+            issue_response = await github_request(
+                http_client, "GET", github_url(f"/repos/{owner}/{repo}/issues/{issue_number}")
             )
             if issue_response.status_code == 401:
                 raise GitHubAuthError(f"GitHub returned 401 fetching issue {issue_number}")
@@ -272,19 +252,13 @@ async def fetch_github_thread_participants(
             issue = issue_response.json()
             comments, review_comments, reviews = await asyncio.gather(
                 _fetch_paginated(
-                    http_client,
-                    f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments",
-                    headers,
+                    http_client, f"/repos/{owner}/{repo}/issues/{issue_number}/comments"
                 ),
                 _fetch_paginated(
-                    http_client,
-                    f"https://api.github.com/repos/{owner}/{repo}/pulls/{issue_number}/comments",
-                    headers,
+                    http_client, f"/repos/{owner}/{repo}/pulls/{issue_number}/comments"
                 ),
                 _fetch_paginated(
-                    http_client,
-                    f"https://api.github.com/repos/{owner}/{repo}/pulls/{issue_number}/reviews",
-                    headers,
+                    http_client, f"/repos/{owner}/{repo}/pulls/{issue_number}/reviews"
                 ),
             )
     except GitHubAuthError:
@@ -314,18 +288,9 @@ async def fetch_issue_comments(
     """Fetch all comments for a GitHub issue."""
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with github_client(token=token) as http_client:
         comments = await _fetch_paginated(
-            http_client,
-            f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments",
-            headers,
+            http_client, f"/repos/{owner}/{repo}/issues/{issue_number}/comments"
         )
 
     return [
@@ -362,31 +327,14 @@ async def fetch_pr_comments_since_last_tag(
     """
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
 
     all_comments: list[dict[str, Any]] = []
 
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with github_client(token=token) as http_client:
         pr_comments, review_comments, reviews = await asyncio.gather(
-            _fetch_paginated(
-                http_client,
-                f"https://api.github.com/repos/{owner}/{repo}/issues/{pr_number}/comments",
-                headers,
-            ),
-            _fetch_paginated(
-                http_client,
-                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/comments",
-                headers,
-            ),
-            _fetch_paginated(
-                http_client,
-                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
-                headers,
-            ),
+            _fetch_paginated(http_client, f"/repos/{owner}/{repo}/issues/{pr_number}/comments"),
+            _fetch_paginated(http_client, f"/repos/{owner}/{repo}/pulls/{pr_number}/comments"),
+            _fetch_paginated(http_client, f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews"),
         )
 
     for c in pr_comments:
@@ -461,17 +409,10 @@ async def fetch_pr_branch(
     """
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
     try:
-        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-            response = await http_client.get(
-                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}",
-                headers=headers,
+        async with github_client(token=token) as http_client:
+            response = await github_request(
+                http_client, "GET", github_url(f"/repos/{owner}/{repo}/pulls/{pr_number}")
             )
             if response.status_code == 200:  # noqa: PLR2004
                 return response.json().get("head", {}).get("ref", "")
@@ -545,28 +486,23 @@ def build_pr_prompt(
     )
 
 
-async def _fetch_paginated(
-    client: httpx.AsyncClient, url: str, headers: dict[str, str]
-) -> list[dict[str, Any]]:
-    """Fetch all pages from a GitHub paginated endpoint.
+async def _fetch_paginated(client: httpx.AsyncClient, path: str) -> list[dict[str, Any]]:
+    """Fetch every page of a GitHub comment endpoint, tolerating a bad page.
 
+    Deliberately not :func:`~agent.utils.github_http.github_paginate`: comment
+    fetches are best-effort context for a prompt, so a failing page keeps the
+    pages already collected instead of aborting the whole webhook. A 401 still
+    propagates as :class:`GitHubAuthError` so the caller can refresh the token.
     Caps at ``PAGINATED_MAX_PAGES`` pages to avoid unbounded fetching on
     pathological PRs with thousands of comments.
-
-    Args:
-        client: An active httpx async client.
-        url: The GitHub API endpoint URL.
-        headers: Auth + accept headers.
-
-    Returns:
-        Combined list of all items across pages.
     """
+    url = github_url(path)
     results: list[dict[str, Any]] = []
     params: dict[str, Any] = {"per_page": 100, "page": 1}
 
     while params["page"] <= PAGINATED_MAX_PAGES:
         try:
-            response = await client.get(url, headers=headers, params=params)
+            response = await github_request(client, "GET", url, params=params)
             if response.status_code == 401:
                 raise GitHubAuthError(f"GitHub returned 401 fetching {url}")
             if response.status_code != 200:  # noqa: PLR2004

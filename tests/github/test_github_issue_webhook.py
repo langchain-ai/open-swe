@@ -1091,12 +1091,12 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     async def fake_get_github_app_installation_token_with_expiry() -> tuple[str | None, str | None]:
         return "app-token", None
 
-    async def fake_fetch_github_pr_metadata(
-        pr_ref: GitHubPrRef, *, token: str
+    async def fake_fetch_pr(
+        *, owner: str, repo: str, pr_number: int, token: str
     ) -> dict[str, object]:
         captured["metadata_token"] = token
         return {
-            "html_url": pr_ref.url,
+            "html_url": f"https://github.com/{owner}/{repo}/pull/{pr_number}",
             "base": {"sha": "base-sha"},
             "head": {"sha": "head-sha", "ref": "feature-branch"},
         }
@@ -1129,7 +1129,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         captured["status_comment_kwargs"] = kwargs
         return 1
 
-    monkeypatch.setattr(webhook_common, "fetch_github_pr_metadata", fake_fetch_github_pr_metadata)
+    monkeypatch.setattr(webhook_common, "fetch_pr", fake_fetch_pr)
     monkeypatch.setattr(webhook_common, "cache_github_token_for_thread", fake_cache_github_token)
     monkeypatch.setattr(
         webhook_common, "set_reviewer_thread_metadata", fake_set_reviewer_thread_metadata

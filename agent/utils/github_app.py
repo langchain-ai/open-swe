@@ -7,11 +7,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
-import httpx
 import jwt
 
 from ..config import github_app_id, github_app_installation_id, github_app_private_key
-from .http import DEFAULT_HTTP_TIMEOUT
+from .github_http import github_client, github_request, github_url
 from .timestamps import parse_expiry
 
 logger = logging.getLogger(__name__)
@@ -81,16 +80,10 @@ async def get_github_app_installation_id_for_org(org: str) -> int | None:
     """Resolve the GitHub App installation for an organization."""
     if not github_app_id() or not github_app_private_key() or not org.strip():
         return None
+    url = github_url(f"/orgs/{quote(org.strip(), safe='')}/installation")
     try:
-        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-            response = await client.get(
-                f"https://api.github.com/orgs/{quote(org.strip(), safe='')}/installation",
-                headers={
-                    "Authorization": f"Bearer {_generate_app_jwt()}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
+        async with github_client(token=_generate_app_jwt()) as client:
+            response = await github_request(client, "GET", url)
         response.raise_for_status()
         installation_id = response.json().get("id")
         return installation_id if isinstance(installation_id, int) and installation_id > 0 else None
@@ -103,20 +96,12 @@ async def get_github_app_installation_id_for_repo(owner: str, repo: str) -> int 
     """Resolve the GitHub App installation that can access a repository."""
     if not github_app_id() or not github_app_private_key() or not owner.strip() or not repo.strip():
         return None
-    url = (
-        "https://api.github.com/repos/"
-        f"{quote(owner.strip(), safe='')}/{quote(repo.strip(), safe='')}/installation"
+    url = github_url(
+        f"/repos/{quote(owner.strip(), safe='')}/{quote(repo.strip(), safe='')}/installation"
     )
     try:
-        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-            response = await client.get(
-                url,
-                headers={
-                    "Authorization": f"Bearer {_generate_app_jwt()}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
+        async with github_client(token=_generate_app_jwt()) as client:
+            response = await github_request(client, "GET", url)
         response.raise_for_status()
         installation_id = response.json().get("id")
         return installation_id if isinstance(installation_id, int) and installation_id > 0 else None
@@ -184,14 +169,11 @@ async def get_github_app_installation_token_with_expiry(
 
     try:
         app_jwt = _generate_app_jwt()
-        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-            response = await client.post(
-                f"https://api.github.com/app/installations/{resolved_installation_id}/access_tokens",
-                headers={
-                    "Authorization": f"Bearer {app_jwt}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
+        async with github_client(token=app_jwt) as client:
+            response = await github_request(
+                client,
+                "POST",
+                github_url(f"/app/installations/{resolved_installation_id}/access_tokens"),
                 json=body or None,
             )
             response.raise_for_status()

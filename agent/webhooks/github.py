@@ -247,7 +247,9 @@ async def trigger_pr_review_from_ref(
         common.logger.warning("No GitHub App token available for PR reviewer request")
         return {"success": False, "error": "No GitHub App token available"}
 
-    pr_metadata = await common.fetch_github_pr_metadata(pr_ref, token=app_token)
+    pr_metadata = await common.fetch_pr(
+        owner=pr_ref.owner, repo=pr_ref.repo, pr_number=pr_ref.number, token=app_token
+    )
     if not pr_metadata:
         return {"success": False, "error": "Could not fetch pull request metadata"}
 
@@ -595,7 +597,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         common.logger.warning("No GitHub App token for push re-review on %s", head_ref)
         return
 
-    pr = await common._fetch_open_pr_for_branch(repo_config, head_ref, token=app_token)
+    pr = await common.fetch_open_pr_for_branch(
+        owner=repo_config["owner"], repo=repo_config["name"], branch=head_ref, token=app_token
+    )
     if not pr:
         common.logger.debug(
             "No open PR found for push to %s/%s head=%s",

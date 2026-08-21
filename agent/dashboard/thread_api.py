@@ -24,6 +24,7 @@ from ..input_messages import (
     injected_dynamic_context_hashes_from_metadata,
 )
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
+from ..utils.github_http import github_client
 from ..utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -2394,12 +2395,7 @@ async def get_dashboard_thread_pr_diff(
         raise HTTPException(404, "thread has no pull request")
 
     token = await _github_token_for_login(login)
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    async with httpx.AsyncClient(headers=headers, timeout=_PROXY_REQUEST_TIMEOUT) as client:
+    async with github_client(token=token, timeout=_PROXY_REQUEST_TIMEOUT) as client:
         diff = await build_pr_diff_files(client, full_name, pr_number)
 
     return {

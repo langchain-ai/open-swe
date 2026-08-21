@@ -15,11 +15,9 @@ from typing import Any
 import httpx
 
 from .github_checks import REVIEW_CHECK_RUN_NAME
-from .github_http import GITHUB_API_BASE, github_client, github_request
+from .github_http import github_client, github_paginate, github_request, github_url
 
 logger = logging.getLogger(__name__)
-
-_GITHUB_API_BASE = GITHUB_API_BASE
 
 # Check-run conclusions that mean "this CI step did not pass" and are worth an
 # auto-fix attempt. ``cancelled`` / ``stale`` / ``skipped`` are intentionally
@@ -38,68 +36,40 @@ async def list_check_runs(
     *, owner: str, repo: str, ref: str, token: str
 ) -> list[dict[str, Any]] | None:
     """Return the complete latest check-run set for ``ref``."""
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{ref}/check-runs"
-    collected: list[dict[str, Any]] = []
-    page = 1
+    url = github_url(f"/repos/{owner}/{repo}/commits/{ref}/check-runs")
     try:
         async with github_client(token=token) as client:
-            while True:
-                response = await github_request(
-                    client,
-                    "GET",
-                    url,
-                    params={"per_page": "100", "page": str(page), "filter": "latest"},
-                )
-                response.raise_for_status()
-                data = response.json()
-                runs = data.get("check_runs") if isinstance(data, dict) else None
-                if not isinstance(runs, list):
-                    break
-                page_runs = [run for run in runs if isinstance(run, dict)]
-                collected.extend(page_runs)
-                if len(runs) < 100:
-                    break
-                page += 1
+            collected = await github_paginate(
+                client, url, items_key="check_runs", params={"filter": "latest"}
+            )
     except httpx.HTTPError:
         logger.warning(
             "Failed to list check runs for %s/%s@%s (Checks: Read missing?)", owner, repo, ref
         )
         return None
-    return [run for run in collected if run.get("name") not in _OPEN_SWE_CHECK_NAMES]
+    return [
+        run
+        for run in collected
+        if isinstance(run, dict) and run.get("name") not in _OPEN_SWE_CHECK_NAMES
+    ]
 
 
 async def list_commit_statuses(
     *, owner: str, repo: str, ref: str, token: str
 ) -> list[dict[str, Any]] | None:
     """Return the complete legacy commit-status set for ``ref``."""
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{ref}/status"
-    collected: list[dict[str, Any]] = []
-    page = 1
+    url = github_url(f"/repos/{owner}/{repo}/commits/{ref}/status")
     try:
         async with github_client(token=token) as client:
-            while True:
-                response = await github_request(
-                    client,
-                    "GET",
-                    url,
-                    params={"per_page": "100", "page": str(page)},
-                )
-                response.raise_for_status()
-                data = response.json()
-                statuses = data.get("statuses") if isinstance(data, dict) else None
-                if not isinstance(statuses, list):
-                    break
-                page_statuses = [status for status in statuses if isinstance(status, dict)]
-                collected.extend(page_statuses)
-                if len(statuses) < 100:
-                    break
-                page += 1
+            collected = await github_paginate(client, url, items_key="statuses")
     except httpx.HTTPError:
         logger.warning("Failed to read combined status for %s/%s@%s", owner, repo, ref)
         return None
     latest: list[dict[str, Any]] = []
     seen_contexts: set[str] = set()
     for status in collected:
+        if not isinstance(status, dict):
+            continue
         context = status.get("context")
         key = context if isinstance(context, str) else ""
         if key in seen_contexts:
@@ -166,7 +136,7 @@ async def fetch_open_pr_for_branch(
     *, owner: str, repo: str, branch: str, token: str
 ) -> dict[str, Any] | None:
     """Return the first open PR whose head is ``branch`` in ``owner/repo``."""
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls"
+    url = github_url(f"/repos/{owner}/{repo}/pulls")
     params = {"head": f"{owner}:{branch}", "state": "open", "per_page": "1"}
     try:
         async with github_client(token=token) as client:
@@ -183,7 +153,7 @@ async def fetch_open_pr_for_branch(
 
 async def fetch_pr(*, owner: str, repo: str, pr_number: int, token: str) -> dict[str, Any] | None:
     """Fetch full PR metadata (includes ``mergeable_state``)."""
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}"
+    url = github_url(f"/repos/{owner}/{repo}/pulls/{pr_number}")
     try:
         async with github_client(token=token) as client:
             response = await github_request(client, "GET", url)
@@ -197,7 +167,7 @@ async def fetch_pr(*, owner: str, repo: str, pr_number: int, token: str) -> dict
 
 async def head_commit_author_login(*, owner: str, repo: str, sha: str, token: str) -> str | None:
     """Return the GitHub login that authored commit ``sha`` (or ``None``)."""
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{sha}"
+    url = github_url(f"/repos/{owner}/{repo}/commits/{sha}")
     try:
         async with github_client(token=token) as client:
             response = await github_request(client, "GET", url)
@@ -219,7 +189,7 @@ async def has_repo_write_permission(*, owner: str, repo: str, username: str, tok
     """
     if not username:
         return False
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/collaborators/{username}/permission"
+    url = github_url(f"/repos/{owner}/{repo}/collaborators/{username}/permission")
     try:
         async with github_client(token=token) as client:
             response = await github_request(client, "GET", url)

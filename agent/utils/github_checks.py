@@ -15,21 +15,12 @@ from typing import Literal
 
 import httpx
 
-from .github_http import (
-    GITHUB_API_BASE,
-    github_client,
-    github_headers,  # re-exported for backward compatibility
-    github_request,
-)
-
-__all__ = ["github_headers"]
+from .github_http import github_client, github_request, github_url
 
 logger = logging.getLogger(__name__)
 
 REVIEW_CHECK_RUN_NAME = "Open SWE Review"
 AUTOFIX_CHECK_RUN_NAME = "Open SWE Auto-fix"
-
-_GITHUB_API_BASE = GITHUB_API_BASE
 
 CheckConclusion = Literal["success", "neutral", "failure"]
 
@@ -63,7 +54,7 @@ async def create_review_check_run(
     }
     if details_url:
         payload["details_url"] = details_url
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/check-runs"
+    url = github_url(f"/repos/{owner}/{repo}/check-runs")
     try:
         async with github_client(token=token) as client:
             response = await github_request(client, "POST", url, json=payload)
@@ -93,7 +84,7 @@ async def complete_review_check_run(
     summary: str,
 ) -> bool:
     """Mark a review check run as completed. Returns True on success."""
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/check-runs/{check_run_id}"
+    url = github_url(f"/repos/{owner}/{repo}/check-runs/{check_run_id}")
     payload = {
         "status": "completed",
         "conclusion": conclusion,
@@ -140,7 +131,7 @@ async def post_autofix_status_check(
     }
     if details_url:
         payload["details_url"] = details_url
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/check-runs"
+    url = github_url(f"/repos/{owner}/{repo}/check-runs")
     try:
         async with github_client(token=token) as client:
             response = await github_request(client, "POST", url, json=payload)
