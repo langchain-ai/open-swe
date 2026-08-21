@@ -12,6 +12,8 @@ from urllib.parse import quote
 
 import httpx
 
+from .github_http import GITHUB_RAW_ACCEPT, github_client, github_request, github_url
+
 logger = logging.getLogger(__name__)
 
 # Cap the inlined content. AGENTS.md / CLAUDE.md is meant to be a short
@@ -62,18 +64,11 @@ async def fetch_agents_md(
     if not owner or not repo or not ref:
         return None
 
-    headers = {
-        "Accept": "application/vnd.github.raw",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with github_client(token=token, timeout=timeout, accept=GITHUB_RAW_ACCEPT) as client:
         for filename in _AGENT_DOC_FILENAMES:
-            url = f"https://api.github.com/repos/{owner}/{repo}/contents/{filename}"
+            url = github_url(f"/repos/{owner}/{repo}/contents/{filename}")
             try:
-                response = await client.get(url, headers=headers, params={"ref": ref})
+                response = await github_request(client, "GET", url, params={"ref": ref})
             except httpx.HTTPError:
                 logger.exception("Failed to fetch %s from %s/%s@%s", filename, owner, repo, ref)
                 return None
@@ -137,25 +132,18 @@ async def fetch_scoped_agents_md(
     if not candidates:
         return {}
 
-    headers = {
-        "Accept": "application/vnd.github.raw",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
     semaphore = asyncio.Semaphore(_SCOPED_FETCH_CONCURRENCY)
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with github_client(token=token, timeout=timeout, accept=GITHUB_RAW_ACCEPT) as client:
 
         async def _fetch(candidate: str) -> tuple[str, str] | None:
             directory = posixpath.dirname(candidate)
             for filename in _AGENT_DOC_FILENAMES:
                 path = posixpath.join(directory, filename)
                 url_path = quote(path, safe="/")
-                url = f"https://api.github.com/repos/{owner}/{repo}/contents/{url_path}"
+                url = github_url(f"/repos/{owner}/{repo}/contents/{url_path}")
                 try:
                     async with semaphore:
-                        response = await client.get(url, headers=headers, params={"ref": ref})
+                        response = await github_request(client, "GET", url, params={"ref": ref})
                 except httpx.HTTPError:
                     logger.exception("Failed to fetch %s from %s/%s@%s", path, owner, repo, ref)
                     return None

@@ -25,6 +25,7 @@ from ..config import (
     dashboard_jwt_secret,
     github_app_oauth,
 )
+from ..utils.github_http import github_client, github_request, github_url
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from .github_token_auth import bearer_github_token
 
@@ -467,18 +468,13 @@ async def refresh_user_access_token(refresh_token: str) -> dict[str, Any]:
 
 async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
     """Return ``(user, primary_email)`` for the authenticated user."""
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        u = await client.get("https://api.github.com/user", headers=headers)
+    async with github_client(token=access_token) as client:
+        u = await github_request(client, "GET", github_url("/user"))
         u.raise_for_status()
         user = u.json()
         email = user.get("email")
         if not email:
-            e = await client.get("https://api.github.com/user/emails", headers=headers)
+            e = await github_request(client, "GET", github_url("/user/emails"))
             if e.status_code == 200:
                 primary = next((x for x in e.json() if x.get("primary")), None)
                 if primary:

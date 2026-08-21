@@ -3,8 +3,6 @@
 import logging
 from urllib.parse import quote
 
-import httpx
-
 from ..config import (
     allowed_github_orgs,
     allowed_github_repos,
@@ -14,6 +12,7 @@ from .github_app import (
     get_github_app_installation_id_for_org,
     get_github_app_installation_token,
 )
+from .github_http import github_client, github_request, github_url
 
 logger = logging.getLogger(__name__)
 
@@ -84,19 +83,10 @@ async def is_user_active_org_member(username: str, org: str) -> bool:
         )
         return False
 
-    url = (
-        f"https://api.github.com/orgs/{quote(org, safe='')}/memberships/{quote(username, safe='')}"
-    )
+    url = github_url(f"/orgs/{quote(org, safe='')}/memberships/{quote(username, safe='')}")
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                url,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
+        async with github_client(token=token) as client:
+            response = await github_request(client, "GET", url)
     except Exception:
         logger.exception("Error calling GitHub org membership API for %s/%s", org, username)
         return False

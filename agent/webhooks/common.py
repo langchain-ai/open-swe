@@ -73,6 +73,7 @@ from ..utils.github_app import (
     get_github_app_installation_token_with_expiry,
 )
 from ..utils.github_checks import complete_review_check_run, create_review_check_run  # noqa: F401
+from ..utils.github_ci import fetch_open_pr_for_branch, fetch_pr  # noqa: F401
 from ..utils.github_comments import (
     build_pr_prompt,  # noqa: F401
     derive_pr_state,
@@ -85,6 +86,12 @@ from ..utils.github_comments import (
     react_to_github_comment,  # noqa: F401
     sanitize_github_comment_body,  # noqa: F401
     verify_github_signature,
+)
+from ..utils.github_http import (
+    GITHUB_DIFF_ACCEPT,
+    github_client,
+    github_request,
+    github_url,
 )
 from ..utils.github_org_membership import internal_bot_logins, is_user_active_org_member
 from ..utils.github_token import (
@@ -105,7 +112,6 @@ from ..utils.multimodal import (
 )
 from ..utils.repo import extract_repo_from_text
 from ..utils.slack import (
-    GitHubPrRef,
     SlackThreadMappingError,  # noqa: F401
     _parse_ts,  # noqa: F401
     fetch_slack_thread_messages,  # noqa: F401
@@ -170,7 +176,6 @@ __all__ = [
     "_draft_review_enabled_for_author",
     "_enforce_public_repo_org_gate",
     "_ensure_thread_exists_for_metadata",
-    "_fetch_open_pr_for_branch",
     "_finding_comment_ids",
     "_get_or_resolve_thread_github_token",
     "_get_slack_channel_context",
@@ -210,10 +215,11 @@ __all__ = [
     "extract_image_urls",
     "extract_pr_context",
     "extract_repo_from_text",
-    "fetch_github_pr_metadata",
     "fetch_image_block",
     "fetch_issue_comments",
     "fetch_linear_issue_details",
+    "fetch_open_pr_for_branch",
+    "fetch_pr",
     "fetch_pr_comments_since_last_tag",
     "fetch_pr_review_threads",
     "fetch_slack_thread_messages",
@@ -1089,31 +1095,6 @@ async def _trigger_or_queue_run(
     logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
 
 
-async def fetch_github_pr_metadata(pr_ref: GitHubPrRef, *, token: str) -> dict[str, Any] | None:
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-        try:
-            response = await http_client.get(
-                f"https://api.github.com/repos/{pr_ref.owner}/{pr_ref.repo}/pulls/{pr_ref.number}",
-                headers=headers,
-            )
-            response.raise_for_status()
-        except httpx.HTTPError:
-            logger.exception(
-                "Failed to fetch PR metadata for %s/%s#%s",
-                pr_ref.owner,
-                pr_ref.repo,
-                pr_ref.number,
-            )
-            return None
-    data = response.json()
-    return data if isinstance(data, dict) else None
-
-
 def _repo_private_from_pr_metadata(pr_metadata: dict[str, Any]) -> bool | None:
     repo = pr_metadata.get("base", {}).get("repo")
     if isinstance(repo, dict) and isinstance(repo.get("private"), bool):
@@ -1221,36 +1202,6 @@ async def _draft_review_enabled_for_author(author_login: str) -> bool:
     return bool(team.get("review_draft_prs"))
 
 
-async def _fetch_open_pr_for_branch(
-    repo_config: dict[str, str], head_ref: str, *, token: str
-) -> dict[str, Any] | None:
-    """Find the open PR whose head ref matches ``head_ref``, if one exists."""
-    owner = repo_config.get("owner", "")
-    repo = repo_config.get("name", "")
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    params = {"state": "open", "head": f"{owner}:{head_ref}", "per_page": 1}
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-        try:
-            response = await http_client.get(
-                f"https://api.github.com/repos/{owner}/{repo}/pulls",
-                headers=headers,
-                params=params,
-            )
-            response.raise_for_status()
-        except httpx.HTTPError:
-            logger.exception("Failed to look up open PR for %s/%s head=%s", owner, repo, head_ref)
-            return None
-    data = response.json()
-    if not isinstance(data, list) or not data:
-        return None
-    pr = data[0]
-    return pr if isinstance(pr, dict) else None
-
-
 def _normalized_diff_hash(diff_text: str) -> str:
     normalized = "\n".join(
         line.rstrip() for line in diff_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
@@ -1268,23 +1219,19 @@ async def _fetch_compare_diff(
 
     base = quote(base_ref, safe="")
     head = quote(head_ref, safe="")
-    headers = {
-        "Accept": "application/vnd.github.diff",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-        try:
-            response = await http_client.get(
-                f"https://api.github.com/repos/{owner}/{repo}/compare/{base}...{head}",
-                headers=headers,
+    try:
+        async with github_client(token=token, accept=GITHUB_DIFF_ACCEPT) as http_client:
+            response = await github_request(
+                http_client,
+                "GET",
+                github_url(f"/repos/{owner}/{repo}/compare/{base}...{head}"),
             )
             response.raise_for_status()
-        except httpx.HTTPError:
-            logger.exception(
-                "Failed to fetch compare diff for %s/%s %s...%s", owner, repo, base_ref, head_ref
-            )
-            return None
+    except httpx.HTTPError:
+        logger.exception(
+            "Failed to fetch compare diff for %s/%s %s...%s", owner, repo, base_ref, head_ref
+        )
+        return None
     return response.text
 
 
