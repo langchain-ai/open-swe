@@ -23,7 +23,8 @@ from .github_app import (
     normalize_permissions,
 )
 from .sandbox import sandbox_provider_uses_proxy
-from .sandbox_state import SANDBOX_BACKENDS, unwrap_sandbox_backend
+from .sandbox_proxy import unwrap_sandbox_backend
+from .sandbox_registry import SANDBOX_BACKENDS
 from .timestamps import parse_expiry
 
 logger = logging.getLogger(__name__)

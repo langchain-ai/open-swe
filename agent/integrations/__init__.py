@@ -1,7 +1,6 @@
-"""Sandbox provider integrations."""
+"""Sandbox provider integrations.
 
-from deepagents.backends import LangSmithSandbox
-
-from agent.integrations.langsmith import LangSmithProvider
-
-__all__ = ["LangSmithProvider", "LangSmithSandbox"]
+Deliberately empty: each provider module imports the SDK of one platform, and a
+deployment installs only the platform it runs on. ``agent.utils.sandbox``
+imports the configured one by name.
+"""

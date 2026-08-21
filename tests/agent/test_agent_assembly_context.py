@@ -18,7 +18,8 @@ from langgraph.graph.state import RunnableConfig
 from agent.graphs.agent import _registered_tool_name, get_agent
 from agent.graphs.run_environment import DesktopRunEnvironment
 from agent.utils.read_only_backend import ReadOnlyBackend
-from agent.utils.sandbox_state import SandboxBackendProxy, clear_sandbox_backend
+from agent.utils.sandbox_proxy import SandboxBackendProxy
+from agent.utils.sandbox_registry import clear_sandbox_backend
 
 
 class _DummyAgent:

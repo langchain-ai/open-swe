@@ -12,7 +12,7 @@ from agent.middleware.sandbox_circuit_breaker import (
     sandbox_unreachable_message,
 )
 from agent.middleware.tool_error_handler import ToolErrorMiddleware
-from agent.utils.sandbox_state import SANDBOX_BACKENDS, set_sandbox_backend
+from agent.utils.sandbox_registry import SANDBOX_BACKENDS, set_sandbox_backend
 
 
 def _tool_request(thread_id: str = "thread-1") -> ToolCallRequest:

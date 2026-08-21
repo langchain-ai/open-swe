@@ -1,3 +1,4 @@
+import contextlib
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -246,35 +247,53 @@ async def test_run_snapshot_build_failure_marks_failed() -> None:
     assert statuses[-1] == "failed"
 
 
-async def test_create_langsmith_sandbox_uses_repo_snapshot_override() -> None:
+def _langsmith_create_patches(create_with_retry: AsyncMock):
+    """Everything ``LangSmithProvider.create`` touches outside the create call itself."""
     from agent.integrations import langsmith
 
-    fake_backend = MagicMock()
-    fake_backend.id = "box-1"
-    provider = MagicMock()
-    provider.get_or_create = AsyncMock(return_value=fake_backend)
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    return (
+        patch.dict(
+            "os.environ",
+            {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-default", "LANGSMITH_API_KEY": "ls-key"},
+            clear=True,
+        ),
+        patch.object(langsmith, "AsyncSandboxClient", return_value=client),
+        patch.object(langsmith, "_install_create_extra_fields"),
+        patch.object(langsmith, "_create_sandbox_with_retry", create_with_retry),
+        patch.object(langsmith, "TimeoutLangSmithSandbox", MagicMock(return_value="backend")),
+    )
 
-    with (
-        patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-default"}, clear=True),
-        patch.object(langsmith, "LangSmithProvider", return_value=provider),
-    ):
-        await langsmith.create_langsmith_sandbox(snapshot_id="repo-snap")
 
-    assert provider.get_or_create.call_args.kwargs["snapshot_id"] == "repo-snap"
+async def test_langsmith_create_uses_repo_snapshot_override() -> None:
+    from agent.integrations.langsmith import LangSmithProvider
+
+    create_with_retry = AsyncMock(return_value=MagicMock())
+    with contextlib.ExitStack() as stack:
+        for context in _langsmith_create_patches(create_with_retry):
+            stack.enter_context(context)
+        await LangSmithProvider().create(snapshot_id="repo-snap")
+
+    assert create_with_retry.await_args_list[0].kwargs["snapshot_id"] == "repo-snap"
 
 
-async def test_create_langsmith_sandbox_falls_back_to_default() -> None:
-    from agent.integrations import langsmith
+async def test_langsmith_create_falls_back_to_the_default_snapshot() -> None:
+    from agent.integrations.langsmith import LangSmithProvider
 
-    fake_backend = MagicMock()
-    fake_backend.id = "box-2"
-    provider = MagicMock()
-    provider.get_or_create = AsyncMock(return_value=fake_backend)
+    create_with_retry = AsyncMock(return_value=MagicMock())
+    with contextlib.ExitStack() as stack:
+        for context in _langsmith_create_patches(create_with_retry):
+            stack.enter_context(context)
+        await LangSmithProvider().create()
 
-    with (
-        patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-default"}, clear=True),
-        patch.object(langsmith, "LangSmithProvider", return_value=provider),
-    ):
-        await langsmith.create_langsmith_sandbox()
+    assert create_with_retry.await_args_list[0].kwargs["snapshot_id"] == "env-default"
 
-    assert provider.get_or_create.call_args.kwargs["snapshot_id"] == "env-default"
+
+async def test_langsmith_create_without_any_snapshot_is_refused() -> None:
+    from agent.integrations.langsmith import LangSmithProvider
+
+    with patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-key"}, clear=True):
+        with pytest.raises(ValueError, match="No base snapshot configured"):
+            await LangSmithProvider().create()

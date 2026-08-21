@@ -1,17 +1,22 @@
-"""Helpers for resolving portable writable paths inside sandboxes."""
+"""Where a sandbox keeps the tree we clone repositories into.
+
+The provider answers first, since it knows what it booted; the sandbox's own
+shell answers when the provider doesn't. Either way the answer only counts once
+it is confirmed writable, and it is cached on the thread's handle — which drops
+it when the backend behind it is replaced.
+"""
 
 import logging
 import posixpath
 import shlex
-from collections.abc import AsyncIterable, Iterable
-from typing import Any
+from collections.abc import AsyncIterable
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-logger = logging.getLogger(__name__)
+from .sandbox import current_sandbox_provider
+from .sandbox_proxy import SandboxBackendProxy, unwrap_sandbox_backend
 
-_WORK_DIR_CACHE_ATTR = "_open_swe_resolved_work_dir"
-_PROVIDER_ATTR_NAMES = ("sandbox", "_sandbox")
+logger = logging.getLogger(__name__)
 
 
 async def aresolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: str) -> str:
@@ -25,15 +30,16 @@ async def aresolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: 
 
 async def aresolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
     """Resolve a writable base directory for repository operations."""
-    cached_work_dir = getattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, None)
-    if isinstance(cached_work_dir, str) and cached_work_dir:
-        return cached_work_dir
+    proxy = sandbox_backend if isinstance(sandbox_backend, SandboxBackendProxy) else None
+    if proxy is not None and proxy.work_dir:
+        return proxy.work_dir
 
     checked_candidates: list[str] = []
     async for candidate in _iter_work_dir_candidates(sandbox_backend):
         checked_candidates.append(candidate)
         if await _is_writable_directory(sandbox_backend, candidate):
-            _cache_work_dir(sandbox_backend, candidate)
+            if proxy is not None:
+                proxy.cache_work_dir(candidate)
             return candidate
 
     msg = "Failed to resolve a writable sandbox work directory"
@@ -47,60 +53,30 @@ async def _iter_work_dir_candidates(
 ) -> AsyncIterable[str]:
     seen: set[str] = set()
 
-    for candidate in _iter_provider_paths(sandbox_backend, "get_work_dir"):
-        if candidate not in seen:
+    provider_work_dir = _normalize_path(await _provider_work_dir(sandbox_backend))
+    if provider_work_dir:
+        seen.add(provider_work_dir)
+        yield provider_work_dir
+
+    # Only reached when the provider had no answer or its answer was rejected,
+    # so these shells run at most once per resolution.
+    for command in ("pwd", "printf '%s' \"$HOME\""):
+        candidate = await _resolve_shell_path(sandbox_backend, command)
+        if candidate and candidate not in seen:
             seen.add(candidate)
             yield candidate
 
-    shell_work_dir = await _resolve_shell_path(sandbox_backend, "pwd")
-    if shell_work_dir and shell_work_dir not in seen:
-        seen.add(shell_work_dir)
-        yield shell_work_dir
 
-    for candidate in _iter_provider_paths(
-        sandbox_backend,
-        "get_user_home_dir",
-        "get_user_root_dir",
-    ):
-        if candidate not in seen:
-            seen.add(candidate)
-            yield candidate
+async def _provider_work_dir(sandbox_backend: SandboxBackendProtocol) -> str | None:
+    """Ask the configured provider, handing it the real backend.
 
-    shell_home_dir = await _resolve_shell_path(sandbox_backend, "printf '%s' \"$HOME\"")
-    if shell_home_dir and shell_home_dir not in seen:
-        seen.add(shell_home_dir)
-        yield shell_home_dir
-
-
-def _iter_provider_paths(
-    sandbox_backend: SandboxBackendProtocol,
-    *method_names: str,
-) -> Iterable[str]:
-    for provider in _iter_path_providers(sandbox_backend):
-        for method_name in method_names:
-            path = _call_path_method(provider, method_name)
-            if path:
-                yield path
-
-
-def _iter_path_providers(sandbox_backend: SandboxBackendProtocol) -> Iterable[Any]:
-    yield sandbox_backend
-    for attr_name in _PROVIDER_ATTR_NAMES:
-        provider = getattr(sandbox_backend, attr_name, None)
-        if provider is not None:
-            yield provider
-
-
-def _call_path_method(provider: Any, method_name: str) -> str | None:
-    method = getattr(provider, method_name, None)
-    if not callable(method):
-        return None
-
+    A proxy is a handle, not a sandbox: providers inspect the object their own
+    SDK produced, so passing the wrapper would make every provider answer None.
+    """
     try:
-        value = method()
-        return _normalize_path(value if isinstance(value, str) else None)
+        return await current_sandbox_provider().work_dir(unwrap_sandbox_backend(sandbox_backend))
     except Exception:
-        logger.debug("Failed to call %s on %s", method_name, type(provider).__name__, exc_info=True)
+        logger.debug("Provider could not report its sandbox work dir", exc_info=True)
         return None
 
 
@@ -132,10 +108,3 @@ async def _is_writable_directory(
     safe_directory = shlex.quote(directory)
     result = await sandbox_backend.aexecute(f"test -d {safe_directory} && test -w {safe_directory}")
     return result.exit_code == 0
-
-
-def _cache_work_dir(sandbox_backend: SandboxBackendProtocol, work_dir: str) -> None:
-    try:
-        setattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, work_dir)
-    except Exception:
-        logger.debug("Failed to cache sandbox work dir on %s", type(sandbox_backend).__name__)

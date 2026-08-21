@@ -19,15 +19,19 @@ from ..dashboard.sandbox_settings import get_admin_base_snapshot_id
 from ..dashboard.team_settings import get_team_default_repo
 from ..utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from ..utils.github_proxy import configure_proxy_for_sandbox
-from ..utils.sandbox import SandboxGoneError, create_sandbox, sandbox_provider_uses_proxy
-from ..utils.sandbox_state import (
-    SANDBOX_BACKENDS,
-    SandboxBackendProxy,
+from ..utils.sandbox import (
+    SandboxGoneError,
     SandboxUnreachableError,
+    create_sandbox,
+    sandbox_provider_supports_snapshots,
+    sandbox_provider_uses_proxy,
+)
+from ..utils.sandbox_proxy import SandboxBackendProxy, unwrap_sandbox_backend
+from ..utils.sandbox_registry import (
+    SANDBOX_BACKENDS,
     get_or_create_sandbox_backend_proxy,
     get_sandbox_id_from_metadata,
     set_sandbox_backend,
-    unwrap_sandbox_backend,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,7 +74,13 @@ async def _resolve_snapshot_id(
     built snapshot, then the admin-configured base snapshot. Never raises: any
     failure resolves to ``None`` so sandbox creation falls back to the configured
     ``DEFAULT_SANDBOX_SNAPSHOT_ID``.
+
+    Resolves to ``None`` outright on a provider that cannot boot from a snapshot:
+    the ids stored here are only meaningful to the provider that captured them,
+    and handing one to another provider is an error rather than a preference.
     """
+    if not sandbox_provider_supports_snapshots():
+        return None
     environment_snapshot = environment_snapshot_id(await resolve_environment(environment))
     if environment_snapshot:
         return environment_snapshot

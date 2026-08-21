@@ -13,8 +13,8 @@ from langsmith.sandbox import SandboxClientError
 
 from agent.graphs.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
 from agent.runtime.sandbox import ensure_sandbox_for_thread
-from agent.utils.sandbox import SandboxGoneError
-from agent.utils.sandbox_state import SandboxUnreachableError, set_sandbox_backend
+from agent.utils.sandbox import SandboxGoneError, SandboxUnreachableError
+from agent.utils.sandbox_registry import set_sandbox_backend
 
 
 @pytest.mark.asyncio
