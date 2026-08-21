@@ -12,6 +12,10 @@ import {
   MenuGroup,
   MenuItem,
   MenuPopup,
+  MenuSeparator,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
   MenuTrigger,
 } from "@/components/ui/menu"
 
@@ -55,30 +59,43 @@ export function SidebarProjectSelector({
             {projects.map((project) => (
               <MenuItem
                 key={project.cwd}
-                className="pe-1"
                 onClick={() => onSelectProject(project.cwd)}
                 title={project.cwd}
               >
                 <FolderIcon />
                 <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                {selectedProject?.cwd === project.cwd && <CheckIcon />}
-                <button
-                  aria-label={`Remove ${project.name}`}
-                  className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-sidebar-row-hover hover:text-destructive"
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    if (selectedProject?.cwd === project.cwd)
-                      onSelectProject(null)
-                    onRemoveProject(project.cwd)
-                  }}
-                  title="Remove project"
-                  type="button"
-                >
-                  <TrashIcon className="size-3.5" />
-                </button>
+                {selectedProject?.cwd === project.cwd && (
+                  <CheckIcon className="ml-auto" />
+                )}
               </MenuItem>
             ))}
           </MenuGroup>
+          {projects.length > 0 && (
+            <>
+              <MenuSeparator />
+              <MenuSub>
+                <MenuSubTrigger>
+                  <TrashIcon />
+                  Remove project…
+                </MenuSubTrigger>
+                <MenuSubPopup className="w-60">
+                  <MenuGroup>
+                    {projects.map((project) => (
+                      <MenuItem
+                        key={project.cwd}
+                        onClick={() => onRemoveProject(project.cwd)}
+                        title={project.cwd}
+                        variant="destructive"
+                      >
+                        <FolderIcon />
+                        <span className="truncate">{project.name}</span>
+                      </MenuItem>
+                    ))}
+                  </MenuGroup>
+                </MenuSubPopup>
+              </MenuSub>
+            </>
+          )}
         </MenuPopup>
       </Menu>
       <button
