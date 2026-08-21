@@ -283,6 +283,7 @@ export interface AgentThread {
   triggerKind?: AgentTriggerKind | string
   automationId?: string | null
   automationName?: string | null
+  automationActionPosted?: boolean
   status: AgentStatus
   viewed: boolean
   viewedAt?: number | null

@@ -559,6 +559,10 @@ async def _thread_summary(
         "triggerKind": trigger_kind,
         "automationId": _metadata_string(metadata, "schedule_id"),
         "automationName": _metadata_string(metadata, "schedule_name"),
+        "automationActionPosted": (
+            thread_category == "automation"
+            and _metadata_string(metadata, "automation_action_posted_at") is not None
+        ),
         "status": status,
         "viewed": _is_thread_viewed(metadata, latest_run_id),
         "viewedAt": (
