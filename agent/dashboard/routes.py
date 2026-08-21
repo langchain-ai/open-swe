@@ -1970,6 +1970,7 @@ async def api_list_threads_page(
     q: str | None = None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    sort_by: Literal["created_at", "updated_at"] = "updated_at",
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not _session_is_admin(session):
@@ -1987,6 +1988,7 @@ async def api_list_threads_page(
         query=q,
         scope=scope,
         automation_id=automation_id,
+        sort_by=sort_by,
     )
 
 

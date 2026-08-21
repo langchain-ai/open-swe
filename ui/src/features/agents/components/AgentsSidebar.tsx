@@ -555,16 +555,10 @@ function groupLocalProjects(
     .map((project) => ({
       project,
       sessions: (sessionsByProject.get(project.cwd) ?? []).sort(
-        (left, right) => right.updatedAt - left.updatedAt
-      ),
-      updatedAt: Math.max(
-        project.addedAt,
-        ...(sessionsByProject.get(project.cwd) ?? []).map(
-          (session) => session.updatedAt
-        )
+        (left, right) => right.createdAt - left.createdAt
       ),
     }))
-    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .sort((left, right) => right.project.addedAt - left.project.addedAt)
 }
 
 function LocalThreadGroup({

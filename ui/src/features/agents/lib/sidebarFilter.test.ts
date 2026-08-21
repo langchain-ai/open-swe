@@ -214,9 +214,9 @@ describe("groupThreadsByMode", () => {
     const now = Date.now()
     const sections = groupThreadsByMode(
       [
-        makeThread({ updatedAt: now }),
-        makeThread({ updatedAt: now - 3 * DAY }),
-        makeThread({ updatedAt: now - 40 * DAY }),
+        makeThread({ createdAt: now }),
+        makeThread({ createdAt: now - 3 * DAY }),
+        makeThread({ createdAt: now - 40 * DAY }),
       ],
       "date"
     )
@@ -255,9 +255,9 @@ describe("groupThreadsByMode", () => {
     ])
   })
 
-  it("sorts threads within a section by recency", () => {
-    const older = makeThread({ status: "idle", updatedAt: 1 })
-    const newer = makeThread({ status: "idle", updatedAt: 2 })
+  it("sorts threads within a section by creation time", () => {
+    const older = makeThread({ status: "idle", createdAt: 1, updatedAt: 3 })
+    const newer = makeThread({ status: "idle", createdAt: 2, updatedAt: 2 })
     const [section] = groupThreadsByMode([older, newer], "status")
     expect(section?.threads).toEqual([newer, older])
   })

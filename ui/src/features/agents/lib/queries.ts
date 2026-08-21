@@ -315,11 +315,11 @@ export function useSidebarThreads({
 }) {
   const scope = includeAutomations ? "all" : "interactive"
   const activeQuery = useInfiniteThreadsPages(
-    { limit: SIDEBAR_PAGE_SIZE, resolved: false, scope },
+    { limit: SIDEBAR_PAGE_SIZE, resolved: false, scope, sortBy: "created_at" },
     { enabled, pollWhileRunning: true }
   )
   const resolvedQuery = useInfiniteThreadsPages(
-    { limit: SIDEBAR_PAGE_SIZE, resolved: true, scope },
+    { limit: SIDEBAR_PAGE_SIZE, resolved: true, scope, sortBy: "created_at" },
     { enabled: enabled && includeResolved, pollWhileRunning: true }
   )
   const loadedActive = infinitePageThreads(activeQuery.data)
