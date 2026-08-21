@@ -5,9 +5,10 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { SlackMrkdwn } from "./SlackMrkdwn"
-import type { Message } from "@/features/agents/lib/types"
+import type { Message as ThreadMessage } from "@/features/agents/lib/types"
+import { Message, MessageContent } from "@/components/ai-elements/message"
 
-export function UserMessage({ message }: { message: Message }) {
+export function UserMessage({ message }: { message: ThreadMessage }) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const text = message.chunks
@@ -42,8 +43,9 @@ export function UserMessage({ message }: { message: Message }) {
       : undefined
 
   return (
-    <div
-      className={`group/turn my-4 flex flex-col gap-1 ${isSystem ? "items-start" : "items-end"}`}
+    <Message
+      from={isSystem ? "system" : "user"}
+      className="my-4"
       data-testid="user-message"
       data-message-sender-kind={message.structuredSenderKind}
       data-message-surface={message.structuredSurface}
@@ -88,13 +90,9 @@ export function UserMessage({ message }: { message: Message }) {
           )
         )}
         {(!isSystem || expanded) && (text || images.length > 0) && (
-          <div
-            className={`relative overflow-hidden rounded-2xl p-3 ${
-              isSystem ? "mt-1 border border-border bg-muted/50" : "bg-accent"
-            }`}
-          >
+          <MessageContent className={isSystem ? "mt-1" : undefined}>
             {images.length > 0 && (
-              <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
+              <div className="grid max-w-[420px] grid-cols-2 gap-2">
                 {images.map((img, i) => (
                   <div
                     key={i}
@@ -113,7 +111,7 @@ export function UserMessage({ message }: { message: Message }) {
               <div
                 ref={textRef}
                 onScroll={updateScrollIndicators}
-                className="max-h-[250px] overflow-auto text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-accent-foreground"
+                className="max-h-[250px] overflow-auto text-[14px] leading-[1.6] break-words whitespace-pre-wrap"
                 style={{
                   maskImage: textEdgeMask,
                   WebkitMaskImage: textEdgeMask,
@@ -126,7 +124,7 @@ export function UserMessage({ message }: { message: Message }) {
                 )}
               </div>
             )}
-          </div>
+          </MessageContent>
         )}
         {!message.timestampIsFallback && (!isSystem || expanded) && (
           <MessageTimestamp
@@ -136,6 +134,6 @@ export function UserMessage({ message }: { message: Message }) {
           />
         )}
       </div>
-    </div>
+    </Message>
   )
 }

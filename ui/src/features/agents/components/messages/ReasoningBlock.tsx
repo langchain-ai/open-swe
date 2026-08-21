@@ -1,12 +1,31 @@
-import { useEffect, useRef, useState } from "react"
 import { ChevronRight } from "lucide-react"
 
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+  useReasoning,
+} from "@/components/ai-elements/reasoning"
 import { formatElapsed } from "@/lib/utils"
 
-function reasoningLabel(elapsedMs: number | null): string {
-  if (elapsedMs === null) return "Thought"
-  if (elapsedMs < 1000) return "Thought briefly"
-  return `Thought for ${formatElapsed(elapsedMs)}`
+function ReasoningLabel() {
+  const { isOpen, isStreaming, duration } = useReasoning()
+  if (isStreaming) {
+    return <span className="shimmer-text text-[13px]">Thinking...</span>
+  }
+  const label =
+    duration === undefined
+      ? "Thought"
+      : `Thought for ${formatElapsed(duration * 1000)}`
+  return (
+    <>
+      <ChevronRight
+        className={`size-3 shrink-0 text-muted-foreground/65 transition-transform ${isOpen ? "rotate-90" : ""}`}
+        aria-hidden
+      />
+      <span className="text-[13px] text-muted-foreground">{label}</span>
+    </>
+  )
 }
 
 /**
@@ -22,58 +41,19 @@ export function ReasoningBlock({
   text: string
   isLive: boolean
 }) {
-  const [userExpanded, setUserExpanded] = useState(false)
-  const [elapsedMs, setElapsedMs] = useState<number | null>(null)
-  const startedAtRef = useRef<number | null>(null)
-  const wasLiveRef = useRef(false)
-
-  useEffect(() => {
-    if (isLive) {
-      if (startedAtRef.current === null) startedAtRef.current = Date.now()
-      wasLiveRef.current = true
-      return
-    }
-    if (wasLiveRef.current && startedAtRef.current !== null) {
-      setElapsedMs(Date.now() - startedAtRef.current)
-      wasLiveRef.current = false
-    }
-  }, [isLive])
-
   const trimmed = text.trim()
   if (!trimmed && !isLive) return null
 
-  const expanded = isLive || userExpanded
-
   return (
-    <div className="my-1">
-      <button
-        type="button"
-        onClick={() => {
-          if (!isLive) setUserExpanded((value) => !value)
-        }}
-        className="flex items-center gap-1 text-left transition-opacity hover:opacity-90 disabled:cursor-default"
-        aria-expanded={expanded}
-        disabled={isLive}
-      >
-        {isLive ? (
-          <span className="shimmer-text text-[13px]">Thinking...</span>
-        ) : (
-          <>
-            <ChevronRight
-              className={`size-3 shrink-0 text-muted-foreground/65 transition-transform ${expanded ? "rotate-90" : ""}`}
-              aria-hidden
-            />
-            <span className="text-[13px] text-muted-foreground">
-              {reasoningLabel(elapsedMs)}
-            </span>
-          </>
-        )}
-      </button>
-      {expanded && trimmed && (
-        <div className="ms-1 mt-1 border-s border-border/45 ps-3 text-[13px] leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+    <Reasoning className="my-1 mb-1" isStreaming={isLive}>
+      <ReasoningTrigger className="w-auto gap-1 text-left">
+        <ReasoningLabel />
+      </ReasoningTrigger>
+      {trimmed && (
+        <ReasoningContent className="ms-1 mt-1 border-s border-border/45 ps-3 text-[13px] leading-5 break-words text-muted-foreground">
           {trimmed}
-        </div>
+        </ReasoningContent>
       )}
-    </div>
+    </Reasoning>
   )
 }

@@ -1,8 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { Check, Copy } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { MessageAction } from "@/components/ai-elements/message"
 import { cn } from "@/lib/utils"
 
 const COPIED_RESET_MS = 1500
@@ -36,25 +35,13 @@ export const MessageCopyButton = memo(function MessageCopyButton({
   }, [text])
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            aria-label="Copy message"
-            className={cn(
-              "text-muted-foreground hover:text-foreground",
-              className
-            )}
-            onClick={copy}
-            size="icon-xs"
-            type="button"
-            variant="ghost"
-          />
-        }
-      >
-        {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-      </TooltipTrigger>
-      <TooltipPopup>{copied ? "Copied!" : "Copy to clipboard"}</TooltipPopup>
-    </Tooltip>
+    <MessageAction
+      aria-label="Copy message"
+      className={cn("text-muted-foreground hover:text-foreground", className)}
+      onClick={copy}
+      tooltip={copied ? "Copied!" : "Copy to clipboard"}
+    >
+      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+    </MessageAction>
   )
 })

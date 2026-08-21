@@ -66,7 +66,7 @@ export function MessageTimestamp({
       <time
         dateTime={date.toISOString()}
         title={title}
-        className="text-[11px] leading-4 text-muted-foreground/70 tabular-nums opacity-0 transition-opacity duration-200 select-none group-hover/turn:opacity-100"
+        className="text-[11px] leading-4 text-muted-foreground/70 tabular-nums opacity-0 transition-opacity duration-200 select-none group-hover/message:opacity-100"
       >
         {shortTimestamp(date)}
       </time>

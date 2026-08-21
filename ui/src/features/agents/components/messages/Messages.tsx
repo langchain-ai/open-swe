@@ -1,12 +1,4 @@
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { memo, useMemo } from "react"
 import { ChevronDown } from "lucide-react"
 
 import { SkillPromptText } from "../SkillBadge"
@@ -15,11 +7,27 @@ import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { UserMessage } from "./UserMessage"
 import type { MessagesProps } from "./types"
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation"
+import {
+  Queue,
+  QueueItem,
+  QueueItemAttachment,
+  QueueItemContent,
+  QueueItemImage,
+  QueueItemIndicator,
+  QueueList,
+  QueueSection,
+  QueueSectionContent,
+  QueueSectionLabel,
+  QueueSectionTrigger,
+} from "@/components/ai-elements/queue"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
-
-const BOTTOM_LOCK_THRESHOLD_PX = 24
 
 function QueuedMessages({
   queuedMessages,
@@ -29,37 +37,49 @@ function QueuedMessages({
   if (queuedMessages.length === 0) return null
 
   return (
-    <div className="mb-3 space-y-2" data-testid="queued-messages">
-      {queuedMessages.map((message, index) => {
-        const imageCount = message.images?.length ?? 0
-        return (
-          <div
-            key={message.id}
-            className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-border bg-accent/40 px-3 py-2 text-[14px] text-foreground shadow-sm"
-            data-testid="queued-message"
-          >
-            <div className="mb-1 flex items-center gap-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-              <span>
-                {queuedMessages.length > 1
-                  ? `Queued next #${index + 1}`
-                  : "Queued next"}
-              </span>
+    <Queue
+      className="my-3 ml-auto w-full max-w-[85%]"
+      data-testid="queued-messages"
+    >
+      <QueueSection>
+        <QueueSectionTrigger>
+          <QueueSectionLabel
+            count={queuedMessages.length}
+            label={queuedMessages.length === 1 ? "queued next" : "queued"}
+            icon={
               <span className="size-1.5 animate-status-pulse rounded-full bg-foreground/60" />
-            </div>
-            {message.content && (
-              <div className="break-words whitespace-pre-wrap">
-                <SkillPromptText text={message.content} />
-              </div>
-            )}
-            {imageCount > 0 && (
-              <div className="mt-1 text-xs text-muted-foreground">
-                {imageCount} image{imageCount === 1 ? "" : "s"} attached
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </div>
+            }
+          />
+        </QueueSectionTrigger>
+        <QueueSectionContent>
+          <QueueList>
+            {queuedMessages.map((message) => (
+              <QueueItem key={message.id} data-testid="queued-message">
+                <span className="flex items-start gap-2">
+                  <QueueItemIndicator />
+                  <QueueItemContent className="line-clamp-4 whitespace-pre-wrap text-foreground">
+                    {message.content && (
+                      <SkillPromptText text={message.content} />
+                    )}
+                  </QueueItemContent>
+                </span>
+                {message.images && message.images.length > 0 && (
+                  <QueueItemAttachment className="ml-5">
+                    {message.images.map((image, index) => (
+                      <QueueItemImage
+                        key={`${image.fileName ?? "image"}-${index}`}
+                        alt={image.fileName ?? "Queued image"}
+                        src={`data:${image.mimeType};base64,${image.base64}`}
+                      />
+                    ))}
+                  </QueueItemAttachment>
+                )}
+              </QueueItem>
+            ))}
+          </QueueList>
+        </QueueSectionContent>
+      </QueueSection>
+    </Queue>
   )
 }
 
@@ -74,153 +94,8 @@ export const Messages = memo(function MessagesComponent({
   settingUpSandbox,
   project,
   contentWidthClass = "max-w-[42rem]",
-  contentPaddingClass = "px-6",
-  bottomInset = 0,
-  scrollButtonSlot = "internal",
-  onShowScrollToBottomChange,
-  scrollControlRef,
-  onApprove,
-  onReject,
-  onAutoApprove,
   onOpenFile,
 }: MessagesProps) {
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const contentRef = useRef<HTMLDivElement>(null)
-  const autoScrollEnabledRef = useRef(true)
-  const lastManualScrollTopRef = useRef(0)
-  const previousScrollTopRef = useRef(0)
-  const pendingScrollFrameRef = useRef<number | null>(null)
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
-
-  const clearScheduledScroll = useCallback(() => {
-    if (pendingScrollFrameRef.current === null) return
-    window.cancelAnimationFrame(pendingScrollFrameRef.current)
-    pendingScrollFrameRef.current = null
-  }, [])
-
-  const isNearBottom = useCallback((el: HTMLDivElement) => {
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    return distanceFromBottom <= BOTTOM_LOCK_THRESHOLD_PX
-  }, [])
-
-  const syncScrollButtonVisibility = useCallback(
-    (el: HTMLDivElement) => {
-      setShowScrollToBottom(!isNearBottom(el))
-    },
-    [isNearBottom]
-  )
-
-  const scrollToBottomNow = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-
-    el.scrollTop = el.scrollHeight
-    const currentTop = el.scrollTop
-    lastManualScrollTopRef.current = currentTop
-    previousScrollTopRef.current = currentTop
-    syncScrollButtonVisibility(el)
-  }, [syncScrollButtonVisibility])
-
-  const scheduleScrollToBottom = useCallback(() => {
-    if (!autoScrollEnabledRef.current) return
-
-    clearScheduledScroll()
-    pendingScrollFrameRef.current = window.requestAnimationFrame(() => {
-      pendingScrollFrameRef.current = null
-      if (!autoScrollEnabledRef.current) return
-      scrollToBottomNow()
-    })
-  }, [clearScheduledScroll, scrollToBottomNow])
-
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-
-    const handleScroll = () => {
-      const currentTop = el.scrollTop
-      const scrolledUp = currentTop < previousScrollTopRef.current - 1
-      const nearBottom = isNearBottom(el)
-
-      if (scrolledUp) {
-        autoScrollEnabledRef.current = false
-        clearScheduledScroll()
-      } else if (nearBottom) {
-        autoScrollEnabledRef.current = true
-      }
-
-      syncScrollButtonVisibility(el)
-      lastManualScrollTopRef.current = currentTop
-      previousScrollTopRef.current = currentTop
-    }
-
-    scrollToBottomNow()
-    autoScrollEnabledRef.current = true
-
-    el.addEventListener("scroll", handleScroll, { passive: true })
-    return () => {
-      el.removeEventListener("scroll", handleScroll)
-      clearScheduledScroll()
-    }
-  }, [
-    clearScheduledScroll,
-    isNearBottom,
-    scrollToBottomNow,
-    syncScrollButtonVisibility,
-  ])
-
-  useLayoutEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-
-    if (autoScrollEnabledRef.current) {
-      scheduleScrollToBottom()
-      return
-    }
-
-    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight)
-    const targetTop = Math.min(lastManualScrollTopRef.current, maxTop)
-    const jumpDistance = Math.abs(el.scrollTop - targetTop)
-
-    if (jumpDistance > el.clientHeight * 0.5) {
-      el.scrollTop = targetTop
-    }
-
-    previousScrollTopRef.current = el.scrollTop
-    syncScrollButtonVisibility(el)
-  }, [
-    messages,
-    isStreaming,
-    scheduleScrollToBottom,
-    syncScrollButtonVisibility,
-  ])
-
-  useEffect(() => {
-    const scroller = scrollRef.current
-    const content = contentRef.current
-    if (!scroller || !content || typeof ResizeObserver === "undefined") return
-
-    const resizeObserver = new ResizeObserver(() => {
-      if (autoScrollEnabledRef.current) {
-        scheduleScrollToBottom()
-        return
-      }
-
-      const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
-      if (lastManualScrollTopRef.current > maxTop) {
-        scroller.scrollTop = maxTop
-        lastManualScrollTopRef.current = maxTop
-        previousScrollTopRef.current = maxTop
-      }
-
-      syncScrollButtonVisibility(scroller)
-    })
-
-    resizeObserver.observe(scroller)
-    resizeObserver.observe(content)
-
-    return () => resizeObserver.disconnect()
-  }, [scheduleScrollToBottom, syncScrollButtonVisibility])
-
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),
     [messages]
@@ -230,24 +105,6 @@ export const Messages = memo(function MessagesComponent({
     streamIsLoading,
     isStreaming
   )
-
-  const handleScrollToBottom = useCallback(() => {
-    autoScrollEnabledRef.current = true
-    clearScheduledScroll()
-    scrollToBottomNow()
-  }, [clearScheduledScroll, scrollToBottomNow])
-
-  useEffect(() => {
-    if (!scrollControlRef) return
-    scrollControlRef.current = { scrollToBottom: handleScrollToBottom }
-    return () => {
-      scrollControlRef.current = null
-    }
-  }, [handleScrollToBottom, scrollControlRef])
-
-  useEffect(() => {
-    onShowScrollToBottomChange?.(showScrollToBottom)
-  }, [onShowScrollToBottomChange, showScrollToBottom])
 
   const projectPath = project?.path
   const lastAgentIndex = visibleMessages.findLastIndex(
@@ -262,78 +119,64 @@ export const Messages = memo(function MessagesComponent({
 
   return (
     <TooltipProvider delay={250} closeDelay={0}>
-      <div className="relative min-h-0 min-w-0 flex-1">
-        <div
-          ref={scrollRef}
-          // Gutter on both edges: the centered column keeps its position when the
-          // scrollbar appears, so it stays aligned with the composer below it.
-          className="h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-5 text-[14px] leading-[1.6] antialiased"
+      <Conversation
+        // Gutter on both edges: the centered column keeps its position when the
+        // scrollbar appears, so it stays aligned with the composer below it.
+        className="min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden text-[14px] leading-[1.6] antialiased"
+      >
+        <ConversationContent
+          className={`w-full ${contentWidthClass} mx-auto min-w-0 gap-0 px-6 py-5`}
         >
-          <div
-            ref={contentRef}
-            className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
-            style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
-          >
-            {visibleMessages.map((message, index) => {
-              const isLastMessage = index === visibleMessages.length - 1
-              const messageIsStreaming = isStreaming && isLastMessage
-              const messageIsMarkdownLive = message.id === liveMarkdownMessageId
+          {visibleMessages.map((message, index) => {
+            const isLastMessage = index === visibleMessages.length - 1
+            const messageIsStreaming = isStreaming && isLastMessage
+            const messageIsMarkdownLive = message.id === liveMarkdownMessageId
 
-              if (
-                message.author === "user" ||
-                message.structuredSenderKind === "system"
-              ) {
-                return <UserMessage key={message.id} message={message} />
-              }
+            if (
+              message.author === "user" ||
+              message.structuredSenderKind === "system"
+            ) {
+              return <UserMessage key={message.id} message={message} />
+            }
 
-              return (
-                <AgentTurn
-                  key={message.id}
-                  message={message}
-                  isStreaming={messageIsStreaming}
-                  isMarkdownLive={messageIsMarkdownLive}
-                  projectPath={projectPath}
-                  threadId={threadId}
-                  isLatestTurn={index === lastAgentIndex}
-                  activityLabel={messageIsStreaming ? activityLabel : undefined}
-                  onApprove={onApprove}
-                  onReject={onReject}
-                  onAutoApprove={onAutoApprove}
-                  onOpenFile={onOpenFile}
-                />
+            return (
+              <AgentTurn
+                key={message.id}
+                message={message}
+                isStreaming={messageIsStreaming}
+                isMarkdownLive={messageIsMarkdownLive}
+                projectPath={projectPath}
+                threadId={threadId}
+                isLatestTurn={index === lastAgentIndex}
+                activityLabel={messageIsStreaming ? activityLabel : undefined}
+                onOpenFile={onOpenFile}
+              />
+            )
+          })}
+          {threadId && showPlanArtifact && (
+            <InlinePlanArtifact threadId={threadId} />
+          )}
+          <QueuedMessages queuedMessages={queuedMessages} />
+          <ThinkingSpinner
+            isActive={
+              !!(isThinking || streamIsLoading || isStreaming) &&
+              !(
+                isStreaming &&
+                lastAgentIndex >= 0 &&
+                lastAgentIndex === visibleMessages.length - 1
               )
-            })}
-            {threadId && showPlanArtifact && (
-              <InlinePlanArtifact threadId={threadId} />
-            )}
-            <QueuedMessages queuedMessages={queuedMessages} />
-            <ThinkingSpinner
-              isActive={
-                !!(isThinking || streamIsLoading || isStreaming) &&
-                !(
-                  isStreaming &&
-                  lastAgentIndex >= 0 &&
-                  lastAgentIndex === visibleMessages.length - 1
-                )
-              }
-              settingUpSandbox={settingUpSandbox}
-              label={activityLabel}
-            />
-          </div>
-        </div>
-
-        {scrollButtonSlot === "internal" && showScrollToBottom && (
-          <button
-            type="button"
-            onClick={handleScrollToBottom}
-            aria-label="Scroll to bottom"
-            className="dropdown-glass absolute left-1/2 z-30 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
-            style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
-          >
-            <ChevronDown className="size-3.5" />
-          </button>
-        )}
-      </div>
+            }
+            settingUpSandbox={settingUpSandbox}
+            label={activityLabel}
+          />
+        </ConversationContent>
+        <ConversationScrollButton
+          aria-label="Scroll to bottom"
+          className="dropdown-glass z-30 size-8 border-0 text-muted-foreground hover:text-foreground"
+        >
+          <ChevronDown className="size-3.5" />
+        </ConversationScrollButton>
+      </Conversation>
     </TooltipProvider>
   )
 })

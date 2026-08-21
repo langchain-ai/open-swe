@@ -1,4 +1,3 @@
-import { useCallback, useState } from "react"
 import {
   Bot,
   Check,
@@ -14,13 +13,18 @@ import {
   X,
   Zap,
 } from "lucide-react"
-import type { KeyboardEvent, ReactNode } from "react"
+import { ToolResultBody } from "./ToolResultBody"
+import type { ReactNode } from "react"
 
 import type { WorkEntryIconName, WorkEntryView } from "./workEntry"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { cn } from "@/lib/utils"
-import { ToolResultBody } from "./ToolResultBody"
 
 const ICONS: Record<WorkEntryIconName, typeof Bot> = {
   bot: Bot,
@@ -46,9 +50,6 @@ function WorkEntryIcon({
   const Icon = ICONS[name]
   return <Icon className={className} aria-hidden />
 }
-
-const stopRowToggle = (event: { stopPropagation: () => void }) =>
-  event.stopPropagation()
 
 function StatusIndicator({ status }: { status: WorkEntryView["status"] }) {
   if (status === "error") {
@@ -96,6 +97,111 @@ function StatusIndicator({ status }: { status: WorkEntryView["status"] }) {
   )
 }
 
+function WorkEntryLine({
+  entry,
+  timestamp,
+  canExpand,
+}: {
+  entry: WorkEntryView
+  timestamp?: string
+  canExpand: boolean
+}) {
+  const isError = entry.tone === "error"
+  const hoverTimestamp = formatHoverTimestamp(timestamp)
+
+  // Spans throughout: this line also renders inside a collapsible's <button>.
+  return (
+    <span className="flex w-full items-center gap-1.5 select-none">
+      <span
+        className={cn(
+          "flex size-5 shrink-0 items-center justify-center",
+          isError
+            ? "text-destructive"
+            : entry.tone === "thinking"
+              ? "text-foreground/92"
+              : "text-muted-foreground/65"
+        )}
+      >
+        <WorkEntryIcon
+          name={entry.icon}
+          className="block size-3.5 shrink-0 stroke-[1.8] opacity-80"
+        />
+      </span>
+
+      <span className="flex min-w-0 flex-1 items-center gap-1.5">
+        <span className="block min-w-0 flex-1 overflow-hidden">
+          <span className="flex w-full min-w-0 items-baseline gap-1.5 text-left text-[13px] leading-5">
+            <span
+              className={cn(
+                "shrink-0 truncate font-medium",
+                isError
+                  ? "text-destructive"
+                  : entry.status === "pending" || entry.status === "in_progress"
+                    ? "shimmer-text"
+                    : "text-foreground/82"
+              )}
+            >
+              {entry.heading}
+            </span>
+            {entry.preview &&
+              (entry.previewTooltip ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span className="min-w-0 flex-1 truncate text-muted-foreground" />
+                    }
+                  >
+                    {entry.preview}
+                  </TooltipTrigger>
+                  <TooltipPopup className="max-w-md break-all">
+                    {entry.previewTooltip}
+                  </TooltipPopup>
+                </Tooltip>
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                  {entry.preview}
+                </span>
+              ))}
+            {entry.diffStats && (
+              <span className="flex shrink-0 items-center gap-1 font-mono text-[11px] text-muted-foreground tabular-nums">
+                <span className="transition-colors group-focus-within/entry:text-success-foreground group-hover/entry:text-success-foreground">
+                  +{entry.diffStats.additions}
+                </span>
+                <span aria-hidden>/</span>
+                <span className="transition-colors group-focus-within/entry:text-destructive group-hover/entry:text-destructive">
+                  -{entry.diffStats.deletions}
+                </span>
+              </span>
+            )}
+          </span>
+        </span>
+
+        <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+          {hoverTimestamp && (
+            <time className="text-[10px] tabular-nums opacity-0 transition-opacity group-hover/entry:opacity-100">
+              {hoverTimestamp}
+            </time>
+          )}
+          <span
+            className="flex size-4 shrink-0 items-center justify-center"
+            aria-hidden={!canExpand}
+          >
+            {canExpand && (
+              <ChevronDown
+                className="size-3 shrink-0 opacity-70 transition-transform duration-200 group-data-open/entry:rotate-180"
+                aria-hidden
+              />
+            )}
+          </span>
+          <span className="flex size-4 shrink-0 items-center justify-center">
+            <StatusIndicator status={entry.status} />
+          </span>
+        </span>
+      </span>
+    </span>
+  )
+}
+
 /**
  * One line in the agent's work log: icon, heading, dimmed argument, status.
  * Expanding reveals `body` when a tool has a richer renderer (a diff, terminal
@@ -105,164 +211,44 @@ export function WorkEntryRow({
   entry,
   timestamp,
   body,
-  trailing,
-  onActivate,
   defaultExpanded = false,
 }: {
   entry: WorkEntryView
   timestamp?: string
   body?: ReactNode
-  trailing?: ReactNode
-  /** Clicking the row runs this instead of expanding it (e.g. reveal a file). */
-  onActivate?: () => void
   defaultExpanded?: boolean
 }) {
-  const [expanded, setExpanded] = useState(defaultExpanded)
-  const toggle = useCallback(() => setExpanded((value) => !value), [])
+  const canExpand = body != null || entry.expandedText != null
 
-  const canExpand =
-    onActivate == null && (body != null || entry.expandedText != null)
-  const activate = onActivate ?? (canExpand ? toggle : null)
-  const isError = entry.tone === "error"
-  const hoverTimestamp = formatHoverTimestamp(timestamp)
+  if (!canExpand) {
+    return (
+      <div className="group/entry flex flex-col rounded-md px-0.5 py-0.5">
+        <WorkEntryLine entry={entry} timestamp={timestamp} canExpand={false} />
+      </div>
+    )
+  }
 
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      if (event.key !== "Enter" && event.key !== " ") return
-      event.preventDefault()
-      activate?.()
-    },
-    [activate]
-  )
-
-  const rowToggleProps = activate
-    ? {
-        role: "button" as const,
-        tabIndex: 0,
-        ...(canExpand ? { "aria-expanded": expanded } : {}),
-        "aria-label": entry.preview
-          ? `${entry.heading} ${entry.preview}`
-          : entry.heading,
-        onClick: activate,
-        onKeyDown: handleKeyDown,
-      }
-    : {}
+  const label = entry.preview
+    ? `${entry.heading} ${entry.preview}`
+    : entry.heading
 
   return (
-    <div
-      className={cn(
-        "group/entry flex flex-col rounded-md px-0.5 py-0.5 transition-colors",
-        activate &&
-          "cursor-pointer hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none focus-visible:ring-inset"
-      )}
-      {...rowToggleProps}
+    <Collapsible
+      className="group/entry flex flex-col rounded-md"
+      defaultOpen={defaultExpanded}
     >
-      <div className="flex items-center gap-1.5 select-none">
-        <span
-          className={cn(
-            "flex size-5 shrink-0 items-center justify-center",
-            isError
-              ? "text-destructive"
-              : entry.tone === "thinking"
-                ? "text-foreground/92"
-                : "text-muted-foreground/65"
-          )}
-        >
-          <WorkEntryIcon
-            name={entry.icon}
-            className="block size-3.5 shrink-0 stroke-[1.8] opacity-80"
-          />
-        </span>
-
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <div className="min-w-0 flex-1 overflow-hidden">
-            <p className="flex w-full min-w-0 items-baseline gap-1.5 text-[13px] leading-5">
-              <span
-                className={cn(
-                  "shrink-0 truncate font-medium",
-                  isError
-                    ? "text-destructive"
-                    : entry.status === "pending" ||
-                        entry.status === "in_progress"
-                      ? "shimmer-text"
-                      : "text-foreground/82"
-                )}
-              >
-                {entry.heading}
-              </span>
-              {entry.preview &&
-                (entry.previewTooltip ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span className="min-w-0 flex-1 truncate text-muted-foreground" />
-                      }
-                    >
-                      {entry.preview}
-                    </TooltipTrigger>
-                    <TooltipPopup className="max-w-md break-all">
-                      {entry.previewTooltip}
-                    </TooltipPopup>
-                  </Tooltip>
-                ) : (
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                    {entry.preview}
-                  </span>
-                ))}
-              {entry.diffStats && (
-                <span className="flex shrink-0 items-center gap-1 font-mono text-[11px] text-muted-foreground tabular-nums">
-                  <span className="transition-colors group-focus-within/entry:text-success-foreground group-hover/entry:text-success-foreground">
-                    +{entry.diffStats.additions}
-                  </span>
-                  <span aria-hidden>/</span>
-                  <span className="transition-colors group-focus-within/entry:text-destructive group-hover/entry:text-destructive">
-                    -{entry.diffStats.deletions}
-                  </span>
-                </span>
-              )}
-            </p>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-1 text-muted-foreground">
-            {trailing}
-            {hoverTimestamp && (
-              <time className="text-[10px] tabular-nums opacity-0 transition-opacity group-hover/entry:opacity-100">
-                {hoverTimestamp}
-              </time>
-            )}
-            <span
-              className="flex size-4 shrink-0 items-center justify-center"
-              aria-hidden={!canExpand}
-            >
-              {canExpand ? (
-                <ChevronDown
-                  className={cn(
-                    "size-3 shrink-0 opacity-70 transition-transform duration-200",
-                    expanded && "rotate-180"
-                  )}
-                  aria-hidden
-                />
-              ) : null}
-            </span>
-            <span className="flex size-4 shrink-0 items-center justify-center">
-              <StatusIndicator status={entry.status} />
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {expanded && canExpand && (
-        <div
-          className="ms-7 mt-1 cursor-default border-s border-border/45 ps-3 pt-0.5"
-          onClick={stopRowToggle}
-          onPointerDown={stopRowToggle}
-        >
-          {body ??
-            (entry.expandedText != null && (
-              <ToolResultBody value={entry.expandedText} />
-            ))}
-        </div>
-      )}
-    </div>
+      <CollapsibleTrigger
+        aria-label={label}
+        className="w-full cursor-pointer rounded-md px-0.5 py-0.5 transition-colors hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none focus-visible:ring-inset"
+      >
+        <WorkEntryLine entry={entry} timestamp={timestamp} canExpand />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="ms-7 mt-1 cursor-default border-s border-border/45 ps-3 pt-0.5">
+        {body ??
+          (entry.expandedText != null && (
+            <ToolResultBody value={entry.expandedText} />
+          ))}
+      </CollapsibleContent>
+    </Collapsible>
   )
 }

@@ -1,7 +1,14 @@
 import { memo } from "react"
 
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
-import { ToolResultBody } from "./ToolResultBody"
+import {
+  Terminal,
+  TerminalActions,
+  TerminalContent,
+  TerminalCopyButton,
+  TerminalHeader,
+  TerminalTitle,
+} from "@/components/ai-elements/terminal"
 
 export const ShellEntryBody = memo(function ShellEntryBody({
   chunk,
@@ -11,24 +18,47 @@ export const ShellEntryBody = memo(function ShellEntryBody({
   const command =
     typeof chunk.input?.command === "string" ? chunk.input.command : ""
   const output = chunk.output ?? ""
+  const isRunning = chunk.status === "in_progress"
+  const placeholder = isRunning
+    ? "Running…"
+    : chunk.status === "pending"
+      ? "Waiting for approval…"
+      : null
 
   return (
-    <div className="space-y-1.5">
+    <Terminal className="text-[12px]" isStreaming={isRunning} output={output}>
       {command && (
-        <pre className="cursor-text overflow-x-auto font-mono text-[12px] leading-relaxed whitespace-pre text-foreground/85 select-text">
-          <span className="text-muted-foreground/80">$ </span>
-          {command}
-        </pre>
+        <TerminalHeader className="items-start">
+          <TerminalTitle className="min-w-0 flex-1 items-start">
+            <span className="font-mono text-[12px] leading-relaxed break-words whitespace-pre-wrap text-foreground/85 select-text">
+              <span className="text-muted-foreground/80">$ </span>
+              {command}
+            </span>
+          </TerminalTitle>
+          {output && (
+            <TerminalActions>
+              <TerminalCopyButton aria-label="Copy output" />
+            </TerminalActions>
+          )}
+        </TerminalHeader>
       )}
-      {output && <ToolResultBody value={output} />}
-      {!output && chunk.status === "in_progress" && (
-        <p className="font-mono text-[12px] text-muted-foreground">Running…</p>
+      {output || isRunning ? (
+        <TerminalContent className="max-h-64 p-3 text-[12px] text-muted-foreground" />
+      ) : (
+        placeholder && (
+          <TerminalContent className="p-3 text-[12px]">
+            <p
+              className={
+                chunk.status === "pending"
+                  ? "text-warning-foreground"
+                  : "text-muted-foreground"
+              }
+            >
+              {placeholder}
+            </p>
+          </TerminalContent>
+        )
       )}
-      {!output && chunk.status === "pending" && (
-        <p className="font-mono text-[12px] text-warning-foreground">
-          Waiting for approval…
-        </p>
-      )}
-    </div>
+    </Terminal>
   )
 })

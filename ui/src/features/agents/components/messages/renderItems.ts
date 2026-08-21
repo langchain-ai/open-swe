@@ -1,8 +1,14 @@
-import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
+import type {
+  Chunk,
+  ImageChunk,
+  ReasoningChunk,
+  TextChunk,
+  ToolExecutionChunk,
+} from "@/features/agents/lib/types"
 
 export type RenderItem =
-  | { type: "text-chunk"; key: string; chunk: Chunk }
-  | { type: "reasoning-item"; key: string; chunk: Chunk }
+  | { type: "text-chunk"; key: string; chunk: TextChunk | ImageChunk }
+  | { type: "reasoning-item"; key: string; chunk: ReasoningChunk }
   | {
       type: "explored-group"
       key: string
@@ -90,10 +96,6 @@ function attentionItems(
     return toolNeedsAttention(item.chunk, includeUnfinished) ? [item] : []
   }
 
-  if (item.type === "text-chunk" && item.chunk.kind === "error") {
-    return [item]
-  }
-
   return []
 }
 
@@ -126,24 +128,9 @@ export function countWorkActions(items: Array<RenderItem>): number {
 }
 
 function getChunkRenderKey(chunk: Chunk, sourceIndex: number): string {
-  switch (chunk.kind) {
-    case "tool-execution":
-      return `tool-${chunk.toolCallId}`
-    case "text":
-      return `text-${sourceIndex}`
-    case "reasoning":
-      return `reasoning-${sourceIndex}`
-    case "code":
-      return `code-${sourceIndex}`
-    case "error":
-      return `error-${sourceIndex}`
-    case "list":
-      return `list-${sourceIndex}`
-    case "image":
-      return `image-${sourceIndex}`
-    default:
-      return `chunk-${sourceIndex}`
-  }
+  return chunk.kind === "tool-execution"
+    ? `tool-${chunk.toolCallId}`
+    : `${chunk.kind}-${sourceIndex}`
 }
 
 function isEditTool(chunk: ToolExecutionChunk): boolean {
@@ -283,26 +270,15 @@ export function buildRenderItems(
 
     if (chunk.kind === "text" && !chunk.text.trim()) continue
 
-    if (chunk.kind === "reasoning") {
-      flushGroups()
-      items.push({
-        type: "reasoning-item",
-        key: messageId
-          ? `${messageId}-${getChunkRenderKey(chunk, i)}`
-          : getChunkRenderKey(chunk, i),
-        chunk,
-      })
-      continue
-    }
-
     flushGroups()
-    items.push({
-      type: "text-chunk",
-      key: messageId
-        ? `${messageId}-${getChunkRenderKey(chunk, i)}`
-        : getChunkRenderKey(chunk, i),
-      chunk,
-    })
+    const key = messageId
+      ? `${messageId}-${getChunkRenderKey(chunk, i)}`
+      : getChunkRenderKey(chunk, i)
+    items.push(
+      chunk.kind === "reasoning"
+        ? { type: "reasoning-item", key, chunk }
+        : { type: "text-chunk", key, chunk }
+    )
   }
 
   flushGroups()

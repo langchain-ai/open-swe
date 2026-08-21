@@ -1,6 +1,7 @@
 import { Component, memo, useMemo } from "react"
-import { Streamdown, defaultUrlTransform } from "streamdown"
+import { defaultUrlTransform } from "streamdown"
 import type { ComponentProps, ReactNode } from "react"
+import { MessageResponse } from "@/components/ai-elements/message"
 import "streamdown/styles.css"
 
 interface MarkdownProps {
@@ -177,7 +178,7 @@ export const Markdown = memo(function Markdown({
   return (
     <div className="max-w-full min-w-0 text-[14px] leading-[1.6] [overflow-wrap:anywhere] break-words [&_.streamdown]:text-foreground">
       <MarkdownErrorBoundary content={content}>
-        <Streamdown
+        <MessageResponse
           mode={isLive ? "streaming" : "static"}
           parseIncompleteMarkdown={isLive}
           isAnimating={isLive}
@@ -188,7 +189,7 @@ export const Markdown = memo(function Markdown({
           urlTransform={urlTransform}
         >
           {content}
-        </Streamdown>
+        </MessageResponse>
       </MarkdownErrorBoundary>
     </div>
   )

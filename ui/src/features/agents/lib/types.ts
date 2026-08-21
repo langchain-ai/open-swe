@@ -1,17 +1,5 @@
 export type Author = "user" | "agent" | "system" | "tool"
 
-export type ChunkKind =
-  | "text"
-  | "reasoning"
-  | "code"
-  | "error"
-  | "list"
-  | "tool-execution"
-  | "todo"
-  | "image"
-
-export type TodoStatus = "pending" | "in_progress" | "completed"
-
 export type AgentStatus =
   "idle" | "running" | "finished" | "interrupted" | "error"
 
@@ -29,11 +17,6 @@ export type AgentTriggerKind =
   | "reviewer"
   | "analyzer"
   | "ci_autofix"
-
-export interface TodoItem {
-  content: string
-  status: TodoStatus
-}
 
 export type AcpToolKind =
   | "read"
@@ -98,14 +81,6 @@ export interface ToolExecutionChunk {
   diffData?: DiffData
   diffs?: Array<DiffData>
   locations?: Array<AcpToolLocation>
-  /**
-   * Namespace of the subagent this `task` call spawned, from the SDK's
-   * `stream.subagents` discovery map (correlated by tool-call id). Present only
-   * for `toolKind: "task"` chunks whose subagent the SDK has discovered; lets
-   * the UI open a scoped `useToolCalls(stream, { namespace })` subscription to
-   * show the subagent's nested activity.
-   */
-  subagentNamespace?: Array<string>
 }
 
 export interface TextChunk {
@@ -118,27 +93,6 @@ export interface ReasoningChunk {
   text: string
 }
 
-export interface CodeChunk {
-  kind: "code"
-  text: string
-  language?: string
-}
-
-export interface ErrorChunk {
-  kind: "error"
-  text: string
-}
-
-export interface ListChunk {
-  kind: "list"
-  lines: Array<string>
-}
-
-export interface TodoChunk {
-  kind: "todo"
-  todos: Array<TodoItem>
-}
-
 export interface ImageChunk {
   kind: "image"
   base64: string
@@ -146,15 +100,7 @@ export interface ImageChunk {
   fileName?: string
 }
 
-export type Chunk =
-  | TextChunk
-  | ReasoningChunk
-  | CodeChunk
-  | ErrorChunk
-  | ListChunk
-  | ToolExecutionChunk
-  | TodoChunk
-  | ImageChunk
+export type Chunk = TextChunk | ReasoningChunk | ToolExecutionChunk | ImageChunk
 
 export interface Message {
   id: string

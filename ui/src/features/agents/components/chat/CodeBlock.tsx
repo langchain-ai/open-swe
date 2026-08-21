@@ -1,150 +1,68 @@
-import { useEffect, useMemo, useState } from "react"
-import { getSingletonHighlighter } from "shiki"
-import type { ThemedToken } from "shiki"
-import { useResolvedTheme } from "@/lib/theme"
+import { useMemo } from "react"
+import type { BundledLanguage } from "shiki"
+import {
+  CodeBlockActions,
+  CodeBlock as CodeBlockBase,
+  CodeBlockCopyButton,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from "@/components/ai-elements/code-block"
 
 interface CodeBlockProps {
   text: string
   language?: string
 }
 
-const SHIKI_THEME = { light: "github-light", dark: "github-dark" } as const
-
-const TOKEN_CACHE = new Map<string, Array<Array<ThemedToken>>>()
+const LANGUAGE_ALIASES: Record<string, string> = {
+  ts: "typescript",
+  js: "javascript",
+  md: "markdown",
+  yml: "yaml",
+  sh: "bash",
+  zsh: "bash",
+  shell: "bash",
+  py: "python",
+  rb: "ruby",
+  rs: "rust",
+  "c#": "csharp",
+  plaintext: "text",
+  txt: "text",
+}
 
 function normalizeLanguage(language?: string): string {
   const raw = (language || "").toLowerCase().trim()
   if (!raw) return "text"
-
-  const aliases: Record<string, string> = {
-    ts: "typescript",
-    tsx: "tsx",
-    js: "javascript",
-    jsx: "jsx",
-    md: "markdown",
-    yml: "yaml",
-    sh: "bash",
-    zsh: "bash",
-    shell: "bash",
-    py: "python",
-    rb: "ruby",
-    rs: "rust",
-    csharp: "csharp",
-    "c#": "csharp",
-    plaintext: "text",
-    txt: "text",
-  }
-
-  return aliases[raw] || raw
+  return LANGUAGE_ALIASES[raw] || raw
 }
 
 function languageLabel(language: string): string {
-  if (language === "text") return "text"
   if (language === "typescript") return "ts"
   if (language === "javascript") return "js"
   return language
 }
 
 export function CodeBlock({ text, language }: CodeBlockProps) {
-  const [tokens, setTokens] = useState<Array<Array<ThemedToken>> | null>(null)
-  const [copied, setCopied] = useState(false)
-  const resolvedTheme = useResolvedTheme()
-  const shikiTheme = SHIKI_THEME[resolvedTheme]
   const normalizedLanguage = useMemo(
     () => normalizeLanguage(language),
     [language]
   )
-  const displayLanguage = useMemo(
-    () => languageLabel(normalizedLanguage),
-    [normalizedLanguage]
-  )
-
-  useEffect(() => {
-    let cancelled = false
-    setTokens(null)
-
-    if (normalizedLanguage === "text") return
-
-    const cacheKey = `${shikiTheme}::${normalizedLanguage}::${text}`
-    const cached = TOKEN_CACHE.get(cacheKey)
-    if (cached) {
-      setTokens(cached)
-      return
-    }
-
-    getSingletonHighlighter({
-      themes: [shikiTheme],
-      langs: [normalizedLanguage as any],
-    })
-      .then((highlighter) => {
-        if (cancelled) return
-        const result = highlighter.codeToTokens(text, {
-          lang: normalizedLanguage as any,
-          theme: shikiTheme,
-        })
-        if (TOKEN_CACHE.size >= 500) TOKEN_CACHE.clear()
-        TOKEN_CACHE.set(cacheKey, result.tokens)
-        setTokens(result.tokens)
-      })
-      .catch((err: unknown) => {
-        console.warn("[code-block] Tokenization failed:", err)
-        if (!cancelled) {
-          setTokens(null)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [text, normalizedLanguage, shikiTheme])
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1200)
-    } catch {
-      setCopied(false)
-    }
-  }
 
   return (
-    <div className="my-2 max-w-full overflow-hidden rounded-xl border border-border/60 bg-muted">
-      <div className="flex items-center justify-between px-3 py-2 text-xs">
-        <span className="font-mono text-muted-foreground">
-          {displayLanguage}
-        </span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="text-muted-foreground transition-colors hover:text-foreground"
-          title="Copy code"
-        >
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
-      <pre className="max-w-full px-3 pb-3 text-[12px] [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
-        {tokens ? (
-          <code className="block max-w-full">
-            {tokens.map((lineTokens, lineIndex) => (
-              <div
-                key={lineIndex}
-                className="max-w-full [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
-              >
-                {lineTokens.map((token, tokenIndex) => (
-                  <span key={tokenIndex} style={{ color: token.color }}>
-                    {token.content}
-                  </span>
-                ))}
-              </div>
-            ))}
-          </code>
-        ) : (
-          <code className="block max-w-full [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-foreground">
-            {text}
-          </code>
-        )}
-      </pre>
-    </div>
+    <CodeBlockBase
+      // Shiki paints the theme's own page colour onto the <pre>; drop it so
+      // the block sits on the app's muted surface in both themes.
+      className="my-2 max-w-full rounded-xl border-border/60 bg-muted [&_pre]:bg-transparent! [&_pre]:p-3 [&_pre]:text-[12px] [&_pre]:[overflow-wrap:anywhere] [&_pre]:break-words [&_pre]:whitespace-pre-wrap"
+      code={text}
+      language={normalizedLanguage as BundledLanguage}
+    >
+      <CodeBlockHeader className="border-0 bg-transparent">
+        <CodeBlockTitle className="font-mono">
+          {languageLabel(normalizedLanguage)}
+        </CodeBlockTitle>
+        <CodeBlockActions>
+          <CodeBlockCopyButton aria-label="Copy code" size="icon-sm" />
+        </CodeBlockActions>
+      </CodeBlockHeader>
+    </CodeBlockBase>
   )
 }

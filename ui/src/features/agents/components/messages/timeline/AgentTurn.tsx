@@ -14,12 +14,25 @@ import { TurnChangedFilesCard } from "../TurnChangedFilesCard"
 import { MessageCopyButton } from "./MessageCopyButton"
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, latestDiff } from "./workEntry"
-import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
+import {
+  TurnFoldRow,
+  WorkGroupToggleRow,
+  workGroupToggleLabel,
+} from "./foldRows"
 import { ShellEntryBody } from "./entryBodies"
 import type { ReactNode } from "react"
 import type { RenderItem } from "../renderItems"
-import type { ApprovalCallbacks } from "../types"
-import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
+import type { MessagesProps } from "../types"
+import type {
+  Message as ThreadMessage,
+  ToolExecutionChunk,
+} from "@/features/agents/lib/types"
+import {
+  Message,
+  MessageActions,
+  MessageToolbar,
+} from "@/components/ai-elements/message"
+import { Task, TaskContent, TaskTrigger } from "@/components/ai-elements/task"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
 import { SubagentGroup } from "@/features/agents/components/subagents"
@@ -71,27 +84,26 @@ function WorkGroup({
   onToggle: () => void
 }) {
   const hiddenCount = Math.max(0, chunks.length - MAX_VISIBLE_WORK_LOG_ENTRIES)
-  const visible = expanded
-    ? chunks
-    : chunks.slice(chunks.length - MAX_VISIBLE_WORK_LOG_ENTRIES)
+  const earlier = chunks.slice(0, hiddenCount)
+  const latest = chunks.slice(hiddenCount)
+  const row = (chunk: ToolExecutionChunk, index: number) => (
+    <WorkEntryRow
+      key={chunk.toolCallId || `work-${index}`}
+      entry={describeWorkEntry(chunk, projectPath)}
+      timestamp={chunk.timestamp}
+    />
+  )
+
+  if (hiddenCount === 0) return <div>{latest.map(row)}</div>
 
   return (
-    <div>
-      {hiddenCount > 0 && (
-        <WorkGroupToggleRow
-          hiddenCount={hiddenCount}
-          expanded={expanded}
-          onToggle={onToggle}
-        />
-      )}
-      {visible.map((chunk, index) => (
-        <WorkEntryRow
-          key={chunk.toolCallId || `work-${index}`}
-          entry={describeWorkEntry(chunk, projectPath)}
-          timestamp={chunk.timestamp}
-        />
-      ))}
-    </div>
+    <Task open={expanded} onOpenChange={onToggle}>
+      <TaskTrigger title={workGroupToggleLabel(hiddenCount, expanded)}>
+        <WorkGroupToggleRow hiddenCount={hiddenCount} expanded={expanded} />
+      </TaskTrigger>
+      <TaskContent>{earlier.map(row)}</TaskContent>
+      {latest.map(row)}
+    </Task>
   )
 }
 
@@ -103,9 +115,9 @@ export function AgentTurn({
   threadId,
   isLatestTurn,
   activityLabel,
-  ...callbacks
+  onOpenFile,
 }: {
-  message: Message
+  message: ThreadMessage
   isStreaming?: boolean
   isMarkdownLive?: boolean
   projectPath?: string
@@ -113,7 +125,8 @@ export function AgentTurn({
   threadId?: string
   isLatestTurn?: boolean
   activityLabel?: string
-} & ApprovalCallbacks) {
+  onOpenFile?: MessagesProps["onOpenFile"]
+}) {
   const renderItems = useMemo(
     () => buildRenderItems(message.chunks, message.id),
     [message.chunks, message.id]
@@ -195,12 +208,10 @@ export function AgentTurn({
   ): ReactNode => {
     switch (item.type) {
       case "reasoning-item": {
-        const reasoningChunk =
-          item.chunk.kind === "reasoning" ? item.chunk : null
         return (
           <div key={item.key} className="min-w-0 flex-1">
             <ReasoningBlock
-              text={reasoningChunk?.text ?? ""}
+              text={item.chunk.text}
               isLive={!!isStreaming && index === total - 1}
             />
           </div>
@@ -258,17 +269,11 @@ export function AgentTurn({
           />
         )
 
-      // Not only prose: buildRenderItems funnels code/error/list/image chunks
-      // here too, so this has to go through the full chunk renderer.
+      // Prose or an inline image.
       case "text-chunk":
         return (
           <div key={item.key} className="min-w-0 px-1 py-0.5">
-            <ChunkRenderer
-              chunk={item.chunk}
-              projectPath={projectPath}
-              isMarkdownLive={isMarkdownLive}
-              {...callbacks}
-            />
+            <ChunkRenderer chunk={item.chunk} isMarkdownLive={isMarkdownLive} />
           </div>
         )
     }
@@ -291,7 +296,7 @@ export function AgentTurn({
         : renderItems
 
   return (
-    <div className="group/turn my-2 min-w-0 space-y-1.5">
+    <Message from="assistant" className="my-2 gap-1.5">
       {canFoldWork && (
         <TurnFoldRow
           label={foldLabelWithCount}
@@ -309,16 +314,18 @@ export function AgentTurn({
           threadId={threadId}
           turnKey={message.turnKey}
           isLatestTurn={!!isLatestTurn}
-          onOpenFile={callbacks.onOpenFile}
+          onOpenFile={onOpenFile}
         />
       )}
 
-      <div className="mt-1 flex items-center gap-1">
+      <MessageToolbar>
         {replyText && !isStreaming && (
-          <MessageCopyButton
-            className="opacity-0 transition-opacity duration-200 group-hover/turn:opacity-100 focus-visible:opacity-100"
-            text={replyText}
-          />
+          <MessageActions>
+            <MessageCopyButton
+              className="opacity-0 transition-opacity duration-200 group-hover/message:opacity-100 focus-visible:opacity-100"
+              text={replyText}
+            />
+          </MessageActions>
         )}
         {!message.timestampIsFallback && (
           <MessageTimestamp
@@ -326,7 +333,7 @@ export function AgentTurn({
             startedAt={message.startedAt}
           />
         )}
-      </div>
-    </div>
+      </MessageToolbar>
+    </Message>
   )
 }

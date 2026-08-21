@@ -6,8 +6,13 @@ import {
   useWorkflowApprovalDecision,
   useWorkflowApprovals,
 } from "@/features/agents/lib/queries"
-import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import {
+  Confirmation,
+  ConfirmationAction,
+  ConfirmationActions,
+  ConfirmationDescription,
+  ConfirmationTitle,
+} from "@/components/ai-elements/confirmation"
 
 function shortSha(value: string): string {
   return value ? value.slice(0, 7) : "unknown"
@@ -41,6 +46,7 @@ export function WorkflowApprovalCard({
   if (approvals.length === 0) return null
 
   const isOwner = query.data?.isOwner === true
+  const busy = decision.isPending
   const decide = async (
     approval: WorkflowPushApproval,
     kind: "approve" | "reject"
@@ -59,72 +65,41 @@ export function WorkflowApprovalCard({
   return (
     <div className="border-b border-border bg-card px-4 py-3">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-        {approvals.map((approval) => {
-          const busy = decision.isPending
-          return (
-            <section
-              key={approval.fingerprint}
-              data-testid="workflow-approval-card"
-              className="rounded-lg border border-border bg-background p-3 shadow-sm"
-            >
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="min-w-0 space-y-1">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <ShieldCheck className="size-4 text-primary" />
-                    Workflow file approval required
-                  </div>
-                  <p className="text-xs text-muted-foreground/70">
-                    {approval.repo || "Repository"} on{" "}
-                    {approval.branch || "Current branch"} ·{" "}
-                    {shortSha(approval.baseSha)} → {shortSha(approval.headSha)}
-                  </p>
-                  <p className="font-mono text-[0.68rem] break-all text-muted-foreground/70">
-                    Fingerprint: {approval.fingerprint}
-                  </p>
-                </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  {approval.approvalUrl && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        window.location.href = approval.approvalUrl ?? ""
-                      }}
-                    >
-                      Open in Web
-                    </Button>
-                  )}
-                  <Button
-                    disabled={!isOwner || busy}
-                    onClick={() => void decide(approval, "approve")}
-                  >
-                    Approve
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    disabled={!isOwner || busy}
-                    onClick={() => void decide(approval, "reject")}
-                  >
-                    Reject
-                  </Button>
-                </div>
-              </div>
+        {approvals.map((approval) => (
+          <Confirmation
+            key={approval.fingerprint}
+            approval={{ id: approval.fingerprint }}
+            data-testid="workflow-approval-card"
+            state="approval-requested"
+          >
+            <ShieldCheck />
+            <ConfirmationTitle>
+              Workflow file approval required
+            </ConfirmationTitle>
+            <ConfirmationDescription>
+              <p className="text-xs">
+                {approval.repo || "Repository"} on{" "}
+                {approval.branch || "Current branch"} ·{" "}
+                {shortSha(approval.baseSha)} → {shortSha(approval.headSha)}
+              </p>
+              <p className="font-mono text-[0.68rem] break-all">
+                Fingerprint: {approval.fingerprint}
+              </p>
 
               {!isOwner && (
-                <p className="mt-3 text-xs text-muted-foreground/70">
+                <p className="text-xs">
                   Only the thread owner can approve or reject this workflow
                   push.
                 </p>
               )}
-              {error && (
-                <p className="mt-3 text-xs text-destructive">{error}</p>
-              )}
+              {error && <p className="text-xs text-destructive">{error}</p>}
 
-              <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                 <div className="min-w-0">
                   <p className="text-xs font-medium text-foreground">
                     {fileLabel(approval.files.length)} changed
                   </p>
-                  <ul className="mt-1 space-y-1 text-xs text-muted-foreground/70">
+                  <ul className="mt-1 space-y-1 text-xs">
                     {approval.files.slice(0, 8).map((file) => (
                       <li
                         key={file}
@@ -139,7 +114,7 @@ export function WorkflowApprovalCard({
                     )}
                   </ul>
                 </div>
-                <div className="rounded-md border border-border px-3 py-2 text-xs text-muted-foreground/70">
+                <div className="self-start rounded-md border border-border px-3 py-2 text-xs">
                   <span>{approval.diffStats.files} files</span>
                   <span className="mx-2 text-success-foreground">
                     +{approval.diffStats.additions}
@@ -151,24 +126,44 @@ export function WorkflowApprovalCard({
               </div>
 
               {approval.diffPreview && (
-                <details className="mt-3" open>
+                <details open>
                   <summary className="cursor-pointer text-xs font-medium text-foreground">
                     Diff preview
                     {approval.diffPreviewTruncated ? " (truncated)" : ""}
                   </summary>
-                  <pre
-                    className={cn(
-                      "mt-2 max-h-72 overflow-auto rounded-md border border-border",
-                      "bg-card p-3 text-[0.68rem] leading-relaxed text-foreground"
-                    )}
-                  >
+                  <pre className="mt-2 max-h-72 overflow-auto rounded-md border border-border bg-background p-3 text-[0.68rem] leading-relaxed text-foreground">
                     {approval.diffPreview}
                   </pre>
                 </details>
               )}
-            </section>
-          )
-        })}
+            </ConfirmationDescription>
+            <ConfirmationActions>
+              {approval.approvalUrl && (
+                <ConfirmationAction
+                  variant="secondary"
+                  onClick={() => {
+                    window.location.href = approval.approvalUrl ?? ""
+                  }}
+                >
+                  Open in Web
+                </ConfirmationAction>
+              )}
+              <ConfirmationAction
+                disabled={!isOwner || busy}
+                onClick={() => void decide(approval, "approve")}
+              >
+                Approve
+              </ConfirmationAction>
+              <ConfirmationAction
+                variant="destructive"
+                disabled={!isOwner || busy}
+                onClick={() => void decide(approval, "reject")}
+              >
+                Reject
+              </ConfirmationAction>
+            </ConfirmationActions>
+          </Confirmation>
+        ))}
       </div>
     </div>
   )

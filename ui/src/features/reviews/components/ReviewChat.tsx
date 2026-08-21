@@ -3,7 +3,6 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -25,6 +24,13 @@ import { Menu } from "@base-ui/react/menu"
 import type { BaseMessage } from "@langchain/core/messages"
 
 import type { ReviewChatThread } from "@/lib/api"
+// Aliased: this file's own `Conversation` is a chat-tab record.
+import {
+  Conversation as MessageList,
+  ConversationContent as MessageListContent,
+  ConversationScrollButton as MessageListScrollButton,
+} from "@/components/ai-elements/conversation"
+import { Message, MessageContent } from "@/components/ai-elements/message"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { IconButton } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -432,9 +438,6 @@ function ChatBody({
   const stream = useStreamContext()
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Array<ChatAttachment>>([])
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const autoScrollRef = useRef(true)
-  const prevTopRef = useRef(0)
   const messages = stream.messages
   const busy = stream.isLoading
   // True during the one-time getState hydration when switching to / loading an
@@ -497,33 +500,6 @@ function ChatBody({
   // conversation hydrates, so a chat with messages never flashes its greeting.
   const showEmpty = visible.length === 0 && !busy
   const showLoading = showEmpty && hydrating && expectsHistory
-  const showMessages = !showEmpty && !showLoading
-
-  // Auto-scroll is fully contained to the messages list (scrollTop assignment,
-  // never scrollIntoView) so it can't bubble up and move the diff column. We
-  // pause auto-scroll when the user scrolls up and resume when near the bottom.
-  useLayoutEffect(() => {
-    if (!showMessages) return
-    const el = scrollRef.current
-    if (!el || !autoScrollRef.current) return
-    el.scrollTop = el.scrollHeight
-    prevTopRef.current = el.scrollTop
-  }, [showMessages, messages, busy])
-
-  useEffect(() => {
-    if (!showMessages) return
-    const el = scrollRef.current
-    if (!el) return
-    const onScroll = () => {
-      const top = el.scrollTop
-      const nearBottom = el.scrollHeight - top - el.clientHeight <= 24
-      if (top < prevTopRef.current - 1) autoScrollRef.current = false
-      else if (nearBottom) autoScrollRef.current = true
-      prevTopRef.current = top
-    }
-    el.addEventListener("scroll", onScroll, { passive: true })
-    return () => el.removeEventListener("scroll", onScroll)
-  }, [showMessages])
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -537,39 +513,35 @@ function ChatBody({
           }}
         />
       ) : (
-        <div
-          ref={scrollRef}
-          className="flex flex-1 flex-col gap-4 overflow-y-auto p-4"
-        >
-          {visible.map(({ message, content, structured }, index) => {
-            const isUser = messageType(message) === "human"
-            if (!isUser) {
+        // Scrolling stays contained to this list (the container's own
+        // scrollTop, never scrollIntoView) so it can't move the diff column.
+        <MessageList>
+          <MessageListContent className="gap-4 p-4">
+            {visible.map(({ message, content, structured }, index) => {
+              const isUser = messageType(message) === "human"
+              if (!isUser) {
+                return (
+                  <Message from="assistant" key={message.id ?? index}>
+                    <MessageContent className="text-[13px]">
+                      <Markdown content={content} />
+                    </MessageContent>
+                  </Message>
+                )
+              }
+              const parsed = parseUserMessage(content)
+              const isSystem =
+                structured?.type === "message" &&
+                structured.senderKind === "system"
               return (
-                <div key={message.id ?? index} className="flex justify-start">
-                  <div className="w-full text-[13px] text-foreground">
-                    <Markdown content={content} />
-                  </div>
-                </div>
-              )
-            }
-            const parsed = parseUserMessage(content)
-            const isSystem =
-              structured?.type === "message" &&
-              structured.senderKind === "system"
-            return (
-              <div
-                key={message.id ?? index}
-                className={isSystem ? "flex justify-start" : "flex justify-end"}
-                data-message-sender-kind={
-                  structured?.type === "message"
-                    ? structured.senderKind
-                    : undefined
-                }
-              >
-                <div
-                  className={`flex max-w-[85%] flex-col gap-1.5 ${
-                    isSystem ? "items-start" : "items-end"
-                  }`}
+                <Message
+                  from={isSystem ? "system" : "user"}
+                  key={message.id ?? index}
+                  className="max-w-[85%] gap-1.5 self-end data-[message-from=system]:self-start"
+                  data-message-sender-kind={
+                    structured?.type === "message"
+                      ? structured.senderKind
+                      : undefined
+                  }
                 >
                   {parsed.attachments.length > 0 && (
                     <div className="flex flex-wrap justify-end gap-1">
@@ -579,28 +551,23 @@ function ChatBody({
                     </div>
                   )}
                   {parsed.text && (
-                    <span
-                      className={`rounded-lg px-3 py-2 text-[13px] whitespace-pre-wrap text-foreground ${
-                        isSystem
-                          ? "border border-border bg-muted/50"
-                          : "bg-muted"
-                      }`}
-                    >
+                    <MessageContent className="px-3 py-2 text-[13px] whitespace-pre-wrap">
                       {parsed.text}
-                    </span>
+                    </MessageContent>
                   )}
+                </Message>
+              )
+            })}
+            {busy && (
+              <Message from="assistant">
+                <div className="px-3 py-2 text-xs text-muted-foreground">
+                  Thinking…
                 </div>
-              </div>
-            )
-          })}
-          {busy && (
-            <div className="flex justify-start">
-              <div className="px-3 py-2 text-xs text-muted-foreground">
-                Thinking…
-              </div>
-            </div>
-          )}
-        </div>
+              </Message>
+            )}
+          </MessageListContent>
+          <MessageListScrollButton aria-label="Scroll to bottom" />
+        </MessageList>
       )}
 
       <div className="p-3">

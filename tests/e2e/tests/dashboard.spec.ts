@@ -353,7 +353,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await edit.click();
     await expect(edit).toHaveAttribute("aria-expanded", "true");
 
-    const inlineDiff = edit.locator("[data-diff]");
+    // The row is a collapsible: the diff lives in the panel the trigger
+    // controls, not inside the trigger itself.
+    const panelId = await edit.getAttribute("aria-controls");
+    expect(panelId).toBeTruthy();
+    const inlineDiff = page.locator(`[id="${panelId}"] [data-diff]`);
     await expect(inlineDiff).toBeVisible();
     await expect(
       inlineDiff.locator('[data-line][data-line-type="change-deletion"]'),

@@ -1,5 +1,5 @@
 import http from "node:http"
-import { defineConfig } from "vite"
+import { defineConfig } from "vitest/config"
 import { devtools } from "@tanstack/devtools-vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import viteReact from "@vitejs/plugin-react"
@@ -158,6 +158,7 @@ const SHELL_PAGE = {
 
 const config = defineConfig({
   base: "/",
+  test: { setupFiles: ["./src/test/setup.ts"] },
   optimizeDeps: {
     include: [
       "streamdown",

@@ -1,3 +1,4 @@
+import { formatJsonToolResult } from "./toolResultJson"
 import type {
   AcpToolStatus,
   Chunk,
@@ -8,7 +9,6 @@ import {
   formatToolDisplayParts,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
-import { formatJsonToolResult } from "./toolResultJson"
 
 export type WorkEntryIconName =
   | "bot"
@@ -230,15 +230,7 @@ export function liveActivityLabel(
       if (chunk.text.trim()) return "Writing response…"
       continue
     }
-    if (chunk.kind === "error") return "Recovering from an error…"
-    if (
-      chunk.kind === "code" ||
-      chunk.kind === "list" ||
-      chunk.kind === "image"
-    ) {
-      return "Preparing response…"
-    }
-    if (chunk.kind === "todo") return "Planning next steps…"
+    if (chunk.kind === "image") return "Preparing response…"
 
     if (chunk.status === "pending") return "Waiting for approval…"
     if (chunk.status === "error") return "Recovering from an error…"

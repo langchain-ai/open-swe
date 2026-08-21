@@ -1,4 +1,5 @@
 import { memo } from "react"
+import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { Bot, Loader2 } from "lucide-react"
 
 import { SubagentActivity } from "./SubagentActivity"
@@ -8,6 +9,18 @@ import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsIn
 /** Coerce an unknown tool-argument value to a trimmed string, or `""`. */
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : ""
+}
+
+/**
+ * Nested activity for a subagent the SDK has discovered. `stream.subagents`
+ * is keyed by the `task` tool-call id, so the card's chunk maps straight to
+ * its namespace. Mounted only inside a `StreamProvider`.
+ */
+function LiveSubagentActivity({ toolCallId }: { toolCallId: string }) {
+  const stream = useAgentThreadStream()
+  const namespace = stream.subagents.get(toolCallId)?.namespace
+  if (!namespace || namespace.length === 0) return null
+  return <SubagentActivity namespace={namespace} />
 }
 
 /**
@@ -25,23 +38,21 @@ export const SubagentCard = memo(function SubagentCard({
   const description = asString(input.description)
   const isRunning = chunk.status === "in_progress" || chunk.status === "pending"
   const isError = chunk.status === "error"
-  const namespace = chunk.subagentNamespace
-  const activity =
-    inLiveStream && namespace && namespace.length > 0 ? (
-      <SubagentActivity namespace={namespace} />
-    ) : null
 
   return (
-    <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-accent p-2.5">
+    <div
+      className="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-accent p-2.5"
+      data-testid="subagent-card"
+    >
       <div className="flex min-w-0 items-center gap-1.5">
         {isRunning ? (
           <Loader2
-            className="h-3 w-3 shrink-0 animate-spin text-primary"
+            className="size-3 shrink-0 animate-spin text-primary"
             aria-hidden
           />
         ) : (
           <Bot
-            className={`h-3 w-3 shrink-0 ${isError ? "text-red-400" : "text-primary"}`}
+            className={`size-3 shrink-0 ${isError ? "text-destructive" : "text-primary"}`}
             aria-hidden
           />
         )}
@@ -54,7 +65,7 @@ export const SubagentCard = memo(function SubagentCard({
           {description}
         </p>
       )}
-      {activity}
+      {inLiveStream && <LiveSubagentActivity toolCallId={chunk.toolCallId} />}
     </div>
   )
 })
