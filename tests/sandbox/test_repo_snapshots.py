@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import BackgroundTasks, HTTPException
 
-from agent.dashboard import routes
 from agent.dashboard.repo_snapshots import (
     RepoSnapshotConfigError,
     RepoSnapshotUpdate,
@@ -17,6 +16,7 @@ from agent.dashboard.repo_snapshots import (
     run_snapshot_build,
     update_repo_snapshot,
 )
+from agent.dashboard.routes import repo_snapshots as repo_snapshot_routes
 
 
 def test_generate_dockerfile_template_uses_base_image() -> None:
@@ -35,27 +35,29 @@ def test_generate_dockerfile_template_requires_base_image() -> None:
 @pytest.mark.asyncio
 async def test_template_endpoint_returns_configuration_error() -> None:
     with patch.object(
-        routes,
+        repo_snapshot_routes,
         "generate_dockerfile_template",
         side_effect=RepoSnapshotConfigError("base image missing"),
     ):
         with pytest.raises(HTTPException) as exc:
-            await routes.api_repo_snapshot_template("acme/repo", _admin={"sub": "octo"})
+            await repo_snapshot_routes.api_repo_snapshot_template(
+                "acme/repo", _admin={"sub": "octo"}
+            )
     assert exc.value.status_code == 500
     assert "base image missing" in exc.value.detail
 
 
 @pytest.mark.asyncio
 async def test_create_endpoint_returns_configuration_error() -> None:
-    body = routes.RepoSnapshotCreate(full_name="acme/repo")
+    body = repo_snapshot_routes.RepoSnapshotCreate(full_name="acme/repo")
     with patch.object(
-        routes,
+        repo_snapshot_routes,
         "create_repo_snapshot",
         new_callable=AsyncMock,
         side_effect=RepoSnapshotConfigError("base image missing"),
     ):
         with pytest.raises(HTTPException) as exc:
-            await routes.api_create_repo_snapshot(body, _admin={"sub": "octo"})
+            await repo_snapshot_routes.api_create_repo_snapshot(body, _admin={"sub": "octo"})
     assert exc.value.status_code == 500
     assert "base image missing" in exc.value.detail
 
@@ -162,9 +164,11 @@ async def test_build_endpoint_blocks_non_stale_build() -> None:
         "dockerfile": "FROM x",
         "build_started_at": datetime.now(UTC).isoformat(),
     }
-    with patch.object(routes, "get_repo_snapshot", new_callable=AsyncMock, return_value=record):
+    with patch.object(
+        repo_snapshot_routes, "get_repo_snapshot", new_callable=AsyncMock, return_value=record
+    ):
         with pytest.raises(HTTPException) as exc:
-            await routes.api_build_repo_snapshot(
+            await repo_snapshot_routes.api_build_repo_snapshot(
                 "acme/repo", BackgroundTasks(), _admin={"sub": "octo"}
             )
     assert exc.value.status_code == 409
@@ -181,15 +185,17 @@ async def test_build_endpoint_allows_stale_build_retry() -> None:
     }
     building = {**stale, "build_started_at": datetime.now(UTC).isoformat()}
     with (
-        patch.object(routes, "get_repo_snapshot", new_callable=AsyncMock, return_value=stale),
         patch.object(
-            routes,
+            repo_snapshot_routes, "get_repo_snapshot", new_callable=AsyncMock, return_value=stale
+        ),
+        patch.object(
+            repo_snapshot_routes,
             "mark_repo_snapshot_building",
             new_callable=AsyncMock,
             return_value=building,
         ) as mark_building,
     ):
-        result = await routes.api_build_repo_snapshot(
+        result = await repo_snapshot_routes.api_build_repo_snapshot(
             "acme/repo", BackgroundTasks(), _admin={"sub": "octo"}
         )
     assert result is building

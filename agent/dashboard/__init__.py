@@ -2,8 +2,8 @@
 
 ``router`` is loaded lazily (PEP 562): importing any dashboard submodule
 (e.g. ``agent.dashboard.options`` from middleware) executes this __init__,
-and it must NOT drag in routes.py + FastAPI + every API/job module. Only the
-webapp, which actually mounts the router, pays that cost.
+and it must NOT drag in the ``routes`` package + FastAPI + every API/job
+module. Only the webapp, which actually mounts the router, pays that cost.
 """
 
 from typing import TYPE_CHECKING, Any

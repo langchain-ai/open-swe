@@ -1,7 +1,5 @@
 """Notion MCP OAuth helpers."""
 
-import base64
-import hashlib
 import secrets
 from typing import Any
 from urllib.parse import urlencode, urlparse
@@ -11,6 +9,7 @@ import httpx
 from ..config import dashboard_base_url, notion_mcp_client_name
 from ..encryption import decrypt_token, encrypt_token
 from ..store import delete_value, get_value, now_iso, put_value
+from .oauth import s256_challenge
 
 NOTION_MCP_URL = "https://mcp.notion.com/mcp"
 NOTION_STATE_COOKIE_NAME = "osw_notion_oauth_state"
@@ -48,16 +47,8 @@ def _metadata_url(auth_server_url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}{_AUTHORIZATION_SERVER_METADATA_PATH}"
 
 
-def _base64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode().rstrip("=")
-
-
 def generate_code_verifier() -> str:
-    return _base64url(secrets.token_bytes(32))
-
-
-def code_challenge_for_verifier(verifier: str) -> str:
-    return _base64url(hashlib.sha256(verifier.encode()).digest())
+    return secrets.token_urlsafe(32)
 
 
 def build_notion_authorize_url(
@@ -194,7 +185,7 @@ async def store_notion_oauth_flow(
         authorization_endpoint=authorization_endpoint,
         client_id=client_id,
         redirect_uri=redirect_uri,
-        code_challenge=code_challenge_for_verifier(verifier),
+        code_challenge=s256_challenge(verifier),
         state=state,
     )
 
