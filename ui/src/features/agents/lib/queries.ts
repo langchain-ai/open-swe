@@ -410,13 +410,7 @@ export function useAgentThreadPullRequestStatus(
 ) {
   return useQuery({
     queryKey: agentThreadKeys.pullRequestStatus(threadId),
-    queryFn: async () => {
-      try {
-        return await agentsApi.getThreadPullRequestStatus(threadId)
-      } catch {
-        return { pullRequests: [] }
-      }
-    },
+    queryFn: () => agentsApi.getThreadPullRequestStatus(threadId),
     enabled: enabled && Boolean(threadId),
     staleTime: 15_000,
     refetchInterval: 30_000,

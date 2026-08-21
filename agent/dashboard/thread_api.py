@@ -1979,7 +1979,7 @@ async def get_dashboard_thread_pull_request_status(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Return live GitHub health for every pull request tracked by the thread."""
-    metadata = await _authorized_thread_metadata(thread_id, login, email=email)
+    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     records = metadata.get("pull_requests")
     tracked = list(records) if isinstance(records, list) else []
     if not tracked:

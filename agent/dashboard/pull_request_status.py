@@ -2,7 +2,7 @@
 
 import asyncio
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import httpx
@@ -350,7 +350,7 @@ async def _pull_request_status(client: httpx.AsyncClient, record: object) -> dic
     return result
 
 
-async def get_pull_request_statuses(records: list[object], token: str) -> list[dict[str, Any]]:
+async def get_pull_request_statuses(records: Sequence[object], token: str) -> list[dict[str, Any]]:
     """Return live status for every tracked pull request record."""
     async with github_client(token=token) as client:
         return [await _pull_request_status(client, record) for record in records]

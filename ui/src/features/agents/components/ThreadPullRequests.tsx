@@ -156,9 +156,18 @@ function HealthSummary({
 
 function HealthDetails({
   health,
+  unavailable,
 }: {
   health: AgentPullRequestHealth | undefined
+  unavailable: boolean
 }) {
+  if (unavailable) {
+    return (
+      <p className="border-t border-border/70 pt-3 text-xs text-muted-foreground">
+        GitHub health is unavailable. This PR is not marked clean.
+      </p>
+    )
+  }
   if (!health) {
     return <p className="text-xs text-muted-foreground">Loading PR health…</p>
   }
@@ -249,9 +258,11 @@ function HealthDetails({
 function PullRequestHoverCard({
   pullRequest,
   health,
+  healthUnavailable,
 }: {
   pullRequest: AgentPullRequest
   health: AgentPullRequestHealth | undefined
+  healthUnavailable: boolean
 }) {
   const age = relativeAge(pullRequest.createdAt)
   const authorInitial = pullRequest.author?.slice(0, 1).toUpperCase() || "?"
@@ -315,7 +326,7 @@ function PullRequestHoverCard({
           </span>
         </span>
       </div>
-      <HealthDetails health={health} />
+      <HealthDetails health={health} unavailable={healthUnavailable} />
     </div>
   )
 }
@@ -323,11 +334,13 @@ function PullRequestHoverCard({
 function PullRequestLink({
   pullRequest,
   health,
+  healthUnavailable,
   onFix,
   fixDisabled,
 }: {
   pullRequest: AgentPullRequest
   health: AgentPullRequestHealth | undefined
+  healthUnavailable: boolean
   onFix?: (prompt: string) => Promise<void> | void
   fixDisabled: boolean
 }) {
@@ -400,7 +413,11 @@ function PullRequestLink({
           sideOffset={8}
           className="rounded-xl p-3 shadow-2xl"
         >
-          <PullRequestHoverCard pullRequest={pullRequest} health={health} />
+          <PullRequestHoverCard
+            pullRequest={pullRequest}
+            health={health}
+            healthUnavailable={healthUnavailable}
+          />
         </TooltipPopup>
       </Tooltip>
       {actionable && onFix && (
@@ -422,11 +439,13 @@ function PullRequestLink({
 export function ThreadPullRequests({
   pullRequests,
   health,
+  healthUnavailable = false,
   onFix,
   fixDisabled = false,
 }: {
   pullRequests: Array<AgentPullRequest>
   health?: Array<AgentPullRequestHealth>
+  healthUnavailable?: boolean
   onFix?: (prompt: string) => Promise<void> | void
   fixDisabled?: boolean
 }) {
@@ -451,6 +470,7 @@ export function ThreadPullRequests({
           health={healthByPullRequest.get(
             healthKey(pullRequest.repoFullName, pullRequest.number)
           )}
+          healthUnavailable={healthUnavailable}
           onFix={onFix}
           fixDisabled={fixDisabled}
         />

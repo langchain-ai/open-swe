@@ -320,6 +320,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       "text-muted-foreground",
       { timeout: 5_000 },
     );
+    await summary.focus();
+    await expect(
+      page.getByTestId("pr-hover-card-fakeorg/demo-1"),
+    ).toContainText("GitHub health is unavailable");
+    await page.keyboard.press("Escape");
     await page.unroute("**/pull-request-status");
 
     await setPullRequestHealth(page, {

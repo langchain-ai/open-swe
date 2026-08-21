@@ -72,7 +72,9 @@ export function AgentThreadView({
     thread.id,
     (thread.pullRequests?.length ?? 0) > 0
   )
-  const pullRequestHealth = pullRequestStatus.data?.pullRequests
+  const pullRequestHealth = pullRequestStatus.isError
+    ? undefined
+    : pullRequestStatus.data?.pullRequests
 
   const { models, defaultSelection } = useModelOptions()
   const threadSelection = useMemo<ModelSelection | null>(() => {
@@ -271,6 +273,7 @@ export function AgentThreadView({
                 <ThreadPullRequests
                   pullRequests={thread.pullRequests ?? []}
                   health={pullRequestHealth}
+                  healthUnavailable={pullRequestStatus.isError}
                   onFix={fixPullRequest}
                   fixDisabled={!canPost || sendMessage.isPending}
                 />

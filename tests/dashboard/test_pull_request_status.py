@@ -329,7 +329,7 @@ async def test_partial_check_failure_cannot_appear_green(
     assert result["commentsAvailable"] is True
 
 
-async def test_thread_status_authorizes_owner_before_token_or_metadata_use(
+async def test_thread_status_authorizes_read_access_before_token_or_metadata_use(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     order: list[str] = []
@@ -338,26 +338,26 @@ async def test_thread_status_authorizes_owner_before_token_or_metadata_use(
         {"repo_full_name": "o/two", "number": 2},
     ]
 
-    async def authorized(thread_id: str, login: str, *, email: str | None = None):
-        order.append("authorized")
-        assert (thread_id, login, email) == ("thread-1", "owner", "owner@example.com")
+    async def readable(thread_id: str, *, login: str | None = None, email: str | None = None):
+        order.append("readable")
+        assert (thread_id, login, email) == ("thread-1", "teammate", "teammate@example.com")
         return {"pull_requests": records}
 
     async def token(login: str):
         order.append("token")
-        assert login == "owner"
+        assert login == "teammate"
         return "oauth-token"
 
     statuses = AsyncMock(return_value=[{"number": 1}, {"number": 2}])
-    monkeypatch.setattr(thread_api, "_authorized_thread_metadata", authorized)
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", readable)
     monkeypatch.setattr(thread_api, "_github_token_for_login", token)
     monkeypatch.setattr(thread_api, "get_pull_request_statuses", statuses)
 
     result = await thread_api.get_dashboard_thread_pull_request_status(
-        "thread-1", "owner", email="owner@example.com"
+        "thread-1", "teammate", email="teammate@example.com"
     )
 
-    assert order == ["authorized", "token"]
+    assert order == ["readable", "token"]
     statuses.assert_awaited_once_with(records, "oauth-token")
     assert result == {"pullRequests": [{"number": 1}, {"number": 2}]}
 
@@ -375,14 +375,14 @@ async def test_thread_status_requires_the_users_oauth_token(
     token.assert_awaited_once_with("owner")
 
 
-async def test_thread_status_owner_denial_does_not_resolve_oauth_token(
+async def test_thread_status_read_denial_does_not_resolve_oauth_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def denied(*args, **kwargs):
-        raise HTTPException(403, "thread owner only")
+        raise HTTPException(403, "thread is not readable")
 
     token = AsyncMock(return_value="oauth-token")
-    monkeypatch.setattr(thread_api, "_authorized_thread_metadata", denied)
+    monkeypatch.setattr(thread_api, "_readable_thread_metadata", denied)
     monkeypatch.setattr(thread_api, "_github_token_for_login", token)
 
     with pytest.raises(HTTPException) as exc_info:
