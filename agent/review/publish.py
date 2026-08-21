@@ -22,10 +22,10 @@ from typing import Any, TypedDict
 import httpx
 
 from ..github.api import (
-    GITHUB_API_BASE,
-    GITHUB_GRAPHQL,
     github_client,
+    github_graphql,
     github_request,
+    github_url,
 )
 from ..github.checks import CheckConclusion, complete_review_check_run
 from ..github.token import GitHubAuthError
@@ -41,8 +41,6 @@ from .findings import (
 logger = logging.getLogger(__name__)
 
 
-_GITHUB_API_BASE = GITHUB_API_BASE
-_GITHUB_GRAPHQL = GITHUB_GRAPHQL
 _OPEN_SWE_REVIEW_COMMENT_MARKER_RE = re.compile(
     r"<!--\s*open-swe-review-comment\s+(\{.*?\})\s*-->",
     re.DOTALL,
@@ -352,7 +350,7 @@ async def post_status_comment(
     token: str,
 ) -> int | None:
     """POST the live status comment to a PR. Returns its comment id or None."""
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{pr_number}/comments"
+    url = github_url(f"/repos/{owner}/{repo}/issues/{pr_number}/comments")
     async with github_client(token=token) as client:
         try:
             response = await github_request(client, "POST", url, json={"body": body})
@@ -373,7 +371,7 @@ async def delete_status_comment(
     token: str,
 ) -> bool:
     """DELETE a status comment by id. Returns True on success (or if gone)."""
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/issues/comments/{comment_id}"
+    url = github_url(f"/repos/{owner}/{repo}/issues/comments/{comment_id}")
     async with github_client(token=token) as client:
         try:
             response = await github_request(client, "DELETE", url)
@@ -508,7 +506,7 @@ async def open_swe_review_exists(
       summaries whenever pagination failed mid-walk.
     """
     marker = review_summary_marker(pr_number)
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
+    url = github_url(f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews")
     params: dict[str, Any] = {"per_page": 100, "page": 1}
     async with github_client(token=token) as client:
         while True:
@@ -547,7 +545,7 @@ async def post_pull_request_review(
     token: str,
 ) -> dict[str, Any] | None:
     """POST one GitHub PR Review with inline comments. Returns the API response or None."""
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
+    url = github_url(f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews")
     payload: dict[str, Any] = {
         "commit_id": head_sha,
         "event": "COMMENT",
@@ -632,7 +630,7 @@ async def fetch_review_comments(
     GitHub's review-creation response includes a ``comments`` count but not the
     per-comment IDs in all paths; this paginates the canonical list endpoint.
     """
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews/{review_id}/comments"
+    url = github_url(f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews/{review_id}/comments")
     out: list[dict[str, Any]] = []
     params: dict[str, Any] = {"per_page": 100, "page": 1}
     async with github_client(token=token) as client:
@@ -717,19 +715,15 @@ async def fetch_pr_review_threads(
     async with github_client(token=token) as client:
         while len(out) < max_threads:
             try:
-                response = await github_request(
+                response = await github_graphql(
                     client,
-                    "POST",
-                    _GITHUB_GRAPHQL,
-                    json={
-                        "query": query,
-                        "variables": {
-                            "owner": owner,
-                            "repo": repo,
-                            "pr": pr_number,
-                            "cursor": cursor,
-                            "perThread": max_comments_per_thread,
-                        },
+                    query,
+                    variables={
+                        "owner": owner,
+                        "repo": repo,
+                        "pr": pr_number,
+                        "cursor": cursor,
+                        "perThread": max_comments_per_thread,
                     },
                 )
                 response.raise_for_status()
@@ -840,18 +834,14 @@ async def fetch_review_thread_id_for_comment(
     async with github_client(token=token) as client:
         while True:
             try:
-                response = await github_request(
+                response = await github_graphql(
                     client,
-                    "POST",
-                    _GITHUB_GRAPHQL,
-                    json={
-                        "query": query,
-                        "variables": {
-                            "owner": owner,
-                            "repo": repo,
-                            "pr": pr_number,
-                            "cursor": cursor,
-                        },
+                    query,
+                    variables={
+                        "owner": owner,
+                        "repo": repo,
+                        "pr": pr_number,
+                        "cursor": cursor,
                     },
                 )
                 response.raise_for_status()
@@ -902,11 +892,10 @@ async def resolve_review_thread(*, thread_node_id: str, token: str) -> bool:
     """
     async with github_client(token=token) as client:
         try:
-            response = await github_request(
+            response = await github_graphql(
                 client,
-                "POST",
-                _GITHUB_GRAPHQL,
-                json={"query": mutation, "variables": {"threadId": thread_node_id}},
+                mutation,
+                variables={"threadId": thread_node_id},
             )
             response.raise_for_status()
         except httpx.HTTPError:
@@ -932,9 +921,8 @@ async def reply_to_review_comment(
     token: str,
 ) -> dict[str, Any] | None:
     """Reply to an existing pull request review comment thread."""
-    url = (
-        f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/"
-        f"{pr_number}/comments/{review_comment_id}/replies"
+    url = github_url(
+        f"/repos/{owner}/{repo}/pulls/{pr_number}/comments/{review_comment_id}/replies"
     )
     async with github_client(token=token) as client:
         try:

@@ -226,18 +226,12 @@ async def fetch_pr_diff(
     """
     import httpx
 
-    from ..github.api import github_client, github_request
+    from ..github.api import GITHUB_DIFF_ACCEPT, github_client, github_request, github_url
 
-    url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
+    url = github_url(f"/repos/{owner}/{repo}/pulls/{pr_number}")
     try:
-        async with github_client(token=token) as client:
-            response = await github_request(
-                client,
-                "GET",
-                url,
-                headers={"Accept": "application/vnd.github.diff"},
-                timeout=timeout,
-            )
+        async with github_client(token=token, accept=GITHUB_DIFF_ACCEPT) as client:
+            response = await github_request(client, "GET", url, timeout=timeout)
             response.raise_for_status()
     except httpx.HTTPError:
         logger.exception("Failed to fetch PR diff for %s/%s#%s", owner, repo, pr_number)
@@ -262,9 +256,9 @@ async def fetch_pr_metadata(
     """
     import httpx
 
-    from ..github.api import github_client, github_request
+    from ..github.api import github_client, github_request, github_url
 
-    url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
+    url = github_url(f"/repos/{owner}/{repo}/pulls/{pr_number}")
     try:
         async with github_client(token=token) as client:
             response = await github_request(client, "GET", url, timeout=timeout)

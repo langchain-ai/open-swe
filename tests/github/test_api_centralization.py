@@ -14,17 +14,13 @@ AGENT_ROOT = Path(__file__).resolve().parents[2] / "agent"
 GITHUB_API_HOST = "api.github.com"
 GITHUB_JSON_MEDIA_TYPE = "application/vnd.github+json"
 
-# The only module that may name the GitHub API host, plus two documented
-# exceptions that are not API calls / not this package's to change.
+# The only module that may name the GitHub API host, plus one documented
+# exception that is a host match rule rather than an API call.
 _HOST_ALLOWED = {
     # Builds every GitHub URL, via github_url().
     "github/api.py",
     # A sandbox-proxy host match rule, not an API call.
     "integrations/langsmith.py",
-    # Already routes through the shared client and retries; it only spells
-    # the URL. Owned by a parallel refactor, so left for that package to fold
-    # into github_url().
-    "review/diff.py",
 }
 
 # The media type is constructed in exactly one place; there is no exception.
