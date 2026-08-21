@@ -2306,9 +2306,9 @@ async def get_dashboard_thread_turn_diff(
     include_content: bool = True,
     email: str | None = None,
 ) -> dict[str, Any]:
-    """Return a persisted run diff, with sandbox checkpoints as a legacy fallback."""
+    """Return the live working tree or a persisted diff for one completed turn."""
     from ..utils.turn_checkpoint import read_turn_diff
-    from .run_diffs import THREAD_DIFF_KEY, get_run_diff, project_run_diff
+    from .run_diffs import get_run_diff, project_run_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     checkpoints = metadata.get("turn_checkpoints")
@@ -2337,8 +2337,6 @@ async def get_dashboard_thread_turn_diff(
         stored = await get_run_diff(thread_id, turn_key)
         if stored is not None:
             return project_run_diff(stored, max_files=max_files, include_content=include_content)
-    else:
-        stored = await get_run_diff(thread_id, THREAD_DIFF_KEY)
 
     plan_ref = checkpoint.get("plan_ref")
     if (
@@ -2388,7 +2386,7 @@ async def get_dashboard_thread_turn_diff(
     live = await read_turn_diff(
         sandbox,
         None,
-        str(checkpoint["ref"]),
+        "HEAD" if turn_key is None else str(checkpoint["ref"]),
         head,
         max_files=max_files,
         include_content=include_content,
