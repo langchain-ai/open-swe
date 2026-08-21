@@ -10,6 +10,12 @@ Desktop users can choose **This Mac** in the new-task composer to run the same O
 
 The packaged app bundles its Python runtime and locked Open SWE dependencies. Source development uses `uv run langgraph dev`. Provider credentials stay in the local LangGraph process and are not inherited by agent shell commands. Added projects and local thread history are persisted in the desktop app's local data.
 
+For local OpenAI models, the app can use either `OPENAI_API_KEY` or Sign in with ChatGPT. When no
+API key is configured, sending the first local task opens the system browser for sign-in. OAuth
+credentials are encrypted with the operating system's secure storage, refreshed by Electron, and
+made available to the local model client through an authenticated loopback broker. Refresh tokens
+are never placed in the local backend environment or inherited by agent shell commands.
+
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
 started, so it shows what the agent changed and not the working tree's prior state. It also shows
 the current branch and discovers its pull request when the GitHub CLI is installed and authenticated.
@@ -29,6 +35,11 @@ The backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` 
 Set `ALLOWED_GITHUB_ORGS` on the backend to prevent GitHub users outside the organization from
 creating dashboard sessions.
 
+The desktop sign-in screen also offers **Continue in local mode**. This skips GitHub sign-in and
+limits the Agents workspace to projects and threads on **This Mac**; cloud threads, settings, and
+other account-backed features remain behind sign-in. The choice is remembered on that computer,
+and **Sign in for cloud mode** remains available from the local sidebar.
+
 ## Install on macOS
 
 Install Git, Node.js 22, and `uv`, clone this repository, then run this from its root:
@@ -43,12 +54,15 @@ backend settings, login sessions, and projects are preserved.
 
 ## Local development
 
-Install the workspace dependencies, run the backend at `http://localhost:2024`, then start Electron:
+Install the workspace dependencies, then start the backend and Electron together:
 
 ```bash
 pnpm install                  # from the repo root
-pnpm run dev:desktop
+make desktop
 ```
+
+`pnpm run dev:desktop` is the equivalent workspace command. Both commands stop the backend when
+the desktop app exits, and stop the desktop app if the backend fails.
 
 Source launches use an isolated `Open SWE Development` Electron profile, so the dev app can run
 beside an installed `Open SWE` app without sharing its login session, backend configuration,

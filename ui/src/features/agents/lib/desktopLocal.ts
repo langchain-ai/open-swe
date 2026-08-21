@@ -17,6 +17,26 @@ export const localThreadKeys = {
   prDiff: (threadId: string) => ["local-thread-pr-diff", threadId] as const,
 }
 
+export async function ensureDesktopModelCredential(
+  modelId?: string
+): Promise<string | null> {
+  const desktop = window.openSweDesktop
+  if (!desktop) return null
+  const credential = await desktop.localModelCredentialStatus(modelId)
+  if (credential.available) return null
+  if (credential.canSignIn) {
+    try {
+      const result = await desktop.signInLocalOpenAI()
+      if (result.signedIn) return null
+    } catch (cause) {
+      return cause instanceof Error ? cause.message : "OpenAI sign-in failed"
+    }
+  }
+  return credential.variable
+    ? `Set ${credential.variable} in the environment before starting Open SWE.`
+    : "Sign in to use the selected model."
+}
+
 export function useReadyDesktopLocalThread(threadId: string) {
   const queryClient = useQueryClient()
   return useQuery({

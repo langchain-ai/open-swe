@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -50,7 +51,7 @@ def _artifacts_root() -> Path:
     return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{os.getuid()}"
 
 
-def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
+async def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
     """Backends for the agent's own scratch files on a desktop run.
 
     Offloaded tool results and evicted history default to the artifacts root,
@@ -64,6 +65,6 @@ def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
     routes = {}
     for name in ("large_tool_results", "conversation_history"):
         directory = root / name
-        directory.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
         routes[f"/{name}/"] = FilesystemBackend(root_dir=directory, virtual_mode=True)
     return routes

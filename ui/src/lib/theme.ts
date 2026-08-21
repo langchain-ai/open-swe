@@ -4,6 +4,7 @@ export type Theme = "light" | "dark" | "system"
 export type ResolvedTheme = "light" | "dark"
 
 export const THEME_STORAGE_KEY = "open-swe-theme"
+const THEME_CHANGE_EVENT = "open-swe-theme-change"
 
 function isTheme(value: string | null): value is Theme {
   return value === "light" || value === "dark" || value === "system"
@@ -39,11 +40,15 @@ export function useTheme() {
   const themeRef = useRef<Theme>("system")
 
   useEffect(() => {
-    const stored = readStoredTheme()
-    themeRef.current = stored
-    setThemeState(stored)
-    setResolvedTheme(resolveTheme(stored))
-    applyTheme(resolveTheme(stored))
+    const syncPreference = () => {
+      const stored = readStoredTheme()
+      const resolved = resolveTheme(stored)
+      themeRef.current = stored
+      setThemeState(stored)
+      setResolvedTheme(resolved)
+      applyTheme(resolved)
+    }
+    syncPreference()
 
     const media = window.matchMedia("(prefers-color-scheme: dark)")
     const onChange = () => {
@@ -53,12 +58,17 @@ export function useTheme() {
       applyTheme(next)
     }
     media.addEventListener("change", onChange)
-    return () => media.removeEventListener("change", onChange)
+    window.addEventListener(THEME_CHANGE_EVENT, syncPreference)
+    return () => {
+      media.removeEventListener("change", onChange)
+      window.removeEventListener(THEME_CHANGE_EVENT, syncPreference)
+    }
   }, [])
 
   const setTheme = useCallback((next: Theme) => {
     if (typeof window !== "undefined") {
       window.localStorage.setItem(THEME_STORAGE_KEY, next)
+      window.dispatchEvent(new Event(THEME_CHANGE_EVENT))
     }
     themeRef.current = next
     const resolved = resolveTheme(next)
