@@ -100,8 +100,42 @@ jobs:
       - name: Run desktop checks
         run: pnpm run check
 
+  e2e-changes:
+    name: Detect E2E changes
+    runs-on: ubuntu-latest
+    outputs:
+      browser: ${{ steps.changes.outputs.browser }}
+      desktop: ${{ steps.changes.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            echo "browser=true" >> "$GITHUB_OUTPUT"
+            echo "desktop=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          paths=(agent ui tests/e2e package.json pnpm-lock.yaml pyproject.toml uv.lock langgraph.json langgraph.desktop.json Makefile .github/workflows/ci.yml)
+          if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}"; then
+            echo "browser=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "browser=true" >> "$GITHUB_OUTPUT"
+          fi
+          if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}" desktop; then
+            echo "desktop=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "desktop=true" >> "$GITHUB_OUTPUT"
+          fi
+
   browser-e2e:
     name: Browser E2E (${{ matrix.shard }}/3)
+    needs: e2e-changes
+    if: ${{ needs.e2e-changes.outputs.browser == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -139,6 +173,8 @@ jobs:
 
   desktop-e2e:
     name: Desktop E2E
+    needs: e2e-changes
+    if: ${{ needs.e2e-changes.outputs.desktop == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -169,10 +205,14 @@ jobs:
   e2e:
     name: Playwright E2E
     if: ${{ always() }}
-    needs: [browser-e2e, desktop-e2e]
+    needs: [e2e-changes, browser-e2e, desktop-e2e]
     runs-on: ubuntu-latest
     env:
+      CHANGES_RESULT: ${{ needs.e2e-changes.result }}
       BROWSER_RESULT: ${{ needs.browser-e2e.result }}
       DESKTOP_RESULT: ${{ needs.desktop-e2e.result }}
     steps:
-      - run: test "$BROWSER_RESULT" = success && test "$DESKTOP_RESULT" = success
+      - run: |
+          test "$CHANGES_RESULT" = success
+          test "$BROWSER_RESULT" = success || test "$BROWSER_RESULT" = skipped
+          test "$DESKTOP_RESULT" = success || test "$DESKTOP_RESULT" = skipped
