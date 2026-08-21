@@ -122,7 +122,8 @@ const PR_STATE_META: Record<
 }
 
 interface AgentsSidebarProps {
-  user: SessionUser
+  user: SessionUser | null
+  localOnly?: boolean
   activeThreadId?: string
   activeLocalSessionId?: string
   layout: SidebarLayout
@@ -137,6 +138,7 @@ const NAV = [
 
 export function AgentsSidebar({
   user,
+  localOnly = false,
   activeThreadId,
   activeLocalSessionId,
   layout,
@@ -157,6 +159,7 @@ export function AgentsSidebar({
       prefs.filters.includeAutomations ||
       prefs.filters.sources.includes("schedule"),
     includeResolved: prefs.filters.includeResolved,
+    enabled: !localOnly,
   })
   const localSessions = useDesktopLocalThreads().data ?? []
   const refreshLocalThreads = useRefreshLocalThreads()
@@ -231,8 +234,10 @@ export function AgentsSidebar({
         thread.status !== "starting"
     ).length,
   }
-  const showLocalThreads = isDesktop && desktopThreadSource === "local"
-  const showCloudThreads = !isDesktop || desktopThreadSource === "cloud"
+  const showLocalThreads =
+    isDesktop && (localOnly || desktopThreadSource === "local")
+  const showCloudThreads =
+    !localOnly && (!isDesktop || desktopThreadSource === "cloud")
 
   return (
     <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
@@ -243,7 +248,7 @@ export function AgentsSidebar({
         )}
       >
         <Link
-          to="/my-settings"
+          to={localOnly ? "/agents" : "/my-settings"}
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
           <img src="/logo-mark.png" alt="" className="size-5" />
@@ -278,28 +283,31 @@ export function AgentsSidebar({
         </Link>
       </div>
 
-      <nav className="flex flex-col gap-0.5 px-2 pb-4">
-        {NAV.map((item) => {
-          const Icon = item.icon
-          return (
-            <Link
-              key={item.to}
-              to={item.to}
-              onClick={layout.closeOnMobile}
-              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-              activeProps={{
-                className: "bg-sidebar-row-hover !text-foreground font-medium",
-              }}
-            >
-              <Icon className="size-4" />
-              {item.label}
-            </Link>
-          )
-        })}
-      </nav>
+      {!localOnly && (
+        <nav className="flex flex-col gap-0.5 px-2 pb-4">
+          {NAV.map((item) => {
+            const Icon = item.icon
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                onClick={layout.closeOnMobile}
+                className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+                activeProps={{
+                  className:
+                    "bg-sidebar-row-hover !text-foreground font-medium",
+                }}
+              >
+                <Icon className="size-4" />
+                {item.label}
+              </Link>
+            )
+          })}
+        </nav>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
-        {isDesktop && (
+        {isDesktop && !localOnly && (
           <DesktopThreadSourceToggle
             source={desktopThreadSource}
             localActivity={localActivity}
@@ -426,7 +434,16 @@ export function AgentsSidebar({
 
       <div className="flex items-center gap-1 p-2">
         <div className="min-w-0 flex-1">
-          <SidebarUserMenu user={user} showSettingsLink />
+          {user ? (
+            <SidebarUserMenu user={user} showSettingsLink />
+          ) : (
+            <Link
+              to="/login"
+              className="flex w-full items-center justify-center rounded-md border border-border px-2 py-1.5 text-xs font-medium hover:bg-sidebar-accent"
+            >
+              Sign in for cloud mode
+            </Link>
+          )}
         </div>
         {showCloudThreads && (
           <SidebarFilterMenu
@@ -1102,11 +1119,13 @@ function ThreadRow({
 
 export function AgentsShell({
   user,
+  localOnly = false,
   activeThreadId,
   activeLocalSessionId,
   children,
 }: {
-  user: SessionUser
+  user: SessionUser | null
+  localOnly?: boolean
   activeThreadId?: string
   activeLocalSessionId?: string
   children: React.ReactNode
@@ -1134,6 +1153,7 @@ export function AgentsShell({
       <div className="agents-ui flex h-svh overflow-hidden bg-background">
         <AgentsSidebar
           user={user}
+          localOnly={localOnly}
           activeThreadId={activeThreadId}
           activeLocalSessionId={activeLocalSessionId}
           layout={layout}

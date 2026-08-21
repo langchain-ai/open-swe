@@ -1530,7 +1530,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         skill_sources = [USER_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
         # The default backend is the user's project, so offloads would land in
         # their repository. Keep the agent's scratch files out of it.
-        skill_routes.update(desktop_artifact_routes(thread_id))
+        skill_routes.update(await desktop_artifact_routes(thread_id))
     else:
         skill_routes[ORGANIZATION_SKILLS_ROUTE] = ReadOnlyBackend(
             StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))

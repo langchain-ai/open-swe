@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamProvider } from "@/features/agents/lib/AgentThreadStreamProvider"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
+import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
 
 export const Route = createFileRoute("/agents")({
   component: AgentsLayout,
@@ -45,6 +46,11 @@ function AgentsLayout() {
       : undefined
   const activeLocalSessionId =
     section === "agents" && threadId === "local" ? nestedRoute : undefined
+  const localOnly = !session.data && isDesktopLocalModeEnabled()
+  const isLocalRoute =
+    pathname === "/agents" ||
+    pathname === "/agents/" ||
+    pathname.startsWith("/agents/local/")
 
   if (session.isLoading) {
     return (
@@ -54,11 +60,12 @@ function AgentsLayout() {
     )
   }
 
-  if (!session.data) return <RequireLogin />
+  if (!session.data && (!localOnly || !isLocalRoute)) return <RequireLogin />
 
   return (
     <AgentsShell
-      user={session.data}
+      user={session.data ?? null}
+      localOnly={localOnly}
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
     >
