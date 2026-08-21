@@ -30,6 +30,7 @@ import { useAgentSkills } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
+  ensureDesktopModelCredential,
   localThreadKeys,
   useDesktopLocalThread,
   useLocalThreadDiff,
@@ -43,6 +44,7 @@ import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
+import { useSession } from "@/lib/session"
 
 function promptContent(text: string, images: Array<ImageChunk>) {
   const trimmed = text.trim()
@@ -72,11 +74,12 @@ function errorMessage(error: unknown): string {
 }
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
+  const session = useSession()
   const stream = useAgentThreadStream()
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
   const queryClient = useQueryClient()
-  const skills = useAgentSkills()
+  const skills = useAgentSkills({ enabled: Boolean(session.data) })
   const {
     models,
     defaultSelection,
@@ -231,14 +234,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     ) => {
       if (!thread) return false
       setError(null)
-      const credential =
-        await window.openSweDesktop?.localModelCredentialStatus(
-          activeSelection?.modelId
-        )
-      if (credential && !credential.available) {
-        setError(
-          `Set ${credential.variable} in the environment before starting Open SWE.`
-        )
+      const credentialError = await ensureDesktopModelCredential(
+        activeSelection?.modelId
+      )
+      if (credentialError) {
+        setError(credentialError)
         return false
       }
       try {

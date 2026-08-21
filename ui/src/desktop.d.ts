@@ -157,9 +157,12 @@ declare global {
         localSessionId: string
         path: string
       }) => Promise<string | null>
-      localModelCredentialStatus: (
-        modelId?: string
-      ) => Promise<{ available: boolean; variable: string | null }>
+      localModelCredentialStatus: (modelId?: string) => Promise<{
+        available: boolean
+        variable: string | null
+        canSignIn?: boolean
+      }>
+      signInLocalOpenAI: () => Promise<{ signedIn: boolean }>
       startLocalThread: (
         input: DesktopLocalPromptInput & {
           cwd: string
