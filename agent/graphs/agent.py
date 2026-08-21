@@ -5,51 +5,34 @@ owns that lifecycle), builds the curated tool list plus optional integrations, a
 wires the middleware stack. All per-thread state lives in the sandbox + thread
 metadata; the agent itself is stateless.
 """
-# ruff: noqa: E402
-
-import logging
-import posixpath
-import warnings
-from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, Literal, cast
-
-logger = logging.getLogger(__name__)
-
-from langgraph.graph.state import RunnableConfig
-from langgraph.pregel import Pregel
-from langgraph.runtime import Runtime
-
-warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
 import asyncio
-
-# Suppress Pydantic v1 compatibility warnings from langchain on Python 3.14+
-warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
+import logging
+import posixpath
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Any
 
 from deepagents import create_deep_agent
 from deepagents.backends.composite import CompositeBackend
-from deepagents.backends.filesystem import FilesystemBackend
-from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
-from deepagents.backends.state import StateBackend
-from deepagents.backends.store import StoreBackend
+from deepagents.backends.protocol import BackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
-from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
-from langchain.agents.middleware.types import AgentMiddleware, AgentState
+from langchain.agents.middleware import ToolRetryMiddleware
+from langchain.agents.middleware.types import AgentState
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
+from langgraph.graph.state import RunnableConfig
+from langgraph.pregel import Pregel
+from langgraph.runtime import Runtime
 
 from ..config import (
     dashboard_base_url,
     fallback_llm_model_id,
     in_process_langgraph_client,
-    is_langsmith_sandbox,
     tool_loader_timeout_seconds,
 )
 from ..dashboard.admin import is_admin, is_observability_authorized
 from ..dashboard.agent_overrides import (
-    load_profile,
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
     profile_draft_prs,
@@ -57,22 +40,8 @@ from ..dashboard.agent_overrides import (
 )
 from ..dashboard.agent_usage import record_agent_thread_usage
 from ..dashboard.environments import environment_prompt, resolve_environment
-from ..dashboard.options import (
-    SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
-    gate_fable_model,
-    model_supports_effort,
-)
 from ..dashboard.run_diffs import THREAD_DIFF_KEY, save_run_diff
-from ..dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
-from ..dashboard.team_settings import (
-    get_effective_gateway_enabled,
-    get_team_default_model_pair,
-    get_team_default_thread_title_model,
-    get_team_fable_enabled,
-)
 from ..dashboard.user_mappings import email_for_login
-from ..desktop import create_desktop_backend, is_desktop_run
 from ..input_messages import append_message_data
 from ..integrations.corridor_mcp import load_corridor_tools
 from ..integrations.currents_tools import load_currents_tools
@@ -85,17 +54,10 @@ from ..middleware import (
     DynamicContextMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
-    ModelCallTimeoutMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
-    PullRequestCreationGuardMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
-    ToolErrorMiddleware,
     WorkflowPushGuardMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
@@ -105,22 +67,14 @@ from ..middleware import (
 )
 from ..middleware.prepare_run import PrepareRunState
 from ..middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from ..middleware.stack import core_stack, model_guard_middleware
 from ..prompt import construct_sender_context, construct_system_prompt, render_open_swe_shared_base
-from ..runtime.constants import (
-    DEFAULT_LLM_MAX_TOKENS,
-    DEFAULT_RECURSION_LIMIT,
-    MODEL_CALL_RECURSION_LIMIT,
-)
+from ..runtime.constants import DEFAULT_LLM_MAX_TOKENS, MODEL_CALL_RECURSION_LIMIT
 from ..runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
 )
 from ..runtime.execution import graph_loaded_for_execution
-from ..runtime.sandbox import (
-    ensure_sandbox_for_thread,
-    environment_slug,
-    get_cached_sandbox_backend,
-    resolve_default_repo,
-)
+from ..runtime.sandbox import environment_slug, get_cached_sandbox_backend, resolve_default_repo
 from ..thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from ..tools import (
     approve_plan,
@@ -169,36 +123,29 @@ from ..utils import ttl_cache
 from ..utils.auth import resolve_github_token
 from ..utils.authorship import resolve_triggering_user_identity
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
-from ..utils.deferred_model import make_deferred_error_model
 from ..utils.github_org_membership import is_login_in_allowed_org
 from ..utils.json_types import as_json_object
-from ..utils.model import (
-    DEFAULT_LLM_REASONING,
-    ModelKwargs,
-    fallback_model_id_for,
-    make_model,
-    provider_model_kwargs,
-)
-from ..utils.read_only_backend import ReadOnlyBackend
+from ..utils.model import DEFAULT_LLM_REASONING, ModelKwargs, fallback_model_id_for
 from ..utils.sandbox_paths import aresolve_sandbox_work_dir
 from ..utils.sandbox_state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
-from ..utils.thread_settings import (
-    ThreadSettings,
-    load_thread_settings,
-    normalize_thread_settings,
-    store_thread_settings,
-)
+from ..utils.thread_settings import ThreadSettings, normalize_thread_settings
 from ..utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 from ..utils.turn_checkpoint import merge_checkpoint, read_turn_diff, record_turn_checkpoint
+from ._assembly import (
+    make_model_or_defer,
+    model_spec,
+    prepare_config,
+    requested_model_pair,
+    stub_agent,
+)
+from .run_environment import RunEnvironment
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
-USER_SKILLS_ROUTE = "/skills/"
-ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
-BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
-BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent.parent / "bundled_skills"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
     "edit_file",
@@ -283,17 +230,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
 )
 
 
-def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
-    """Provider guards for subagent model calls.
-
-    Subagents compile into their own graphs, so parent middleware never wraps them.
-    """
-    return cast(
-        list[AgentMiddleware[Any, Any, Any]],
-        [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
-    )
-
-
 def _is_subagent_excluded_tool(tool: Any) -> bool:
     """Return whether a tool depends on parent-only source context."""
     name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
@@ -330,7 +266,7 @@ def _general_purpose_subagent(
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
         "middleware": [
             *([dynamic_tools] if dynamic_tools else []),
-            *_subagent_model_middleware(),
+            *model_guard_middleware(),
         ],
     }
     if skills:
@@ -377,7 +313,7 @@ def _browser_subagent(model: BaseChatModel, tools: list[Any]) -> SubAgent:
         "system_prompt": BROWSER_SUBAGENT_SYSTEM_PROMPT,
         "tools": tools,
         "model": model,
-        "middleware": _subagent_model_middleware(),
+        "middleware": model_guard_middleware(),
     }
 
 
@@ -473,56 +409,6 @@ async def _load_corridor_mcp_tools() -> list[Any]:
     return await _cached_tool_loader("tools:corridor", 600, load_corridor_tools)
 
 
-async def _cached_team_default_model_pair(kind: Literal["agent", "reviewer"]):
-    return await ttl_cache.cached(
-        f"team-default-model-pair:{kind}",
-        60,
-        lambda: get_team_default_model_pair(kind),
-    )
-
-
-async def _cached_thread_title_model() -> tuple[str, str]:
-    return await ttl_cache.cached(
-        "team:thread-title-model",
-        60,
-        get_team_default_thread_title_model,
-    )
-
-
-async def _cached_gateway_enabled() -> bool:
-    return await ttl_cache.cached(
-        "team:gateway-enabled",
-        60,
-        get_effective_gateway_enabled,
-    )
-
-
-async def _cached_fable_enabled() -> bool:
-    return await ttl_cache.cached(
-        "team:fable-enabled",
-        60,
-        get_team_fable_enabled,
-    )
-
-
-async def _cached_profile(profile_login: str | None):
-    if not profile_login:
-        return None
-    return await ttl_cache.cached(
-        f"profile:{profile_login}", 30, lambda: load_profile(profile_login)
-    )
-
-
-def _sandbox_file_downloads_enabled(configurable: dict[str, Any] | None = None) -> bool:
-    """Return whether signed sandbox file downloads are available for this run."""
-    resolved = configurable or {}
-    return (
-        is_langsmith_sandbox()
-        and resolved.get("stop_summary") is not True
-        and not is_desktop_run(resolved)
-    )
-
-
 def _slack_tools_enabled(configurable: dict[str, Any]) -> bool:
     """Return whether the run has trusted Slack source context."""
     if configurable.get("source") not in {"slack", "schedule"}:
@@ -536,25 +422,13 @@ def _slack_tools_enabled(configurable: dict[str, Any]) -> bool:
     )
 
 
-def _make_model_or_defer(
-    model_id: str,
-    *,
-    use_gateway: bool,
-    **kwargs: Any,
-) -> BaseChatModel:
-    try:
-        return make_model(model_id, use_gateway=use_gateway, **kwargs)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Deferring model setup failure for %s", model_id, exc_info=True)
-        return make_deferred_error_model(e, model_id=model_id)
-
-
 class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     def __init__(
         self,
         *,
         thread_id: str,
         config: RunnableConfig,
+        environment: RunEnvironment,
         profile_login: str | None,
         repo_instructions: str | None,
         model_id: str,
@@ -568,9 +442,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         plan_mode: bool,
         corridor_enabled: bool,
         admin_environments: bool,
+        sandbox_file_downloads: bool,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
+        self._environment = environment
         self._profile_login = profile_login
         self._repo_instructions = repo_instructions
         self._model_id = model_id
@@ -584,6 +460,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._plan_mode = plan_mode
         self._corridor_enabled = corridor_enabled
         self._admin_environments = admin_environments
+        self._sandbox_file_downloads = sandbox_file_downloads
 
     def _prepare_config_fingerprint(self) -> Any:
         configurable = (self._config or {}).get("configurable") or {}
@@ -730,14 +607,18 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
-        if is_desktop_run(configurable):
+        if self._environment.local_workspace:
+            # Nothing below applies to a local checkout: there is no GitHub token
+            # to resolve (the developer's own `gh` is used), no cloud thread to
+            # stamp usage onto, and no worktree snapshot for the dashboard to diff.
             sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
             work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
             return {
                 "work_dir": work_dir,
                 "rendered_system_prompt": construct_system_prompt(
                     working_dir=work_dir,
-                    source="desktop",
+                    source=self._source,
+                    local_workspace=self._environment.local_workspace,
                 ),
             }
         github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
@@ -825,69 +706,46 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 admin_environments=self._admin_environments,
                 source=self._source,
                 slack_context=_slack_tools_enabled(configurable),
-                sandbox_file_downloads=_sandbox_file_downloads_enabled(configurable),
+                sandbox_file_downloads=self._sandbox_file_downloads,
+                local_workspace=self._environment.local_workspace,
             ),
         }
 
 
 async def get_agent(config: RunnableConfig) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
-    configurable = config.get("configurable") or {}
+    config, configurable = prepare_config(config, share_configurable=True)
     thread_id = configurable.get("thread_id")
-
-    config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning agent without sandbox")
-        return create_deep_agent(
-            system_prompt="",
-            tools=[],
-        ).with_config(config)
+        return stub_agent(config)
 
-    async def reconnect_backend(
-        _thread_id: str = thread_id,
-        _configurable: dict[str, Any] = configurable,
-    ) -> SandboxBackendProtocol:
-        if is_desktop_run(_configurable):
-            return create_desktop_backend(_configurable)
-        prompt_default_repo = await resolve_default_repo(_configurable)
-        return await ensure_sandbox_for_thread(
-            _thread_id,
-            repo=prompt_default_repo,
-            environment_slug=environment_slug(_configurable),
-        )
+    # The one place this factory asks where the run executes; everything that
+    # follows from the answer is on the object.
+    environment = RunEnvironment.for_run(thread_id, configurable)
 
-    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    backend = get_cached_sandbox_backend(thread_id, reconnect=environment.make_backend)
     backend.start()
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization and credentialed integrations, which stay personal to them.
     # Everything else comes from the thread's own settings, resolved from the
     # owner's profile on the first run and frozen there afterwards.
-    local_run = is_desktop_run(configurable)
     profile_login = resolve_github_login(as_json_object(config))
     thread_settings, settings_changed = normalize_thread_settings(
-        {} if local_run else await load_thread_settings(in_process_langgraph_client(), thread_id)
+        await environment.load_thread_settings()
     )
     settings_login = thread_settings.get("owner_login") or profile_login
-    # Team/profile settings are accepted stale for a short TTL so graph factories
-    # stay off the critical path during worker load and retry storms.
-    if local_run:
-        from ..dashboard.options import default_model_pair
-
-        team_defaults = (default_model_pair(), default_model_pair())
-        title_defaults = team_defaults[0]
-        use_gateway = False
-        profile = None
-        fable_enabled = False
-    else:
-        team_defaults, title_defaults, use_gateway, profile, fable_enabled = await asyncio.gather(
-            _cached_team_default_model_pair("agent"),
-            _cached_thread_title_model(),
-            _cached_gateway_enabled(),
-            _cached_profile(None if thread_settings.get("model_id") else settings_login),
-            _cached_fable_enabled(),
-        )
+    defaults = await environment.resolve_model_defaults(
+        None if thread_settings.get("model_id") else settings_login
+    )
+    team_defaults, title_defaults = defaults.team, defaults.title
+    use_gateway, profile, fable_enabled = (
+        defaults.use_gateway,
+        defaults.profile,
+        defaults.fable_enabled,
+    )
 
     linear_issue = as_json_object(configurable.get("linear_issue"))
     linear_project_id = linear_issue.get("linear_project_id", "")
@@ -933,17 +791,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     # An explicit per-run model choice is the one thing allowed to move a thread
     # off its stored settings; the new choice is then stored in turn.
-    per_thread_model = configurable.get("agent_model_id")
-    per_thread_effort = configurable.get("agent_effort")
-    canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
-    if canonical_per_thread is not None:
-        per_thread_model, per_thread_effort = canonical_per_thread
-    if (
-        isinstance(per_thread_model, str)
-        and per_thread_model in SUPPORTED_MODEL_IDS
-        and isinstance(per_thread_effort, str)
-        and model_supports_effort(per_thread_model, per_thread_effort)
-    ):
+    per_thread = requested_model_pair(
+        configurable.get("agent_model_id"), configurable.get("agent_effort")
+    )
+    if per_thread is not None:
+        per_thread_model, per_thread_effort = per_thread
         logger.info(
             "Applying per-thread model override: model=%s effort=%s",
             per_thread_model,
@@ -957,7 +809,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     sender_profile = (
         profile
         if profile_login == settings_login and profile is not None
-        else await _cached_profile(profile_login)
+        else await environment.load_profile(profile_login)
     )
     sender_draft_prs = profile_draft_prs(sender_profile)
     configurable["draft_prs"] = sender_draft_prs
@@ -977,38 +829,18 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         "subagent_effort": subagent_effort,
         "repo_instructions": repo_instructions,
     }
-    if not local_run and (
-        settings_changed or {**thread_settings, **resolved_settings} != thread_settings
-    ):
-        await store_thread_settings(
-            in_process_langgraph_client(), thread_id, {**thread_settings, **resolved_settings}
-        )
+    if settings_changed or {**thread_settings, **resolved_settings} != thread_settings:
+        await environment.store_thread_settings({**thread_settings, **resolved_settings})
 
-    model_id, profile_effort = gate_fable_model(
-        model_id, profile_effort, fable_enabled=fable_enabled
-    )
-    subagent_model_id, subagent_effort = gate_fable_model(
-        subagent_model_id, subagent_effort, fable_enabled=fable_enabled
-    )
-    title_model_id, title_effort = gate_fable_model(
-        title_model_id, title_effort, fable_enabled=fable_enabled
-    )
-
-    model_kwargs = provider_model_kwargs(
-        model_id,
-        profile_effort,
-        max_tokens=DEFAULT_LLM_MAX_TOKENS,
-    )
-    subagent_model_kwargs = provider_model_kwargs(
-        subagent_model_id,
-        subagent_effort,
-        max_tokens=DEFAULT_LLM_MAX_TOKENS,
-    )
-    title_model_kwargs = provider_model_kwargs(
+    main_spec = model_spec(model_id, profile_effort, fable_enabled=fable_enabled)
+    subagent_spec = model_spec(subagent_model_id, subagent_effort, fable_enabled=fable_enabled)
+    title_spec = model_spec(
         title_model_id,
         title_effort,
+        fable_enabled=fable_enabled,
         max_tokens=TITLE_GENERATION_MAX_TOKENS,
     )
+    model_id, profile_effort = main_spec.model_id, main_spec.effort
 
     fallback_model_id = fallback_llm_model_id() or fallback_model_id_for(model_id)
     fallback_middleware: list[Any] = []
@@ -1018,7 +850,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             fallback_kwargs["reasoning"] = DEFAULT_LLM_REASONING
         fallback_middleware.append(
             ModelFallbackMiddleware(
-                _make_model_or_defer(fallback_model_id, use_gateway=use_gateway, **fallback_kwargs)
+                make_model_or_defer(fallback_model_id, use_gateway=use_gateway, **fallback_kwargs)
             )
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
@@ -1046,13 +878,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Admin thread %s: adding environment management tools", thread_id)
 
     stop_summary_mode = configurable.get("stop_summary") is True
-    sandbox_file_downloads = _sandbox_file_downloads_enabled(configurable)
+    sandbox_file_downloads = environment.sandbox_file_downloads(stop_summary=stop_summary_mode)
     observability_tools: list[Any] = []
     corridor_tools: list[Any] = []
     browser_tools: list[Any] = []
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
-    if not stop_summary_mode and not local_run:
+    if not stop_summary_mode and environment.credentialed_integrations:
         observability_authorized = await _observability_authorized(config, profile_login)
         if observability_authorized:
             observability_tools = await _load_observability_tools(True, profile_login)
@@ -1084,7 +916,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_start_new_thread,
         slack_thread_reply,
     ]
-    static_tools = [
+    hosted_tools = [
         http_request,
         fetch_url,
         web_search,
@@ -1123,10 +955,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
         *(ENVIRONMENT_TOOLS if admin_environments else ()),
     ]
-    if local_run:
-        static_tools = [http_request, fetch_url, web_search]
-    elif stop_summary_mode:
-        static_tools = [slack_read_thread_messages, slack_thread_reply]
+    static_tools = environment.static_tools(
+        [slack_read_thread_messages, slack_thread_reply] if stop_summary_mode else hosted_tools
+    )
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     if not _slack_tools_enabled(configurable):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
@@ -1144,44 +975,16 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
-    agent_backend: BackendProtocol = backend
-    skill_routes: dict[str, BackendProtocol] = {
-        BUNDLED_SKILLS_ROUTE: ReadOnlyBackend(
-            FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
-        ),
-    }
-    if is_desktop_run(configurable):
-        skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(StateBackend())
-        skill_sources = [USER_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
-    else:
-        skill_routes[ORGANIZATION_SKILLS_ROUTE] = ReadOnlyBackend(
-            StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
-        )
-        skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
-        if profile_login:
-            skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
-                StoreBackend(
-                    namespace=lambda _runtime, login=profile_login: (SKILLS_NAMESPACE, login)
-                )
-            )
-            skill_sources.insert(0, USER_SKILLS_ROUTE)
-    agent_backend = CompositeBackend(default=backend, routes=skill_routes)
-    main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
-    subagent_model = _make_model_or_defer(
-        subagent_model_id,
-        use_gateway=use_gateway,
-        **subagent_model_kwargs,
-    )
+    skill_routes, skill_sources = environment.skill_routes(profile_login)
+    agent_backend: BackendProtocol = CompositeBackend(default=backend, routes=skill_routes)
+    main_model = main_spec.build(use_gateway=use_gateway)
+    subagent_model = subagent_spec.build(use_gateway=use_gateway)
     subagent_tools = [
         tool
         for tool in static_tools
         if tool is not background_execute and tool is not background_task
     ]
-    title_model = _make_model_or_defer(
-        title_model_id,
-        use_gateway=use_gateway,
-        **title_model_kwargs,
-    )
+    title_model = title_spec.build(use_gateway=use_gateway)
     return create_deep_agent(
         model=main_model,
         system_prompt="",
@@ -1198,30 +1001,29 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ],
         skills=skill_sources,
         backend=agent_backend,
-        middleware=cast(
-            list[AgentMiddleware[Any, Any, Any]],
-            [
-                PrepareAgentRunMiddleware(
-                    thread_id=thread_id,
-                    config=config,
-                    profile_login=profile_login,
-                    repo_instructions=repo_instructions,
-                    model_id=model_id,
-                    effort=profile_effort,
-                    title_model=title_model,
-                    source=source,
-                    user_email=user_email,
-                    linear_project_id=linear_project_id,
-                    linear_issue_number=linear_issue_number,
-                    draft_prs=sender_draft_prs,
-                    plan_mode=plan_mode,
-                    corridor_enabled=bool(corridor_tools),
-                    admin_environments=admin_environments,
-                ),
-                *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
-                SanitizeToolInputsMiddleware(),
-                ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-                ToolErrorMiddleware(),
+        middleware=core_stack(
+            PrepareAgentRunMiddleware(
+                thread_id=thread_id,
+                config=config,
+                environment=environment,
+                profile_login=profile_login,
+                repo_instructions=repo_instructions,
+                model_id=model_id,
+                effort=profile_effort,
+                title_model=title_model,
+                source=source,
+                user_email=user_email,
+                linear_project_id=linear_project_id,
+                linear_issue_number=linear_issue_number,
+                draft_prs=sender_draft_prs,
+                plan_mode=plan_mode,
+                corridor_enabled=bool(corridor_tools),
+                admin_environments=admin_environments,
+                sandbox_file_downloads=sandbox_file_downloads,
+            ),
+            *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
+            call_limit=MODEL_CALL_RECURSION_LIMIT,
+            extras=[
                 *(
                     [ExcludeToolsMiddleware(excluded=STOP_SUMMARY_EXCLUDED_TOOLS)]
                     if stop_summary_mode
@@ -1236,7 +1038,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     initial_delay=1.0,
                     max_delay=10.0,
                 ),
-                *([] if local_run else [PullRequestCreationGuardMiddleware()]),
+                *environment.extra_middleware(),
                 WorkflowPushGuardMiddleware(),
                 refresh_github_proxy_before_model,
                 *([] if stop_summary_mode else [check_message_queue_before_model]),
@@ -1245,12 +1047,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 notify_step_limit_reached,
                 *fallback_middleware,
                 *plan_mode_middleware,
-                SanitizeFireworksMessagesMiddleware(),
-                SanitizeOpenAIResponsesMiddleware(),
-                SanitizeThinkingBlocksMiddleware(),
-                # Innermost, so the deadline covers the provider call itself and a
-                # timeout escalates outward to the fallback model.
-                ModelCallTimeoutMiddleware(),
             ],
         ),
     ).with_config(config)

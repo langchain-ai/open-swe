@@ -20,6 +20,8 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage
 
+from ..utils.model import unwrap_chat_model
+
 try:
     from langchain_fireworks.chat_models import ChatFireworks
 except ImportError:  # pragma: no cover
@@ -29,20 +31,7 @@ except ImportError:  # pragma: no cover
 def _is_chat_fireworks(model: object) -> bool:
     if ChatFireworks is None:
         return False
-    seen: set[int] = set()
-    current = model
-    for _ in range(10):
-        if isinstance(current, ChatFireworks):
-            return True
-        current_id = id(current)
-        if current_id in seen:
-            return False
-        seen.add(current_id)
-        bound = getattr(current, "bound", None)
-        if bound is None or bound is current:
-            return False
-        current = bound
-    return False
+    return unwrap_chat_model(model, ChatFireworks) is not None
 
 
 def _sanitize_messages(messages: list[Any]) -> None:

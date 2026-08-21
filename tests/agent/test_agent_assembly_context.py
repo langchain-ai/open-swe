@@ -16,6 +16,7 @@ from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
 from agent.graphs.agent import _registered_tool_name, get_agent
+from agent.graphs.run_environment import DesktopRunEnvironment
 from agent.utils.read_only_backend import ReadOnlyBackend
 from agent.utils.sandbox_state import SandboxBackendProxy, clear_sandbox_backend
 
@@ -60,7 +61,7 @@ async def _capture_create_deep_agent_kwargs(
         ),
         patch("agent.graphs.agent.resolve_triggering_user_identity", return_value=None),
         patch(
-            "agent.graphs.agent.ensure_sandbox_for_thread",
+            "agent.graphs.run_environment.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
@@ -70,18 +71,22 @@ async def _capture_create_deep_agent_kwargs(
             return_value="/workspace",
         ),
         patch(
-            "agent.graphs.agent.get_team_default_model_pair",
+            "agent.graphs.run_environment.get_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
-        patch("agent.graphs.agent.load_profile", new_callable=AsyncMock, return_value=profile),
         patch(
-            "agent.graphs.agent.load_thread_settings",
+            "agent.graphs.run_environment.load_profile",
+            new_callable=AsyncMock,
+            return_value=profile,
+        ),
+        patch(
+            "agent.graphs.run_environment.load_thread_settings",
             new_callable=AsyncMock,
             return_value=thread_settings or {},
         ),
         patch("agent.graphs.agent.fallback_model_id_for", return_value=None),
-        patch("agent.graphs.agent.make_model", side_effect=[MagicMock(), MagicMock()]),
+        patch("agent.graphs._assembly.make_model", side_effect=[MagicMock(), MagicMock()]),
         patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
         patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
@@ -128,14 +133,25 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
 
     clear_sandbox_backend("thread-ctx")
     with (
-        patch("agent.graphs.agent.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
-        patch("agent.graphs.agent._cached_team_default_model_pair", side_effect=load_defaults),
+        patch("agent.graphs.run_environment.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
         patch(
-            "agent.graphs.agent._cached_gateway_enabled", new_callable=AsyncMock, return_value=False
+            "agent.graphs.run_environment._cached_team_default_model_pair",
+            side_effect=load_defaults,
         ),
-        patch("agent.graphs.agent._cached_profile", new_callable=AsyncMock, return_value=None),
         patch(
-            "agent.graphs.agent._cached_fable_enabled", new_callable=AsyncMock, return_value=True
+            "agent.graphs.run_environment.cached_gateway_enabled",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "agent.graphs.run_environment.cached_profile",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "agent.graphs.run_environment._cached_fable_enabled",
+            new_callable=AsyncMock,
+            return_value=True,
         ),
         patch(
             "agent.graphs.agent._observability_authorized",
@@ -147,7 +163,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
             "agent.graphs.agent._load_corridor_mcp_tools", new_callable=AsyncMock, return_value=[]
         ),
         patch("agent.graphs.agent.load_browser_tools", return_value=[]),
-        patch("agent.graphs.agent.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.agent.fallback_model_id_for", return_value=None),
         patch("agent.graphs.agent.create_deep_agent", return_value=_DummyAgent()),
     ):
@@ -197,7 +213,7 @@ async def test_desktop_agent_loads_snapshotted_and_bundled_skills() -> None:
     config.setdefault("configurable", {}).update(
         {"source": "desktop", "local_project_path": "/tmp"}
     )
-    with patch("agent.graphs.agent.create_desktop_backend", return_value=MagicMock()):
+    with patch.object(DesktopRunEnvironment, "make_backend", AsyncMock(return_value=MagicMock())):
         captured = await _capture_create_deep_agent_kwargs(config)
 
     assert captured["skills"] == ["/skills/", "/bundled-skills/"]

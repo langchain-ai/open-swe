@@ -6,6 +6,7 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from agent.graphs import _assembly, run_environment
 from agent.graphs import agent as agent_graph
 from agent.integrations import corridor_mcp
 
@@ -142,7 +143,7 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
             ),
             patch.object(agent_graph, "resolve_triggering_user_identity", return_value=None),
             patch.object(
-                agent_graph,
+                run_environment,
                 "ensure_sandbox_for_thread",
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
@@ -154,13 +155,13 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
                 return_value="/workspace",
             ),
             patch.object(
-                agent_graph,
+                run_environment,
                 "get_team_default_model_pair",
                 new_callable=AsyncMock,
                 return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
             ),
             patch.object(agent_graph, "fallback_model_id_for", return_value=None),
-            patch.object(agent_graph, "make_model", return_value=MagicMock()),
+            patch.object(_assembly, "make_model", return_value=MagicMock()),
             patch.object(
                 agent_graph, "_load_observability_tools", new_callable=AsyncMock, return_value=[]
             ),

@@ -8,22 +8,11 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage
 
+from ..utils.model import unwrap_chat_model
+
 
 def _is_chat_anthropic(model: object) -> bool:
-    seen: set[int] = set()
-    current = model
-    for _ in range(10):
-        if isinstance(current, ChatAnthropic):
-            return True
-        current_id = id(current)
-        if current_id in seen:
-            return False
-        seen.add(current_id)
-        bound = getattr(current, "bound", None)
-        if bound is None or bound is current:
-            return False
-        current = bound
-    return False
+    return unwrap_chat_model(model, ChatAnthropic) is not None
 
 
 def _sanitize_messages(messages: list[Any]) -> None:

@@ -480,7 +480,7 @@ class TestRefreshProxyOnSandboxReuse:
                 new_callable=AsyncMock,
                 return_value="/workspace",
             ),
-            patch("agent.graphs.agent.make_model", return_value=MagicMock()),
+            patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
             patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
             patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
             patch.dict(
@@ -542,7 +542,7 @@ class TestRefreshProxyOnSandboxReuse:
                 new_callable=AsyncMock,
                 return_value="/workspace",
             ),
-            patch("agent.graphs.agent.make_model", return_value=MagicMock()),
+            patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
             patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
             patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
             patch.dict("agent.utils.sandbox_state.SANDBOX_BACKENDS", {}, clear=True),

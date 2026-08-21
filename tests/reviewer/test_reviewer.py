@@ -86,7 +86,7 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.reviewer.create_deep_agent", return_value=dummy_agent) as create_agent,
     ):
         await reviewer.get_reviewer_agent(config)
@@ -149,7 +149,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
             new_callable=AsyncMock,
         ),
         patch("agent.graphs.reviewer.fetch_agents_md", new_callable=AsyncMock, return_value=None),
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch(
             "agent.graphs.reviewer.create_deep_agent", return_value=_DummyAgent()
         ) as create_agent,
@@ -190,7 +190,7 @@ async def test_reviewer_raises_when_app_installation_token_unavailable() -> None
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ) as mock_sandbox,
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch(
             "agent.graphs.reviewer.create_deep_agent", return_value=_DummyAgent()
         ) as create_agent,
@@ -234,7 +234,7 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()) as make_model,
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()) as make_model,
         patch("agent.graphs.reviewer.create_deep_agent", return_value=dummy_agent),
         patch(
             "agent.graphs.reviewer.fetch_agents_md",
@@ -282,7 +282,7 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()) as make_model,
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()) as make_model,
         patch("agent.graphs.reviewer.create_deep_agent", return_value=dummy_agent),
         patch(
             "agent.graphs.reviewer.fetch_agents_md",
@@ -348,7 +348,7 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
             new_callable=AsyncMock,
             return_value="Flag table rerender regressions.",
         ),
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
         patch("agent.graphs.reviewer.fetch_pr_review_threads", fetch_threads),
         patch("agent.graphs.reviewer.fetch_pr_diff", new_callable=AsyncMock, return_value=None),
@@ -425,7 +425,7 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -482,7 +482,7 @@ async def test_reviewer_inlines_agents_md_into_system_prompt() -> None:
             new_callable=AsyncMock,
             return_value="Always use the design system IconButton.",
         ) as mock_fetch_agents_md,
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -540,7 +540,7 @@ async def test_reviewer_inlines_claude_md_when_agents_md_absent() -> None:
             new_callable=AsyncMock,
             return_value="# CLAUDE.md\nUse semantic tokens only.",
         ) as mock_fetch_agents_md,
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -900,7 +900,7 @@ async def test_reviewer_injects_pr_review_threads_into_first_review_context() ->
             new_callable=AsyncMock,
             return_value=fake_threads,
         ) as mock_fetch_threads,
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -982,7 +982,7 @@ async def test_reviewer_injects_pr_review_threads_into_re_review_context() -> No
             new_callable=AsyncMock,
             return_value=[],
         ),
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -1046,7 +1046,7 @@ async def test_reviewer_omits_threads_block_when_fetch_returns_empty() -> None:
             new_callable=AsyncMock,
             return_value=[],
         ),
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -1111,7 +1111,7 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
             new_callable=AsyncMock,
             side_effect=RuntimeError("network down"),
         ),
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -1191,7 +1191,7 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
             new_callable=AsyncMock,
             return_value=pr_diff,
         ) as mock_fetch_diff,
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -1263,7 +1263,7 @@ async def test_reviewer_leaves_validation_disabled_when_diff_fetch_fails() -> No
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)
@@ -1334,7 +1334,7 @@ async def test_reviewer_injects_pr_title_and_body_into_context() -> None:
             new_callable=AsyncMock,
             return_value=("Add retry logic for uploads", "Retries flaky uploads up to 3 times."),
         ) as mock_fetch_metadata,
-        patch("agent.graphs.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
         patch("agent.graphs.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await reviewer.get_reviewer_agent(config)

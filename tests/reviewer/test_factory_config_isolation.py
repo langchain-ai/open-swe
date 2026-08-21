@@ -26,7 +26,7 @@ async def test_get_reviewer_agent_does_not_mutate_caller_config() -> None:
     fake_pregel = MagicMock()
     fake_pregel.with_config = MagicMock(return_value=fake_pregel)
 
-    with patch("agent.graphs.reviewer.create_deep_agent", return_value=fake_pregel):
+    with patch("agent.graphs._assembly.create_deep_agent", return_value=fake_pregel):
         await reviewer.get_reviewer_agent(config)
 
     assert config.get("recursion_limit") == original_limit, (
@@ -45,7 +45,7 @@ async def test_get_reviewer_agent_applies_default_when_limit_unset() -> None:
     fake_pregel = MagicMock()
     fake_pregel.with_config = MagicMock(return_value=fake_pregel)
 
-    with patch("agent.graphs.reviewer.create_deep_agent", return_value=fake_pregel):
+    with patch("agent.graphs._assembly.create_deep_agent", return_value=fake_pregel):
         await reviewer.get_reviewer_agent(config)
 
     assert "recursion_limit" not in config
@@ -63,7 +63,7 @@ async def test_get_chat_agent_does_not_mutate_caller_config() -> None:
     fake_pregel = MagicMock()
     fake_pregel.with_config = MagicMock(return_value=fake_pregel)
 
-    with patch("agent.graphs.chat.create_deep_agent", return_value=fake_pregel):
+    with patch("agent.graphs._assembly.create_deep_agent", return_value=fake_pregel):
         await chat.get_chat_agent(config)
 
     assert config.get("recursion_limit") == original_limit, (
@@ -82,7 +82,7 @@ async def test_get_chat_agent_applies_default_when_limit_unset() -> None:
     fake_pregel = MagicMock()
     fake_pregel.with_config = MagicMock(return_value=fake_pregel)
 
-    with patch("agent.graphs.chat.create_deep_agent", return_value=fake_pregel):
+    with patch("agent.graphs._assembly.create_deep_agent", return_value=fake_pregel):
         await chat.get_chat_agent(config)
 
     assert "recursion_limit" not in config
@@ -113,7 +113,7 @@ async def test_factory_copies_config_dicts_but_preserves_runtime_objects(
     fake_pregel = MagicMock()
     fake_pregel.with_config = MagicMock(return_value=fake_pregel)
 
-    with patch(f"{module_name}.create_deep_agent", return_value=fake_pregel):
+    with patch("agent.graphs._assembly.create_deep_agent", return_value=fake_pregel):
         await factory(config)
 
     assert fake_pregel.with_config.call_args is not None

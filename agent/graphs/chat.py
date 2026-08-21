@@ -12,53 +12,28 @@ tools operate over those. Repo coordinates and the reviewer thread id arrive in
 ``configurable``; a repo-scoped GitHub App token is resolved here so the
 GitHub-backed tools never receive a user credential.
 """
-# ruff: noqa: E402
 
 import logging
-import warnings
 from typing import Any, cast
-
-from langgraph.graph.state import RunnableConfig
-from langgraph.pregel import Pregel
-from langgraph.runtime import Runtime
-
-warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
-warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
-from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
-from langchain_core.language_models import BaseChatModel
+from langgraph.graph.state import RunnableConfig
+from langgraph.pregel import Pregel
+from langgraph.runtime import Runtime
 
-from ..dashboard.options import (
-    SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
-    gate_fable_model,
-    model_supports_effort,
-)
-from ..dashboard.team_settings import (
-    get_effective_gateway_enabled,
-    get_team_default_model,
-    get_team_fable_enabled,
-)
+from ..dashboard.team_settings import get_team_default_model, get_team_fable_enabled
 from ..middleware import (
     BasePrepareRunMiddleware,
+    DynamicContextMiddleware,
     ExcludeToolsMiddleware,
-    ModelCallTimeoutMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
-    ToolErrorMiddleware,
+    TimeoutWrapupMiddleware,
 )
 from ..middleware.prepare_run import PrepareRunState
-from ..runtime import (
-    DEFAULT_LLM_MAX_TOKENS,
-    DEFAULT_RECURSION_LIMIT,
-    graph_loaded_for_execution,
-)
+from ..middleware.stack import core_stack, model_guard_middleware
+from ..runtime import graph_loaded_for_execution
 from ..tools import (
     fetch_url,
     list_review_findings,
@@ -67,10 +42,16 @@ from ..tools import (
     web_search,
 )
 from ..utils import ttl_cache
-from ..utils.deferred_model import make_deferred_error_model
 from ..utils.github_app import get_github_app_installation_token
-from ..utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from ..utils.model import DEFAULT_LLM_REASONING
 from ..utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
+from ._assembly import (
+    cached_gateway_enabled,
+    model_spec,
+    prepare_config,
+    requested_model_pair,
+    stub_agent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +76,7 @@ def _chat_general_purpose_subagent() -> SubAgent:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 FilesystemMiddleware(tools=["read_file", "ls", "glob", "grep"]),
-                SanitizeOpenAIResponsesMiddleware(),
-                ModelCallTimeoutMiddleware(),
+                *model_guard_middleware(),
             ],
         ),
     }
@@ -131,28 +111,12 @@ Guidance:
 """
 
 
-async def _cached_gateway_enabled() -> bool:
-    return await ttl_cache.cached(
-        "team:gateway-enabled",
-        60,
-        get_effective_gateway_enabled,
-    )
-
-
 async def _cached_team_chat_model() -> tuple[str, str]:
     return await ttl_cache.cached(
         "team-default-model:chat",
         60,
         lambda: get_team_default_model("chat"),
     )
-
-
-def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
-    try:
-        return make_model(model_id, use_gateway=use_gateway, **kwargs)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Deferring chat model setup failure for %s", model_id, exc_info=True)
-        return make_deferred_error_model(e, model_id=model_id)
 
 
 class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
@@ -196,47 +160,33 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
 
 
 async def _resolve_chat_model(configurable: dict[str, Any]) -> tuple[str, str]:
-    model_id = configurable.get("chat_model_id")
-    effort = configurable.get("chat_effort")
-    if (
-        isinstance(model_id, str)
-        and model_id in SUPPORTED_MODEL_IDS
-        and isinstance(effort, str)
-        and model_supports_effort(model_id, effort)
-    ):
-        return model_id, effort
-    canonical = canonical_model_pair(model_id, effort)
-    if canonical is not None:
-        return canonical
+    requested = requested_model_pair(
+        configurable.get("chat_model_id"), configurable.get("chat_effort")
+    )
+    if requested is not None:
+        return requested
     # Team review-chat default, which itself inherits the Agent default if unset.
     return await _cached_team_chat_model()
 
 
 async def get_chat_agent(config: RunnableConfig) -> Pregel:
     """Get a read-only PR chat agent. No sandbox; PR context comes via config."""
-    config = config.copy()
-    configurable = dict(config.get("configurable") or {})
-    config["configurable"] = configurable
-    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
+    config, configurable = prepare_config(config)
     thread_id = configurable.get("thread_id")
 
     if thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(system_prompt="", tools=[]).with_config(config)
+        return stub_agent(config)
 
     model_id, effort = await _resolve_chat_model(configurable)
-    model_id, effort = gate_fable_model(
-        model_id, effort, fable_enabled=await get_team_fable_enabled()
-    )
-    use_gateway = await _cached_gateway_enabled()
-    model_kwargs = provider_model_kwargs(
+    spec = model_spec(
         model_id,
         effort,
-        max_tokens=DEFAULT_LLM_MAX_TOKENS,
+        fable_enabled=await get_team_fable_enabled(),
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
 
     return create_deep_agent(
-        model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
+        model=spec.build(use_gateway=await cached_gateway_enabled()),
         system_prompt="",
         tools=[
             read_repo_file,
@@ -246,19 +196,17 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
             fetch_url,
         ],
         subagents=[_chat_general_purpose_subagent()],
-        middleware=cast(
-            list[AgentMiddleware[Any, Any, Any]],
-            [
-                PrepareChatRunMiddleware(config=config),
-                SanitizeToolInputsMiddleware(),
-                ModelCallLimitMiddleware(run_limit=CHAT_MODEL_CALL_LIMIT, exit_behavior="end"),
-                ToolErrorMiddleware(),
+        middleware=core_stack(
+            PrepareChatRunMiddleware(config=config),
+            call_limit=CHAT_MODEL_CALL_LIMIT,
+            extras=[
                 ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),
-                SanitizeFireworksMessagesMiddleware(),
-                SanitizeOpenAIResponsesMiddleware(),
-                SanitizeThinkingBlocksMiddleware(),
-                ModelCallTimeoutMiddleware(),
+                TimeoutWrapupMiddleware(),
+                DynamicContextMiddleware(),
             ],
+            # No refresh_github_proxy_before_model and no sandbox middleware at
+            # all: this graph has no sandbox — its GitHub access is a repo-scoped
+            # App token the prepare middleware puts in `configurable`.
         ),
     ).with_config(config)
 

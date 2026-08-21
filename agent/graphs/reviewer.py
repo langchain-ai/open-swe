@@ -13,35 +13,23 @@ agent for code review only:
 - A system prompt that pins the single-evolving-findings model, in-diff-only
   discipline, severity ladder, and the watch-mode reconciliation flow.
 """
-# ruff: noqa: E402
 
 import asyncio
 import logging
 import posixpath
 import re
-import warnings
 from typing import Any, NotRequired, cast
-
-logger = logging.getLogger(__name__)
-
-from langgraph.graph.state import RunnableConfig
-from langgraph.pregel import Pregel
-from langgraph.runtime import Runtime
-
-warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
-warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from deepagents.middleware.subagents import SubAgent
-from langchain.agents.middleware import ModelCallLimitMiddleware
-from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
+from langgraph.graph.state import RunnableConfig
+from langgraph.pregel import Pregel
+from langgraph.runtime import Runtime
 
-from ..dashboard.options import gate_fable_model
 from ..dashboard.team_settings import (
-    get_effective_gateway_enabled,
     get_org_review_guidelines,
     get_team_default_grouping_model,
     get_team_default_model_pair,
@@ -50,20 +38,14 @@ from ..dashboard.team_settings import (
 from ..middleware import (
     BasePrepareRunMiddleware,
     DynamicContextMiddleware,
-    ModelCallTimeoutMiddleware,
-    RepairOrphanedToolCallsMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
     TimeoutWrapupMiddleware,
-    ToolErrorMiddleware,
     check_message_queue_before_model,
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
 from ..middleware.prepare_run import PrepareRunState
 from ..middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from ..middleware.stack import core_stack, model_guard_middleware
 from ..review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -88,8 +70,6 @@ from ..review.trace_context import (
     prepare_pr_trace_context,
 )
 from ..runtime import (
-    DEFAULT_LLM_MAX_TOKENS,
-    DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
@@ -110,14 +90,16 @@ from ..tools import (
 from ..utils import ttl_cache
 from ..utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from ..utils.api_standards_skill import fetch_api_standards_skill
-from ..utils.deferred_model import make_deferred_error_model
 from ..utils.github_app import get_github_app_installation_token_with_expiry
 from ..utils.github_token import cache_github_token_for_thread
-from ..utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from ..utils.model import DEFAULT_LLM_REASONING
 from ..utils.repo_prep import materialize_trusted_skills, prepare_review_repo
 from ..utils.sandbox_paths import aresolve_sandbox_work_dir
 from ..utils.sandbox_state import SandboxUnreachableError
 from ..utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
+from ._assembly import ModelSpec, cached_gateway_enabled, model_spec, prepare_config, stub_agent
+
+logger = logging.getLogger(__name__)
 
 HISTORICAL_REVIEW_GUIDANCE = """- **Anything that overlaps an existing PR review thread.** A
   "Pre-existing PR review threads" block below (when present) lists every
@@ -359,12 +341,7 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
         ),
         "system_prompt": REVIEWER_SUBAGENT_SYSTEM_PROMPT,
         "model": model,
-        # Subagents compile into their own graphs, so the reviewer's own
-        # middleware never wraps their model calls.
-        "middleware": cast(
-            list[AgentMiddleware[Any, Any, Any]],
-            [SanitizeOpenAIResponsesMiddleware(), ModelCallTimeoutMiddleware()],
-        ),
+        "middleware": model_guard_middleware(),
     }
 
 
@@ -843,19 +820,6 @@ def _format_existing_findings(findings: list[Finding]) -> str:
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
-def _make_model_or_defer(
-    model_id: str,
-    *,
-    use_gateway: bool,
-    **kwargs: Any,
-) -> BaseChatModel:
-    try:
-        return make_model(model_id, use_gateway=use_gateway, **kwargs)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Deferring reviewer model setup failure for %s", model_id, exc_info=True)
-        return make_deferred_error_model(e, model_id=model_id)
-
-
 def _on_background_task_done(task: asyncio.Task[None]) -> None:
     _BACKGROUND_TASKS.discard(task)
     if task.cancelled():
@@ -881,16 +845,13 @@ async def _resolve_grouping_model(
         effort = configured_effort if isinstance(configured_effort, str) else None
     else:
         model_id, effort = await get_team_default_grouping_model()
-    model_id, effort = gate_fable_model(
-        model_id, effort, fable_enabled=await get_team_fable_enabled()
-    )
-    model_kwargs = provider_model_kwargs(
+    spec = model_spec(
         model_id,
         effort,
-        max_tokens=DEFAULT_LLM_MAX_TOKENS,
+        fable_enabled=await get_team_fable_enabled(),
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
-    return _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
+    return spec.build(use_gateway=use_gateway)
 
 
 async def _cached_reviewer_team_defaults():
@@ -898,14 +859,6 @@ async def _cached_reviewer_team_defaults():
         "team-default-model-pair:reviewer",
         60,
         lambda: get_team_default_model_pair("reviewer"),
-    )
-
-
-async def _cached_gateway_enabled() -> bool:
-    return await ttl_cache.cached(
-        "team:gateway-enabled",
-        60,
-        get_effective_gateway_enabled,
     )
 
 
@@ -1327,15 +1280,12 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
 
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     """Get or create a reviewer agent with checkpointed run prep."""
-    config = config.copy()
-    configurable = dict(config.get("configurable") or {})
-    config["configurable"] = configurable
-    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
+    config, configurable = prepare_config(config)
     thread_id = configurable.get("thread_id")
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
-        return create_deep_agent(system_prompt="", tools=[]).with_config(config)
+        return stub_agent(config)
 
     configured_model_id = configurable.get("reviewer_model_id")
     configured_effort = configurable.get("reviewer_reasoning_effort")
@@ -1367,29 +1317,19 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             configured_subagent_effort if isinstance(configured_subagent_effort, str) else None
         )
     fable_enabled = await get_team_fable_enabled()
-    model_id, reasoning_effort = gate_fable_model(
-        model_id, reasoning_effort, fable_enabled=fable_enabled
-    )
-    subagent_model_id, subagent_effort = gate_fable_model(
-        subagent_model_id, subagent_effort, fable_enabled=fable_enabled
-    )
-    model_kwargs = provider_model_kwargs(
-        model_id,
-        reasoning_effort,
-        max_tokens=DEFAULT_LLM_MAX_TOKENS,
-        openai_reasoning_default=DEFAULT_LLM_REASONING,
-    )
-    subagent_model_kwargs = provider_model_kwargs(
-        subagent_model_id,
-        subagent_effort,
-        max_tokens=DEFAULT_LLM_MAX_TOKENS,
-        openai_reasoning_default=DEFAULT_LLM_REASONING,
-    )
 
-    use_gateway = await _cached_gateway_enabled()
-    reviewer_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
-    reviewer_subagent_model = _make_model_or_defer(
-        subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs
+    def spec_for(candidate_id: str, effort: str | None) -> ModelSpec:
+        return model_spec(
+            candidate_id,
+            effort,
+            fable_enabled=fable_enabled,
+            openai_reasoning_default=DEFAULT_LLM_REASONING,
+        )
+
+    use_gateway = await cached_gateway_enabled()
+    reviewer_model = spec_for(model_id, reasoning_effort).build(use_gateway=use_gateway)
+    reviewer_subagent_model = spec_for(subagent_model_id, subagent_effort).build(
+        use_gateway=use_gateway
     )
 
     async def reconnect_backend(
@@ -1420,29 +1360,26 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         ],
         subagents=[_reviewer_subagent(reviewer_subagent_model)],
         backend=backend,
-        middleware=cast(
-            list[AgentMiddleware[Any, Any, Any]],
-            [
+        middleware=[
+            *core_stack(
                 PrepareReviewerRunMiddleware(
                     thread_id=thread_id,
                     config=config,
                     use_gateway=use_gateway,
                 ),
-                SanitizeToolInputsMiddleware(),
-                ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-                ToolErrorMiddleware(),
-                refresh_github_proxy_before_model,
-                check_message_queue_before_model,
-                TimeoutWrapupMiddleware(),
-                DynamicContextMiddleware(),
-                SanitizeFireworksMessagesMiddleware(),
-                SanitizeOpenAIResponsesMiddleware(),
-                SanitizeThinkingBlocksMiddleware(),
-                RepairOrphanedToolCallsMiddleware(),
-                ModelCallTimeoutMiddleware(),
-                settle_review_check_on_exit,
-            ],
-        ),
+                call_limit=MODEL_CALL_RECURSION_LIMIT,
+                extras=[
+                    refresh_github_proxy_before_model,
+                    check_message_queue_before_model,
+                    TimeoutWrapupMiddleware(),
+                    DynamicContextMiddleware(),
+                ],
+                repair_orphaned_tool_calls=True,
+            ),
+            # After the guards: an after-agent hook, so it settles the PR check
+            # once the run is over however it ended.
+            settle_review_check_on_exit,
+        ],
     ).with_config(config)
 
 
