@@ -239,6 +239,20 @@ export function cloudTerminalCloseError(
   return reason || currentError || "Cloud terminal disconnected"
 }
 
+const MAX_CLOUD_RECONNECT_ATTEMPTS = 5
+
+export function cloudTerminalReconnectDelay(attempt: number): number {
+  return Math.min(500 * 2 ** attempt, 10_000)
+}
+
+export function shouldReconnectCloudTerminal(
+  code: number,
+  attempt: number
+): boolean {
+  if (code === 1000 || code === 1008) return false
+  return attempt < MAX_CLOUD_RECONNECT_ATTEMPTS
+}
+
 export function useAttachedTerminal(
   target: TerminalTarget,
   terminalId: string,
@@ -277,7 +291,24 @@ export function useAttachedTerminal(
         }))
         retryTimer = setTimeout(
           connect,
-          Math.min(500 * 2 ** retryCount++, 10_000)
+          cloudTerminalReconnectDelay(retryCount++)
+        )
+      }
+
+      const stop = (reason: string | null) => {
+        cloudConnectingRef.current = false
+        pendingRef.current = []
+        setState((current) =>
+          reason === null
+            ? current.status === "error"
+              ? current
+              : { ...current, status: "closed", version: current.version + 1 }
+            : {
+                ...current,
+                status: "error",
+                error: cloudTerminalCloseError(reason, current.error),
+                version: current.version + 1,
+              }
         )
       }
 
@@ -353,13 +384,29 @@ export function useAttachedTerminal(
                 }))
               }
             }
-            createdSocket.onclose = () => {
+            createdSocket.onclose = (event) => {
               if (socketRef.current !== createdSocket) return
               socketRef.current = null
-              reconnect()
+              if (disposed || exited) return
+              if (shouldReconnectCloudTerminal(event.code, retryCount)) {
+                reconnect()
+                return
+              }
+              stop(event.code === 1000 ? null : event.reason)
             }
           })
-          .catch(reconnect)
+          .catch((error: unknown) => {
+            if (disposed || exited) return
+            if (retryCount < MAX_CLOUD_RECONNECT_ATTEMPTS) {
+              reconnect()
+              return
+            }
+            stop(
+              error instanceof Error
+                ? error.message
+                : "Unable to connect to cloud terminal"
+            )
+          })
       }
 
       connect()
