@@ -1,4 +1,5 @@
-import { CloudIcon, LaptopIcon } from "@phosphor-icons/react"
+import type { IconType } from "react-icons"
+import { IoCloudOutline, IoLaptopOutline } from "react-icons/io5"
 
 import type { DesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { cn } from "@/lib/utils"
@@ -23,20 +24,27 @@ export function DesktopThreadSourceToggle({
     <div
       role="group"
       aria-label="Thread location"
-      className="mb-3 grid grid-cols-2 gap-0.5 rounded-lg bg-sidebar-control-surface p-0.5"
+      className="relative mb-3 grid grid-cols-2 rounded-lg border border-border/60 bg-sidebar-control-surface p-1"
     >
+      <span
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-md bg-sidebar shadow-sm ring-1 ring-border/70 transition-transform duration-200 ease-out",
+          source === "local" && "translate-x-full"
+        )}
+      />
       <SourceButton
         label="Cloud"
         activity={cloudActivity}
         active={source === "cloud"}
-        icon={CloudIcon}
+        icon={IoCloudOutline}
         onClick={() => onSourceChange("cloud")}
       />
       <SourceButton
         label="This Mac"
         activity={localActivity}
         active={source === "local"}
-        icon={LaptopIcon}
+        icon={IoLaptopOutline}
         onClick={() => onSourceChange("local")}
       />
     </div>
@@ -53,7 +61,7 @@ function SourceButton({
   label: string
   activity: ThreadActivity
   active: boolean
-  icon: typeof CloudIcon
+  icon: IconType
   onClick: () => void
 }) {
   return (
@@ -63,9 +71,9 @@ function SourceButton({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors",
+        "relative z-10 flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active
-          ? "bg-sidebar text-foreground shadow-sm"
+          ? "text-foreground"
           : "text-muted-foreground hover:text-foreground"
       )}
     >
@@ -75,14 +83,14 @@ function SourceButton({
         <ActivityCount
           label={`${activity.running} running`}
           count={activity.running}
-          className="bg-primary text-primary-foreground"
+          className="bg-primary/15 text-primary"
         />
       )}
       {activity.completed > 0 && (
         <ActivityCount
           label={`${activity.completed} completed`}
           count={activity.completed}
-          className="bg-success-foreground text-background"
+          className="bg-success-foreground/15 text-success-foreground"
         />
       )}
     </button>
