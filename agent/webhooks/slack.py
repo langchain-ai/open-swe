@@ -17,13 +17,6 @@ from ..config import (
     slack_repo_name,
     slack_repo_owner,
 )
-from ..dashboard.agent_overrides import resolve_agent_model_id
-from ..dashboard.environments import get_environment, parse_environment_tag
-from ..dashboard.github_tokens import get_valid_access_token, has_access_token_record
-from ..dashboard.options import default_vision_model_pair, model_supports_images
-from ..dashboard.team_settings import get_team_default_repo
-from ..dashboard.user_mappings import login_for_email, login_for_slack_id
-from ..dashboard.user_mappings import refresh_cache as refresh_user_mapping_cache
 from ..dispatch import dispatch_agent_run
 from ..input_messages import (
     InputMessageContext,
@@ -37,6 +30,13 @@ from ..input_messages import (
     system_input,
     system_introduction,
 )
+from ..settings.agent_overrides import resolve_agent_model_id
+from ..settings.environments import get_environment, parse_environment_tag
+from ..settings.github_tokens import get_valid_access_token, has_access_token_record
+from ..settings.options import default_vision_model_pair, model_supports_images
+from ..settings.team_settings import get_team_default_repo
+from ..settings.user_mappings import login_for_email, login_for_slack_id
+from ..settings.user_mappings import refresh_cache as refresh_user_mapping_cache
 from ..utils.auth import is_bot_token_only_mode
 from ..utils.dashboard_links import build_settings_url, dashboard_thread_url
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
@@ -711,7 +711,7 @@ async def process_slack_plan_approval(
     event_data: dict[str, Any], repo_config: dict[str, str]
 ) -> None:
     from ..dashboard.plan_api import approve_plan_for_thread
-    from ..dashboard.plan_store import make_plan_approver
+    from ..settings.plan_store import make_plan_approver
 
     try:
         user_id = str(event_data.get("user_id") or "")

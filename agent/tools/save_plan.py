@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from ..dashboard.plan_store import (
+from ..settings.plan_store import (
     PLAN_FILE_DIRECTORY,
     PLAN_STATUS_READY,
     PLAN_STATUS_SHARED,

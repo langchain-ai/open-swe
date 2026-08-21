@@ -5,8 +5,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..dashboard.analyzer_cron import ensure_continual_cron
-from ..dashboard.review_styles import mark_analysis_completed, mark_analysis_failed
+from ..settings.analyzer_cron import ensure_continual_cron
+from ..settings.review_styles import mark_analysis_completed, mark_analysis_failed
 
 logger = logging.getLogger(__name__)
 

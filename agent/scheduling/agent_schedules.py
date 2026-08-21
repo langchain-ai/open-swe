@@ -12,12 +12,12 @@ from typing import Any, Literal, TypedDict
 from fastapi import HTTPException
 
 from ..config import agent_version_metadata, langgraph_client
-from ..dashboard.options import gate_fable_model, normalize_model_choice
 from ..dashboard.repo_access import require_repo_access_for_user
-from ..dashboard.team_settings import get_team_fable_enabled
-from ..dashboard.user_mappings import slack_id_for_login
 from ..dispatch import create_durable_run
 from ..input_messages import InputMessageContext, build_run_input
+from ..settings.options import gate_fable_model, normalize_model_choice
+from ..settings.team_settings import get_team_fable_enabled
+from ..settings.user_mappings import slack_id_for_login
 from ..store import get_value, now_iso, now_ms, put_value
 from ..utils.slack_api import post_slack_top_level_message_with_ts
 from ..utils.slack_threads import bind_slack_thread_id, store_slack_run_mapping

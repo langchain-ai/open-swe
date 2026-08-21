@@ -5,8 +5,8 @@ from cryptography.fernet import Fernet
 from pydantic import ValidationError
 from support.langgraph_fakes import FakeLangGraphClient, FakeStore
 
-from agent.dashboard import team_credentials as tc
-from agent.dashboard.team_credentials import (
+from agent.settings import team_credentials as tc
+from agent.settings.team_credentials import (
     DatadogCredentialsUpdate,
     LangSmithCredentialsUpdate,
 )

@@ -20,16 +20,16 @@ from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
 
 from ..config import in_process_langgraph_client, is_langsmith_sandbox, local_projects_file
-from ..dashboard.agent_overrides import load_profile
-from ..dashboard.options import default_model_pair
-from ..dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
-from ..dashboard.team_settings import (
+from ..middleware import PullRequestCreationGuardMiddleware
+from ..runtime.sandbox import ensure_sandbox_for_thread, environment_slug, resolve_default_repo
+from ..settings.agent_overrides import load_profile
+from ..settings.options import default_model_pair
+from ..settings.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
+from ..settings.team_settings import (
     get_team_default_model_pair,
     get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
-from ..middleware import PullRequestCreationGuardMiddleware
-from ..runtime.sandbox import ensure_sandbox_for_thread, environment_slug, resolve_default_repo
 from ..tools import fetch_url, http_request, web_search
 from ..utils import ttl_cache
 from ..utils.read_only_backend import ReadOnlyBackend

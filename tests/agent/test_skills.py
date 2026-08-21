@@ -3,7 +3,7 @@ from unittest.mock import ANY, AsyncMock, patch
 import pytest
 from pydantic import ValidationError
 
-from agent.dashboard.skills import (
+from agent.settings.skills import (
     SkillCreate,
     create_organization_skill,
     create_skill,

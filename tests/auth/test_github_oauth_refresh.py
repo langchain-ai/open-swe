@@ -7,14 +7,14 @@ import pytest
 from cryptography.fernet import Fernet
 from support.langgraph_fakes import FakeLangGraphClient, FakeStore
 
-from agent.dashboard import github_tokens
-from agent.dashboard.github_tokens import (
+from agent.encryption import decrypt_token, encrypt_token
+from agent.settings import github_tokens
+from agent.settings.github_tokens import (
     OAUTH_TOKENS_NAMESPACE,
     GithubOAuthError,
     get_valid_access_token,
     is_unrecoverable_refresh_error,
 )
-from agent.encryption import decrypt_token, encrypt_token
 
 _ITEM = (tuple(OAUTH_TOKENS_NAMESPACE), "octo")
 

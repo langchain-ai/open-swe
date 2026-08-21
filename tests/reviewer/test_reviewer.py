@@ -344,7 +344,7 @@ async def test_reviewer_injects_repo_style_during_eval() -> None:
             return_value="/workspace",
         ),
         patch(
-            "agent.dashboard.review_styles.get_repo_custom_prompt",
+            "agent.settings.review_styles.get_repo_custom_prompt",
             new_callable=AsyncMock,
             return_value="Flag table rerender regressions.",
         ),
@@ -416,7 +416,7 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
             return_value="Never approve a PR that disables a CI gate.",
         ),
         patch(
-            "agent.dashboard.review_styles.get_repo_custom_prompt",
+            "agent.settings.review_styles.get_repo_custom_prompt",
             new_callable=AsyncMock,
             return_value=None,
         ),

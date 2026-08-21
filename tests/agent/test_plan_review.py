@@ -55,7 +55,7 @@ def test_plan_approved_slack_text_mentions_comments_and_actor() -> None:
 
 
 def test_plan_comment_helpers_exported() -> None:
-    from agent.dashboard import plan_store
+    from agent.settings import plan_store
 
     assert plan_store.PLAN_COMMENTS_NAMESPACE == ["plan", "comments"]
     assert callable(plan_store.add_plan_comment)
@@ -71,7 +71,7 @@ def _fake_client(store: Any) -> Any:
 async def test_list_plan_comments_swallows_errors_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import plan_store
+    from agent.settings import plan_store
 
     class _Store:
         async def search_items(self, *a: Any, **k: Any) -> Any:
@@ -82,7 +82,7 @@ async def test_list_plan_comments_swallows_errors_by_default(
 
 
 async def test_list_plan_comments_raises_with_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard import plan_store
+    from agent.settings import plan_store
 
     class _Store:
         async def search_items(self, *a: Any, **k: Any) -> Any:
@@ -94,7 +94,7 @@ async def test_list_plan_comments_raises_with_flag(monkeypatch: pytest.MonkeyPat
 
 
 async def test_clear_plan_comments_deletes_each(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard import plan_store
+    from agent.settings import plan_store
 
     deleted: list[str] = []
 
@@ -391,7 +391,7 @@ def test_save_plan_exported_and_wired() -> None:
 
 
 def test_plan_status_constants() -> None:
-    from agent.dashboard import plan_store
+    from agent.settings import plan_store
 
     assert plan_store.PLAN_STATUS_READY == "ready"
     assert plan_store.PLAN_STATUS_SHARED == "shared"
@@ -401,7 +401,7 @@ def test_plan_status_constants() -> None:
 
 
 def test_plan_file_path_for_thread_uses_plans_dir_and_slug() -> None:
-    from agent.dashboard import plan_store
+    from agent.settings import plan_store
 
     path = plan_store.plan_file_path_for_thread("Thread ABC/123")
     assert path.startswith("/workspace/plans/")
@@ -466,7 +466,7 @@ def test_plan_mode_middleware_self_deactivation_via_state() -> None:
 
 
 async def test_set_plan_status_preserves_plan_file_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard import plan_store
+    from agent.settings import plan_store
 
     existing = {
         "html": "# Plan",
@@ -494,7 +494,7 @@ async def test_set_plan_status_preserves_plan_file_path(monkeypatch: pytest.Monk
 
 
 async def test_set_plan_status_records_approver_audit(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard import plan_store
+    from agent.settings import plan_store
 
     saved: dict[str, Any] = {}
     merged: dict[str, Any] = {}
@@ -540,7 +540,7 @@ async def test_set_plan_status_records_approver_audit(monkeypatch: pytest.Monkey
 async def test_set_plan_status_clears_shared_content_when_entering_plan_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import plan_store
+    from agent.settings import plan_store
 
     existing = {
         "html": "# Old report",
@@ -570,7 +570,7 @@ async def test_set_plan_status_clears_shared_content_when_entering_plan_mode(
 
 
 async def test_save_plan_content_clear_comments_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.dashboard import plan_store
+    from agent.settings import plan_store
 
     cleared: list[str] = []
 
@@ -598,7 +598,7 @@ async def test_save_plan_content_clear_comments_flag(monkeypatch: pytest.MonkeyP
 async def test_save_plan_content_can_skip_plan_mode_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.dashboard import plan_store
+    from agent.settings import plan_store
 
     merged: dict[str, Any] = {}
 

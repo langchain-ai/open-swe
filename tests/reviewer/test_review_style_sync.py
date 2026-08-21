@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.dashboard.review_styles import reconcile_running_status
+from agent.settings.review_styles import reconcile_running_status
 
 
 @pytest.mark.asyncio
@@ -13,7 +13,7 @@ async def test_reconcile_running_marks_completed_when_prompt_saved() -> None:
         "custom_prompt": "Prefer concrete runtime checks.",
     }
     with patch(
-        "agent.dashboard.review_styles.update_review_style",
+        "agent.settings.review_styles.update_review_style",
         new_callable=AsyncMock,
         return_value={**record, "status": "completed"},
     ) as mock_up:
@@ -28,7 +28,7 @@ async def test_reconcile_running_marks_completed_when_prompt_saved() -> None:
 async def test_reconcile_running_marks_failed_when_run_success_without_prompt() -> None:
     record = {"full_name": "acme/repo", "status": "running", "custom_prompt": None}
     with patch(
-        "agent.dashboard.review_styles.mark_analysis_failed",
+        "agent.settings.review_styles.mark_analysis_failed",
         new_callable=AsyncMock,
         return_value={**record, "status": "failed"},
     ) as mock_fail:
@@ -47,7 +47,7 @@ async def test_reconcile_running_marks_completed_when_run_missing_but_prompt_exi
         "custom_prompt": "Prioritize security boundaries.",
     }
     with patch(
-        "agent.dashboard.review_styles.update_review_style",
+        "agent.settings.review_styles.update_review_style",
         new_callable=AsyncMock,
         return_value={**record, "status": "completed"},
     ) as mock_up:
@@ -60,7 +60,7 @@ async def test_reconcile_running_marks_completed_when_run_missing_but_prompt_exi
 
 @pytest.mark.asyncio
 async def test_sync_preserves_running_when_langgraph_errors() -> None:
-    from agent.dashboard.review_style_jobs import sync_review_style_run_status
+    from agent.settings.review_style_jobs import sync_review_style_run_status
 
     record = {
         "full_name": "acme/repo",
@@ -72,13 +72,13 @@ async def test_sync_preserves_running_when_langgraph_errors() -> None:
     mock_client.runs.get = AsyncMock(side_effect=RuntimeError("network blip"))
     with (
         patch(
-            "agent.dashboard.review_style_jobs.get_review_style",
+            "agent.settings.review_style_jobs.get_review_style",
             new_callable=AsyncMock,
             return_value=record,
         ),
-        patch("agent.dashboard.review_style_jobs.langgraph_client", return_value=mock_client),
+        patch("agent.settings.review_style_jobs.langgraph_client", return_value=mock_client),
         patch(
-            "agent.dashboard.review_style_jobs.reconcile_running_status",
+            "agent.settings.review_style_jobs.reconcile_running_status",
             new_callable=AsyncMock,
         ) as mock_reconcile,
     ):

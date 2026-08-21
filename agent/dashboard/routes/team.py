@@ -5,9 +5,8 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from ..authz import ADMIN, SESSION
-from ..enabled_repos import list_enabled_review_repos, set_review_repo_enabled
-from ..team_credentials import (
+from ...settings.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
+from ...settings.team_credentials import (
     DatadogCredentialsUpdate,
     LangSmithCredentialsUpdate,
     connect_datadog,
@@ -16,13 +15,14 @@ from ..team_credentials import (
     disconnect_langsmith,
     get_team_credentials_status,
 )
-from ..team_settings import (
+from ...settings.team_settings import (
     TeamSettingsUpdate,
     TranscriptionSettingsUpdate,
     get_team_settings,
     update_team_transcription_model,
     upsert_team_settings,
 )
+from ..authz import ADMIN, SESSION
 
 router = APIRouter()
 

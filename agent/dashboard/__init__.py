@@ -1,8 +1,10 @@
-"""Dashboard backend: OAuth, profiles, and admin endpoints for the open-swe UI.
+"""The web layer for the open-swe UI: OAuth, HTTP endpoints, thread APIs.
 
-``router`` is loaded lazily (PEP 562): importing any dashboard submodule
-(e.g. ``agent.dashboard.options`` from middleware) executes this __init__,
-and it must NOT drag in the ``routes`` package + FastAPI + every API/job
+What the dashboard *stores* lives in :mod:`agent.settings`; this package only
+speaks HTTP. A few in-graph modules still call the thread/plan/approval APIs
+directly (``agent.tools.threads``, ``agent.webhooks.slack``), so ``router`` is
+still loaded lazily (PEP 562): importing one of those submodules executes this
+__init__, and it must NOT drag in the ``routes`` package + FastAPI + every API
 module. Only the webapp, which actually mounts the router, pays that cost.
 """
 

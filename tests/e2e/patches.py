@@ -73,9 +73,9 @@ def apply() -> None:
     # OAuth-token store is an external credential boundary. Stub it so a web
     # follow-up (dashboard run.start) and PR-as-user resolution have a token;
     # the real ownership/authorization checks still run.
-    from agent.dashboard import github_tokens
     from agent.dashboard.threads import runs as thread_runs
     from agent.dashboard.threads import sandbox as thread_sandbox
+    from agent.settings import github_tokens
 
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:  # noqa: ARG001
         return "dummy-user-oauth-token"
@@ -88,8 +88,8 @@ def apply() -> None:
     # provider, so there is nothing to capture from — record the request in the
     # fake store instead. The environment tools, store writes, name/tag scheme
     # and status transitions all still run for real.
-    from agent.dashboard import environments as environments_store
     from agent.integrations import langsmith as langsmith_integration
+    from agent.settings import environments as environments_store
 
     langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
     # The capture path refuses to run off the langsmith provider; with that

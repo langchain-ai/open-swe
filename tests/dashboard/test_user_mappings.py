@@ -3,7 +3,7 @@ from collections.abc import Callable
 import pytest
 from support.langgraph_fakes import FakeLangGraphClient, FakeStore
 
-from agent.dashboard import user_mappings as um
+from agent.settings import user_mappings as um
 
 
 @pytest.fixture()
@@ -62,7 +62,7 @@ async def test_resolve_login_from_email_async_cold_cache(
 ) -> None:
     # Mapped user must resolve even on a cold worker (cache not yet primed),
     # because repo-resolution call sites run before the cache is refreshed.
-    from agent.dashboard import agent_overrides
+    from agent.settings import agent_overrides
 
     monkeypatch.setattr(agent_overrides, "login_for_email", um.login_for_email)
     await um.upsert_mapping(github_login="cold", work_email="cold@x.com")

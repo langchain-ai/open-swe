@@ -8,13 +8,13 @@ from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 
 from ...config import github_app_oauth
-from ..authz import SESSION, session_is_admin
-from ..github_token_auth import fetch_github_identity
-from ..github_tokens import (
+from ...settings.github_tokens import (
     GithubOAuthError,
     exchange_code,
     upsert_access_token_from_github_response,
 )
+from ..authz import SESSION, session_is_admin
+from ..github_token_auth import fetch_github_identity
 from ..oauth import (
     SESSION_TTL_SECONDS,
     decode_state,

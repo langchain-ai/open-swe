@@ -15,7 +15,7 @@ from datetime import timedelta
 from langchain_core.tools import BaseTool
 
 from ..config import datadog_mcp_toolsets
-from ..dashboard.team_credentials import DatadogCredentials, get_datadog_credentials
+from ..settings.team_credentials import DatadogCredentials, get_datadog_credentials
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import BackgroundTasks, HTTPException
 
-from agent.dashboard.repo_snapshots import (
+from agent.dashboard.routes import repo_snapshots as repo_snapshot_routes
+from agent.settings.repo_snapshots import (
     RepoSnapshotConfigError,
     RepoSnapshotUpdate,
     create_repo_snapshot,
@@ -16,7 +17,6 @@ from agent.dashboard.repo_snapshots import (
     run_snapshot_build,
     update_repo_snapshot,
 )
-from agent.dashboard.routes import repo_snapshots as repo_snapshot_routes
 
 
 def test_generate_dockerfile_template_uses_base_image() -> None:
@@ -211,15 +211,15 @@ async def test_run_snapshot_build_success_marks_ready() -> None:
 
     with (
         patch(
-            "agent.dashboard.repo_snapshots.get_repo_snapshot",
+            "agent.settings.repo_snapshots.get_repo_snapshot",
             new_callable=AsyncMock,
             return_value={"full_name": "acme/repo", "dockerfile": "FROM x"},
         ),
         patch(
-            "agent.dashboard.repo_snapshots._build_snapshot_sync",
+            "agent.settings.repo_snapshots._build_snapshot_sync",
             return_value=("snap-new", "build log"),
         ),
-        patch("agent.dashboard.repo_snapshots._set_status", side_effect=fake_set_status),
+        patch("agent.settings.repo_snapshots._set_status", side_effect=fake_set_status),
     ):
         await run_snapshot_build("acme/repo")
 
@@ -238,15 +238,15 @@ async def test_run_snapshot_build_failure_marks_failed() -> None:
 
     with (
         patch(
-            "agent.dashboard.repo_snapshots.get_repo_snapshot",
+            "agent.settings.repo_snapshots.get_repo_snapshot",
             new_callable=AsyncMock,
             return_value={"full_name": "acme/repo", "dockerfile": "FROM x"},
         ),
         patch(
-            "agent.dashboard.repo_snapshots._build_snapshot_sync",
+            "agent.settings.repo_snapshots._build_snapshot_sync",
             side_effect=RuntimeError("boom"),
         ),
-        patch("agent.dashboard.repo_snapshots._set_status", side_effect=fake_set_status),
+        patch("agent.settings.repo_snapshots._set_status", side_effect=fake_set_status),
     ):
         await run_snapshot_build("acme/repo")
 

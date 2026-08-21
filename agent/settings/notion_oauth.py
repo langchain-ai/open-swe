@@ -12,7 +12,6 @@ from ..store import delete_value, get_value, now_iso, put_value
 from ..utils.pkce import s256_challenge
 
 NOTION_MCP_URL = "https://mcp.notion.com/mcp"
-NOTION_STATE_COOKIE_NAME = "osw_notion_oauth_state"
 NOTION_OAUTH_FLOW_NAMESPACE: list[str] = ["notion_oauth_flows"]
 
 _NOTION_HOST = "mcp.notion.com"

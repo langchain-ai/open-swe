@@ -32,6 +32,17 @@ from ...input_messages import (
     dynamic_context_hashes_from_messages,
     injected_dynamic_context_hashes_from_metadata,
 )
+from ...settings.agent_overrides import normalize_profile_overrides
+from ...settings.environments import get_environment, slugify
+from ...settings.github_tokens import get_valid_access_token
+from ...settings.options import (
+    default_vision_model_pair,
+    gate_fable_model,
+    model_supports_images,
+    normalize_model_choice,
+)
+from ...settings.profiles import get_profile
+from ...settings.team_settings import get_team_default_model, get_team_fable_enabled
 from ...store import now_ms
 from ...utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from ...utils.json_types import (
@@ -47,7 +58,6 @@ from ...utils.thread_ops import get_thread_active_status, queue_message_for_thre
 from ...utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
 from ...utils.timing import phase
 from ..admin import is_admin
-from ..agent_overrides import normalize_profile_overrides
 from ..authz import (
     DASHBOARD_SOURCE,
     assert_thread_owner,
@@ -61,16 +71,6 @@ from ..authz import (
     thread_source,
     user_owns_thread,
 )
-from ..environments import get_environment, slugify
-from ..github_tokens import get_valid_access_token
-from ..options import (
-    default_vision_model_pair,
-    gate_fable_model,
-    model_supports_images,
-    normalize_model_choice,
-)
-from ..profiles import get_profile
-from ..team_settings import get_team_default_model, get_team_fable_enabled
 from .listing import refresh_latest_run_metadata
 from .proxy import (
     PROXY_STREAM_MODES,

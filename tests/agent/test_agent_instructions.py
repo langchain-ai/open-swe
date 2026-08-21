@@ -6,15 +6,15 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from agent.dashboard import authz, repo_access, routes
-from agent.dashboard.agent_instructions import (
-    create_agent_instructions,
-    get_repo_agent_instructions,
-    set_agent_instructions,
-)
 from agent.dashboard.oauth import COOKIE_NAME, issue_session
 from agent.dashboard.routes import agent_instructions as agent_instruction_routes
 from agent.graphs import agent as agent_graph
 from agent.prompt import construct_system_prompt
+from agent.settings.agent_instructions import (
+    create_agent_instructions,
+    get_repo_agent_instructions,
+    set_agent_instructions,
+)
 
 
 def _signed_in_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
@@ -30,7 +30,7 @@ def _signed_in_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 @pytest.mark.asyncio
 async def test_get_repo_agent_instructions_returns_trimmed_text() -> None:
     with patch(
-        "agent.dashboard.agent_instructions.get_agent_instructions",
+        "agent.settings.agent_instructions.get_agent_instructions",
         new_callable=AsyncMock,
         return_value={"instructions": "  Always run mypy.\n"},
     ):
@@ -41,7 +41,7 @@ async def test_get_repo_agent_instructions_returns_trimmed_text() -> None:
 @pytest.mark.asyncio
 async def test_get_repo_agent_instructions_returns_none_when_empty() -> None:
     with patch(
-        "agent.dashboard.agent_instructions.get_agent_instructions",
+        "agent.settings.agent_instructions.get_agent_instructions",
         new_callable=AsyncMock,
         return_value={"instructions": "   "},
     ):

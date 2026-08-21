@@ -5,8 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from ..authz import ADMIN, SESSION
-from ..environments import (
+from ...settings.environments import (
     DEFAULT_ENVIRONMENT_SLUG,
     EnvironmentCreate,
     EnvironmentUpdate,
@@ -18,6 +17,7 @@ from ..environments import (
     slugify,
     update_environment,
 )
+from ..authz import ADMIN, SESSION
 
 router = APIRouter()
 

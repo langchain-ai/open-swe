@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent import store as agent_store
-from agent.dashboard import environments as env_store
-from agent.dashboard.environments import (
+from agent.settings import environments as env_store
+from agent.settings.environments import (
     EnvironmentCreate,
     EnvironmentUpdate,
     environment_prompt,

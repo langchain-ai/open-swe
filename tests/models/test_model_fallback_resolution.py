@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.dashboard.agent_overrides import normalize_profile_overrides
-from agent.dashboard.options import (
+from agent.settings.agent_overrides import normalize_profile_overrides
+from agent.settings.options import (
     DEFAULT_MODEL_ID,
     FABLE_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
@@ -16,11 +16,11 @@ from agent.dashboard.options import (
     models_with_profile_context_windows,
     provider_fallback_pair,
 )
-from agent.dashboard.options import (
+from agent.settings.options import (
     normalize_model_choice as normalize_schedule_model_choice,
 )
-from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_response
-from agent.dashboard.team_settings import (
+from agent.settings.profiles import ProfileUpdate, normalize_profile_for_response
+from agent.settings.team_settings import (
     TeamSettingsUpdate,
     get_team_default_model,
     normalize_team_settings_for_response,
@@ -131,7 +131,7 @@ async def test_team_default_stale_anthropic_stays_on_provider() -> None:
         "default_agent_reasoning_effort": "xhigh",
     }
     with patch(
-        "agent.dashboard.team_settings.get_team_settings",
+        "agent.settings.team_settings.get_team_settings",
         new_callable=AsyncMock,
         return_value=settings,
     ):
@@ -145,7 +145,7 @@ async def test_team_default_unknown_provider_falls_back_to_global() -> None:
         "default_reviewer_reasoning_effort": "high",
     }
     with patch(
-        "agent.dashboard.team_settings.get_team_settings",
+        "agent.settings.team_settings.get_team_settings",
         new_callable=AsyncMock,
         return_value=settings,
     ):

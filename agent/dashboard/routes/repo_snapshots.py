@@ -5,8 +5,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import Response
 
-from ..authz import ADMIN
-from ..repo_snapshots import (
+from ...settings.repo_snapshots import (
     RepoSnapshotConfigError,
     RepoSnapshotCreate,
     RepoSnapshotUpdate,
@@ -20,7 +19,8 @@ from ..repo_snapshots import (
     run_snapshot_build,
     update_repo_snapshot,
 )
-from ..review_styles import normalize_repo_full_name
+from ...settings.review_styles import normalize_repo_full_name
+from ..authz import ADMIN
 
 router = APIRouter()
 

@@ -5,31 +5,31 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from ..authz import SESSION
-from ..options import (
+from ...settings.options import (
     FABLE_MODEL_IDS,
     SUPPORTED_MODELS,
     gate_fable_model,
     models_with_profile_context_windows,
 )
-from ..profiles import (
+from ...settings.profiles import (
     ProfileUpdate,
     get_profile,
     normalize_profile_for_response,
     upsert_profile,
 )
-from ..team_settings import (
+from ...settings.team_settings import (
     get_team_default_model,
     get_team_default_subagent_model,
     get_team_fable_enabled,
 )
-from ..user_instructions import (
+from ...settings.user_instructions import (
     UserInstructionsUpdate,
     delete_user_instructions,
     get_user_instructions,
     set_user_instructions,
 )
-from ..user_mappings import get_mapping
+from ...settings.user_mappings import get_mapping
+from ..authz import SESSION
 
 router = APIRouter()
 

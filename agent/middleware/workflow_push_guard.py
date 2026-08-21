@@ -16,7 +16,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
 from ..config import langgraph_client
-from ..dashboard.workflow_approval import (
+from ..settings.workflow_approval import (
     ensure_workflow_push_pending,
     mark_workflow_push_notified,
     workflow_push_approved,

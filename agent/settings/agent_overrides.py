@@ -22,7 +22,7 @@ def resolve_login_from_email(email: str | None) -> str | None:
 
     Reads the in-process mapping cache (sync). When the cache is cold the
     lookup misses; the webhook path that triggers a run primes the cache via
-    :func:`agent.dashboard.user_mappings.refresh_cache` beforehand.
+    :func:`agent.settings.user_mappings.refresh_cache` beforehand.
     """
     return cached_login_for_email(email)
 
@@ -76,7 +76,7 @@ async def load_profile(login: str) -> dict[str, Any] | None:
     :func:`get_profile_default_repo`, :func:`resolve_agent_model_id` — is on the
     path that starts an agent run, and a store blip must cost the run its
     per-user overrides, not the run itself. Dashboard reads that should surface
-    a failure use :func:`agent.dashboard.profiles.get_profile` instead.
+    a failure use :func:`agent.settings.profiles.get_profile` instead.
     """
     try:
         return await get_value(PROFILES_NAMESPACE, login)

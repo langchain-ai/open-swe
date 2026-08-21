@@ -32,16 +32,7 @@ from ..config import (
     tool_loader_timeout_seconds,
 )
 from ..dashboard.admin import is_admin, is_observability_authorized
-from ..dashboard.agent_overrides import (
-    normalize_profile_overrides,
-    normalize_profile_subagent_overrides,
-    profile_draft_prs,
-    resolve_github_login,
-)
-from ..dashboard.agent_usage import record_agent_thread_usage
-from ..dashboard.environments import environment_prompt, resolve_environment
 from ..dashboard.run_diffs import THREAD_DIFF_KEY, save_run_diff
-from ..dashboard.user_mappings import email_for_login
 from ..input_messages import append_message_data
 from ..integrations.corridor_mcp import load_corridor_tools
 from ..integrations.currents_tools import load_currents_tools
@@ -74,6 +65,15 @@ from ..runtime.constants import (
 )
 from ..runtime.execution import graph_loaded_for_execution
 from ..runtime.sandbox import environment_slug, get_cached_sandbox_backend, resolve_default_repo
+from ..settings.agent_overrides import (
+    normalize_profile_overrides,
+    normalize_profile_subagent_overrides,
+    profile_draft_prs,
+    resolve_github_login,
+)
+from ..settings.agent_usage import record_agent_thread_usage
+from ..settings.environments import environment_prompt, resolve_environment
+from ..settings.user_mappings import email_for_login
 from ..thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from ..tools import (
     approve_plan,
@@ -172,7 +172,7 @@ async def _resolve_repo_custom_instructions(
     if not default_repo or not default_repo.get("owner") or not default_repo.get("name"):
         return None
     try:
-        from ..dashboard.agent_instructions import get_repo_agent_instructions
+        from ..settings.agent_instructions import get_repo_agent_instructions
 
         return await get_repo_agent_instructions(default_repo["owner"], default_repo["name"])
     except Exception:
@@ -185,7 +185,7 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
     if not login:
         return None
     try:
-        from ..dashboard.user_instructions import get_user_custom_instructions
+        from ..settings.user_instructions import get_user_custom_instructions
 
         return await get_user_custom_instructions(login)
     except Exception:

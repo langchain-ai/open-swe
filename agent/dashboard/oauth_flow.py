@@ -14,7 +14,6 @@ from fastapi import HTTPException, Response
 from starlette.requests import HTTPConnection
 
 from ..config import dashboard_api_base_url, dashboard_api_is_https, dashboard_base_url
-from .notion_oauth import NOTION_STATE_COOKIE_NAME
 from .oauth import (
     COOKIE_NAME,
     SESSION_TTL_SECONDS,
@@ -115,6 +114,8 @@ class OAuthStateCookie:
         secure, _ = _cookie_security()
         response.delete_cookie(self.name, path=self.path, samesite="lax", secure=secure)
 
+
+NOTION_STATE_COOKIE_NAME = "osw_notion_oauth_state"
 
 GITHUB_LOGIN_STATE = OAuthStateCookie(STATE_COOKIE_NAME, "/dashboard/api/auth")
 SLACK_LINK_STATE = OAuthStateCookie(SLACK_STATE_COOKIE_NAME, "/dashboard/api/slack")

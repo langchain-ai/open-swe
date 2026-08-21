@@ -5,9 +5,9 @@ import pytest
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 
-from agent.dashboard.team_credentials import DatadogCredentials, LangSmithCredentials
 from agent.graphs import agent as agent_graph
 from agent.integrations import datadog_mcp, langsmith_tools, notion_mcp
+from agent.settings.team_credentials import DatadogCredentials, LangSmithCredentials
 from agent.utils import github_org_membership
 
 

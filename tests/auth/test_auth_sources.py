@@ -63,7 +63,7 @@ def _stub_dashboard_store(
     expires_at: str | None = "2099-01-01T00:00:00Z",
     cached: tuple[str | None, str | None] = (None, None),
 ) -> None:
-    from agent.dashboard import github_tokens
+    from agent.settings import github_tokens
 
     async def fake_get_from_thread(thread_id: str):
         return cached

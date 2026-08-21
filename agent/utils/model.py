@@ -10,7 +10,7 @@ from ..config import (
     missing_provider_api_key,
     openai_base_url,
 )
-from ..dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
+from ..settings.options import DEFAULT_MODEL_ID, model_profile_with_context_override
 from .gateway import gateway_overrides
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"

@@ -4,14 +4,14 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from ..authz import SESSION
-from ..repo_access import fetch_user_installations_and_repos
-from ..repo_cache import (
+from ...settings.repo_cache import (
     REPO_LIST_FRESH_MS,
     read_cached_repos,
     schedule_repo_cache_refresh,
     write_cached_repos,
 )
+from ..authz import SESSION
+from ..repo_access import fetch_user_installations_and_repos
 
 router = APIRouter()
 

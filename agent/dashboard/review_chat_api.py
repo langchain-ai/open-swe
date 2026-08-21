@@ -19,12 +19,12 @@ from fastapi import HTTPException
 from ..config import langgraph_client
 from ..review.diff import fetch_pr_diff
 from ..review.findings import REVIEWER_THREAD_KIND
+from ..settings.options import normalize_model_choice
 from ..store import now_ms
 from ..thread_ids import reviewer_thread_id
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.json_types import as_json_object
 from .authz import thread_identifies_user
-from .options import normalize_model_choice
 from .review_api import classify_finding, get_pr_head_sha, get_review
 from .threads.proxy import (
     PROXY_STREAM_MODES,

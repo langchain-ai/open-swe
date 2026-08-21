@@ -2,7 +2,7 @@
 
 Only the user-editable settings (model, effort, default_repo, …) live here, in
 ``["profiles"]``. The user's GitHub OAuth tokens are a separate namespace owned
-by :mod:`agent.dashboard.github_tokens`, so a profile save and an OAuth
+by :mod:`agent.settings.github_tokens`, so a profile save and an OAuth
 callback can interleave without clobbering each other's fields.
 """
 

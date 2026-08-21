@@ -15,11 +15,11 @@ from urllib.parse import quote
 import httpx
 
 from ..config import agent_version_metadata, langgraph_client
-from ..dashboard.enabled_repos import is_review_repo_enabled
-from ..dashboard.profiles import get_profile
-from ..dashboard.team_settings import get_team_settings
 from ..dispatch import dispatch_agent_run
 from ..input_messages import InputMessageContext, SystemIdentity, github_person
+from ..settings.enabled_repos import is_review_repo_enabled
+from ..settings.profiles import get_profile
+from ..settings.team_settings import get_team_settings
 from ..thread_ids import reviewer_thread_id
 from ..utils.dashboard_links import dashboard_thread_url
 from ..utils.github_app import get_github_app_installation_token_with_expiry

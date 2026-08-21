@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent import store as agent_store
-from agent.dashboard import autofix_state
+from agent.settings import autofix_state
 
 
 @pytest.mark.asyncio

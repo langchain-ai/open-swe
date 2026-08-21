@@ -6,8 +6,7 @@ from typing import Any, TypeVar
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
-from ..authz import ADMIN, SESSION
-from ..skills import (
+from ...settings.skills import (
     DEFAULT_SKILLS_PAGE_SIZE,
     MAX_SKILLS_PAGE_SIZE,
     SkillCreate,
@@ -22,6 +21,7 @@ from ..skills import (
     update_organization_skill,
     update_skill,
 )
+from ..authz import ADMIN, SESSION
 
 router = APIRouter()
 

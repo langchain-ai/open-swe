@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from ..agent_instructions import (
+from ...settings.agent_instructions import (
     AgentInstructionsCreate,
     AgentInstructionsUpdate,
     create_agent_instructions,

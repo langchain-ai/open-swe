@@ -7,9 +7,9 @@ from cryptography.fernet import Fernet
 from pydantic import ValidationError
 from support.langgraph_fakes import FakeLangGraphClient, FakeStore
 
-from agent.dashboard import user_credentials as uc
-from agent.dashboard.notion_oauth import NotionOAuthError
-from agent.dashboard.user_credentials import CurrentsCredentialsUpdate
+from agent.settings import user_credentials as uc
+from agent.settings.notion_oauth import NotionOAuthError
+from agent.settings.user_credentials import CurrentsCredentialsUpdate
 
 
 @pytest.fixture()

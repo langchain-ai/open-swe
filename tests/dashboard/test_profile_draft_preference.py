@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_response, upsert_profile
+from agent.settings.profiles import ProfileUpdate, normalize_profile_for_response, upsert_profile
 
 
 @pytest.mark.asyncio
@@ -12,7 +12,7 @@ async def test_omitted_draft_preference_preserves_existing_value() -> None:
 
     with (
         patch(
-            "agent.dashboard.profiles.get_profile",
+            "agent.settings.profiles.get_profile",
             new_callable=AsyncMock,
             return_value={"draft_prs": False},
         ),
@@ -36,7 +36,7 @@ async def test_explicit_draft_preference_is_persisted() -> None:
     put_item = AsyncMock()
 
     with (
-        patch("agent.dashboard.profiles.get_profile", new_callable=AsyncMock, return_value=None),
+        patch("agent.settings.profiles.get_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.store.store_client") as client,
     ):
         client.return_value.store.put_item = put_item
@@ -60,7 +60,7 @@ async def test_profile_save_removes_legacy_create_prs_setting() -> None:
 
     with (
         patch(
-            "agent.dashboard.profiles.get_profile",
+            "agent.settings.profiles.get_profile",
             new_callable=AsyncMock,
             return_value={"create_prs": True},
         ),

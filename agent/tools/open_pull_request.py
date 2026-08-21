@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from ..dashboard.agent_usage import record_pr_opened
+from ..settings.agent_usage import record_pr_opened
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_http import github_client, github_error_message, github_request, github_url
 from ..utils.github_pr import PullRequestAttempt, head_branch_for_repo, preflight_pr_access
@@ -33,7 +33,7 @@ async def _resolve_pr_author_token(configurable: dict[str, Any]) -> tuple[str | 
     github_login = configurable.get("github_login")
 
     if source in _USER_TOKEN_SOURCES and isinstance(github_login, str) and github_login.strip():
-        from ..dashboard.github_tokens import get_valid_access_token
+        from ..settings.github_tokens import get_valid_access_token
 
         user_token = await get_valid_access_token(github_login.strip())
         if user_token:

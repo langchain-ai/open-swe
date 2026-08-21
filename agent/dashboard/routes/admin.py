@@ -5,15 +5,15 @@ from typing import Any
 from fastapi import APIRouter
 
 from ...review.eval_store import ReviewerEvalRecord
-from ..authz import ADMIN, ADMIN_OR_CI_TOKEN
-from ..eval_jobs import get_reviewer_eval_status
-from ..sandbox_settings import (
+from ...settings.eval_jobs import get_reviewer_eval_status
+from ...settings.sandbox_settings import (
     SandboxSettingsUpdate,
     get_sandbox_settings,
     upsert_sandbox_settings,
 )
+from ...settings.user_mappings import delete_mapping, list_mappings
+from ..authz import ADMIN, ADMIN_OR_CI_TOKEN
 from ..threads.runs import admin_cancel_dashboard_thread
-from ..user_mappings import delete_mapping, list_mappings
 
 router = APIRouter()
 
