@@ -39,6 +39,9 @@ jobs:
 
       - run: corepack enable
 
+      # The packaged app embeds a uv-built Python runtime (desktop/scripts/build-local-backend.cjs).
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
       - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
         with:
           mode: firewall-free
@@ -47,39 +50,7 @@ jobs:
         id: bump
         env:
           BUMP_TYPE: ${{ inputs.version_bump }}
-        run: |
-          node <<'NODE'
-          const fs = require('fs');
-          const path = 'desktop/package.json';
-          const bump = process.env.BUMP_TYPE;
-
-          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-          const current = pkg.version;
-          const parts = current.split('.').map(Number);
-
-          if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
-            throw new Error(`Invalid semver in ${path}: ${current}`);
-          }
-
-          let [major, minor, patch] = parts;
-          if (bump === 'major') {
-            major += 1;
-            minor = 0;
-            patch = 0;
-          } else if (bump === 'minor') {
-            minor += 1;
-            patch = 0;
-          } else if (bump === 'patch') {
-            patch += 1;
-          } else {
-            throw new Error(`Unsupported bump type: ${bump}`);
-          }
-
-          const next = `${major}.${minor}.${patch}`;
-          pkg.version = next;
-          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `new_version=${next}\n`);
-          NODE
+        run: node desktop/scripts/bump-version.cjs "$BUMP_TYPE"
 
       - name: Commit desktop version
         env:
@@ -126,9 +97,7 @@ jobs:
           APPLE_API_KEY: ${{ env.APPLE_API_KEY_PATH }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: |
-          pnpm run build
-          pnpm --filter open-swe-desktop exec electron-builder --mac zip dmg --publish never
+        run: pnpm --filter open-swe-desktop run dist
 
       - name: Verify and package release assets
         id: assets
