@@ -1,10 +1,11 @@
 """Workflow-file push approval state."""
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from typing import Any
 
 from langgraph_sdk import get_client
+
+from ..store import now_iso
 
 WORKFLOW_PUSH_APPROVALS_KEY = "workflow_push_approvals"
 WORKFLOW_APPROVAL_PENDING = "pending"
@@ -12,10 +13,6 @@ WORKFLOW_APPROVAL_APPROVED = "approved"
 WORKFLOW_APPROVAL_REJECTED = "rejected"
 _MAX_APPROVAL_RECORDS = 20
 _TERMINAL_STATUSES = {WORKFLOW_APPROVAL_APPROVED, WORKFLOW_APPROVAL_REJECTED}
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _approvals_from_metadata(metadata: Mapping[str, Any] | None) -> dict[str, dict[str, Any]]:
@@ -84,7 +81,7 @@ async def ensure_workflow_push_pending(
         "fingerprint": fingerprint,
         "status": WORKFLOW_APPROVAL_PENDING,
         **review_fields,
-        "requested_at": _now(),
+        "requested_at": now_iso(),
         "notified": False,
     }
     approvals[fingerprint] = record
@@ -150,7 +147,7 @@ async def mark_workflow_push_notified(thread_id: str, fingerprint: str) -> None:
     if not record:
         return
     record["notified"] = True
-    record["notified_at"] = _now()
+    record["notified_at"] = now_iso()
     approvals[fingerprint] = record
     await _save_approvals(thread_id, approvals)
 
@@ -167,7 +164,7 @@ async def decide_workflow_push_approval(
     if not record:
         return None
     record["status"] = WORKFLOW_APPROVAL_APPROVED if approved else WORKFLOW_APPROVAL_REJECTED
-    record["decided_at"] = _now()
+    record["decided_at"] = now_iso()
     record["decided_by"] = actor
     approvals[fingerprint] = record
     await _save_approvals(thread_id, approvals)

@@ -5,11 +5,11 @@ analysis metadata, and the status of the background style-analysis run.
 """
 
 import logging
-from datetime import UTC, datetime
 from typing import Any, Literal
 
-from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, field_validator
+
+from ..store import KeyedRecordStore, now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -53,26 +53,6 @@ class ReviewStylePromptUpdate(BaseModel):
         return v
 
 
-def _client():
-    return get_client()
-
-
-async def _get_value(key: str) -> dict[str, Any] | None:
-    try:
-        item = await _client().store.get_item(REVIEW_STYLES_NAMESPACE, key)
-    except Exception as e:
-        logger.debug("store get_item failed for %s: %s", key, e)
-        return None
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
-
-
 def _default_record(full_name: str, created_by: str) -> dict[str, Any]:
     owner, name = full_name.split("/", 1)
     return {
@@ -90,43 +70,32 @@ def _default_record(full_name: str, created_by: str) -> dict[str, Any]:
         "continual_cron_id": None,
         "error": None,
         "created_by": created_by,
-        "created_at": _now_iso(),
-        "updated_at": _now_iso(),
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
     }
 
 
+_RECORDS = KeyedRecordStore(
+    REVIEW_STYLES_NAMESPACE,
+    sort_key="full_name",
+    default_factory=_default_record,
+)
+
+
 async def get_review_style(full_name: str) -> dict[str, Any] | None:
-    return await _get_value(full_name)
+    return await _RECORDS.get(full_name)
 
 
 async def list_review_styles() -> list[dict[str, Any]]:
-    result = await _client().store.search_items(REVIEW_STYLES_NAMESPACE, limit=1000)
-    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-    out: list[dict[str, Any]] = []
-    for item in items or []:
-        value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-        if isinstance(value, dict):
-            out.append(value)
-    out.sort(key=lambda r: r.get("full_name", ""))
-    return out
+    return await _RECORDS.list()
 
 
 async def create_review_style(full_name: str, created_by: str) -> dict[str, Any]:
-    existing = await get_review_style(full_name)
-    if existing:
-        return existing
-    value = _default_record(full_name, created_by)
-    await _client().store.put_item(REVIEW_STYLES_NAMESPACE, full_name, value)
-    return value
+    return await _RECORDS.create(full_name, created_by)
 
 
 async def update_review_style(full_name: str, patch: dict[str, Any]) -> dict[str, Any]:
-    existing = await get_review_style(full_name) or _default_record(
-        full_name, patch.get("created_by", "")
-    )
-    value = {**existing, **patch, "updated_at": _now_iso()}
-    await _client().store.put_item(REVIEW_STYLES_NAMESPACE, full_name, value)
-    return value
+    return await _RECORDS.update(full_name, patch)
 
 
 def has_saved_prompt(record: dict[str, Any]) -> bool:
@@ -182,7 +151,7 @@ async def reconcile_running_status(
 
 
 async def delete_review_style(full_name: str) -> None:
-    await _client().store.delete_item(REVIEW_STYLES_NAMESPACE, full_name)
+    await _RECORDS.delete(full_name)
 
 
 async def mark_analysis_running(
@@ -236,9 +205,18 @@ async def mark_analysis_failed(full_name: str, error: str) -> dict[str, Any]:
 
 
 async def get_repo_custom_prompt(owner: str, repo: str) -> str | None:
-    """Return the custom prompt supplement for a repo, if configured."""
+    """Return the custom prompt supplement for a repo, if configured.
+
+    Fail-soft on purpose: this runs while the reviewer assembles its system
+    prompt, and a store blip should cost the run its style supplement, not the
+    whole review.
+    """
     full_name = f"{owner}/{repo}"
-    record = await get_review_style(full_name)
+    try:
+        record = await get_review_style(full_name)
+    except Exception:
+        logger.warning("review style lookup failed for %s", full_name, exc_info=True)
+        return None
     if not record:
         return None
     prompt = record.get("custom_prompt")

@@ -15,11 +15,9 @@ fresh on every call.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
 from typing import Any
 
-import httpx
-from langgraph_sdk import get_client
+from ..store import get_value, now_ms, put_value
 
 logger = logging.getLogger(__name__)
 
@@ -31,39 +29,30 @@ _refreshing: set[str] = set()
 _refresh_tasks: set[asyncio.Task[None]] = set()
 
 
-def _client():
-    return get_client()
-
-
-def _now_ms() -> int:
-    return int(datetime.now(UTC).timestamp() * 1000)
-
-
 def _cache_key(login: str) -> str:
     return login.strip().lower()
 
 
 async def read_cached_repos(login: str) -> tuple[dict[str, Any], int] | None:
-    """Return ``(payload, age_ms)`` for a login, or ``None`` when unusable."""
+    """Return ``(payload, age_ms)`` for a login, or ``None`` when unusable.
+
+    Fail-soft on purpose, both ways: this is a cache, so an unreachable store
+    is a miss the caller serves by rebuilding the payload.
+    """
     if not login.strip():
         return None
     try:
-        item = await _client().store.get_item(REPO_LIST_CACHE_NAMESPACE, _cache_key(login))
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code != 404:
-            logger.debug("repo list cache lookup failed: %s", e)
+        value = await get_value(REPO_LIST_CACHE_NAMESPACE, _cache_key(login))
+    except Exception:
+        logger.warning("repo list cache lookup failed", exc_info=True)
         return None
-    except Exception as e:
-        logger.debug("repo list cache lookup failed: %s", e)
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    if not isinstance(value, dict):
+    if value is None:
         return None
     payload = value.get("payload")
     cached_at_ms = value.get("cached_at_ms")
     if not isinstance(payload, dict) or not isinstance(cached_at_ms, int):
         return None
-    age_ms = max(_now_ms() - cached_at_ms, 0)
+    age_ms = max(now_ms() - cached_at_ms, 0)
     if age_ms > REPO_LIST_MAX_AGE_MS:
         return None
     return payload, age_ms
@@ -73,13 +62,13 @@ async def write_cached_repos(login: str, payload: dict[str, Any]) -> None:
     if not login.strip():
         return
     try:
-        await _client().store.put_item(
+        await put_value(
             REPO_LIST_CACHE_NAMESPACE,
             _cache_key(login),
-            {"payload": payload, "cached_at_ms": _now_ms()},
+            {"payload": payload, "cached_at_ms": now_ms()},
         )
-    except Exception as e:
-        logger.debug("repo list cache write failed: %s", e)
+    except Exception:
+        logger.warning("repo list cache write failed", exc_info=True)
 
 
 def schedule_repo_cache_refresh(login: str, refresh: Callable[[], Awaitable[Any]]) -> None:
