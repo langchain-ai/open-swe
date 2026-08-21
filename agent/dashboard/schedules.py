@@ -19,13 +19,14 @@ from ..utils.slack import (
     store_slack_run_mapping,
 )
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
+from .github_tokens import get_valid_access_token
 from .options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
-from .profiles import get_profile, get_valid_access_token
+from .profiles import get_profile
 from .repo_access import repo_config_for_user, require_repo_access_for_user
 from .team_settings import get_team_fable_enabled
 from .thread_api import _resolve_run_email

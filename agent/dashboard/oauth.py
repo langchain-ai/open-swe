@@ -7,7 +7,6 @@ import logging
 import re
 import secrets
 import time
-from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -380,14 +379,6 @@ def require_same_origin_for_mutations(request: HTTPConnection) -> None:
     if bearer_github_token(request) and not request.cookies.get(COOKIE_NAME):
         return
     require_same_origin(request)
-
-
-def expires_at_from_github_response(data: dict[str, Any], *, field: str) -> str | None:
-    """Convert GitHub ``expires_in`` / ``refresh_token_expires_in`` to an ISO timestamp."""
-    raw = data.get(field)
-    if not isinstance(raw, int | float) or raw <= 0:
-        return None
-    return (datetime.now(UTC) + timedelta(seconds=int(raw))).isoformat()
 
 
 class GithubOAuthError(HTTPException):

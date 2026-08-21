@@ -11,7 +11,7 @@ from typing import TypeVar
 from fastapi import HTTPException
 
 from ..utils.github_http import github_client, github_request, github_url
-from .profiles import get_valid_access_token
+from .github_tokens import get_valid_access_token
 from .review_styles import normalize_repo_full_name
 
 T = TypeVar("T")

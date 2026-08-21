@@ -1,35 +1,19 @@
 """User profile schema and LangGraph Store CRUD.
 
-Storage is split into two namespaces to avoid the read-modify-write race
-between profile-edit writes and OAuth-callback token refreshes:
-
-* ``["profiles"]`` — user-editable settings (model, effort, default_repo).
-* ``["oauth_tokens"]`` — encrypted GitHub OAuth access token + email.
-
-Each upsert only touches its own namespace, so the two flows can't clobber
-each other's fields even when they interleave.
+Only the user-editable settings (model, effort, default_repo, …) live here, in
+``["profiles"]``. The user's GitHub OAuth tokens are a separate namespace owned
+by :mod:`agent.dashboard.github_tokens`, so a profile save and an OAuth
+callback can interleave without clobbering each other's fields.
 """
 
-import asyncio
-import logging
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, model_validator
 
-from ..encryption import decrypt_token, encrypt_token
-from ..store import delete_value, get_value, now_iso, put_value, search_values
-from .oauth import (
-    expires_at_from_github_response,
-    is_unrecoverable_refresh_error,
-    refresh_user_access_token,
-)
+from ..store import get_value, now_iso, put_value, search_values
 from .options import SUPPORTED_MODEL_IDS, model_supports_effort, provider_fallback_pair
 
-logger = logging.getLogger(__name__)
-
 PROFILES_NAMESPACE: list[str] = ["profiles"]
-OAUTH_TOKENS_NAMESPACE: list[str] = ["oauth_tokens"]
 
 
 class ProfileUpdate(BaseModel):
@@ -118,18 +102,8 @@ async def get_profile(login: str) -> dict[str, Any] | None:
     return await get_value(PROFILES_NAMESPACE, login)
 
 
-async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
-    """The raw encrypted-token record, for callers that need its expiry metadata."""
-    return await get_value(OAUTH_TOKENS_NAMESPACE, login)
-
-
 async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[str, Any]:
-    """Write the user's editable settings.
-
-    Only touches ``["profiles"]`` — the OAuth token in ``["oauth_tokens"]``
-    is untouched, so a concurrent re-login can't be clobbered by this write
-    and vice versa.
-    """
+    """Write the user's editable settings."""
     existing = await get_profile(login) or {}
     value: dict[str, Any] = {
         **existing,
@@ -160,188 +134,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         value.pop(stale_field, None)
     await put_value(PROFILES_NAMESPACE, login, value)
     return value
-
-
-_refresh_locks: dict[str, asyncio.Lock] = {}
-
-
-def _refresh_lock(login: str) -> asyncio.Lock:
-    lock = _refresh_locks.get(login)
-    if lock is None:
-        lock = asyncio.Lock()
-        _refresh_locks[login] = lock
-    return lock
-
-
-def _token_expired(expires_at: str | None, *, skew_seconds: int = 300) -> bool:
-    if not isinstance(expires_at, str) or not expires_at:
-        return False
-    try:
-        exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-        if exp.tzinfo is None:
-            exp = exp.replace(tzinfo=UTC)
-    except ValueError:
-        return False
-    return datetime.now(UTC) + timedelta(seconds=skew_seconds) >= exp
-
-
-async def upsert_access_token(
-    login: str,
-    email: str,
-    access_token: str,
-    *,
-    refresh_token: str | None = None,
-    token_expires_at: str | None = None,
-    refresh_token_expires_at: str | None = None,
-) -> None:
-    """Persist (or refresh) the user's encrypted GitHub OAuth tokens.
-
-    Only touches ``["oauth_tokens"]`` — the user-editable profile is left
-    intact even if a save is in flight in another request.
-    """
-    if not access_token:
-        return
-    existing = await get_value(OAUTH_TOKENS_NAMESPACE, login) or {}
-    value: dict[str, Any] = {
-        "login": login,
-        "email": email or existing.get("email", ""),
-        "encrypted_gh_token": encrypt_token(access_token),
-        "updated_at": now_iso(),
-    }
-    if refresh_token:
-        value["encrypted_gh_refresh_token"] = encrypt_token(refresh_token)
-    elif existing.get("encrypted_gh_refresh_token"):
-        value["encrypted_gh_refresh_token"] = existing["encrypted_gh_refresh_token"]
-    if token_expires_at:
-        value["token_expires_at"] = token_expires_at
-    if refresh_token_expires_at:
-        value["refresh_token_expires_at"] = refresh_token_expires_at
-    await put_value(OAUTH_TOKENS_NAMESPACE, login, value)
-
-
-async def upsert_access_token_from_github_response(
-    login: str, email: str, data: dict[str, Any]
-) -> None:
-    """Store tokens from a GitHub OAuth code exchange or refresh response."""
-    access_token = data.get("access_token")
-    if not isinstance(access_token, str) or not access_token:
-        return
-    refresh_token = data.get("refresh_token")
-    await upsert_access_token(
-        login,
-        email,
-        access_token,
-        refresh_token=refresh_token if isinstance(refresh_token, str) else None,
-        token_expires_at=expires_at_from_github_response(data, field="expires_in"),
-        refresh_token_expires_at=expires_at_from_github_response(
-            data, field="refresh_token_expires_in"
-        ),
-    )
-
-
-async def delete_access_token(login: str) -> None:
-    """Drop the user's stored OAuth tokens.
-
-    Used when a refresh token is permanently dead so we stop handing out a
-    known-stale access token and callers prompt a clean re-login instead.
-    """
-    await delete_value(OAUTH_TOKENS_NAMESPACE, login)
-
-
-def _decrypt_access_token(record: dict[str, Any]) -> str | None:
-    encrypted = record.get("encrypted_gh_token")
-    if not encrypted:
-        return None
-    return decrypt_token(encrypted) or None
-
-
-def _decrypt_refresh_token(record: dict[str, Any]) -> str | None:
-    encrypted = record.get("encrypted_gh_refresh_token")
-    if not encrypted:
-        return None
-    return decrypt_token(encrypted) or None
-
-
-async def _refresh_stored_token(login: str, record: dict[str, Any]) -> tuple[str | None, bool]:
-    """Refresh the stored token, returning ``(access_token, refresh_token_dead)``.
-
-    ``refresh_token_dead`` is True when GitHub says the refresh token can never
-    mint a new token again, so the caller should drop the stored authorization
-    rather than keep serving a stale access token.
-    """
-    refresh_token = _decrypt_refresh_token(record)
-    if not refresh_token:
-        return None, False
-    try:
-        data = await refresh_user_access_token(refresh_token)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("GitHub token refresh failed for %s", login, exc_info=True)
-        return None, is_unrecoverable_refresh_error(exc)
-    email_value = record.get("email")
-    email = email_value if isinstance(email_value, str) else ""
-    await upsert_access_token_from_github_response(login, email, data)
-    access_token = data.get("access_token")
-    return (access_token if isinstance(access_token, str) else None), False
-
-
-async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> str | None:
-    """Return a GitHub access token, refreshing proactively when near expiry."""
-    record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
-    if not record:
-        return None
-
-    access_token = _decrypt_access_token(record)
-    if not access_token:
-        return None
-
-    if not force_refresh and not _token_expired(record.get("token_expires_at")):
-        return access_token
-
-    if not _decrypt_refresh_token(record):
-        return access_token
-
-    async with _refresh_lock(login):
-        record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
-        if not record:
-            return None
-        access_token = _decrypt_access_token(record)
-        if not access_token:
-            return None
-        if not force_refresh and not _token_expired(record.get("token_expires_at")):
-            return access_token
-        refreshed, refresh_token_dead = await _refresh_stored_token(login, record)
-        if refreshed:
-            return refreshed
-        if refresh_token_dead:
-            # The refresh token is permanently invalid (revoked / expired), so
-            # the cached access token is dead too. Drop it so callers prompt a
-            # clean re-login instead of repeatedly handing out a stale token.
-            # The OAuth callback can write a fresh authorization while the
-            # refresh request is in flight (it doesn't take this lock), so only
-            # delete if the stored record is still the one that failed.
-            latest = await get_value(OAUTH_TOKENS_NAMESPACE, login)
-            if latest and latest.get("encrypted_gh_refresh_token") != record.get(
-                "encrypted_gh_refresh_token"
-            ):
-                return _decrypt_access_token(latest)
-            logger.info("Dropping dead GitHub authorization for %s; re-login required", login)
-            await delete_access_token(login)
-            return None
-        return access_token
-
-
-async def get_access_token(login: str) -> str | None:
-    return await get_valid_access_token(login)
-
-
-async def has_access_token_record(login: str) -> bool:
-    """Whether an OAuth token record exists for ``login``.
-
-    Distinguishes "user has never completed a GitHub login" (no record) from
-    "the stored authorization is present but no longer usable" (record exists
-    but won't decrypt / was revoked), so callers can prompt accurately.
-    """
-    return bool(await get_value(OAUTH_TOKENS_NAMESPACE, login))
 
 
 async def list_profiles() -> list[dict[str, Any]]:

@@ -106,13 +106,13 @@ def _open() -> dict[str, Any]:
 def test_uses_user_token_for_slack_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from agent.dashboard import github_tokens
 
     async def fake_user_token(login: str, **_kw: Any) -> str | None:
         assert login == "johannes117"
         return "user-tok"
 
-    monkeypatch.setattr(profiles, "get_valid_access_token", fake_user_token)
+    monkeypatch.setattr(github_tokens, "get_valid_access_token", fake_user_token)
 
     async def fail_bot() -> str | None:
         raise AssertionError("bot token should not be used when a user token exists")
@@ -164,13 +164,13 @@ def test_profile_draft_preference_overrides_tool_argument(monkeypatch: pytest.Mo
 def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "linear", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from agent.dashboard import github_tokens
 
     async def fake_user_token(login: str, **_kw: Any) -> str | None:
         assert login == "johannes117"
         return "user-tok"
 
-    monkeypatch.setattr(profiles, "get_valid_access_token", fake_user_token)
+    monkeypatch.setattr(github_tokens, "get_valid_access_token", fake_user_token)
 
     async def fail_bot() -> str | None:
         raise AssertionError("bot token should not be used when a user token exists")
@@ -198,12 +198,12 @@ def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) 
 def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "github", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from agent.dashboard import github_tokens
 
     async def fail_user_token(login: str, **_kw: Any) -> str | None:
         raise AssertionError("user token should not be resolved for github source")
 
-    monkeypatch.setattr(profiles, "get_valid_access_token", fail_user_token)
+    monkeypatch.setattr(github_tokens, "get_valid_access_token", fail_user_token)
 
     async def fake_bot() -> str | None:
         return "bot-tok"
@@ -226,12 +226,12 @@ def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) ->
 def test_falls_back_to_bot_when_user_token_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from agent.dashboard import github_tokens
 
     async def no_user_token(login: str, **_kw: Any) -> str | None:
         return None
 
-    monkeypatch.setattr(profiles, "get_valid_access_token", no_user_token)
+    monkeypatch.setattr(github_tokens, "get_valid_access_token", no_user_token)
 
     async def fake_bot() -> str | None:
         return "bot-tok"
@@ -247,9 +247,11 @@ def test_falls_back_to_bot_when_user_token_missing(monkeypatch: pytest.MonkeyPat
 def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from agent.dashboard import github_tokens
 
-    monkeypatch.setattr(profiles, "get_valid_access_token", lambda *_a, **_k: _coro("user-tok"))
+    monkeypatch.setattr(
+        github_tokens, "get_valid_access_token", lambda *_a, **_k: _coro("user-tok")
+    )
     monkeypatch.setattr(opr, "get_github_app_installation_token", lambda: _coro("bot"))
 
     client = _FakeClient(
@@ -275,9 +277,11 @@ def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_error_surfaced_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from agent.dashboard import github_tokens
 
-    monkeypatch.setattr(profiles, "get_valid_access_token", lambda *_a, **_k: _coro("user-tok"))
+    monkeypatch.setattr(
+        github_tokens, "get_valid_access_token", lambda *_a, **_k: _coro("user-tok")
+    )
     monkeypatch.setattr(opr, "get_github_app_installation_token", lambda: _coro("bot"))
 
     client = _FakeClient(post=_FakeResponse(403, {"message": "Resource not accessible"}))
