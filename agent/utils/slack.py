@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import hmac
+import html
 import logging
 import os
 import re
@@ -12,7 +13,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from langgraph_sdk.client import LangGraphClient
@@ -1033,10 +1034,10 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
 
 async def fetch_slack_thread_message_by_ts(
     channel_id: str, thread_ts: str, message_ts: str
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, str | None]:
     """Fetch an exact reply from a Slack thread."""
     if not SLACK_BOT_TOKEN:
-        return None
+        return None, None
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
@@ -1061,7 +1062,7 @@ async def fetch_slack_thread_message_by_ts(
                 thread_ts,
                 message_ts,
             )
-            return None
+            return None, "http_error"
 
     if not payload.get("ok"):
         logger.warning(
@@ -1071,9 +1072,9 @@ async def fetch_slack_thread_message_by_ts(
             message_ts,
             payload.get("error"),
         )
-        return None
+        return None, payload.get("error")
     messages = payload.get("messages", [])
-    return next(
+    message = next(
         (
             message
             for message in messages
@@ -1081,15 +1082,16 @@ async def fetch_slack_thread_message_by_ts(
         ),
         None,
     )
+    return message, None
 
 
 SLACK_MESSAGE_URL_RE = re.compile(
-    r"https?://[a-zA-Z0-9\-]+\.slack\.com/archives/([A-Za-z0-9]+)/p(\d{16})(?:\?[^\s>]*)?"
+    r"https?://[a-zA-Z0-9\-]+\.slack\.com/archives/([A-Za-z0-9]+)/p(\d{16})(\?[^\s>]*)?"
 )
 
 
-def parse_slack_message_url(url: str) -> tuple[str, str] | None:
-    """Parse a Slack message URL into (channel_id, message_ts).
+def parse_slack_message_url(url: str) -> tuple[str, str, str | None] | None:
+    """Parse a Slack message URL into channel, message, and thread timestamps.
 
     URL format: https://{workspace}.slack.com/archives/{channel_id}/p{ts_without_dot}
     The 16-digit timestamp becomes {first_10}.{last_6} (e.g. p1776281321762829 -> 1776281321.762829).
@@ -1100,7 +1102,16 @@ def parse_slack_message_url(url: str) -> tuple[str, str] | None:
     channel_id = match.group(1)
     raw_ts = match.group(2)
     message_ts = f"{raw_ts[:10]}.{raw_ts[10:]}"
-    return channel_id, message_ts
+    thread_ts = None
+    query = match.group(3)
+    if query:
+        unescaped_query = query
+        while (next_query := html.unescape(unescaped_query)) != unescaped_query:
+            unescaped_query = next_query
+        thread_ts = parse_qs(unescaped_query[1:]).get("thread_ts", [None])[0]
+        if thread_ts == message_ts:
+            thread_ts = None
+    return channel_id, message_ts, thread_ts
 
 
 def extract_slack_message_urls(text: str) -> list[tuple[str, str, str]]:
@@ -1117,10 +1128,12 @@ def extract_slack_message_urls(text: str) -> list[tuple[str, str, str]]:
     return results
 
 
-async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[str, Any] | None:
+async def fetch_slack_message_by_ts(
+    channel_id: str, message_ts: str
+) -> tuple[dict[str, Any] | None, str | None]:
     """Fetch a single Slack message by channel and timestamp."""
     if not SLACK_BOT_TOKEN:
-        return None
+        return None, None
 
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
         try:
@@ -1144,17 +1157,18 @@ async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[st
                     message_ts,
                     data.get("error"),
                 )
-                return None
+                return None, data.get("error")
             messages = data.get("messages", [])
             if messages and isinstance(messages[0], dict):
-                return messages[0]
+                return messages[0], None
         except httpx.HTTPError:
             logger.exception(
                 "Slack conversations.history request failed for channel=%s ts=%s",
                 channel_id,
                 message_ts,
             )
-    return None
+            return None, "http_error"
+    return None, None
 
 
 async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
@@ -1190,19 +1204,27 @@ async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
     return None
 
 
-async def resolve_slack_message_url(url: str) -> dict[str, Any] | None:
+async def resolve_slack_message_url(url: str) -> tuple[dict[str, Any] | None, str | None]:
     """Resolve a Slack message URL to its message content.
 
     Returns a dict with keys: text, user, ts, channel_id, files, thread_ts (if threaded).
     """
     parsed = parse_slack_message_url(url)
     if not parsed:
-        return None
+        return None, None
 
-    channel_id, message_ts = parsed
-    message = await fetch_slack_message_by_ts(channel_id, message_ts)
+    channel_id, message_ts, thread_ts = parsed
+    if thread_ts:
+        message, error = await fetch_slack_thread_message_by_ts(channel_id, thread_ts, message_ts)
+    else:
+        message, error = await fetch_slack_message_by_ts(channel_id, message_ts)
+        if message is None:
+            message, thread_error = await fetch_slack_thread_message_by_ts(
+                channel_id, message_ts, message_ts
+            )
+            error = thread_error or error
     if not message:
-        return None
+        return None, error
 
     result: dict[str, Any] = {
         "channel_id": channel_id,
@@ -1213,7 +1235,7 @@ async def resolve_slack_message_url(url: str) -> dict[str, Any] | None:
     }
     if message.get("thread_ts"):
         result["thread_ts"] = message["thread_ts"]
-    return result
+    return result, None
 
 
 async def resolve_slack_links_in_context(
@@ -1240,7 +1262,7 @@ async def resolve_slack_links_in_context(
             continue
         seen_urls.add(link_url)
         try:
-            resolved = await resolve_slack_message_url(link_url)
+            resolved, error = await resolve_slack_message_url(link_url)
             if resolved:
                 author_id = resolved.get("user", "")
                 author = user_names_by_id.get(author_id, author_id)
@@ -1259,9 +1281,12 @@ async def resolve_slack_links_in_context(
                     ):
                         image_urls.append(file_info["url_private"])
             else:
-                resolved_parts.append(
-                    f"**{link_url}**\n  (Could not fetch — bot may not have access)"
+                reason = (
+                    "bot may not have access"
+                    if error in {"not_in_channel", "channel_not_found"}
+                    else "message lookup failed"
                 )
+                resolved_parts.append(f"**{link_url}**\n  (Could not fetch — {reason})")
         except Exception:
             logger.exception("Failed to resolve Slack link %s", link_url)
             resolved_parts.append(f"**{link_url}**\n  (Error resolving link)")

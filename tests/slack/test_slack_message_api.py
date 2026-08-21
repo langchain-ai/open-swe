@@ -193,6 +193,78 @@ async def test_post_slack_top_level_message_with_ts_returns_slack_error(
     assert result == (None, "msg_too_long")
 
 
+@pytest.mark.asyncio
+async def test_resolve_slack_top_level_permalink_uses_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    response = MagicMock()
+    response.json.return_value = {
+        "ok": True,
+        "messages": [{"ts": "1787332089.367249", "text": "top-level", "user": "U1"}],
+    }
+    response.raise_for_status.return_value = None
+    client_cm = _async_client_cm(response)
+    client_cm.get = AsyncMock(return_value=response)
+
+    with patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm):
+        result = await slack_utils.resolve_slack_message_url(
+            "https://langchain.slack.com/archives/C0BGM15CBT9/p1787332089367249"
+        )
+
+    assert result[0] == {
+        "channel_id": "C0BGM15CBT9",
+        "ts": "1787332089.367249",
+        "text": "top-level",
+        "user": "U1",
+        "files": [],
+    }
+    assert result[1] is None
+    assert client_cm.get.call_args.args[0].endswith("/conversations.history")
+
+
+@pytest.mark.asyncio
+async def test_resolve_slack_reply_permalink_uses_thread_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url = (
+        "https://langchain.slack.com/archives/C0BGM15CBT9/"
+        "p1787332089367249?thread_ts=1787331210.248299&amp;amp;cid=C0BGM15CBT9"
+    )
+    thread_lookup = AsyncMock(
+        return_value=(
+            {"ts": "1787332089.367249", "text": "reply", "user": "U1"},
+            None,
+        )
+    )
+    history_lookup = AsyncMock()
+    monkeypatch.setattr(slack_utils, "fetch_slack_thread_message_by_ts", thread_lookup)
+    monkeypatch.setattr(slack_utils, "fetch_slack_message_by_ts", history_lookup)
+
+    result = await slack_utils.resolve_slack_message_url(url)
+
+    assert result[0]["text"] == "reply"
+    thread_lookup.assert_awaited_once_with("C0BGM15CBT9", "1787331210.248299", "1787332089.367249")
+    history_lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_slack_links_access_placeholder_uses_slack_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url = "https://langchain.slack.com/archives/C1/p1787332089367249"
+    monkeypatch.setattr(
+        slack_utils,
+        "resolve_slack_message_url",
+        AsyncMock(return_value=(None, "not_in_channel")),
+    )
+
+    section, images = await slack_utils.resolve_slack_links_in_context([{"text": url}], {})
+
+    assert "bot may not have access" in section
+    assert images == []
+
+
 async def test_post_slack_thread_reply_preserves_bool_return_on_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

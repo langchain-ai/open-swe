@@ -122,7 +122,7 @@ async def _refresh_once(
     if snapshot is None:
         return "pending", "LangSmith trace or fresh aggregate unavailable"
 
-    message = await fetch_slack_thread_message_by_ts(
+    message, _error = await fetch_slack_thread_message_by_ts(
         payload["channel_id"], payload["thread_ts"], message_ts
     )
     if message is None:
