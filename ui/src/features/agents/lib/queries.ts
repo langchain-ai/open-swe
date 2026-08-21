@@ -141,11 +141,12 @@ export const environmentOptionKeys = {
 }
 
 /** Environments a new thread can boot from. Empty when none are configured. */
-export function useEnvironmentOptions() {
+export function useEnvironmentOptions(enabled = true) {
   return useQuery({
     queryKey: environmentOptionKeys.all,
     queryFn: api.listEnvironmentOptions,
     staleTime: 60_000,
+    enabled,
   })
 }
 
@@ -171,23 +172,26 @@ async function listOrganizationSkills() {
   return items
 }
 
-export function usePersonalAgentSkills() {
+export function usePersonalAgentSkills(enabled = true) {
   return useQuery({
     queryKey: agentSkillKeys.personal,
     queryFn: listPersonalSkills,
+    enabled,
   })
 }
 
-export function useOrganizationAgentSkills() {
+export function useOrganizationAgentSkills(enabled = true) {
   return useQuery({
     queryKey: agentSkillKeys.organization,
     queryFn: listOrganizationSkills,
+    enabled,
   })
 }
 
-export function useAgentSkills() {
-  const personal = usePersonalAgentSkills()
-  const organization = useOrganizationAgentSkills()
+export function useAgentSkills(options: { enabled?: boolean } = {}) {
+  const enabled = options.enabled ?? true
+  const personal = usePersonalAgentSkills(enabled)
+  const organization = useOrganizationAgentSkills(enabled)
   return {
     ...personal,
     personal: personal.data ?? [],
@@ -298,19 +302,21 @@ export function useSidebarThreads({
   activeThreadId,
   includeAutomations = false,
   includeResolved = false,
+  enabled = true,
 }: {
   activeThreadId?: string
   includeAutomations?: boolean
   includeResolved?: boolean
+  enabled?: boolean
 }) {
   const scope = includeAutomations ? "all" : "interactive"
   const activeQuery = useInfiniteThreadsPages(
     { limit: SIDEBAR_PAGE_SIZE, resolved: false, scope },
-    { pollWhileRunning: true }
+    { enabled, pollWhileRunning: true }
   )
   const resolvedQuery = useInfiniteThreadsPages(
     { limit: SIDEBAR_PAGE_SIZE, resolved: true, scope },
-    { enabled: includeResolved, pollWhileRunning: true }
+    { enabled: enabled && includeResolved, pollWhileRunning: true }
   )
   const loadedActive = infinitePageThreads(activeQuery.data)
   const loadedResolved = infinitePageThreads(resolvedQuery.data)
@@ -323,7 +329,10 @@ export function useSidebarThreads({
     queryFn: () =>
       agentsApi.getThread(activeThreadId as string, { markViewed: false }),
     enabled:
-      Boolean(activeThreadId) && activeQuery.isSuccess && !activeThreadLoaded,
+      enabled &&
+      Boolean(activeThreadId) &&
+      activeQuery.isSuccess &&
+      !activeThreadLoaded,
     staleTime: 30_000,
     refetchInterval: (query) =>
       query.state.data?.status === "running" ? 2000 : false,

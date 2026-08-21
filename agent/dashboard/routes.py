@@ -492,7 +492,10 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     state_payload = decode_state(state)
     state_nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(STATE_COOKIE_NAME)
-    if (
+    is_desktop = isinstance(state_payload.get("handoff_challenge"), str) and isinstance(
+        state_payload.get("handoff_port"), int
+    )
+    if not is_desktop and (
         not isinstance(state_nonce_hash, str)
         or not cookie_nonce
         or not hmac.compare_digest(hash_state_nonce(cookie_nonce), state_nonce_hash)
@@ -1883,7 +1886,12 @@ async def api_create_schedule(
     body: ScheduleCreateBody,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await create_agent_schedule(session["sub"], body, email=session.get("email"))
+    return await create_agent_schedule(
+        session["sub"],
+        body,
+        email=session.get("email"),
+        allow_admin_thread=_session_is_admin(session),
+    )
 
 
 @router.patch("/schedules/{schedule_id}")
@@ -1893,7 +1901,11 @@ async def api_update_schedule(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await update_agent_schedule(
-        schedule_id, session["sub"], body, email=session.get("email")
+        schedule_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        allow_admin_thread=_session_is_admin(session),
     )
 
 

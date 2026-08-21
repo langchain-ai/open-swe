@@ -21,8 +21,10 @@ from agent.utils.github_proxy import (
 @pytest.fixture(autouse=True)
 def _clear_state() -> Generator[None, None, None]:
     github_proxy._PROXY_TOKEN_EXPIRY.clear()
+    github_proxy._PROXY_BASE_CONFIGS.clear()
     yield
     github_proxy._PROXY_TOKEN_EXPIRY.clear()
+    github_proxy._PROXY_BASE_CONFIGS.clear()
 
 
 class TestProxyTokenNeedsRefresh:
@@ -112,6 +114,39 @@ class TestMaybeRefreshProxyToken:
         expires_at, _recorded, _scope, permissions = github_proxy._PROXY_TOKEN_EXPIRY["thread-1"]
         assert expires_at == datetime(2025, 1, 1, 13, 0, 0, tzinfo=UTC)
         assert permissions == ()
+
+    @pytest.mark.asyncio
+    async def test_preserves_base_proxy_config_on_refresh(self) -> None:
+        now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        base_proxy_config = {"rules": [{"name": "public-api", "match_hosts": ["example.com"]}]}
+        record_proxy_token_expiry(
+            "thread-1",
+            now + timedelta(minutes=1),
+            base_proxy_config=base_proxy_config,
+        )
+        backend = MagicMock(id="sb-1")
+
+        with (
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
+            patch.dict(github_proxy.SANDBOX_BACKENDS, {"thread-1": backend}, clear=True),
+            patch(
+                "agent.utils.github_proxy.get_github_app_installation_token_with_expiry",
+                new=AsyncMock(return_value=("ghs_new", "2025-01-01T13:00:00Z")),
+            ),
+            patch(
+                "agent.integrations.langsmith._configure_github_proxy",
+                new_callable=AsyncMock,
+            ) as mock_configure,
+        ):
+            result = await maybe_refresh_proxy_token("thread-1", now=now)
+
+        assert result is True
+        mock_configure.assert_awaited_once_with(
+            "sb-1",
+            "ghs_new",
+            base_proxy_config=base_proxy_config,
+        )
+        assert github_proxy._PROXY_BASE_CONFIGS["thread-1"] == base_proxy_config
 
     @pytest.mark.asyncio
     async def test_preserves_repo_scope_on_refresh(self) -> None:

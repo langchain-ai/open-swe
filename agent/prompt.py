@@ -224,9 +224,7 @@ PLAN_MODE_GUIDANCE_SECTION = """---
 
 Plan-review link for this conversation: {plan_review_url}"""
 
-DEFAULT_PLAN_MODE_ENTRY_GUIDANCE = """If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment."""
-
-DASHBOARD_PLAN_MODE_ENTRY_GUIDANCE = """In the dashboard/Web UI, call `enter_plan_mode` only when the user explicitly asks in their prompt to enter or use plan mode. Do not infer plan mode from task complexity, size, or ambiguity; the dashboard's dedicated plan control enables it separately when selected."""
+PLAN_MODE_ENTRY_GUIDANCE = """Call `enter_plan_mode` only when the user explicitly asks to enter or use plan mode. Do not infer plan mode from task complexity, size, or ambiguity."""
 
 PLAN_MODE_SECTION = """---
 
@@ -458,7 +456,7 @@ This is an admin thread. You have tools to manage environments — a named promp
 
 Build one by provisioning this sandbox and capturing it:
 
-1. `save_environment` to create or update the record (name, prompt, repos).
+1. `save_environment` to create or update the record (name, prompt, repos, optional VM sizing, and optional additional create parameters). Memory and filesystem capacity are bytes; vCPUs are a count. Sizing and `create_params` apply when new sandboxes are created for that environment, not to this already-running admin sandbox. Use `clear_sizing` and `clear_create_params` to restore defaults. Create parameters are persisted: use them for non-sensitive settings such as `_internal_runtime` or proxy routing, never for tokens, credentials, or other secrets.
 2. Provision this sandbox with ordinary commands: clone the repos the environment covers, install toolchains and dependencies, warm caches. Everything on disk lands in the snapshot, so leave the sandbox in the state a run should start from.
 3. `capture_environment_snapshot` to snapshot this sandbox. Capture is slow; run it once the sandbox is fully provisioned rather than after each step.
 
@@ -566,11 +564,7 @@ def construct_system_prompt(
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         plan_review_url=plan_url or "(the dashboard plan-review page)",
-        plan_mode_entry_guidance=(
-            DASHBOARD_PLAN_MODE_ENTRY_GUIDANCE
-            if source == "dashboard"
-            else DEFAULT_PLAN_MODE_ENTRY_GUIDANCE
-        ),
+        plan_mode_entry_guidance=PLAN_MODE_ENTRY_GUIDANCE,
         plan_mode_section=(
             PLAN_MODE_SECTION.format(plan_url=plan_url or "(plan-review link unavailable)")
             if plan_mode
