@@ -25,7 +25,10 @@ import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
-import { useAgentSkills } from "@/features/agents/lib/queries"
+import {
+  useAgentSkills,
+  useAgentThreadPullRequestStatus,
+} from "@/features/agents/lib/queries"
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
 import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
@@ -65,6 +68,11 @@ export function AgentThreadView({
   const skills = useAgentSkills()
   const session = useSession()
   const canPost = !thread.adminThread || session.data?.is_admin === true
+  const pullRequestStatus = useAgentThreadPullRequestStatus(
+    thread.id,
+    (thread.pullRequests?.length ?? 0) > 0
+  )
+  const pullRequestHealth = pullRequestStatus.data?.pullRequests
 
   const { models, defaultSelection } = useModelOptions()
   const threadSelection = useMemo<ModelSelection | null>(() => {
@@ -104,6 +112,10 @@ export function AgentThreadView({
       sendMessage,
       thread.id,
     ]
+  )
+  const fixPullRequest = useCallback(
+    (prompt: string) => submitMessage(prompt, []),
+    [submitMessage]
   )
   const usedTokens = useMemo(
     () => latestContextTokens(stream.messages),
@@ -256,7 +268,12 @@ export function AgentThreadView({
             />
             <div className="shrink-0 px-4 pb-4">
               <div className="mx-auto w-full max-w-3xl min-w-0">
-                <ThreadPullRequests pullRequests={thread.pullRequests ?? []} />
+                <ThreadPullRequests
+                  pullRequests={thread.pullRequests ?? []}
+                  health={pullRequestHealth}
+                  onFix={fixPullRequest}
+                  fixDisabled={!canPost || sendMessage.isPending}
+                />
                 <AgentPromptBar
                   placeholder={
                     canPost
@@ -310,7 +327,12 @@ export function AgentThreadView({
               </p>
             )}
             <div className="w-full max-w-3xl">
-              <ThreadPullRequests pullRequests={thread.pullRequests ?? []} />
+              <ThreadPullRequests
+                pullRequests={thread.pullRequests ?? []}
+                health={pullRequestHealth}
+                onFix={fixPullRequest}
+                fixDisabled={!canPost || sendMessage.isPending}
+              />
               <AgentPromptBar
                 placeholder={
                   canPost

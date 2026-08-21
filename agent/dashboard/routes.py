@@ -228,6 +228,7 @@ from .thread_api import (
     get_dashboard_terminal_sandbox,
     get_dashboard_thread,
     get_dashboard_thread_branch_diff,
+    get_dashboard_thread_pull_request_status,
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
     get_dashboard_thread_turn_diff,
@@ -1984,6 +1985,18 @@ async def api_list_threads_page(
         query=q,
         scope=scope,
         automation_id=automation_id,
+    )
+
+
+@router.get("/threads/{thread_id}/pull-request-status")
+async def api_get_thread_pull_request_status(
+    thread_id: str,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_pull_request_status(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
     )
 
 

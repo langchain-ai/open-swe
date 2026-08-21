@@ -1,4 +1,5 @@
 import type {
+  AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
   ImageChunk,
@@ -302,6 +303,10 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}${
         options?.markViewed === false ? "?mark_viewed=false" : ""
       }`
+    ),
+  getThreadPullRequestStatus: (threadId: string) =>
+    agentsRequest<AgentPullRequestStatusResponse>(
+      `/threads/${encodeURIComponent(threadId)}/pull-request-status`
     ),
   listWorkflowApprovals: (threadId: string) =>
     agentsRequest<WorkflowPushApprovalsResponse>(

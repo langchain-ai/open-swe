@@ -58,6 +58,7 @@ from .options import (
 )
 from .pr_diff import build_compare_diff_files, build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
+from .pull_request_status import get_pull_request_statuses
 from .team_settings import get_team_default_model, get_team_fable_enabled
 from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from .user_mappings import email_for_login
@@ -1972,6 +1973,29 @@ async def _authorized_thread_metadata(
     thread = await _authorized_thread(thread_id, login, email=email)
     metadata = thread_metadata(thread)
     return metadata
+
+
+async def get_dashboard_thread_pull_request_status(
+    thread_id: str, login: str, *, email: str | None = None
+) -> dict[str, Any]:
+    """Return live GitHub health for every pull request tracked by the thread."""
+    metadata = await _authorized_thread_metadata(thread_id, login, email=email)
+    records = metadata.get("pull_requests")
+    tracked = list(records) if isinstance(records, list) else []
+    if not tracked:
+        pr_url = metadata.get("pr_url")
+        pr_ref = parse_github_pr_url(pr_url) if isinstance(pr_url, str) else None
+        if pr_ref:
+            tracked = [
+                {
+                    "repo_full_name": f"{pr_ref.owner}/{pr_ref.repo}",
+                    "number": pr_ref.number,
+                }
+            ]
+    if not tracked:
+        return {"pullRequests": []}
+    token = await _github_token_for_login(login)
+    return {"pullRequests": await get_pull_request_statuses(tracked, token)}
 
 
 async def _authorized_thread(thread_id: str, login: str, *, email: str | None = None) -> ThreadLike:
