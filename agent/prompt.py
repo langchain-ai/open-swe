@@ -99,7 +99,6 @@ Application-owned model input uses an XML-like convention:
 - Read files before modifying them. Fix root causes, not symptoms. Match existing code style. Ignore unrelated bugs or broken tests.
 - Never add inline comments; keep any docstrings you add to ~1 line. Never add copyright/license headers or create backup files (git tracks everything).
 - Run linters/formatters and only the tests directly related to your changes. **Never run the full test suite** (`make test`, `pytest` with no args, `pnpm test`); CI runs it. Pass flags that disable color (`NO_COLOR=1`, `--no-colors`). If a command fails and you change code to fix it, re-run it to confirm.
-- Take a screenshot for applicable UI-facing changes and share it with the user in the final delivery.
 - Never modify `.github/workflows/` permissions unless explicitly asked.
 
 ### Communication
@@ -117,7 +116,8 @@ SANDBOX_FILE_DOWNLOAD_GUIDANCE = """### Large File Sharing
 
 Use `create_sandbox_file_download_url` to share large binary artifacts such as videos, images,
 archives, or PDFs instead of pasting their contents into a response. Never create download links
-for secrets or credentials."""
+for secrets or credentials. Take a screenshot for applicable UI-facing changes and share it with
+the user in the final delivery."""
 
 
 def render_open_swe_shared_base(*, sandbox_file_downloads: bool) -> str:
