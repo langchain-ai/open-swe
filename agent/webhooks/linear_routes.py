@@ -10,6 +10,7 @@ from ..github.comments import describe_open_swe_tags, mentions_open_swe
 from ..github.org_membership import is_repo_allowed
 from ..linear.api import fetch_issue_details
 from . import linear as service
+from .bot_messages import is_own_bot_message
 from .signatures import verify_linear_signature
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ async def linear_webhook(request: Request, background_tasks: BackgroundTasks) ->
         return {"status": "ignored", "reason": "Comment is from a bot"}
 
     comment_body = data.get("body", "")
-    if any(comment_body.startswith(prefix) for prefix in service.BOT_MESSAGE_PREFIXES):
+    if is_own_bot_message(comment_body):
         logger.debug("Ignoring webhook: comment is our own bot message")
         return {"status": "ignored", "reason": "Comment is our own bot message"}
     if not mentions_open_swe(comment_body):

@@ -1,19 +1,8 @@
 """The two diffs a thread can show: one turn's changes, and its pull request."""
 
-from typing import Any
 from unittest.mock import AsyncMock
 
-from support.langgraph_fakes import FakeLangGraphClient
-
-from agent.dashboard import authz
 from agent.dashboard.threads import sandbox as thread_sandbox
-
-
-def _install_thread(monkeypatch, metadata: dict[str, Any]) -> FakeLangGraphClient:
-    client = FakeLangGraphClient(thread_metadata=metadata)
-    monkeypatch.setattr(authz, "langgraph_client", lambda: client)
-    return client
-
 
 _EMPTY_DIFF = {
     "status": "missing",
@@ -23,10 +12,9 @@ _EMPTY_DIFF = {
 }
 
 
-async def test_turn_diff_prefers_persisted_run_artifact(monkeypatch) -> None:
-    _install_thread(
-        monkeypatch,
-        {
+async def test_turn_diff_prefers_persisted_run_artifact(monkeypatch, dashboard_client) -> None:
+    dashboard_client(
+        thread_metadata={
             "sandbox_id": "sandbox-1",
             "turn_checkpoints": [
                 {"key": "msg-1", "ref": "refs/open-swe/turns/msg-1", "started_at": "t0"}
@@ -61,10 +49,9 @@ async def test_turn_diff_prefers_persisted_run_artifact(monkeypatch) -> None:
     create_sandbox.assert_not_awaited()
 
 
-async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
-    _install_thread(
-        monkeypatch,
-        {
+async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch, dashboard_client) -> None:
+    dashboard_client(
+        thread_metadata={
             "sandbox_id": "sandbox-1",
             "turn_checkpoints": [
                 {
@@ -89,10 +76,11 @@ async def test_turn_diff_hides_plan_mode_checkpoint(monkeypatch) -> None:
     create_sandbox.assert_not_awaited()
 
 
-async def test_turn_diff_preserves_changes_before_mid_run_plan_mode(monkeypatch) -> None:
-    _install_thread(
-        monkeypatch,
-        {
+async def test_turn_diff_preserves_changes_before_mid_run_plan_mode(
+    monkeypatch, dashboard_client
+) -> None:
+    dashboard_client(
+        thread_metadata={
             "sandbox_id": "sandbox-1",
             "turn_checkpoints": [
                 {
@@ -124,10 +112,9 @@ async def test_turn_diff_preserves_changes_before_mid_run_plan_mode(monkeypatch)
     )
 
 
-async def test_turn_diff_reads_the_checkpoint_repository(monkeypatch) -> None:
-    _install_thread(
-        monkeypatch,
-        {
+async def test_turn_diff_reads_the_checkpoint_repository(monkeypatch, dashboard_client) -> None:
+    dashboard_client(
+        thread_metadata={
             "sandbox_id": "sandbox-1",
             "turn_checkpoints": [
                 {
@@ -163,10 +150,11 @@ async def test_turn_diff_reads_the_checkpoint_repository(monkeypatch) -> None:
     )
 
 
-async def test_turn_diff_rejects_checkpoints_from_different_repositories(monkeypatch) -> None:
-    _install_thread(
-        monkeypatch,
-        {
+async def test_turn_diff_rejects_checkpoints_from_different_repositories(
+    monkeypatch, dashboard_client
+) -> None:
+    dashboard_client(
+        thread_metadata={
             "sandbox_id": "sandbox-1",
             "turn_checkpoints": [
                 {
@@ -195,10 +183,9 @@ async def test_turn_diff_rejects_checkpoints_from_different_repositories(monkeyp
     create_sandbox.assert_not_awaited()
 
 
-async def test_pr_diff_uses_repository_from_pr_url(monkeypatch) -> None:
-    _install_thread(
-        monkeypatch,
-        {
+async def test_pr_diff_uses_repository_from_pr_url(monkeypatch, dashboard_client) -> None:
+    dashboard_client(
+        thread_metadata={
             "repo_owner": "langchain-ai",
             "repo_name": "deepagents",
             "pr_number": 1925,

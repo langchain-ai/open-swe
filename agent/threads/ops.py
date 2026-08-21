@@ -29,8 +29,16 @@ MAX_QUEUED_MESSAGES = 100
 
 
 def is_not_found_error(exc: Exception) -> bool:
-    """Best-effort check for LangGraph 404 errors."""
-    return getattr(exc, "status_code", None) == 404
+    """Whether a LangGraph failure is a 404 rather than an outage.
+
+    The SDK raises its own ``NotFoundError`` (status on the exception) for
+    typed endpoints and a bare ``httpx.HTTPStatusError`` (status on the
+    response) elsewhere, so both shapes have to be recognised — everything that
+    isn't a 404 has to stay distinguishable from "the resource is missing".
+    """
+    if getattr(exc, "status_code", None) == 404:  # noqa: PLR2004
+        return True
+    return getattr(getattr(exc, "response", None), "status_code", None) == 404  # noqa: PLR2004
 
 
 async def thread_exists(thread_id: str) -> bool:
@@ -57,15 +65,19 @@ async def ensure_thread_exists(thread_id: str, client: LangGraphClient) -> bool:
 
 
 async def fetch_thread_metadata(thread_id: str) -> dict[str, Any] | None:
-    """A thread's metadata, or ``None`` when the thread doesn't exist."""
-    client = langgraph_client()
+    """A thread's metadata, or ``None`` when the thread doesn't exist.
+
+    Same error policy as ``agent.store``: a missing thread reads as ``None``,
+    every other failure raises. Callers route and authorize on these fields and
+    read a missing key as a permissive default, so a transport blip must not be
+    allowed to masquerade as "the thread has no metadata".
+    """
     try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
+        thread = await langgraph_client().threads.get(thread_id)
+    except Exception as exc:
         if is_not_found_error(exc):
             return None
-        logger.warning("Failed to fetch thread metadata for %s", thread_id)
-        return None
+        raise
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     return metadata if isinstance(metadata, dict) else {}
 

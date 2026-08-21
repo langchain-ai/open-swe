@@ -31,19 +31,10 @@ from ..threads.ids import linear_issue_thread_id
 from ..threads.ops import upsert_agent_thread_owner_metadata
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
+from .bot_messages import is_own_bot_message
 from .repo_config import profile_default_repo_for_email
 
 logger = logging.getLogger(__name__)
-
-BOT_MESSAGE_PREFIXES = (
-    "🔐 **GitHub Authentication Required**",
-    "✅ **Pull Request Created**",
-    "✅ **Pull Request Updated**",
-    "**Pull Request Created**",
-    "**Pull Request Updated**",
-    "🤖 **Agent Response**",
-    "❌ **Agent Error**",
-)
 
 
 def get_repo_config_from_team_mapping(
@@ -129,7 +120,7 @@ def _recent_comments(comments: Sequence[dict[str, Any]]) -> list[dict[str, Any]]
     recent_user_comments: list[dict[str, Any]] = []
     for comment in sorted_comments:
         body = comment.get("body", "")
-        if any(body.startswith(prefix) for prefix in BOT_MESSAGE_PREFIXES):
+        if is_own_bot_message(body):
             break  # Everything after this is from before the last agent response
         recent_user_comments.append(comment)
 
@@ -239,7 +230,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                         len(body_image_urls),
                         author,
                     )
-                if any(body.startswith(prefix) for prefix in BOT_MESSAGE_PREFIXES):
+                if is_own_bot_message(body):
                     continue
                 included_comments.append(comment)
 

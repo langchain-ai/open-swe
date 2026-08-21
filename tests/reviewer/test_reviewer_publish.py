@@ -1909,7 +1909,7 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing(
             "agent.review.publish_flow.get_config",
             return_value={"configurable": {"thread_id": "tid"}},
         ),
-        patch("agent.review.publish_flow.fetch_pr_diff", AsyncMock(return_value=pr_diff)),
+        patch("agent.review.diff.fetch_pr_diff", AsyncMock(return_value=pr_diff)),
         patch("agent.review.publish_flow.store_thread_ids_on_findings", new_callable=AsyncMock),
     ):
         result = await publish_review(

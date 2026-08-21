@@ -554,9 +554,11 @@ def construct_system_prompt(
         default_prompt_section += f"\n\n{repo_line}"
     prompt = SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
+        # Substituted values are not re-scanned by str.format, so this section
+        # has to resolve its own placeholder before it becomes one.
         working_environment_section=(
             DESKTOP_WORKING_ENV_SECTION if local_workspace else WORKING_ENV_SECTION
-        ),
+        ).format(working_dir=working_dir),
         dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
         source_guidance=_render_source_guidance(source, slack_context),
         linear_project_id=linear_project_id or "<PROJECT_ID>",

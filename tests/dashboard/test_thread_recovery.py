@@ -7,12 +7,10 @@ thread).
 
 import json
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-from support.langgraph_fakes import FakeLangGraphClient
 
 from agent.dashboard import authz
 from agent.dashboard.routes import admin as admin_routes
@@ -31,13 +29,6 @@ _OWNED_SANDBOX_THREAD = {
     "repo_name": "repo",
     "base_branch": "main",
 }
-
-
-def _install_client(monkeypatch, **kwargs: Any) -> FakeLangGraphClient:
-    client = FakeLangGraphClient(**kwargs)
-    monkeypatch.setattr(authz, "langgraph_client", lambda: client)
-    monkeypatch.setattr(thread_runs, "langgraph_client", lambda: client)
-    return client
 
 
 class _RecoverySandbox:
@@ -71,10 +62,9 @@ def _install_sandbox(monkeypatch, sandbox: _RecoverySandbox) -> _RecoverySandbox
     return sandbox
 
 
-async def test_recovery_patch_requires_thread_owner(monkeypatch) -> None:
-    _install_client(
-        monkeypatch,
-        thread_metadata={"source": "dashboard", "github_login": "owner", "sandbox_id": "sbx"},
+async def test_recovery_patch_requires_thread_owner(dashboard_client) -> None:
+    dashboard_client(
+        thread_metadata={"source": "dashboard", "github_login": "owner", "sandbox_id": "sbx"}
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -83,8 +73,8 @@ async def test_recovery_patch_requires_thread_owner(monkeypatch) -> None:
     assert exc_info.value.status_code == 404
 
 
-async def test_recovery_patch_requires_sandbox(monkeypatch) -> None:
-    _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "octocat"})
+async def test_recovery_patch_requires_sandbox(dashboard_client) -> None:
+    dashboard_client(thread_metadata={"source": "dashboard", "github_login": "octocat"})
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_sandbox.get_dashboard_thread_recovery_patch("tid", "octocat")
@@ -93,8 +83,8 @@ async def test_recovery_patch_requires_sandbox(monkeypatch) -> None:
     assert "sandbox" in exc_info.value.detail
 
 
-async def test_recovery_patch_downloads_generated_patch(monkeypatch) -> None:
-    _install_client(monkeypatch, thread_metadata=dict(_OWNED_SANDBOX_THREAD))
+async def test_recovery_patch_downloads_generated_patch(monkeypatch, dashboard_client) -> None:
+    dashboard_client(thread_metadata=dict(_OWNED_SANDBOX_THREAD))
     sandbox = _install_sandbox(monkeypatch, _RecoverySandbox())
 
     content, filename = await thread_sandbox.get_dashboard_thread_recovery_patch("tid", "octocat")
@@ -106,8 +96,10 @@ async def test_recovery_patch_downloads_generated_patch(monkeypatch) -> None:
     assert "repo" in sandbox.commands[0]
 
 
-async def test_recovery_patch_searches_command_cwd_before_workspace_fallback(monkeypatch) -> None:
-    _install_client(monkeypatch, thread_metadata=dict(_OWNED_SANDBOX_THREAD))
+async def test_recovery_patch_searches_command_cwd_before_workspace_fallback(
+    monkeypatch, dashboard_client
+) -> None:
+    dashboard_client(thread_metadata=dict(_OWNED_SANDBOX_THREAD))
     sandbox = _install_sandbox(monkeypatch, _RecoverySandbox())
 
     await thread_sandbox.get_dashboard_thread_recovery_patch("tid", "octocat")
@@ -118,8 +110,8 @@ async def test_recovery_patch_searches_command_cwd_before_workspace_fallback(mon
     assert "roots = [Path.cwd().resolve(), WORKSPACE_FALLBACK]" in command
 
 
-async def test_recovery_patch_rejects_empty_patch(monkeypatch) -> None:
-    _install_client(monkeypatch, thread_metadata=dict(_OWNED_SANDBOX_THREAD))
+async def test_recovery_patch_rejects_empty_patch(monkeypatch, dashboard_client) -> None:
+    dashboard_client(thread_metadata=dict(_OWNED_SANDBOX_THREAD))
     _install_sandbox(monkeypatch, _RecoverySandbox(size=0))
 
     with pytest.raises(HTTPException) as exc_info:
@@ -129,8 +121,8 @@ async def test_recovery_patch_rejects_empty_patch(monkeypatch) -> None:
     assert "changes" in exc_info.value.detail
 
 
-async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
-    _install_client(monkeypatch, thread_metadata=dict(_OWNED_SANDBOX_THREAD))
+async def test_recovery_patch_enforces_size_limit(monkeypatch, dashboard_client) -> None:
+    dashboard_client(thread_metadata=dict(_OWNED_SANDBOX_THREAD))
     _install_sandbox(monkeypatch, _RecoverySandbox(size=_PATCH_LIMIT_BYTES + 1))
 
     with pytest.raises(HTTPException) as exc_info:
@@ -150,9 +142,8 @@ _INTERRUPT_ALL_ACTIVE = {
 }
 
 
-async def test_cancel_thread_interrupts_runs_it_did_not_start(monkeypatch) -> None:
-    client = _install_client(
-        monkeypatch,
+async def test_cancel_thread_interrupts_runs_it_did_not_start(dashboard_client) -> None:
+    client = dashboard_client(
         threads=[
             {
                 "thread_id": "thread-1",
@@ -175,9 +166,8 @@ async def test_cancel_thread_interrupts_runs_it_did_not_start(monkeypatch) -> No
     assert result["status"] == "interrupted"
 
 
-async def test_cancel_thread_rejects_non_owner(monkeypatch) -> None:
-    client = _install_client(
-        monkeypatch,
+async def test_cancel_thread_rejects_non_owner(dashboard_client) -> None:
+    client = dashboard_client(
         threads=[
             {
                 "thread_id": "thread-1",
@@ -195,7 +185,7 @@ async def test_cancel_thread_rejects_non_owner(monkeypatch) -> None:
     assert client.threads.updates == []
 
 
-async def test_admin_cancel_thread_interrupts_all_active_runs(monkeypatch) -> None:
+async def test_admin_cancel_thread_interrupts_all_active_runs(dashboard_client) -> None:
     thread = {
         "thread_id": "thread-1",
         "status": "busy",
@@ -205,7 +195,7 @@ async def test_admin_cancel_thread_interrupts_all_active_runs(monkeypatch) -> No
             "updated_at_ms": 1,
         },
     }
-    client = _install_client(monkeypatch, threads=[thread], runs={"thread-1": _ACTIVE_RUNS})
+    client = dashboard_client(threads=[thread], runs={"thread-1": _ACTIVE_RUNS})
 
     result = await thread_runs.admin_cancel_dashboard_thread("thread-1")
 
@@ -216,9 +206,8 @@ async def test_admin_cancel_thread_interrupts_all_active_runs(monkeypatch) -> No
     assert result["id"] == "thread-1"
 
 
-async def test_admin_cancel_thread_does_not_update_on_cancel_failure(monkeypatch) -> None:
-    client = _install_client(
-        monkeypatch,
+async def test_admin_cancel_thread_does_not_update_on_cancel_failure(dashboard_client) -> None:
+    client = dashboard_client(
         threads=[{"thread_id": "thread-1", "status": "busy", "metadata": {}}],
         runs={"thread-1": _ACTIVE_RUNS},
     )

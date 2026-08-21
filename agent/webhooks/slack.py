@@ -483,8 +483,14 @@ async def _slack_user_can_reply_to_ready_plan(
     if not thread_id:
         return False
     # A brand-new thread has no metadata; an untagged message there simply
-    # isn't a plan reply.
-    metadata = await fetch_thread_metadata(thread_id)
+    # isn't a plan reply. A metadata read that fails outright is treated the
+    # same way on purpose: this decides whether an *untagged* message wakes the
+    # agent, so the safe answer to "don't know" is not to.
+    try:
+        metadata = await fetch_thread_metadata(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to read plan metadata for thread %s", thread_id, exc_info=True)
+        return False
     if metadata is None:
         return False
     return metadata.get("plan_mode") is True and metadata.get("plan_status") == "ready"

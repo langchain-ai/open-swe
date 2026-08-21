@@ -12,22 +12,13 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 from support.httpx_fakes import FakeHttpx
-from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.dashboard import authz
 from agent.dashboard.threads import proxy as thread_proxy
 from agent.dashboard.threads import runs as thread_runs
 from agent.dashboard.ttft import AssistantTextObservation
 
 # The cap the history proxy clamps an undirected (no cursor, no filter) read to.
 _DISCOVERY_HISTORY_LIMIT = 5
-
-
-def _install_client(monkeypatch, **kwargs: Any) -> FakeLangGraphClient:
-    client = FakeLangGraphClient(**kwargs)
-    monkeypatch.setattr(authz, "langgraph_client", lambda: client)
-    monkeypatch.setattr(thread_runs, "langgraph_client", lambda: client)
-    return client
 
 
 def _install_proxy(monkeypatch, **kwargs: Any) -> FakeHttpx:
@@ -44,9 +35,11 @@ def _admin_thread_metadata() -> dict[str, object]:
     }
 
 
-async def test_commands_lazily_create_a_missing_thread_only_for_run_start(monkeypatch) -> None:
+async def test_commands_lazily_create_a_missing_thread_only_for_run_start(
+    dashboard_client,
+) -> None:
     # No thread is seeded, so every ``get`` 404s the way the platform would.
-    _install_client(monkeypatch)
+    dashboard_client()
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_runs.proxy_dashboard_thread_commands(
@@ -55,8 +48,8 @@ async def test_commands_lazily_create_a_missing_thread_only_for_run_start(monkey
     assert exc_info.value.status_code == 404
 
 
-async def test_commands_reject_non_object_body(monkeypatch) -> None:
-    _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "octocat"})
+async def test_commands_reject_non_object_body(dashboard_client) -> None:
+    dashboard_client(thread_metadata={"source": "dashboard", "github_login": "octocat"})
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_runs.proxy_dashboard_thread_commands("tid", "octocat", b"[]")
@@ -64,11 +57,11 @@ async def test_commands_reject_non_object_body(monkeypatch) -> None:
     assert exc_info.value.status_code == 400
 
 
-async def test_commands_other_than_run_start_stay_owner_only(monkeypatch) -> None:
+async def test_commands_other_than_run_start_stay_owner_only(dashboard_client) -> None:
     """Non-owners may only post via the attributed run.start path; other write
     commands (e.g. input.respond) carry unattributed input and stay owner-only."""
 
-    _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "owner"})
+    dashboard_client(thread_metadata={"source": "dashboard", "github_login": "owner"})
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_runs.proxy_dashboard_thread_commands(
@@ -77,9 +70,9 @@ async def test_commands_other_than_run_start_stay_owner_only(monkeypatch) -> Non
     assert exc_info.value.status_code == 404
 
 
-async def test_commands_reject_non_admin_on_admin_thread(monkeypatch) -> None:
+async def test_commands_reject_non_admin_on_admin_thread(monkeypatch, dashboard_client) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
-    _install_client(monkeypatch, thread_metadata=_admin_thread_metadata())
+    dashboard_client(thread_metadata=_admin_thread_metadata())
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_runs.proxy_dashboard_thread_commands(
@@ -90,9 +83,11 @@ async def test_commands_reject_non_admin_on_admin_thread(monkeypatch) -> None:
     assert exc_info.value.detail == "only admins can send messages in admin threads"
 
 
-async def test_commands_preserve_admin_writes_and_owner_reads(monkeypatch) -> None:
+async def test_commands_preserve_admin_writes_and_owner_reads(
+    monkeypatch, dashboard_client
+) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin,another-admin")
-    _install_client(monkeypatch, thread_metadata=_admin_thread_metadata())
+    dashboard_client(thread_metadata=_admin_thread_metadata())
     proxy = _install_proxy(monkeypatch, headers={})
 
     status_code, _, _ = await thread_runs.proxy_dashboard_thread_commands(
@@ -113,20 +108,20 @@ async def test_commands_preserve_admin_writes_and_owner_reads(monkeypatch) -> No
     ]
 
 
-async def test_run_cancel_enforces_thread_ownership(monkeypatch) -> None:
+async def test_run_cancel_enforces_thread_ownership(dashboard_client) -> None:
     """Cancelling a run still requires thread ownership (it is not "posting")."""
 
-    _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "owner"})
+    dashboard_client(thread_metadata={"source": "dashboard", "github_login": "owner"})
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_runs.proxy_dashboard_thread_run_cancel("tid", "run-1", "intruder")
     assert exc_info.value.status_code == 404
 
 
-async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
+async def test_read_endpoints_accessible_by_non_owner(monkeypatch, dashboard_client) -> None:
     """Read endpoints (state, stream, history) are accessible by any org member."""
 
-    _install_client(monkeypatch, thread_metadata={"source": "slack", "github_login": "owner"})
+    dashboard_client(thread_metadata={"source": "slack", "github_login": "owner"})
 
     state = await thread_runs.get_dashboard_thread_state("tid", "teammate")
     assert "values" in state
@@ -150,9 +145,10 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
     assert exc_info.value.status_code == 400
 
 
-async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(monkeypatch) -> None:
-    _install_client(
-        monkeypatch,
+async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(
+    dashboard_client,
+) -> None:
+    dashboard_client(
         thread_metadata={
             "source": "dashboard",
             "github_login": "owner",
@@ -167,20 +163,18 @@ async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(mon
     assert "next" not in state
 
 
-async def test_read_endpoints_reject_non_surfaced_source(monkeypatch) -> None:
+async def test_read_endpoints_reject_non_surfaced_source(dashboard_client) -> None:
     """Threads with an unknown source are not readable by anyone."""
-    _install_client(
-        monkeypatch, thread_metadata={"source": "unknown-source", "github_login": "owner"}
-    )
+    dashboard_client(thread_metadata={"source": "unknown-source", "github_login": "owner"})
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_runs.get_dashboard_thread_state("tid", "owner")
     assert exc_info.value.status_code == 404
 
 
-async def test_stream_events_carries_the_platform_api_key(monkeypatch) -> None:
+async def test_stream_events_carries_the_platform_api_key(monkeypatch, dashboard_client) -> None:
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "octocat"})
+    dashboard_client(thread_metadata={"source": "dashboard", "github_login": "octocat"})
     proxy = _install_proxy(monkeypatch, chunks=(b"event: hello\n\n",))
 
     stream = await thread_runs.proxy_dashboard_thread_stream_events(

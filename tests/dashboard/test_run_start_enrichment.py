@@ -17,7 +17,6 @@ from fastapi import HTTPException
 from support.httpx_fakes import FakeHttpx
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.dashboard import authz
 from agent.dashboard.threads import proxy as thread_proxy
 from agent.dashboard.threads import runs as thread_runs
 
@@ -31,13 +30,6 @@ def _image() -> thread_runs.DashboardImageBody:
         base64=base64.b64encode(b"image").decode("ascii"),
         mimeType="image/png",
     )
-
-
-def _install_client(monkeypatch, **kwargs: Any) -> FakeLangGraphClient:
-    client = FakeLangGraphClient(**kwargs)
-    for module in (authz, thread_runs):
-        monkeypatch.setattr(module, "langgraph_client", lambda: client)
-    return client
 
 
 def _install_proxy(monkeypatch) -> FakeHttpx:
@@ -104,9 +96,9 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     monkeypatch.setattr(thread_runs, "get_team_default_model", fake_team_default)
 
 
-async def test_run_start_creates_and_stamps_new_thread(monkeypatch) -> None:
+async def test_run_start_creates_and_stamps_new_thread(monkeypatch, dashboard_client) -> None:
     _patch_new_thread_deps(monkeypatch, profile={})
-    client = _install_client(monkeypatch)
+    client = dashboard_client()
     proxy = _install_proxy(monkeypatch)
 
     enriched = await _run_start(
@@ -151,12 +143,14 @@ async def test_run_start_creates_and_stamps_new_thread(monkeypatch) -> None:
     assert enriched["params"]["assistant_id"] == "agent"
 
 
-async def test_run_start_uses_vision_fallback_for_text_only_model(monkeypatch) -> None:
+async def test_run_start_uses_vision_fallback_for_text_only_model(
+    monkeypatch, dashboard_client
+) -> None:
     _patch_new_thread_deps(
         monkeypatch,
         profile={"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
     )
-    client = _install_client(monkeypatch)
+    client = dashboard_client()
     proxy = _install_proxy(monkeypatch)
 
     image = _image()
@@ -197,12 +191,14 @@ async def test_run_start_uses_vision_fallback_for_text_only_model(monkeypatch) -
     assert configurable["agent_effort"] == "medium"
 
 
-async def test_run_start_applies_profile_model_before_team_default(monkeypatch) -> None:
+async def test_run_start_applies_profile_model_before_team_default(
+    monkeypatch, dashboard_client
+) -> None:
     _patch_new_thread_deps(
         monkeypatch,
         profile={"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
     )
-    client = _install_client(monkeypatch)
+    client = dashboard_client()
     proxy = _install_proxy(monkeypatch)
 
     await _run_start(
@@ -222,12 +218,14 @@ async def test_run_start_applies_profile_model_before_team_default(monkeypatch) 
     assert (stamped["resolved_model"], stamped["resolved_effort"]) == (_TEXT_ONLY_MODEL, "high")
 
 
-async def test_run_start_applies_requested_model_before_profile(monkeypatch) -> None:
+async def test_run_start_applies_requested_model_before_profile(
+    monkeypatch, dashboard_client
+) -> None:
     _patch_new_thread_deps(
         monkeypatch,
         profile={"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
     )
-    client = _install_client(monkeypatch)
+    client = dashboard_client()
     proxy = _install_proxy(monkeypatch)
 
     await _run_start(
@@ -255,9 +253,9 @@ async def test_run_start_applies_requested_model_before_profile(monkeypatch) -> 
     )
 
 
-async def test_run_start_migrates_deprecated_requested_model(monkeypatch) -> None:
+async def test_run_start_migrates_deprecated_requested_model(monkeypatch, dashboard_client) -> None:
     _patch_new_thread_deps(monkeypatch, profile={})
-    client = _install_client(monkeypatch)
+    client = dashboard_client()
     proxy = _install_proxy(monkeypatch)
 
     await _run_start(
@@ -279,9 +277,8 @@ async def test_run_start_migrates_deprecated_requested_model(monkeypatch) -> Non
     assert (stamped["resolved_model"], stamped["resolved_effort"]) == ("openai:gpt-5.6-sol", "high")
 
 
-async def test_run_start_attributes_non_owner_message(monkeypatch) -> None:
-    client = _install_client(
-        monkeypatch,
+async def test_run_start_attributes_non_owner_message(monkeypatch, dashboard_client) -> None:
+    client = dashboard_client(
         thread_metadata={
             "source": "dashboard",
             "github_login": "owner",
@@ -312,9 +309,8 @@ async def test_run_start_attributes_non_owner_message(monkeypatch) -> None:
     assert {call["thread_id"] for _, call in client.calls} == {"tid"}
 
 
-async def test_run_start_adds_web_handoff_for_slack_thread(monkeypatch) -> None:
-    _install_client(
-        monkeypatch,
+async def test_run_start_adds_web_handoff_for_slack_thread(monkeypatch, dashboard_client) -> None:
+    dashboard_client(
         thread_metadata={"source": "slack", "github_login": "owner"},
         messages=[{"id": "existing-message"}],
     )
@@ -353,8 +349,10 @@ async def test_run_start_adds_web_handoff_for_slack_thread(monkeypatch) -> None:
     assert enriched["params"]["config"]["configurable"]["source"] == "dashboard"
 
 
-async def test_run_start_adds_web_handoff_before_image_blocks(monkeypatch) -> None:
-    _install_client(monkeypatch, thread_metadata={"source": "slack", "github_login": "owner"})
+async def test_run_start_adds_web_handoff_before_image_blocks(
+    monkeypatch, dashboard_client
+) -> None:
+    dashboard_client(thread_metadata={"source": "slack", "github_login": "owner"})
     _patch_enrich_deps(monkeypatch)
     proxy = _install_proxy(monkeypatch)
 
@@ -384,8 +382,8 @@ async def test_run_start_adds_web_handoff_before_image_blocks(monkeypatch) -> No
     assert user_message.findtext("content") == "continue here"
 
 
-async def test_run_start_does_not_attribute_owner_message(monkeypatch) -> None:
-    _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "owner"})
+async def test_run_start_does_not_attribute_owner_message(monkeypatch, dashboard_client) -> None:
+    dashboard_client(thread_metadata={"source": "dashboard", "github_login": "owner"})
     _patch_enrich_deps(monkeypatch)
     proxy = _install_proxy(monkeypatch)
 
@@ -405,9 +403,8 @@ async def test_run_start_does_not_attribute_owner_message(monkeypatch) -> None:
     assert last.findtext("content") == "fix the bug"
 
 
-async def test_run_start_allowlists_client_configurable(monkeypatch) -> None:
-    client = _install_client(
-        monkeypatch,
+async def test_run_start_allowlists_client_configurable(monkeypatch, dashboard_client) -> None:
+    client = dashboard_client(
         thread_metadata={
             "source": "dashboard",
             "github_login": "octocat",
@@ -463,10 +460,9 @@ async def test_run_start_allowlists_client_configurable(monkeypatch) -> None:
     assert _update_carrying(client, "model")["model"] == _VISION_MODEL
 
 
-async def test_run_start_unresolves_thread(monkeypatch) -> None:
+async def test_run_start_unresolves_thread(monkeypatch, dashboard_client) -> None:
     _patch_new_thread_deps(monkeypatch, profile={})
-    client = _install_client(
-        monkeypatch,
+    client = dashboard_client(
         thread_metadata={
             "source": "dashboard",
             "github_login": "octocat",
@@ -499,11 +495,12 @@ async def test_run_start_unresolves_thread(monkeypatch) -> None:
     assert patch["resolved_at_ms"] is None
 
 
-async def test_run_start_from_slack_thread_updates_trace_reply(monkeypatch) -> None:
+async def test_run_start_from_slack_thread_updates_trace_reply(
+    monkeypatch, dashboard_client
+) -> None:
     captured: dict[str, object] = {}
 
-    client = _install_client(
-        monkeypatch,
+    client = dashboard_client(
         thread_metadata={
             "source": "slack",
             "github_login": "octocat",
@@ -572,8 +569,10 @@ def _patch_queue(monkeypatch, captured: dict[str, object]) -> None:
     monkeypatch.setattr(thread_runs, "queue_message_for_thread", fake_queue)
 
 
-async def test_queued_message_returns_502_when_activity_unknown(monkeypatch) -> None:
-    _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "octocat"})
+async def test_queued_message_returns_502_when_activity_unknown(
+    monkeypatch, dashboard_client
+) -> None:
+    dashboard_client(thread_metadata={"source": "dashboard", "github_login": "octocat"})
 
     async def unknown_activity(thread_id: str) -> None:
         assert thread_id == "tid"
@@ -589,10 +588,11 @@ async def test_queued_message_returns_502_when_activity_unknown(monkeypatch) -> 
     assert exc_info.value.status_code == 502
 
 
-async def test_queued_message_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
+async def test_queued_message_rejects_non_admin_on_admin_thread(
+    monkeypatch, dashboard_client
+) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
-    client = _install_client(
-        monkeypatch,
+    client = dashboard_client(
         thread_metadata={
             "source": "dashboard",
             "github_login": "workspace-admin",
@@ -610,10 +610,11 @@ async def test_queued_message_rejects_non_admin_on_admin_thread(monkeypatch) -> 
     assert client.threads.updates == []
 
 
-async def test_queued_message_accepts_configured_admin_on_admin_thread(monkeypatch) -> None:
+async def test_queued_message_accepts_configured_admin_on_admin_thread(
+    monkeypatch, dashboard_client
+) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
-    _install_client(
-        monkeypatch,
+    dashboard_client(
         thread_metadata={
             "source": "dashboard",
             "github_login": "someone-else",
@@ -631,9 +632,9 @@ async def test_queued_message_accepts_configured_admin_on_admin_thread(monkeypat
     assert payload["text"] == "ship it"
 
 
-async def test_queued_message_attributes_non_owner(monkeypatch) -> None:
+async def test_queued_message_attributes_non_owner(monkeypatch, dashboard_client) -> None:
     captured: dict[str, object] = {}
-    _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "owner"})
+    dashboard_client(thread_metadata={"source": "dashboard", "github_login": "owner"})
     _patch_queue(monkeypatch, captured)
 
     await thread_runs.send_dashboard_message(
@@ -646,9 +647,9 @@ async def test_queued_message_attributes_non_owner(monkeypatch) -> None:
     assert payload["from_owner"] is False
 
 
-async def test_queued_message_does_not_attribute_owner(monkeypatch) -> None:
+async def test_queued_message_does_not_attribute_owner(monkeypatch, dashboard_client) -> None:
     captured: dict[str, object] = {}
-    _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "owner"})
+    dashboard_client(thread_metadata={"source": "dashboard", "github_login": "owner"})
     _patch_queue(monkeypatch, captured)
 
     await thread_runs.send_dashboard_message(
@@ -660,9 +661,10 @@ async def test_queued_message_does_not_attribute_owner(monkeypatch) -> None:
     assert payload["from_owner"] is True
 
 
-async def test_queued_message_rejects_images_for_text_only_model(monkeypatch) -> None:
-    _install_client(
-        monkeypatch,
+async def test_queued_message_rejects_images_for_text_only_model(
+    monkeypatch, dashboard_client
+) -> None:
+    dashboard_client(
         thread_metadata={
             "source": "dashboard",
             "github_login": "owner",
@@ -682,9 +684,8 @@ async def test_queued_message_rejects_images_for_text_only_model(monkeypatch) ->
     assert "does not support image input" in exc_info.value.detail
 
 
-async def test_queued_message_allows_images_for_vision_model(monkeypatch) -> None:
-    _install_client(
-        monkeypatch,
+async def test_queued_message_allows_images_for_vision_model(monkeypatch, dashboard_client) -> None:
+    dashboard_client(
         thread_metadata={"source": "dashboard", "github_login": "owner", "model": _VISION_MODEL},
     )
     captured: dict[str, object] = {}
