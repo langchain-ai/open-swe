@@ -194,7 +194,9 @@ async function syncThreadBranch(thread) {
 /** A running thread owns the checkout, so its branch can still be changing. */
 async function diffThread(threadId) {
   const thread = localThreadStore.get(threadId);
-  return thread?.status === "running" ? syncThreadBranch(thread) : thread;
+  if (!thread) return thread;
+  const activity = await backendSupervisor.threadActivity();
+  return activity?.[threadId] === "running" ? syncThreadBranch(thread) : thread;
 }
 
 function configureDesktopIpc() {

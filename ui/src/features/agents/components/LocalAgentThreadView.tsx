@@ -100,6 +100,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   }, [models, thread?.effort, thread?.modelId])
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const initialPromptRef = useRef<string | null>(null)
+  const acknowledgedRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isMobile = useIsMobile()
   const sidebarCollapsed = useSidebarCollapsed()
@@ -208,7 +209,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
 
   useEffect(() => {
-    if (!thread || thread.viewed || isRunning) return
+    if (isRunning) {
+      acknowledgedRef.current = null
+      return
+    }
+    if (!thread || acknowledgedRef.current === sessionId) return
+    acknowledgedRef.current = sessionId
     void window.openSweDesktop
       ?.updateLocalThread({ threadId: sessionId, viewed: true })
       .then((updated) => {
