@@ -42,7 +42,7 @@ async def test_turn_diff_prefers_persisted_run_artifact(monkeypatch) -> None:
         "truncated": False,
         "summary": {"files": 3, "additions": 3, "deletions": 0},
     }
-    monkeypatch.setattr("agent.dashboard.run_diffs.get_run_diff", AsyncMock(return_value=stored))
+    monkeypatch.setattr("agent.settings.run_diffs.get_run_diff", AsyncMock(return_value=stored))
     create_sandbox = AsyncMock()
     monkeypatch.setattr(thread_sandbox, "create_sandbox", create_sandbox)
 

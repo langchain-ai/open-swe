@@ -4,11 +4,13 @@ from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
+    "core_stack": ".stack",
     "DynamicContextMiddleware": ".dynamic_context",
     "DynamicToolMiddleware": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
     "ModelFallbackMiddleware": ".model_fallback",
+    "model_guard_middleware": ".stack",
     "notify_step_limit_reached": ".notify_step_limit",
     "PlanModeMiddleware": ".plan_mode",
     "PrepareRunState": ".prepare_run",
@@ -49,6 +51,8 @@ __all__ = [
     "TimeoutWrapupMiddleware",
     "WorkflowPushGuardMiddleware",
     "check_message_queue_before_model",
+    "core_stack",
+    "model_guard_middleware",
     "notify_step_limit_reached",
     "refresh_github_proxy_before_model",
     "settle_review_check_on_exit",
@@ -74,6 +78,7 @@ if TYPE_CHECKING:
     from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
     from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
     from .settle_review_check import settle_review_check_on_exit
+    from .stack import core_stack, model_guard_middleware
     from .subdir_agents import SubdirAgentsReadMiddleware
     from .task_retry import task_on_failure, task_retry_on
     from .timeout_wrapup import TimeoutWrapupMiddleware

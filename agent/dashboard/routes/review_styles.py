@@ -5,8 +5,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from ...settings.analyzer_cron import remove_continual_cron
-from ...settings.review_style_jobs import (
+from ...review.analyzer_cron import remove_continual_cron
+from ...review.style_jobs import (
     cancel_review_style_analysis,
     start_bootstrap_analysis,
     sync_review_style_run_status,

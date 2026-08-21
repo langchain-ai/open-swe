@@ -7,19 +7,19 @@ from typing import Any
 from ..config import langgraph_client
 from ..dispatch import create_durable_run
 from ..input_messages import RunInput, build_run_input
-from ..review.style_collector import (
-    collect_review_samples,
-    format_samples_for_analyzer,
-)
-from ..threads.ids import review_style_thread_id
-from ..utils.analyzer_skills import build_skill_files
-from .review_styles import (
+from ..settings.review_styles import (
     get_review_style,
     has_saved_prompt,
     mark_analysis_failed,
     mark_analysis_running,
     reconcile_running_status,
     update_review_style,
+)
+from ..threads.ids import review_style_thread_id
+from ..utils.analyzer_skills import build_skill_files
+from .style_collector import (
+    collect_review_samples,
+    format_samples_for_analyzer,
 )
 
 logger = logging.getLogger(__name__)

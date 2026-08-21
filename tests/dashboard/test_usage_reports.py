@@ -1,7 +1,7 @@
 import pytest
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.settings import agent_usage
+from agent.dashboard import usage_reports
 
 
 def _client(
@@ -13,7 +13,9 @@ def _client(
 
 
 @pytest.mark.asyncio
-async def test_cached_usage_payload_returns_stale_snapshot_and_schedules_refresh(monkeypatch):
+async def test_cached_usage_payload_returns_stale_snapshot_and_schedules_refresh(
+    monkeypatch, patched_langgraph_client
+):
     usage_snapshot = {
         "period": "30d",
         "total_members": 2,
@@ -65,22 +67,22 @@ async def test_cached_usage_payload_returns_stale_snapshot_and_schedules_refresh
     }
     client = _client(
         items={
-            (tuple(agent_usage.USAGE_LEADERBOARD_CACHE_NAMESPACE), "30d"): {
+            (tuple(usage_reports.USAGE_LEADERBOARD_CACHE_NAMESPACE), "30d"): {
                 "generated_at_ms": 1,
                 "snapshot": usage_snapshot,
             },
-            (tuple(agent_usage.REVIEWER_STATS_CACHE_NAMESPACE), "30d"): {
+            (tuple(usage_reports.REVIEWER_STATS_CACHE_NAMESPACE), "30d"): {
                 "generated_at_ms": 1,
                 "snapshot": reviewer_snapshot,
             },
         }
     )
-    monkeypatch.setattr(agent_usage, "_client", lambda: client)
-    monkeypatch.setattr(agent_usage, "_now_ms", lambda: agent_usage._CACHE_TTL_MS + 2)
+    patched_langgraph_client(usage_reports, attr="_client", client=client)
+    monkeypatch.setattr(usage_reports, "now_ms", lambda: usage_reports._CACHE_TTL_MS + 2)
 
     usage_refreshes: list[str] = []
     reviewer_refreshes: list[str] = []
-    payload = await agent_usage.list_agent_usage_leaderboard(
+    payload = await usage_reports.list_agent_usage_leaderboard(
         period="30d",
         limit=1,
         current_login="octo",
@@ -137,9 +139,9 @@ async def test_reviewer_stats_snapshot_counts_surfaced_and_resolved_findings(mon
             },
         }
     ]
-    monkeypatch.setattr(agent_usage, "_client", lambda: _client(threads=threads))
+    monkeypatch.setattr(usage_reports, "_client", lambda: _client(threads=threads))
 
-    snapshot = await agent_usage._build_reviewer_stats_snapshot("all")
+    snapshot = await usage_reports._build_reviewer_stats_snapshot("all")
 
     assert snapshot["reviewed_prs"] == 1
     assert snapshot["prs_with_findings"] == 1
@@ -196,9 +198,9 @@ async def test_reviewer_stats_classifies_legacy_shaped_findings(monkeypatch):
             },
         }
     ]
-    monkeypatch.setattr(agent_usage, "_client", lambda: _client(threads=threads))
+    monkeypatch.setattr(usage_reports, "_client", lambda: _client(threads=threads))
 
-    snapshot = await agent_usage._build_reviewer_stats_snapshot("all")
+    snapshot = await usage_reports._build_reviewer_stats_snapshot("all")
 
     assert snapshot["findings_recorded"] == 3
     assert snapshot["surfaced_findings"] == 2
@@ -214,10 +216,10 @@ async def test_reviewer_stats_paginates_reviewer_threads(monkeypatch):
         {"created_at": "2025-01-01T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
     ]
     client = _client(threads=threads)
-    monkeypatch.setattr(agent_usage, "_CACHE_SEARCH_LIMIT", 2)
-    monkeypatch.setattr(agent_usage, "_client", lambda: client)
+    monkeypatch.setattr(usage_reports, "_CACHE_SEARCH_LIMIT", 2)
+    monkeypatch.setattr(usage_reports, "_client", lambda: client)
 
-    snapshot = await agent_usage._build_reviewer_stats_snapshot("all")
+    snapshot = await usage_reports._build_reviewer_stats_snapshot("all")
 
     assert snapshot["reviewed_prs"] == 3
     assert [call["offset"] for call in client.threads.searches] == [0, 2]
@@ -232,11 +234,11 @@ async def test_reviewer_stats_stops_after_page_older_than_cutoff(monkeypatch):
         {"created_at": "2024-12-31T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
     ]
     client = _client(threads=threads)
-    monkeypatch.setattr(agent_usage, "_CACHE_SEARCH_LIMIT", 2)
-    monkeypatch.setattr(agent_usage, "_client", lambda: client)
-    cutoff_ms = agent_usage._timestamp_ms("2025-01-02T00:00:00Z")
+    monkeypatch.setattr(usage_reports, "_CACHE_SEARCH_LIMIT", 2)
+    monkeypatch.setattr(usage_reports, "_client", lambda: client)
+    cutoff_ms = usage_reports._timestamp_ms("2025-01-02T00:00:00Z")
 
-    pages = [page async for page in agent_usage._iter_reviewer_thread_pages(cutoff_ms)]
+    pages = [page async for page in usage_reports._iter_reviewer_thread_pages(cutoff_ms)]
 
     assert len(pages) == 1
     assert [call["offset"] for call in client.threads.searches] == [0]

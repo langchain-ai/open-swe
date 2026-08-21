@@ -3,8 +3,8 @@
 import pytest
 
 from agent.review.eval_config import resolve_config
+from agent.review.eval_jobs import _idle_record, _is_heartbeat_fresh
 from agent.review.eval_store import HEARTBEAT_STALE_SECONDS, ReviewerEvalRecord
-from agent.settings.eval_jobs import _idle_record, _is_heartbeat_fresh
 from evals.reviewer.store_reporter import StoreReporter
 
 RECORD_FIELDS = set(ReviewerEvalRecord.__annotations__)

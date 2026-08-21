@@ -27,8 +27,8 @@ from ..middleware import (
     DynamicContextMiddleware,
     PrepareRunState,
     TimeoutWrapupMiddleware,
+    core_stack,
 )
-from ..middleware.stack import core_stack
 from ..models.factory import DEFAULT_LLM_REASONING
 from ..review.style_guidance import REVIEWER_STYLE_THEMES
 from ..runtime import (

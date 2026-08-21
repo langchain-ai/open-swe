@@ -95,11 +95,6 @@ _LAYERS_BUILT_ON_THE_FOUNDATION = (
     "agent.tools",
     "agent.webhooks",
 )
-# ``agent.review`` is a domain built on the foundation too, but three settings
-# modules read review findings / eval config directly. Splitting those readers
-# out is the settings↔review follow-up; until then settings is the one layer
-# allowed to reach into it.
-_FOUNDATION_LAYERS_ALLOWED_TO_IMPORT_REVIEW = frozenset({"settings"})
 
 
 def test_the_foundation_does_not_import_what_is_built_on_it() -> None:
@@ -126,8 +121,7 @@ def test_the_foundation_does_not_import_the_review_domain() -> None:
     offenders = {
         layer: hits
         for layer in _FOUNDATION_LAYERS
-        if layer not in _FOUNDATION_LAYERS_ALLOWED_TO_IMPORT_REVIEW
-        and (hits := _modules_importing(layer, "agent.review"))
+        if (hits := _modules_importing(layer, "agent.review"))
     }
     assert offenders == {}
 
@@ -138,6 +132,42 @@ def test_the_review_domain_does_not_import_the_app_layers() -> None:
         "review", "agent.dashboard", "agent.graphs", "agent.tools", "agent.webhooks"
     )
     assert offenders == {}
+
+
+# The dashboard is the HTTP surface. Where a graph, a tool, a webhook or the
+# scheduler still calls into it, it is calling a *use case* that happens to live
+# in an HTTP module — listing threads, dispatching a run, approving a plan,
+# checking repo access. Each of those is a module that should eventually move
+# down out of ``agent.dashboard``; naming them here keeps the set from growing
+# while that lift is pending, and keeps ``agent.dashboard.__init__`` honest
+# about why it still loads its router lazily.
+_ALLOWED_DASHBOARD_EDGES = {
+    "scheduling/agent_schedules.py": {"agent.dashboard.repo_access"},
+    "tools/slack_start_new_thread.py": {"agent.dashboard.repo_access"},
+    "tools/threads.py": {
+        "agent.dashboard",  # plan_api + workflow_approval_api, imported as modules
+        "agent.dashboard.oauth",
+        "agent.dashboard.threads.listing",
+        "agent.dashboard.threads.runs",
+    },
+    "webhooks/slack.py": {"agent.dashboard.plan_api"},
+}
+
+
+def test_the_graphs_and_their_callers_do_not_grow_new_dashboard_edges() -> None:
+    """Only the listed modules may reach into the HTTP layer, for the listed reason.
+
+    A new entry here is a new dependency from the agent onto FastAPI-shaped
+    code, and it is what forces ``agent.dashboard.__init__`` to keep the router
+    behind a lazy ``__getattr__``: importing one of these submodules must not
+    drag ``agent.dashboard.routes`` into an agent run's import closure.
+    """
+    edges = {
+        module: hits
+        for layer in ("graphs", "scheduling", "tools", "webhooks")
+        for module, hits in _modules_importing(layer, "agent.dashboard").items()
+    }
+    assert edges == _ALLOWED_DASHBOARD_EDGES
 
 
 def _closure_check(entry: str, forbidden: list[str]) -> dict[str, bool]:

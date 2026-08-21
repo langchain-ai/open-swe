@@ -32,6 +32,7 @@ from ...input_messages import (
     dynamic_context_hashes_from_messages,
     injected_dynamic_context_hashes_from_metadata,
 )
+from ...settings.admin import is_admin
 from ...settings.agent_overrides import normalize_profile_overrides
 from ...settings.environments import get_environment, slugify
 from ...settings.github_tokens import get_valid_access_token
@@ -57,7 +58,6 @@ from ...utils.json_types import (
     thread_metadata,
 )
 from ...utils.timing import phase
-from ..admin import is_admin
 from ..authz import (
     DASHBOARD_SOURCE,
     assert_thread_owner,

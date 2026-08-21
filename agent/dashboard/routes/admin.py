@@ -4,8 +4,8 @@ from typing import Any
 
 from fastapi import APIRouter
 
+from ...review.eval_jobs import get_reviewer_eval_status
 from ...review.eval_store import ReviewerEvalRecord
-from ...settings.eval_jobs import get_reviewer_eval_status
 from ...settings.sandbox_settings import (
     SandboxSettingsUpdate,
     get_sandbox_settings,

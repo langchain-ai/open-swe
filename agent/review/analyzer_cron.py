@@ -11,11 +11,11 @@ import logging
 
 from ..config import langgraph_client
 from ..scheduling.crons import create_cron, delete_cron
-from .review_style_jobs import (
+from ..settings.review_styles import get_review_style, update_review_style
+from .style_jobs import (
     build_continual_run_configurable,
     build_continual_run_input,
 )
-from .review_styles import get_review_style, update_review_style
 
 logger = logging.getLogger(__name__)
 

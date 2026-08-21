@@ -14,7 +14,6 @@ from langgraph.prebuilt import InjectedState
 
 from ..config import langgraph_client
 from ..dashboard import plan_api, workflow_approval_api
-from ..dashboard.admin import is_admin
 from ..dashboard.oauth import enforce_org_login_gate
 from ..dashboard.threads.listing import get_dashboard_thread, list_dashboard_threads_page
 from ..dashboard.threads.runs import (
@@ -28,6 +27,7 @@ from ..dashboard.threads.runs import (
 )
 from ..input_messages import input_message_text, message_sender_id
 from ..langsmith.api import LangSmithCostUnavailable, get_langsmith_thread_cost
+from ..settings.admin import is_admin
 from ..settings.agent_overrides import resolve_login_from_email_async
 from ..settings.options import normalize_model_choice
 from ..settings.plan_store import get_plan_content, list_plan_comments

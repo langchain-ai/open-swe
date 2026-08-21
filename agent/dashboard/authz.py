@@ -15,9 +15,9 @@ from typing import Any, NamedTuple
 from fastapi import Depends, HTTPException, Request
 
 from ..config import langgraph_client
+from ..settings.admin import is_admin
 from ..settings.review_styles import normalize_repo_full_name
 from ..utils.json_types import JsonObject, ThreadLike, thread_metadata
-from .admin import is_admin
 from .github_token_auth import admin_session_for_github_token, bearer_github_token
 from .oauth import require_session
 from .oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
