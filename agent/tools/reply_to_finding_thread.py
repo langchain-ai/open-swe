@@ -6,6 +6,7 @@ from ..review.findings import (
     FindingInteraction,
     ReviewerThreadMissingError,
     append_finding_interaction,
+    comment_ids_for_finding,
     get_finding,
     get_thread_id_from_runtime,
     thread_missing_tool_result,
@@ -63,9 +64,10 @@ async def _reply_to_finding_thread_async(
     if finding is None:
         return {"success": False, "error": f"No finding found with id {finding_id}"}
 
-    comment_id = finding.get("github_review_comment_id")
-    if not isinstance(comment_id, int):
+    comment_ids = comment_ids_for_finding(finding)
+    if not comment_ids:
         return {"success": False, "error": "Finding has no GitHub review comment mapping"}
+    comment_id = comment_ids[0]
 
     response = await reply_to_review_comment(
         owner=owner,

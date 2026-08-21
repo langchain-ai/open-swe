@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.review.findings import is_thread_resolved
 from agent.review.reconcile import reconcile_findings_with_review_threads
 
 
@@ -11,8 +12,9 @@ async def test_reconcile_marks_resolved_github_thread_resolved() -> None:
         {
             "id": "f1",
             "status": "open",
-            "github_review_comment_id": 11,
-            "github_review_thread_id": "THREAD_1",
+            "github_review_comment_ids": [11],
+            "github_review_thread_ids": ["THREAD_1"],
+            "surface_state": "surfaced",
         }
     ]
     replace = AsyncMock()
@@ -34,20 +36,13 @@ async def test_reconcile_marks_resolved_github_thread_resolved() -> None:
         )
 
     assert result[0]["status"] == "resolved"
-    assert result[0]["github_thread_resolved"] is True
+    assert result[0]["surface_state"] == "resolved"
     replace.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_reconcile_backfills_comment_and_thread_ids_from_bot_marker() -> None:
-    findings = [
-        {
-            "id": "f1",
-            "status": "open",
-            "github_review_comment_id": None,
-            "github_review_thread_id": None,
-        }
-    ]
+    findings = [{"id": "f1", "status": "open"}]
     replace = AsyncMock()
 
     with (
@@ -76,23 +71,15 @@ async def test_reconcile_backfills_comment_and_thread_ids_from_bot_marker() -> N
             ],
         )
 
-    assert result[0]["github_review_comment_id"] == 11
     assert result[0]["github_review_comment_ids"] == [11]
-    assert result[0]["github_review_thread_id"] == "THREAD_1"
     assert result[0]["github_review_thread_ids"] == ["THREAD_1"]
+    assert result[0]["surface_state"] == "surfaced"
     replace.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_reconcile_backfills_marker_from_graphql_app_login() -> None:
-    findings = [
-        {
-            "id": "f1",
-            "status": "open",
-            "github_review_comment_id": None,
-            "github_review_thread_id": None,
-        }
-    ]
+    findings = [{"id": "f1", "status": "open"}]
     replace = AsyncMock()
 
     with (
@@ -121,21 +108,14 @@ async def test_reconcile_backfills_marker_from_graphql_app_login() -> None:
             ],
         )
 
-    assert result[0]["github_review_comment_id"] == 11
-    assert result[0]["github_review_thread_id"] == "THREAD_1"
+    assert result[0]["github_review_comment_ids"] == [11]
+    assert result[0]["github_review_thread_ids"] == ["THREAD_1"]
     replace.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_reconcile_duplicate_markers_require_all_threads_terminal() -> None:
-    findings = [
-        {
-            "id": "f1",
-            "status": "open",
-            "github_review_comment_id": None,
-            "github_review_thread_id": None,
-        }
-    ]
+    findings = [{"id": "f1", "status": "open"}]
     replace = AsyncMock()
     marker = (
         '<!-- open-swe-review-comment {"id":"f1",'
@@ -173,14 +153,7 @@ async def test_reconcile_duplicate_markers_require_all_threads_terminal() -> Non
 
 @pytest.mark.asyncio
 async def test_reconcile_duplicate_markers_stay_open_when_some_threads_only_outdated() -> None:
-    findings = [
-        {
-            "id": "f1",
-            "status": "open",
-            "github_review_comment_id": None,
-            "github_review_thread_id": None,
-        }
-    ]
+    findings = [{"id": "f1", "status": "open"}]
     replace = AsyncMock()
     marker = (
         '<!-- open-swe-review-comment {"id":"f1",'
@@ -213,20 +186,13 @@ async def test_reconcile_duplicate_markers_stay_open_when_some_threads_only_outd
     assert result[0]["status"] == "open"
     assert "last_reconciliation_note" not in result[0]
     assert result[0]["github_resolved_thread_ids"] == ["THREAD_RESOLVED"]
-    assert result[0].get("github_thread_resolved") is not True
+    assert is_thread_resolved(result[0]) is False
     replace.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_reconcile_ignores_spoofed_non_bot_marker() -> None:
-    findings = [
-        {
-            "id": "f1",
-            "status": "open",
-            "github_review_comment_id": None,
-            "github_review_thread_id": None,
-        }
-    ]
+    findings = [{"id": "f1", "status": "open"}]
     replace = AsyncMock()
 
     with (
@@ -255,14 +221,14 @@ async def test_reconcile_ignores_spoofed_non_bot_marker() -> None:
             ],
         )
 
-    assert result[0]["github_review_comment_id"] is None
-    assert result[0]["github_review_thread_id"] is None
+    assert result[0].get("github_review_comment_ids") is None
+    assert result[0].get("github_review_thread_ids") is None
     replace.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_reconcile_records_latest_human_reply_after_bot_comment() -> None:
-    findings = [{"id": "f1", "status": "open", "github_review_comment_id": 11}]
+    findings = [{"id": "f1", "status": "open", "github_review_comment_ids": [11]}]
     replace = AsyncMock()
 
     with (
@@ -289,7 +255,7 @@ async def test_reconcile_records_latest_human_reply_after_bot_comment() -> None:
             ],
         )
 
-    assert result[0]["github_review_thread_id"] == "THREAD_1"
+    assert result[0]["github_review_thread_ids"] == ["THREAD_1"]
     assert result[0]["last_human_reply_author"] == "human"
     reply_body = result[0]["last_human_reply_body"]
     assert isinstance(reply_body, str)

@@ -10,18 +10,16 @@ from ..review.findings import (
     Finding,
     ReviewerThreadMissingError,
     clip_suggestion,
+    comment_ids_for_finding,
     get_thread_id_from_runtime,
     list_findings,
     normalize_finding_title,
     resolve_review_head_sha,
+    thread_ids_for_finding,
     thread_missing_tool_result,
     update_finding_fields,
 )
 from ..utils.reviewer_outcomes import emit_finding_status_outcome
-
-
-def _is_non_empty_str(value: Any) -> bool:
-    return isinstance(value, str) and bool(value)
 
 
 def _normalize_note(note: str | None) -> str | None:
@@ -32,20 +30,7 @@ def _normalize_note(note: str | None) -> str | None:
 
 
 def _has_published_github_surface(finding: Finding) -> bool:
-    surface = finding.get("surface")
-    if isinstance(surface, dict) and (
-        isinstance(surface.get("github_review_comment_id"), int)
-        or _is_non_empty_str(surface.get("github_review_thread_id"))
-    ):
-        return True
-    comment_ids = finding.get("github_review_comment_ids")
-    thread_ids = finding.get("github_review_thread_ids")
-    return (
-        isinstance(finding.get("github_review_comment_id"), int)
-        or _is_non_empty_str(finding.get("github_review_thread_id"))
-        or (isinstance(comment_ids, list) and any(isinstance(item, int) for item in comment_ids))
-        or (isinstance(thread_ids, list) and any(_is_non_empty_str(item) for item in thread_ids))
-    )
+    return bool(comment_ids_for_finding(finding) or thread_ids_for_finding(finding))
 
 
 async def update_finding(
