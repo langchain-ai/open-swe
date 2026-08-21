@@ -39,11 +39,13 @@ export const agentThreadKeys = {
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
-  turnDiff: (
+  workingTreeDiff: (threadId: string) =>
+    ["agent-threads", threadId, "working-tree-diff"] as const,
+  runDiff: (
     threadId: string,
-    turnKey: string | null,
+    turnKey: string,
     options: ThreadTurnDiffOptions = {}
-  ) => ["agent-threads", threadId, "turn-diff", turnKey, options] as const,
+  ) => ["agent-threads", threadId, "run-diff", turnKey, options] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
   page: (params: ThreadsPageParams) =>
@@ -141,11 +143,12 @@ export const environmentOptionKeys = {
 }
 
 /** Environments a new thread can boot from. Empty when none are configured. */
-export function useEnvironmentOptions() {
+export function useEnvironmentOptions(enabled = true) {
   return useQuery({
     queryKey: environmentOptionKeys.all,
     queryFn: api.listEnvironmentOptions,
     staleTime: 60_000,
+    enabled,
   })
 }
 
@@ -171,23 +174,26 @@ async function listOrganizationSkills() {
   return items
 }
 
-export function usePersonalAgentSkills() {
+export function usePersonalAgentSkills(enabled = true) {
   return useQuery({
     queryKey: agentSkillKeys.personal,
     queryFn: listPersonalSkills,
+    enabled,
   })
 }
 
-export function useOrganizationAgentSkills() {
+export function useOrganizationAgentSkills(enabled = true) {
   return useQuery({
     queryKey: agentSkillKeys.organization,
     queryFn: listOrganizationSkills,
+    enabled,
   })
 }
 
-export function useAgentSkills() {
-  const personal = usePersonalAgentSkills()
-  const organization = useOrganizationAgentSkills()
+export function useAgentSkills(options: { enabled?: boolean } = {}) {
+  const enabled = options.enabled ?? true
+  const personal = usePersonalAgentSkills(enabled)
+  const organization = useOrganizationAgentSkills(enabled)
   return {
     ...personal,
     personal: personal.data ?? [],
@@ -298,19 +304,21 @@ export function useSidebarThreads({
   activeThreadId,
   includeAutomations = false,
   includeResolved = false,
+  enabled = true,
 }: {
   activeThreadId?: string
   includeAutomations?: boolean
   includeResolved?: boolean
+  enabled?: boolean
 }) {
   const scope = includeAutomations ? "all" : "interactive"
   const activeQuery = useInfiniteThreadsPages(
     { limit: SIDEBAR_PAGE_SIZE, resolved: false, scope },
-    { pollWhileRunning: true }
+    { enabled, pollWhileRunning: true }
   )
   const resolvedQuery = useInfiniteThreadsPages(
     { limit: SIDEBAR_PAGE_SIZE, resolved: true, scope },
-    { enabled: includeResolved, pollWhileRunning: true }
+    { enabled: enabled && includeResolved, pollWhileRunning: true }
   )
   const loadedActive = infinitePageThreads(activeQuery.data)
   const loadedResolved = infinitePageThreads(resolvedQuery.data)
@@ -323,7 +331,10 @@ export function useSidebarThreads({
     queryFn: () =>
       agentsApi.getThread(activeThreadId as string, { markViewed: false }),
     enabled:
-      Boolean(activeThreadId) && activeQuery.isSuccess && !activeThreadLoaded,
+      enabled &&
+      Boolean(activeThreadId) &&
+      activeQuery.isSuccess &&
+      !activeThreadLoaded,
     staleTime: 30_000,
     refetchInterval: (query) =>
       query.state.data?.status === "running" ? 2000 : false,
@@ -401,17 +412,14 @@ export function useAgentThreadBranchDiff(threadId: string, enabled: boolean) {
   })
 }
 
-export function useAgentThreadTurnDiff(
+export function useAgentThreadWorkingTreeDiff(
   threadId: string,
-  turnKey: string | null,
   enabled: boolean,
-  options: ThreadTurnDiffOptions = {},
   pollWhileRunning = false
 ) {
-  const queryKey = agentThreadKeys.turnDiff(threadId, turnKey, options)
   const query = useQuery({
-    queryKey,
-    queryFn: () => agentsApi.getThreadTurnDiff(threadId, turnKey, options),
+    queryKey: agentThreadKeys.workingTreeDiff(threadId),
+    queryFn: () => agentsApi.getThreadWorkingTreeDiff(threadId),
     enabled: enabled && Boolean(threadId),
     staleTime: 30_000,
     refetchInterval: pollWhileRunning
@@ -425,9 +433,7 @@ export function useAgentThreadTurnDiff(
   useEffect(() => {
     const was = previous.current
     previous.current = { enabled, pollWhileRunning }
-    const finishedWhileVisible =
-      was.enabled && was.pollWhileRunning && enabled && !pollWhileRunning
-    if (finishedWhileVisible) {
+    if (was.enabled && was.pollWhileRunning && enabled && !pollWhileRunning) {
       const timers = [0, 1000, 3000].map((delay) =>
         window.setTimeout(() => void refetch(), delay)
       )
@@ -437,6 +443,21 @@ export function useAgentThreadTurnDiff(
   }, [enabled, pollWhileRunning, refetch])
 
   return query
+}
+
+export function useAgentThreadRunDiff(
+  threadId: string,
+  turnKey: string,
+  enabled: boolean,
+  options: ThreadTurnDiffOptions = {}
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.runDiff(threadId, turnKey, options),
+    queryFn: () => agentsApi.getThreadRunDiff(threadId, turnKey, options),
+    enabled: enabled && Boolean(threadId),
+    staleTime: 30_000,
+    retry: false,
+  })
 }
 
 export function useWorkflowApprovals(

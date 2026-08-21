@@ -14,7 +14,7 @@ run:
 	uv run uvicorn agent.webapp:app --reload --port 8000
 
 desktop:
-	cd desktop && pnpm run dev
+	pnpm run dev:desktop
 
 install-desktop:
 	@test -z "$$(git status --porcelain)" || { echo 'Commit or stash repository changes first.' >&2; exit 1; }
@@ -76,7 +76,7 @@ help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server'
 	@echo 'run                          - run webhook server'
-	@echo 'desktop                      - run the Electron desktop app (backend must be running)'
+	@echo 'desktop                      - run the backend and Electron desktop app'
 	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'
 	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'

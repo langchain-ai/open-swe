@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from deepagents.backends.protocol import (
     DeleteResult,
@@ -367,15 +368,13 @@ def clear_sandbox_backend(thread_id: str) -> None:
         sandbox_backend.cancel_startup()
 
 
-async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
-    """Fetch sandbox_id from thread metadata."""
+async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:
+    """Fetch sandbox metadata from the run config or live thread."""
     try:
         config = get_config()
         metadata = config.get("metadata", {})
-        if isinstance(metadata, dict):
-            sandbox_id = metadata.get("sandbox_id")
-            if isinstance(sandbox_id, str):
-                return sandbox_id
+        if isinstance(metadata, dict) and isinstance(metadata.get("sandbox_id"), str):
+            return metadata
     except Exception:
         logger.debug(
             "Failed to read inline thread metadata for sandbox; falling back to live lookup",
@@ -387,10 +386,16 @@ async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
         thread = await client.threads.get(thread_id)
     except Exception:
         logger.exception("Failed to fetch live thread metadata for sandbox")
-        return None
+        return {}
 
     metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
-    sandbox_id = metadata.get("sandbox_id") if isinstance(metadata, dict) else None
+    return metadata if isinstance(metadata, dict) else {}
+
+
+async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
+    """Fetch sandbox_id from thread metadata."""
+    metadata = await get_sandbox_metadata(thread_id)
+    sandbox_id = metadata.get("sandbox_id")
     return sandbox_id if isinstance(sandbox_id, str) else None
 
 
