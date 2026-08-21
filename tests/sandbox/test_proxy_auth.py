@@ -11,7 +11,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.integrations.langsmith import PROXY_GH_TOKEN_PLACEHOLDER, configure_github_proxy
-from agent.utils.sandbox_proxy import SandboxBackendProxy
+from agent.sandboxes.proxy import SandboxBackendProxy
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -29,10 +29,12 @@ class TestSandboxProviderLoading:
         module.LocalProvider.return_value = provider
 
         with (
-            patch("agent.utils.sandbox.import_module", return_value=module) as mock_import_module,
+            patch(
+                "agent.sandboxes.providers.import_module", return_value=module
+            ) as mock_import_module,
             patch.dict("os.environ", {"SANDBOX_TYPE": "local"}),
         ):
-            from agent.utils.sandbox import create_sandbox
+            from agent.sandboxes.providers import create_sandbox
 
             sandbox = await create_sandbox("existing")
 
@@ -47,10 +49,10 @@ class TestSandboxProviderLoading:
         module.LocalProvider.return_value = provider
 
         with (
-            patch("agent.utils.sandbox.import_module", return_value=module),
+            patch("agent.sandboxes.providers.import_module", return_value=module),
             patch.dict("os.environ", {"SANDBOX_TYPE": "local"}),
         ):
-            from agent.utils.sandbox import create_sandbox
+            from agent.sandboxes.providers import create_sandbox
 
             sandbox = await create_sandbox(snapshot_id="snap-1")
 
@@ -58,13 +60,13 @@ class TestSandboxProviderLoading:
         provider.create.assert_awaited_once_with(snapshot_id="snap-1")
 
     async def test_create_sandbox_rejects_a_snapshot_for_an_existing_sandbox(self) -> None:
-        from agent.utils.sandbox import create_sandbox
+        from agent.sandboxes.providers import create_sandbox
 
         with pytest.raises(ValueError, match="snapshot_id seeds a new sandbox"):
             await create_sandbox("existing", snapshot_id="snap-1")
 
     async def test_proxy_capability_comes_from_the_provider(self) -> None:
-        from agent.utils.sandbox import sandbox_provider_uses_proxy
+        from agent.sandboxes.providers import sandbox_provider_uses_proxy
 
         with patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}):
             assert sandbox_provider_uses_proxy() is True
@@ -72,7 +74,7 @@ class TestSandboxProviderLoading:
             assert sandbox_provider_uses_proxy() is False
 
     async def test_snapshot_capability_comes_from_the_provider(self) -> None:
-        from agent.utils.sandbox import sandbox_provider_supports_snapshots
+        from agent.sandboxes.providers import sandbox_provider_supports_snapshots
 
         with patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}):
             assert sandbox_provider_supports_snapshots() is True
@@ -80,7 +82,7 @@ class TestSandboxProviderLoading:
             assert sandbox_provider_supports_snapshots() is False
 
     async def test_unknown_sandbox_type_names_the_supported_ones(self) -> None:
-        from agent.utils.sandbox import current_sandbox_provider
+        from agent.sandboxes.providers import current_sandbox_provider
 
         with patch.dict("os.environ", {"SANDBOX_TYPE": "nope"}):
             with pytest.raises(ValueError, match="Invalid sandbox type: nope"):
@@ -531,7 +533,7 @@ class TestRefreshProxyOnSandboxReuse:
             patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
             patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
             patch.dict(
-                "agent.utils.sandbox_registry.SANDBOX_BACKENDS",
+                "agent.sandboxes.registry.SANDBOX_BACKENDS",
                 {"thread-123": SandboxBackendProxy(mock_sandbox, thread_id="thread-123")},
                 clear=True,
             ),
@@ -592,7 +594,7 @@ class TestRefreshProxyOnSandboxReuse:
             patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
             patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
             patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
-            patch.dict("agent.utils.sandbox_registry.SANDBOX_BACKENDS", {}, clear=True),
+            patch.dict("agent.sandboxes.registry.SANDBOX_BACKENDS", {}, clear=True),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             from agent.graphs.agent import get_agent

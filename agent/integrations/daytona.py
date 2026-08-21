@@ -13,7 +13,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_daytona import DaytonaSandbox
 
 from ..config import daytona_api_key, daytona_snapshot
-from ..utils.sandbox import SandboxGoneError, SandboxProvider
+from ..sandboxes.providers import SandboxGoneError, SandboxProvider
 
 DEFAULT_DAYTONA_SANDBOX_SNAPSHOT = "daytonaio/sandbox:0.6.0"
 

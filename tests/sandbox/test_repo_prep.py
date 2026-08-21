@@ -3,7 +3,7 @@ from typing import cast
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from support.sandbox_fakes import FakeSandboxBackend
 
-from agent.utils.repo_prep import materialize_trusted_skills, prepare_review_repo
+from agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
 
 
 def _quiet(exit_code: int = 0) -> FakeSandboxBackend:

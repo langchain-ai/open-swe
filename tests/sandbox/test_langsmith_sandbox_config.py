@@ -21,7 +21,7 @@ from agent.integrations.langsmith import (
     _install_create_extra_fields,
     _reuse_existing_sandbox,
 )
-from agent.utils.sandbox import SandboxGoneError
+from agent.sandboxes.providers import SandboxGoneError
 
 
 def test_sandbox_api_endpoint_appends_v2_sandboxes() -> None:

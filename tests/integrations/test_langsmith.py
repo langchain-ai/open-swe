@@ -6,7 +6,7 @@ import pytest
 from langsmith.sandbox import ResourceNotFoundError
 
 from agent.integrations.langsmith import LANGSMITH_WORK_DIR, LangSmithProvider
-from agent.utils.sandbox import SandboxGoneError
+from agent.sandboxes.providers import SandboxGoneError
 
 
 @pytest.fixture(autouse=True)

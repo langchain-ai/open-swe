@@ -109,7 +109,7 @@ async def test_turn_diff_preserves_changes_before_mid_run_plan_mode(monkeypatch)
     sandbox = object()
     monkeypatch.setattr(thread_sandbox, "create_sandbox", AsyncMock(return_value=sandbox))
     read_diff = AsyncMock(return_value={"status": "ready", "files": [], "truncated": False})
-    monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
+    monkeypatch.setattr("agent.sandboxes.turn_checkpoint.read_turn_diff", read_diff)
 
     await thread_sandbox.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
 
@@ -148,7 +148,7 @@ async def test_turn_diff_reads_the_checkpoint_repository(monkeypatch) -> None:
     sandbox = object()
     monkeypatch.setattr(thread_sandbox, "create_sandbox", AsyncMock(return_value=sandbox))
     read_diff = AsyncMock(return_value={"status": "ready", "files": [], "truncated": False})
-    monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
+    monkeypatch.setattr("agent.sandboxes.turn_checkpoint.read_turn_diff", read_diff)
 
     await thread_sandbox.get_dashboard_thread_turn_diff("thread-1", "owner", turn_key="msg-1")
 

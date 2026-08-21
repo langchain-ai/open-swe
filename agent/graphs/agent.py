@@ -68,6 +68,10 @@ from ..runtime.constants import (
 )
 from ..runtime.execution import graph_loaded_for_execution
 from ..runtime.sandbox import environment_slug, get_cached_sandbox_backend, resolve_default_repo
+from ..sandboxes.paths import aresolve_sandbox_work_dir
+from ..sandboxes.providers import SandboxUnreachableError
+from ..sandboxes.registry import get_or_create_sandbox_backend_proxy
+from ..sandboxes.turn_checkpoint import merge_checkpoint, read_turn_diff, record_turn_checkpoint
 from ..settings.agent_overrides import (
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
@@ -125,13 +129,9 @@ from ..utils import ttl_cache
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from ..utils.json_types import as_json_object
 from ..utils.model import DEFAULT_LLM_REASONING, ModelKwargs, fallback_model_id_for
-from ..utils.sandbox import SandboxUnreachableError
-from ..utils.sandbox_paths import aresolve_sandbox_work_dir
-from ..utils.sandbox_registry import get_or_create_sandbox_backend_proxy
 from ..utils.source_channel import post_sandbox_unreachable_notification
 from ..utils.thread_settings import ThreadSettings, normalize_thread_settings
 from ..utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
-from ..utils.turn_checkpoint import merge_checkpoint, read_turn_diff, record_turn_checkpoint
 from ._assembly import (
     make_model_or_defer,
     model_spec,

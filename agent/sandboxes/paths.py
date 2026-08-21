@@ -13,8 +13,8 @@ from collections.abc import AsyncIterable
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from .sandbox import current_sandbox_provider
-from .sandbox_proxy import SandboxBackendProxy, unwrap_sandbox_backend
+from .providers import current_sandbox_provider
+from .proxy import SandboxBackendProxy, unwrap_sandbox_backend
 
 logger = logging.getLogger(__name__)
 

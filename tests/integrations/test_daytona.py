@@ -6,7 +6,7 @@ import pytest
 from daytona import DaytonaNotFoundError
 
 from agent.integrations.daytona import DaytonaBackend, DaytonaProvider, _get_daytona_sandbox_params
-from agent.utils.sandbox import SandboxGoneError
+from agent.sandboxes.providers import SandboxGoneError
 
 
 @pytest.fixture(autouse=True)

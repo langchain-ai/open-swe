@@ -16,9 +16,9 @@ from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from ..utils.sandbox import sandbox_provider_uses_proxy
-from ..utils.sandbox_proxy import unwrap_sandbox_backend
-from ..utils.sandbox_registry import SANDBOX_BACKENDS
+from ..sandboxes.providers import sandbox_provider_uses_proxy
+from ..sandboxes.proxy import unwrap_sandbox_backend
+from ..sandboxes.registry import SANDBOX_BACKENDS
 from ..utils.timestamps import parse_expiry
 from .app import (
     PermissionKey,

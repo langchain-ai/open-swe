@@ -71,6 +71,9 @@ from ..runtime import (
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
 )
+from ..sandboxes.paths import aresolve_sandbox_work_dir
+from ..sandboxes.providers import SandboxUnreachableError
+from ..sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
 from ..settings.team_settings import (
     get_org_review_guidelines,
     get_team_default_grouping_model,
@@ -92,9 +95,6 @@ from ..tools import (
 from ..utils import ttl_cache
 from ..utils.api_standards_skill import fetch_api_standards_skill
 from ..utils.model import DEFAULT_LLM_REASONING
-from ..utils.repo_prep import materialize_trusted_skills, prepare_review_repo
-from ..utils.sandbox import SandboxUnreachableError
-from ..utils.sandbox_paths import aresolve_sandbox_work_dir
 from ..utils.source_channel import post_sandbox_unreachable_notification
 from ..utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 from ._assembly import ModelSpec, cached_gateway_enabled, model_spec, prepare_config, stub_agent

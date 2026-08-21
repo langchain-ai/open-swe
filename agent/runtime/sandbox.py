@@ -15,24 +15,24 @@ from langgraph_sdk import get_client
 
 from ..github.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from ..github.proxy import configure_proxy_for_sandbox
-from ..settings.environments import environment_snapshot_id, resolve_environment
-from ..settings.repo_snapshots import resolve_repo_snapshot_id
-from ..settings.sandbox_settings import get_admin_base_snapshot_id
-from ..settings.team_settings import get_team_default_repo
-from ..utils.sandbox import (
+from ..sandboxes.providers import (
     SandboxGoneError,
     SandboxUnreachableError,
     create_sandbox,
     sandbox_provider_supports_snapshots,
     sandbox_provider_uses_proxy,
 )
-from ..utils.sandbox_proxy import SandboxBackendProxy, unwrap_sandbox_backend
-from ..utils.sandbox_registry import (
+from ..sandboxes.proxy import SandboxBackendProxy, unwrap_sandbox_backend
+from ..sandboxes.registry import (
     SANDBOX_BACKENDS,
     get_or_create_sandbox_backend_proxy,
     get_sandbox_id_from_metadata,
     set_sandbox_backend,
 )
+from ..settings.environments import environment_snapshot_id, resolve_environment
+from ..settings.repo_snapshots import resolve_repo_snapshot_id
+from ..settings.sandbox_settings import get_admin_base_snapshot_id
+from ..settings.team_settings import get_team_default_repo
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ from deepagents.backends import LocalShellBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 
 from ..config import local_sandbox_root_dir
-from ..utils.sandbox import SandboxProvider
+from ..sandboxes.providers import SandboxProvider
 
 SANDBOX_GITCONFIG = ".gitconfig-sandbox"
 

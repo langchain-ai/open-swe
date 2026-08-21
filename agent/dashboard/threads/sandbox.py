@@ -16,8 +16,8 @@ from fastapi import HTTPException
 
 from ...github.api import github_client
 from ...github.refs import parse_github_pr_url
+from ...sandboxes.recovery_patch import generate_recovery_patch
 from ...settings.github_tokens import get_valid_access_token
-from ...utils.recovery_patch import generate_recovery_patch
 from ..authz import get_owned_thread_metadata, get_readable_thread_metadata
 from ..pr_diff import build_pr_diff_files
 from .proxy import PROXY_REQUEST_TIMEOUT
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
     # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
-    from ...utils.sandbox import create_sandbox as _create_sandbox
+    from ...sandboxes.providers import create_sandbox as _create_sandbox
 
     return await _create_sandbox(*args, **kwargs)
 
@@ -91,7 +91,7 @@ async def get_dashboard_thread_turn_diff(
     email: str | None = None,
 ) -> dict[str, Any]:
     """Return a persisted run diff, with sandbox checkpoints as a legacy fallback."""
-    from ...utils.turn_checkpoint import read_turn_diff
+    from ...sandboxes.turn_checkpoint import read_turn_diff
     from ..run_diffs import THREAD_DIFF_KEY, get_run_diff, project_run_diff
 
     metadata = await get_readable_thread_metadata(thread_id)

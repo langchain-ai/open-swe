@@ -8,7 +8,7 @@ from langchain_runloop import RunloopSandbox
 from runloop_api_client import Client, NotFoundError
 
 from ..config import runloop_api_key
-from ..utils.sandbox import SandboxGoneError, SandboxProvider
+from ..sandboxes.providers import SandboxGoneError, SandboxProvider
 
 
 class RunloopProvider(SandboxProvider):

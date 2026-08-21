@@ -12,8 +12,8 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from .sandbox import create_sandbox
-from .sandbox_proxy import Reconnect, SandboxBackendProxy
+from .providers import create_sandbox
+from .proxy import Reconnect, SandboxBackendProxy
 
 logger = logging.getLogger(__name__)
 

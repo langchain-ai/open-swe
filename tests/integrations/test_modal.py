@@ -6,7 +6,7 @@ import pytest
 from langchain_modal import ModalSandbox
 
 from agent.integrations.modal import ModalProvider
-from agent.utils.sandbox import SandboxGoneError
+from agent.sandboxes.providers import SandboxGoneError
 
 
 def _from_id(**kwargs: object):

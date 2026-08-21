@@ -6,9 +6,9 @@ from typing import Any, TypedDict
 
 from .config import in_process_langgraph_client
 from .dispatch import dispatch_agent_run
+from .sandboxes.providers import create_sandbox
 from .scheduling.crons import delete_scheduler_crons, ensure_scheduler_cron
 from .tools.background_execute import TASK_ROOT, _control_script, _encoded, _execute
-from .utils.sandbox import create_sandbox
 
 logger = logging.getLogger(__name__)
 

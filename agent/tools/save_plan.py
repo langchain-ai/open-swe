@@ -7,13 +7,13 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from ..sandboxes.registry import get_sandbox_backend
 from ..settings.plan_store import (
     PLAN_FILE_DIRECTORY,
     PLAN_STATUS_READY,
     PLAN_STATUS_SHARED,
     save_plan_content,
 )
-from ..utils.sandbox_registry import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
 

@@ -7,8 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from agent.utils.file_diff import build_file_diff
-from agent.utils.turn_checkpoint import (
+from agent.sandboxes.turn_checkpoint import (
     _diff_command,
     build_diff_files,
     mark_checkpoint_plan_mode,
@@ -244,15 +243,3 @@ async def test_record_turn_checkpoint_uses_preferred_repo_and_keeps_first_snapsh
         text=True,
     )
     assert snapshot.stdout == "first\n"
-
-
-def test_build_file_diff_applies_the_edit_to_the_before_image() -> None:
-    args = {"file_path": "/repo/a.py", "old_string": "OLD", "new_string": "NEW"}
-
-    assert build_file_diff("edit_file", args, "x OLD y OLD", None) == {
-        "filePath": "/repo/a.py",
-        "originalContent": "x OLD y OLD",
-        "newContent": "x NEW y OLD",
-        "isNewFile": False,
-    }
-    assert build_file_diff("edit_file", args, "no match here", None) is None

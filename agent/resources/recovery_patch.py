@@ -1,6 +1,6 @@
 """Collect a sandbox's uncommitted work as one git patch. Runs *inside* the sandbox.
 
-This file is never imported by the server: :mod:`agent.utils.recovery_patch`
+This file is never imported by the server: :mod:`agent.sandboxes.recovery_patch`
 reads its text and feeds it to ``python`` in the sandbox, with a base64-encoded
 JSON payload as ``argv[1]``. It therefore has to stay stdlib-only and free of
 version-specific syntax — none of the agent's code, dependencies, or Python

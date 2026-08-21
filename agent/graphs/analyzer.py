@@ -35,11 +35,11 @@ from ..runtime import (
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
 )
+from ..sandboxes.paths import aresolve_sandbox_work_dir
 from ..tools.read_finding_outcomes import read_finding_outcomes
 from ..tools.save_review_style import save_review_style_prompt
 from ..utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
 from ..utils.model import DEFAULT_LLM_REASONING
-from ..utils.sandbox_paths import aresolve_sandbox_work_dir
 from ..utils.tracing import REVIEW_TRACING_PROJECT, traced_graph_factory
 from ._assembly import cached_gateway_enabled, model_spec, prepare_config, stub_agent
 
