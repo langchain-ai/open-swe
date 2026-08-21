@@ -88,6 +88,9 @@ the same project via the `LANGSMITH_PROJECT` env var; override the default with
 
 The runner reads benchmark settings from `evals/reviewer/config.toml`. Set the
 deployment URL there (or leave it blank to use `LANGGRAPH_URL` / local dev).
+Every knob is declared once in `agent/review/eval_config.py`, which owns the env
+var each one reads and the CLI flag `run_eval` generates for it. Later layers win:
+`config.toml` → env vars (what the Action exports) → CLI flag.
 The target sets `reviewer_eval` for every run, so `publish_review` does not post
 to GitHub.
 

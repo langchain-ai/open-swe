@@ -12,14 +12,16 @@ import logging
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
 
 from langgraph_sdk import get_client
 
+from agent.review.eval_config import ReviewerEvalConfig
 from agent.review.eval_store import (
-    _HEARTBEAT_INTERVAL_SECONDS,
     EVALS_NAMESPACE,
+    HEARTBEAT_INTERVAL_SECONDS,
     REVIEWER_EVAL_KEY,
+    EvalStatus,
+    ReviewerEvalRecord,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,7 +53,7 @@ class StoreReporter:
     def __init__(
         self,
         *,
-        config: dict[str, Any],
+        config: ReviewerEvalConfig,
         limit: int | None,
         total: int | None,
         created_by: str | None,
@@ -72,21 +74,27 @@ class StoreReporter:
         # get_client auto-loads the api key from LANGGRAPH/LANGSMITH/LANGCHAIN env.
         self._client = get_client(url=os.environ["LANGGRAPH_URL"])
 
-    def _record(self, *, status: str, **overrides: Any) -> dict[str, Any]:
-        record: dict[str, Any] = {
+    def _record(
+        self,
+        *,
+        status: EvalStatus,
+        finished_at: str | None = None,
+        error: str | None = None,
+    ) -> ReviewerEvalRecord:
+        return {
             "name": REVIEWER_EVAL_KEY,
             "status": status,
-            "run_name": self._config.get("experiment_prefix"),
-            "langsmith_project": self._config.get("langsmith_project"),
+            "run_name": self._config["experiment_prefix"],
+            "langsmith_project": self._config["langsmith_project"],
             "limit": self._limit,
             "config_snapshot": self._config,
             "started_at": self._started_at,
-            "finished_at": None,
+            "finished_at": finished_at,
             "created_by": self._created_by,
             "pid": None,
             "exit_code": None,
             "experiment_url": self._experiment_url_getter(),
-            "error": None,
+            "error": error,
             "log_tail": self._tail_getter(),
             "worker_id": self._worker_id,
             "heartbeat": _now_iso(),
@@ -95,12 +103,10 @@ class StoreReporter:
             "trigger": "github_action",
             "updated_at": _now_iso(),
         }
-        record.update(overrides)
-        return record
 
-    async def _put(self, record: dict[str, Any]) -> None:
+    async def _put(self, record: ReviewerEvalRecord) -> None:
         try:
-            await self._client.store.put_item(EVALS_NAMESPACE, REVIEWER_EVAL_KEY, record)
+            await self._client.store.put_item(EVALS_NAMESPACE, REVIEWER_EVAL_KEY, dict(record))
         except Exception:
             logger.warning("Failed to publish reviewer eval status to store", exc_info=True)
 
@@ -109,11 +115,11 @@ class StoreReporter:
 
     async def _heartbeat_loop(self) -> None:
         while True:
-            await asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
+            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
             await self._put(self._record(status="running"))
 
     def run_heartbeat(self) -> asyncio.Task[None]:
         return asyncio.create_task(self._heartbeat_loop())
 
-    async def finish(self, *, status: str, error: str | None = None) -> None:
+    async def finish(self, *, status: EvalStatus, error: str | None = None) -> None:
         await self._put(self._record(status=status, finished_at=_now_iso(), error=error))

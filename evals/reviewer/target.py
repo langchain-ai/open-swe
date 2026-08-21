@@ -10,25 +10,28 @@ verbatim form martian published.
 import logging
 import os
 import threading
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from langgraph_sdk import get_client
 
 from agent.input_messages import build_run_input
+from agent.review.eval_config import (
+    ENV_VARS,
+    ReviewerEvalConfig,
+    ScoreMode,
+    Severity,
+    config_from_env,
+    resolve_config,
+)
 from agent.review.findings import (
     REVIEW_FINDING_CAP,
     REVIEWER_EVAL_PUBLICATION_KEY,
     Finding,
-    Severity,
 )
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REVIEWER_ASSISTANT_ID = "reviewer"
 DEFAULT_LANGGRAPH_URL = "http://localhost:2024"
-ScoreMode = Literal["all_findings", "surfaced_findings"]
-_VALID_SCORE_MODES: set[ScoreMode] = {"all_findings", "surfaced_findings"}
-_VALID_SEVERITIES: set[Severity] = {"low", "medium", "high", "critical"}
 
 _THREAD_IDS: set[str] = set()
 _THREAD_IDS_LOCK = threading.Lock()
@@ -70,29 +73,29 @@ def drain_thread_ids() -> set[str]:
     return snapshot
 
 
+def _config() -> ReviewerEvalConfig:
+    """Resolve the knobs from the env ``run_eval`` exported before the run started."""
+    return resolve_config(config_from_env())
+
+
 def get_langgraph_url() -> str:
-    return os.getenv("LANGGRAPH_URL", DEFAULT_LANGGRAPH_URL)
+    return os.getenv(ENV_VARS["langgraph_url"], DEFAULT_LANGGRAPH_URL)
 
 
 def get_reviewer_assistant_id() -> str:
-    return os.getenv("REVIEWER_ASSISTANT_ID", DEFAULT_REVIEWER_ASSISTANT_ID)
+    return _config()["assistant_id"]
 
 
 def get_score_mode() -> ScoreMode:
-    value = os.getenv("REVIEWER_EVAL_SCORE_MODE", "surfaced_findings")
-    if value in _VALID_SCORE_MODES:
-        return cast(ScoreMode, value)
-    return "surfaced_findings"
+    return _config()["score_mode"]
 
 
 def get_reviewer_model_id() -> str | None:
-    value = os.getenv("REVIEWER_EVAL_MODEL_ID")
-    return value if value else None
+    return os.getenv(ENV_VARS["model_id"]) or None
 
 
 def get_reviewer_reasoning_effort() -> str | None:
-    value = os.getenv("REVIEWER_EVAL_REASONING_EFFORT")
-    return value if value else None
+    return os.getenv(ENV_VARS["reasoning_effort"]) or None
 
 
 def _build_user_message(inputs: dict[str, Any]) -> str:
@@ -291,16 +294,8 @@ def _normalize_finding(finding: Finding) -> dict[str, Any]:
 
 
 def _score_severity_threshold() -> Severity:
-    value = os.getenv("REVIEWER_EVAL_SEVERITY_THRESHOLD", "low")
-    if value in _VALID_SEVERITIES:
-        return cast(Severity, value)
-    return "low"
+    return _config()["severity_threshold"]
 
 
 def _score_cap() -> int:
-    raw = os.getenv("REVIEWER_EVAL_CAP", str(REVIEW_FINDING_CAP))
-    try:
-        cap = int(raw)
-    except ValueError:
-        return REVIEW_FINDING_CAP
-    return max(cap, 0)
+    return _config()["cap"]
