@@ -128,13 +128,6 @@ async def update_finding(
 
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    if status is not None:
-        try:
-            head_sha = await resolve_review_head_sha(get_thread_id_from_runtime(), configurable)
-        except ReviewerThreadMissingError as exc:
-            return thread_missing_tool_result(exc)
-        if head_sha:
-            updates["last_confirmed_sha"] = head_sha
 
     if not updates:
         if suggestion_dropped:
@@ -202,6 +195,14 @@ async def update_finding(
                     "Only include `suggestion` for small, obvious fixes."
                 )
             return result
+
+    if status is not None and not delegated_resolution:
+        try:
+            head_sha = await resolve_review_head_sha(thread_id, configurable)
+        except ReviewerThreadMissingError as exc:
+            return thread_missing_tool_result(exc)
+        if head_sha:
+            updates["last_confirmed_sha"] = head_sha
 
     try:
         updated = await update_finding_fields(thread_id, finding_id, updates)

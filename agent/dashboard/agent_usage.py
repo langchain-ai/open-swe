@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import weakref
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -12,7 +13,7 @@ from typing import Any, Literal
 import httpx
 from langgraph_sdk import get_client
 
-from ..utils.json_types import as_json_object
+from ..utils.json_types import as_json_object, thread_metadata
 
 AGENT_RUN_NAMESPACE = ["usage", "v2", "agent_runs"]
 AGENT_PR_NAMESPACE = ["usage", "v2", "agent_prs"]
@@ -25,8 +26,15 @@ _AGENT_SOURCES = frozenset({"dashboard", "github", "slack", "linear", "schedule"
 _WRITE_LOCKS: weakref.WeakValueDictionary[tuple[tuple[str, ...], str, int], asyncio.Lock] = (
     weakref.WeakValueDictionary()
 )
-_USAGE_CACHE: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
+_USAGE_CACHE: dict[tuple[str, str], tuple[int, dict[str, Any], dict[str, Any] | None]] = {}
 _USAGE_CACHE_TTL_MS = 60_000
+
+LEGACY_THREAD_NAMESPACE = ["agent_usage", "threads"]
+LEGACY_PR_NAMESPACE = ["agent_usage", "prs"]
+BACKFILL_NAMESPACE = ["usage", "v2", "backfill"]
+_BACKFILL_KEY = "legacy_v1"
+
+logger = logging.getLogger(__name__)
 
 
 def _client():
@@ -126,6 +134,171 @@ def _email(value: object) -> str:
 
 def _int(value: object, fallback: object = 0) -> int:
     return value if isinstance(value, int) else fallback if isinstance(fallback, int) else 0
+
+
+async def _backfill_legacy_agent_records() -> None:
+    legacy_threads, legacy_prs = await asyncio.gather(
+        _all(LEGACY_THREAD_NAMESPACE), _all(LEGACY_PR_NAMESPACE)
+    )
+    for record in legacy_threads:
+        thread_id = record.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id:
+            continue
+        if record.get("source") not in _AGENT_SOURCES:
+            continue
+        key = _store_key("run", f"legacy:{thread_id}")
+        if await _get(AGENT_RUN_NAMESPACE, key):
+            continue
+        await _client().store.put_item(
+            AGENT_RUN_NAMESPACE,
+            key,
+            {
+                "run_id": f"legacy:{thread_id}",
+                "thread_id": thread_id,
+                "github_login": _login(record.get("github_login")),
+                "user_email": _email(record.get("user_email")),
+                "model_id": record.get("model_id") or "",
+                "effort": record.get("effort") or "",
+                "source": record.get("source"),
+                "created_at_ms": _timestamp_ms(record.get("created_at_ms"))
+                or _timestamp_ms(record.get("updated_at_ms")),
+            },
+        )
+    for record in legacy_prs:
+        owner = record.get("owner")
+        repo = record.get("repo")
+        number = record.get("pr_number")
+        if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
+            continue
+        key = _store_key("pr", owner.lower(), repo.lower(), number)
+        if await _get(AGENT_PR_NAMESPACE, key):
+            continue
+        await _client().store.put_item(
+            AGENT_PR_NAMESPACE,
+            key,
+            {
+                **record,
+                "github_login": _login(record.get("github_login")),
+                "user_email": _email(record.get("user_email")),
+                "created_at_ms": _timestamp_ms(record.get("created_at_ms"))
+                or _timestamp_ms(record.get("updated_at_ms")),
+                "merged_at_ms": 0,
+            },
+        )
+
+
+async def _backfill_legacy_reviews() -> None:
+    from ..review.findings import REVIEWER_THREAD_KIND
+
+    offset = 0
+    while True:
+        page = await _client().threads.search(
+            metadata={"kind": REVIEWER_THREAD_KIND}, limit=_PAGE_SIZE, offset=offset
+        )
+        threads = list(page or [])
+        for thread in threads:
+            metadata = thread_metadata(thread)
+            thread_id = thread.get("thread_id") if isinstance(thread, Mapping) else None
+            if not isinstance(thread_id, str) or not thread_id:
+                continue
+            findings = [item for item in metadata.get("findings") or [] if isinstance(item, dict)]
+            head_sha = metadata.get("last_reviewed_sha") or metadata.get("head_sha") or ""
+            reviewed_at_ms = _timestamp_ms(
+                metadata.get("created_at")
+                or (thread.get("created_at") if isinstance(thread, Mapping) else None)
+            )
+            await _backfill_legacy_review(
+                thread_id=thread_id,
+                metadata=metadata,
+                findings=findings,
+                head_sha=str(head_sha),
+                reviewed_at_ms=reviewed_at_ms,
+            )
+        if len(threads) < _PAGE_SIZE:
+            return
+        offset += len(threads)
+
+
+async def _backfill_legacy_review(
+    *,
+    thread_id: str,
+    metadata: dict[str, Any],
+    findings: list[dict[str, Any]],
+    head_sha: str,
+    reviewed_at_ms: int,
+) -> None:
+    pr_meta = as_json_object(metadata.get("pr"))
+    owner = str(pr_meta.get("owner") or "")
+    repo = str(pr_meta.get("name") or "")
+    pr_number = pr_meta.get("number")
+    if not owner or not repo or not isinstance(pr_number, int):
+        return
+    review_key = _store_key("review", thread_id, head_sha)
+    if not await _get(REVIEW_NAMESPACE, review_key):
+        await _client().store.put_item(
+            REVIEW_NAMESPACE,
+            review_key,
+            {
+                "thread_id": thread_id,
+                "owner": owner,
+                "repo": repo,
+                "pr_number": pr_number,
+                "head_sha": head_sha,
+                "findings_recorded": len(findings),
+                "published_at_ms": reviewed_at_ms,
+            },
+        )
+    for finding in findings:
+        finding_id = finding.get("id")
+        if not isinstance(finding_id, str) or not finding_id:
+            continue
+        key = _store_key("finding", thread_id, finding_id)
+        if await _get(REVIEW_FINDING_NAMESPACE, key):
+            continue
+        status = finding.get("status") or "open"
+        surfaced = _finding_surfaced(finding)
+        await _client().store.put_item(
+            REVIEW_FINDING_NAMESPACE,
+            key,
+            {
+                "thread_id": thread_id,
+                "finding_id": finding_id,
+                "owner": owner,
+                "repo": repo,
+                "pr_number": pr_number,
+                "severity": finding.get("severity") or "",
+                "category": finding.get("category") or "",
+                "status": status,
+                "first_seen_sha": finding.get("first_seen_sha") or "",
+                "last_confirmed_sha": finding.get("last_confirmed_sha") or "",
+                "surfaced_at_ms": reviewed_at_ms if surfaced else 0,
+                "human_replies": _human_reply_count(finding),
+                "recorded_at_ms": reviewed_at_ms,
+                "updated_at_ms": reviewed_at_ms,
+                "resolved_at_ms": reviewed_at_ms if status == "resolved" else 0,
+                "resolved_sha": finding.get("last_confirmed_sha") or ""
+                if status == "resolved"
+                else "",
+            },
+        )
+
+
+async def _backfill_legacy_usage() -> None:
+    """Migrate pre-v2 usage records into the event namespaces exactly once."""
+    if await _get(BACKFILL_NAMESPACE, _BACKFILL_KEY):
+        return
+    async with _write_lock(BACKFILL_NAMESPACE, _BACKFILL_KEY):
+        if await _get(BACKFILL_NAMESPACE, _BACKFILL_KEY):
+            return
+        try:
+            await _backfill_legacy_agent_records()
+            await _backfill_legacy_reviews()
+        except Exception:  # noqa: BLE001
+            logger.warning("Legacy usage backfill failed; retrying next read", exc_info=True)
+            return
+        await _client().store.put_item(
+            BACKFILL_NAMESPACE, _BACKFILL_KEY, {"completed_at_ms": _now_ms()}
+        )
 
 
 async def record_agent_run_usage(
@@ -271,10 +444,10 @@ async def record_reviewer_publication(
 ) -> None:
     """Record a completed review and its finding cohort."""
     now_ms = _now_ms()
-    await _client().store.put_item(
-        REVIEW_NAMESPACE,
-        _store_key("review", thread_id, head_sha),
-        {
+
+    def update_review(existing: dict[str, Any] | None) -> dict[str, Any]:
+        return {
+            **(existing or {}),
             "thread_id": thread_id,
             "owner": owner,
             "repo": repo,
@@ -283,9 +456,10 @@ async def record_reviewer_publication(
             "findings_recorded": sum(
                 1 for finding in findings if finding.get("first_seen_sha") == head_sha
             ),
-            "published_at_ms": now_ms,
-        },
-    )
+            "published_at_ms": (existing or {}).get("published_at_ms") or now_ms,
+        }
+
+    await _mutate(REVIEW_NAMESPACE, _store_key("review", thread_id, head_sha), update_review)
     for finding in findings:
         finding_id = finding.get("id")
         if not isinstance(finding_id, str) or not finding_id:
@@ -406,6 +580,15 @@ def _new_user(key: str, record: dict[str, Any], aliases: dict[str, str]) -> dict
     }
 
 
+def _limited_rows(
+    rows: list[dict[str, Any]], current_row: dict[str, Any] | None, limit: int
+) -> list[dict[str, Any]]:
+    limited = rows[: min(max(limit, 1), 100)]
+    if current_row and all(row["rank"] != current_row["rank"] for row in limited):
+        return [*limited, current_row]
+    return limited
+
+
 def _in_period(record: dict[str, Any], field: str, cutoff_ms: int) -> bool:
     timestamp = _timestamp_ms(record.get(field))
     return timestamp > 0 and timestamp >= cutoff_ms
@@ -424,8 +607,9 @@ async def list_agent_usage_leaderboard(
     cached = _USAGE_CACHE.get(cache_key)
     if cached and _now_ms() - cached[0] < _USAGE_CACHE_TTL_MS:
         payload = dict(cached[1])
-        payload["rows"] = payload["rows"][: min(max(limit, 1), 100)]
+        payload["rows"] = _limited_rows(payload["rows"], cached[2], limit)
         return payload
+    await _backfill_legacy_usage()
     cutoff_ms = _period_cutoff_ms(normalized)
     runs, prs, review_records, finding_records = await asyncio.gather(
         _all(AGENT_RUN_NAMESPACE),
@@ -506,8 +690,6 @@ async def list_agent_usage_leaderboard(
             current_row = row
         if len(rows) < 100:
             rows.append(row)
-    if current_row and current_row not in rows:
-        rows.append(current_row)
 
     reviews = [
         record for record in review_records if _in_period(record, "published_at_ms", cutoff_ms)
@@ -563,7 +745,7 @@ async def list_agent_usage_leaderboard(
         "generated_at_ms": now_ms,
         "reviewer_stats": reviewer_stats,
     }
-    _USAGE_CACHE[cache_key] = (now_ms, payload)
+    _USAGE_CACHE[cache_key] = (now_ms, payload, current_row)
     result = dict(payload)
-    result["rows"] = rows[: min(max(limit, 1), 100)]
+    result["rows"] = _limited_rows(rows, current_row, limit)
     return result
