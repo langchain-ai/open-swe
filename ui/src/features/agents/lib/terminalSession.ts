@@ -326,7 +326,6 @@ export function useAttachedTerminal(
             socketRef.current = createdSocket
             createdSocket.onopen = () => {
               if (socketRef.current !== createdSocket || disposed) return
-              retryCount = 0
               cloudConnectingRef.current = false
               setState((current) => ({
                 ...current,
@@ -359,6 +358,7 @@ export function useAttachedTerminal(
                 message.type === "output" &&
                 typeof message.data === "string"
               ) {
+                retryCount = 0
                 setState((current) => ({
                   ...current,
                   buffer: trimBuffer(`${current.buffer}${message.data}`),
