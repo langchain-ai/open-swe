@@ -66,5 +66,7 @@ async def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend
     for name in ("large_tool_results", "conversation_history"):
         directory = root / name
         await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
-        routes[f"/{name}/"] = FilesystemBackend(root_dir=directory, virtual_mode=True)
+        routes[f"/{name}/"] = await asyncio.to_thread(
+            FilesystemBackend, root_dir=directory, virtual_mode=True
+        )
     return routes
