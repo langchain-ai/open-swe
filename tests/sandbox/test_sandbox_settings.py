@@ -95,24 +95,26 @@ async def test_upsert_persists_and_returns_effective() -> None:
     assert result["effective_base_snapshot_id"] == "admin-snap"
 
 
-async def test_server_prefers_repo_snapshot_then_admin_base() -> None:
-    from agent import server
+async def test_runtime_prefers_repo_snapshot_then_admin_base() -> None:
+    from agent.runtime import sandbox
 
     with (
         patch.object(
-            server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
+            sandbox, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
         ),
         patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
+            sandbox, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
         ),
     ):
-        assert await server._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "repo-snap"
+        assert await sandbox._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "repo-snap"
 
     with (
-        patch.object(server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value=None),
         patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
+            sandbox, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value=None
+        ),
+        patch.object(
+            sandbox, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
         ),
     ):
-        assert await server._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "admin-snap"
-        assert await server._resolve_snapshot_id(None) == "admin-snap"
+        assert await sandbox._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "admin-snap"
+        assert await sandbox._resolve_snapshot_id(None) == "admin-snap"

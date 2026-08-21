@@ -29,6 +29,15 @@ SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
 }
 
 
+def sandbox_provider_uses_proxy() -> bool:
+    """Whether the configured provider fronts GitHub traffic with an auth proxy.
+
+    Only LangSmith sandboxes have one; every other provider reaches GitHub
+    directly, so there is nothing to configure or refresh.
+    """
+    return os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
+
+
 def _load_sandbox_factory(sandbox_type: str) -> SandboxFactory:
     factory_path = SANDBOX_FACTORIES.get(sandbox_type)
     if factory_path is None:

@@ -12,9 +12,13 @@ from langchain_core.runnables import RunnableConfig
 from langsmith.sandbox import SandboxClientError
 
 from agent.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
-from agent.server import SANDBOX_BACKENDS, ensure_sandbox_for_thread
+from agent.runtime.sandbox import ensure_sandbox_for_thread
 from agent.utils.sandbox import SandboxGoneError
-from agent.utils.sandbox_state import SandboxUnreachableError, set_sandbox_backend
+from agent.utils.sandbox_state import (
+    SANDBOX_BACKENDS,
+    SandboxUnreachableError,
+    set_sandbox_backend,
+)
 
 
 @pytest.mark.asyncio
@@ -26,22 +30,24 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.runtime.sandbox.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-deleted",
         ),
         patch(
-            "agent.server.create_sandbox",
+            "agent.runtime.sandbox.create_sandbox",
             new_callable=AsyncMock,
             side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
         ),
         patch(
-            "agent.server._create_sandbox_with_proxy",
+            "agent.runtime.sandbox._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=replacement,
         ) as create_replacement,
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
-        patch("agent.server.client.threads.update", new_callable=AsyncMock) as update_thread,
+        patch("agent.runtime.sandbox._configure_git_identity", new_callable=AsyncMock),
+        patch(
+            "agent.runtime.sandbox.client.threads.update", new_callable=AsyncMock
+        ) as update_thread,
     ):
         result = await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
 
@@ -68,22 +74,22 @@ async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() ->
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.runtime.sandbox.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-cached-dead",
         ),
         patch(
-            "agent.server._refresh_github_proxy",
+            "agent.runtime.sandbox.configure_proxy_for_sandbox",
             new_callable=AsyncMock,
             side_effect=SandboxClientError("sandbox is gone"),
         ),
         patch(
-            "agent.server._create_sandbox_with_proxy",
+            "agent.runtime.sandbox._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=replacement,
         ) as create_replacement,
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
-        patch("agent.server.client.threads.update", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox.client.threads.update", new_callable=AsyncMock),
     ):
         result = await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
 
@@ -101,22 +107,22 @@ async def test_failed_replacement_still_raises_sandbox_unreachable() -> None:
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.runtime.sandbox.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-deleted",
         ),
         patch(
-            "agent.server.create_sandbox",
+            "agent.runtime.sandbox.create_sandbox",
             new_callable=AsyncMock,
             side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
         ),
         patch(
-            "agent.server._create_sandbox_with_proxy",
+            "agent.runtime.sandbox._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             side_effect=RuntimeError("sandbox API outage"),
         ),
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
-        patch("agent.server.client.threads.update", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox.client.threads.update", new_callable=AsyncMock),
         pytest.raises(SandboxUnreachableError) as excinfo,
     ):
         await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
@@ -134,21 +140,21 @@ async def test_unreachable_sandbox_still_fails_by_default() -> None:
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.runtime.sandbox.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-deleted",
         ),
         patch(
-            "agent.server.create_sandbox",
+            "agent.runtime.sandbox.create_sandbox",
             new_callable=AsyncMock,
             side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
         ),
         patch(
-            "agent.server._create_sandbox_with_proxy",
+            "agent.runtime.sandbox._create_sandbox_with_proxy",
             new_callable=AsyncMock,
         ) as create_replacement,
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
-        patch("agent.server.client.threads.update", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox.client.threads.update", new_callable=AsyncMock),
         pytest.raises(SandboxUnreachableError),
     ):
         await ensure_sandbox_for_thread(thread_id)
@@ -217,27 +223,27 @@ async def test_deleted_sandbox_is_replaced_without_opting_in() -> None:
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.runtime.sandbox.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-deleted",
         ),
         patch(
-            "agent.server.create_sandbox",
+            "agent.runtime.sandbox.create_sandbox",
             new_callable=AsyncMock,
             side_effect=SandboxGoneError("Sandbox 'sandbox-deleted' not found"),
         ),
         patch(
-            "agent.server._create_sandbox_with_proxy",
+            "agent.runtime.sandbox._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=replacement,
         ) as create_replacement,
         patch(
-            "agent.server._configure_git_identity",
+            "agent.runtime.sandbox._configure_git_identity",
             new_callable=AsyncMock,
             side_effect=lambda *_: order.append("init"),
         ),
         patch(
-            "agent.server.client.threads.update",
+            "agent.runtime.sandbox.client.threads.update",
             new_callable=AsyncMock,
             side_effect=lambda **_: order.append("bind"),
         ) as update_thread,

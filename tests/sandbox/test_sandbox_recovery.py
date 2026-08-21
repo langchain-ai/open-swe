@@ -73,7 +73,9 @@ async def test_sandbox_client_error_notifies_and_never_recreates() -> None:
                 "agent.middleware.tool_error_handler.post_sandbox_unreachable_notification",
                 new_callable=AsyncMock,
             ) as mock_notify,
-            patch("agent.server._create_sandbox_with_proxy", new_callable=AsyncMock) as mock_create,
+            patch(
+                "agent.runtime.sandbox._create_sandbox_with_proxy", new_callable=AsyncMock
+            ) as mock_create,
         ):
             result = await middleware.awrap_tool_call(request, handler)
 
