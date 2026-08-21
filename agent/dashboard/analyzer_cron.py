@@ -10,6 +10,7 @@ import hashlib
 import logging
 
 from ..config import langgraph_client
+from ..scheduling.crons import create_cron, delete_cron
 from .review_style_jobs import (
     build_continual_run_configurable,
     build_continual_run_input,
@@ -37,7 +38,8 @@ async def ensure_continual_cron(full_name: str) -> str | None:
         return existing
 
     try:
-        cron = await langgraph_client().crons.create(
+        cron_id = await create_cron(
+            langgraph_client(),
             _ASSISTANT_ID,
             schedule=_daily_schedule(full_name),
             input=build_continual_run_input(full_name),
@@ -48,11 +50,8 @@ async def ensure_continual_cron(full_name: str) -> str | None:
         logger.exception("Failed to create continual cron for %s", full_name)
         return None
 
-    cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
-    if isinstance(cron_id, str) and cron_id:
-        await update_review_style(full_name, {"continual_cron_id": cron_id})
-        return cron_id
-    return None
+    await update_review_style(full_name, {"continual_cron_id": cron_id})
+    return cron_id
 
 
 async def remove_continual_cron(full_name: str) -> None:
@@ -61,8 +60,5 @@ async def remove_continual_cron(full_name: str) -> None:
     cron_id = record.get("continual_cron_id") if record else None
     if not (isinstance(cron_id, str) and cron_id):
         return
-    try:
-        await langgraph_client().crons.delete(cron_id)
-    except Exception:
-        logger.debug("Could not delete continual cron %s for %s", cron_id, full_name, exc_info=True)
+    await delete_cron(langgraph_client(), cron_id)
     await update_review_style(full_name, {"continual_cron_id": None})

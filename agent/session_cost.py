@@ -7,6 +7,7 @@ from typing import Any, Literal, TypedDict
 from langgraph_sdk.client import LangGraphClient
 
 from .config import langgraph_client
+from .scheduling.crons import SCHEDULER_ASSISTANT_ID, scheduler_run_input
 from .utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from .utils.slack import (
     fetch_slack_thread_message_by_ts,
@@ -18,11 +19,11 @@ from .utils.slack import (
 
 logger = logging.getLogger(__name__)
 
+SESSION_COST_TASK = "session_cost"
 _RETRY_DELAYS_SECONDS = (15, 30, 60, 120, 240)
 
 
-class SessionCostRefresh(TypedDict):
-    task: Literal["session_cost"]
+class SessionCostPayload(TypedDict):
     agent_thread_id: str
     run_id: str
     prepare_run_id: str
@@ -36,7 +37,7 @@ def _value(state: Mapping[str, Any], key: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostRefresh | None:
+def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostPayload | None:
     values = {
         key: _value(state, key)
         for key in ("agent_thread_id", "run_id", "prepare_run_id", "channel_id", "thread_ts")
@@ -44,7 +45,6 @@ def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostRefresh | Non
     if any(value is None for value in values.values()):
         return None
     return {
-        "task": "session_cost",
         "agent_thread_id": values["agent_thread_id"] or "",
         "run_id": values["run_id"] or "",
         "prepare_run_id": values["prepare_run_id"] or "",
@@ -70,8 +70,8 @@ async def schedule_session_cost_refresh(
     try:
         await client.runs.create(
             None,
-            "scheduler",
-            input=payload,
+            SCHEDULER_ASSISTANT_ID,
+            input=scheduler_run_input(SESSION_COST_TASK, payload),
             metadata={"kind": "session_cost_refresh", "run_id": payload["run_id"]},
             after_seconds=_RETRY_DELAYS_SECONDS[attempt],
             on_completion="delete",

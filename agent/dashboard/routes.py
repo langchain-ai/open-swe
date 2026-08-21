@@ -175,9 +175,8 @@ from .sandbox_settings import (
     get_sandbox_settings,
     upsert_sandbox_settings,
 )
+from .schedule_models import ScheduleCreateBody, ScheduleUpdateBody
 from .schedules import (
-    ScheduleCreateBody,
-    ScheduleUpdateBody,
     create_agent_schedule,
     delete_agent_schedule,
     list_agent_schedules,

@@ -54,7 +54,7 @@ async def test_dashboard_followup_on_slack_thread_uses_dashboard_source(
     monkeypatch.setattr(thread_api, "get_thread_active_status", _inactive_thread)
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
     monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
+    monkeypatch.setattr(thread_api, "resolve_run_email", _run_email)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.send_dashboard_message(
@@ -83,7 +83,7 @@ async def test_dashboard_followup_sends_image_content_blocks(
     monkeypatch.setattr(thread_api, "get_thread_active_status", _inactive_thread)
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
     monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
+    monkeypatch.setattr(thread_api, "resolve_run_email", _run_email)
     monkeypatch.setattr(
         thread_api,
         "create_image_block",
@@ -397,7 +397,7 @@ async def test_dashboard_followup_preserves_explicit_repo_less_thread(
     monkeypatch.setattr(thread_api, "get_thread_active_status", _inactive_thread)
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
     monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
+    monkeypatch.setattr(thread_api, "resolve_run_email", _run_email)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.send_dashboard_message(
@@ -423,7 +423,7 @@ async def test_dashboard_followup_without_repo_metadata_allows_team_default(
     monkeypatch.setattr(thread_api, "get_thread_active_status", _inactive_thread)
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", _noop_token_check)
     monkeypatch.setattr(thread_api, "get_profile", _empty_profile)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", _run_email)
+    monkeypatch.setattr(thread_api, "resolve_run_email", _run_email)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_api.send_dashboard_message(

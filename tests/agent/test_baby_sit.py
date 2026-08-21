@@ -7,8 +7,9 @@ import httpx
 import pytest
 from langgraph_sdk.errors import ConflictError
 
-from agent import baby_sit, scheduler
+from agent import baby_sit
 from agent import store as agent_store
+from agent.scheduling import tasks
 from agent.utils.slack import GitHubPrRef
 
 
@@ -127,7 +128,12 @@ async def test_watch_lifecycle_creates_and_deletes_ten_minute_cron(
     assert watch_client.crons.created[0]["schedule"] == "*/10 * * * *"
     assert watch_client.crons.created[0]["input"] == {
         "task": "baby_sit",
-        "watch_key": "acme/repo#7",
+        "payload": {"watch_key": "acme/repo#7"},
+    }
+    assert watch_client.crons.created[0]["config"] is None
+    assert watch_client.crons.created[0]["metadata"] == {
+        "kind": "baby_sit",
+        "key": "acme/repo#7",
     }
 
     assert await baby_sit.stop_watch(watch["key"]) is True
@@ -409,12 +415,9 @@ async def test_failed_webhook_matches_active_head_and_deduplicates_delivery(
 
 async def test_scheduler_routes_baby_sit_task(monkeypatch: pytest.MonkeyPatch) -> None:
     evaluate = AsyncMock(return_value="pending")
-    monkeypatch.setattr(scheduler, "evaluate_watch", evaluate)
+    monkeypatch.setattr(tasks, "evaluate_watch", evaluate)
 
-    result = await scheduler._launch(
-        {"task": "baby_sit", "watch_key": "acme/repo#7"},
-        {"configurable": {}},
-    )
+    result = await tasks.run_scheduler_task("baby_sit", {"watch_key": "acme/repo#7"})
 
-    assert result == {"result": {"status": "pending"}}
+    assert result == {"status": "pending"}
     evaluate.assert_awaited_once_with("acme/repo#7")

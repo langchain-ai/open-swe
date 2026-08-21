@@ -32,6 +32,7 @@ from ..utils.json_types import (
     thread_metadata,
 )
 from ..utils.langsmith import get_langsmith_trace_url
+from ..utils.run_metadata import resolve_run_email
 from ..utils.slack import (
     lookup_slack_thread_run_mapping,
     parse_github_pr_url,
@@ -55,7 +56,6 @@ from .pr_diff import build_pr_diff_files
 from .profiles import get_profile, get_valid_access_token
 from .team_settings import get_team_default_model, get_team_fable_enabled
 from .ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
-from .user_mappings import email_for_login
 
 logger = logging.getLogger(__name__)
 
@@ -117,17 +117,6 @@ def _langgraph_proxy_headers(
 
 def _thread_is_busy(thread: ThreadLike) -> bool:
     return thread.get("status") == "busy"
-
-
-async def _resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
-    """Email used for GitHub/LangSmith auth on a run.
-
-    Prefers the admin/self GitHub→email mapping (the work email known to
-    the org) over the OAuth profile email, which may be a personal account
-    that isn't an org member.
-    """
-    mapped = await email_for_login(login)
-    return mapped or profile.get("email")
 
 
 class DashboardImageBody(BaseModel):
@@ -1373,7 +1362,7 @@ async def _build_dashboard_configurable(
         "thread_id": thread_id,
         "source": thread_source,
         "github_login": login,
-        "user_email": await _resolve_run_email(login, profile),
+        "user_email": await resolve_run_email(login, profile),
     }
     repo_config = _repo_config_from_metadata(metadata)
     if repo_config:

@@ -9,13 +9,19 @@ cancel the ones older than ``max_age_seconds`` so the thread frees up.
 
 import logging
 from datetime import UTC, datetime
+from typing import TypedDict
 
 from .config import langgraph_client
 from .utils.timestamps import parse_expiry
 
 logger = logging.getLogger(__name__)
 
+RECONCILE_TASK = "reconcile"
 _SEARCH_PAGE_SIZE = 100
+
+
+class ReconcilePayload(TypedDict):
+    """The sweep takes nothing from its tick; the schedule is the whole input."""
 
 
 async def reconcile_stale_runs(*, max_age_seconds: int = 1800) -> dict[str, int]:
