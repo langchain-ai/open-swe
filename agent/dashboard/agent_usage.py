@@ -10,9 +10,15 @@ from typing import Any, Literal
 import httpx
 from langgraph_sdk import get_client
 
-from ..review.findings import REVIEWER_THREAD_KIND
+from ..review.findings import (
+    REVIEWER_THREAD_KIND,
+    coerce_finding,
+    is_surfaced,
+    is_thread_resolved,
+    resolved_thread_ids_for_finding,
+)
 from ..utils.github_app import get_github_app_installation_token
-from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
+from ..utils.json_types import ThreadLike, thread_metadata
 
 USAGE_THREAD_NAMESPACE: list[str] = ["agent_usage", "threads"]
 USAGE_PR_NAMESPACE: list[str] = ["agent_usage", "prs"]
@@ -427,28 +433,18 @@ async def refresh_usage_leaderboard_cache(period: str | None = "30d") -> dict[st
 
 
 def _is_finding_surfaced(finding: dict[str, Any]) -> bool:
-    surface = as_json_object(finding.get("surface"))
-    state = surface.get("state")
-    if state in {"surfaced", "resolve_pending", "resolved"}:
-        return True
-    if isinstance(finding.get("github_review_id"), int):
-        return True
-    if isinstance(finding.get("github_review_comment_id"), int):
-        return True
-    comment_ids = finding.get("github_review_comment_ids")
-    thread_ids = finding.get("github_review_thread_ids")
-    return bool(comment_ids or thread_ids)
+    record = coerce_finding(finding)
+    return record is not None and is_surfaced(record)
 
 
 def _is_finding_resolved_by_us(finding: dict[str, Any]) -> bool:
-    if finding.get("status") != "resolved" or not _is_finding_surfaced(finding):
+    record = coerce_finding(finding)
+    if record is None or record.get("status") != "resolved" or not is_surfaced(record):
         return False
-    surface = as_json_object(finding.get("surface"))
     return bool(
-        surface.get("state") == "resolved"
-        or finding.get("github_thread_resolved")
-        or finding.get("github_resolved_thread_ids")
-        or finding.get("resolution_note")
+        is_thread_resolved(record)
+        or resolved_thread_ids_for_finding(record)
+        or record.get("resolution_note")
     )
 
 

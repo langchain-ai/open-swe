@@ -136,8 +136,8 @@ async def test_reviewer_stats_snapshot_counts_surfaced_and_resolved_findings(mon
                         "severity": "high",
                         "category": "correctness",
                         "first_seen_sha": "buggy-sha",
-                        "github_thread_resolved": True,
-                        "github_review_comment_id": 10,
+                        "surface_state": "resolved",
+                        "github_review_comment_ids": [10],
                         "resolution_note": "Fixed in a follow-up commit.",
                         "interactions": [{"kind": "human_reply"}],
                     },
@@ -146,7 +146,8 @@ async def test_reviewer_stats_snapshot_counts_surfaced_and_resolved_findings(mon
                         "status": "open",
                         "severity": "medium",
                         "category": "performance",
-                        "github_review_comment_id": 11,
+                        "surface_state": "surfaced",
+                        "github_review_comment_ids": [11],
                     },
                     {
                         "id": "f_3",
@@ -178,6 +179,54 @@ async def test_reviewer_stats_snapshot_counts_surfaced_and_resolved_findings(mon
         {"name": "performance", "count": 1},
         {"name": "style", "count": 1},
     ]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_stats_classifies_legacy_shaped_findings(monkeypatch):
+    """Findings persisted before the identity fields were unified still count."""
+    threads = [
+        {
+            "created_at": "2025-01-01T00:00:00Z",
+            "metadata": {
+                "kind": "reviewer",
+                "head_sha": "fixed-sha",
+                "pr": {"owner": "langchain-ai", "name": "open-swe", "number": 1},
+                "findings": [
+                    {
+                        "id": "f_1",
+                        "status": "resolved",
+                        "severity": "high",
+                        "category": "correctness",
+                        "first_seen_sha": "buggy-sha",
+                        "github_thread_resolved": True,
+                        "github_review_comment_id": 10,
+                        "resolution_note": "Fixed in a follow-up commit.",
+                    },
+                    {
+                        "id": "f_2",
+                        "status": "open",
+                        "severity": "medium",
+                        "category": "performance",
+                        "surface": {"finding_id": "f_2", "state": "surfaced"},
+                    },
+                    {
+                        "id": "f_3",
+                        "status": "open",
+                        "severity": "low",
+                        "category": "style",
+                    },
+                ],
+            },
+        }
+    ]
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(threads=FakeThreads(threads)))
+
+    snapshot = await agent_usage._build_reviewer_stats_snapshot("all")
+
+    assert snapshot["findings_recorded"] == 3
+    assert snapshot["surfaced_findings"] == 2
+    assert snapshot["addressed_findings"] == 1
+    assert snapshot["resolved_after_update"] == 1
 
 
 @pytest.mark.asyncio
