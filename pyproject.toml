@@ -40,6 +40,7 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.1",
     "Pygments>=2.20.0",
+    "python-dotenv>=1.2.2",
 ]
 
 [tool.uv]
@@ -97,6 +98,6 @@ venvPath = "."
 venv = ".venv"
 pythonVersion = "3.11"
 typeCheckingMode = "standard"
-include = ["agent", "tests"]
+include = ["agent", "evals", "scripts", "tests"]
 exclude = ["**/node_modules", "**/__pycache__", ".venv", "ui", "**/.*"]
 reportMissingTypeStubs = false

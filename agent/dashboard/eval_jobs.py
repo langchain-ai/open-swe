@@ -11,52 +11,23 @@ was killed) to ``failed``.
 import logging
 import os
 from datetime import UTC, datetime
-from typing import Any, Literal, TypedDict
+from typing import Any, cast
 
 from langgraph_sdk import get_client
 
-from agent.review.eval_store import (
-    _HEARTBEAT_STALE_SECONDS,
+from agent.review.eval_config import (
     DEFAULT_EVAL_PROJECT,
-    EVALS_NAMESPACE,
-    REVIEWER_EVAL_KEY,
+    ReviewerEvalConfig,
+    resolve_config,
 )
-from agent.review.findings import REVIEW_FINDING_CAP
+from agent.review.eval_store import (
+    EVALS_NAMESPACE,
+    HEARTBEAT_STALE_SECONDS,
+    REVIEWER_EVAL_KEY,
+    ReviewerEvalRecord,
+)
 
 logger = logging.getLogger(__name__)
-
-EvalStatus = Literal["idle", "running", "completed", "failed"]
-ScoreMode = Literal["all_findings", "surfaced_findings"]
-Severity = Literal["low", "medium", "high", "critical"]
-
-
-class ReviewerEvalConfig(TypedDict):
-    dataset_name: str
-    experiment_prefix: str
-    max_concurrency: int
-    langsmith_project: str
-    langgraph_url: str
-    assistant_id: str
-    model_id: str
-    reasoning_effort: str
-    score_mode: ScoreMode
-    severity_threshold: Severity
-    cap: int
-
-
-DEFAULT_REVIEWER_EVAL_CONFIG: ReviewerEvalConfig = {
-    "dataset_name": "openswe-reviewer-v1",
-    "experiment_prefix": "openswe-review-confidence",
-    "max_concurrency": 5,
-    "langsmith_project": DEFAULT_EVAL_PROJECT,
-    "langgraph_url": "",
-    "assistant_id": "reviewer",
-    "model_id": "google_genai:gemini-3.7-flash",
-    "reasoning_effort": "medium",
-    "score_mode": "surfaced_findings",
-    "severity_threshold": "low",
-    "cap": REVIEW_FINDING_CAP,
-}
 
 
 def _client():
@@ -75,18 +46,16 @@ def _eval_project() -> str:
     return os.environ.get("EVAL_LANGSMITH_PROJECT") or DEFAULT_EVAL_PROJECT
 
 
-def _resolve_eval_config(config: ReviewerEvalConfig | None = None) -> ReviewerEvalConfig:
-    resolved: ReviewerEvalConfig = {
-        **DEFAULT_REVIEWER_EVAL_CONFIG,
-        "langsmith_project": _eval_project(),
-        "langgraph_url": _resolve_langgraph_url() or "",
-    }
-    if config is not None:
-        resolved.update(config)
-    return resolved
+def _resolve_eval_config() -> ReviewerEvalConfig:
+    return resolve_config(
+        {
+            "langsmith_project": _eval_project(),
+            "langgraph_url": _resolve_langgraph_url() or "",
+        }
+    )
 
 
-def _idle_record() -> dict[str, Any]:
+def _idle_record() -> ReviewerEvalRecord:
     config = _resolve_eval_config()
     return {
         "name": REVIEWER_EVAL_KEY,
@@ -112,7 +81,7 @@ def _idle_record() -> dict[str, Any]:
     }
 
 
-async def _get_record() -> dict[str, Any] | None:
+async def _get_record() -> ReviewerEvalRecord | None:
     try:
         item = await _client().store.get_item(EVALS_NAMESPACE, REVIEWER_EVAL_KEY)
     except Exception as e:
@@ -121,19 +90,20 @@ async def _get_record() -> dict[str, Any] | None:
     if item is None:
         return None
     value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
+    return cast(ReviewerEvalRecord, value) if isinstance(value, dict) else None
 
 
-async def _put_record(record: dict[str, Any]) -> dict[str, Any]:
-    record = {**record, "updated_at": _now_iso()}
+async def _put_record(record: ReviewerEvalRecord) -> ReviewerEvalRecord:
+    stamped = record.copy()
+    stamped["updated_at"] = _now_iso()
     try:
-        await _client().store.put_item(EVALS_NAMESPACE, REVIEWER_EVAL_KEY, record)
+        await _client().store.put_item(EVALS_NAMESPACE, REVIEWER_EVAL_KEY, dict(stamped))
     except Exception:
         logger.exception("Failed to persist reviewer eval status")
-    return record
+    return stamped
 
 
-def _heartbeat_age_seconds(record: dict[str, Any]) -> float | None:
+def _heartbeat_age_seconds(record: ReviewerEvalRecord) -> float | None:
     """Seconds since the record's heartbeat, or ``None`` if absent/unparseable."""
     hb = record.get("heartbeat")
     if not isinstance(hb, str) or not hb:
@@ -147,9 +117,9 @@ def _heartbeat_age_seconds(record: dict[str, Any]) -> float | None:
     return (datetime.now(UTC) - ts).total_seconds()
 
 
-def _is_heartbeat_fresh(record: dict[str, Any]) -> bool:
+def _is_heartbeat_fresh(record: ReviewerEvalRecord) -> bool:
     age = _heartbeat_age_seconds(record)
-    return age is not None and age <= _HEARTBEAT_STALE_SECONDS
+    return age is not None and age <= HEARTBEAT_STALE_SECONDS
 
 
 async def get_reviewer_eval_status() -> dict[str, Any]:
@@ -162,16 +132,11 @@ async def get_reviewer_eval_status() -> dict[str, Any]:
     """
     record = await _get_record()
     if record is None:
-        return _idle_record()
-    if record.get("status") != "running":
-        return record
-    if _is_heartbeat_fresh(record):
-        return record
-    return await _put_record(
-        {
-            **record,
-            "status": "failed",
-            "finished_at": record.get("finished_at") or _now_iso(),
-            "error": "Eval process is no longer tracked (GitHub Action stopped?).",
-        }
-    )
+        return dict(_idle_record())
+    if record.get("status") != "running" or _is_heartbeat_fresh(record):
+        return dict(record)
+    stale = record.copy()
+    stale["status"] = "failed"
+    stale["finished_at"] = record.get("finished_at") or _now_iso()
+    stale["error"] = "Eval process is no longer tracked (GitHub Action stopped?)."
+    return dict(await _put_record(stale))
