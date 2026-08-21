@@ -92,7 +92,7 @@ async def get_dashboard_thread_turn_diff(
 ) -> dict[str, Any]:
     """Return a persisted run diff, with sandbox checkpoints as a legacy fallback."""
     from ...sandboxes.turn_checkpoint import read_turn_diff
-    from ..run_diffs import THREAD_DIFF_KEY, get_run_diff, project_run_diff
+    from ...settings.run_diffs import THREAD_DIFF_KEY, get_run_diff, project_run_diff
 
     metadata = await get_readable_thread_metadata(thread_id)
     checkpoints = _checkpoints(metadata)

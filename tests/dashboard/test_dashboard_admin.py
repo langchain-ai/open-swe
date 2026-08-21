@@ -1,6 +1,6 @@
 import pytest
 
-from agent.dashboard.admin import is_admin, is_observability_authorized
+from agent.settings.admin import is_admin, is_observability_authorized
 
 
 def test_is_admin_accepts_email_or_github_login(monkeypatch: pytest.MonkeyPatch) -> None:

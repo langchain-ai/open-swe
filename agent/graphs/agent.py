@@ -31,8 +31,6 @@ from ..config import (
     in_process_langgraph_client,
     tool_loader_timeout_seconds,
 )
-from ..dashboard.admin import is_admin, is_observability_authorized
-from ..dashboard.run_diffs import THREAD_DIFF_KEY, save_run_diff
 from ..github.auth import resolve_github_token
 from ..github.authorship import resolve_triggering_user_identity
 from ..github.org_membership import is_login_in_allowed_org
@@ -51,17 +49,18 @@ from ..middleware import (
     ExcludeToolsMiddleware,
     ModelFallbackMiddleware,
     PlanModeMiddleware,
+    PrepareRunState,
     SubdirAgentsReadMiddleware,
     TimeoutWrapupMiddleware,
     WorkflowPushGuardMiddleware,
     check_message_queue_before_model,
+    core_stack,
+    model_guard_middleware,
     notify_step_limit_reached,
     refresh_github_proxy_before_model,
     task_on_failure,
     task_retry_on,
 )
-from ..middleware.prepare_run import PrepareRunState
-from ..middleware.stack import core_stack, model_guard_middleware
 from ..models.factory import DEFAULT_LLM_REASONING, ModelKwargs, fallback_model_id_for
 from ..prompt import construct_sender_context, construct_system_prompt, render_open_swe_shared_base
 from ..runtime.constants import DEFAULT_LLM_MAX_TOKENS, MODEL_CALL_RECURSION_LIMIT
@@ -74,6 +73,7 @@ from ..sandboxes.paths import aresolve_sandbox_work_dir
 from ..sandboxes.providers import SandboxUnreachableError
 from ..sandboxes.registry import get_or_create_sandbox_backend_proxy
 from ..sandboxes.turn_checkpoint import merge_checkpoint, read_turn_diff, record_turn_checkpoint
+from ..settings.admin import is_admin, is_observability_authorized
 from ..settings.agent_overrides import (
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
@@ -82,6 +82,7 @@ from ..settings.agent_overrides import (
 )
 from ..settings.agent_usage import record_agent_thread_usage
 from ..settings.environments import environment_prompt, resolve_environment
+from ..settings.run_diffs import THREAD_DIFF_KEY, save_run_diff
 from ..settings.user_mappings import email_for_login
 from ..thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from ..threads.settings import ThreadSettings, normalize_thread_settings

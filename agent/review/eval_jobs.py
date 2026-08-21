@@ -12,19 +12,19 @@ import logging
 from datetime import UTC, datetime
 from typing import cast
 
-from agent.config import configured_langgraph_url, eval_langsmith_project
-from agent.review.eval_config import (
+from ..config import configured_langgraph_url, eval_langsmith_project
+from ..store import get_value, now_iso, put_value
+from .eval_config import (
     DEFAULT_EVAL_PROJECT,
     ReviewerEvalConfig,
     resolve_config,
 )
-from agent.review.eval_store import (
+from .eval_store import (
     EVALS_NAMESPACE,
     HEARTBEAT_STALE_SECONDS,
     REVIEWER_EVAL_KEY,
     ReviewerEvalRecord,
 )
-from agent.store import get_value, now_iso, put_value
 
 logger = logging.getLogger(__name__)
 

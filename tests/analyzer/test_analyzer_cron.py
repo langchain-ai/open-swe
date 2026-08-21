@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.settings import analyzer_cron
+from agent.review import analyzer_cron
 
 
 @pytest.fixture

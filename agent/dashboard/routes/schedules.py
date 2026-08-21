@@ -5,11 +5,6 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import Response
 
-from ...settings.agent_usage import (
-    list_agent_usage_leaderboard,
-    refresh_reviewer_stats_cache,
-    refresh_usage_leaderboard_cache,
-)
 from ..authz import SESSION
 from ..schedule_models import ScheduleCreateBody, ScheduleUpdateBody
 from ..schedules import (
@@ -18,6 +13,11 @@ from ..schedules import (
     list_agent_schedules,
     trigger_agent_schedule,
     update_agent_schedule,
+)
+from ..usage_reports import (
+    list_agent_usage_leaderboard,
+    refresh_reviewer_stats_cache,
+    refresh_usage_leaderboard_cache,
 )
 
 router = APIRouter()

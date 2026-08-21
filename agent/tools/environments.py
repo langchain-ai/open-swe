@@ -10,8 +10,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..dashboard.admin import is_admin
 from ..settings import environments as store
+from ..settings.admin import is_admin
 
 logger = logging.getLogger(__name__)
 
