@@ -24,8 +24,8 @@ from ..settings.plan_store import (
     set_plan_status,
     write_plan_to_sandbox,
 )
+from ..slack.api import post_slack_thread_reply
 from ..utils.json_types import JsonObject, thread_metadata
-from ..utils.slack_api import post_slack_thread_reply
 from .authz import thread_is_readable, user_owns_thread
 from .oauth import require_same_origin_for_mutations, require_session
 from .threads.runs import dispatch_thread_followup

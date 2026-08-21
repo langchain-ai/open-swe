@@ -30,7 +30,7 @@ def apply() -> None:
     from agent.github import api as github_api
     from agent.github import auth, authorship
     from agent.graphs import _assembly
-    from agent.utils import slack_api
+    from agent.slack import api as slack_api
 
     # NB: ``from agent.tools import open_pull_request`` returns the re-exported
     # *function* (the tools package __init__ shadows the submodule), so patch the

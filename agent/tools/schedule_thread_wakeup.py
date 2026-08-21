@@ -14,7 +14,7 @@ from langgraph.config import get_config
 from ..config import langgraph_client
 from ..dispatch import completion_webhook_url, prepare_run_config
 from ..input_messages import build_run_input
-from ..utils.slack_threads import get_active_slack_thread
+from ..slack.threads import get_active_slack_thread
 
 logger = logging.getLogger(__name__)
 

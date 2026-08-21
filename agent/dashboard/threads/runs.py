@@ -43,6 +43,8 @@ from ...settings.options import (
 )
 from ...settings.profiles import get_profile
 from ...settings.team_settings import get_team_default_model, get_team_fable_enabled
+from ...slack.api import update_slack_trace_reply_for_web_handoff
+from ...slack.threads import lookup_slack_thread_run_mapping
 from ...store import now_ms
 from ...utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from ...utils.json_types import (
@@ -52,8 +54,6 @@ from ...utils.json_types import (
     thread_metadata,
 )
 from ...utils.run_metadata import resolve_run_email
-from ...utils.slack_api import update_slack_trace_reply_for_web_handoff
-from ...utils.slack_threads import lookup_slack_thread_run_mapping
 from ...utils.thread_ops import get_thread_active_status, queue_message_for_thread
 from ...utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
 from ...utils.timing import phase

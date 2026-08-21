@@ -16,8 +16,8 @@ from ..config import (
     slack_signing_secret,
 )
 from ..settings.workflow_approval import decide_workflow_push_approval
-from ..utils.slack_api import post_slack_thread_reply, update_slack_message
-from ..utils.slack_threads import (
+from ..slack.api import post_slack_thread_reply, update_slack_message
+from ..slack.threads import (
     SlackThreadMappingError,
     lookup_slack_run_mapping,
     lookup_slack_thread_id,

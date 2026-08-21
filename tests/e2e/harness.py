@@ -62,7 +62,7 @@ from langgraph_sdk import get_client  # noqa: E402
 
 from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
-from agent.utils.slack_threads import lookup_slack_thread_id  # noqa: E402
+from agent.slack.threads import lookup_slack_thread_id  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]

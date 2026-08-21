@@ -9,11 +9,12 @@ from typing import Any
 import httpx
 
 from ..config import slack_bot_token
-from .dashboard_links import dashboard_thread_url
-from .http import DEFAULT_HTTP_TIMEOUT
-from .langsmith import get_langsmith_trace_url
-from .run_usage import RunUsageSummary
-from .slack_format import (
+from ..utils.dashboard_links import dashboard_thread_url
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
+from ..utils.langsmith import get_langsmith_trace_url
+from ..utils.run_usage import RunUsageSummary
+from ..utils.user_messages import WARNING_ICON
+from .format import (
     SlackChannelContext,
     append_slack_web_link_footer,
     extract_channel_description_text,
@@ -22,7 +23,6 @@ from .slack_format import (
     parse_slack_ts,
     with_slack_web_link_context_block,
 )
-from .user_messages import WARNING_ICON
 
 logger = logging.getLogger(__name__)
 

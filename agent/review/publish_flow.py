@@ -15,9 +15,9 @@ from langgraph.config import get_config
 
 from ..github.checks import review_check_conclusion
 from ..settings.team_settings import get_team_review_trace_links_enabled
+from ..slack.api import post_slack_thread_reply
 from ..utils.dashboard_links import dashboard_review_url
 from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.slack_api import post_slack_thread_reply
 from ..utils.tracing import REVIEW_TRACING_PROJECT
 from .diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from .findings import (

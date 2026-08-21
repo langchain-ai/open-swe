@@ -21,11 +21,11 @@ from ..settings.workflow_approval import (
     mark_workflow_push_notified,
     workflow_push_approved,
 )
+from ..slack.api import post_slack_thread_reply_with_ts
+from ..slack.threads import get_active_slack_thread
 from ..tools.slack_thread_reply import build_workflow_approval_blocks
 from ..utils.dashboard_links import dashboard_workflow_approval_url
 from ..utils.sandbox_registry import SANDBOX_BACKENDS
-from ..utils.slack_api import post_slack_thread_reply_with_ts
-from ..utils.slack_threads import get_active_slack_thread
 
 logger = logging.getLogger(__name__)
 

@@ -19,8 +19,8 @@ from langgraph_sdk.client import LangGraphClient
 
 from ..config import langgraph_client
 from ..settings.agent_overrides import resolve_login_from_email_async
+from ..slack.api import get_slack_permalink
 from .json_types import as_thread_dict
-from .slack_api import get_slack_permalink
 from .thread_participants import PARTICIPANT_LOGINS_KEY, merge_participant_logins
 
 logger = logging.getLogger(__name__)

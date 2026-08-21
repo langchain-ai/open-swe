@@ -1,15 +1,15 @@
 """Pure functions over Slack payloads: parse, normalize, render.
 
 Nothing here talks to Slack or to the store, so the transport layer
-(:mod:`agent.utils.slack_api`) and the thread-mapping store
-(:mod:`agent.utils.slack_threads`) can both build on it.
+(:mod:`agent.slack.api`) and the thread-mapping store
+(:mod:`agent.slack.threads`) can both build on it.
 """
 
 import copy
 import re
 from typing import Any
 
-from .run_usage import RunUsageSummary
+from ..utils.run_usage import RunUsageSummary
 
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
