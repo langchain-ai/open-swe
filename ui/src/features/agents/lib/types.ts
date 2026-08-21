@@ -193,6 +193,7 @@ export interface AgentSchedule {
   repo: string | null
   slackChannelId?: string | null
   slackNotificationMode: SlackNotificationMode
+  adminThread: boolean
   model: string
   effort?: string | null
   enabled: boolean

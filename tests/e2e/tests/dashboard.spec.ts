@@ -551,7 +551,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       const url = new URL(response.url());
       return (
         response.request().method() === "GET" &&
-        url.pathname === `/dashboard/api/threads/${threadId}/turn-diff` &&
+        url.pathname === `/dashboard/api/threads/${threadId}/run-diff` &&
         url.searchParams.get("max_files") === "10" &&
         url.searchParams.get("include_content") === "false"
       );

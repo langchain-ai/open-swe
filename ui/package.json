@@ -61,6 +61,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
+    "eslint": "^10.8.1",
     "httpxy": "0.5.3",
     "jsdom": "^27.4.0",
     "prettier": "^3.8.1",
