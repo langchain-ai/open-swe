@@ -121,12 +121,18 @@ def test_create_params_accept_non_sensitive_runtime_and_proxy_settings() -> None
     "create_params",
     [
         {"env_vars": {"API_TOKEN": "sensitive"}},
+        {"env_vars": {"OPENAI_API_KEY": "sensitive"}},
         {"clientSecret": "sensitive"},
         {
             "proxy_config": {
                 "rules": [
                     {"headers": [{"name": "Authorization", "type": "opaque", "value": "sensitive"}]}
                 ]
+            }
+        },
+        {
+            "proxy_config": {
+                "rules": [{"headers": [{"name": "X-OpenAI-Api-Key", "value": "sensitive"}]}]
             }
         },
     ],

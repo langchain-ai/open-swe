@@ -68,7 +68,30 @@ _SENSITIVE_CREATE_PARAM_KEYS = frozenset(
         "token",
     }
 )
-_SENSITIVE_HEADER_NAMES = frozenset({"authorization", "cookie", "proxy-authorization", "x-api-key"})
+_SENSITIVE_CREATE_PARAM_SUFFIXES = (
+    "_api_key",
+    "_apikey",
+    "_authorization",
+    "_cookie",
+    "_credential",
+    "_credentials",
+    "_password",
+    "_pat",
+    "_private_key",
+    "_secret",
+    "_token",
+)
+_SENSITIVE_CREATE_PARAM_PREFIXES = (
+    "api_key_",
+    "authorization_",
+    "credential_",
+    "credentials_",
+    "password_",
+    "private_key_",
+    "secret_",
+    "token_",
+)
+_SENSITIVE_HEADER_NAMES = frozenset({"authorization", "cookie", "proxy_authorization", "x_api_key"})
 # `env:my-box` anywhere in a message, as a whole word.
 _ENV_TAG_RE = re.compile(r"(?:(?<=\s)|^)env:([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)")
 
@@ -139,16 +162,31 @@ def _validate_repos(value: list[str] | None) -> list[str]:
     return list(dict.fromkeys(normalize_repo_full_name(entry) for entry in value))
 
 
+def _normalize_create_param_name(value: str) -> str:
+    snake_value = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value.strip())
+    return re.sub(r"[^a-z0-9]+", "_", snake_value.lower()).strip("_")
+
+
+def _is_sensitive_create_param_name(value: str) -> bool:
+    normalized = _normalize_create_param_name(value)
+    return (
+        normalized in _SENSITIVE_CREATE_PARAM_KEYS
+        or normalized.endswith(_SENSITIVE_CREATE_PARAM_SUFFIXES)
+        or normalized.startswith(_SENSITIVE_CREATE_PARAM_PREFIXES)
+    )
+
+
 def _has_sensitive_create_param(value: JsonValue) -> bool:
     if isinstance(value, dict):
         header_name = value.get("name")
-        if isinstance(header_name, str) and header_name.strip().lower() in _SENSITIVE_HEADER_NAMES:
-            return True
+        if isinstance(header_name, str):
+            normalized_header = _normalize_create_param_name(header_name)
+            if normalized_header in _SENSITIVE_HEADER_NAMES or _is_sensitive_create_param_name(
+                normalized_header
+            ):
+                return True
         for key, nested in value.items():
-            snake_key = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key.strip())
-            normalized = re.sub(r"[^a-z0-9]+", "_", snake_key.lower()).strip("_")
-            parts = set(normalized.split("_"))
-            if normalized in _SENSITIVE_CREATE_PARAM_KEYS or parts & _SENSITIVE_CREATE_PARAM_KEYS:
+            if _is_sensitive_create_param_name(key):
                 return True
             if _has_sensitive_create_param(nested):
                 return True

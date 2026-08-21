@@ -560,12 +560,20 @@ class TestRefreshProxyOnSandboxReuse:
             patch(
                 "agent.server.resolve_environment",
                 new_callable=AsyncMock,
-                return_value={"create_params": {"proxy_config": base_proxy_config}},
+                return_value={"create_params": {"proxy_config": {}}},
             ),
             patch(
                 "agent.server.get_sandbox_id_from_metadata",
                 new_callable=AsyncMock,
                 return_value="sandbox-cached",
+            ),
+            patch(
+                "agent.server.get_sandbox_metadata",
+                new_callable=AsyncMock,
+                return_value={
+                    "sandbox_id": "sandbox-cached",
+                    "sandbox_base_proxy_config": base_proxy_config,
+                },
             ),
             patch(
                 "agent.server.get_github_app_installation_token_with_expiry",
@@ -627,6 +635,11 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value="sandbox-existing",
             ),
             patch(
+                "agent.server.get_sandbox_metadata",
+                new_callable=AsyncMock,
+                return_value={"sandbox_id": "sandbox-existing"},
+            ),
+            patch(
                 "agent.server.create_sandbox",
                 new_callable=AsyncMock,
                 return_value=mock_sandbox,
@@ -646,6 +659,7 @@ class TestRefreshProxyOnSandboxReuse:
             patch("agent.server.construct_system_prompt", return_value="prompt"),
             patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
             patch.dict("agent.server.SANDBOX_BACKENDS", {}, clear=True),
+            patch.dict("agent.utils.github_proxy._PROXY_BASE_CONFIGS", {}, clear=True),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             from agent.server import get_agent

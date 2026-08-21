@@ -159,6 +159,13 @@ def _merge_sandbox_create_extra_fields(
     return {**_get_sandbox_create_extra_fields(), **(create_params or {})}
 
 
+def _get_sandbox_proxy_config(
+    create_params: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    proxy_config = _merge_sandbox_create_extra_fields(create_params).get("proxy_config")
+    return dict(proxy_config) if isinstance(proxy_config, dict) else None
+
+
 def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, Any]) -> None:
     """Merge ``extra`` into the JSON body of the sandbox-create request.
 
@@ -395,11 +402,7 @@ async def _configure_github_proxy(
         return
     langsmith_endpoint = _get_sandbox_endpoint()
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
-    if base_proxy_config is None:
-        global_proxy_config = _get_sandbox_create_extra_fields().get("proxy_config")
-        proxy_config = dict(global_proxy_config) if isinstance(global_proxy_config, dict) else {}
-    else:
-        proxy_config = dict(base_proxy_config)
+    proxy_config = dict(base_proxy_config or {})
     custom_rules = proxy_config.get("rules")
     proxy_config["rules"] = [
         *(custom_rules if isinstance(custom_rules, list) else []),
@@ -502,8 +505,8 @@ async def create_langsmith_sandbox(
     )
 
     if sandbox_id is None and github_token:
-        proxy_config = (create_params or {}).get("proxy_config")
-        if isinstance(proxy_config, dict):
+        proxy_config = _get_sandbox_proxy_config(create_params)
+        if proxy_config is not None:
             await _configure_github_proxy(
                 backend.id,
                 github_token,

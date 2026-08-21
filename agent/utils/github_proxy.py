@@ -89,6 +89,13 @@ def record_proxy_token_expiry(
         _PROXY_BASE_CONFIGS.pop(thread_id, None)
 
 
+def get_recorded_proxy_base_config(thread_id: str | None) -> dict[str, Any] | None:
+    if not thread_id:
+        return None
+    config = _PROXY_BASE_CONFIGS.get(thread_id)
+    return dict(config) if config is not None else None
+
+
 def clear_proxy_token_expiry(thread_id: str | None) -> None:
     if thread_id:
         _PROXY_TOKEN_EXPIRY.pop(thread_id, None)
