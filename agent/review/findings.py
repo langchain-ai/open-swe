@@ -92,6 +92,28 @@ SEVERITY_ORDER: dict[Severity, int] = {
     "critical": 3,
 }
 
+# The accepted values for the literal types above, for tools validating agent
+# input before narrowing it with the ``coerce_*`` helpers below.
+SEVERITIES: frozenset[str] = frozenset(SEVERITY_ORDER)
+CONFIDENCES: frozenset[str] = frozenset({"low", "medium", "high"})
+FINDING_STATUSES: frozenset[str] = frozenset({"open", "resolved", "dismissed"})
+TERMINAL_FINDING_STATUSES: frozenset[str] = frozenset({"resolved", "dismissed"})
+DIFF_SIDES: frozenset[str] = frozenset({"LEFT", "RIGHT"})
+
+
+def coerce_severity(value: str) -> Severity:
+    """Narrow an already-validated string to the ``Severity`` literal."""
+    return cast(Severity, value)
+
+
+def coerce_confidence(value: str) -> Confidence:
+    return cast(Confidence, value)
+
+
+def coerce_side(value: str) -> DiffSide:
+    return cast(DiffSide, value)
+
+
 # Surface states only ever move forward, so normalization of a legacy record can
 # reconcile contradictory leftovers by taking the furthest-along state.
 SURFACE_STATE_ORDER: dict[SurfaceState, int] = {

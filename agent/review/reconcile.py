@@ -11,7 +11,7 @@ from .findings import (
     set_surface_state,
     thread_ids_for_finding,
 )
-from .publish import parse_review_comment_marker
+from .publish import fetch_pr_review_threads, parse_review_comment_marker
 
 ReviewThread = dict[str, Any]
 ReviewThreadMatch = tuple[ReviewThread, int | None]
@@ -245,3 +245,31 @@ async def reconcile_findings_with_review_threads(
     if updated:
         await replace_findings(reviewer_thread_id, findings)
     return findings
+
+
+async def sync_findings_with_github(
+    reviewer_thread_id: str,
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> list[Finding]:
+    """Fetch the PR's review threads and reconcile the tracked findings against them.
+
+    The publish flow and the finding-resolution tools both need the same
+    recovery: a finding whose comment was posted but whose ids were never
+    recorded is re-identified from the marker embedded in its GitHub comment.
+    """
+    findings = await list_findings(reviewer_thread_id)
+    if not findings:
+        return findings
+    review_threads = await fetch_pr_review_threads(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+    )
+    if not review_threads:
+        return findings
+    return await reconcile_findings_with_review_threads(reviewer_thread_id, review_threads)

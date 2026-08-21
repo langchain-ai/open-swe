@@ -7,13 +7,15 @@ from typing import Any
 
 import httpx
 
+from ..utils.github_http import github_client, github_paginate, github_request, github_url
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_PRS = 20
 DEFAULT_MAX_REVIEWERS = 10
 DEFAULT_MAX_SAMPLES_PER_REVIEWER = 6
 MIN_COMMENT_CHARS = 20
-GITHUB_API = "https://api.github.com"
+COLLECT_TIMEOUT = httpx.Timeout(90.0, connect=10.0)
 _BOT_SUFFIX = "[bot]"
 
 
@@ -37,42 +39,6 @@ class ReviewStyleSamples:
     samples: list[ReviewSample] = field(default_factory=list)
     prs_scanned: int = 0
     reviews_scanned: int = 0
-
-
-def github_headers(token: str) -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-
-async def _paginate(
-    client: httpx.AsyncClient,
-    url: str,
-    *,
-    headers: dict[str, str],
-    cap: int = 500,
-) -> list[Any]:
-    out: list[Any] = []
-    next_url: str | None = url
-    first = True
-    while next_url and len(out) < cap:
-        params = {"per_page": "100"} if first else None
-        r = await client.get(next_url, headers=headers, params=params)
-        r.raise_for_status()
-        page = r.json()
-        if isinstance(page, list):
-            out.extend(page)
-        next_url = None
-        link = r.headers.get("Link", "")
-        for part in link.split(","):
-            segments = [s.strip() for s in part.split(";")]
-            if len(segments) >= 2 and 'rel="next"' in segments[1] and segments[0].startswith("<"):
-                next_url = segments[0][1:-1]
-                break
-        first = False
-    return out
 
 
 def _is_bot_login(login: str | None) -> bool:
@@ -102,13 +68,13 @@ async def _recent_merged_prs(
     *,
     owner: str,
     repo: str,
-    headers: dict[str, str],
     max_prs: int,
 ) -> list[dict[str, Any]]:
     """Return recently merged PRs via the issues search API (reliable on busy repos)."""
-    r = await client.get(
-        f"{GITHUB_API}/search/issues",
-        headers=headers,
+    r = await github_request(
+        client,
+        "GET",
+        github_url("/search/issues"),
         params={
             "q": f"repo:{owner}/{repo} is:pr is:merged",
             "sort": "updated",
@@ -149,23 +115,20 @@ async def collect_review_samples(
 ) -> ReviewStyleSamples:
     """Sample recent merged PR feedback to identify reviewer style."""
     full_name = f"{owner}/{repo}"
-    headers = github_headers(token)
 
     raw_entries: list[tuple[str, int, ReviewSample]] = []
     reviewer_counts: Counter[str] = Counter()
 
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        merged_prs = await _recent_merged_prs(
-            client, owner=owner, repo=repo, headers=headers, max_prs=max_prs
-        )
+    async with github_client(token=token, timeout=COLLECT_TIMEOUT) as client:
+        merged_prs = await _recent_merged_prs(client, owner=owner, repo=repo, max_prs=max_prs)
 
         for pr in merged_prs:
             pr_number = pr.get("number")
             if not isinstance(pr_number, int):
                 continue
 
-            reviews_url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
-            for review in await _paginate(client, reviews_url, headers=headers, cap=100):
+            reviews_url = github_url(f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews")
+            for review in await github_paginate(client, reviews_url, cap=100):
                 if not isinstance(review, dict):
                     continue
                 user = review.get("user")
@@ -193,8 +156,8 @@ async def collect_review_samples(
                     )
                 )
 
-            comments_url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}/comments"
-            for comment in await _paginate(client, comments_url, headers=headers, cap=200):
+            comments_url = github_url(f"/repos/{owner}/{repo}/pulls/{pr_number}/comments")
+            for comment in await github_paginate(client, comments_url, cap=200):
                 if not isinstance(comment, dict):
                     continue
                 user = comment.get("user")
@@ -223,8 +186,8 @@ async def collect_review_samples(
                     )
                 )
 
-            issue_comments_url = f"{GITHUB_API}/repos/{owner}/{repo}/issues/{pr_number}/comments"
-            for comment in await _paginate(client, issue_comments_url, headers=headers, cap=100):
+            issue_comments_url = github_url(f"/repos/{owner}/{repo}/issues/{pr_number}/comments")
+            for comment in await github_paginate(client, issue_comments_url, cap=100):
                 if not isinstance(comment, dict):
                     continue
                 user = comment.get("user")

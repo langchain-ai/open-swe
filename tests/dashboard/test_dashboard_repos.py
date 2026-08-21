@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from agent import store
-from agent.dashboard import repo_cache, routes
+from agent.dashboard import repo_access, repo_cache, routes
 
 
 @pytest.fixture(autouse=True)
@@ -29,8 +29,8 @@ async def test_paginate_converts_github_timeout_to_503() -> None:
             await routes._paginate(
                 client,
                 "https://api.github.com/user/installations",
-                headers={},
                 items_key="installations",
+                max_retries=0,
             )
 
     assert exc.value.status_code == 503
@@ -48,8 +48,8 @@ async def test_paginate_converts_github_status_error_to_502() -> None:
             await routes._paginate(
                 client,
                 "https://api.github.com/user/installations",
-                headers={},
                 items_key="installations",
+                max_retries=0,
             )
 
     assert exc.value.status_code == 502
@@ -58,7 +58,7 @@ async def test_paginate_converts_github_status_error_to_502() -> None:
 
 @pytest.mark.asyncio
 async def test_list_repos_propagates_repository_page_timeouts(monkeypatch) -> None:
-    monkeypatch.setattr(routes, "get_valid_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(repo_access, "get_valid_access_token", AsyncMock(return_value="token"))
     calls = 0
 
     async def fake_paginate(*args: object, **kwargs: object) -> list[dict[str, object]]:
@@ -79,7 +79,7 @@ async def test_list_repos_propagates_repository_page_timeouts(monkeypatch) -> No
 
 @pytest.mark.asyncio
 async def test_list_repos_skips_inaccessible_installations(monkeypatch) -> None:
-    monkeypatch.setattr(routes, "get_valid_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(repo_access, "get_valid_access_token", AsyncMock(return_value="token"))
     calls = 0
 
     async def fake_paginate(*args: object, **kwargs: object) -> list[dict[str, object]]:

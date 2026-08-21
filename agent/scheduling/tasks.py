@@ -1,7 +1,7 @@
 """What a scheduler tick can be, and what running one does.
 
 One entry per task kind: the payload type its producer builds, and the handler
-that consumes it. The graph in :mod:`agent.scheduler` only forwards
+that consumes it. The graph in :mod:`agent.graphs.scheduler` only forwards
 ``(task, payload)`` here, so adding a kind never touches the graph.
 """
 

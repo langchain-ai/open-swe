@@ -26,15 +26,19 @@ from ..review.findings import (
 )
 from ..thread_ids import reviewer_thread_id
 from ..utils.github_app import get_github_app_installation_token
-from ..utils.github_checks import github_headers
+from ..utils.github_ci import fetch_pr
+from ..utils.github_http import (
+    github_client,
+    github_error_message,
+    github_request,
+    github_url,
+)
 from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
-from ..webhooks.common import fetch_github_pr_metadata
 from ..webhooks.github import trigger_pr_review_from_ref
 from .pr_diff import build_pr_diff_files
 
 logger = logging.getLogger(__name__)
 
-_GITHUB_API = "https://api.github.com"
 _GITHUB_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
 
@@ -45,56 +49,24 @@ async def _require_app_token() -> str:
     return token
 
 
-async def _github_get(
-    path: str, token: str, *, accept: str | None = None, params: dict[str, Any] | None = None
-) -> Any:
-    headers = github_headers(token)
-    if accept:
-        headers["Accept"] = accept
-    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
-        response = await client.get(f"{_GITHUB_API}{path}", headers=headers, params=params)
+async def _github_get(path: str, token: str, *, params: dict[str, Any] | None = None) -> Any:
+    async with github_client(token=token, timeout=_GITHUB_TIMEOUT) as client:
+        response = await github_request(client, "GET", github_url(path), params=params)
     if response.status_code == 404:
         raise HTTPException(404, "not found on GitHub")
     if response.status_code >= 400:
         logger.warning("GitHub GET %s failed: %s", path, response.status_code)
         raise HTTPException(502, f"GitHub request failed ({response.status_code})")
-    if accept and "json" not in accept:
-        return response.text
     return response.json()
-
-
-def _github_error_message(response: httpx.Response) -> str:
-    """Best-effort extraction of GitHub's error message for surfacing to the UI."""
-    fallback = f"GitHub request failed ({response.status_code})"
-    try:
-        data = response.json()
-    except ValueError:
-        return fallback
-    if not isinstance(data, dict):
-        return fallback
-    message = data.get("message")
-    message_str = message if isinstance(message, str) else ""
-    errors = data.get("errors")
-    detail_parts: list[str] = []
-    if isinstance(errors, list):
-        for err in errors:
-            if isinstance(err, dict) and isinstance(err.get("message"), str):
-                detail_parts.append(err["message"])
-    detail = "; ".join(detail_parts)
-    if message_str and detail:
-        return f"{message_str}: {detail}"
-    return message_str or detail or fallback
 
 
 async def _github_write(
     method: Literal["POST", "PATCH"], path: str, token: str, *, json: dict[str, Any]
 ) -> Any:
-    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
-        response = await client.request(
-            method, f"{_GITHUB_API}{path}", headers=github_headers(token), json=json
-        )
+    async with github_client(token=token, timeout=_GITHUB_TIMEOUT) as client:
+        response = await github_request(client, method, github_url(path), json=json)
     if response.status_code >= 400:
-        message = _github_error_message(response)
+        message = github_error_message(response)
         logger.warning("GitHub %s %s failed: %s %s", method, path, response.status_code, message)
         # Pass 4xx through verbatim (422 = line not in diff, 403 = perms); collapse
         # 5xx to a 502 so a GitHub outage doesn't masquerade as a client error.
@@ -463,7 +435,7 @@ async def update_review_comment(
     comment = as_json_object(await _github_get(path, token))
     author = as_json_object(comment.get("user")).get("login")
     pull_request_url = comment.get("pull_request_url")
-    expected_pr_url = f"{_GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
+    expected_pr_url = github_url(f"/repos/{owner}/{repo}/pulls/{pr_number}")
     if (
         not isinstance(author, str)
         or author.lower() != viewer_login.lower()
@@ -594,7 +566,7 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, An
     is viewing the review. The client renders these with pierre's MultiFileDiff.
     """
     token = await _require_app_token()
-    async with httpx.AsyncClient(headers=github_headers(token), timeout=_GITHUB_TIMEOUT) as client:
+    async with github_client(token=token, timeout=_GITHUB_TIMEOUT) as client:
         diff = await build_pr_diff_files(client, f"{owner}/{repo}", pr_number)
     files = diff["files"]
     return {
@@ -684,12 +656,13 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
     _validate_image_url(url)
     token = await _require_app_token()
     await _require_image_in_pr(owner, repo, pr_number, url, token)
-    headers = {"Authorization": f"Bearer {token}", "Accept": "image/*"}
 
     current_url = url
-    async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT, follow_redirects=False) as client:
+    async with github_client(
+        token=token, timeout=_GITHUB_TIMEOUT, accept="image/*", follow_redirects=False
+    ) as client:
         for _ in range(_MAX_IMAGE_REDIRECTS + 1):
-            async with client.stream("GET", current_url, headers=headers) as response:
+            async with client.stream("GET", current_url) as response:
                 if response.is_redirect:
                     location = response.headers.get("Location")
                     if not location:
@@ -760,7 +733,7 @@ async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dic
     token, _ = await get_github_app_installation_token_with_expiry()
     if not token:
         raise HTTPException(502, "No GitHub App token available")
-    pr_metadata = await fetch_github_pr_metadata(pr_ref, token=token)
+    pr_metadata = await fetch_pr(owner=owner, repo=repo, pr_number=pr_number, token=token)
     if not pr_metadata:
         raise HTTPException(502, "Could not fetch pull request metadata")
 

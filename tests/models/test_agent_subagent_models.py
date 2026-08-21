@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langgraph.graph.state import RunnableConfig
 
-from agent.server import get_agent
+from agent.graphs.agent import get_agent
 
 
 class _DummyAgent:
@@ -32,28 +32,28 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
 
     with (
         patch(
-            "agent.server.resolve_github_token",
+            "agent.graphs.agent.resolve_github_token",
             new_callable=AsyncMock,
             return_value=("ghp", None),
         ),
-        patch("agent.server.resolve_triggering_user_identity", return_value=None),
+        patch("agent.graphs.agent.resolve_triggering_user_identity", return_value=None),
         patch(
-            "agent.server.ensure_sandbox_for_thread",
+            "agent.graphs.run_environment.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.aresolve_sandbox_work_dir",
+            "agent.graphs.agent.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model_pair",
+            "agent.graphs.run_environment.get_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
         patch(
-            "agent.server.load_profile",
+            "agent.graphs.run_environment.load_profile",
             new_callable=AsyncMock,
             return_value={
                 "default_model": "anthropic:claude-opus-5",
@@ -62,10 +62,12 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
                 "subagent_reasoning_effort": "xhigh",
             },
         ),
-        patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
-        patch("agent.server.construct_system_prompt", return_value="prompt"),
-        patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.agent.fallback_model_id_for", return_value=None),
+        patch(
+            "agent.graphs._assembly.make_model", side_effect=[main_model, subagent_model]
+        ) as make_model,
+        patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
+        patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await get_agent(config)
 
@@ -105,38 +107,40 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
 
     with (
         patch(
-            "agent.server.resolve_github_token",
+            "agent.graphs.agent.resolve_github_token",
             new_callable=AsyncMock,
             return_value=("ghp", None),
         ),
-        patch("agent.server.resolve_triggering_user_identity", return_value=None),
+        patch("agent.graphs.agent.resolve_triggering_user_identity", return_value=None),
         patch(
-            "agent.server.ensure_sandbox_for_thread",
+            "agent.graphs.run_environment.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.aresolve_sandbox_work_dir",
+            "agent.graphs.agent.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model_pair",
+            "agent.graphs.run_environment.get_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
         patch(
-            "agent.server.load_profile",
+            "agent.graphs.run_environment.load_profile",
             new_callable=AsyncMock,
             return_value={
                 "default_model": "anthropic:claude-opus-5",
                 "reasoning_effort": "high",
             },
         ),
-        patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
-        patch("agent.server.construct_system_prompt", return_value="prompt"),
-        patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.agent.fallback_model_id_for", return_value=None),
+        patch(
+            "agent.graphs._assembly.make_model", side_effect=[main_model, subagent_model]
+        ) as make_model,
+        patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
+        patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await get_agent(config)
 
@@ -172,38 +176,46 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
 
     with (
         patch(
-            "agent.server.resolve_github_token", new_callable=AsyncMock, return_value=("ghp", None)
+            "agent.graphs.agent.resolve_github_token",
+            new_callable=AsyncMock,
+            return_value=("ghp", None),
         ),
-        patch("agent.server.resolve_triggering_user_identity", return_value=None),
+        patch("agent.graphs.agent.resolve_triggering_user_identity", return_value=None),
         patch(
-            "agent.server.ensure_sandbox_for_thread",
+            "agent.graphs.run_environment.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.aresolve_sandbox_work_dir",
+            "agent.graphs.agent.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model_pair",
+            "agent.graphs.run_environment.get_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
         # Profile selected Fable back when it was allowed; it's now disabled.
         patch(
-            "agent.server.load_profile",
+            "agent.graphs.run_environment.load_profile",
             new_callable=AsyncMock,
             return_value={
                 "default_model": "anthropic:claude-fable-5",
                 "reasoning_effort": "high",
             },
         ),
-        patch("agent.server.get_team_fable_enabled", new_callable=AsyncMock, return_value=False),
-        patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
-        patch("agent.server.construct_system_prompt", return_value="prompt"),
-        patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch(
+            "agent.graphs.run_environment.get_team_fable_enabled",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch("agent.graphs.agent.fallback_model_id_for", return_value=None),
+        patch(
+            "agent.graphs._assembly.make_model", side_effect=[main_model, subagent_model]
+        ) as make_model,
+        patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
+        patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await get_agent(config)
 

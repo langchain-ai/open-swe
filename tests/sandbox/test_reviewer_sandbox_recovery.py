@@ -11,7 +11,7 @@ import pytest
 from langchain_core.runnables import RunnableConfig
 from langsmith.sandbox import SandboxClientError
 
-from agent.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
+from agent.graphs.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
 from agent.runtime.sandbox import ensure_sandbox_for_thread
 from agent.utils.sandbox import SandboxGoneError
 from agent.utils.sandbox_state import SandboxUnreachableError, set_sandbox_backend
@@ -154,7 +154,7 @@ async def test_reviewer_opts_into_replacement() -> None:
     sandbox_backend = MagicMock()
 
     with patch(
-        "agent.reviewer.ensure_sandbox_for_thread",
+        "agent.graphs.reviewer.ensure_sandbox_for_thread",
         new_callable=AsyncMock,
         return_value=sandbox_backend,
     ) as ensure:
@@ -179,12 +179,12 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
 
     with (
         patch(
-            "agent.reviewer._ensure_reviewer_sandbox_for_thread",
+            "agent.graphs.reviewer._ensure_reviewer_sandbox_for_thread",
             new_callable=AsyncMock,
             side_effect=SandboxUnreachableError("thread-reviewer", "sandbox-deleted", "not found"),
         ),
         patch(
-            "agent.reviewer.post_sandbox_unreachable_notification",
+            "agent.graphs.reviewer.post_sandbox_unreachable_notification",
             new_callable=AsyncMock,
         ) as notify,
         pytest.raises(SandboxUnreachableError),

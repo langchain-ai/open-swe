@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 import pytest
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent import server
 from agent.dashboard import thread_api
+from agent.graphs import agent as agent_graph
 from agent.prompt import construct_system_prompt
 
 
@@ -35,7 +35,7 @@ def test_plan_mode_prompt_requests_slack_approval_options() -> None:
 
 
 def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
-    excluded = server.PLAN_MODE_EXCLUDED_TOOLS
+    excluded = agent_graph.PLAN_MODE_EXCLUDED_TOOLS
     for tool in (
         "task",
         "manage_baby_sit",

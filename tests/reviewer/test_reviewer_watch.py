@@ -79,7 +79,7 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
             return_value="t",
         ),
         patch(
-            "agent.webhooks.common._fetch_open_pr_for_branch",
+            "agent.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
@@ -120,7 +120,7 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
             return_value=("t", None),
         ),
         patch(
-            "agent.webhooks.common._fetch_open_pr_for_branch",
+            "agent.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
@@ -198,7 +198,7 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
             return_value=("t", None),
         ),
         patch(
-            "agent.webhooks.common._fetch_open_pr_for_branch",
+            "agent.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
@@ -289,7 +289,7 @@ async def test_push_event_idempotent_when_head_unchanged() -> None:
             return_value="t",
         ),
         patch(
-            "agent.webhooks.common._fetch_open_pr_for_branch",
+            "agent.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
@@ -372,7 +372,7 @@ async def test_push_event_public_repo_uses_scoped_token() -> None:
         ),
         patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token),
         patch(
-            "agent.webhooks.common._fetch_open_pr_for_branch",
+            "agent.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),
@@ -427,7 +427,7 @@ async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> No
         ),
         patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token),
         patch(
-            "agent.webhooks.common._fetch_open_pr_for_branch",
+            "agent.webhooks.common.fetch_open_pr_for_branch",
             new_callable=AsyncMock,
             return_value=pr,
         ),

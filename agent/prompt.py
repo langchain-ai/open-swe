@@ -543,6 +543,7 @@ def construct_system_prompt(
     source: str = "dashboard",
     slack_context: bool = False,
     sandbox_file_downloads: bool = False,
+    local_workspace: bool = False,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
@@ -554,7 +555,7 @@ def construct_system_prompt(
     prompt = SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
         working_environment_section=(
-            DESKTOP_WORKING_ENV_SECTION if source == "desktop" else WORKING_ENV_SECTION
+            DESKTOP_WORKING_ENV_SECTION if local_workspace else WORKING_ENV_SECTION
         ),
         dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
         source_guidance=_render_source_guidance(source, slack_context),
@@ -576,7 +577,7 @@ def construct_system_prompt(
             _render_repository_scope_section() if source in {"dashboard", "slack"} else ""
         ),
         corridor_prompt_section=CORRIDOR_PROMPT if corridor_enabled else "",
-        commit_pr_section=COMMIT_PR_SECTION + (DESKTOP_PR_SECTION if source == "desktop" else ""),
+        commit_pr_section=COMMIT_PR_SECTION + (DESKTOP_PR_SECTION if local_workspace else ""),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         environment_section=_render_environment_section(environment_name, environment_instructions),
         admin_environment_section=ADMIN_ENVIRONMENT_SECTION if admin_environments else "",

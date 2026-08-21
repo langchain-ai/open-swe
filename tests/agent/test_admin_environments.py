@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from langgraph.graph.state import RunnableConfig
 
-from agent import server
+from agent.graphs import agent as agent_graph
 from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.runtime import sandbox
 from agent.tools import environments as env_tools
@@ -85,21 +85,21 @@ async def test_admin_thread_requires_flag_and_configured_admin(
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramon.nogueira@langchain.dev")
     admin_config = _config(admin_thread=True, user_email="ramon.nogueira@langchain.dev")
 
-    assert await server._admin_thread(admin_config, None) is True
+    assert await agent_graph._admin_thread(admin_config, None) is True
     # Same user, no flag: an ordinary thread never gets the tools.
     assert (
-        await server._admin_thread(_config(user_email="ramon.nogueira@langchain.dev"), None)
+        await agent_graph._admin_thread(_config(user_email="ramon.nogueira@langchain.dev"), None)
         is False
     )
     # Flag set by a thread whose current requester is not an admin.
     non_admin = _config(admin_thread=True, user_email="someone@else.dev")
-    assert await server._admin_thread(non_admin, None) is False
+    assert await agent_graph._admin_thread(non_admin, None) is False
 
 
 @pytest.mark.asyncio
 async def test_admin_thread_accepts_configured_login(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    assert await server._admin_thread(_config(admin_thread=True), "ramonn") is True
+    assert await agent_graph._admin_thread(_config(admin_thread=True), "ramonn") is True
 
 
 @pytest.mark.asyncio
@@ -108,9 +108,9 @@ async def test_workspace_admin_resolves_email_for_github_login(
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramon@langchain.dev")
     with patch.object(
-        server, "email_for_login", new_callable=AsyncMock, return_value="ramon@langchain.dev"
+        agent_graph, "email_for_login", new_callable=AsyncMock, return_value="ramon@langchain.dev"
     ):
-        assert await server._workspace_admin(_config(github_login="ramonn"), None) is True
+        assert await agent_graph._workspace_admin(_config(github_login="ramonn"), None) is True
 
 
 # --- tool gate ---

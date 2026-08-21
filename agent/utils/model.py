@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Literal, TypedDict, Unpack, cast
+from typing import Any, Literal, TypedDict, TypeVar, Unpack, cast
 
 from langchain.chat_models import init_chat_model
 
@@ -124,6 +124,35 @@ def _configure_openai_responses_kwargs(model_kwargs: dict[str, object]) -> None:
         model_kwargs["include"] = ["reasoning.encrypted_content"]
     elif isinstance(include, list) and "reasoning.encrypted_content" not in include:
         include.append("reasoning.encrypted_content")
+
+
+_ChatModelT = TypeVar("_ChatModelT")
+
+# A model reaches middleware wrapped in whatever the agent bound onto it, which
+# is a handful of `RunnableBinding` layers at most.
+_MAX_BOUND_DEPTH = 10
+
+
+def unwrap_chat_model(model: object, kind: type[_ChatModelT]) -> _ChatModelT | None:
+    """Return the ``kind`` chat model under a runnable's ``bound`` chain, if there is one.
+
+    The walk is capped and remembers what it has seen so a binding that points
+    at itself cannot spin.
+    """
+    current = model
+    seen: set[int] = set()
+    for _ in range(_MAX_BOUND_DEPTH):
+        if isinstance(current, kind):
+            return current
+        current_id = id(current)
+        if current_id in seen:
+            return None
+        seen.add(current_id)
+        bound = getattr(current, "bound", None)
+        if bound is None or bound is current:
+            return None
+        current = bound
+    return None
 
 
 def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpack[ModelKwargs]):

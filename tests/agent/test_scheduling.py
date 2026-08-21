@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent import scheduler
+from agent.graphs import scheduler
 from agent.scheduling import agent_schedules, crons, tasks
 
 

@@ -6,6 +6,8 @@ from typing import Any
 
 import httpx
 
+from .github_http import github_headers, github_url
+
 logger = logging.getLogger(__name__)
 
 OPEN_SWE_BOT_NAME = "open-swe[bot]"
@@ -61,14 +63,12 @@ def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentit
     if not github_token:
         return None
 
+    # Synchronous by design: the caller resolves the identity from a worker
+    # thread while assembling the agent, so it cannot await.
     try:
         response = httpx.get(
-            "https://api.github.com/user",
-            headers={
-                "Authorization": f"Bearer {github_token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
+            github_url("/user"),
+            headers=github_headers(github_token),
             timeout=5.0,
         )
         if response.status_code != 200:  # noqa: PLR2004

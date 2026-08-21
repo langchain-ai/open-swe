@@ -32,6 +32,7 @@ from ..config import (
     is_langsmith_sandbox,
     langgraph_url,
 )
+from ..utils.github_http import DEFAULT_MAX_RETRIES, github_client, github_paginate, github_url
 from ..utils.timing import server_timing_header
 from .admin import is_admin
 from .agent_instructions import (
@@ -69,6 +70,7 @@ from .eval_jobs import (
     get_reviewer_eval_status,
 )
 from .github_token_auth import admin_session_for_github_token, bearer_github_token
+from .github_tokens import get_valid_access_token, upsert_access_token_from_github_response
 from .notion_oauth import (
     NOTION_STATE_COOKIE_NAME,
     NotionOAuthError,
@@ -109,12 +111,10 @@ from .options import (
 from .profiles import (
     ProfileUpdate,
     get_profile,
-    get_valid_access_token,
     normalize_profile_for_response,
-    upsert_access_token_from_github_response,
     upsert_profile,
 )
-from .repo_access import require_repo_access_for_user
+from .repo_access import github_http_exception, require_repo_access_for_user, with_user_github_token
 from .repo_cache import (
     REPO_LIST_FRESH_MS,
     read_cached_repos,
@@ -1147,71 +1147,28 @@ async def admin_get_reviewer_eval(
     return await get_reviewer_eval_status()
 
 
-def _next_link_url(link_header: str | None) -> str | None:
-    if not link_header:
-        return None
-    # GitHub Link header is comma-separated: '<url>; rel="next", <url>; rel="last"'
-    for part in link_header.split(","):
-        segments = [s.strip() for s in part.split(";")]
-        if len(segments) >= 2 and 'rel="next"' in segments[1] and segments[0].startswith("<"):
-            return segments[0][1:-1]
-    return None
-
-
-def _github_api_http_exception(status_code: int) -> HTTPException:
-    if status_code == 401:
-        return HTTPException(401, "github token expired, re-login required")
-    if status_code == 403:
-        return HTTPException(403, "github API forbidden")
-    if status_code == 404:
-        return HTTPException(404, "github API resource not found")
-    return HTTPException(502, f"github API error ({status_code})")
-
-
 async def _paginate(
     client: httpx.AsyncClient,
     url: str,
     *,
-    headers: dict[str, str],
     items_key: str | None,
     cap: int = 1000,
+    max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> list[dict[str, Any]]:
-    """Follow ``Link: rel="next"`` until exhausted (or cap reached).
-
-    ``items_key`` is the JSON key holding the list when the endpoint returns
-    a wrapper object (e.g. ``/user/installations`` returns
-    ``{"total_count": N, "installations": [...]}``). When ``None`` the
-    response body itself is treated as the list.
-    """
-    out: list[dict[str, Any]] = []
-    next_url: str | None = url
-    first = True
-    while next_url and len(out) < cap:
-        params = {"per_page": "100"} if first else None
-        try:
-            r = await client.get(next_url, headers=headers, params=params)
-        except httpx.TimeoutException as exc:
-            logger.warning("GitHub API timed out while paginating %s", next_url)
-            raise HTTPException(503, "github API request timed out") from exc
-        except httpx.RequestError as exc:
-            logger.warning("GitHub API request failed while paginating %s: %s", next_url, exc)
-            raise HTTPException(502, "github API request failed") from exc
-        try:
-            r.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            logger.warning(
-                "GitHub API returned %s while paginating %s",
-                r.status_code,
-                next_url,
-            )
-            raise _github_api_http_exception(r.status_code) from exc
-        body = r.json()
-        page = body.get(items_key, []) if items_key else body
-        if isinstance(page, list):
-            out.extend(page)
-        next_url = _next_link_url(r.headers.get("Link"))
-        first = False
-    return out
+    """:func:`github_paginate` with GitHub failures mapped to dashboard errors."""
+    try:
+        return await github_paginate(
+            client, url, items_key=items_key, cap=cap, max_retries=max_retries
+        )
+    except httpx.TimeoutException as exc:
+        logger.warning("GitHub API timed out while paginating %s", url)
+        raise HTTPException(503, "github API request timed out") from exc
+    except httpx.HTTPStatusError as exc:
+        logger.warning("GitHub API returned %s while paginating %s", exc.response.status_code, url)
+        raise github_http_exception(exc.response.status_code) from exc
+    except httpx.RequestError as exc:
+        logger.warning("GitHub API request failed while paginating %s: %s", url, exc)
+        raise HTTPException(502, "github API request failed") from exc
 
 
 async def _fetch_user_installations_and_repos(
@@ -1224,36 +1181,17 @@ async def _fetch_user_installations_and_repos(
     installations or >30 accessible repos get the complete set. Shared by the
     ``/repos`` endpoint and the reviews access filter.
     """
-    token = await get_valid_access_token(login)
-    if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    async with httpx.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
-        try:
-            installations = await _paginate(
-                client,
-                "https://api.github.com/user/installations",
-                headers=headers,
-                items_key="installations",
+
+    async def list_installations(token: str) -> list[dict[str, Any]]:
+        async with github_client(token=token, timeout=_GITHUB_API_TIMEOUT) as client:
+            return await _paginate(
+                client, github_url("/user/installations"), items_key="installations"
             )
-        except HTTPException as exc:
-            if exc.status_code != 401:
-                raise
-            token = await get_valid_access_token(login, force_refresh=True)
-            if not token:
-                raise HTTPException(401, "github token expired, re-login required") from exc
-            headers["Authorization"] = f"Bearer {token}"
-            installations = await _paginate(
-                client,
-                "https://api.github.com/user/installations",
-                headers=headers,
-                items_key="installations",
-            )
-        repositories: list[dict[str, Any]] = []
+
+    token, installations = await with_user_github_token(login, list_installations)
+
+    repositories: list[dict[str, Any]] = []
+    async with github_client(token=token, timeout=_GITHUB_API_TIMEOUT) as client:
         for inst in installations:
             inst_id = inst.get("id")
             if inst_id is None:
@@ -1261,8 +1199,7 @@ async def _fetch_user_installations_and_repos(
             try:
                 repos = await _paginate(
                     client,
-                    f"https://api.github.com/user/installations/{inst_id}/repositories",
-                    headers=headers,
+                    github_url(f"/user/installations/{inst_id}/repositories"),
                     items_key="repositories",
                 )
             except HTTPException as exc:

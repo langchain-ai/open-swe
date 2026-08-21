@@ -381,7 +381,7 @@ class _FakeResponse:
 
 
 def _patch_membership_http(monkeypatch, response: _FakeResponse) -> dict[str, Any]:
-    from agent.utils import github_org_membership
+    from agent.utils import github_http, github_org_membership
 
     seen: dict[str, Any] = {}
 
@@ -400,7 +400,7 @@ def _patch_membership_http(monkeypatch, response: _FakeResponse) -> dict[str, An
     def factory(*_args, **_kwargs) -> _FakeAsyncClient:
         return _FakeAsyncClient(response)
 
-    monkeypatch.setattr(github_org_membership.httpx, "AsyncClient", factory)
+    monkeypatch.setattr(github_http.httpx, "AsyncClient", factory)
     return seen
 
 
