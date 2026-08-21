@@ -84,6 +84,7 @@ from ..settings.agent_usage import record_agent_thread_usage
 from ..settings.environments import environment_prompt, resolve_environment
 from ..settings.user_mappings import email_for_login
 from ..thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from ..threads.settings import ThreadSettings, normalize_thread_settings
 from ..tools import (
     approve_plan,
     background_execute,
@@ -131,7 +132,6 @@ from ..utils import ttl_cache
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from ..utils.json_types import as_json_object
 from ..utils.source_channel import post_sandbox_unreachable_notification
-from ..utils.thread_settings import ThreadSettings, normalize_thread_settings
 from ._assembly import (
     make_model_or_defer,
     model_spec,

@@ -17,7 +17,7 @@ from typing import Any
 
 from langgraph_sdk.client import LangGraphClient
 
-from ..thread_ids import slack_thread_id
+from ..threads.ids import slack_thread_id
 from .format import is_slack_channel_id, is_slack_message_ts
 
 logger = logging.getLogger(__name__)

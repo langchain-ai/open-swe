@@ -4,7 +4,7 @@ These ids are persisted and re-derived across processes, so a formula change
 must be a deliberate act that updates these literals — not a silent refactor.
 """
 
-from agent.thread_ids import (
+from agent.threads.ids import (
     baby_sit_lock_thread_id,
     github_issue_thread_id,
     linear_issue_thread_id,

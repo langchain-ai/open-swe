@@ -30,7 +30,7 @@ from ..settings.github_tokens import get_valid_access_token
 from ..settings.options import normalize_model_choice
 from ..settings.profiles import get_profile
 from ..store import delete_value, now_iso, search_all_values
-from ..utils.run_metadata import resolve_run_email
+from ..threads.run_metadata import resolve_run_email
 from .repo_access import repo_config_for_user
 from .schedule_models import ScheduleCreateBody, ScheduleUpdateBody
 

@@ -33,7 +33,7 @@ from ..review.findings import (
     comment_ids_for_finding,
     is_thread_resolved,
 )
-from ..thread_ids import reviewer_thread_id
+from ..threads.ids import reviewer_thread_id
 from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
 from .pr_diff import build_pr_diff_files
 

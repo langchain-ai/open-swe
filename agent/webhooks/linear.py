@@ -27,10 +27,10 @@ from ..linear.team_repo_map import LINEAR_TEAM_TO_REPO
 from ..settings.agent_overrides import resolve_agent_model_id, resolve_login_from_email_async
 from ..settings.options import default_vision_model_pair, model_supports_images
 from ..settings.team_settings import get_team_default_repo
-from ..thread_ids import linear_issue_thread_id
+from ..threads.ids import linear_issue_thread_id
+from ..threads.ops import upsert_agent_thread_owner_metadata
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
-from ..utils.thread_ops import upsert_agent_thread_owner_metadata
 from .repo_config import profile_default_repo_for_email
 
 logger = logging.getLogger(__name__)

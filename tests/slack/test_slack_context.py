@@ -16,7 +16,7 @@ from agent.slack.format import (
     select_slack_context_messages,
     strip_bot_mention,
 )
-from agent.utils import thread_ops
+from agent.threads import ops as thread_ops
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.webhooks import repo_config as webhook_repo_config
 from agent.webhooks import slack as slack_webhooks

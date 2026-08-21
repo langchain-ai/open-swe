@@ -30,9 +30,9 @@ from ..input_messages import InputMessageContext, SystemIdentity, github_person
 from ..settings.enabled_repos import is_review_repo_enabled
 from ..settings.profiles import get_profile
 from ..settings.team_settings import get_team_settings
-from ..thread_ids import reviewer_thread_id
+from ..threads.ids import reviewer_thread_id
+from ..threads.ops import ensure_thread_exists, fetch_thread_metadata
 from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.thread_ops import ensure_thread_exists, fetch_thread_metadata
 from .findings import (
     REVIEWER_THREAD_KIND,
     FindingInteraction,

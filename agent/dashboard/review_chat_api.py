@@ -22,7 +22,7 @@ from ..review.diff import fetch_pr_diff
 from ..review.findings import REVIEWER_THREAD_KIND
 from ..settings.options import normalize_model_choice
 from ..store import now_ms
-from ..thread_ids import reviewer_thread_id
+from ..threads.ids import reviewer_thread_id
 from ..utils.json_types import as_json_object
 from .authz import thread_identifies_user
 from .review_api import classify_finding, get_pr_head_sha, get_review

@@ -21,7 +21,7 @@ from ..settings.user_mappings import slack_id_for_login
 from ..slack.api import post_slack_top_level_message_with_ts
 from ..slack.threads import bind_slack_thread_id, store_slack_run_mapping
 from ..store import get_value, now_iso, now_ms, put_value
-from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
+from ..threads.participants import PARTICIPANT_LOGINS_KEY
 
 logger = logging.getLogger(__name__)
 

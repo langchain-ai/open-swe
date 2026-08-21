@@ -67,11 +67,7 @@ from ..slack.threads import (
     resolve_slack_thread_id,
     store_slack_run_mapping,
 )
-from ..utils.dashboard_links import build_settings_url, dashboard_thread_url
-from ..utils.http import DEFAULT_HTTP_TIMEOUT
-from ..utils.json_types import ThreadLike, as_json_object, as_thread_dict
-from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
-from ..utils.thread_ops import (
+from ..threads.ops import (
     fetch_thread_metadata,
     get_thread_environment,
     get_thread_plan_mode,
@@ -79,6 +75,10 @@ from ..utils.thread_ops import (
     thread_exists,
     upsert_agent_thread_owner_metadata,
 )
+from ..utils.dashboard_links import build_settings_url, dashboard_thread_url
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
+from ..utils.json_types import ThreadLike, as_json_object, as_thread_dict
+from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from ..utils.user_messages import warning
 from .repo_config import profile_default_repo_for_email
 

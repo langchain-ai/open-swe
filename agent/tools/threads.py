@@ -36,9 +36,9 @@ from ..settings.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from ..threads.participants import PARTICIPANT_LOGINS_KEY
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from ..utils.json_types import as_json_object, thread_metadata
-from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
 
 logger = logging.getLogger(__name__)
 

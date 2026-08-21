@@ -23,7 +23,7 @@ from ..slack.threads import (
     lookup_slack_thread_id,
     resolve_slack_thread_id,
 )
-from ..utils.thread_ops import thread_exists
+from ..threads.ops import thread_exists
 from . import slack as service
 from .signatures import verify_slack_signature
 from .slack_events import claim_slack_event, slack_event_already_seen

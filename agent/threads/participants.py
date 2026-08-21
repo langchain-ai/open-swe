@@ -13,7 +13,7 @@ from ..linear.api import fetch_linear_issue_participant_emails
 from ..settings.agent_overrides import resolve_github_login
 from ..settings.user_mappings import get_mapping, login_for_email, login_for_slack_id
 from ..slack.api import fetch_slack_thread_messages
-from .json_types import as_json_object, thread_metadata
+from ..utils.json_types import as_json_object, thread_metadata
 
 PARTICIPANT_LOGINS_KEY = "participant_logins"
 _SLACK_SYSTEM_MESSAGE_SUBTYPES = {

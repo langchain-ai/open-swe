@@ -25,7 +25,7 @@ from .github.ci import (
 from .github.refs import GitHubPrRef
 from .scheduling.crons import delete_cron, ensure_scheduler_cron
 from .store import delete_value, get_value, now_iso, put_value, search_all_values
-from .thread_ids import baby_sit_lock_thread_id
+from .threads.ids import baby_sit_lock_thread_id
 from .utils.source_channel import notify_source_channel, source_context_from_watch
 
 logger = logging.getLogger(__name__)

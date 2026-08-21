@@ -31,9 +31,9 @@ from ..settings.team_settings import (
     get_team_default_thread_title_model,
     get_team_fable_enabled,
 )
+from ..threads.settings import ThreadSettings, load_thread_settings, store_thread_settings
 from ..tools import fetch_url, http_request, web_search
 from ..utils import ttl_cache
-from ..utils.thread_settings import ThreadSettings, load_thread_settings, store_thread_settings
 from ._assembly import cached_gateway_enabled
 
 USER_SKILLS_ROUTE = "/skills/"

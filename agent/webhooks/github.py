@@ -51,8 +51,8 @@ from ..review.dispatch import (
 )
 from ..review.findings import REVIEWER_THREAD_KIND
 from ..settings.user_mappings import email_for_login
-from ..thread_ids import github_issue_thread_id, pr_comment_thread_id, thread_id_from_branch
-from ..utils.thread_ops import (
+from ..threads.ids import github_issue_thread_id, pr_comment_thread_id, thread_id_from_branch
+from ..threads.ops import (
     is_not_found_error,
     thread_exists,
     upsert_agent_thread_owner_metadata,

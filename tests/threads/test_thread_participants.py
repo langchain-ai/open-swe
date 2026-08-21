@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.utils import thread_participants as participants
+from agent.threads import participants
 
 
 class _Threads:
