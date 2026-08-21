@@ -7,6 +7,7 @@ from cryptography.fernet import Fernet
 from support.langgraph_fakes import FakeLangGraphClient, FakeStore
 
 from agent.dashboard import notion_oauth as no
+from agent.dashboard.oauth import s256_challenge
 
 
 @pytest.fixture()
@@ -20,7 +21,7 @@ def fake_store(
 
 def test_code_challenge_matches_rfc7636_vector() -> None:
     verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-    assert no.code_challenge_for_verifier(verifier) == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+    assert s256_challenge(verifier) == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
 
 
 def test_build_notion_authorize_url() -> None:

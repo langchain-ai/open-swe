@@ -14,7 +14,8 @@ import pytest
 from fastapi import HTTPException
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.dashboard import routes, thread_api
+from agent.dashboard import authz, thread_api
+from agent.dashboard.routes import admin as admin_routes
 
 # The endpoint's own guardrails on the generated patch.
 _PATCH_TIMEOUT_SECONDS = 120
@@ -229,9 +230,9 @@ async def test_admin_cancel_thread_does_not_update_on_cancel_failure(monkeypatch
 
 async def test_admin_cancel_thread_route_delegates_without_owner_identity(monkeypatch) -> None:
     cancel = AsyncMock(return_value={"id": "thread-1", "status": "interrupted"})
-    monkeypatch.setattr(routes, "admin_cancel_dashboard_thread", cancel)
+    monkeypatch.setattr(admin_routes, "admin_cancel_dashboard_thread", cancel)
 
-    result = await routes.admin_cancel_thread("thread-1", _admin={"sub": "admin"})
+    result = await admin_routes.admin_cancel_thread("thread-1", _admin={"sub": "admin"})
 
     assert result == {"id": "thread-1", "status": "interrupted"}
     cancel.assert_awaited_once_with("thread-1")
@@ -241,6 +242,6 @@ def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
 
     with pytest.raises(HTTPException) as exc_info:
-        routes._require_admin({"sub": "not-admin", "email": "user@example.com"})
+        authz.require_admin({"sub": "not-admin", "email": "user@example.com"})
 
     assert exc_info.value.status_code == 403

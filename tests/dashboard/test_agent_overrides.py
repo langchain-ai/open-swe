@@ -7,9 +7,9 @@ from and migrate anything the team has since retired.
 
 from unittest.mock import AsyncMock, patch
 
-from agent.dashboard import routes
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
+from agent.dashboard.routes import profile as profile_routes
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
 _VISION_MODEL = "openai:gpt-5.6-sol"
@@ -72,7 +72,7 @@ async def test_resolve_agent_model_id_migrates_deprecated_per_thread_override(mo
 
 async def test_get_my_profile_migrates_deprecated_models() -> None:
     with patch(
-        "agent.dashboard.routes.get_profile",
+        "agent.dashboard.routes.profile.get_profile",
         new_callable=AsyncMock,
         return_value={
             "default_model": "openai:gpt-5.5",
@@ -81,7 +81,7 @@ async def test_get_my_profile_migrates_deprecated_models() -> None:
             "subagent_reasoning_effort": "low",
         },
     ):
-        payload = await routes.get_my_profile({"sub": "octocat"})
+        payload = await profile_routes.get_my_profile({"sub": "octocat"})
 
     assert payload["default_model"] == "openai:gpt-5.6-sol"
     assert payload["reasoning_effort"] == "medium"
@@ -92,44 +92,44 @@ async def test_get_my_profile_migrates_deprecated_models() -> None:
 async def test_options_omits_fable_when_disabled() -> None:
     with (
         patch(
-            "agent.dashboard.routes.get_team_fable_enabled",
+            "agent.dashboard.routes.profile.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_model",
+            "agent.dashboard.routes.profile.get_team_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_subagent_model",
+            "agent.dashboard.routes.profile.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
     ):
-        payload = await routes.options()
+        payload = await profile_routes.options()
     assert _FABLE not in [m["id"] for m in payload["models"]]
 
 
 async def test_options_includes_fable_when_enabled() -> None:
     with (
         patch(
-            "agent.dashboard.routes.get_team_fable_enabled",
+            "agent.dashboard.routes.profile.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=True,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_model",
+            "agent.dashboard.routes.profile.get_team_default_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_subagent_model",
+            "agent.dashboard.routes.profile.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=_PAIR,
         ),
     ):
-        payload = await routes.options()
+        payload = await profile_routes.options()
     assert _FABLE in [m["id"] for m in payload["models"]]
     openai_model = next(m for m in payload["models"] if m["id"] == _VISION_MODEL)
     assert openai_model["context_window"] == 272_000
@@ -142,22 +142,22 @@ async def test_options_gates_stale_fable_default_when_disabled() -> None:
     fable_pair = (_FABLE, "high")
     with (
         patch(
-            "agent.dashboard.routes.get_team_fable_enabled",
+            "agent.dashboard.routes.profile.get_team_fable_enabled",
             new_callable=AsyncMock,
             return_value=False,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_model",
+            "agent.dashboard.routes.profile.get_team_default_model",
             new_callable=AsyncMock,
             return_value=fable_pair,
         ),
         patch(
-            "agent.dashboard.routes.get_team_default_subagent_model",
+            "agent.dashboard.routes.profile.get_team_default_subagent_model",
             new_callable=AsyncMock,
             return_value=fable_pair,
         ),
     ):
-        payload = await routes.options()
+        payload = await profile_routes.options()
     model_ids = [m["id"] for m in payload["models"]]
     assert _FABLE not in model_ids
     assert payload["default_agent_model"] != _FABLE

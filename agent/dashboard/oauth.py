@@ -24,7 +24,6 @@ from ..config import (
     dashboard_jwt_secret,
     github_app_oauth,
 )
-from ..utils.github_http import github_client, github_request, github_url
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from .github_token_auth import bearer_github_token
 
@@ -231,7 +230,8 @@ def decode_state(state: str) -> dict[str, Any]:
 _S256_CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")
 
 
-def _s256(verifier: str) -> str:
+def s256_challenge(verifier: str) -> str:
+    """The PKCE ``S256`` challenge for a verifier: unpadded base64url SHA-256."""
     digest = hashlib.sha256(verifier.encode()).digest()
     return base64.urlsafe_b64encode(digest).decode().rstrip("=")
 
@@ -291,7 +291,7 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
     login = payload.get("sub")
     if not isinstance(challenge, str) or not isinstance(login, str) or not login:
         raise HTTPException(400, "malformed handoff code")
-    if not hmac.compare_digest(_s256(verifier), challenge):
+    if not hmac.compare_digest(s256_challenge(verifier), challenge):
         raise HTTPException(400, "handoff verifier mismatch")
     email = payload.get("email")
     avatar_url = payload.get("avatar_url")
@@ -455,19 +455,3 @@ async def refresh_user_access_token(refresh_token: str) -> dict[str, Any]:
     if not data.get("access_token"):
         raise HTTPException(400, f"oauth refresh failed: {data}")
     return data
-
-
-async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
-    """Return ``(user, primary_email)`` for the authenticated user."""
-    async with github_client(token=access_token) as client:
-        u = await github_request(client, "GET", github_url("/user"))
-        u.raise_for_status()
-        user = u.json()
-        email = user.get("email")
-        if not email:
-            e = await github_request(client, "GET", github_url("/user/emails"))
-            if e.status_code == 200:
-                primary = next((x for x in e.json() if x.get("primary")), None)
-                if primary:
-                    email = primary.get("email")
-    return user, email

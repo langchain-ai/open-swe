@@ -1,4 +1,4 @@
-"""Admin authentication for non-browser callers using a GitHub user token.
+"""Who a GitHub user token belongs to, and whether that person is an admin.
 
 The dashboard API is normally cookie-authenticated through the GitHub OAuth
 login flow, which automation cannot complete. A CI job (typically in the repo
@@ -7,10 +7,13 @@ with a personal access token: the token is resolved to a GitHub identity via
 ``GET /user``, which must match a ``CONFIGURED_ADMINS`` entry.
 
 Only endpoints that explicitly opt in accept this; the ambient session cookie
-remains the only credential for everything else.
+remains the only credential for everything else. The browser login flow lands
+here too — it resolves the identity behind the token it just exchanged the same
+way, so there is one place that knows how to answer "who is this token".
 """
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -33,14 +36,21 @@ def bearer_github_token(request: Request) -> str | None:
     return value.strip() or None
 
 
-async def _github_identity(token: str) -> tuple[str, str | None]:
-    """Resolve a GitHub token to ``(login, email)``.
+@dataclass(frozen=True)
+class GithubIdentity:
+    login: str
+    email: str | None
+    avatar_url: str | None
+
+
+async def fetch_github_identity(token: str) -> GithubIdentity:
+    """Resolve a GitHub token to the account behind it.
 
     ``GET /user`` only carries an email when the account publishes one, so fall
-    back to the primary from ``/user/emails`` — same as the browser OAuth path —
-    otherwise an admin allowlisted by email is unauthenticatable. That endpoint
-    needs the token to be able to read email addresses; failure just leaves the
-    email unresolved, and login matching still works.
+    back to the primary from ``/user/emails``, otherwise an admin allowlisted by
+    email is unauthenticatable. That endpoint needs the token to be able to read
+    email addresses; failure just leaves the email unresolved, and login
+    matching still works.
     """
     email: str | None = None
     try:
@@ -63,10 +73,17 @@ async def _github_identity(token: str) -> tuple[str, str | None]:
         raise HTTPException(401, "invalid GitHub token")
 
     data = response.json() if response.content else {}
-    login = data.get("login") if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        data = {}
+    login = data.get("login")
     if not isinstance(login, str) or not login.strip():
         raise HTTPException(401, "GitHub token did not resolve to a user")
-    return login.strip(), email
+    avatar_url = data.get("avatar_url")
+    return GithubIdentity(
+        login=login.strip(),
+        email=email,
+        avatar_url=avatar_url if isinstance(avatar_url, str) else None,
+    )
 
 
 def _email_of(response: httpx.Response) -> str | None:
@@ -95,8 +112,8 @@ async def admin_session_for_github_token(token: str) -> dict[str, Any]:
 
     Raises 401 when the token is unusable and 403 when its owner is not an admin.
     """
-    login, email = await _github_identity(token)
-    if not is_admin(email, login=login):
-        logger.warning("Rejected GitHub-token admin request for non-admin %s", login)
+    identity = await fetch_github_identity(token)
+    if not is_admin(identity.email, login=identity.login):
+        logger.warning("Rejected GitHub-token admin request for non-admin %s", identity.login)
         raise HTTPException(403, "admin only")
-    return {"sub": login, "email": email, "auth": "github_token"}
+    return {"sub": identity.login, "email": identity.email, "auth": "github_token"}
