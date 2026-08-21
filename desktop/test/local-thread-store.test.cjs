@@ -48,7 +48,7 @@ test("persists a prompt until it is acknowledged", (t) => {
   assert.equal(restored.modelId, "anthropic:test")
 })
 
-test("reconciles interrupted threads and retains checkpoint refs until deletion", (t) => {
+test("retains checkpoint refs until deletion", (t) => {
   const fixture = temporaryStore(t)
   const store = fixture.create()
   const thread = store.create({ cwd: path.resolve("/tmp/project"), prompt: "work" })
@@ -58,10 +58,9 @@ test("reconciles interrupted threads and retains checkpoint refs until deletion"
     branch: "feature",
   })
   assert.equal(store.get(thread.id).checkpoint.branch, "feature")
-  store.update(thread.id, { status: "running", viewed: false })
+  store.update(thread.id, { viewed: false })
 
   const restored = fixture.create()
-  assert.equal(restored.get(thread.id).status, "error")
   assert.equal(restored.get(thread.id).viewed, false)
   assert.equal(restored.get(thread.id).checkpoint.ref, "refs/open-swe/local/thread-1")
   assert.equal(restored.delete(thread.id).checkpoint.ref, "refs/open-swe/local/thread-1")

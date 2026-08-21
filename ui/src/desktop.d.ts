@@ -19,7 +19,6 @@ export interface DesktopLocalThreadSummary {
   id: string
   cwd: string
   title: string
-  status: "starting" | "idle" | "running" | "error"
   viewed: boolean
   createdAt: number
   updatedAt: number
@@ -27,6 +26,8 @@ export interface DesktopLocalThreadSummary {
   effort: string | null
   pending?: DesktopLocalPromptInput | null
 }
+
+export type DesktopLocalActivity = Record<string, "running" | "error">
 
 export interface DesktopLocalDiff {
   status: "ready" | "missing" | "error"
@@ -180,9 +181,9 @@ declare global {
         threadId: string
       ) => Promise<DesktopLocalThreadSummary | null>
       listLocalThreads: () => Promise<Array<DesktopLocalThreadSummary>>
+      localActivity: () => Promise<DesktopLocalActivity>
       updateLocalThread: (input: {
         threadId: string
-        status: DesktopLocalThreadSummary["status"]
         viewed?: boolean
         modelId?: string
         effort?: string

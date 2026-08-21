@@ -58,6 +58,7 @@ import {
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
   useDesktopLocalThreads,
+  useLocalThreadActivity,
   useRefreshLocalThreads,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
@@ -162,6 +163,7 @@ export function AgentsSidebar({
     enabled: !localOnly,
   })
   const localSessions = useDesktopLocalThreads().data ?? []
+  const activity = useLocalThreadActivity()
   const refreshLocalThreads = useRefreshLocalThreads()
   const deleteLocalSession = async (sessionId: string) => {
     const deleted =
@@ -235,14 +237,10 @@ export function AgentsSidebar({
     ).length,
   }
   const localActivity = {
-    running: localSessions.filter(
-      (thread) => thread.status === "running" || thread.status === "starting"
-    ).length,
+    running: localSessions.filter((thread) => activity[thread.id] === "running")
+      .length,
     completed: localSessions.filter(
-      (thread) =>
-        !thread.viewed &&
-        thread.status !== "running" &&
-        thread.status !== "starting"
+      (thread) => !thread.viewed && activity[thread.id] !== "running"
     ).length,
   }
   const showLocalThreads =
@@ -646,7 +644,7 @@ function LocalThreadRow({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const running = session.status === "running" || session.status === "starting"
+  const running = useLocalThreadActivity()[session.id] === "running"
 
   const confirmDelete = async () => {
     if (isDeleting) return

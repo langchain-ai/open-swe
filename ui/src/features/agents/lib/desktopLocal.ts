@@ -1,7 +1,13 @@
 import { useEffect } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
-import type { DesktopLocalDiff, DesktopLocalThreadSummary } from "@/desktop"
+import type {
+  DesktopLocalActivity,
+  DesktopLocalDiff,
+  DesktopLocalThreadSummary,
+} from "@/desktop"
+
+const NO_ACTIVITY: DesktopLocalActivity = {}
 
 const NO_DIFF: DesktopLocalDiff = {
   status: "missing",
@@ -11,6 +17,7 @@ const NO_DIFF: DesktopLocalDiff = {
 
 export const localThreadKeys = {
   all: ["local-threads"] as const,
+  activity: ["local-thread-activity"] as const,
   detail: (threadId: string) => ["local-threads", threadId] as const,
   ready: (threadId: string) => ["local-thread-ready", threadId] as const,
   diff: (threadId: string) => ["local-thread-diff", threadId] as const,
@@ -73,6 +80,17 @@ export function useDesktopLocalThreads(options: { enabled?: boolean } = {}) {
     enabled: options.enabled,
     refetchInterval: options.enabled === false ? false : 1000,
   })
+}
+
+export function useLocalThreadActivity(): DesktopLocalActivity {
+  return (
+    useQuery({
+      queryKey: localThreadKeys.activity,
+      queryFn: () => window.openSweDesktop?.localActivity() ?? NO_ACTIVITY,
+      enabled: typeof window !== "undefined" && Boolean(window.openSweDesktop),
+      refetchInterval: 1000,
+    }).data ?? NO_ACTIVITY
+  )
 }
 
 export function useLocalThreadDiff(
