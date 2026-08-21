@@ -259,22 +259,43 @@ export function useAttachedTerminal(
       let disposed = false
       let sequence = 0
       let socket: WebSocket | null = null
+      let retryTimer: ReturnType<typeof setTimeout> | null = null
+      let retryCount = 0
+      let exited = false
       pendingRef.current = []
       cloudConnectingRef.current = true
       setState({ ...EMPTY_TERMINAL_SESSION, status: "starting" })
 
-      void agentsApi
-        .connectCloudTerminal(target.threadId)
-        .then((connection) => {
-          if (disposed) return
-          const createdSocket = new WebSocket(
-            connection.url,
-            cloudTerminalProtocols(connection)
-          )
-          socket = createdSocket
-          socketRef.current = createdSocket
-          createdSocket.onopen = () => {
-            if (socketRef.current === createdSocket && !disposed) {
+      const reconnect = () => {
+        if (disposed || exited) return
+        cloudConnectingRef.current = true
+        setState((current) => ({
+          ...current,
+          status: "starting",
+          error: null,
+          version: current.version + 1,
+        }))
+        retryTimer = setTimeout(
+          connect,
+          Math.min(500 * 2 ** retryCount++, 10_000)
+        )
+      }
+
+      const connect = () => {
+        if (disposed || exited) return
+        void agentsApi
+          .connectCloudTerminal(target.threadId)
+          .then((connection) => {
+            if (disposed || exited) return
+            const createdSocket = new WebSocket(
+              connection.url,
+              cloudTerminalProtocols(connection)
+            )
+            socket = createdSocket
+            socketRef.current = createdSocket
+            createdSocket.onopen = () => {
+              if (socketRef.current !== createdSocket || disposed) return
+              retryCount = 0
               cloudConnectingRef.current = false
               setState((current) => ({
                 ...current,
@@ -285,108 +306,68 @@ export function useAttachedTerminal(
                 createdSocket.send(JSON.stringify(message))
               }
             }
-          }
-          createdSocket.onmessage = (event) => {
-            if (
-              disposed ||
-              socketRef.current !== createdSocket ||
-              typeof event.data !== "string"
-            )
-              return
-            let message: {
-              type: string
-              data?: string
-              exitCode?: number
-              message?: string
-            }
-            try {
-              message = JSON.parse(event.data)
-            } catch {
-              return
-            }
-            if (message.type === "output" && typeof message.data === "string") {
-              setState((current) => ({
-                ...current,
-                buffer: trimBuffer(`${current.buffer}${message.data}`),
-                status: "running",
-                error: null,
-                version: current.version + 1,
-                sequence: ++sequence,
-              }))
-            } else if (message.type === "exit") {
-              setState((current) => ({
-                ...current,
-                status: "exited",
-                version: current.version + 1,
-                sequence: ++sequence,
-              }))
-            } else if (message.type === "error") {
-              setState((current) => ({
-                ...current,
-                status: "error",
-                error: message.message ?? "Cloud terminal disconnected",
-                version: current.version + 1,
-              }))
-            }
-          }
-          createdSocket.onerror = () => {
-            if (socketRef.current !== createdSocket || disposed) return
-            cloudConnectingRef.current = false
-            setState((current) => ({
-              ...current,
-              status: "error",
-              error: "Unable to connect to cloud terminal",
-              version: current.version + 1,
-            }))
-          }
-          createdSocket.onclose = (event) => {
-            const active = socketRef.current === createdSocket
-            if (active) {
-              socketRef.current = null
-              cloudConnectingRef.current = false
-            }
-            if (active && !disposed) {
-              pendingRef.current = []
-              setState((current) =>
-                event.code !== 1000
-                  ? {
-                      ...current,
-                      status: "error",
-                      error: cloudTerminalCloseError(
-                        event.reason,
-                        current.error
-                      ),
-                      version: current.version + 1,
-                    }
-                  : current.status === "error"
-                    ? current
-                    : {
-                        ...current,
-                        status: "closed",
-                        version: current.version + 1,
-                      }
+            createdSocket.onmessage = (event) => {
+              if (
+                disposed ||
+                socketRef.current !== createdSocket ||
+                typeof event.data !== "string"
               )
+                return
+              let message: {
+                type: string
+                data?: string
+                exitCode?: number
+                message?: string
+              }
+              try {
+                message = JSON.parse(event.data)
+              } catch {
+                return
+              }
+              if (
+                message.type === "output" &&
+                typeof message.data === "string"
+              ) {
+                setState((current) => ({
+                  ...current,
+                  buffer: trimBuffer(`${current.buffer}${message.data}`),
+                  status: "running",
+                  error: null,
+                  version: current.version + 1,
+                  sequence: ++sequence,
+                }))
+              } else if (message.type === "exit") {
+                exited = true
+                cloudConnectingRef.current = false
+                setState((current) => ({
+                  ...current,
+                  status: "exited",
+                  version: current.version + 1,
+                  sequence: ++sequence,
+                }))
+              } else if (message.type === "error") {
+                setState((current) => ({
+                  ...current,
+                  error: message.message ?? "Cloud terminal disconnected",
+                  version: current.version + 1,
+                }))
+              }
             }
-          }
-        })
-        .catch((error: unknown) => {
-          if (disposed) return
-          cloudConnectingRef.current = false
-          pendingRef.current = []
-          setState({
-            ...EMPTY_TERMINAL_SESSION,
-            status: "error",
-            error:
-              error instanceof Error
-                ? error.message
-                : "Unable to connect to cloud terminal",
+            createdSocket.onclose = () => {
+              if (socketRef.current !== createdSocket) return
+              socketRef.current = null
+              reconnect()
+            }
           })
-        })
+          .catch(reconnect)
+      }
 
+      connect()
       return () => {
         disposed = true
         cloudConnectingRef.current = false
         pendingRef.current = []
+        if (retryTimer) clearTimeout(retryTimer)
         socket?.close()
         if (socketRef.current === socket) socketRef.current = null
       }
