@@ -1,14 +1,27 @@
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from blockbuster import blockbuster_ctx
+from blockbuster import BlockBuster
 
 from agent.desktop import (
     create_desktop_backend,
     desktop_artifact_routes,
     resolve_desktop_project,
 )
+
+
+@contextmanager
+def detect_blocking_calls() -> Iterator[None]:
+    """Leak-proof ``blockbuster_ctx``: deactivates even when the body raises."""
+    blockbuster = BlockBuster()
+    blockbuster.activate()
+    try:
+        yield
+    finally:
+        blockbuster.deactivate()
 
 
 def test_desktop_backend_allows_registered_project_without_provider_secrets(
@@ -47,7 +60,7 @@ async def test_artifact_routes_stay_out_of_the_project(
     artifacts = tmp_path / "artifacts"
     monkeypatch.setenv("OPEN_SWE_LOCAL_ARTIFACTS_DIR", str(artifacts))
 
-    with blockbuster_ctx():
+    with detect_blocking_calls():
         routes = await desktop_artifact_routes("thread-1")
     assert set(routes) == {"/large_tool_results/", "/conversation_history/"}
     for prefix, backend in routes.items():
