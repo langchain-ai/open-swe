@@ -295,7 +295,12 @@ export function AgentsSidebar({
       </div>
 
       {!localOnly && (
-        <nav className="flex flex-col gap-0.5 px-2 pb-4">
+        <nav
+          className={cn(
+            "flex flex-col gap-0.5 px-2",
+            isDesktop ? "pb-3" : "pb-4"
+          )}
+        >
           {NAV.map((item) => {
             const Icon = item.icon
             return (
