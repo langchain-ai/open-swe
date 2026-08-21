@@ -224,9 +224,7 @@ PLAN_MODE_GUIDANCE_SECTION = """---
 
 Plan-review link for this conversation: {plan_review_url}"""
 
-DEFAULT_PLAN_MODE_ENTRY_GUIDANCE = """If a task would genuinely benefit from a structured plan before any code — complex, many files, or multiple valid approaches — call the `enter_plan_mode` tool. This is NOT triggered by the word "plan" in the request; use judgment."""
-
-DASHBOARD_PLAN_MODE_ENTRY_GUIDANCE = """In the dashboard/Web UI, call `enter_plan_mode` only when the user explicitly asks in their prompt to enter or use plan mode. Do not infer plan mode from task complexity, size, or ambiguity; the dashboard's dedicated plan control enables it separately when selected."""
+PLAN_MODE_ENTRY_GUIDANCE = """Call `enter_plan_mode` only when the user explicitly asks to enter or use plan mode. Do not infer plan mode from task complexity, size, or ambiguity."""
 
 PLAN_MODE_SECTION = """---
 
@@ -566,11 +564,7 @@ def construct_system_prompt(
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
         plan_review_url=plan_url or "(the dashboard plan-review page)",
-        plan_mode_entry_guidance=(
-            DASHBOARD_PLAN_MODE_ENTRY_GUIDANCE
-            if source == "dashboard"
-            else DEFAULT_PLAN_MODE_ENTRY_GUIDANCE
-        ),
+        plan_mode_entry_guidance=PLAN_MODE_ENTRY_GUIDANCE,
         plan_mode_section=(
             PLAN_MODE_SECTION.format(plan_url=plan_url or "(plan-review link unavailable)")
             if plan_mode
