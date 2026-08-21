@@ -19,7 +19,7 @@ from ..langsmith.tracing import REVIEW_TRACING_PROJECT
 from ..settings.team_settings import get_team_review_trace_links_enabled
 from ..slack.api import post_slack_thread_reply
 from ..utils.dashboard_links import dashboard_review_url
-from .diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
+from .diff import is_range_in_diff, resolve_diff_context
 from .findings import (
     REVIEWER_EVAL_PUBLICATION_KEY,
     SEVERITY_ORDER,
@@ -587,37 +587,6 @@ async def post_slack_completion_reply(
     await post_slack_thread_reply(
         channel_id, thread_ts, f"{headline} <{review_url}|View review>", agent_thread_id=thread_id
     )
-
-
-async def resolve_diff_context(
-    *,
-    state: Mapping[str, Any] | None,
-    configurable: Mapping[str, Any] | None,
-    owner: str | None,
-    repo: str | None,
-    pr_number: int | None,
-    token: str | None,
-) -> tuple[dict[str, Any] | None, str]:
-    """The PR's ``(diff_line_set, diff_text)`` for this reviewer run.
-
-    Reviewer runs clear ``diff_line_set`` from the run config before the agent
-    starts (so ``add_finding`` trusts the agent's anchors), which means neither
-    the anchor check nor the publish-time retry can rely on it being there:
-    prefer injected state, then the config, then fetch the PR's unified diff and
-    recompute. ``(None, "")`` means the diff is simply unknown.
-    """
-    for source in (state, configurable):
-        if isinstance(source, Mapping):
-            line_set = source.get("diff_line_set")
-            if isinstance(line_set, dict):
-                diff_text = source.get("diff_text")
-                return line_set, diff_text if isinstance(diff_text, str) else ""
-    if not owner or not repo or not isinstance(pr_number, int) or not token:
-        return None, ""
-    diff_text = await fetch_pr_diff(owner=owner, repo=repo, pr_number=pr_number, token=token)
-    if diff_text is None:
-        return None, ""
-    return compute_diff_line_set(diff_text), diff_text
 
 
 async def resolve_diff_line_set(

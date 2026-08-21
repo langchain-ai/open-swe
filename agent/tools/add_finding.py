@@ -6,7 +6,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from ..github.token import get_github_token
-from ..review.diff import is_range_in_diff
+from ..review.diff import is_range_in_diff, resolve_diff_context
 from ..review.findings import (
     CONFIDENCES,
     DEFAULT_FINDING_TITLE,
@@ -26,7 +26,6 @@ from ..review.findings import (
     resolve_review_head_sha,
     thread_missing_tool_result,
 )
-from ..review.publish_flow import resolve_diff_context
 
 
 async def add_finding(
