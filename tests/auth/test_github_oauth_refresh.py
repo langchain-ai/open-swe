@@ -38,7 +38,7 @@ async def test_get_valid_access_token_refreshes_when_near_expiry() -> None:
     }
     with (
         patch(
-            "agent.dashboard.profiles._get_value",
+            "agent.dashboard.profiles.get_value",
             new_callable=AsyncMock,
             return_value=record,
         ),
@@ -87,7 +87,7 @@ async def test_get_valid_access_token_drops_record_on_dead_refresh_token() -> No
     }
     with (
         patch(
-            "agent.dashboard.profiles._get_value",
+            "agent.dashboard.profiles.get_value",
             new_callable=AsyncMock,
             return_value=record,
         ),
@@ -127,7 +127,7 @@ async def test_get_valid_access_token_keeps_fresh_reauth_on_dead_refresh_token()
     }
     with (
         patch(
-            "agent.dashboard.profiles._get_value",
+            "agent.dashboard.profiles.get_value",
             new_callable=AsyncMock,
             side_effect=[stale, stale, reauthed],
         ),
@@ -164,7 +164,7 @@ async def test_get_valid_access_token_keeps_record_on_transient_refresh_failure(
     }
     with (
         patch(
-            "agent.dashboard.profiles._get_value",
+            "agent.dashboard.profiles.get_value",
             new_callable=AsyncMock,
             return_value=record,
         ),
@@ -195,7 +195,7 @@ async def test_get_valid_access_token_returns_stored_when_not_expiring() -> None
     }
     with (
         patch(
-            "agent.dashboard.profiles._get_value",
+            "agent.dashboard.profiles.get_value",
             new_callable=AsyncMock,
             return_value=record,
         ),

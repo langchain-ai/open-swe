@@ -23,7 +23,7 @@ async def test_skill_validation_and_persistence() -> None:
 
     client.store.get_item.return_value = None
 
-    with patch("agent.dashboard.skills._client", return_value=client):
+    with patch("agent.store.store_client", return_value=client):
         record = await create_skill(
             "octocat",
             SkillCreate(
@@ -50,7 +50,7 @@ async def test_organization_skill_uses_singleton_namespace() -> None:
     client.store.get_item.return_value = None
     client.store.search_items.return_value = {"items": []}
 
-    with patch("agent.dashboard.skills._client", return_value=client):
+    with patch("agent.store.store_client", return_value=client):
         await create_organization_skill(
             SkillCreate(name="security-review", description="Apply organization security rules")
         )
@@ -71,7 +71,7 @@ async def test_organization_skill_listing_uses_opaque_cursor() -> None:
         ]
     }
 
-    with patch("agent.dashboard.skills._client", return_value=client):
+    with patch("agent.store.store_client", return_value=client):
         first_page = await list_organization_skills(limit=1, cursor=None)
         second_page = await list_organization_skills(limit=1, cursor=first_page["next_cursor"])
         for cursor in (
@@ -87,7 +87,9 @@ async def test_organization_skill_listing_uses_opaque_cursor() -> None:
 
     assert first_page == {"items": [{"name": "first"}], "next_cursor": "eyJuYW1lIjogImZpcnN0In0"}
     assert second_page == {"items": [{"name": "second"}], "next_cursor": None}
-    client.store.search_items.assert_awaited_with(["organization_skills"], limit=1001)
+    client.store.search_items.assert_awaited_with(
+        ["organization_skills"], filter=None, limit=1001, offset=0
+    )
 
 
 async def test_save_user_skill_uses_triggering_user_namespace() -> None:
@@ -115,10 +117,10 @@ async def test_skill_listing_returns_next_offset() -> None:
         ]
     }
 
-    with patch("agent.dashboard.skills._client", return_value=client):
+    with patch("agent.store.store_client", return_value=client):
         page = await list_skills("octocat", limit=1, offset=3)
 
     assert page == {"items": [{"name": "first"}], "next_offset": 4}
     client.store.search_items.assert_awaited_once_with(
-        ["user_skills", "octocat"], limit=2, offset=3
+        ["user_skills", "octocat"], filter=None, limit=2, offset=3
     )

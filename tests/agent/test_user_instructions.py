@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -11,21 +11,15 @@ from agent.tools.save_user_instructions import save_user_instructions
 
 @pytest.mark.asyncio
 async def test_set_user_instructions_upserts_record() -> None:
-    mock_put = AsyncMock()
-    with (
-        patch(
-            "agent.dashboard.user_instructions.get_user_instructions",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-        patch("agent.dashboard.user_instructions._client") as mock_client,
-    ):
-        mock_client.return_value.store.put_item = mock_put
+    client = MagicMock()
+    client.store.get_item = AsyncMock(return_value=None)
+    client.store.put_item = AsyncMock()
+    with patch("agent.store.store_client", return_value=client):
         record = await set_user_instructions("octo", "Always run the linter.")
     assert record["login"] == "octo"
     assert record["instructions"] == "Always run the linter."
     assert record["updated_by"] == "octo"
-    mock_put.assert_awaited_once()
+    client.store.put_item.assert_awaited_once_with(["user_instructions"], "octo", record)
 
 
 @pytest.mark.asyncio

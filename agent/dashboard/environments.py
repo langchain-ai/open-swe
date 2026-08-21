@@ -23,12 +23,11 @@ the configured base snapshot.
 import logging
 import os
 import re
-from datetime import UTC, datetime
 from typing import Any, Literal
 
-from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, field_validator
 
+from ..store import KeyedRecordStore, now_iso
 from .review_styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)
@@ -158,40 +157,15 @@ class EnvironmentUpdate(BaseModel):
         return None if v is None else _validate_repos(v)
 
 
-def _client():
-    return get_client()
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-def _item_value(item: Any) -> dict[str, Any] | None:
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
+_RECORDS = KeyedRecordStore(ENVIRONMENTS_NAMESPACE, sort_key="name")
 
 
 async def get_environment(slug: str) -> dict[str, Any] | None:
-    try:
-        item = await _client().store.get_item(ENVIRONMENTS_NAMESPACE, slug)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("environment lookup failed for %s: %s", slug, e)
-        return None
-    return _item_value(item)
+    return await _RECORDS.get(slug)
 
 
 async def list_environments() -> list[dict[str, Any]]:
-    try:
-        result = await _client().store.search_items(ENVIRONMENTS_NAMESPACE, limit=1000)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("environment search failed: %s", e)
-        return []
-    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-    out = [value for item in items or [] if (value := _item_value(item)) is not None]
-    out.sort(key=lambda record: record.get("name", ""))
-    return out
+    return await _RECORDS.list()
 
 
 async def create_environment(create: EnvironmentCreate, created_by: str) -> dict[str, Any]:
@@ -211,11 +185,10 @@ async def create_environment(create: EnvironmentCreate, created_by: str) -> dict
         "source_sandbox_id": None,
         "last_captured_at": None,
         "created_by": created_by,
-        "created_at": _now_iso(),
-        "updated_at": _now_iso(),
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
     }
-    await _client().store.put_item(ENVIRONMENTS_NAMESPACE, slug, record)
-    return record
+    return await _RECORDS.put(slug, record)
 
 
 async def update_environment(slug: str, update: EnvironmentUpdate) -> dict[str, Any]:
@@ -224,26 +197,21 @@ async def update_environment(slug: str, update: EnvironmentUpdate) -> dict[str, 
         raise ValueError(f"no environment named {slug!r}")
     if update.name is not None and slugify(update.name) != slug:
         raise ValueError("renaming an environment across slugs is not supported; create a new one")
-    record = {**existing, "updated_at": _now_iso()}
+    record = {**existing, "updated_at": now_iso()}
     if update.name is not None:
         record["name"] = update.name.strip()
     if update.prompt is not None:
         record["prompt"] = update.prompt
     if update.repos is not None:
         record["repos"] = update.repos
-    await _client().store.put_item(ENVIRONMENTS_NAMESPACE, slug, record)
-    return record
+    return await _RECORDS.put(slug, record)
 
 
 async def delete_environment(slug: str) -> bool:
     existing = await get_environment(slug)
     if existing is None:
         return False
-    try:
-        await _client().store.delete_item(ENVIRONMENTS_NAMESPACE, slug)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("failed to delete environment %s: %s", slug, e)
-        return False
+    await _RECORDS.delete(slug)
     await _delete_snapshot(existing.get("snapshot_id"))
     return True
 
@@ -251,13 +219,14 @@ async def delete_environment(slug: str) -> bool:
 async def resolve_default_environment() -> dict[str, Any] | None:
     """Return the environment named ``default``, or ``None``.
 
-    Never raises: a store failure resolves to ``None`` so runs fall back to the
-    per-repo and base snapshots with no environment prompt.
+    Fail-soft on purpose: this runs while a sandbox is being created, and a
+    store failure must fall back to the per-repo and base snapshots with no
+    environment prompt rather than fail the run.
     """
     try:
         return await get_environment(DEFAULT_ENVIRONMENT_SLUG)
-    except Exception:  # noqa: BLE001
-        logger.debug("default environment resolution failed", exc_info=True)
+    except Exception:
+        logger.warning("default environment resolution failed", exc_info=True)
         return None
 
 
@@ -271,8 +240,8 @@ async def resolve_environment(slug: str | None) -> dict[str, Any] | None:
         return await resolve_default_environment()
     try:
         record = await get_environment(slug)
-    except Exception:  # noqa: BLE001
-        logger.debug("environment resolution failed for %s", slug, exc_info=True)
+    except Exception:
+        logger.warning("environment resolution failed for %s", slug, exc_info=True)
         record = None
     if record is None:
         logger.info("Environment %s is not configured; falling back to the default", slug)
@@ -344,11 +313,10 @@ async def _set_snapshot_state(
         **existing,
         "snapshot_status": status,
         "status_message": status_message,
-        "updated_at": _now_iso(),
+        "updated_at": now_iso(),
         **(extra or {}),
     }
-    await _client().store.put_item(ENVIRONMENTS_NAMESPACE, slug, record)
-    return record
+    return await _RECORDS.put(slug, record)
 
 
 def _require_capture_support() -> None:
@@ -449,7 +417,7 @@ async def capture_environment_snapshot(
             "snapshot_id": snapshot.id,
             "snapshot_name": snapshot_name,
             "source_sandbox_id": sandbox_id,
-            "last_captured_at": _now_iso(),
+            "last_captured_at": now_iso(),
         },
     )
     if previous_snapshot_id != snapshot.id:

@@ -18,9 +18,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, field_validator
 
+from ..store import KeyedRecordStore, now_iso
 from .review_styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)
@@ -137,14 +137,6 @@ class RepoSnapshotUpdate(BaseModel):
         return v
 
 
-def _client():
-    return get_client()
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
-
-
 def _parse_iso(value: object) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         return None
@@ -177,18 +169,6 @@ def is_repo_snapshot_build_stale(record: dict[str, Any]) -> bool:
     return (datetime.now(UTC) - started_at).total_seconds() > _stale_build_seconds()
 
 
-async def _get_value(key: str) -> dict[str, Any] | None:
-    try:
-        item = await _client().store.get_item(REPO_SNAPSHOTS_NAMESPACE, key)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("store get_item failed for %s: %s", key, e)
-        return None
-    if item is None:
-        return None
-    value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-    return value if isinstance(value, dict) else None
-
-
 def _default_record(full_name: str, created_by: str) -> dict[str, Any]:
     owner, name = full_name.split("/", 1)
     return {
@@ -209,100 +189,86 @@ def _default_record(full_name: str, created_by: str) -> dict[str, Any]:
         "build_started_at": None,
         "last_built_at": None,
         "created_by": created_by,
-        "created_at": _now_iso(),
-        "updated_at": _now_iso(),
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
     }
 
 
+_RECORDS = KeyedRecordStore(
+    REPO_SNAPSHOTS_NAMESPACE,
+    sort_key="full_name",
+    default_factory=_default_record,
+)
+
+
 async def get_repo_snapshot(full_name: str) -> dict[str, Any] | None:
-    return await _get_value(normalize_repo_full_name(full_name))
+    return await _RECORDS.get(normalize_repo_full_name(full_name))
 
 
 async def list_repo_snapshots() -> list[dict[str, Any]]:
-    try:
-        result = await _client().store.search_items(REPO_SNAPSHOTS_NAMESPACE, limit=1000)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("store search_items failed for repo_snapshots: %s", e)
-        return []
-    items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-    out: list[dict[str, Any]] = []
-    for item in items or []:
-        value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
-        if isinstance(value, dict):
-            out.append(value)
-    out.sort(key=lambda r: r.get("full_name", ""))
-    return out
+    return await _RECORDS.list()
 
 
 async def create_repo_snapshot(full_name: str, created_by: str) -> dict[str, Any]:
-    full_name = normalize_repo_full_name(full_name)
-    existing = await get_repo_snapshot(full_name)
-    if existing:
-        return existing
-    value = _default_record(full_name, created_by)
-    await _client().store.put_item(REPO_SNAPSHOTS_NAMESPACE, full_name, value)
-    return value
+    return await _RECORDS.create(normalize_repo_full_name(full_name), created_by)
 
 
 async def update_repo_snapshot(full_name: str, update: RepoSnapshotUpdate) -> dict[str, Any]:
-    full_name = normalize_repo_full_name(full_name)
-    existing = await get_repo_snapshot(full_name) or _default_record(full_name, "")
-    value = {**existing, "dockerfile": update.dockerfile, "updated_at": _now_iso()}
-    if update.fs_capacity_bytes is not None:
-        value["fs_capacity_bytes"] = update.fs_capacity_bytes
-    if update.vcpus is not None:
-        value["vcpus"] = update.vcpus
-    if update.mem_bytes is not None:
-        value["mem_bytes"] = update.mem_bytes
-    value["target"] = update.target
-    value["build_args"] = update.build_args
-    await _client().store.put_item(REPO_SNAPSHOTS_NAMESPACE, full_name, value)
-    return value
+    patch: dict[str, Any] = {
+        "dockerfile": update.dockerfile,
+        "target": update.target,
+        "build_args": update.build_args,
+    }
+    for field, value in (
+        ("fs_capacity_bytes", update.fs_capacity_bytes),
+        ("vcpus", update.vcpus),
+        ("mem_bytes", update.mem_bytes),
+    ):
+        if value is not None:
+            patch[field] = value
+    return await _RECORDS.update(normalize_repo_full_name(full_name), patch)
 
 
 async def delete_repo_snapshot(full_name: str) -> bool:
     full_name = normalize_repo_full_name(full_name)
-    existing = await get_repo_snapshot(full_name)
-    if not existing:
+    if not await get_repo_snapshot(full_name):
         return False
-    try:
-        await _client().store.delete_item(REPO_SNAPSHOTS_NAMESPACE, full_name)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to delete repo snapshot %s: %s", full_name, e)
-        return False
+    await _RECORDS.delete(full_name)
     return True
 
 
 async def mark_repo_snapshot_building(full_name: str) -> dict[str, Any]:
     """Set a repo snapshot's status to ``building`` and return the record."""
     full_name = normalize_repo_full_name(full_name)
-    existing = await get_repo_snapshot(full_name)
+    existing = await _RECORDS.get(full_name)
     if existing is None:
         raise ValueError(f"no repo snapshot record for {full_name}")
-    value = {
-        **existing,
-        "status": "building",
-        "status_message": None,
-        "build_log": None,
-        "build_started_at": _now_iso(),
-        "updated_at": _now_iso(),
-    }
-    await _client().store.put_item(REPO_SNAPSHOTS_NAMESPACE, full_name, value)
-    return value
+    return await _RECORDS.put(
+        full_name,
+        {
+            **existing,
+            "status": "building",
+            "status_message": None,
+            "build_log": None,
+            "build_started_at": now_iso(),
+            "updated_at": now_iso(),
+        },
+    )
 
 
 async def resolve_repo_snapshot_id(owner: str | None, name: str | None) -> str | None:
     """Return a repo's ready snapshot id, or ``None`` to fall back to the default.
 
-    Never raises: any lookup failure resolves to ``None`` so sandbox creation
-    falls back to the configured ``DEFAULT_SANDBOX_SNAPSHOT_ID``.
+    Fail-soft on purpose: this runs while a sandbox is being created, and a
+    lookup failure must fall back to the configured
+    ``DEFAULT_SANDBOX_SNAPSHOT_ID`` rather than fail the run.
     """
     if not owner or not name:
         return None
     try:
-        record = await _get_value(f"{owner}/{name}")
-    except Exception:  # noqa: BLE001
-        logger.debug("repo snapshot lookup failed for %s/%s", owner, name, exc_info=True)
+        record = await _RECORDS.get(f"{owner}/{name}")
+    except Exception:
+        logger.warning("repo snapshot lookup failed for %s/%s", owner, name, exc_info=True)
         return None
     if not record or record.get("status") != "ready":
         return None
@@ -317,20 +283,21 @@ async def _set_status(
     status_message: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    existing = await get_repo_snapshot(full_name)
+    full_name = normalize_repo_full_name(full_name)
+    existing = await _RECORDS.get(full_name)
     if existing is None:
         return
     value = {
         **existing,
         "status": status,
         "status_message": status_message,
-        "updated_at": _now_iso(),
+        "updated_at": now_iso(),
     }
     if status != "building":
         value["build_started_at"] = None
     if extra:
         value.update(extra)
-    await _client().store.put_item(REPO_SNAPSHOTS_NAMESPACE, full_name, value)
+    await _RECORDS.put(full_name, value)
 
 
 def _build_snapshot_sync(record: dict[str, Any], snapshot_name: str) -> tuple[str, str]:
@@ -421,7 +388,7 @@ async def run_snapshot_build(full_name: str) -> None:
             "snapshot_id": snapshot_id,
             "snapshot_name": snapshot_name,
             "build_log": log_tail,
-            "last_built_at": _now_iso(),
+            "last_built_at": now_iso(),
         },
     )
     logger.info("Built snapshot %s for repo %s", snapshot_id, full_name)

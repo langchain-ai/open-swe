@@ -400,13 +400,12 @@ async def _resolve_dashboard_user_token(
     if not login:
         raise ValueError("missing github_login")
 
-    from ..dashboard.profiles import OAUTH_TOKENS_NAMESPACE, get_valid_access_token
-    from ..dashboard.profiles import _get_value as get_oauth_record
+    from ..dashboard.profiles import get_oauth_token_record, get_valid_access_token
 
     token = await get_valid_access_token(login)
     if not token:
         return None
-    record = await get_oauth_record(OAUTH_TOKENS_NAMESPACE, login)
+    record = await get_oauth_token_record(login)
     expires_at = record.get("token_expires_at") if isinstance(record, dict) else None
     return _cache_resolved_github_token(
         thread_id,

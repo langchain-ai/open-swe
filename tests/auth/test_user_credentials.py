@@ -6,6 +6,7 @@ import pytest
 from cryptography.fernet import Fernet
 from pydantic import ValidationError
 
+from agent import store as agent_store
 from agent.dashboard import user_credentials as uc
 from agent.dashboard.notion_oauth import NotionOAuthError
 from agent.dashboard.user_credentials import CurrentsCredentialsUpdate
@@ -34,7 +35,7 @@ class _FakeClient:
 @pytest.fixture()
 def fake_store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
     store = _FakeStore()
-    monkeypatch.setattr(uc, "_client", lambda: _FakeClient(store))
+    monkeypatch.setattr(agent_store, "store_client", lambda: _FakeClient(store))
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     return store
 

@@ -71,12 +71,12 @@ def _stub_dashboard_store(
     async def fake_get_valid(login: str):
         return token
 
-    async def fake_get_value(namespace, key):
+    async def fake_get_record(login: str):
         return {"token_expires_at": expires_at}
 
     monkeypatch.setattr(auth, "get_github_token_from_thread", fake_get_from_thread)
     monkeypatch.setattr(profiles, "get_valid_access_token", fake_get_valid)
-    monkeypatch.setattr(profiles, "_get_value", fake_get_value)
+    monkeypatch.setattr(profiles, "get_oauth_token_record", fake_get_record)
 
 
 def test_resolve_github_token_slack_uses_dashboard_store(
