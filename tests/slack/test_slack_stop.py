@@ -141,7 +141,7 @@ def _patch_handler(
         )
         return {"run_id": "run-summary"}
 
-    monkeypatch.setattr(slack_stop, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_stop, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_stop, "claim_slack_event", fake_claim)
     monkeypatch.setattr(slack_stop, "dispatch_agent_run", fake_dispatch)
     return dispatched, claimed

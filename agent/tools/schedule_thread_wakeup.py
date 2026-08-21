@@ -10,12 +10,11 @@ from xml.etree import ElementTree
 
 from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
-from langgraph_sdk import get_client
 
-from ..dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
+from ..config import langgraph_client
+from ..dispatch import completion_webhook_url, prepare_run_config
 from ..input_messages import build_run_input
 from ..utils.slack import get_active_slack_thread
-from ..utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +188,7 @@ async def purge_expired_wakeup_crons(client: Any, *, now: datetime) -> int:
 async def _purge_expired_wakeups_best_effort() -> None:
     """Opportunistically purge expired wakeup crons; never raises."""
     try:
-        client = get_client(url=langgraph_url())
+        client = langgraph_client()
         deleted = await purge_expired_wakeup_crons(client, now=datetime.now(UTC))
         if deleted:
             logger.info("Purged %d expired thread_wakeup cron(s)", deleted)
@@ -205,7 +204,7 @@ async def _create_wakeup_cron(
     configurable: dict[str, Any],
     client: Any | None = None,
 ) -> dict[str, Any]:
-    resolved_client = get_client(url=langgraph_url()) if client is None else client
+    resolved_client = langgraph_client() if client is None else client
     schedule = _build_one_shot_cron(fire_time)
     end_time = fire_time + timedelta(seconds=_END_TIME_PADDING_SECONDS)
     run_config = prepare_run_config(
@@ -234,8 +233,9 @@ async def _create_wakeup_cron(
         "timezone": "UTC",
         "metadata": run_config["metadata"],
     }
-    if COMPLETION_WEBHOOK_URL:
-        kwargs["webhook"] = COMPLETION_WEBHOOK_URL
+    webhook = completion_webhook_url()
+    if webhook:
+        kwargs["webhook"] = webhook
     cron = await resolved_client.crons.create_for_thread(
         thread_id,
         _AGENT_ASSISTANT_ID,
@@ -281,7 +281,7 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
     if not isinstance(thread_id, str) or not thread_id:
         return {"success": False, "error": "No thread_id in current run config"}
 
-    client = get_client(url=langgraph_url())
+    client = langgraph_client()
     fire_time = _ceil_to_next_minute(datetime.now(UTC) + timedelta(seconds=delay_seconds))
     wakeup_prompt = (
         prompt.strip() if isinstance(prompt, str) and prompt.strip() else _DEFAULT_WAKEUP_PROMPT

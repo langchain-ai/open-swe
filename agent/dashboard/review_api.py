@@ -17,6 +17,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from fastapi import HTTPException, Response
 
+from ..config import langgraph_client
 from ..review.findings import (
     REVIEWER_THREAD_KIND,
     coerce_finding,
@@ -27,7 +28,6 @@ from ..thread_ids import reviewer_thread_id
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_checks import github_headers
 from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
-from ..utils.thread_ops import langgraph_client
 from ..webhooks.common import fetch_github_pr_metadata
 from ..webhooks.github import trigger_pr_review_from_ref
 from .pr_diff import build_pr_diff_files

@@ -1,9 +1,8 @@
 """Utilities for extracting repository configuration from text."""
 
-import os
 import re
 
-_DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
+from ..config import default_repo_owner
 
 
 def extract_repo_from_text(text: str, default_owner: str | None = None) -> dict[str, str] | None:
@@ -16,7 +15,7 @@ def extract_repo_from_text(text: str, default_owner: str | None = None) -> dict[
         A dict with ``owner`` and ``name`` keys, or ``None`` if no repo found.
     """
     if default_owner is None:
-        default_owner = _DEFAULT_REPO_OWNER
+        default_owner = default_repo_owner()
     owner: str | None = None
     name: str | None = None
 

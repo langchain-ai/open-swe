@@ -102,7 +102,7 @@ def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
-    monkeypatch.setattr(slack_events, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_events, "langgraph_client", lambda: client)
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
@@ -137,7 +137,7 @@ async def test_mention_and_message_deliveries_start_one_run(
     _patch_slack_webhook: _FakeClient,
 ) -> None:
     background_tasks = _FakeBackgroundTasks()
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "BOT")
 
     first = await _post(_mention_payload("Ev1"), background_tasks)
     slack_events.reset_slack_event_claims()

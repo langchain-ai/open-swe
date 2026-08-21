@@ -16,8 +16,11 @@ import httpx
 import pytest
 
 from agent.utils import github_comments, github_token
+from agent.utils.timestamps import is_expired
 from agent.webhooks import common as webhook_common
 from agent.webhooks import github as github_webhooks
+
+_SKEW = github_token._GITHUB_TOKEN_EXPIRY_SKEW_SECONDS
 
 
 @pytest.fixture(autouse=True)
@@ -31,21 +34,29 @@ def _clear_token_cache() -> None:
 def test_is_expired_handles_iso_zulu_strings() -> None:
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
     future = (datetime.now(UTC) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
-    assert github_token._is_expired(past) is True
-    assert github_token._is_expired(future) is False
+    assert is_expired(past, skew_seconds=_SKEW) is True
+    assert is_expired(future, skew_seconds=_SKEW) is False
 
 
 def test_is_expired_handles_unix_timestamps() -> None:
     past = (datetime.now(UTC) - timedelta(hours=1)).timestamp()
     future = (datetime.now(UTC) + timedelta(hours=1)).timestamp()
-    assert github_token._is_expired(past) is True
-    assert github_token._is_expired(future) is False
+    assert is_expired(past, skew_seconds=_SKEW) is True
+    assert is_expired(future, skew_seconds=_SKEW) is False
 
 
 def test_is_expired_treats_unparseable_as_not_expired() -> None:
-    assert github_token._is_expired(None) is False
-    assert github_token._is_expired("") is False
-    assert github_token._is_expired("not-a-date") is False
+    assert is_expired(None, skew_seconds=_SKEW) is False
+    assert is_expired("", skew_seconds=_SKEW) is False
+    assert is_expired("not-a-date", skew_seconds=_SKEW) is False
+
+
+def test_is_expired_applies_the_skew_window() -> None:
+    """A token expiring inside the skew window is already unusable."""
+    inside = (datetime.now(UTC) + timedelta(seconds=_SKEW - 10)).isoformat()
+    outside = (datetime.now(UTC) + timedelta(seconds=_SKEW + 30)).isoformat()
+    assert is_expired(inside, skew_seconds=_SKEW) is True
+    assert is_expired(outside, skew_seconds=_SKEW) is False
 
 
 def test_get_github_token_returns_none_for_expired_cache() -> None:

@@ -76,7 +76,7 @@ async def test_sync_preserves_running_when_langgraph_errors() -> None:
             new_callable=AsyncMock,
             return_value=record,
         ),
-        patch("agent.dashboard.review_style_jobs._client", return_value=mock_client),
+        patch("agent.dashboard.review_style_jobs.langgraph_client", return_value=mock_client),
         patch(
             "agent.dashboard.review_style_jobs.reconcile_running_status",
             new_callable=AsyncMock,

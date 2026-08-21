@@ -4,12 +4,13 @@ import asyncio
 import hashlib
 import hmac
 import logging
-import os
 import re
+from functools import lru_cache
 from typing import Any
 
 import httpx
 
+from ..config import open_swe_mention_tags
 from .github_token import GitHubAuthError
 from .http import DEFAULT_HTTP_TIMEOUT
 
@@ -17,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "GitHubAuthError",
-    "OPEN_SWE_TAGS",
     "build_pr_prompt",
     "describe_open_swe_tags",
     "extract_pr_context",
@@ -27,6 +27,7 @@ __all__ = [
     "fetch_pr_comments_since_last_tag",
     "format_github_comment_body_for_prompt",
     "mentions_open_swe",
+    "open_swe_tags",
     "post_github_comment",
     "react_to_github_comment",
     "sanitize_github_comment_body",
@@ -36,35 +37,32 @@ __all__ = [
 _DEFAULT_OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
 
 
-def _load_open_swe_tags() -> tuple[str, ...]:
-    configured = tuple(
-        tag.strip().lower()
-        for tag in os.environ.get("OPEN_SWE_MENTION_TAGS", "").split(",")
-        if tag.strip()
+def open_swe_tags() -> tuple[str, ...]:
+    """This deployment's handles, or the built-in defaults when unconfigured."""
+    return open_swe_mention_tags() or _DEFAULT_OPEN_SWE_TAGS
+
+
+@lru_cache(maxsize=8)
+def _open_swe_tag_re(tags: tuple[str, ...]) -> re.Pattern[str]:
+    # Deployments sharing a workspace each own a distinct handle, so a tag must
+    # not match when it is only a prefix of a longer one (@openswe vs
+    # @openswe-preview).
+    return re.compile(
+        "(?:"
+        + "|".join(re.escape(tag) for tag in sorted(tags, key=len, reverse=True))
+        + r")(?![\w-])",
+        re.IGNORECASE,
     )
-    return configured or _DEFAULT_OPEN_SWE_TAGS
-
-
-OPEN_SWE_TAGS = _load_open_swe_tags()
-
-# Deployments sharing a workspace each own a distinct handle, so a tag must not
-# match when it is only a prefix of a longer one (@openswe vs @openswe-preview).
-_OPEN_SWE_TAG_RE = re.compile(
-    "(?:"
-    + "|".join(re.escape(tag) for tag in sorted(OPEN_SWE_TAGS, key=len, reverse=True))
-    + r")(?![\w-])",
-    re.IGNORECASE,
-)
 
 
 def mentions_open_swe(text: str | None) -> bool:
     """Whether text mentions one of this deployment's handles."""
-    return bool(text) and _OPEN_SWE_TAG_RE.search(text or "") is not None
+    return bool(text) and _open_swe_tag_re(open_swe_tags()).search(text or "") is not None
 
 
 def describe_open_swe_tags() -> str:
     """Human-readable handle list for ignore reasons in webhook responses."""
-    return " or ".join(OPEN_SWE_TAGS)
+    return " or ".join(open_swe_tags())
 
 
 UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "<dangerous-external-untrusted-users-comment>"

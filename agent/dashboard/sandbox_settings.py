@@ -12,11 +12,11 @@ precedence over this base for runs that target a repo with a ready snapshot.
 """
 
 import logging
-import os
 from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator
 
+from ..config import default_sandbox_snapshot_id
 from ..store import get_value, now_iso, put_value
 
 logger = logging.getLogger(__name__)
@@ -50,8 +50,7 @@ class SandboxSettingsUpdate(BaseModel):
 
 
 def env_base_snapshot_id() -> str | None:
-    value = os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID", "").strip()
-    return value or None
+    return default_sandbox_snapshot_id()
 
 
 def _stored_base_snapshot_id(record: dict[str, Any] | None) -> str | None:

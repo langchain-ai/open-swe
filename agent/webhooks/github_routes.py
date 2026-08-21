@@ -2,6 +2,8 @@
 
 from fastapi import APIRouter
 
+from ..config import github_webhook_secret
+from ..utils.github_org_membership import is_repo_allowed
 from . import common
 from . import github as service
 
@@ -16,7 +18,7 @@ async def github_webhook(
     body = await request.body()
 
     signature = request.headers.get("X-Hub-Signature-256", "")
-    if not common.verify_github_signature(body, signature, secret=common.GITHUB_WEBHOOK_SECRET):
+    if not common.verify_github_signature(body, signature, secret=github_webhook_secret()):
         common.logger.warning("Invalid GitHub webhook signature")
         raise common.HTTPException(status_code=401, detail="Invalid signature")
 
@@ -81,7 +83,7 @@ async def github_webhook(
         background_tasks.add_task(service.process_github_push_event, payload)
         return {"status": "accepted", "message": "Processing GitHub push for reviewer watch"}
 
-    if not common._is_repo_allowed(webhook_repo_config):
+    if not is_repo_allowed(webhook_repo_config):
         common.logger.debug(
             "Rejecting GitHub webhook: repo '%s/%s' not in allowlist",
             webhook_repo_config.get("owner"),

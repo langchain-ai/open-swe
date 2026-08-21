@@ -50,9 +50,10 @@ def _install_membership_stub(monkeypatch, members: set[str]) -> dict[str, list[s
 
 
 def _common_setup(monkeypatch, *, gate: str = "langchain-ai") -> None:
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-    monkeypatch.setattr(webhook_common, "PUBLIC_REPO_ORG_GATE", gate)
-    monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset())
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    monkeypatch.setenv("PUBLIC_REPO_ORG_GATE", gate)
+    monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
+    monkeypatch.delenv("ALLOWED_GITHUB_REPOS", raising=False)
 
 
 def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch) -> None:

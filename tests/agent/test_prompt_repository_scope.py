@@ -9,7 +9,7 @@ def test_prompt_restricts_edits_to_allowed_github_orgs(monkeypatch: pytest.Monke
     prompt = construct_system_prompt(working_dir="/workspace")
 
     assert "### Repository Modification Scope" in prompt
-    assert "`langchain-ai`, `anthropics`" in prompt
+    assert "`anthropics`, `langchain-ai`" in prompt
     assert "Do not create, edit, delete, commit, push" in prompt
     assert "full `https://github.com/<owner>/<repo>` URL" in prompt
     assert "`owner/repo` shorthand" in prompt

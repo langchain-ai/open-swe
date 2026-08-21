@@ -13,18 +13,16 @@ updates in place instead of duplicating.
 
 import asyncio
 import logging
-import os
 import uuid
 from typing import Any
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 
+from ..config import langsmith_credentials, reviewer_outcomes_dataset
 from ..review.findings import Finding
 from .langsmith import async_langsmith_client, sync_langsmith_client
 
 logger = logging.getLogger(__name__)
-
-OUTCOMES_DATASET_NAME = os.environ.get("REVIEWER_OUTCOMES_DATASET", "openswe-reviewer-outcomes")
 
 TRUE_POSITIVE = "true_positive"
 FALSE_POSITIVE = "false_positive"
@@ -63,22 +61,14 @@ def outcome_from_score(score: float | None, *, source: str) -> tuple[str, str] |
 
 
 def _outcomes_credentials() -> tuple[str, str] | None:
-    """Resolve the outcomes-dataset credentials, preferring the prod tenant."""
-    prod_key = os.environ.get("LANGSMITH_API_KEY_PROD")
-    if prod_key:
-        api_url = os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
-            "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
-        )
-        return prod_key, api_url
-    api_key = os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY")
-    if not api_key:
-        return None
-    return api_key, os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    """The outcomes dataset lives in the prod tenant alongside the traces it labels."""
+    return langsmith_credentials("prod")
 
 
 async def _find_dataset(client: AsyncLangSmithClient) -> Any:
-    async for dataset in client.list_datasets(dataset_name=OUTCOMES_DATASET_NAME):
-        if dataset.name == OUTCOMES_DATASET_NAME:
+    name = reviewer_outcomes_dataset()
+    async for dataset in client.list_datasets(dataset_name=name):
+        if dataset.name == name:
             return dataset
     return None
 
@@ -88,7 +78,7 @@ async def _ensure_dataset(client: AsyncLangSmithClient) -> Any:
     if existing is not None:
         return existing.id
     ds = await client.create_dataset(
-        dataset_name=OUTCOMES_DATASET_NAME,
+        dataset_name=reviewer_outcomes_dataset(),
         description=(
             "Open SWE reviewer finding outcomes (resolved / dismissed / 👍👎) "
             "captured in production for per-repo continual learning."

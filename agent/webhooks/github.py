@@ -274,8 +274,8 @@ async def trigger_pr_review_from_ref(
         return {"success": False, "error": "Pull request metadata is missing base/head SHA"}
 
     thread_id = reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    if not await common._ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+    client = common.langgraph_client()
+    if not await common._ensure_thread_exists_for_metadata(thread_id, client):
         return {"success": False, "error": "Could not create reviewer thread"}
 
     pr_meta: ReviewerPRMeta = {
@@ -343,8 +343,8 @@ async def trigger_pr_review_from_ref(
         source=source,
         input=review_input,
         assistant_id="reviewer",
-        metadata=common._AGENT_VERSION_METADATA,
-        client=langgraph_client,
+        metadata=common.agent_version_metadata(),
+        client=client,
     )
     await common._store_current_reviewer_run_id(thread_id, run)
     return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
@@ -415,8 +415,8 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         common.logger.warning("No GitHub App token available for reviewer dispatch")
         return
 
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    if not await common._ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+    client = common.langgraph_client()
+    if not await common._ensure_thread_exists_for_metadata(thread_id, client):
         return
 
     await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
@@ -468,8 +468,8 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         source=source,
         input=run_input,
         assistant_id="reviewer",
-        metadata=common._AGENT_VERSION_METADATA,
-        client=langgraph_client,
+        metadata=common.agent_version_metadata(),
+        client=client,
     )
     await common._store_current_reviewer_run_id(thread_id, run)
     common.logger.info("Reviewer run dispatched for thread %s (source=%s)", thread_id, source)
@@ -701,8 +701,8 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         )
         return
 
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    if not await common._ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+    client = common.langgraph_client()
+    if not await common._ensure_thread_exists_for_metadata(thread_id, client):
         return
     try:
         threads = await common.fetch_pr_review_threads(
@@ -781,8 +781,8 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
             },
         ),
         assistant_id="reviewer",
-        metadata=common._AGENT_VERSION_METADATA,
-        client=langgraph_client,
+        metadata=common.agent_version_metadata(),
+        client=client,
     )
     await common._store_current_reviewer_run_id(thread_id, run)
 
@@ -837,12 +837,12 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         common.logger.info(
             "Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name
         )
-        langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+        client = common.langgraph_client()
         try:
-            await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
+            await client.threads.update(thread_id, metadata={"branch_name": branch_name})
         except Exception as exc:  # noqa: BLE001
             if common._is_not_found_error(exc):
-                await langgraph_client.threads.create(
+                await client.threads.create(
                     thread_id=thread_id,
                     if_exists="do_nothing",
                     metadata={"branch_name": branch_name},
@@ -1049,7 +1049,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
         reply_body=reply_body,
         pr_number=pr_number,
     )
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    client = common.langgraph_client()
     run = await common.dispatch_agent_run(
         thread_id,
         None,
@@ -1066,8 +1066,8 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
             },
         ),
         assistant_id="reviewer",
-        metadata=common._AGENT_VERSION_METADATA,
-        client=langgraph_client,
+        metadata=common.agent_version_metadata(),
+        client=client,
     )
     await common._store_current_reviewer_run_id(thread_id, run)
 
@@ -1212,7 +1212,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     )
 
     common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", thread_id)
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    client = common.langgraph_client()
     if existing_thread:
         sender_login = (
             comment.get("user", {}).get("login", github_login) or github_login
@@ -1251,7 +1251,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         configurable,
         source="github_issue",
         input=run_input,
-        metadata=common._AGENT_VERSION_METADATA,
-        client=langgraph_client,
+        metadata=common.agent_version_metadata(),
+        client=client,
     )
     common.logger.info("LangGraph run dispatched for thread %s from GitHub issue", thread_id)

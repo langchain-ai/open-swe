@@ -1,11 +1,17 @@
 import asyncio
-import os
 from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
 
+from ..config import (
+    default_llm_model_id,
+    is_local_dev,
+    langsmith_gateway_enabled_default,
+    missing_provider_api_key,
+    openai_base_url,
+)
 from ..dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
-from .gateway import gateway_env_default, gateway_overrides
+from .gateway import gateway_overrides
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 
@@ -134,14 +140,10 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
         model_kwargs.setdefault("timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS)
 
     if model_id.startswith("openai:"):
-        model_kwargs["base_url"] = (
-            os.environ.get("OPENAI_BASE_URL")
-            or os.environ.get("OPENAI_API_BASE")
-            or OPENAI_RESPONSES_WS_BASE_URL
-        )
+        model_kwargs["base_url"] = openai_base_url() or OPENAI_RESPONSES_WS_BASE_URL
         model_kwargs["use_responses_api"] = True
 
-    enabled = gateway_env_default() if use_gateway is None else use_gateway
+    enabled = langsmith_gateway_enabled_default() if use_gateway is None else use_gateway
     if enabled:
         overrides = gateway_overrides(model_id)
         if overrides is not None:
@@ -306,24 +308,14 @@ def provider_model_kwargs(
 def validate_local_dev_llm_config() -> None:
     """Validate API keys for the locally configured default model.
 
-    This check only runs in localhost development environments and is
-    intended to catch missing credentials for the default model specified
-    via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
-    from team, profile, or thread configuration and is not validated here.
+    Only runs in local development: it catches missing credentials for the
+    default model (``LLM_MODEL_ID``/``DEFAULT_MODEL_ID``) before the first run
+    fails on them. Runtime model selection may come from team, profile, or
+    thread configuration and is not validated here.
     """
-    dashboard_url = os.environ.get("DASHBOARD_BASE_URL", "")
-    if not dashboard_url.startswith("http://localhost"):
+    if not is_local_dev():
         return
-
-    model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_MODEL_ID)
-
-    if model_id.startswith("openai:") and not os.environ.get("OPENAI_API_KEY"):
-        raise ValueError(f"OPENAI_API_KEY is required for configured model {model_id}")
-    elif model_id.startswith("anthropic:") and not os.environ.get("ANTHROPIC_API_KEY"):
-        raise ValueError(f"ANTHROPIC_API_KEY is required for configured model {model_id}")
-    elif model_id.startswith("google_genai:") and not os.environ.get("GOOGLE_API_KEY"):
-        raise ValueError(f"GOOGLE_API_KEY is required for configured model {model_id}")
-    elif model_id.startswith("groq:") and not os.environ.get("GROQ_API_KEY"):
-        raise ValueError(f"GROQ_API_KEY is required for configured model {model_id}")
-    elif model_id.startswith("fireworks:") and not os.environ.get("FIREWORKS_API_KEY"):
-        raise ValueError(f"FIREWORKS_API_KEY is required for configured model {model_id}")
+    model_id = default_llm_model_id() or DEFAULT_MODEL_ID
+    missing = missing_provider_api_key(model_id)
+    if missing:
+        raise ValueError(f"{missing} is required for configured model {model_id}")

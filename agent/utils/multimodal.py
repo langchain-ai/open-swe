@@ -3,7 +3,6 @@
 import base64
 import logging
 import mimetypes
-import os
 import re
 from urllib.parse import urlparse
 
@@ -15,6 +14,7 @@ from langchain_core.messages.content import (
     create_text_block,
 )
 
+from ..config import linear_api_key, slack_bot_token
 from .url_safety import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
@@ -66,17 +66,15 @@ def _image_auth_headers_for_url(original_url: str, current_url: str) -> dict[str
     if provider is None or _image_provider(current_url) != provider:
         return None
     if provider == "linear":
-        linear_api_key = os.environ.get("LINEAR_API_KEY", "")
-        if linear_api_key:
-            return {"Authorization": linear_api_key}
+        if api_key := linear_api_key():
+            return {"Authorization": api_key}
         logger.warning(
             "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
             current_url,
         )
     else:
-        slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
-        if slack_bot_token:
-            return {"Authorization": f"Bearer {slack_bot_token}"}
+        if token := slack_bot_token():
+            return {"Authorization": f"Bearer {token}"}
         logger.warning(
             "SLACK_BOT_TOKEN not set; cannot authenticate image fetch for %s",
             current_url,

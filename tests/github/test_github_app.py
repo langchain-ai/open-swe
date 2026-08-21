@@ -39,9 +39,9 @@ class _FakeAsyncClient:
 
 
 def _configure(monkeypatch: pytest.MonkeyPatch, client_cls: type) -> None:
-    monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
-    monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
-    monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "key")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "2")
     monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
     monkeypatch.setattr(github_app.httpx, "AsyncClient", client_cls)
 
@@ -167,9 +167,9 @@ async def test_near_expiry_token_is_not_cached(monkeypatch: pytest.MonkeyPatch) 
 async def test_installation_token_can_be_scoped_to_repository_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
-    monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
-    monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "key")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "2")
     monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
     monkeypatch.setattr(github_app.httpx, "AsyncClient", _FakeAsyncClient)
 
@@ -186,9 +186,9 @@ async def test_installation_token_can_be_scoped_to_repository_ids(
 
 @pytest.mark.asyncio
 async def test_installation_token_includes_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
-    monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
-    monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "key")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "2")
     monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
     monkeypatch.setattr(github_app.httpx, "AsyncClient", _FakeAsyncClient)
 
@@ -230,9 +230,9 @@ async def test_cache_is_scoped_per_permission_set(monkeypatch: pytest.MonkeyPatc
 async def test_installation_token_omits_scope_for_full_installation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
-    monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
-    monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "key")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "2")
     monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
     monkeypatch.setattr(github_app.httpx, "AsyncClient", _FakeAsyncClient)
 

@@ -7,6 +7,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from .timestamps import is_expired
+
 logger = logging.getLogger(__name__)
 
 # Treat tokens with <= this many seconds remaining as expired so we re-auth
@@ -53,42 +55,11 @@ def cache_github_token_for_thread(
     _evict_expired(now=now)
 
 
-def _is_expired(expires_at: Any, *, now: datetime | None = None) -> bool:
-    """Return True when ``expires_at`` is past (or close to) ``now``."""
-    if expires_at is None:
-        return False
-
-    parsed: datetime | None = None
-    if isinstance(expires_at, int | float):
-        try:
-            parsed = datetime.fromtimestamp(float(expires_at), tz=UTC)
-        except (OverflowError, OSError, ValueError):
-            return False
-    elif isinstance(expires_at, str):
-        raw = expires_at.strip()
-        if not raw:
-            return False
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        try:
-            parsed = datetime.fromisoformat(raw)
-        except ValueError:
-            return False
-
-    if parsed is None:
-        return False
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-
-    current = (now or datetime.now(UTC)).astimezone(UTC)
-    return (parsed - current).total_seconds() <= _GITHUB_TOKEN_EXPIRY_SKEW_SECONDS
-
-
 def _entry_expired(expires_at: str | None, cached_at: datetime, *, now: datetime) -> bool:
     """Expired when past the token's own expiry or the 24h cache cap."""
     if now - cached_at >= _GITHUB_TOKEN_MAX_TTL:
         return True
-    return _is_expired(expires_at, now=now)
+    return is_expired(expires_at, now=now, skew_seconds=_GITHUB_TOKEN_EXPIRY_SKEW_SECONDS)
 
 
 def _evict_expired(*, now: datetime | None = None) -> None:

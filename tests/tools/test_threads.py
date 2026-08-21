@@ -91,6 +91,7 @@ async def test_list_threads_denies_actor_outside_allowed_org(
 
 
 async def test_list_threads_defaults_to_triggering_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     actor = _actor()
     page = AsyncMock(
         return_value={
@@ -110,7 +111,7 @@ async def test_list_threads_defaults_to_triggering_user(monkeypatch: pytest.Monk
         {
             "id": "thread-1",
             "title": "One",
-            "webUrl": "https://openswe.vercel.app/agents/thread-1",
+            "webUrl": "https://dashboard.example/agents/thread-1",
         }
     ]
     page.assert_awaited_once_with(
@@ -231,6 +232,7 @@ class _DetailClient:
 async def test_get_thread_returns_links_cost_last_message_and_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     client = _DetailClient()
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(

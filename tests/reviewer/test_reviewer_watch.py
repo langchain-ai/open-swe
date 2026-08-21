@@ -88,7 +88,7 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
             new_callable=AsyncMock,
             return_value={"kind": "reviewer", "watch": False},
         ),
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.langgraph_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
     fake_client.runs.create.assert_not_called()
@@ -149,7 +149,7 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
             new_callable=AsyncMock,
             return_value=True,
         ) as complete_check,
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.langgraph_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
 
@@ -231,7 +231,7 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
             new_callable=AsyncMock,
             return_value=99,
         ) as create_check,
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.langgraph_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
 
@@ -302,7 +302,7 @@ async def test_push_event_idempotent_when_head_unchanged() -> None:
                 "last_reviewed_sha": "samesha",
             },
         ),
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.langgraph_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
     fake_client.runs.create.assert_not_called()
@@ -394,7 +394,7 @@ async def test_push_event_public_repo_uses_scoped_token() -> None:
             "agent.webhooks.common.reconcile_findings_with_review_threads", new_callable=AsyncMock
         ),
         patch("agent.webhooks.common.set_reviewer_thread_metadata", new_callable=AsyncMock),
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.langgraph_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
 
@@ -449,7 +449,7 @@ async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> No
             "agent.webhooks.common.reconcile_findings_with_review_threads", new_callable=AsyncMock
         ),
         patch("agent.webhooks.common.set_reviewer_thread_metadata", new_callable=AsyncMock),
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.langgraph_client", return_value=fake_client),
     ):
         await github_webhooks.process_github_push_event(payload)
 

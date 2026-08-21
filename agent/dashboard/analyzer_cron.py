@@ -9,8 +9,8 @@ token resolved inside ``get_analyzer`` (the cron carries no fresh user token).
 import hashlib
 import logging
 
+from ..config import langgraph_client
 from .review_style_jobs import (
-    _client,
     build_continual_run_configurable,
     build_continual_run_input,
 )
@@ -37,7 +37,7 @@ async def ensure_continual_cron(full_name: str) -> str | None:
         return existing
 
     try:
-        cron = await _client().crons.create(
+        cron = await langgraph_client().crons.create(
             _ASSISTANT_ID,
             schedule=_daily_schedule(full_name),
             input=build_continual_run_input(full_name),
@@ -62,7 +62,7 @@ async def remove_continual_cron(full_name: str) -> None:
     if not (isinstance(cron_id, str) and cron_id):
         return
     try:
-        await _client().crons.delete(cron_id)
+        await langgraph_client().crons.delete(cron_id)
     except Exception:
         logger.debug("Could not delete continual cron %s for %s", cron_id, full_name, exc_info=True)
     await update_review_style(full_name, {"continual_cron_id": None})

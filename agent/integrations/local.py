@@ -3,6 +3,8 @@ from pathlib import Path
 
 from deepagents.backends import LocalShellBackend
 
+from ..config import local_sandbox_root_dir
+
 SANDBOX_GITCONFIG = ".gitconfig-sandbox"
 
 
@@ -36,10 +38,12 @@ def create_local_sandbox(sandbox_id: str | None = None):
     Returns:
         LocalShellBackend instance implementing SandboxBackendProtocol.
     """
-    root_dir = os.getenv("LOCAL_SANDBOX_ROOT_DIR", os.getcwd())
+    root_dir = local_sandbox_root_dir() or os.getcwd()
     os.makedirs(root_dir, exist_ok=True)
 
-    env = {} if os.getenv("GIT_CONFIG_GLOBAL") else _scoped_git_config_env(root_dir)
+    # A process-level git setting, not app config: when the host already scopes
+    # git's global file we leave it alone.
+    env = {} if os.environ.get("GIT_CONFIG_GLOBAL") else _scoped_git_config_env(root_dir)
 
     return LocalShellBackend(
         root_dir=root_dir,

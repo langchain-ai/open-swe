@@ -467,12 +467,12 @@ async def test_interrupted_status_is_ignored(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_verify_run_complete_token(monkeypatch: pytest.MonkeyPatch) -> None:
     # No secret configured: fail closed (reject everything).
-    monkeypatch.setattr(completion, "RUN_COMPLETE_WEBHOOK_SECRET", None)
+    monkeypatch.delenv("RUN_COMPLETE_WEBHOOK_SECRET", raising=False)
     assert completion.verify_run_complete_token(None) is False
     assert completion.verify_run_complete_token("whatever") is False
 
     # Secret configured: require an exact match.
-    monkeypatch.setattr(completion, "RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
     assert completion.verify_run_complete_token("s3cret") is True
     assert completion.verify_run_complete_token("wrong") is False
     assert completion.verify_run_complete_token(None) is False

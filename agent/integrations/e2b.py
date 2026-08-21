@@ -1,11 +1,10 @@
-import os
-
 from deepagents.backends.protocol import SandboxBackendProtocol
 from e2b import Sandbox
 from langchain_e2b import E2BSandbox
 
+from ..config import e2b_api_key, e2b_template
+
 DEFAULT_E2B_SANDBOX_TIMEOUT = 60 * 60
-E2B_TEMPLATE_ENV = "E2B_TEMPLATE"
 
 
 def create_e2b_sandbox(sandbox_id: str | None = None) -> SandboxBackendProtocol:
@@ -18,15 +17,11 @@ def create_e2b_sandbox(sandbox_id: str | None = None) -> SandboxBackendProtocol:
     Returns:
         E2BSandbox instance implementing SandboxBackendProtocol.
     """
-    api_key = os.getenv("E2B_API_KEY")
+    api_key = e2b_api_key()
     if not api_key:
         raise ValueError("E2B_API_KEY environment variable is required")
 
-    template = os.getenv(E2B_TEMPLATE_ENV)
-    if template is not None:
-        template = template.strip()
-        if not template:
-            raise ValueError(f"{E2B_TEMPLATE_ENV} must not be empty")
+    template = e2b_template()
 
     if sandbox_id:
         sandbox = Sandbox.connect(

@@ -10,11 +10,14 @@ opt-in via ``LANGSMITH_GATEWAY_ENABLED`` (deployment default) or the
 """
 
 import logging
-import os
+
+from ..config import (
+    langsmith_credentials,
+    langsmith_gateway_enabled_default,
+    langsmith_gateway_openai_use_responses,
+)
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_GATEWAY_BASE_URL = "https://gateway.smith.langchain.com"
 
 # Provider prefix -> base-URL suffix appended to the gateway host. Each suffix
 # matches the SDK's own path handling: the OpenAI SDK appends
@@ -32,48 +35,6 @@ _GATEWAY_PROVIDER_PATHS: dict[str, str] = {
 }
 
 
-def _env_bool(value: str | None) -> bool:
-    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _langsmith_api_key() -> str | None:
-    """LangSmith API key used to authenticate gateway calls.
-
-    Prefer a gateway-specific key, then the prod LangSmith key. LangGraph Cloud
-    may inject ``LANGSMITH_API_KEY`` for tracing/platform APIs, and that key can
-    lack the ``gateway:invoke`` permission required by the LLM Gateway.
-    """
-    return (
-        os.environ.get("LANGSMITH_GATEWAY_API_KEY")
-        or os.environ.get("LANGSMITH_API_KEY_PROD")
-        or os.environ.get("LANGSMITH_API_KEY")
-    )
-
-
-def gateway_base_url() -> str:
-    """Gateway host, overridable via ``LANGSMITH_GATEWAY_BASE_URL`` (regional/self-hosted)."""
-    return (os.environ.get("LANGSMITH_GATEWAY_BASE_URL") or DEFAULT_GATEWAY_BASE_URL).rstrip("/")
-
-
-def gateway_env_default() -> bool:
-    """Deployment-level default for gateway routing (``LANGSMITH_GATEWAY_ENABLED``)."""
-    return _env_bool(os.environ.get("LANGSMITH_GATEWAY_ENABLED"))
-
-
-def gateway_openai_use_responses() -> bool:
-    """Whether gateway-routed OpenAI keeps the Responses API.
-
-    Defaults to ``True`` because OpenAI reasoning models with tool calls reject
-    ``reasoning_effort`` on Chat Completions. Set
-    ``LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false`` only for deployments that
-    need to force Chat Completions through the gateway.
-    """
-    raw = os.environ.get("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES")
-    if raw is None:
-        return True
-    return _env_bool(raw)
-
-
 def resolve_gateway_enabled(team_value: bool | None) -> bool:
     """Combine the team-settings toggle with the env default.
 
@@ -81,7 +42,7 @@ def resolve_gateway_enabled(team_value: bool | None) -> bool:
     ``LANGSMITH_GATEWAY_ENABLED`` deployment default.
     """
     if team_value is None:
-        return gateway_env_default()
+        return langsmith_gateway_enabled_default()
     return team_value
 
 
@@ -105,20 +66,21 @@ def gateway_overrides(model_id: str) -> dict[str, object] | None:
             provider,
         )
         return None
-    api_key = _langsmith_api_key()
-    if not api_key:
+    credentials = langsmith_credentials("gateway")
+    if credentials is None:
         logger.warning(
             "LangSmith gateway enabled but no LANGSMITH_GATEWAY_API_KEY or "
             "LANGSMITH_API_KEY(_PROD) is set; "
             "calling the provider directly"
         )
         return None
+    api_key, base_url = credentials
     overrides: dict[str, object] = {
-        "base_url": f"{gateway_base_url()}{path}",
+        "base_url": f"{base_url}{path}",
         "api_key": api_key,
     }
     if provider == "openai":
         # Use HTTPS Responses through the gateway by default; tool-calling OpenAI
         # reasoning models reject reasoning_effort on Chat Completions.
-        overrides["use_responses_api"] = gateway_openai_use_responses()
+        overrides["use_responses_api"] = langsmith_gateway_openai_use_responses()
     return overrides

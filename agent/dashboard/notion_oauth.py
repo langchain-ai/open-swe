@@ -2,13 +2,13 @@
 
 import base64
 import hashlib
-import os
 import secrets
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
 import httpx
 
+from ..config import dashboard_base_url, notion_mcp_client_name
 from ..encryption import decrypt_token, encrypt_token
 from ..store import delete_value, get_value, now_iso, put_value
 
@@ -135,13 +135,13 @@ async def register_notion_oauth_client(
         raise NotionOAuthError(502, "Notion OAuth metadata missing registration endpoint")
     _require_notion_https_url(registration_endpoint, "registration endpoint")
     body: dict[str, Any] = {
-        "client_name": os.environ.get("NOTION_MCP_CLIENT_NAME", "Open SWE"),
+        "client_name": notion_mcp_client_name(),
         "redirect_uris": [redirect_uri],
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
         "token_endpoint_auth_method": "none",
     }
-    client_uri = os.environ.get("DASHBOARD_BASE_URL", "").strip()
+    client_uri = dashboard_base_url()
     if client_uri:
         body["client_uri"] = client_uri
 

@@ -4,7 +4,6 @@ import asyncio
 import hmac
 import json
 import logging
-import os
 import posixpath
 import shlex
 from time import perf_counter
@@ -25,7 +24,14 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from ..utils.thread_ops import langgraph_url
+from ..config import (
+    dashboard_api_base_url,
+    dashboard_api_is_https,
+    dashboard_base_url,
+    github_app_oauth,
+    is_langsmith_sandbox,
+    langgraph_url,
+)
 from ..utils.timing import server_timing_header
 from .admin import is_admin
 from .agent_instructions import (
@@ -345,14 +351,14 @@ async def _filter_repo_records_for_user(
 
 
 def _api_base_url() -> str:
-    v = os.environ.get("DASHBOARD_API_BASE_URL", "").rstrip("/")
+    v = dashboard_api_base_url()
     if not v:
         raise HTTPException(500, "DASHBOARD_API_BASE_URL not configured")
     return v
 
 
 def _frontend_base_url() -> str:
-    v = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    v = dashboard_base_url()
     if not v:
         raise HTTPException(500, "DASHBOARD_BASE_URL not configured")
     return v
@@ -367,7 +373,7 @@ def _cookie_security() -> tuple[bool, Literal["lax", "none"]]:
     rejected and the frontend/API are same-site, so fall back to
     ``SameSite=Lax`` without ``Secure``.
     """
-    if os.environ.get("DASHBOARD_API_BASE_URL", "").startswith("https://"):
+    if dashboard_api_is_https():
         return True, "none"
     return False, "lax"
 
@@ -456,7 +462,7 @@ async def auth_login(
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
 ) -> RedirectResponse:
-    client_id = os.environ.get("GITHUB_APP_CLIENT_ID", "")
+    client_id, _ = github_app_oauth()
     if not client_id:
         raise HTTPException(500, "GITHUB_APP_CLIENT_ID not configured")
     safe_redirect = sanitize_redirect_to(redirect_to) or _frontend_base_url()
@@ -2046,7 +2052,7 @@ async def api_thread_terminal_connection(
 
 
 async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[str, Any]) -> None:
-    if os.environ.get("SANDBOX_TYPE", "langsmith") != "langsmith":
+    if not is_langsmith_sandbox():
         await websocket.close(code=1008, reason="Cloud terminal requires a LangSmith sandbox")
         return
     try:

@@ -1,24 +1,20 @@
 """Slack emergency-stop reaction handling."""
 
 import logging
-import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from agent.dispatch import dispatch_agent_run
 
+from ..config import agent_version_metadata, langgraph_client
 from .slack import lookup_slack_run_mapping, lookup_slack_thread_id, store_slack_run_mapping
 from .slack_events import claim_slack_event
 
 logger = logging.getLogger(__name__)
 
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
 _QUEUE_RECORDS = (
     (("queue",), "pending_messages"),
     (("autofix",), "pending_event"),
@@ -151,11 +147,6 @@ Do not resume or continue the prior task. Do not modify files, run mutating comm
 Your first and only user-facing action must be one concise `slack_thread_reply` that factually summarizes what was completed, what was in progress when interrupted, and what remains. If no active run existed, say so. Do not post an acknowledgement before the summary. End immediately after posting it."""
 
 
-def _agent_version_metadata() -> dict[str, str]:
-    revision = os.environ.get("LANGCHAIN_REVISION_ID")
-    return {"LANGSMITH_AGENT_VERSION": revision} if revision else {}
-
-
 async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> None:
     if event.get("reaction") != "x":
         return
@@ -172,7 +163,7 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
         logger.warning("Ignoring Slack stop reaction without an event id")
         return
 
-    client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     target = await _resolve_stop_target(client, channel_id, message_ts)
     if target is None:
         return
@@ -202,7 +193,7 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
         _stop_summary_prompt(bool(run_ids)),
         configurable,
         source=str(configurable["source"]),
-        metadata=_agent_version_metadata(),
+        metadata=agent_version_metadata(),
         client=client,
     )
     summary_run_id = _mapping_value(summary_run, "run_id") or _mapping_value(summary_run, "id")

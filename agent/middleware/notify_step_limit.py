@@ -7,9 +7,9 @@ from typing import Any
 from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
-from langgraph_sdk import get_client
 
-from ..utils.slack import LANGGRAPH_URL, get_active_slack_thread, post_slack_thread_reply
+from ..config import langgraph_client
+from ..utils.slack import get_active_slack_thread, post_slack_thread_reply
 from ..utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ async def notify_step_limit_reached(
     slack_thread = configurable.get("slack_thread") if isinstance(configurable, dict) else None
     thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
+        langgraph_client(),
         thread_id if isinstance(thread_id, str) else None,
         slack_thread if isinstance(slack_thread, dict) else None,
     )

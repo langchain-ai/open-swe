@@ -1,4 +1,3 @@
-import os
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -6,6 +5,7 @@ from typing import Any
 from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.messages import BaseMessage, SystemMessage
 
+from ..config import wrapup_timeout_seconds
 from ..input_messages import wrap_system_prompt
 
 _DEFAULT_TIMEOUT_SECONDS = 45 * 60
@@ -19,14 +19,7 @@ your turn with the best available result.
 
 
 def _configured_timeout_seconds() -> int:
-    raw = os.environ.get("OPEN_SWE_WRAPUP_TIMEOUT_SECONDS")
-    if not raw:
-        return _DEFAULT_TIMEOUT_SECONDS
-    try:
-        value = int(raw)
-    except ValueError:
-        return _DEFAULT_TIMEOUT_SECONDS
-    return value if value > 0 else _DEFAULT_TIMEOUT_SECONDS
+    return wrapup_timeout_seconds(_DEFAULT_TIMEOUT_SECONDS)
 
 
 def _content_with_instruction(

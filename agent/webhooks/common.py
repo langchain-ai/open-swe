@@ -4,16 +4,26 @@ import hashlib
 import hmac
 import json
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, quote
 
 import httpx
 from fastapi import BackgroundTasks, HTTPException, Request
-from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
+from ..config import (
+    agent_version_metadata,
+    debug_tracemalloc,
+    debug_tracemalloc_frames,
+    default_repo_name,
+    default_repo_owner,
+    langgraph_client,
+    linear_api_key,
+    public_repo_org_gate,
+    slack_repo_name,
+    slack_repo_owner,
+)
 from ..dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_agent_model_id,  # noqa: F401
@@ -64,7 +74,6 @@ from ..utils.github_app import (
 )
 from ..utils.github_checks import complete_review_check_run, create_review_check_run  # noqa: F401
 from ..utils.github_comments import (
-    OPEN_SWE_TAGS,
     build_pr_prompt,  # noqa: F401
     derive_pr_state,
     describe_open_swe_tags,  # noqa: F401
@@ -77,7 +86,7 @@ from ..utils.github_comments import (
     sanitize_github_comment_body,  # noqa: F401
     verify_github_signature,
 )
-from ..utils.github_org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
+from ..utils.github_org_membership import internal_bot_logins, is_user_active_org_member
 from ..utils.github_token import (
     cache_github_token_for_thread,
     get_github_token_from_thread,
@@ -139,21 +148,13 @@ __all__ = [
     "Any",
     "BackgroundTasks",
     "DEFAULT_HTTP_TIMEOUT",
-    "DEFAULT_REPO_OWNER",
     "DOCS_PLZ_SLACK_GATE_REPLY",
     "FEEDBACK_REACTIONS",
-    "GITHUB_WEBHOOK_SECRET",
     "HTTPException",
-    "LANGGRAPH_URL",
-    "LINEAR_WEBHOOK_SECRET",
-    "OPEN_SWE_TAGS",
     "REVIEWER_THREAD_KIND",
     "Request",
-    "SLACK_BOT_USERNAME",
-    "SLACK_BOT_USER_ID",
-    "SLACK_SIGNING_SECRET",
     "SlackThreadMappingError",
-    "_AGENT_VERSION_METADATA",
+    "agent_version_metadata",
     "describe_open_swe_tags",
     "mentions_open_swe",
     "_GH_PR_AGENT_STATE_ACTIONS",
@@ -179,7 +180,6 @@ __all__ = [
     "_is_docs_plz_slack_channel",
     "_is_not_found_error",
     "_is_pr_diff_unchanged_since_last_review",
-    "_is_repo_allowed",
     "_is_repo_auto_review_enabled",
     "_post_account_link_prompt",
     "_refresh_thread_github_token_after_401",
@@ -219,7 +219,6 @@ __all__ = [
     "fetch_slack_thread_messages",
     "format_github_comment_body_for_prompt",
     "format_slack_messages_for_prompt",
-    "get_client",
     "get_github_app_installation_token",
     "get_github_app_installation_token_with_expiry",
     "get_profile_default_repo",
@@ -234,6 +233,7 @@ __all__ = [
     "has_access_token_record",
     "is_bot_token_only_mode",
     "json",
+    "langgraph_client",
     "list_reviewer_findings",
     "logger",
     "login_for_email",
@@ -280,13 +280,10 @@ logger = logging.getLogger(__name__)
 # allocation site. With tracemalloc running, aiohttp appends an "Object allocated
 # at" traceback to each warning, naming the exact source. Inert unless the env
 # var is set, so this is safe to ship and flip on for one diagnostic run.
-if os.environ.get("DEBUG_TRACEMALLOC"):
+if debug_tracemalloc():
     import tracemalloc
 
-    try:
-        _tracemalloc_frames = int(os.environ.get("DEBUG_TRACEMALLOC_FRAMES") or "25")
-    except ValueError:
-        _tracemalloc_frames = 25
+    _tracemalloc_frames = debug_tracemalloc_frames(25)
     tracemalloc.start(_tracemalloc_frames)
     logger.warning(
         "DEBUG_TRACEMALLOC enabled: tracemalloc started (%d frames) to attribute "
@@ -295,46 +292,10 @@ if os.environ.get("DEBUG_TRACEMALLOC"):
     )
 
 
-LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
-GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
-SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
-SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
-SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
-DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
-DEFAULT_REPO_NAME = os.environ.get("DEFAULT_REPO_NAME", "")
-SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "") or DEFAULT_REPO_OWNER
-SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "") or DEFAULT_REPO_NAME
 DOCS_PLZ_SLACK_CHANNEL_NAME = "docs-plz"
 DOCS_PLZ_SLACK_GATE_REPLY = (
     "Please don't use Open SWE here, instead ask the Fleet docs-plz agent to implement the docs"
 )
-
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
-
-_AGENT_VERSION_METADATA: dict[str, str] = (
-    {"LANGSMITH_AGENT_VERSION": os.environ["LANGCHAIN_REVISION_ID"]}
-    if os.environ.get("LANGCHAIN_REVISION_ID")
-    else {}
-)
-
-ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
-    org.strip().lower()
-    for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
-    if org.strip()
-)
-# Org whose members are allowed to tag @open-swe on public repos. When empty,
-# the public-repo gate is disabled (back-compat).
-PUBLIC_REPO_ORG_GATE: str = os.environ.get("PUBLIC_REPO_ORG_GATE", "").strip()
-
-ALLOWED_GITHUB_REPOS: frozenset[str] = frozenset(
-    repo.strip().lower()
-    for repo in os.environ.get("ALLOWED_GITHUB_REPOS", "").split(",")
-    if repo.strip()
-)
-
-LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 
 _GITHUB_BOT_MESSAGE_PREFIXES = (
     "🔐 **GitHub Authentication Required**",
@@ -351,7 +312,8 @@ def get_repo_config_from_team_mapping(
     team_identifier: str, project_name: str = ""
 ) -> dict[str, str]:
     """Look up repository configuration from LINEAR_TEAM_TO_REPO mapping."""
-    fallback = {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME} if DEFAULT_REPO_NAME else {}
+    default_name = default_repo_name()
+    fallback = {"owner": default_repo_owner(), "name": default_name} if default_name else {}
 
     if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
         return fallback
@@ -384,7 +346,7 @@ async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
     Returns:
         True if successful, False otherwise
     """
-    if not LINEAR_API_KEY:
+    if not linear_api_key():
         return False
 
     url = "https://api.linear.app/graphql"
@@ -402,7 +364,7 @@ async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
             response = await client.post(
                 url,
                 headers={
-                    "Authorization": LINEAR_API_KEY,
+                    "Authorization": linear_api_key(),
                     "Content-Type": "application/json",
                 },
                 json={
@@ -426,7 +388,7 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
     Returns:
         Full issue data dict, or None if fetch failed
     """
-    if not LINEAR_API_KEY:
+    if not linear_api_key():
         return None
 
     url = "https://api.linear.app/graphql"
@@ -469,7 +431,7 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
             response = await client.post(
                 url,
                 headers={
-                    "Authorization": LINEAR_API_KEY,
+                    "Authorization": linear_api_key(),
                     "Content-Type": "application/json",
                 },
                 json={
@@ -546,24 +508,6 @@ async def _is_docs_plz_slack_channel(
     )
 
 
-def _is_repo_allowed(repo_config: dict[str, str]) -> bool:
-    """Check if the repo is in the allowlist.
-
-    Returns True if no allowlist is configured (both ALLOWED_GITHUB_ORGS and
-    ALLOWED_GITHUB_REPOS are empty), or if the repo owner is in
-    ALLOWED_GITHUB_ORGS, or if owner/name is in ALLOWED_GITHUB_REPOS.
-    """
-    if not ALLOWED_GITHUB_ORGS and not ALLOWED_GITHUB_REPOS:
-        return True
-    owner = repo_config.get("owner", "").lower()
-    name = repo_config.get("name", "").lower()
-    if ALLOWED_GITHUB_ORGS and owner in ALLOWED_GITHUB_ORGS:
-        return True
-    if ALLOWED_GITHUB_REPOS and f"{owner}/{name}" in ALLOWED_GITHUB_REPOS:
-        return True
-    return False
-
-
 async def _is_repo_auto_review_enabled(repo_config: dict[str, str]) -> bool:
     """Return whether automatic reviews are enabled for a repository."""
     return await is_review_repo_enabled(repo_config.get("owner", ""), repo_config.get("name", ""))
@@ -584,7 +528,8 @@ async def _is_sender_allowed_for_public_repo(payload: dict[str, Any]) -> bool:
     - The sender is a known internal bot, OR
     - The sender is an active member of ``PUBLIC_REPO_ORG_GATE``.
     """
-    if not PUBLIC_REPO_ORG_GATE:
+    gate = public_repo_org_gate()
+    if not gate:
         return True
 
     repository = payload.get("repository") or {}
@@ -593,13 +538,13 @@ async def _is_sender_allowed_for_public_repo(payload: dict[str, Any]) -> bool:
 
     sender = payload.get("sender") or {}
     sender_login = sender.get("login", "") or ""
-    if sender_login in INTERNAL_BOT_LOGINS:
+    if sender_login in internal_bot_logins():
         return True
 
     if not sender_login:
         return False
 
-    return await is_user_active_org_member(sender_login, PUBLIC_REPO_ORG_GATE)
+    return await is_user_active_org_member(sender_login, gate)
 
 
 async def _enforce_public_repo_org_gate(
@@ -621,15 +566,15 @@ async def _enforce_public_repo_org_gate(
 
 
 async def _upsert_slack_thread_repo_metadata(
-    thread_id: str, repo_config: dict[str, str], langgraph_client: LangGraphClient
+    thread_id: str, repo_config: dict[str, str], client: LangGraphClient
 ) -> None:
     """Persist the selected repo config on the thread metadata."""
     try:
-        await langgraph_client.threads.update(thread_id=thread_id, metadata={"repo": repo_config})
+        await client.threads.update(thread_id=thread_id, metadata={"repo": repo_config})
     except Exception as exc:  # noqa: BLE001
         if _is_not_found_error(exc):
             try:
-                await langgraph_client.threads.create(
+                await client.threads.create(
                     thread_id=thread_id,
                     if_exists="do_nothing",
                     metadata={"repo": repo_config},
@@ -741,9 +686,9 @@ async def upsert_agent_thread_owner_metadata(
     if environment:
         metadata["environment"] = environment
 
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     try:
-        existing = await langgraph_client.threads.get(thread_id)
+        existing = await client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         if not _is_not_found_error(exc):
             logger.exception("Failed to read thread %s for owner metadata", thread_id)
@@ -791,11 +736,11 @@ async def upsert_agent_thread_owner_metadata(
 
     try:
         if existing is None:
-            await langgraph_client.threads.create(
+            await client.threads.create(
                 thread_id=thread_id, if_exists="do_nothing", metadata=metadata
             )
         else:
-            await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
+            await client.threads.update(thread_id=thread_id, metadata=metadata)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to persist owner metadata for thread %s", thread_id)
 
@@ -817,17 +762,17 @@ async def get_slack_repo_config(
         4. Team default repo.
         5. ``SLACK_REPO_*`` env defaults.
     """
-    default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
-    default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    default_owner = slack_repo_owner()
+    default_name = slack_repo_name()
+    client = langgraph_client()
 
     repo_config: dict[str, str] | None = None
 
     try:
         resolved_thread_id = thread_id or await resolve_slack_thread_id(
-            langgraph_client, channel_id, thread_ts
+            client, channel_id, thread_ts
         )
-        thread = await langgraph_client.threads.get(resolved_thread_id)
+        thread = await client.threads.get(resolved_thread_id)
         thread_repo_config = _extract_repo_config_from_thread(thread)
         if thread_repo_config:
             repo_config = thread_repo_config
@@ -895,9 +840,9 @@ async def get_slack_repo_config(
 
 async def _thread_exists(thread_id: str) -> bool:
     """Return whether a LangGraph thread already exists."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     try:
-        await langgraph_client.threads.get(thread_id)
+        await client.threads.get(thread_id)
         return True
     except Exception as exc:  # noqa: BLE001
         if _is_not_found_error(exc):
@@ -906,11 +851,9 @@ async def _thread_exists(thread_id: str) -> bool:
         return True
 
 
-async def _ensure_thread_exists_for_metadata(
-    thread_id: str, langgraph_client: LangGraphClient
-) -> bool:
+async def _ensure_thread_exists_for_metadata(thread_id: str, client: LangGraphClient) -> bool:
     try:
-        await langgraph_client.threads.create(thread_id=thread_id, if_exists="do_nothing")
+        await client.threads.create(thread_id=thread_id, if_exists="do_nothing")
         return True
     except Exception:
         logger.exception("Failed to ensure thread %s exists before metadata update", thread_id)
@@ -927,9 +870,9 @@ async def _slack_user_is_thread_owner(thread_id: str, slack_user_id: str) -> boo
     """
     if not slack_user_id:
         return False
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     try:
-        thread = await langgraph_client.threads.get(thread_id)
+        thread = await client.threads.get(thread_id)
     except Exception:  # noqa: BLE001
         return False
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
@@ -943,9 +886,9 @@ async def _slack_user_is_thread_owner(thread_id: str, slack_user_id: str) -> boo
 
 async def _get_thread_plan_mode(thread_id: str) -> bool | None:
     """Return the persisted plan-mode flag for a thread, or ``None`` if unset."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     try:
-        thread = await langgraph_client.threads.get(thread_id)
+        thread = await client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         if _is_not_found_error(exc):
             return None
@@ -960,9 +903,9 @@ async def _get_thread_plan_mode(thread_id: str) -> bool | None:
 
 async def _get_thread_environment(thread_id: str) -> str | None:
     """Return the environment slug persisted for a thread, or ``None`` if unset."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     try:
-        thread = await langgraph_client.threads.get(thread_id)
+        thread = await client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         if not _is_not_found_error(exc):
             logger.warning("Failed to fetch environment metadata for thread %s", thread_id)
@@ -976,15 +919,13 @@ async def _get_thread_environment(thread_id: str) -> str | None:
 
 async def _set_thread_plan_mode(thread_id: str, enabled: bool) -> None:
     """Persist the plan-mode flag onto thread metadata."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     try:
-        await langgraph_client.threads.update(
-            thread_id=thread_id, metadata={"plan_mode": bool(enabled)}
-        )
+        await client.threads.update(thread_id=thread_id, metadata={"plan_mode": bool(enabled)})
     except Exception as exc:  # noqa: BLE001
         if _is_not_found_error(exc):
             try:
-                await langgraph_client.threads.create(
+                await client.threads.create(
                     thread_id=thread_id,
                     if_exists="do_nothing",
                     metadata={"plan_mode": bool(enabled)},
@@ -1143,7 +1084,7 @@ async def _trigger_or_queue_run(
         },
         source="github",
         input=input,
-        metadata=_AGENT_VERSION_METADATA,
+        metadata=agent_version_metadata(),
     )
     logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
 
@@ -1364,9 +1305,9 @@ async def _is_pr_diff_unchanged_since_last_review(
 
 async def _get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
     """Fetch a thread's metadata; return ``None`` if the thread doesn't exist."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     try:
-        thread = await langgraph_client.threads.get(thread_id)
+        thread = await client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         if _is_not_found_error(exc):
             return None
@@ -1402,14 +1343,14 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     if not isinstance(pr_url, str) or not pr_url or new_state is None:
         return
 
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     matching_threads: dict[str, Any] = {}
     page_size = 50
     for metadata_filter in ({"pr_url": pr_url}, {"pr_urls": [pr_url]}):
         offset = 0
         while True:
             try:
-                threads = await langgraph_client.threads.search(
+                threads = await client.threads.search(
                     metadata=metadata_filter, limit=page_size, offset=offset
                 )
             except Exception:  # noqa: BLE001
@@ -1449,7 +1390,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         if not metadata_update:
             continue
         try:
-            await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
         except Exception:  # noqa: BLE001
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
 

@@ -4,7 +4,6 @@ import base64
 import hashlib
 import hmac
 import logging
-import os
 import re
 import secrets
 import time
@@ -17,8 +16,15 @@ import jwt
 from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
 
-from agent.utils.github_org_membership import is_user_active_org_member
+from agent.utils.github_org_membership import is_login_in_allowed_org
 
+from ..config import (
+    allowed_github_orgs,
+    dashboard_allowed_origins,
+    dashboard_base_url,
+    dashboard_jwt_secret,
+    github_app_oauth,
+)
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from .github_token_auth import bearer_github_token
 
@@ -69,12 +75,8 @@ def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
     return {"sub": login, "email": email if isinstance(email, str) else None}
 
 
-GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "")
-GITHUB_APP_CLIENT_SECRET = os.environ.get("GITHUB_APP_CLIENT_SECRET", "")
-
-
 def _secret() -> str:
-    s = os.environ.get("DASHBOARD_JWT_SECRET", "")
+    s = dashboard_jwt_secret()
     if not s:
         raise HTTPException(500, "DASHBOARD_JWT_SECRET not configured")
     return s
@@ -87,14 +89,9 @@ def allowed_dashboard_origins() -> set[str]:
     so the dashboard itself and its preview deploys are allowed — but nothing
     else.
     """
-    origins: set[str] = set()
-    base = os.environ.get("DASHBOARD_BASE_URL", "").strip()
-    if base:
-        origins.add(_origin_of(base))
-    for entry in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(","):
-        entry = entry.strip()
-        if entry:
-            origins.add(_origin_of(entry))
+    origins = {
+        _origin_of(entry) for entry in (dashboard_base_url() or "", *dashboard_allowed_origins())
+    }
     origins.discard("")
     return origins
 
@@ -129,7 +126,7 @@ def _is_blocked_redirect_path(path: str) -> bool:
 
 def sanitize_redirect_to(redirect_to: str | None) -> str:
     """Return a safe post-login redirect URL."""
-    fallback = os.environ.get("DASHBOARD_BASE_URL", "").strip()
+    fallback = dashboard_base_url() or ""
     if not redirect_to:
         return fallback
     trimmed = redirect_to.strip()
@@ -155,33 +152,16 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
     return fallback
 
 
-def _allowed_login_orgs() -> frozenset[str]:
-    """Orgs whose members may log in to the dashboard.
-
-    Reuses the webhook-side ``ALLOWED_GITHUB_ORGS`` allowlist so deployments
-    configure a single org gate. When empty the dashboard login gate is
-    disabled (fail-open) to preserve existing deployments.
-    """
-    return frozenset(
-        org.strip().lower()
-        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
-        if org.strip()
-    )
-
-
 async def enforce_org_login_gate(login: str) -> None:
     """Reject dashboard login for users outside the allowed GitHub org(s).
 
-    No-op when ``ALLOWED_GITHUB_ORGS`` is unset. Otherwise the user must be an
-    active member of at least one configured org; membership is checked with
-    the GitHub App installation token (fail-closed on any API error).
+    Shares the webhook-side ``ALLOWED_GITHUB_ORGS`` allow-list, so a deployment
+    configures one org gate. No-op when it is unset (fail-open, to preserve
+    existing deployments); otherwise membership is checked with the GitHub App
+    installation token, fail-closed on any API error.
     """
-    orgs = _allowed_login_orgs()
-    if not orgs:
+    if not allowed_github_orgs() or await is_login_in_allowed_org(login):
         return
-    for org in orgs:
-        if await is_user_active_org_member(login, org):
-            return
     logger.warning("Rejected dashboard login for %r — not in allowed org(s)", login)
     raise HTTPException(403, "your GitHub account is not a member of an authorized organization")
 
@@ -333,7 +313,7 @@ def build_settings_url() -> str | None:
     safe to share in a public Slack thread. The user signs in with GitHub from
     their own session and connects Slack via verified OIDC on the settings page.
     """
-    frontend_base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    frontend_base = dashboard_base_url()
     if not frontend_base:
         return None
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
@@ -432,7 +412,8 @@ def is_unrecoverable_refresh_error(exc: BaseException) -> bool:
 
 
 async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
-    if not GITHUB_APP_CLIENT_ID or not GITHUB_APP_CLIENT_SECRET:
+    client_id, client_secret = github_app_oauth()
+    if not client_id or not client_secret:
         raise HTTPException(500, "GitHub App OAuth not configured")
     async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         resp = await client.post(
@@ -455,10 +436,11 @@ async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
 
 async def exchange_code(code: str) -> dict[str, Any]:
     """Exchange an OAuth authorization code for user-to-server tokens."""
+    client_id, client_secret = github_app_oauth()
     data = await _request_github_tokens(
         {
-            "client_id": GITHUB_APP_CLIENT_ID,
-            "client_secret": GITHUB_APP_CLIENT_SECRET,
+            "client_id": client_id,
+            "client_secret": client_secret,
             "code": code,
         }
     )
@@ -469,10 +451,11 @@ async def exchange_code(code: str) -> dict[str, Any]:
 
 async def refresh_user_access_token(refresh_token: str) -> dict[str, Any]:
     """Rotate an expiring user access token using its refresh token."""
+    client_id, client_secret = github_app_oauth()
     data = await _request_github_tokens(
         {
-            "client_id": GITHUB_APP_CLIENT_ID,
-            "client_secret": GITHUB_APP_CLIENT_SECRET,
+            "client_id": client_id,
+            "client_secret": client_secret,
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
         }

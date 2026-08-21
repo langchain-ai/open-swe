@@ -3,16 +3,23 @@
 import asyncio
 import logging
 import math
-import os
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
 from langsmith.utils import LangSmithNotFoundError
 
+from ..config import (
+    LangSmithPurpose,
+    langsmith_app_url,
+    langsmith_credentials,
+    langsmith_tenant_id,
+    langsmith_tracing_project_id,
+)
+from .timestamps import parse_expiry
 from .tracing import AGENT_TRACING_PROJECT
 
 logger = logging.getLogger(__name__)
@@ -58,17 +65,8 @@ def sync_langsmith_client(api_key: str, api_url: str) -> LangSmithClient:
 
 def _build_prod_langsmith_client() -> AsyncLangSmithClient | None:
     """Build a LangSmith client scoped to the prod tenant for project lookups."""
-    api_key = (
-        os.environ.get("LANGSMITH_API_KEY_PROD")
-        or os.environ.get("LANGSMITH_API_KEY")
-        or os.environ.get("LANGCHAIN_API_KEY")
-    )
-    if not api_key:
-        return None
-    api_url = os.environ.get("LANGSMITH_ENDPOINT_PROD") or os.environ.get(
-        "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
-    )
-    return async_langsmith_client(api_key, api_url)
+    credentials = langsmith_credentials("prod")
+    return async_langsmith_client(*credentials) if credentials else None
 
 
 async def _resolve_project_id_by_name(project_name: str) -> str | None:
@@ -92,19 +90,33 @@ async def _resolve_project_id_by_name(project_name: str) -> str | None:
     return resolved or None
 
 
+def _project_name_is_id(project_name: str) -> bool:
+    """A caller may pass a project id where a name is expected; both resolve here."""
+    try:
+        uuid.UUID(project_name)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+async def _resolve_project_id(project_name: str) -> str | None:
+    return (
+        await _resolve_project_id_by_name(project_name)
+        or langsmith_tracing_project_id()
+        or (project_name if _project_name_is_id(project_name) else None)
+    )
+
+
 async def _compose_langsmith_project_url(project_name: str = AGENT_TRACING_PROJECT) -> str | None:
     """Build the LangSmith project URL base, or None when tracing isn't configured
     for the prod tenant. Bails before any API call when the tenant id is unset."""
-    tenant_id = os.environ.get("LANGSMITH_TENANT_ID_PROD")
+    tenant_id = langsmith_tenant_id()
     if not tenant_id:
         return None
-    host_url = os.environ.get("LANGSMITH_URL_PROD", "https://smith.langchain.com")
-    project_id = await _resolve_project_id_by_name(project_name) or os.environ.get(
-        "LANGSMITH_TRACING_PROJECT_ID_PROD"
-    )
+    project_id = await _resolve_project_id(project_name)
     if not project_id:
         return None
-    return f"{host_url}/o/{tenant_id}/projects/p/{project_id}"
+    return f"{langsmith_app_url()}/o/{tenant_id}/projects/p/{project_id}"
 
 
 async def get_langsmith_trace_url(
@@ -118,18 +130,6 @@ async def get_langsmith_trace_url(
 
 def _langsmith_value(value: Any, name: str) -> Any:
     return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
-
-
-def _parse_langsmith_time(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _langsmith_metadata_filter(key: str, value: str) -> str:
@@ -147,9 +147,7 @@ async def get_langsmith_thread_cost(
     client = _build_prod_langsmith_client()
     if client is None:
         raise LangSmithCostUnavailable("LangSmith credentials are not configured")
-    project_id = await _resolve_project_id_by_name(project_name) or os.environ.get(
-        "LANGSMITH_TRACING_PROJECT_ID_PROD"
-    )
+    project_id = await _resolve_project_id(project_name)
     if not project_id:
         raise LangSmithCostUnavailable("LangSmith tracing project is unavailable")
     try:
@@ -163,7 +161,7 @@ async def get_langsmith_thread_cost(
         target_times = [
             parsed
             async for run in roots
-            if (parsed := _parse_langsmith_time(_langsmith_value(run, "end_time"))) is not None
+            if (parsed := parse_expiry(_langsmith_value(run, "end_time"))) is not None
         ]
         if not target_times:
             return None
@@ -188,7 +186,7 @@ async def get_langsmith_thread_cost(
         total_cost = float(raw_cost)
     except (TypeError, ValueError):
         return None
-    last_end_time = _parse_langsmith_time(_langsmith_value(stats, "last_end_time"))
+    last_end_time = parse_expiry(_langsmith_value(stats, "last_end_time"))
     target_end_time = max(target_times)
     if (
         not math.isfinite(total_cost)
@@ -205,32 +203,17 @@ async def get_langsmith_thread_cost(
 
 
 def _build_langsmith_feedback_clients() -> tuple[tuple[str, str], ...]:
-    """Resolve feedback client configs from current env. Re-read each call so
-    rotated keys / late secret hydration are picked up."""
+    """Every tenant that should receive feedback, deduplicated.
+
+    Feedback is written wherever the run may have been traced, so both the
+    platform workspace and the prod tenant get a copy when they differ.
+    """
     configs: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-
-    api_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
-    client_configs = (
-        (
-            os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY"),
-            api_endpoint,
-        ),
-        (
-            os.environ.get("LANGSMITH_API_KEY_PROD"),
-            os.environ.get("LANGSMITH_ENDPOINT_PROD", api_endpoint),
-        ),
-    )
-
-    for api_key, api_url in client_configs:
-        if not api_key or not api_url:
-            continue
-        identity = (api_key, api_url)
-        if identity in seen:
-            continue
-        configs.append(identity)
-        seen.add(identity)
-
+    purposes: tuple[LangSmithPurpose, ...] = ("platform", "prod")
+    for purpose in purposes:
+        credentials = langsmith_credentials(purpose)
+        if credentials is not None and credentials not in configs:
+            configs.append(credentials)
     return tuple(configs)
 
 

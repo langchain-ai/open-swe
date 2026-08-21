@@ -14,8 +14,8 @@ from langchain_core.messages import ToolCall, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
-from langgraph_sdk import get_client
 
+from ..config import langgraph_client
 from ..dashboard.workflow_approval import (
     ensure_workflow_push_pending,
     mark_workflow_push_notified,
@@ -24,11 +24,7 @@ from ..dashboard.workflow_approval import (
 from ..tools.slack_thread_reply import build_workflow_approval_blocks
 from ..utils.dashboard_links import dashboard_workflow_approval_url
 from ..utils.sandbox_state import SANDBOX_BACKENDS
-from ..utils.slack import (
-    LANGGRAPH_URL,
-    get_active_slack_thread,
-    post_slack_thread_reply_with_ts,
-)
+from ..utils.slack import get_active_slack_thread, post_slack_thread_reply_with_ts
 
 logger = logging.getLogger(__name__)
 
@@ -469,7 +465,7 @@ async def _post_slack_approval_if_needed(
     slack_thread = configurable.get("slack_thread")
     thread_id = _thread_id(request)
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
+        langgraph_client(),
         thread_id,
         slack_thread if isinstance(slack_thread, Mapping) else None,
     )

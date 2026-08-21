@@ -33,11 +33,19 @@ import contextlib
 import inspect
 import json
 import logging
-import os
 from typing import Any
 
 from langgraph.config import get_config
 
+from ..config import (
+    browserbase_api_key,
+    browserbase_project_id,
+    stagehand_headless,
+    stagehand_local_chrome_path,
+    stagehand_local_mode,
+    stagehand_model,
+    stagehand_model_api_key,
+)
 from ..utils.url_safety import is_url_safe
 
 logger = logging.getLogger(__name__)
@@ -54,27 +62,19 @@ class BrowserNavigationBlocked(RuntimeError):
 
 
 def _is_local() -> bool:
-    return os.getenv("STAGEHAND_ENV", "LOCAL").strip().upper() != "BROWSERBASE"
+    return stagehand_local_mode()
 
 
 def _model_name() -> str:
-    return os.getenv("STAGEHAND_MODEL", _DEFAULT_MODEL)
+    return stagehand_model(_DEFAULT_MODEL)
 
 
 def _model_api_key() -> str | None:
-    return (
-        os.getenv("STAGEHAND_MODEL_API_KEY")
-        or os.getenv("MODEL_API_KEY")
-        or os.getenv("ANTHROPIC_API_KEY")
-    )
+    return stagehand_model_api_key()
 
 
 def _headless() -> bool:
-    return os.getenv("STAGEHAND_HEADLESS", "true").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-    )
+    return stagehand_headless()
 
 
 def browser_tools_enabled() -> bool:
@@ -86,7 +86,7 @@ def browser_tools_enabled() -> bool:
     """
     if _is_local():
         return bool(_model_api_key())
-    return bool(os.getenv("BROWSERBASE_API_KEY"))
+    return bool(browserbase_api_key())
 
 
 def _thread_id() -> str:
@@ -104,11 +104,11 @@ def _build_client() -> Any:
 
     return AsyncStagehand(
         server="local" if _is_local() else "remote",
-        browserbase_api_key=os.getenv("BROWSERBASE_API_KEY"),
-        browserbase_project_id=os.getenv("BROWSERBASE_PROJECT_ID"),
+        browserbase_api_key=browserbase_api_key(),
+        browserbase_project_id=browserbase_project_id(),
         model_api_key=_model_api_key(),
         local_headless=_headless(),
-        local_chrome_path=os.getenv("STAGEHAND_LOCAL_CHROME_PATH"),
+        local_chrome_path=stagehand_local_chrome_path(),
     )
 
 
@@ -121,7 +121,7 @@ def _browser_spec() -> dict[str, Any]:
     if not _is_local():
         return {"type": "browserbase"}
     launch_options: dict[str, Any] = {"headless": _headless()}
-    chrome_path = os.getenv("STAGEHAND_LOCAL_CHROME_PATH")
+    chrome_path = stagehand_local_chrome_path()
     if chrome_path:
         launch_options["executable_path"] = chrome_path
     return {"type": "local", "launch_options": launch_options}
@@ -130,7 +130,7 @@ def _browser_spec() -> dict[str, Any]:
 def _browserbase_session_create_params() -> dict[str, Any]:
     if _is_local():
         return {}
-    project_id = os.getenv("BROWSERBASE_PROJECT_ID")
+    project_id = browserbase_project_id()
     return {"project_id": project_id} if project_id else {}
 
 

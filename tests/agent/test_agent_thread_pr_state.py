@@ -58,7 +58,7 @@ async def test_update_agent_thread_pr_state_updates_matching_thread() -> None:
     )
     fake_client.threads.update = AsyncMock()
 
-    with patch("agent.webhooks.common.get_client", return_value=fake_client):
+    with patch("agent.webhooks.common.langgraph_client", return_value=fake_client):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 
     assert fake_client.threads.search.await_count == 2
@@ -77,7 +77,7 @@ async def test_update_agent_thread_pr_state_skips_reviewer_threads() -> None:
     )
     fake_client.threads.update = AsyncMock()
 
-    with patch("agent.webhooks.common.get_client", return_value=fake_client):
+    with patch("agent.webhooks.common.langgraph_client", return_value=fake_client):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 
     fake_client.threads.update.assert_not_called()
@@ -117,7 +117,7 @@ async def test_update_agent_thread_pr_state_updates_non_latest_collection_entry(
     )
     fake_client.threads.update = AsyncMock()
 
-    with patch("agent.webhooks.common.get_client", return_value=fake_client):
+    with patch("agent.webhooks.common.langgraph_client", return_value=fake_client):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 
     fake_client.threads.update.assert_awaited_once_with(
@@ -143,7 +143,7 @@ async def test_update_agent_thread_pr_state_paginates_all_matching_threads() -> 
     fake_client.threads.search = AsyncMock(side_effect=[first_page, [target], []])
     fake_client.threads.update = AsyncMock()
 
-    with patch("agent.webhooks.common.get_client", return_value=fake_client):
+    with patch("agent.webhooks.common.langgraph_client", return_value=fake_client):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 
     assert [call.kwargs["offset"] for call in fake_client.threads.search.await_args_list] == [
@@ -172,7 +172,7 @@ async def test_update_agent_thread_pr_state_noop_when_state_unchanged() -> None:
     )
     fake_client.threads.update = AsyncMock()
 
-    with patch("agent.webhooks.common.get_client", return_value=fake_client):
+    with patch("agent.webhooks.common.langgraph_client", return_value=fake_client):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
 
     fake_client.threads.update.assert_not_called()

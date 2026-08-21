@@ -25,11 +25,12 @@ endpoints that accept this, so scope the allowlist to internal repos.
 
 import asyncio
 import logging
-import os
 from typing import Any
 
 import jwt
 from fastapi import HTTPException
+
+from ..config import admin_oidc_audience, admin_oidc_subjects
 
 logger = logging.getLogger(__name__)
 
@@ -51,22 +52,16 @@ def _client() -> jwt.PyJWKClient:
 
 
 def _audience() -> str:
-    return os.environ.get("ADMIN_OIDC_AUDIENCE", "").strip() or DEFAULT_OIDC_AUDIENCE
+    return admin_oidc_audience() or DEFAULT_OIDC_AUDIENCE
 
 
 def _allowlist() -> tuple[frozenset[str], frozenset[str]]:
     """Return ``(exact subjects, repositories)`` from ``ADMIN_OIDC_SUBJECTS``."""
-    subjects: set[str] = set()
-    repositories: set[str] = set()
-    for raw in os.environ.get("ADMIN_OIDC_SUBJECTS", "").split(","):
-        entry = raw.strip()
-        if not entry:
-            continue
-        if ":" in entry:
-            subjects.add(entry)
-        else:
-            repositories.add(entry.lower())
-    return frozenset(subjects), frozenset(repositories)
+    entries = admin_oidc_subjects()
+    return (
+        frozenset(entry for entry in entries if ":" in entry),
+        frozenset(entry.lower() for entry in entries if ":" not in entry),
+    )
 
 
 def actions_oidc_configured() -> bool:

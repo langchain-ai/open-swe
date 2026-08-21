@@ -23,7 +23,7 @@ def _stub_purge(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(wakeup_tool, "_purge_expired_wakeups_best_effort", _noop)
     monkeypatch.setattr(wakeup_tool, "get_active_slack_thread", _active)
-    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: _FakeClient([]))
+    monkeypatch.setattr(wakeup_tool, "langgraph_client", lambda: _FakeClient([]))
 
 
 class _FakeCrons:
@@ -230,8 +230,9 @@ async def test_wakeup_cron_includes_trace_correlation_and_completion_webhook(
             return {"cron_id": "cron-1"}
 
     client = type("Client", (), {"crons": _Crons()})()
-    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
-    monkeypatch.setattr(wakeup_tool, "COMPLETION_WEBHOOK_URL", "https://app/webhooks/run-complete")
+    monkeypatch.setattr(wakeup_tool, "langgraph_client", lambda: client)
+    monkeypatch.setenv("COMPLETION_WEBHOOK_URL", "https://app/webhooks/run-complete")
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
 
     result = await wakeup_tool._create_wakeup_cron(
         thread_id="thread-1",
@@ -244,7 +245,7 @@ async def test_wakeup_cron_includes_trace_correlation_and_completion_webhook(
     assert result["success"] is True
     assert captured["metadata"]["prepare_run_id"] == prepare_run_id
     assert captured["config"]["metadata"] == captured["metadata"]
-    assert captured["webhook"] == "https://app/webhooks/run-complete"
+    assert captured["webhook"] == "https://app/webhooks/run-complete?token=s3cret"
 
 
 async def test_schedule_thread_wakeup_returns_error_on_exception(
@@ -262,7 +263,7 @@ async def test_schedule_thread_wakeup_returns_error_on_exception(
 
     client = _FakeClient([])
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
-    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+    monkeypatch.setattr(wakeup_tool, "langgraph_client", lambda: client)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 
     result = await wakeup_tool.schedule_thread_wakeup(5)
@@ -311,7 +312,7 @@ async def test_schedule_allows_ten_wakeups_then_rejects_the_eleventh(
         messages=[_input_message("user-1", kind="human", sender="slack:U1")],
     )
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
-    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+    monkeypatch.setattr(wakeup_tool, "langgraph_client", lambda: client)
 
     for _ in range(10):
         result = await wakeup_tool.schedule_thread_wakeup(5)
@@ -342,7 +343,7 @@ async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyP
         ]
     )
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
-    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+    monkeypatch.setattr(wakeup_tool, "langgraph_client", lambda: client)
 
     result = await wakeup_tool.schedule_thread_wakeup(5)
 
@@ -367,7 +368,7 @@ async def test_system_wakeup_does_not_reset_wakeup_limit(monkeypatch: pytest.Mon
         },
     )
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
-    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+    monkeypatch.setattr(wakeup_tool, "langgraph_client", lambda: client)
 
     result = await wakeup_tool.schedule_thread_wakeup(5)
 
@@ -388,7 +389,7 @@ async def test_schedule_does_not_create_cron_when_budget_cannot_be_recorded(
 
     monkeypatch.setattr(client.threads, "update", fail_update)
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
-    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+    monkeypatch.setattr(wakeup_tool, "langgraph_client", lambda: client)
 
     result = await wakeup_tool.schedule_thread_wakeup(5)
 
@@ -409,7 +410,7 @@ async def test_parallel_schedules_share_one_wakeup_budget(monkeypatch: pytest.Mo
         },
     )
     monkeypatch.setattr(wakeup_tool, "get_config", _config)
-    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+    monkeypatch.setattr(wakeup_tool, "langgraph_client", lambda: client)
 
     results = await asyncio.gather(
         wakeup_tool.schedule_thread_wakeup(5),
@@ -499,7 +500,7 @@ async def test_best_effort_purge_swallows_errors(monkeypatch: pytest.MonkeyPatch
         raise RuntimeError("search failed")
 
     monkeypatch.setattr(wakeup_tool, "purge_expired_wakeup_crons", boom)
-    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: object())
+    monkeypatch.setattr(wakeup_tool, "langgraph_client", lambda: object())
 
     # The real wrapper must never propagate — a purge failure can't block wakeups.
     await _real_purge_best_effort()

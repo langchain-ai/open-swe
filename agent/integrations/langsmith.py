@@ -2,9 +2,7 @@
 
 import asyncio
 import base64
-import json
 import logging
-import os
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -19,6 +17,18 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 
+from agent.config import (
+    default_sandbox_snapshot_id,
+    langsmith_credentials,
+    sandbox_create_extra_fields,
+    sandbox_delete_after_stop_seconds,
+    sandbox_execute_client_grace_seconds,
+    sandbox_fs_capacity_bytes,
+    sandbox_idle_ttl_seconds,
+    sandbox_langsmith_endpoint,
+    sandbox_mem_bytes,
+    sandbox_vcpus,
+)
 from agent.utils.sandbox import SandboxGoneError
 
 logger = logging.getLogger(__name__)
@@ -48,38 +58,10 @@ SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 
 
-def _get_langsmith_api_key() -> str | None:
-    """Get LangSmith API key from environment.
-
-    Checks LANGSMITH_API_KEY first, then falls back to LANGSMITH_API_KEY_PROD
-    for LangGraph Cloud deployments where LANGSMITH_API_KEY is reserved.
-    """
-    return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
-
-
 def _get_sandbox_api_key() -> str | None:
-    """LangSmith API key for sandbox operations.
-
-    ``SANDBOX_LANGSMITH_API_KEY`` lets sandboxes run against a different
-    LangSmith workspace than the one used for tracing/other API calls; falls
-    back to the standard key.
-    """
-    return os.environ.get("SANDBOX_LANGSMITH_API_KEY") or _get_langsmith_api_key()
-
-
-def _get_sandbox_endpoint() -> str:
-    """LangSmith API **root** for sandbox operations.
-
-    Overridable via ``SANDBOX_LANGSMITH_ENDPOINT`` to pair with
-    ``SANDBOX_LANGSMITH_API_KEY``; falls back to ``LANGSMITH_ENDPOINT``. This is
-    the bare root (e.g. ``https://api.smith.langchain.com``) used to build the
-    proxy-config URL; the SDK clients take :func:`_get_sandbox_api_endpoint`.
-    """
-    return (
-        os.environ.get("SANDBOX_LANGSMITH_ENDPOINT")
-        or os.environ.get("LANGSMITH_ENDPOINT")
-        or "https://api.smith.langchain.com"
-    )
+    """LangSmith API key for sandbox operations."""
+    credentials = langsmith_credentials("sandbox")
+    return credentials[0] if credentials else None
 
 
 def _get_sandbox_api_endpoint() -> str:
@@ -88,69 +70,28 @@ def _get_sandbox_api_endpoint() -> str:
     The SDK's ``api_endpoint`` is the sandbox base (root + ``/v2/sandboxes``),
     not the API root, and its methods append ``/boxes``, ``/snapshots``, etc.
     """
-    root = _get_sandbox_endpoint().rstrip("/")
+    root = sandbox_langsmith_endpoint().rstrip("/")
     suffix = "/v2/sandboxes"
     return root if root.endswith(suffix) else f"{root}{suffix}"
-
-
-def _parse_optional_int(name: str, default: int) -> int:
-    raw = os.environ.get(name)
-    if not raw:
-        return default
-    try:
-        return int(raw)
-    except ValueError as e:
-        msg = f"{name} must be an integer, got {raw!r}"
-        raise ValueError(msg) from e
 
 
 def _execute_client_grace_seconds() -> int:
     """Extra wall-clock seconds the client waits past a command's own timeout
     before giving up and killing it. The server is meant to enforce the command
     timeout; this is the client-side backstop for when it doesn't."""
-    return _parse_optional_int("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", 30)
+    return sandbox_execute_client_grace_seconds(30)
 
 
 def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]:
     """Get sandbox snapshot configuration from environment."""
-    snapshot_id = os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID")
-    fs_capacity_bytes = _parse_optional_int(
-        "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES
-    )
-    vcpus = _parse_optional_int("DEFAULT_SANDBOX_VCPUS", DEFAULT_SANDBOX_VCPUS)
-    mem_bytes = _parse_optional_int("DEFAULT_SANDBOX_MEM_BYTES", DEFAULT_SANDBOX_MEM_BYTES)
-    idle_ttl_seconds = _parse_optional_int(
-        "DEFAULT_SANDBOX_IDLE_TTL_SECONDS", DEFAULT_SANDBOX_IDLE_TTL_SECONDS
-    )
-    delete_after_stop_seconds = _parse_optional_int(
-        "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS",
-        DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS,
-    )
     return (
-        snapshot_id,
-        fs_capacity_bytes,
-        vcpus,
-        mem_bytes,
-        idle_ttl_seconds,
-        delete_after_stop_seconds,
+        default_sandbox_snapshot_id(),
+        sandbox_fs_capacity_bytes(DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES),
+        sandbox_vcpus(DEFAULT_SANDBOX_VCPUS),
+        sandbox_mem_bytes(DEFAULT_SANDBOX_MEM_BYTES),
+        sandbox_idle_ttl_seconds(DEFAULT_SANDBOX_IDLE_TTL_SECONDS),
+        sandbox_delete_after_stop_seconds(DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS),
     )
-
-
-def _get_sandbox_create_extra_fields() -> dict[str, Any]:
-    """Parse SANDBOX_CREATE_EXTRA_JSON into extra fields merged into the
-    sandbox-create request body, e.g. ``{"_internal_runtime": "v2"}``."""
-    raw = os.environ.get("SANDBOX_CREATE_EXTRA_JSON")
-    if not raw or not raw.strip():
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as e:
-        msg = f"SANDBOX_CREATE_EXTRA_JSON must be valid JSON, got {raw!r}"
-        raise ValueError(msg) from e
-    if not isinstance(parsed, dict):
-        msg = f"SANDBOX_CREATE_EXTRA_JSON must be a JSON object, got {type(parsed).__name__}"
-        raise ValueError(msg)
-    return parsed
 
 
 def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, Any]) -> None:
@@ -381,8 +322,7 @@ async def configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     if not api_key:
         logger.warning("No LangSmith API key found, skipping GitHub proxy configuration")
         return
-    langsmith_endpoint = _get_sandbox_endpoint()
-    url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
+    url = f"{sandbox_langsmith_endpoint()}/v2/sandboxes/boxes/{sandbox_name}"
     payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
     async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         try:
@@ -581,40 +521,21 @@ class LangSmithProvider(SandboxProvider):
 
     @classmethod
     def validate_startup_config(cls) -> None:
-        """Validate env-var configuration at server startup. Raises ValueError if invalid."""
-        if not os.environ.get("DEFAULT_SANDBOX_SNAPSHOT_ID"):
+        """Validate env-var configuration at server startup. Raises ValueError if invalid.
+
+        Reading every setting is the validation: each accessor raises on a value
+        it cannot use.
+        """
+        if not default_sandbox_snapshot_id():
             # Not fatal: an admin can set the base snapshot at runtime from the
             # dashboard, which is stored outside the environment.
             logger.warning(
                 "DEFAULT_SANDBOX_SNAPSHOT_ID is not set; sandbox creation will fail until a "
                 "base snapshot is configured in admin settings"
             )
-        for name in (
-            "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES",
-            "DEFAULT_SANDBOX_VCPUS",
-            "DEFAULT_SANDBOX_MEM_BYTES",
-            "DEFAULT_SANDBOX_IDLE_TTL_SECONDS",
-            "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS",
-        ):
-            raw = os.environ.get(name)
-            if raw is None or raw == "":
-                continue
-            try:
-                value = int(raw)
-            except ValueError as e:
-                msg = f"{name} must be an integer, got {raw!r}"
-                raise ValueError(msg) from e
-            if (
-                name
-                in {
-                    "DEFAULT_SANDBOX_IDLE_TTL_SECONDS",
-                    "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS",
-                }
-                and value < 0
-            ):
-                msg = f"{name} must be >= 0, got {value}"
-                raise ValueError(msg)
-        _get_sandbox_create_extra_fields()
+        _get_sandbox_snapshot_config()
+        _execute_client_grace_seconds()
+        sandbox_create_extra_fields()
 
     async def get_or_create(
         self,
@@ -653,7 +574,7 @@ class LangSmithProvider(SandboxProvider):
                 )
                 raise ValueError(msg)
 
-            _install_create_extra_fields(client, _get_sandbox_create_extra_fields())
+            _install_create_extra_fields(client, sandbox_create_extra_fields())
 
             try:
                 sandbox = await _create_sandbox_with_retry(

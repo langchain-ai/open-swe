@@ -1,9 +1,6 @@
-import importlib.util
+import importlib
 import sys
 import types
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 class _FakeCreateSandboxFromSnapshotParams:
@@ -32,12 +29,8 @@ def _load_daytona_module(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "daytona", fake_daytona)
     monkeypatch.setitem(sys.modules, "langchain_daytona", fake_langchain_daytona)
-    module_path = ROOT / "agent" / "integrations" / "daytona.py"
-    spec = importlib.util.spec_from_file_location("daytona_under_test", module_path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    monkeypatch.delitem(sys.modules, "agent.integrations.daytona", raising=False)
+    return importlib.import_module("agent.integrations.daytona")
 
 
 def test_daytona_params_default_to_existing_snapshot(monkeypatch):

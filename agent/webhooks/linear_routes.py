@@ -2,6 +2,8 @@
 
 from fastapi import APIRouter
 
+from ..config import default_repo_owner, linear_webhook_secret
+from ..utils.github_org_membership import is_repo_allowed
 from . import common
 from . import linear as service
 
@@ -20,7 +22,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     body = await request.body()
 
     signature = request.headers.get("Linear-Signature", "")
-    if not common.verify_linear_signature(body, signature, common.LINEAR_WEBHOOK_SECRET):
+    if not common.verify_linear_signature(body, signature, linear_webhook_secret()):
         common.logger.warning("Invalid webhook signature")
         raise common.HTTPException(status_code=401, detail="Invalid signature")
 
@@ -79,9 +81,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         common.logger.warning("Failed to fetch full issue details, using webhook data")
         full_issue = issue
 
-    repo_config = common.extract_repo_from_text(
-        comment_body, default_owner=common.DEFAULT_REPO_OWNER
-    )
+    repo_config = common.extract_repo_from_text(comment_body, default_owner=default_repo_owner())
 
     if repo_config:
         common.logger.debug(
@@ -133,7 +133,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     if not repo_config:
         return {"status": "ignored", "reason": "No default repository configured"}
 
-    if not common._is_repo_allowed(repo_config):
+    if not is_repo_allowed(repo_config):
         common.logger.warning(
             "Rejecting Linear webhook: repo '%s/%s' not in allowlist",
             repo_config.get("owner"),

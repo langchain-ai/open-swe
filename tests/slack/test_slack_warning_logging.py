@@ -26,7 +26,7 @@ async def test_slack_warning_post_logs_error(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     client_cm = _async_client_cm(_ok_response())
 
     with (
@@ -49,7 +49,7 @@ async def test_plain_slack_post_does_not_log_warning_error(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     client_cm = _async_client_cm(_ok_response())
 
     with (

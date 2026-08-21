@@ -12,6 +12,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from ..config import langgraph_client
 from ..dashboard import plan_api, workflow_approval_api
 from ..dashboard.admin import is_admin
 from ..dashboard.agent_overrides import resolve_login_from_email_async
@@ -38,7 +39,6 @@ from ..input_messages import input_message_text, message_sender_id
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from ..utils.json_types import as_json_object, thread_metadata
 from ..utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
-from ..utils.thread_ops import langgraph_client
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
 
 logger = logging.getLogger(__name__)

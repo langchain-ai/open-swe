@@ -1,22 +1,17 @@
 import json
-import os
 from collections.abc import Mapping
 from typing import Annotated, Any
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
-from langgraph_sdk import get_client
 
+from ..config import langgraph_client
 from ..utils.run_usage import RunUsageSummary, summarize_run_usage
 from ..utils.slack import (
     convert_mentions_to_slack_format,
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
     store_slack_message_run_mapping,
-)
-
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
 )
 
 
@@ -58,9 +53,9 @@ async def slack_thread_reply(
     run_id = _current_run_id(config)
     slack_thread = configurable.get("slack_thread", {})
     thread_id = configurable.get("thread_id")
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     active = await get_active_slack_thread(
-        langgraph_client,
+        client,
         thread_id if isinstance(thread_id, str) else None,
         slack_thread if isinstance(slack_thread, dict) else None,
     )
@@ -87,7 +82,7 @@ async def slack_thread_reply(
         blocks=slack_blocks,
         usage=usage,
         agent_thread_id=thread_id if isinstance(thread_id, str) else None,
-        langgraph_client=langgraph_client,
+        client=client,
         run_id=run_id,
         triggering_user_id=_triggering_user_id(configurable),
     )
@@ -212,7 +207,7 @@ async def _post_and_store_mapping(
     blocks: list[dict[str, Any]] | None = None,
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
-    langgraph_client: Any | None = None,
+    client: Any | None = None,
     run_id: str | None = None,
     triggering_user_id: str | None = None,
 ) -> tuple[str | None, str | None]:
@@ -225,7 +220,7 @@ async def _post_and_store_mapping(
         agent_thread_id=agent_thread_id,
     )
     if message_ts:
-        resolved_client = langgraph_client or get_client(url=LANGGRAPH_URL)
+        resolved_client = client or langgraph_client()
         await store_slack_message_run_mapping(
             resolved_client,
             channel_id,

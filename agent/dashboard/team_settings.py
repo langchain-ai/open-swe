@@ -6,12 +6,12 @@ configuration in one place. Per-repo style prompts live in
 """
 
 import logging
-import os
 import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
+from ..config import default_repo_name, default_repo_owner
 from ..store import get_value, now_iso, put_value
 from ..utils.gateway import resolve_gateway_enabled
 from .options import (
@@ -252,8 +252,8 @@ def normalize_team_settings_for_response(settings: dict[str, Any]) -> dict[str, 
 
 
 def _env_default_repo() -> str | None:
-    owner = os.environ.get("DEFAULT_REPO_OWNER", "").strip()
-    name = os.environ.get("DEFAULT_REPO_NAME", "").strip()
+    owner = default_repo_owner()
+    name = default_repo_name()
     return f"{owner}/{name}" if owner and name else None
 
 

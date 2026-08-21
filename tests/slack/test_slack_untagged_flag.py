@@ -107,7 +107,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
-    monkeypatch.setattr(slack_events, "get_client", lambda url: _FakeClient())
+    monkeypatch.setattr(slack_events, "langgraph_client", lambda: _FakeClient())
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(return_value="t1"))
@@ -127,8 +127,8 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
     monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "BOT")
+    monkeypatch.setenv("SLACK_BOT_USERNAME", "openswe")
     # The two-party gate would admit these messages on its own.
     monkeypatch.setattr(
         slack_service, "_slack_thread_allows_untagged_reply", AsyncMock(return_value=True)
