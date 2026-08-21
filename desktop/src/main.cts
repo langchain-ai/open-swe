@@ -294,9 +294,11 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return localThreadStore.list();
   });
-  ipcMain.handle("desktop:local-activity", (event) => {
+  ipcMain.handle("desktop:local-activity", async (event) => {
     requireTrustedDesktopIpc(event);
-    return backendSupervisor.threadActivity();
+    const activity = await backendSupervisor.threadActivity();
+    if (!activity) throw new Error("Could not read local agent activity");
+    return activity;
   });
   ipcMain.handle("desktop:update-local-thread", (event, input) => {
     requireTrustedDesktopIpc(event);
@@ -310,7 +312,7 @@ function configureDesktopIpc() {
     const thread = localThreadStore.get(threadId);
     if (!thread) return false;
     const activity = await backendSupervisor.threadActivity();
-    if (activity[threadId] === "running")
+    if (!activity || activity[threadId] === "running")
       throw new Error("Stop the local agent before deleting it");
     await closeThreadTerminals(threadId);
     try {

@@ -217,9 +217,9 @@ class BackendSupervisor {
         body: JSON.stringify({ limit: 1_000 }),
         signal: AbortSignal.timeout(2_000),
       })
-      if (!response.ok) return {}
+      if (!response.ok) return null
       const threads = await response.json()
-      if (!Array.isArray(threads)) return {}
+      if (!Array.isArray(threads)) return null
       const activity = {}
       for (const thread of threads) {
         const status = THREAD_STATUS[thread?.status]
@@ -227,7 +227,7 @@ class BackendSupervisor {
       }
       return activity
     } catch {
-      return {}
+      return null
     }
   }
 

@@ -114,6 +114,11 @@ test("derives thread activity from the backend without starting it", async () =>
     "thread-1": "running",
     "thread-3": "error",
   })
+
+  supervisor.fetch = async () => {
+    throw new Error("connection refused")
+  }
+  assert.equal(await supervisor.threadActivity(), null)
 })
 
 test("packaged target runs the bundled backend", () => {
