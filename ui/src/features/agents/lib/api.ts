@@ -39,6 +39,7 @@ export interface ScheduleCreateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
+  admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
 }
@@ -50,6 +51,7 @@ export interface ScheduleUpdateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
+  admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
   enabled?: boolean | null
