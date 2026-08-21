@@ -4,6 +4,7 @@ import hmac
 import importlib
 import json
 import logging
+from collections.abc import Iterator
 from typing import cast
 from xml.etree import ElementTree
 
@@ -22,13 +23,28 @@ from agent.threads import ops as thread_ops
 from agent.threads.ids import github_issue_thread_id
 from agent.tools import request_pr_review as request_pr_review_tool
 from agent.webhooks import github as github_webhooks
-from agent.webhooks import github_routes, slack_routes
+from agent.webhooks import github_routes, slack_events, slack_routes
 from agent.webhooks import slack as slack_webhooks
 
 request_pr_review_module = importlib.import_module("agent.tools.request_pr_review")
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 _TEST_SLACK_SECRET = "test-slack-secret"
+
+
+@pytest.fixture(autouse=True)
+def _local_slack_event_claims(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Claim Slack event deliveries against an in-memory client, not the platform.
+
+    ``slack_events`` dedupes by creating a short-lived thread, so without this
+    every Slack test here posts a real claim to whatever LangGraph server is
+    listening — and a developer's ``langgraph dev`` makes them fail outright.
+    """
+    client = FakeLangGraphClient()
+    monkeypatch.setattr(slack_events, "langgraph_client", lambda: client)
+    slack_events.reset_slack_event_claims()
+    yield
+    slack_events.reset_slack_event_claims()
 
 
 @pytest.fixture(autouse=True)
