@@ -8,6 +8,7 @@ from agent.dashboard.environments import (
     EnvironmentCreate,
     EnvironmentUpdate,
     environment_prompt,
+    environment_sandbox_resources,
     environment_snapshot_id,
     slugify,
     snapshot_name_for,
@@ -79,6 +80,29 @@ def test_create_validates_repo_full_names() -> None:
     assert create.repos == ["owner/repo"]
 
 
+def test_sandbox_resources_require_positive_integers() -> None:
+    with pytest.raises(ValueError, match="greater than 0"):
+        EnvironmentCreate(name="env", mem_bytes=0)
+    with pytest.raises(ValueError, match="greater than 0"):
+        EnvironmentUpdate(vcpus=-1)
+
+
+def test_environment_sandbox_resources_omits_invalid_stored_values() -> None:
+    assert environment_sandbox_resources(
+        {
+            "mem_bytes": 16 * 1024**3,
+            "vcpus": 8,
+            "fs_capacity_bytes": 256 * 1024**3,
+            "unexpected": 1,
+        }
+    ) == {
+        "mem_bytes": 16 * 1024**3,
+        "vcpus": 8,
+        "fs_capacity_bytes": 256 * 1024**3,
+    }
+    assert environment_sandbox_resources({"mem_bytes": -1, "vcpus": True}) == {}
+
+
 def test_snapshot_id_only_resolves_when_ready() -> None:
     assert environment_snapshot_id({"snapshot_status": "capturing", "snapshot_id": "s-1"}) is None
     assert environment_snapshot_id({"snapshot_status": "ready", "snapshot_id": "s-1"}) == "s-1"
@@ -121,11 +145,29 @@ async def test_update_writes_only_provided_fields() -> None:
     client, _ = _fake_client()
     with patch.object(env_store, "get_client", return_value=client):
         await env_store.create_environment(
-            EnvironmentCreate(name="base", prompt="original", repos=["o/r"]), "ramon"
+            EnvironmentCreate(
+                name="base",
+                prompt="original",
+                repos=["o/r"],
+                mem_bytes=8 * 1024**3,
+                vcpus=4,
+                fs_capacity_bytes=128 * 1024**3,
+            ),
+            "ramon",
         )
-        updated = await env_store.update_environment("base", EnvironmentUpdate(prompt="replaced"))
+        updated = await env_store.update_environment(
+            "base", EnvironmentUpdate(prompt="replaced", vcpus=8)
+        )
         assert updated["prompt"] == "replaced"
         assert updated["repos"] == ["o/r"]
+        assert updated["mem_bytes"] == 8 * 1024**3
+        assert updated["vcpus"] == 8
+        assert updated["fs_capacity_bytes"] == 128 * 1024**3
+
+        cleared = await env_store.update_environment("base", EnvironmentUpdate(mem_bytes=None))
+        assert cleared["mem_bytes"] is None
+        assert cleared["vcpus"] == 8
+        assert cleared["fs_capacity_bytes"] == 128 * 1024**3
 
 
 @pytest.mark.asyncio

@@ -53,7 +53,9 @@ from .dashboard.agent_overrides import (
 )
 from .dashboard.agent_usage import record_agent_thread_usage
 from .dashboard.environments import (
+    SandboxResources,
     environment_prompt,
+    environment_sandbox_resources,
     environment_snapshot_id,
     resolve_environment,
 )
@@ -303,20 +305,16 @@ async def _resolve_proxy_token(
     return token, expires_at, None
 
 
-async def _resolve_snapshot_id(
+async def _resolve_sandbox_create_config(
     repo: dict[str, str] | None,
     environment_slug: str | None = None,
-) -> str | None:
-    """Resolve the snapshot a new sandbox boots from.
-
-    The run's environment (its selection, else ``default``) wins, then the repo's
-    built snapshot, then the admin-configured base snapshot. Never raises: any
-    failure resolves to ``None`` so sandbox creation falls back to the configured
-    ``DEFAULT_SANDBOX_SNAPSHOT_ID``.
-    """
-    environment_snapshot = environment_snapshot_id(await resolve_environment(environment_slug))
+) -> tuple[str | None, SandboxResources]:
+    """Resolve the snapshot and VM sizing a new sandbox uses."""
+    environment = await resolve_environment(environment_slug)
+    environment_snapshot = environment_snapshot_id(environment)
+    resources = environment_sandbox_resources(environment)
     if environment_snapshot:
-        return environment_snapshot
+        return environment_snapshot, resources
     if repo:
         try:
             repo_snapshot_id = await resolve_repo_snapshot_id(repo.get("owner"), repo.get("name"))
@@ -324,8 +322,17 @@ async def _resolve_snapshot_id(
             logger.debug("Failed to resolve repo-scoped snapshot", exc_info=True)
             repo_snapshot_id = None
         if repo_snapshot_id:
-            return repo_snapshot_id
-    return await get_admin_base_snapshot_id()
+            return repo_snapshot_id, resources
+    return await get_admin_base_snapshot_id(), resources
+
+
+async def _resolve_snapshot_id(
+    repo: dict[str, str] | None,
+    environment_slug: str | None = None,
+) -> str | None:
+    """Resolve the snapshot a new sandbox boots from."""
+    snapshot_id, _ = await _resolve_sandbox_create_config(repo, environment_slug)
+    return snapshot_id
 
 
 async def _create_sandbox_with_proxy(
@@ -337,8 +344,8 @@ async def _create_sandbox_with_proxy(
     environment_slug: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
-    snapshot_id = await _resolve_snapshot_id(repo, environment_slug)
-    sandbox_backend = await create_sandbox(snapshot_id=snapshot_id)
+    snapshot_id, resources = await _resolve_sandbox_create_config(repo, environment_slug)
+    sandbox_backend = await create_sandbox(snapshot_id=snapshot_id, **resources)
 
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     if sandbox_type == "langsmith":
@@ -531,6 +538,7 @@ async def ensure_sandbox_for_thread(
                     thread_id=thread_id,
                     github_proxy_repositories=github_proxy_repositories,
                     repo=repo,
+                    environment_slug=environment_slug,
                 )
             except Exception as create_exc:
                 # Keep the failure typed so callers still recognize "this run has no

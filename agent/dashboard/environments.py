@@ -24,7 +24,7 @@ import logging
 import os
 import re
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, field_validator
@@ -37,6 +37,13 @@ ENVIRONMENTS_NAMESPACE: list[str] = ["environments"]
 DEFAULT_ENVIRONMENT_SLUG = "default"
 
 SnapshotStatus = Literal["none", "capturing", "ready", "failed"]
+
+
+class SandboxResources(TypedDict, total=False):
+    mem_bytes: int
+    vcpus: int
+    fs_capacity_bytes: int
+
 
 NAME_MAX_CHARS = 80
 PROMPT_MAX_CHARS = 20_000
@@ -118,6 +125,9 @@ class EnvironmentCreate(BaseModel):
     name: str
     prompt: str = ""
     repos: list[str] = Field(default_factory=list)
+    mem_bytes: int | None = Field(default=None, gt=0)
+    vcpus: int | None = Field(default=None, gt=0)
+    fs_capacity_bytes: int | None = Field(default=None, gt=0)
 
     @field_validator("name")
     @classmethod
@@ -141,6 +151,9 @@ class EnvironmentUpdate(BaseModel):
     name: str | None = None
     prompt: str | None = None
     repos: list[str] | None = None
+    mem_bytes: int | None = Field(default=None, gt=0)
+    vcpus: int | None = Field(default=None, gt=0)
+    fs_capacity_bytes: int | None = Field(default=None, gt=0)
 
     @field_validator("name")
     @classmethod
@@ -204,6 +217,9 @@ async def create_environment(create: EnvironmentCreate, created_by: str) -> dict
         "name": create.name.strip(),
         "prompt": create.prompt,
         "repos": create.repos,
+        "mem_bytes": create.mem_bytes,
+        "vcpus": create.vcpus,
+        "fs_capacity_bytes": create.fs_capacity_bytes,
         "snapshot_id": None,
         "snapshot_name": None,
         "snapshot_status": "none",
@@ -231,6 +247,9 @@ async def update_environment(slug: str, update: EnvironmentUpdate) -> dict[str, 
         record["prompt"] = update.prompt
     if update.repos is not None:
         record["repos"] = update.repos
+    for field in ("mem_bytes", "vcpus", "fs_capacity_bytes"):
+        if field in update.model_fields_set:
+            record[field] = getattr(update, field)
     await _client().store.put_item(ENVIRONMENTS_NAMESPACE, slug, record)
     return record
 
@@ -328,6 +347,17 @@ def environment_prompt(record: dict[str, Any] | None) -> str | None:
         return None
     prompt = record.get("prompt")
     return prompt.strip() or None if isinstance(prompt, str) else None
+
+
+def environment_sandbox_resources(record: dict[str, Any] | None) -> SandboxResources:
+    if not record:
+        return {}
+    resources: SandboxResources = {}
+    for field in ("mem_bytes", "vcpus", "fs_capacity_bytes"):
+        value = record.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            resources[field] = value
+    return resources
 
 
 async def _set_snapshot_state(

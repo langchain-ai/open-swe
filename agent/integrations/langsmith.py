@@ -421,6 +421,9 @@ async def create_langsmith_sandbox(
     github_token: str | None = None,
     *,
     snapshot_id: str | None = None,
+    mem_bytes: int | None = None,
+    vcpus: int | None = None,
+    fs_capacity_bytes: int | None = None,
 ) -> SandboxBackendProtocol:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
 
@@ -434,7 +437,10 @@ async def create_langsmith_sandbox(
         github_token: Optional GitHub token. Used to configure proxy auth on
                       new sandboxes. Ignored when connecting to an existing sandbox.
         snapshot_id: Optional repo-scoped snapshot to boot from. When omitted,
-                      falls back to DEFAULT_SANDBOX_SNAPSHOT_ID.
+            falls back to DEFAULT_SANDBOX_SNAPSHOT_ID.
+        mem_bytes: Optional memory capacity override for a newly-created sandbox.
+        vcpus: Optional virtual CPU count override for a newly-created sandbox.
+        fs_capacity_bytes: Optional filesystem capacity override for a newly-created sandbox.
 
     Returns:
         SandboxBackendProtocol instance
@@ -442,22 +448,30 @@ async def create_langsmith_sandbox(
     api_key = _get_sandbox_api_key()
     (
         default_snapshot_id,
-        fs_capacity_bytes,
-        vcpus,
-        mem_bytes,
+        default_fs_capacity_bytes,
+        default_vcpus,
+        default_mem_bytes,
         idle_ttl_seconds,
         delete_after_stop_seconds,
     ) = _get_sandbox_snapshot_config()
 
     effective_snapshot_id = snapshot_id or default_snapshot_id
+    if mem_bytes is None and vcpus is None:
+        effective_mem_bytes = default_mem_bytes
+        effective_vcpus = default_vcpus
+    else:
+        effective_mem_bytes = mem_bytes
+        effective_vcpus = vcpus
 
     provider = LangSmithProvider(api_key=api_key)
     backend = await provider.get_or_create(
         sandbox_id=sandbox_id,
         snapshot_id=effective_snapshot_id,
-        fs_capacity_bytes=fs_capacity_bytes,
-        vcpus=vcpus,
-        mem_bytes=mem_bytes,
+        fs_capacity_bytes=(
+            fs_capacity_bytes if fs_capacity_bytes is not None else default_fs_capacity_bytes
+        ),
+        vcpus=effective_vcpus,
+        mem_bytes=effective_mem_bytes,
         idle_ttl_seconds=idle_ttl_seconds,
         delete_after_stop_seconds=delete_after_stop_seconds,
     )

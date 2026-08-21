@@ -458,7 +458,7 @@ This is an admin thread. You have tools to manage environments — a named promp
 
 Build one by provisioning this sandbox and capturing it:
 
-1. `save_environment` to create or update the record (name, prompt, repos).
+1. `save_environment` to create or update the record (name, prompt, repos, and optional VM sizing). Memory and filesystem capacity are bytes; vCPUs are a count. Sizing applies when new sandboxes are created for that environment, not to this already-running admin sandbox. Use `clear_sizing` to restore provider defaults.
 2. Provision this sandbox with ordinary commands: clone the repos the environment covers, install toolchains and dependencies, warm caches. Everything on disk lands in the snapshot, so leave the sandbox in the state a run should start from.
 3. `capture_environment_snapshot` to snapshot this sandbox. Capture is slow; run it once the sandbox is fully provisioned rather than after each step.
 

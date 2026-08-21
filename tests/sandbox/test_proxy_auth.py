@@ -39,6 +39,32 @@ class TestSandboxFactoryLoading:
         mock_import_module.assert_called_once_with("agent.integrations.local")
         module.create_local_sandbox.assert_called_once_with("existing")
 
+    async def test_create_sandbox_passes_langsmith_resource_overrides(self) -> None:
+        with (
+            patch("agent.utils.sandbox.import_module") as mock_import_module,
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
+        ):
+            module = MagicMock()
+            module.create_langsmith_sandbox = AsyncMock(return_value=MagicMock(id="langsmith"))
+            mock_import_module.return_value = module
+
+            from agent.utils.sandbox import create_sandbox
+
+            await create_sandbox(
+                snapshot_id="env-snap",
+                mem_bytes=16,
+                vcpus=8,
+                fs_capacity_bytes=128,
+            )
+
+        module.create_langsmith_sandbox.assert_awaited_once_with(
+            None,
+            snapshot_id="env-snap",
+            mem_bytes=16,
+            vcpus=8,
+            fs_capacity_bytes=128,
+        )
+
 
 class TestConfigureGithubProxy:
     """Tests for _configure_github_proxy payload shape and error handling."""
@@ -358,6 +384,41 @@ class TestCreateSandboxWithProxy:
             mock_create.assert_called_once_with(snapshot_id=None)
             mock_proxy.assert_called_once_with("sandbox-123", "ghs_install")
             mock_get_token.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    async def test_passes_environment_resources_to_sandbox_creation(self) -> None:
+        environment = {
+            "snapshot_status": "ready",
+            "snapshot_id": "env-snap",
+            "mem_bytes": 16,
+            "vcpus": 8,
+            "fs_capacity_bytes": 128,
+        }
+        with (
+            patch(
+                "agent.server.resolve_environment", new_callable=AsyncMock, return_value=environment
+            ),
+            patch("agent.server.create_sandbox", new_callable=AsyncMock) as mock_create,
+            patch(
+                "agent.server.get_github_app_installation_token_with_expiry",
+                new_callable=AsyncMock,
+                return_value=("ghs_install", None),
+            ),
+            patch("agent.server._configure_github_proxy", new_callable=AsyncMock),
+            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
+        ):
+            mock_create.return_value = MagicMock(id="sandbox-123")
+
+            from agent.server import _create_sandbox_with_proxy
+
+            await _create_sandbox_with_proxy(environment_slug="large")
+
+        mock_create.assert_awaited_once_with(
+            snapshot_id="env-snap",
+            mem_bytes=16,
+            vcpus=8,
+            fs_capacity_bytes=128,
+        )
 
     @pytest.mark.asyncio
     async def test_raises_when_installation_token_mint_fails(self) -> None:
