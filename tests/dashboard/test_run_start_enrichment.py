@@ -89,7 +89,7 @@ def _patch_enrich_deps(monkeypatch, *, profile: dict[str, object] | None = None)
 
     monkeypatch.setattr(thread_api, "get_profile", fake_profile)
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    monkeypatch.setattr(thread_api, "resolve_run_email", fake_resolve_email)
 
 
 def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
@@ -426,7 +426,7 @@ async def test_run_start_allowlists_client_configurable(monkeypatch) -> None:
 
     monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    monkeypatch.setattr(thread_api, "resolve_run_email", fake_resolve_email)
     proxy = _install_proxy(monkeypatch)
 
     enriched = await _run_start(

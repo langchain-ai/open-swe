@@ -11,6 +11,7 @@ from langgraph_sdk.errors import ConflictError
 
 from .config import in_process_langgraph_client
 from .dispatch import dispatch_agent_run
+from .scheduling.crons import delete_cron, ensure_scheduler_cron
 from .store import delete_value, get_value, now_iso, put_value, search_all_values
 from .thread_ids import baby_sit_lock_thread_id
 from .utils.github_app import get_github_app_installation_token
@@ -30,7 +31,7 @@ from .utils.slack import GitHubPrRef, post_slack_thread_reply
 logger = logging.getLogger(__name__)
 
 WATCH_NAMESPACE = ["baby_sit_watches"]
-WATCH_CRON_KIND = "baby_sit_watch"
+WATCH_TASK = "baby_sit"
 WATCH_SCHEDULE = "*/10 * * * *"
 MAX_RETRIES_PER_HEAD = 3
 MAX_DISPATCH_KEYS = 30
@@ -63,6 +64,10 @@ async def _watch_lock(key: str) -> AsyncIterator[bool]:
             await client.threads.delete(lock_id)
         except Exception:
             logger.warning("Failed to release baby-sit lock for %s", key, exc_info=True)
+
+
+class BabySitPayload(TypedDict):
+    watch_key: str
 
 
 class BabySitWatch(TypedDict):
@@ -121,40 +126,15 @@ async def list_active_watches(
     return [cast(BabySitWatch, value) for value in values]
 
 
-async def _create_watch_cron(key: str) -> str:
-    cron = await in_process_langgraph_client().crons.create(
-        "scheduler",
-        schedule=WATCH_SCHEDULE,
-        input={"task": "baby_sit", "watch_key": key},
-        config={"configurable": {"task": "baby_sit", "watch_key": key}},
-        metadata={"kind": WATCH_CRON_KIND, "watch_key": key},
-        timezone="UTC",
-    )
-    cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
-    if not isinstance(cron_id, str) or not cron_id:
-        raise RuntimeError("baby-sit cron creation did not return a cron_id")
-    return cron_id
-
-
 async def _ensure_watch_cron(key: str) -> str:
-    crons = await in_process_langgraph_client().crons.search(
-        assistant_id="scheduler",
-        metadata={"kind": WATCH_CRON_KIND, "watch_key": key},
-        limit=10,
+    payload: BabySitPayload = {"watch_key": key}
+    return await ensure_scheduler_cron(
+        in_process_langgraph_client(),
+        kind=WATCH_TASK,
+        key=key,
+        schedule=WATCH_SCHEDULE,
+        payload=payload,
     )
-    cron_ids = [
-        cron_id
-        for cron in crons or []
-        if isinstance(cron, dict) and isinstance((cron_id := cron.get("cron_id")), str) and cron_id
-    ]
-    if cron_ids:
-        for duplicate in cron_ids[1:]:
-            try:
-                await in_process_langgraph_client().crons.delete(duplicate)
-            except Exception:
-                logger.warning("Failed to delete duplicate baby-sit cron %s", duplicate)
-        return cron_ids[0]
-    return await _create_watch_cron(key)
 
 
 async def start_watch(
@@ -207,11 +187,9 @@ async def start_watch(
     except Exception:
         if existing is None:
             cron_id = watch.get("cron_id")
-            if isinstance(cron_id, str) and cron_id:
-                try:
-                    await in_process_langgraph_client().crons.delete(cron_id)
-                except Exception:
-                    logger.warning("Failed to roll back baby-sit cron %s", cron_id)
+            await delete_cron(
+                in_process_langgraph_client(), cron_id if isinstance(cron_id, str) else None
+            )
             await delete_value(WATCH_NAMESPACE, key)
         raise
 
@@ -221,14 +199,14 @@ async def stop_watch(key: str) -> bool:
     if not watch:
         return False
     cron_id = watch.get("cron_id")
-    if isinstance(cron_id, str) and cron_id:
-        try:
-            await in_process_langgraph_client().crons.delete(cron_id)
-        except Exception:
-            logger.warning("Failed to delete baby-sit cron %s", cron_id, exc_info=True)
-            watch["active"] = False
-            await _put_watch(watch)
-            return True
+    if not await delete_cron(
+        in_process_langgraph_client(), cron_id if isinstance(cron_id, str) else None
+    ):
+        # Keep the record so the still-firing cron evaluates an inactive watch
+        # and retries the delete, rather than an already-forgotten one.
+        watch["active"] = False
+        await _put_watch(watch)
+        return True
     await delete_value(WATCH_NAMESPACE, key)
     return True
 

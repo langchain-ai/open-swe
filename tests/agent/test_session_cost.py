@@ -151,7 +151,6 @@ class _Client:
 
 def _state(attempt: int) -> dict[str, Any]:
     return {
-        "task": "session_cost",
         "agent_thread_id": "thread-1",
         "run_id": "run-1",
         "prepare_run_id": "prepare-1",
@@ -182,6 +181,17 @@ async def test_refresh_schedules_bounded_stateless_retry(monkeypatch: pytest.Mon
     assert created["after_seconds"] == 30
     assert created["on_completion"] == "delete"
     assert "webhook" not in created
+    assert created["input"] == {
+        "task": "session_cost",
+        "payload": {
+            "agent_thread_id": "thread-1",
+            "run_id": "run-1",
+            "prepare_run_id": "prepare-1",
+            "channel_id": "C1",
+            "thread_ts": "1.0",
+            "attempt": 1,
+        },
+    }
 
 
 async def test_refresh_stops_after_final_attempt(monkeypatch: pytest.MonkeyPatch) -> None:

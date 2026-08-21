@@ -106,7 +106,7 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> FakeLangGraphClient
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
     monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    monkeypatch.setattr(thread_api, "resolve_run_email", fake_resolve_email)
     return client
 
 
