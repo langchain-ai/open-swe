@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.utils import slack as slack_utils
+from agent.utils import slack_api
 from agent.utils.user_messages import warning
 
 
@@ -30,10 +30,10 @@ async def test_slack_warning_post_logs_error(
     client_cm = _async_client_cm(_ok_response())
 
     with (
-        caplog.at_level(logging.ERROR, logger=slack_utils.logger.name),
-        patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm),
+        caplog.at_level(logging.ERROR, logger=slack_api.logger.name),
+        patch.object(slack_api.httpx, "AsyncClient", return_value=client_cm),
     ):
-        result = await slack_utils._post_slack_message_with_ts(
+        result = await slack_api._post_slack_message_with_ts(
             "C1",
             warning("Open SWE reached its maximum step limit."),
             thread_ts="1.0",
@@ -53,10 +53,10 @@ async def test_plain_slack_post_does_not_log_warning_error(
     client_cm = _async_client_cm(_ok_response())
 
     with (
-        caplog.at_level(logging.ERROR, logger=slack_utils.logger.name),
-        patch.object(slack_utils.httpx, "AsyncClient", return_value=client_cm),
+        caplog.at_level(logging.ERROR, logger=slack_api.logger.name),
+        patch.object(slack_api.httpx, "AsyncClient", return_value=client_cm),
     ):
-        result = await slack_utils._post_slack_message_with_ts(
+        result = await slack_api._post_slack_message_with_ts(
             "C1",
             "Normal Slack reply",
             thread_ts="1.0",

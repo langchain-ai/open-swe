@@ -1,11 +1,11 @@
 from typing import Any
 
-from ..utils.slack import (
+from ..utils.slack_api import (
     SLACK_THREAD_MAX_MESSAGES,
     fetch_slack_thread_messages,
-    format_slack_messages_for_prompt,
     get_slack_user_names,
 )
+from ..utils.slack_format import format_slack_messages_for_prompt
 
 
 async def _fetch_and_format(channel_id: str, message_ts: str) -> dict[str, Any]:

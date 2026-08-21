@@ -25,7 +25,7 @@ from .utils.github_ci import (
     list_check_runs,
     list_commit_statuses,
 )
-from .utils.slack import GitHubPrRef
+from .utils.github_refs import GitHubPrRef
 from .utils.source_channel import notify_source_channel, source_context_from_watch
 
 logger = logging.getLogger(__name__)

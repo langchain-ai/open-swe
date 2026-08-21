@@ -4,7 +4,8 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.review.dispatch import trigger_pr_review_from_ref
-from agent.utils.slack import get_active_slack_thread, parse_github_pr_url
+from agent.utils.github_refs import parse_github_pr_url
+from agent.utils.slack_threads import get_active_slack_thread
 
 
 async def request_pr_review(pr_url: str) -> dict[str, Any]:

@@ -24,11 +24,8 @@ from ..dashboard.user_mappings import slack_id_for_login
 from ..dispatch import create_durable_run
 from ..input_messages import InputMessageContext, build_run_input
 from ..store import get_value, now_iso, now_ms, put_value
-from ..utils.slack import (
-    bind_slack_thread_id,
-    post_slack_top_level_message_with_ts,
-    store_slack_run_mapping,
-)
+from ..utils.slack_api import post_slack_top_level_message_with_ts
+from ..utils.slack_threads import bind_slack_thread_id, store_slack_run_mapping
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
 
 logger = logging.getLogger(__name__)

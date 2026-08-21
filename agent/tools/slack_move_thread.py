@@ -6,13 +6,13 @@ from langgraph.config import get_config
 
 from ..config import langgraph_client
 from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.slack import (
-    append_slack_web_link_footer,
+from ..utils.slack_api import post_slack_top_level_message_with_ts
+from ..utils.slack_format import append_slack_web_link_footer
+from ..utils.slack_threads import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
     get_active_slack_thread,
     lookup_slack_thread_run_mapping,
-    post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
 

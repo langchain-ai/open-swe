@@ -9,7 +9,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from ..config import agent_version_metadata, langgraph_client
 from ..dispatch import dispatch_agent_run
-from ..utils.slack import (
+from ..utils.slack_threads import (
     lookup_slack_run_mapping,
     lookup_slack_thread_id,
     store_slack_run_mapping,

@@ -17,10 +17,9 @@ from agent.review import dispatch as review_dispatch
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.thread_ids import github_issue_thread_id
 from agent.tools import request_pr_review as request_pr_review_tool
-from agent.utils import slack as slack_utils
-from agent.utils import thread_ops
+from agent.utils import slack_api, thread_ops
 from agent.utils.github_comments import describe_open_swe_tags
-from agent.utils.slack import GitHubPrRef
+from agent.utils.github_refs import GitHubPrRef
 from agent.webhooks import github as github_webhooks
 from agent.webhooks import github_routes, slack_routes
 from agent.webhooks import slack as slack_webhooks
@@ -599,7 +598,7 @@ def test_slack_webhook_gates_docs_plz_channel(monkeypatch) -> None:
     monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
-    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(slack_api.time, "time", lambda: 1700000000)
     monkeypatch.setattr(
         slack_webhooks, "resolve_slack_channel_context", fake_get_slack_channel_context
     )
@@ -672,7 +671,7 @@ def test_slack_webhook_routes_review_command_to_agent(monkeypatch) -> None:
     monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
-    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(slack_api.time, "time", lambda: 1700000000)
     monkeypatch.setattr(
         slack_webhooks, "resolve_slack_channel_context", fake_get_slack_channel_context
     )
@@ -727,7 +726,7 @@ def test_slack_webhook_malformed_review_command_starts_agent(monkeypatch) -> Non
     monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
-    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(slack_api.time, "time", lambda: 1700000000)
     monkeypatch.setattr(slack_webhooks, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
 
@@ -778,7 +777,7 @@ def test_slack_webhook_non_pr_review_request_starts_agent(monkeypatch) -> None:
     monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
-    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(slack_api.time, "time", lambda: 1700000000)
     monkeypatch.setattr(slack_webhooks, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
     # An allow-list that excludes the inferred repo: the Slack path must not consult it.
@@ -829,7 +828,7 @@ def test_slack_webhook_threaded_followup_uses_parent_thread_ts(monkeypatch) -> N
     monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
-    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(slack_api.time, "time", lambda: 1700000000)
     monkeypatch.setattr(slack_webhooks, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
 
@@ -887,7 +886,7 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
     monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setenv("SLACK_BOT_USERNAME", "open-swe")
-    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(slack_api.time, "time", lambda: 1700000000)
     monkeypatch.setattr(slack_webhooks, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
 
@@ -937,7 +936,7 @@ def test_slack_webhook_accepts_unmentioned_ready_plan_reply(monkeypatch) -> None
 
     monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
-    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(slack_api.time, "time", lambda: 1700000000)
     monkeypatch.setattr(
         slack_webhooks, "_slack_user_can_reply_to_ready_plan", fake_ready_plan_reply
     )
@@ -972,7 +971,7 @@ def test_slack_webhook_ignores_unmentioned_non_plan_reply(monkeypatch) -> None:
 
     monkeypatch.setenv("SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
-    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
+    monkeypatch.setattr(slack_api.time, "time", lambda: 1700000000)
     monkeypatch.setattr(
         slack_webhooks, "_slack_user_can_reply_to_ready_plan", fake_ready_plan_reply
     )
