@@ -43,9 +43,9 @@ _UNTAGGED_REPLY_PREAMBLE = (
     "conversation, answers to your questions, and follow-up instructions are addressed to you. "
     "Someone thinking out loud, talking to another person, or commenting on the thread without "
     "expecting you to act is not.\n\n"
-    "If it is not addressed to you, call `no_op` and post nothing, including no reaction. Staying "
-    "silent is the right outcome; an unwanted reply or reaction from an untagged message is worse "
-    "than no reply. If it is "
+    "If it is not addressed to you, end your turn without calling any tool and post nothing, "
+    "including no reaction. Staying silent is the right outcome; an unwanted reply or reaction "
+    "from an untagged message is worse than no reply. If it is "
     "addressed to you, handle it exactly as you would a direct mention.\n\n"
 )
 

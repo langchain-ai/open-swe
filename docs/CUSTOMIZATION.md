@@ -3,25 +3,27 @@
 Open SWE is designed to be forked and customized for your org. The core agent is assembled in a single function — `get_agent()` in `agent/server.py` — where you can swap out the sandbox, model, tools, and triggers.
 
 ```python
-# agent/server.py — the key lines
-model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
-model_kwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
-if model_id == DEFAULT_LLM_MODEL_ID:
-    model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
+# agent/server.py — the shape of get_agent(), simplified
+static_tools = [http_request, fetch_url, web_search, ..., slack_thread_reply]  # ~35 tools
 
 return create_deep_agent(
-    model=make_model(model_id, **model_kwargs),
-    system_prompt=construct_system_prompt(...),
-    tools=[http_request, fetch_url, linear_comment, slack_thread_reply],
+    model=main_model,  # resolved per run; see "2. Model" below
+    system_prompt="",  # rendered per run by PrepareAgentRunMiddleware
+    tools=static_tools,
+    subagents=[general_purpose_subagent, browser_subagent],
     backend=sandbox_backend,
     middleware=[
+        PrepareAgentRunMiddleware(...),  # awaits the sandbox, renders the prompt
+        SanitizeToolInputsMiddleware(),
+        ModelCallLimitMiddleware(...),
         ToolErrorMiddleware(),
-        check_message_queue_before_model,
-        ensure_no_empty_msg,
-        notify_step_limit_reached,
+        ...,  # ~20 entries, several conditional
+        ModelCallTimeoutMiddleware(),  # innermost
     ],
-)
+).with_config(config)
 ```
+
+`get_agent` is called once per run, so anything you want to vary by repo, trigger source, or user can be decided right here.
 
 ---
 
@@ -140,14 +142,16 @@ See `deepagents.backends.LangSmithSandbox` and `agent/integrations/langsmith.py`
 
 ## 2. Model
 
-The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `openai:gpt-5.6-sol` with medium reasoning effort, but you can override the model with the `LLM_MODEL_ID` environment variable:
+The model is resolved per run in `get_agent()` (`agent/server.py`). There is no single "the model" env var: the effective choice is settings-driven, and the last rule that applies wins.
 
-```bash
-# Set the model via environment variable (uses provider:model format)
-LLM_MODEL_ID="anthropic:claude-sonnet-5"
-```
+1. **Team default** — set in the dashboard under **Admin → Models**, read via `get_team_default_model_pair("agent")`. With nothing configured this falls back to `default_model_pair()` in `agent/dashboard/options.py` (`openai:gpt-5.6-sol`, medium effort).
+2. **Per-user profile override** — a dashboard profile can pin a model (and a separate subagent model) for runs triggered by that GitHub login.
+3. **Thread settings** — the resolved pair is frozen onto the thread on its first run (`agent/utils/thread_settings.py`), so a long-lived Slack or Linear thread does not silently change models mid-conversation.
+4. **Per-run config** — `agent_model_id` + `agent_effort` in `configurable`, set by the UI or a webhook. This is the only thing allowed to move a thread off its stored settings, and the new choice is stored in turn.
 
-If `LLM_MODEL_ID` is not set, the default model (`openai:gpt-5.6-sol`) is used.
+Supported ids and the per-model effort/reasoning rules live in `agent/dashboard/options.py`; add a model there before it can be selected anywhere.
+
+`LLM_MODEL_ID` does **not** select the runtime model. It is only read by `validate_local_dev_llm_config()` (`agent/utils/model.py`), which fails fast at startup on `localhost` when the API key for your locally configured default is missing. Set `LLM_FALLBACK_MODEL_ID` to override the automatic fallback model.
 
 `max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
 
@@ -220,7 +224,7 @@ Routing is applied centrally in `make_model` (`agent/utils/model.py`), which res
 
 ## 3. Tools
 
-Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents). GitHub operations are handled by `gh` inside the sandbox.
+Open SWE ships with around three dozen first-party tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents). They all live in `agent/tools/`, are re-exported from `agent/tools/__init__.py`, and are assembled into `static_tools` in `get_agent()` — that list is the authoritative inventory. A representative slice:
 
 | Tool | File | Purpose |
 |---|---|---|
@@ -228,6 +232,10 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
 | `linear_comment` | `agent/tools/linear_comment.py` | Post comments on Linear tickets |
 | `slack_thread_reply` | `agent/tools/slack_thread_reply.py` | Reply in Slack threads |
+| `open_pull_request` | `agent/tools/open_pull_request.py` | Open a PR attributed to the triggering user |
+| `save_plan` | `agent/tools/save_plan.py` | Publish a plan for dashboard review |
+
+Day-to-day git and GitHub work is done with `git` and `gh` inside the sandbox; PR *creation* is the exception — it goes through `open_pull_request`, and `PullRequestCreationGuardMiddleware` blocks the shell fallbacks.
 
 ### Adding a tool
 
@@ -255,21 +263,17 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
     ...
 ```
 
-Then register it in `agent/server.py`:
+Export it from `agent/tools/__init__.py`, then add it to `static_tools` in `agent/server.py`:
 
 ```python
-from .tools import fetch_url, http_request, linear_comment, slack_thread_reply
-from .tools.datadog_search import datadog_search
+from .tools import datadog_search, fetch_url, http_request, ...
 
-return create_deep_agent(
-    ...
-    tools=[
-        http_request, fetch_url,
-        linear_comment, slack_thread_reply,
-        datadog_search,  # new tool
-    ],
-    ...
-)
+static_tools = [
+    http_request,
+    fetch_url,
+    ...,
+    datadog_search,  # new tool
+]
 ```
 
 The agent will automatically see the tool's name, docstring, and parameter types — the docstring serves as the tool description, so write it clearly.
@@ -280,7 +284,7 @@ If you only use Linear (not Slack), remove `slack_thread_reply` from the tools l
 
 ### Conditional tools
 
-You can vary the toolset based on the trigger source:
+`get_agent()` already does this — Slack tools are dropped unless the run carries trusted Slack context, environment tools are added only for admin threads — and you can extend the same pattern:
 
 ```python
 base_tools = [http_request, fetch_url]
@@ -317,16 +321,18 @@ For `LOCAL` mode the sandbox image in `Dockerfile.sandbox` installs `chromium`; 
 
 ## 4. Triggers
 
-Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each is implemented as a webhook endpoint in `agent/webapp.py`. You can add, remove, or modify triggers independently.
+Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each lives in `agent/webhooks/`, split in two: a `<source>_routes.py` module with the FastAPI endpoints and signature verification, and a `<source>.py` module with the event handling. Anything shared between surfaces — deterministic thread ids, repo resolution, allow-list gates, thread metadata — is in `agent/webhooks/common.py`. All three end at the same place: `dispatch_agent_run()` in `agent/dispatch.py`, which owns the durable-run contract (interrupt-on-follow-up, sync checkpointing, completion webhook). Routers are mounted in `agent/api/app.py:create_app()`.
+
+You can add, remove, or modify triggers independently.
 
 ### Removing a trigger
 
 If you don't use Linear, simply don't configure the Linear webhook and remove the env vars. Same for Slack. The webhook endpoints still exist but won't receive events.
 
-To fully remove a trigger's code, delete the corresponding endpoint from `agent/webapp.py`:
+To fully remove a trigger's code, drop its router from `create_app()` in `agent/api/app.py` and delete the pair of modules:
 
-- **Linear**: `linear_webhook()` and `process_linear_issue()`
-- **Slack**: `slack_webhook()` and `process_slack_mention()`
+- **Linear**: `agent/webhooks/linear_routes.py` and `agent/webhooks/linear.py`
+- **Slack**: `agent/webhooks/slack_routes.py` and `agent/webhooks/slack.py`
 
 ### Default repository
 
@@ -371,7 +377,7 @@ Users can also override the team/project mapping on a per-comment basis by inclu
 
 ### Customizing Slack routing
 
-Slack repo resolution (`get_slack_repo_config` in `agent/webapp.py`) checks, in order:
+Slack repo resolution (`get_slack_repo_config` in `agent/webhooks/common.py`) checks, in order:
 
 1. Repo carried over from the existing Slack thread's metadata.
 2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description"). This lets a channel be pinned to a repo without anyone repeating it per-message.
@@ -387,42 +393,42 @@ Reading the channel topic/purpose requires the bot's Slack token to have the `ch
 
 To add a new invocation surface (e.g. Jira, Discord, a custom API):
 
-1. **Add a webhook endpoint** in `agent/webapp.py`:
+1. **Add a router** at `agent/webhooks/my_trigger_routes.py` and include it in `create_app()` (`agent/api/app.py`):
 
 ```python
-@app.post("/webhooks/my-trigger")
+# agent/webhooks/my_trigger_routes.py
+from fastapi import APIRouter, BackgroundTasks, Request
+
+from . import my_trigger
+
+router = APIRouter()
+
+
+@router.post("/webhooks/my-trigger")
 async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks):
-    # Parse the incoming event
-    payload = await request.json()
-    
-    # Extract task description and repo info
-    task_description = payload["description"]
-    repo_config = {"owner": "my-org", "name": "my-repo"}
-    
-    # Create a LangGraph run
-    background_tasks.add_task(process_my_trigger, task_description, repo_config)
+    payload = await request.json()  # verify the signature here
+    background_tasks.add_task(my_trigger.process, payload)
     return {"status": "accepted"}
 ```
 
-2. **Create a processing function** that builds the prompt and starts an agent run:
+2. **Create the handler** in `agent/webhooks/my_trigger.py`. Derive a deterministic thread id — reuse the helpers in `agent/webhooks/common.py`, which is where every surface's id derivation lives — and dispatch through `dispatch_agent_run` rather than calling `runs.create` yourself; that is what gives your trigger interrupt-on-follow-up, sync checkpointing, and a completion signal:
 
 ```python
-async def process_my_trigger(task_description: str, repo_config: dict):
-    thread_id = generate_deterministic_id(task_description)
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+import uuid
 
-    await langgraph_client.runs.create(
-        thread_id,
-        "agent",
-        input={"messages": [{"role": "user", "content": task_description}]},
-        config={
-            "configurable": {
-                "repo": repo_config,
-                "source": "my-trigger",
-                "user_email": "user@example.com",
-            }
+from ..dispatch import dispatch_agent_run
+
+
+async def process(payload: dict) -> None:
+    thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"my-trigger:{payload['id']}"))
+    await dispatch_agent_run(
+        thread_id=thread_id,
+        content=payload["description"],
+        source="my-trigger",
+        configurable={
+            "repo": {"owner": "my-org", "name": "my-repo"},
+            "user_email": "user@example.com",
         },
-        if_not_exists="create",
     )
 ```
 
@@ -503,18 +509,27 @@ Drop an `AGENTS.md` file in the root of any repository to add repo-specific inst
 
 ## 6. Middleware
 
-Middleware hooks run around the agent loop. Open SWE includes:
+Middleware hooks run around the agent loop. The agent's stack is the `middleware=[...]` list in `get_agent()` (`agent/server.py`) — around 20 entries, several of them conditional on the run. Order is outermost-first: the first entry wraps everything, the last sits closest to the provider call. Each module lives in `agent/middleware/` and is registered in that package's `__init__.py`. The ones you are most likely to care about when forking:
 
 | Middleware | Type | Purpose |
 |---|---|---|
-| `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
+| `PrepareAgentRunMiddleware` | Before agent | First entry. Awaits the sandbox, renders the system prompt, records the turn checkpoint |
+| `SanitizeToolInputsMiddleware` | Tool call wrapper | Normalizes tool inputs before they reach a tool |
+| `ModelCallLimitMiddleware` | Before model | Caps model calls per run; ends the run instead of looping |
+| `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors; notifies the user when the sandbox is unreachable |
+| `PullRequestCreationGuardMiddleware` | Tool call wrapper | Blocks `gh pr create` and friends so PRs go through `open_pull_request` |
+| `WorkflowPushGuardMiddleware` | Tool call wrapper | Requires approval before pushing `.github/workflows` changes |
 | `check_message_queue_before_model` | Before model | Injects follow-up messages that arrived mid-run |
-| `ensure_no_empty_msg` | After model | Re-injects a tool call when the model stops without one, so runs don't end prematurely |
 | `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
+| `ModelCallTimeoutMiddleware` | Around model | Innermost. Caps a single provider call so a stall escalates to the fallback model |
+
+The reviewer, chat, and analyzer graphs assemble their own shorter lists from the same modules.
+
+Nothing re-injects a tool call when the model stops without one: a model turn with no tool call ends the run. The system prompt is what asks the agent to keep calling tools until it is genuinely finished.
 
 There is intentionally no after-agent middleware that opens a PR for the agent. The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
 
-Add custom middleware by appending to the middleware list in `get_agent()`. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
+Add custom middleware by inserting it into the middleware list in `get_agent()` at the position its ordering needs. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
 
 **Example — adding a CI check after agent completion:**
 
@@ -530,14 +545,17 @@ async def run_ci_check(state: AgentState, runtime: Runtime):
     ...
 ```
 
-Then add it to the middleware list:
+Then add it to the middleware list in `get_agent()`. An after-agent hook has no ordering constraints against the model-call wrappers, so append it after the existing after-agent entry:
 
 ```python
 middleware = [
-    ToolErrorMiddleware(),
-    check_message_queue_before_model,
-    ensure_no_empty_msg,
+    PrepareAgentRunMiddleware(...),
+    ...,
     notify_step_limit_reached,
     run_ci_check,  # new middleware
+    ...,
+    ModelCallTimeoutMiddleware(),  # keep this last
 ]
 ```
+
+Something that must see every tool call (a guard, an audit hook) belongs near `PullRequestCreationGuardMiddleware`, outside the provider-specific sanitizers at the end of the list.
