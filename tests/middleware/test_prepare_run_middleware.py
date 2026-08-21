@@ -9,9 +9,9 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
+from agent.graphs.agent import PrepareAgentRunMiddleware
 from agent.input_messages import human_input
 from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
-from agent.server import PrepareAgentRunMiddleware
 from agent.utils import ttl_cache
 
 

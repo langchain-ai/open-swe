@@ -5,8 +5,8 @@ import pytest
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 
-from agent import server
 from agent.dashboard.team_credentials import DatadogCredentials, LangSmithCredentials
+from agent.graphs import agent as agent_graph
 from agent.integrations import datadog_mcp, langsmith_tools, notion_mcp
 from agent.utils import github_org_membership
 
@@ -249,19 +249,23 @@ async def test_langsmith_list_runs_caps_limit() -> None:
 @pytest.mark.asyncio
 async def test_load_observability_tools_skipped_when_unauthorized() -> None:
     with (
-        patch.object(server, "load_datadog_tools", AsyncMock(return_value=["dd"])),
-        patch.object(server, "load_langsmith_tools", AsyncMock(return_value=["ls"])),
+        patch.object(agent_graph, "load_datadog_tools", AsyncMock(return_value=["dd"])),
+        patch.object(agent_graph, "load_langsmith_tools", AsyncMock(return_value=["ls"])),
     ):
-        assert await server._load_observability_tools(authorized=False, profile_login=None) == []
+        assert (
+            await agent_graph._load_observability_tools(authorized=False, profile_login=None) == []
+        )
 
 
 @pytest.mark.asyncio
 async def test_load_observability_tools_loaded_when_authorized() -> None:
     with (
-        patch.object(server, "load_datadog_tools", AsyncMock(return_value=["dd"])),
-        patch.object(server, "load_langsmith_tools", AsyncMock(return_value=["ls"])),
+        patch.object(agent_graph, "load_datadog_tools", AsyncMock(return_value=["dd"])),
+        patch.object(agent_graph, "load_langsmith_tools", AsyncMock(return_value=["ls"])),
     ):
-        assert await server._load_observability_tools(authorized=True, profile_login="alice") == [
+        assert await agent_graph._load_observability_tools(
+            authorized=True, profile_login="alice"
+        ) == [
             "dd",
             "ls",
         ]
@@ -271,23 +275,23 @@ async def test_load_observability_tools_loaded_when_authorized() -> None:
 async def test_observability_authorized_gates_on_admin(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
     monkeypatch.delenv("OBSERVABILITY_AUTHORIZED_EMAILS", raising=False)
-    monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(agent_graph, "email_for_login", AsyncMock(return_value=None))
 
     admin_config = cast(RunnableConfig, {"configurable": {"user_email": "admin@example.com"}})
     other_config = cast(RunnableConfig, {"configurable": {"user_email": "attacker@example.com"}})
 
-    assert await server._observability_authorized(admin_config, None) is True
-    assert await server._observability_authorized(other_config, None) is False
+    assert await agent_graph._observability_authorized(admin_config, None) is True
+    assert await agent_graph._observability_authorized(other_config, None) is False
 
 
 @pytest.mark.asyncio
 async def test_observability_authorized_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "")
     monkeypatch.setenv("OBSERVABILITY_AUTHORIZED_EMAILS", "trusted@example.com")
-    monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(agent_graph, "email_for_login", AsyncMock(return_value=None))
 
     config = cast(RunnableConfig, {"configurable": {"user_email": "trusted@example.com"}})
-    assert await server._observability_authorized(config, None) is True
+    assert await agent_graph._observability_authorized(config, None) is True
 
 
 @pytest.mark.asyncio
@@ -297,7 +301,7 @@ async def test_allowed_org_member(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(github_org_membership, "is_user_active_org_member", membership)
 
     config = cast(RunnableConfig, {"configurable": {"github_login": "dev"}})
-    assert await server._allowed_org_member(config, "dev") is True
+    assert await agent_graph._allowed_org_member(config, "dev") is True
     assert membership.await_args_list == [call("dev", "primary"), call("dev", "secondary")]
 
 
@@ -308,13 +312,13 @@ async def test_observability_authorized_resolves_login_email(
     monkeypatch.setenv("CONFIGURED_ADMINS", "dev@example.com")
     monkeypatch.delenv("OBSERVABILITY_AUTHORIZED_EMAILS", raising=False)
     monkeypatch.setattr(
-        server,
+        agent_graph,
         "email_for_login",
         AsyncMock(side_effect=lambda login: "dev@example.com" if login else None),
     )
 
     config = cast(RunnableConfig, {"configurable": {"github_login": "dev"}})
-    assert await server._observability_authorized(config, "dev") is True
+    assert await agent_graph._observability_authorized(config, "dev") is True
 
 
 @pytest.mark.asyncio
@@ -323,7 +327,7 @@ async def test_observability_authorized_accepts_admin_login(
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "dev")
     monkeypatch.delenv("OBSERVABILITY_AUTHORIZED_EMAILS", raising=False)
-    monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(agent_graph, "email_for_login", AsyncMock(return_value=None))
 
     config = cast(RunnableConfig, {"configurable": {"github_login": "dev"}})
-    assert await server._observability_authorized(config, "dev") is True
+    assert await agent_graph._observability_authorized(config, "dev") is True

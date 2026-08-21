@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from agent import server
 from agent.dashboard import routes
 from agent.dashboard.agent_instructions import (
     create_agent_instructions,
     get_repo_agent_instructions,
     set_agent_instructions,
 )
+from agent.graphs import agent as agent_graph
 from agent.prompt import construct_system_prompt
 
 
@@ -74,7 +74,7 @@ def test_construct_system_prompt_contains_only_repository_instructions() -> None
 
 
 def test_resolve_repo_custom_instructions_returns_none_without_repo() -> None:
-    result = asyncio.run(server._resolve_repo_custom_instructions(None))
+    result = asyncio.run(agent_graph._resolve_repo_custom_instructions(None))
     assert result is None
 
 

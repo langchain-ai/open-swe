@@ -27,7 +27,7 @@ def apply() -> None:
 
     import importlib
 
-    from agent import server
+    from agent.graphs import _assembly
     from agent.utils import auth, authorship
     from agent.utils import slack as slack_utils
 
@@ -50,7 +50,7 @@ def apply() -> None:
         def _fake_make_model(model_id: str, **kwargs: object):  # noqa: ARG001
             return FakeScriptedChatModel(script=build_script())
 
-        server.make_model = _fake_make_model
+        _assembly.make_model = _fake_make_model
 
     async def _dummy_install_token_with_expiry() -> tuple[str, str | None]:
         return "dummy-installation-token", None

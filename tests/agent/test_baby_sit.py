@@ -7,8 +7,9 @@ import httpx
 import pytest
 from langgraph_sdk.errors import ConflictError
 
-from agent import baby_sit, scheduler
+from agent import baby_sit
 from agent import store as agent_store
+from agent.graphs import scheduler
 from agent.utils.slack import GitHubPrRef
 
 

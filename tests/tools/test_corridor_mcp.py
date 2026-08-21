@@ -6,7 +6,8 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent import server
+from agent.graphs import _assembly, run_environment
+from agent.graphs import agent as agent_graph
 from agent.integrations import corridor_mcp
 
 
@@ -97,18 +98,18 @@ async def test_load_corridor_tools_returns_tools(monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.asyncio
 async def test_server_load_corridor_mcp_tools() -> None:
-    with patch.object(server, "load_corridor_tools", AsyncMock(return_value=["corridor"])):
-        assert await server._load_corridor_mcp_tools() == ["corridor"]
+    with patch.object(agent_graph, "load_corridor_tools", AsyncMock(return_value=["corridor"])):
+        assert await agent_graph._load_corridor_mcp_tools() == ["corridor"]
 
 
 @pytest.mark.asyncio
 async def test_server_load_corridor_mcp_tools_degrades_on_error() -> None:
     with patch.object(
-        server,
+        agent_graph,
         "load_corridor_tools",
         AsyncMock(side_effect=RuntimeError("boom")),
     ):
-        assert await server._load_corridor_mcp_tools() == []
+        assert await agent_graph._load_corridor_mcp_tools() == []
 
 
 @pytest.mark.asyncio
@@ -135,51 +136,51 @@ async def test_get_agent_passes_corridor_prompt_state() -> None:
     async def run_with_corridor_tools(corridor_tools: list[object]) -> bool:
         with (
             patch.object(
-                server,
+                agent_graph,
                 "resolve_github_token",
                 new_callable=AsyncMock,
                 return_value=("ghp", None),
             ),
-            patch.object(server, "resolve_triggering_user_identity", return_value=None),
+            patch.object(agent_graph, "resolve_triggering_user_identity", return_value=None),
             patch.object(
-                server,
+                run_environment,
                 "ensure_sandbox_for_thread",
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
             patch.object(
-                server,
+                agent_graph,
                 "aresolve_sandbox_work_dir",
                 new_callable=AsyncMock,
                 return_value="/workspace",
             ),
             patch.object(
-                server,
+                run_environment,
                 "get_team_default_model_pair",
                 new_callable=AsyncMock,
                 return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
             ),
-            patch.object(server, "fallback_model_id_for", return_value=None),
-            patch.object(server, "make_model", return_value=MagicMock()),
+            patch.object(agent_graph, "fallback_model_id_for", return_value=None),
+            patch.object(_assembly, "make_model", return_value=MagicMock()),
             patch.object(
-                server, "_load_observability_tools", new_callable=AsyncMock, return_value=[]
+                agent_graph, "_load_observability_tools", new_callable=AsyncMock, return_value=[]
             ),
             patch.object(
-                server,
+                agent_graph,
                 "_observability_authorized",
                 new_callable=AsyncMock,
                 return_value=False,
             ),
             patch.object(
-                server,
+                agent_graph,
                 "_load_corridor_mcp_tools",
                 new_callable=AsyncMock,
                 return_value=corridor_tools,
             ),
-            patch.object(server, "construct_system_prompt", return_value="prompt") as prompt,
-            patch.object(server, "create_deep_agent", side_effect=fake_create_deep_agent),
+            patch.object(agent_graph, "construct_system_prompt", return_value="prompt") as prompt,
+            patch.object(agent_graph, "create_deep_agent", side_effect=fake_create_deep_agent),
         ):
-            await server.get_agent(cast(RunnableConfig, config))
+            await agent_graph.get_agent(cast(RunnableConfig, config))
             middleware = cast(list[object], captured["middleware"])
             prepare = cast(
                 AgentMiddleware,

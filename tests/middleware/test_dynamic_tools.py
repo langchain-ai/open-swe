@@ -87,7 +87,7 @@ async def test_dynamic_tools_load_only_selected_schemas_and_route_calls() -> Non
 
 
 def test_general_purpose_subagent_includes_dynamic_tools() -> None:
-    from agent.server import _general_purpose_subagent
+    from agent.graphs.agent import _general_purpose_subagent
 
     middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
     subagent = _general_purpose_subagent(MagicMock(), tools=[], dynamic_tools=middleware)

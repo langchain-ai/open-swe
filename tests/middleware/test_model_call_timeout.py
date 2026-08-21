@@ -53,8 +53,8 @@ class TestModelCallTimeoutMiddleware:
     def test_every_subagent_spec_carries_the_deadline(self) -> None:
         # Subagents compile into their own graphs, so the parent's middleware
         # never wraps their model calls.
-        from agent.reviewer import _reviewer_subagent
-        from agent.server import _browser_subagent, _general_purpose_subagent
+        from agent.graphs.agent import _browser_subagent, _general_purpose_subagent
+        from agent.graphs.reviewer import _reviewer_subagent
 
         model = MagicMock()
         specs = [
