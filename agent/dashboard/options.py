@@ -87,6 +87,16 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "default_effort": "high",
         "supports_images": False,
     },
+    {
+        "id": "orcarouter:auto",
+        "label": "OrcaRouter Auto",
+        # OrcaRouter routes the selected effort to a reasoning upstream model
+        # when available; ``none`` disables reasoning. ``supports_images`` is
+        # False because the smart-routed gateway may land on a text-only model.
+        "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high",
+        "supports_images": False,
+    },
 ]
 
 SUPPORTED_MODEL_IDS: frozenset[str] = frozenset(m["id"] for m in SUPPORTED_MODELS)

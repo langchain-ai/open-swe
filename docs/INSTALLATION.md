@@ -467,6 +467,8 @@ OPENAI_API_KEY=""                      # OpenAI models and dashboard voice dicta
 # OPENAI_BASE_URL="https://api.openai.com/v1"  # Optional OpenAI-compatible API base URL
 GOOGLE_API_KEY=""                      # Google AI API key (when using google_genai: models)
 FIREWORKS_API_KEY=""                   # Fireworks API key (when using fireworks: models)
+ORCAROUTER_API_KEY=""                  # OrcaRouter API key (when using orcarouter: models)
+# ORCAROUTER_BASE_URL="https://api.orcarouter.ai/v1"  # Optional OrcaRouter base URL override
 # Voice dictation uses this OpenAI configuration.
 # Admins choose its transcription model in the dashboard Admin page.
 

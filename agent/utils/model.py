@@ -9,6 +9,16 @@ from .gateway import gateway_env_default, gateway_overrides
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 
+# OrcaRouter (https://www.orcarouter.ai) is an OpenAI-compatible model gateway
+# that routes a single API key across many upstream models. Like OpenRouter it
+# accepts Chat Completions at ``/v1``, so the ``openai:`` ChatOpenAI transport
+# is reused with ``model_provider="openai"`` and a bare ``orcarouter/...`` model
+# id. ``orcarouter:`` keeps the repo's ``provider:model`` id convention; the
+# prefix is stripped in ``make_model`` because ``init_chat_model`` would
+# otherwise reject the ``orcarouter`` provider.
+ORCAROUTER_BASE_URL = "https://api.orcarouter.ai/v1"
+ORCAROUTER_MODEL_PREFIX = "orcarouter:"
+
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
 # primary provider a fair chance before the fallback middleware kicks in.
 DEFAULT_MAX_RETRIES = 6
@@ -19,7 +29,7 @@ DEFAULT_MAX_RETRIES = 6
 # max-effort reasoning on a long context, and let ``max_retries`` above turn a
 # stall into a retry instead of a dead run.
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 600.0
-_TIMEOUT_PROVIDER_PREFIXES = ("openai:", "anthropic:", "google_genai:", "fireworks:")
+_TIMEOUT_PROVIDER_PREFIXES = ("openai:", "anthropic:", "google_genai:", "fireworks:", "orcarouter:")
 
 _MODEL_CACHE: dict[
     tuple[str, bool | None, int | None, tuple[tuple[str, str], ...], int | None], Any
@@ -140,6 +150,24 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
             or OPENAI_RESPONSES_WS_BASE_URL
         )
         model_kwargs["use_responses_api"] = True
+
+    # OrcaRouter talks Chat Completions over ``/v1`` — the ChatOpenAI transport
+    # with an explicit ``model_provider`` and a bare ``orcarouter/...`` model id.
+    # The api key comes from ORCAROUTER_API_KEY (required); the base URL is
+    # overridable via ORCAROUTER_BASE_URL for self-hosted/regional gateways.
+    if model_id.startswith(ORCAROUTER_MODEL_PREFIX):
+        orcarouter_model = model_id[len(ORCAROUTER_MODEL_PREFIX) :]
+        if "/" not in orcarouter_model:
+            orcarouter_model = f"orcarouter/{orcarouter_model}"
+        model_kwargs["model_provider"] = "openai"
+        model_kwargs["base_url"] = os.environ.get("ORCAROUTER_BASE_URL") or ORCAROUTER_BASE_URL
+        model_kwargs["api_key"] = os.environ.get("ORCAROUTER_API_KEY")
+        if model_kwargs["api_key"] is None:
+            raise ValueError(
+                "ORCAROUTER_API_KEY is required for configured model "
+                f"{model_id} (get one at https://www.orcarouter.ai)"
+            )
+        model_id = orcarouter_model
 
     enabled = gateway_env_default() if use_gateway is None else use_gateway
     if enabled:
@@ -300,6 +328,13 @@ def provider_model_kwargs(
         effort = fireworks_reasoning_effort_for(profile_effort)
         if effort is not None:
             kwargs["model_kwargs"] = {"reasoning_effort": effort}
+    elif model_id.startswith(ORCAROUTER_MODEL_PREFIX):
+        # OrcaRouter proxies upstream Chat Completions and honors a
+        # ``reasoning_effort`` request field on reasoning models. Pass the
+        # selected effort straight through; ``none`` disables reasoning.
+        effort = fireworks_reasoning_effort_for(profile_effort)
+        if effort is not None:
+            kwargs["reasoning_effort"] = effort
     return kwargs
 
 
@@ -327,3 +362,5 @@ def validate_local_dev_llm_config() -> None:
         raise ValueError(f"GROQ_API_KEY is required for configured model {model_id}")
     elif model_id.startswith("fireworks:") and not os.environ.get("FIREWORKS_API_KEY"):
         raise ValueError(f"FIREWORKS_API_KEY is required for configured model {model_id}")
+    elif model_id.startswith(ORCAROUTER_MODEL_PREFIX) and not os.environ.get("ORCAROUTER_API_KEY"):
+        raise ValueError(f"ORCAROUTER_API_KEY is required for configured model {model_id}")

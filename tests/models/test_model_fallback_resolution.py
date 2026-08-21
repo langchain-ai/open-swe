@@ -13,6 +13,7 @@ from agent.dashboard.options import (
     fable_disabled_fallback,
     gate_fable_model,
     model_profile_context_window,
+    model_supports_effort,
     models_with_profile_context_windows,
     provider_fallback_pair,
 )
@@ -307,3 +308,10 @@ def test_fable_disabled_fallback_is_non_fable_anthropic() -> None:
     assert model == SUPPORTED_ANTHROPIC
     assert model not in FABLE_MODEL_IDS
     assert effort == "high"
+
+
+def test_orcarouter_auto_is_supported_selectable_model() -> None:
+    assert "orcarouter:auto" in SUPPORTED_MODEL_IDS
+    assert any(m["id"] == "orcarouter:auto" for m in SUPPORTED_MODELS)
+    assert model_supports_effort("orcarouter:auto", "high")
+    assert model_supports_effort("orcarouter:auto", "none")

@@ -12,6 +12,7 @@ const PROVIDER_KEYS = {
   fireworks: ["FIREWORKS_API_KEY"],
   google_genai: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
   openai: ["OPENAI_API_KEY"],
+  orcarouter: ["ORCAROUTER_API_KEY"],
 }
 
 function devBackendTarget({ repoRoot, port, env = process.env }) {
