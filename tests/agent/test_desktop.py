@@ -50,7 +50,7 @@ def test_artifact_routes_stay_out_of_the_project(
     assert set(routes) == {"/large_tool_results/", "/conversation_history/"}
     for prefix, backend in routes.items():
         root = Path(str(backend.cwd)).resolve()
-        assert root.is_dir()
+        assert not root.exists()
         assert root == (artifacts / "thread-1" / prefix.strip("/")).resolve()
 
 

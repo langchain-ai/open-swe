@@ -64,6 +64,5 @@ def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
     routes = {}
     for name in ("large_tool_results", "conversation_history"):
         directory = root / name
-        directory.mkdir(parents=True, exist_ok=True)
         routes[f"/{name}/"] = FilesystemBackend(root_dir=directory, virtual_mode=True)
     return routes
