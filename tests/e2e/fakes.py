@@ -25,23 +25,27 @@ from e2e_env import (
 # --- Slack -----------------------------------------------------------------
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
 SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
-_slack_seq = [1]
+_slack_seq = [0]
 
 
 def next_slack_ts() -> str:
+    """A globally-unique, increasing Slack timestamp.
+
+    Anchored on the wall clock, not on a fixed epoch: the langgraph dev store
+    outlives this process, and it binds each Slack location to one Open SWE
+    thread permanently. A counter that restarted with the process would hand a
+    later run a location the store still maps to a thread that is gone, and
+    every rebinding (a breakout thread, a moved thread) would fail.
+
+    Not reset by ``reset()``, so back-to-back tests never collide either.
+    """
     _slack_seq[0] += 1
-    return f"1700000000.{_slack_seq[0]:06d}"
-
-
-_thread_seq = [0]
+    return f"{int(time.time())}.{_slack_seq[0]:06d}"
 
 
 def new_thread_ts() -> str:
-    """A globally-unique thread ts so every send maps to a fresh LangGraph thread
-    (the in-mem store persists across restarts, so reused ids would carry state).
-    Not reset by reset(), so back-to-back tests never collide."""
-    _thread_seq[0] += 1
-    return f"{int(time.time())}.{_thread_seq[0]:06d}"
+    """A thread ts, so every send maps to a fresh LangGraph thread."""
+    return next_slack_ts()
 
 
 def add_slack_message(
