@@ -1,38 +1,15 @@
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient
 
 from agent.dashboard import agent_usage
 
 
-class FakeStore:
-    def __init__(self, values: dict[tuple[tuple[str, ...], str], dict] | None = None):
-        self.values = values or {}
-        self.puts: list[tuple[list[str], str, dict]] = []
-
-    async def get_item(self, namespace: list[str], key: str) -> dict | None:
-        value = self.values.get((tuple(namespace), key))
-        return {"value": value} if value is not None else None
-
-    async def put_item(self, namespace: list[str], key: str, value: dict) -> None:
-        self.puts.append((namespace, key, value))
-        self.values[(tuple(namespace), key)] = value
-
-
-class FakeThreads:
-    def __init__(self, threads: list[dict]):
-        self.threads = threads
-        self.calls: list[dict] = []
-
-    async def search(self, **kwargs) -> list[dict]:
-        self.calls.append(kwargs)
-        offset = kwargs.get("offset") or 0
-        limit = kwargs.get("limit") or len(self.threads)
-        return self.threads[offset : offset + limit]
-
-
-class FakeClient:
-    def __init__(self, *, store: FakeStore | None = None, threads: FakeThreads | None = None):
-        self.store = store or FakeStore()
-        self.threads = threads or FakeThreads([])
+def _client(
+    *,
+    items: dict[tuple[tuple[str, ...], str], dict] | None = None,
+    threads: list[dict] | None = None,
+) -> FakeLangGraphClient:
+    return FakeLangGraphClient(items=items, threads=threads)
 
 
 @pytest.mark.asyncio
@@ -86,8 +63,8 @@ async def test_cached_usage_payload_returns_stale_snapshot_and_schedules_refresh
         "severity_counts": {"medium": 1},
         "top_categories": [{"name": "correctness", "count": 1}],
     }
-    store = FakeStore(
-        {
+    client = _client(
+        items={
             (tuple(agent_usage.USAGE_LEADERBOARD_CACHE_NAMESPACE), "30d"): {
                 "generated_at_ms": 1,
                 "snapshot": usage_snapshot,
@@ -98,7 +75,7 @@ async def test_cached_usage_payload_returns_stale_snapshot_and_schedules_refresh
             },
         }
     )
-    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store=store))
+    monkeypatch.setattr(agent_usage, "_client", lambda: client)
     monkeypatch.setattr(agent_usage, "_now_ms", lambda: agent_usage._CACHE_TTL_MS + 2)
 
     usage_refreshes: list[str] = []
@@ -117,7 +94,7 @@ async def test_cached_usage_payload_returns_stale_snapshot_and_schedules_refresh
     assert payload["rows"][0]["user"]["email"] == "octo@example.com"
     assert payload["total_members"] == 2
     assert payload["reviewer_stats"]["surfaced_findings"] == 1
-    assert store.puts == []
+    assert client.store.puts == []
 
 
 @pytest.mark.asyncio
@@ -160,7 +137,7 @@ async def test_reviewer_stats_snapshot_counts_surfaced_and_resolved_findings(mon
             },
         }
     ]
-    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(threads=FakeThreads(threads)))
+    monkeypatch.setattr(agent_usage, "_client", lambda: _client(threads=threads))
 
     snapshot = await agent_usage._build_reviewer_stats_snapshot("all")
 
@@ -219,7 +196,7 @@ async def test_reviewer_stats_classifies_legacy_shaped_findings(monkeypatch):
             },
         }
     ]
-    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(threads=FakeThreads(threads)))
+    monkeypatch.setattr(agent_usage, "_client", lambda: _client(threads=threads))
 
     snapshot = await agent_usage._build_reviewer_stats_snapshot("all")
 
@@ -236,15 +213,15 @@ async def test_reviewer_stats_paginates_reviewer_threads(monkeypatch):
         {"created_at": "2025-01-02T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
         {"created_at": "2025-01-01T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
     ]
-    fake_threads = FakeThreads(threads)
+    client = _client(threads=threads)
     monkeypatch.setattr(agent_usage, "_CACHE_SEARCH_LIMIT", 2)
-    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(threads=fake_threads))
+    monkeypatch.setattr(agent_usage, "_client", lambda: client)
 
     snapshot = await agent_usage._build_reviewer_stats_snapshot("all")
 
     assert snapshot["reviewed_prs"] == 3
-    assert [call["offset"] for call in fake_threads.calls] == [0, 2]
-    assert all(call["sort_by"] == "created_at" for call in fake_threads.calls)
+    assert [call["offset"] for call in client.threads.searches] == [0, 2]
+    assert all(call["sort_by"] == "created_at" for call in client.threads.searches)
 
 
 @pytest.mark.asyncio
@@ -254,12 +231,12 @@ async def test_reviewer_stats_stops_after_page_older_than_cutoff(monkeypatch):
         {"created_at": "2025-01-01T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
         {"created_at": "2024-12-31T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
     ]
-    fake_threads = FakeThreads(threads)
+    client = _client(threads=threads)
     monkeypatch.setattr(agent_usage, "_CACHE_SEARCH_LIMIT", 2)
-    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(threads=fake_threads))
+    monkeypatch.setattr(agent_usage, "_client", lambda: client)
     cutoff_ms = agent_usage._timestamp_ms("2025-01-02T00:00:00Z")
 
     pages = [page async for page in agent_usage._iter_reviewer_thread_pages(cutoff_ms)]
 
     assert len(pages) == 1
-    assert [call["offset"] for call in fake_threads.calls] == [0]
+    assert [call["offset"] for call in client.threads.searches] == [0]

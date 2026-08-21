@@ -2,6 +2,7 @@ import asyncio
 from typing import Any
 
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient
 
 from agent.dashboard import thread_api
 
@@ -89,47 +90,9 @@ async def test_thread_summary_includes_trace_url(monkeypatch: pytest.MonkeyPatch
     assert summary["traceUrl"] == "https://smith.example/t/t3"
 
 
-class _FakeThreadsClient:
-    async def create(
-        self, *, thread_id: str, metadata: dict[str, Any], if_exists: str
-    ) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": metadata, "if_exists": if_exists}
-
-    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": metadata}
-
-    async def get(self, thread_id: str) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": {}}
-
-
-class _FakeRunsClient:
-    def __init__(self) -> None:
-        self.configurable: dict[str, Any] | None = None
-
-    async def create(
-        self,
-        thread_id: str,
-        assistant_id: str,
-        *,
-        input: dict[str, Any],
-        config: dict[str, Any],
-        if_not_exists: str = "reject",
-        stream_mode: list[str] | None = None,
-        stream_resumable: bool = False,
-    ) -> dict[str, str]:
-        self.configurable = config["configurable"]
-        return {"run_id": "run-id"}
-
-
-class _FakeLangGraphClient:
-    def __init__(self) -> None:
-        self.threads = _FakeThreadsClient()
-        self.runs = _FakeRunsClient()
-
-
 @pytest.fixture
-def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClient:
-    client = _FakeLangGraphClient()
+def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> FakeLangGraphClient:
+    client = FakeLangGraphClient(thread_metadata={})
 
     async def fake_get_profile(login: str) -> dict[str, Any]:
         return {}
@@ -148,7 +111,7 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClien
 
 
 def test_create_thread_record_omits_repo_less_marker_when_repo_unset(
-    dashboard_run_client: _FakeLangGraphClient,
+    dashboard_run_client: FakeLangGraphClient,
 ) -> None:
     # Runs now start client-side via the stream commands endpoint, so the run
     # configurable is assembled from thread metadata by
@@ -171,7 +134,7 @@ def test_create_thread_record_omits_repo_less_marker_when_repo_unset(
 
 
 def test_build_configurable_marks_repo_less_config_when_explicit(
-    dashboard_run_client: _FakeLangGraphClient,
+    dashboard_run_client: FakeLangGraphClient,
 ) -> None:
     configurable = asyncio.run(
         thread_api._build_dashboard_configurable(
@@ -185,7 +148,7 @@ def test_build_configurable_marks_repo_less_config_when_explicit(
 
 
 def test_build_configurable_includes_repo_when_configured(
-    dashboard_run_client: _FakeLangGraphClient,
+    dashboard_run_client: FakeLangGraphClient,
 ) -> None:
     configurable = asyncio.run(
         thread_api._build_dashboard_configurable(

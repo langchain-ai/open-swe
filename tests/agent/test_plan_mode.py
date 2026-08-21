@@ -3,6 +3,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient
 
 from agent import server
 from agent.dashboard import thread_api
@@ -61,47 +62,9 @@ def test_plan_mode_excluded_tools_cover_mutating_tools() -> None:
     assert "execute" not in excluded
 
 
-class _FakeThreadsClient:
-    async def create(
-        self, *, thread_id: str, metadata: dict[str, Any], if_exists: str
-    ) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": metadata}
-
-    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": metadata}
-
-    async def get(self, thread_id: str) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": {}}
-
-
-class _FakeRunsClient:
-    def __init__(self) -> None:
-        self.configurable: dict[str, Any] | None = None
-
-    async def create(
-        self,
-        thread_id: str,
-        assistant_id: str,
-        *,
-        input: dict[str, Any],
-        config: dict[str, Any],
-        if_not_exists: str = "reject",
-        stream_mode: list[str] | None = None,
-        stream_resumable: bool = False,
-    ) -> dict[str, str]:
-        self.configurable = config["configurable"]
-        return {"run_id": "run-id"}
-
-
-class _FakeLangGraphClient:
-    def __init__(self) -> None:
-        self.threads = _FakeThreadsClient()
-        self.runs = _FakeRunsClient()
-
-
 @pytest.fixture
-def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClient:
-    client = _FakeLangGraphClient()
+def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> FakeLangGraphClient:
+    client = FakeLangGraphClient(thread_metadata={})
 
     async def fake_get_profile(login: str) -> dict[str, Any]:
         return {}
@@ -133,7 +96,7 @@ def _run_start_command(plan_mode: bool | None) -> dict[str, Any]:
 
 
 def test_run_start_passes_plan_mode_when_enabled(
-    dashboard_run_client: _FakeLangGraphClient,
+    dashboard_run_client: FakeLangGraphClient,
 ) -> None:
     enriched = asyncio.run(
         thread_api._enrich_run_start_command(
@@ -150,7 +113,7 @@ def test_run_start_passes_plan_mode_when_enabled(
 
 
 def test_run_start_omits_plan_mode_when_disabled(
-    dashboard_run_client: _FakeLangGraphClient,
+    dashboard_run_client: FakeLangGraphClient,
 ) -> None:
     enriched = asyncio.run(
         thread_api._enrich_run_start_command(

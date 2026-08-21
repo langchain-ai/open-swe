@@ -2,22 +2,10 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient
 
 from agent.dashboard import plan_api
 from agent.webhooks import slack as slack_webhook
-
-
-class _FakeThreads:
-    def __init__(self) -> None:
-        self.updates: list[dict[str, Any]] = []
-
-    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
-        self.updates.append({"thread_id": thread_id, "metadata": metadata})
-
-
-class _FakeClient:
-    def __init__(self) -> None:
-        self.threads = _FakeThreads()
 
 
 @pytest.mark.asyncio
@@ -27,7 +15,7 @@ async def test_slack_processing_error_posts_dashboard_link(
     async def fail_processing(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
         raise RuntimeError("boom")
 
-    client = _FakeClient()
+    client = FakeLangGraphClient()
     upsert = AsyncMock()
     post_reply = AsyncMock(return_value=True)
 
@@ -58,8 +46,8 @@ async def test_slack_processing_error_posts_dashboard_link(
     )
 
     upsert.assert_awaited_once()
-    assert len(client.threads.updates) == 1
-    update = client.threads.updates[0]
+    assert len(client.threads.update_calls) == 1
+    update = client.threads.update_calls[0]
     assert update["thread_id"] == "t1"
     assert update["metadata"]["latest_run_status"] == "error"
     assert "failure_reply_posted" not in update["metadata"]
@@ -228,7 +216,7 @@ async def test_dispatch_or_queue_enqueues_untagged_follow_up(
 
     blocks = [{"type": "text", "text": "follow up"}]
     run = await slack_webhook._dispatch_or_queue_slack_run(
-        _FakeClient(),
+        FakeLangGraphClient(),
         "t1",
         blocks,
         {},
@@ -251,7 +239,7 @@ async def test_dispatch_or_queue_interrupts_for_explicit_mention(
     monkeypatch.setattr(slack_webhook.common, "dispatch_agent_run", dispatch)
 
     run = await slack_webhook._dispatch_or_queue_slack_run(
-        _FakeClient(),
+        FakeLangGraphClient(),
         "t1",
         [{"type": "text", "text": "<@BOT> stop and do this instead"}],
         {},
@@ -445,7 +433,7 @@ async def test_rapid_follow_up_blocked_for_another_sender(
 async def test_message_update_dispatches_a_new_message_without_old_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient()
+    client = FakeLangGraphClient()
     fetch_messages = AsyncMock(return_value=[{"ts": "1.0", "user": "U1", "text": "old text"}])
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     store_mapping = AsyncMock()

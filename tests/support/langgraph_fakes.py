@@ -81,10 +81,12 @@ class FakeThreads(_SubClient):
         super().__init__(calls, "threads")
         if state is not None and messages is not None:
             raise ValueError("pass either `state` or `messages`, not both")
-        self.threads: dict[str, Thread] = {
-            str(thread["thread_id"]): thread for thread in (threads or [])
-        }
         self.search_results: list[Thread] = list(threads or [])
+        self.threads: dict[str, Thread] = {
+            str(thread["thread_id"]): thread
+            for thread in self.search_results
+            if thread.get("thread_id") is not None
+        }
         self.metadata = metadata
         self.status = status
         self.state: dict[str, Any] = (
@@ -122,7 +124,11 @@ class FakeThreads(_SubClient):
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Thread:
-        record = {"thread_id": thread_id, "metadata": dict(metadata or {}), **kwargs}
+        record = {
+            "thread_id": thread_id,
+            **({} if metadata is None else {"metadata": dict(metadata)}),
+            **kwargs,
+        }
         self.created.append(record)
         self._record("create", **record)
         thread: Thread = {
@@ -186,15 +192,16 @@ class FakeRuns(_SubClient):
     """Runs listed per thread.
 
     ``runs`` is either one list shared by every thread or a mapping from thread
-    id to that thread's runs. ``list`` filters on ``status`` when the caller
-    passes one, the way the platform does.
+    id to that thread's runs; a mapping may hold an exception instead of a list
+    for a thread whose runs cannot be listed. ``list`` filters on ``status``
+    when the caller passes one, the way the platform does.
     """
 
     def __init__(
         self,
         calls: list[Call],
         *,
-        runs: Sequence[Run] | Mapping[str, Sequence[Run]] | None = None,
+        runs: Sequence[Run] | Mapping[str, Sequence[Run] | BaseException] | None = None,
         run_id: str = "run-1",
     ) -> None:
         super().__init__(calls, "runs")
@@ -208,7 +215,10 @@ class FakeRuns(_SubClient):
 
     def _for_thread(self, thread_id: str) -> list[Run]:
         if isinstance(self.runs, Mapping):
-            return list(self.runs.get(thread_id, []))
+            value = self.runs.get(thread_id, [])
+            if isinstance(value, BaseException):
+                raise value
+            return list(value)
         return list(self.runs)
 
     async def create(self, thread_id: str, assistant_id: str, **kwargs: Any) -> dict[str, str]:
@@ -405,7 +415,7 @@ class FakeLangGraphClient:
         thread_status: str = "idle",
         messages: Sequence[dict[str, Any]] | None = None,
         state: dict[str, Any] | None = None,
-        runs: Sequence[Run] | Mapping[str, Sequence[Run]] | None = None,
+        runs: Sequence[Run] | Mapping[str, Sequence[Run] | BaseException] | None = None,
         run_id: str = "run-1",
         items: Mapping[tuple[Namespace, str], dict[str, Any]] | None = None,
         missing: Literal["none", "404"] = "none",
