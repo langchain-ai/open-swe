@@ -40,7 +40,9 @@ _TOOL_MODULES = {
     "request_pr_review": ".request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
+    "delete_organization_skill": ".organization_skills",
     "save_environment": ".environments",
+    "save_organization_skill": ".organization_skills",
     "save_plan": ".save_plan",
     "save_user_instructions": ".save_user_instructions",
     "save_user_skill": ".user_skills",
@@ -95,6 +97,8 @@ __all__ = [
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "save_environment",
+    "save_organization_skill",
+    "delete_organization_skill",
     "save_plan",
     "save_user_instructions",
     "save_user_skill",
@@ -138,6 +142,7 @@ if TYPE_CHECKING:
     from .manage_baby_sit import manage_baby_sit
     from .notify_automation_channel import notify_automation_channel
     from .open_pull_request import open_pull_request
+    from .organization_skills import delete_organization_skill, save_organization_skill
     from .output_iframe import output_iframe
     from .publish_review import publish_review
     from .read_repo_file import read_repo_file

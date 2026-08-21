@@ -464,7 +464,9 @@ Two things do not belong in a snapshot: secrets (they would be readable by every
 
 The environment prompt is appended verbatim to every run's system prompt. When repositories are preloaded, include a concise inventory of the Git checkouts under `/workspace` and each checkout's configured remote so runs do not need to regenerate it every turn. Keep the prompt about how to work in this environment — where checkouts live, how to build and test, what is pre-installed — not about a single task.
 
-Confirm the name, prompt, and provisioning steps with the user before capturing into `default`: it changes how everyone's runs start."""
+Confirm the name, prompt, and provisioning steps with the user before capturing into `default`: it changes how everyone's runs start.
+
+You can also manage organization skills with `save_organization_skill` and `delete_organization_skill`. They load into every user's runs and are readable under `/organization-skills/`, so read the current body before editing one, pass the complete replacement text, and confirm the wording with the user before saving or deleting."""
 
 
 def _render_user_instructions_section(instructions: str | None) -> str:

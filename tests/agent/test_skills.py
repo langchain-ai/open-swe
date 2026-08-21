@@ -10,6 +10,7 @@ from agent.dashboard.skills import (
     list_organization_skills,
     list_skills,
 )
+from agent.tools.organization_skills import save_organization_skill
 from agent.tools.user_skills import save_user_skill
 
 
@@ -122,3 +123,14 @@ async def test_skill_listing_returns_next_offset() -> None:
     client.store.search_items.assert_awaited_once_with(
         ["user_skills", "octocat"], limit=2, offset=3
     )
+
+
+async def test_save_organization_skill_requires_admin(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    with patch(
+        "agent.tools.admin_gate.get_config",
+        return_value={"configurable": {"github_login": "someone-else"}},
+    ):
+        result = await save_organization_skill("deslop", "Minimize diffs")
+
+    assert result["ok"] is False
