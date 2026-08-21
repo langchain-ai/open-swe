@@ -54,11 +54,11 @@ def test_local_workspace_flag_is_what_switches_the_prompt_not_the_source() -> No
     assert DesktopRunEnvironment("thread-desktop", {}).local_workspace is True
 
     hosted = construct_system_prompt(working_dir="/workspace", source="desktop")
-    assert hosted.startswith(WORKING_ENV_SECTION)
+    assert hosted.startswith(WORKING_ENV_SECTION.format(working_dir="/workspace"))
     assert DESKTOP_PR_SECTION not in hosted
 
     local = construct_system_prompt(
         working_dir="/workspace", source="desktop", local_workspace=True
     )
-    assert local.startswith(DESKTOP_WORKING_ENV_SECTION)
+    assert local.startswith(DESKTOP_WORKING_ENV_SECTION.format(working_dir="/workspace"))
     assert DESKTOP_PR_SECTION in local
