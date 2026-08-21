@@ -2,7 +2,7 @@
 
 A single record keyed ``"default"`` keeps all instance-wide reviewer
 configuration in one place. Per-repo style prompts live in
-:mod:`agent.dashboard.review_styles`.
+:mod:`agent.settings.review_styles`.
 """
 
 import logging
@@ -374,7 +374,7 @@ async def get_team_default_model(
     still supported; otherwise the newest supported model for the same provider
     (so a stale Anthropic/OpenAI selection stays on its provider rather than
     jumping cross-provider); otherwise the hardcoded global default from
-    :func:`agent.dashboard.options.default_model_pair`.
+    :func:`agent.settings.options.default_model_pair`.
 
     ``"chat"`` (the review-page PR chat) has no hardcoded default: when its
     admin setting is unset/invalid it inherits the team **agent** default.

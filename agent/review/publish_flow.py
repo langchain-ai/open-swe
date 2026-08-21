@@ -13,7 +13,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..dashboard.team_settings import get_team_review_trace_links_enabled
+from ..settings.team_settings import get_team_review_trace_links_enabled
 from ..utils.dashboard_links import dashboard_review_url
 from ..utils.github_checks import review_check_conclusion
 from ..utils.langsmith import get_langsmith_trace_url

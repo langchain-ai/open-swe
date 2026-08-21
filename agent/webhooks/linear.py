@@ -12,9 +12,6 @@ from ..config import (
     default_repo_name,
     default_repo_owner,
 )
-from ..dashboard.agent_overrides import resolve_agent_model_id, resolve_login_from_email_async
-from ..dashboard.options import default_vision_model_pair, model_supports_images
-from ..dashboard.team_settings import get_team_default_repo
 from ..dispatch import dispatch_agent_run
 from ..input_messages import (
     PersonIdentity,
@@ -24,6 +21,9 @@ from ..input_messages import (
     system_input,
     system_introduction,
 )
+from ..settings.agent_overrides import resolve_agent_model_id, resolve_login_from_email_async
+from ..settings.options import default_vision_model_pair, model_supports_images
+from ..settings.team_settings import get_team_default_repo
 from ..thread_ids import linear_issue_thread_id
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.linear import fetch_issue_details, post_linear_trace_comment, react_to_linear_comment

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent import store as agent_store
-from agent.dashboard.sandbox_settings import (
+from agent.settings.sandbox_settings import (
     SandboxSettingsUpdate,
     get_admin_base_snapshot_id,
     get_sandbox_settings,

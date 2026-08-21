@@ -10,7 +10,6 @@ from typing import Any
 
 from ..baby_sit import handle_ci_webhook
 from ..config import agent_version_metadata, langgraph_client
-from ..dashboard.user_mappings import email_for_login
 from ..dispatch import dispatch_agent_run
 from ..input_messages import (
     RunInput,
@@ -29,6 +28,7 @@ from ..review.dispatch import (
     update_pr_watch,
 )
 from ..review.findings import REVIEWER_THREAD_KIND
+from ..settings.user_mappings import email_for_login
 from ..thread_ids import github_issue_thread_id, pr_comment_thread_id, thread_id_from_branch
 from ..utils.auth import is_bot_token_only_mode, resolve_github_token_from_email
 from ..utils.github_app import (

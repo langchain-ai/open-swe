@@ -8,15 +8,18 @@ from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 
 from ...config import github_app_oauth
+from ...settings.github_tokens import (
+    GithubOAuthError,
+    exchange_code,
+    upsert_access_token_from_github_response,
+)
 from ..authz import SESSION, session_is_admin
 from ..github_token_auth import fetch_github_identity
-from ..github_tokens import upsert_access_token_from_github_response
 from ..oauth import (
     SESSION_TTL_SECONDS,
     decode_state,
     desktop_callback_url,
     enforce_org_login_gate,
-    exchange_code,
     hash_state_nonce,
     issue_desktop_handoff,
     issue_session,
@@ -87,7 +90,10 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
 
     redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
 
-    token_data = await exchange_code(code)
+    try:
+        token_data = await exchange_code(code)
+    except GithubOAuthError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
     access_token = token_data.get("access_token")
     if not isinstance(access_token, str):
         raise HTTPException(400, "oauth exchange missing access_token")

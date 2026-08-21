@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.dashboard.user_instructions import (
+from agent.settings.user_instructions import (
     get_user_custom_instructions,
     set_user_instructions,
 )
@@ -25,7 +25,7 @@ async def test_set_user_instructions_upserts_record() -> None:
 @pytest.mark.asyncio
 async def test_get_user_custom_instructions_trims_text() -> None:
     with patch(
-        "agent.dashboard.user_instructions.get_user_instructions",
+        "agent.settings.user_instructions.get_user_instructions",
         new_callable=AsyncMock,
         return_value={"instructions": "  Be terse.\n"},
     ):
@@ -35,7 +35,7 @@ async def test_get_user_custom_instructions_trims_text() -> None:
 @pytest.mark.asyncio
 async def test_get_user_custom_instructions_returns_none_when_empty() -> None:
     with patch(
-        "agent.dashboard.user_instructions.get_user_instructions",
+        "agent.settings.user_instructions.get_user_instructions",
         new_callable=AsyncMock,
         return_value={"instructions": "   "},
     ):

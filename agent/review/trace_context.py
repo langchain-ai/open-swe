@@ -10,9 +10,9 @@ from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from ..dashboard.team_credentials import get_langsmith_credentials
-from ..dashboard.team_settings import get_team_review_tracing_project
 from ..integrations.langsmith_tools import _client
+from ..settings.team_credentials import get_langsmith_credentials
+from ..settings.team_settings import get_team_review_tracing_project
 from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.timestamps import parse_expiry
 

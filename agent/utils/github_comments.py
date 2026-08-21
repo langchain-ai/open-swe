@@ -110,7 +110,7 @@ def sanitize_github_comment_body(body: str) -> str:
 def format_github_comment_body_for_prompt(author: str, body: str) -> str:
     """Format a GitHub comment body for prompt inclusion."""
     sanitized_body = sanitize_github_comment_body(body)
-    from ..dashboard.user_mappings import is_login_mapped
+    from ..settings.user_mappings import is_login_mapped
 
     if is_login_mapped(author):
         return sanitized_body

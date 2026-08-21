@@ -5,15 +5,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from ..analyzer_cron import remove_continual_cron
-from ..authz import REPO_FULL_NAME_ACCESS, SESSION, RepoAccess
-from ..repo_access import filter_repo_records_for_user, require_repo_access_for_user
-from ..review_style_jobs import (
+from ...settings.analyzer_cron import remove_continual_cron
+from ...settings.review_style_jobs import (
     cancel_review_style_analysis,
     start_bootstrap_analysis,
     sync_review_style_run_status,
 )
-from ..review_styles import (
+from ...settings.review_styles import (
     ReviewStyleCreate,
     ReviewStylePromptUpdate,
     create_review_style,
@@ -22,6 +20,8 @@ from ..review_styles import (
     list_review_styles,
     set_custom_prompt,
 )
+from ..authz import REPO_FULL_NAME_ACCESS, SESSION, RepoAccess
+from ..repo_access import filter_repo_records_for_user, require_repo_access_for_user
 
 router = APIRouter()
 

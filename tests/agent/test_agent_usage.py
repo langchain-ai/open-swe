@@ -1,7 +1,7 @@
 import pytest
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.dashboard import agent_usage
+from agent.settings import agent_usage
 
 
 def _client(

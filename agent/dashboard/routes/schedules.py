@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import Response
 
-from ..agent_usage import (
+from ...settings.agent_usage import (
     list_agent_usage_leaderboard,
     refresh_reviewer_stats_cache,
     refresh_usage_leaderboard_cache,

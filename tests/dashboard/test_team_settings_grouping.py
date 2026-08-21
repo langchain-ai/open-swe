@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import ValidationError
 
-from agent.dashboard.team_settings import (
+from agent.settings.team_settings import (
     TeamSettingsUpdate,
     get_team_default_grouping_model,
 )
@@ -26,7 +26,7 @@ def _settings(**overrides: object) -> dict[str, object]:
 @pytest.mark.asyncio
 async def test_grouping_inherits_reviewer_subagent_when_unset() -> None:
     with patch(
-        "agent.dashboard.team_settings.get_team_settings",
+        "agent.settings.team_settings.get_team_settings",
         new_callable=AsyncMock,
         return_value=_settings(),
     ):
@@ -36,7 +36,7 @@ async def test_grouping_inherits_reviewer_subagent_when_unset() -> None:
 @pytest.mark.asyncio
 async def test_grouping_uses_configured_model_when_set() -> None:
     with patch(
-        "agent.dashboard.team_settings.get_team_settings",
+        "agent.settings.team_settings.get_team_settings",
         new_callable=AsyncMock,
         return_value=_settings(
             default_grouping_model=_GROUPING_PAIR[0],
@@ -49,7 +49,7 @@ async def test_grouping_uses_configured_model_when_set() -> None:
 @pytest.mark.asyncio
 async def test_grouping_inherits_when_configured_model_invalid() -> None:
     with patch(
-        "agent.dashboard.team_settings.get_team_settings",
+        "agent.settings.team_settings.get_team_settings",
         new_callable=AsyncMock,
         return_value=_settings(
             default_grouping_model="bogus:model",

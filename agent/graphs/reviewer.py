@@ -29,12 +29,6 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 
-from ..dashboard.team_settings import (
-    get_org_review_guidelines,
-    get_team_default_grouping_model,
-    get_team_default_model_pair,
-    get_team_fable_enabled,
-)
 from ..middleware import (
     BasePrepareRunMiddleware,
     DynamicContextMiddleware,
@@ -73,6 +67,12 @@ from ..runtime import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
+)
+from ..settings.team_settings import (
+    get_org_review_guidelines,
+    get_team_default_grouping_model,
+    get_team_default_model_pair,
+    get_team_fable_enabled,
 )
 from ..tools import (
     add_finding,
@@ -1102,7 +1102,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         async def _fetch_repo_style_prompt() -> str | None:
             if not repo_owner or not repo_name:
                 return None
-            from ..dashboard.review_styles import get_repo_custom_prompt
+            from ..settings.review_styles import get_repo_custom_prompt
 
             return await get_repo_custom_prompt(repo_owner, repo_name)
 

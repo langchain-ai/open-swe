@@ -1118,7 +1118,7 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An unmapped Slack user is blocked (no run) and prompted to link."""
-    from agent.dashboard import user_mappings
+    from agent.settings import user_mappings
 
     captured: dict[str, object] = {}
     client = _setup_slack_mention_fakes(monkeypatch, captured)

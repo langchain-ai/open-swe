@@ -36,13 +36,22 @@ def _imported_packages(module_path: Path) -> set[str]:
     return {name for name in imported if name.startswith("agent.")}
 
 
-def _modules_importing(package: str, forbidden_prefix: str) -> dict[str, set[str]]:
+def _layer_files(layer: str) -> list[Path]:
+    """Every module in ``layer``, whether it names a package or a single module."""
+    package = _AGENT_ROOT / layer
+    if package.is_dir():
+        return sorted(package.rglob("*.py"))
+    return [_AGENT_ROOT / f"{layer}.py"]
+
+
+def _modules_importing(layer: str, *forbidden: str) -> dict[str, set[str]]:
     offenders: dict[str, set[str]] = {}
-    for path in sorted((_AGENT_ROOT / package).rglob("*.py")):
+    for path in _layer_files(layer):
         hits = {
             name
             for name in _imported_packages(path)
-            if name == forbidden_prefix or name.startswith(f"{forbidden_prefix}.")
+            for prefix in forbidden
+            if name == prefix or name.startswith(f"{prefix}.")
         }
         if hits:
             offenders[str(path.relative_to(_AGENT_ROOT))] = hits
@@ -57,6 +66,38 @@ def test_dashboard_does_not_import_the_webhook_layer() -> None:
 def test_tools_do_not_import_the_webhook_layer() -> None:
     """Agent tools call the domain (``agent.review.dispatch``), never the webhook adapter."""
     assert _modules_importing("tools", "agent.webhooks") == {}
+
+
+# What a run is built on: stored settings, shared helpers, the sandbox runtime,
+# the store client, the environment. Everything else is built on top of these.
+_FOUNDATION_LAYERS = ("settings", "utils", "runtime", "store", "config")
+# The layers built on that foundation: the web surface, the inbound adapters,
+# the graphs, and the tools the graphs call.
+_LAYERS_BUILT_ON_THE_FOUNDATION = (
+    "agent.api",
+    "agent.dashboard",
+    "agent.graphs",
+    "agent.tools",
+    "agent.webhooks",
+)
+
+
+def test_the_foundation_does_not_import_what_is_built_on_it() -> None:
+    """Stored settings and shared helpers must not reach back up into the app.
+
+    ``agent.settings`` is where team/user/repo configuration lives, and every
+    layer above reads it. If it — or ``agent.utils``/``agent.runtime``/the store
+    and config modules — imports the dashboard, a graph, a tool or a webhook,
+    the dependency runs backwards: importing a setting drags FastAPI and the
+    agent stack in with it, and the layers can no longer be reasoned about (or
+    loaded) separately. A lazy import inside a function is the same edge.
+    """
+    offenders = {
+        layer: hits
+        for layer in _FOUNDATION_LAYERS
+        if (hits := _modules_importing(layer, *_LAYERS_BUILT_ON_THE_FOUNDATION))
+    }
+    assert offenders == {}
 
 
 def _closure_check(entry: str, forbidden: list[str]) -> dict[str, bool]:

@@ -14,7 +14,7 @@ import httpx
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from ..dashboard.plan_store import get_plan_content
+from ..settings.plan_store import get_plan_content
 from .dashboard_links import dashboard_plan_url
 from .github_pr import is_private_repo
 from .slack_api import get_slack_permalink

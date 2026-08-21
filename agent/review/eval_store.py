@@ -2,7 +2,7 @@
 
 The eval runs in the ``Reviewer eval`` GitHub Action and publishes its progress into a
 LangGraph store record the dashboard reads. This module is the contract between the
-writer (``evals.reviewer.store_reporter``) and the reader (``agent.dashboard.eval_jobs``);
+writer (``evals.reviewer.store_reporter``) and the reader (``agent.settings.eval_jobs``);
 it stays free of dashboard/server imports so the Action can publish progress without
 importing the FastAPI dashboard.
 """

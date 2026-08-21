@@ -15,10 +15,7 @@ from langgraph.prebuilt import InjectedState
 from ..config import langgraph_client
 from ..dashboard import plan_api, workflow_approval_api
 from ..dashboard.admin import is_admin
-from ..dashboard.agent_overrides import resolve_login_from_email_async
 from ..dashboard.oauth import enforce_org_login_gate
-from ..dashboard.options import normalize_model_choice
-from ..dashboard.plan_store import get_plan_content, list_plan_comments
 from ..dashboard.threads.listing import get_dashboard_thread, list_dashboard_threads_page
 from ..dashboard.threads.runs import (
     ThreadMessageBody,
@@ -29,12 +26,15 @@ from ..dashboard.threads.runs import (
     resolve_dashboard_thread,
     send_dashboard_message,
 )
-from ..dashboard.workflow_approval import (
+from ..input_messages import input_message_text, message_sender_id
+from ..settings.agent_overrides import resolve_login_from_email_async
+from ..settings.options import normalize_model_choice
+from ..settings.plan_store import get_plan_content, list_plan_comments
+from ..settings.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
-from ..input_messages import input_message_text, message_sender_id
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from ..utils.json_types import as_json_object, thread_metadata
 from ..utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost

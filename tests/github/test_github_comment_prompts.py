@@ -6,8 +6,8 @@ from langchain_core.language_models.base import LangSmithParams
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from agent.dashboard.agent_overrides import profile_draft_prs
 from agent.prompt import construct_sender_context, construct_system_prompt
+from agent.settings.agent_overrides import profile_draft_prs
 from agent.utils import github_comments
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -251,7 +251,7 @@ def test_build_pr_prompt_sanitizes_reserved_tags_from_comment_body() -> None:
 
 
 def test_build_github_issue_prompt_only_wraps_external_comments() -> None:
-    from agent.dashboard import user_mappings
+    from agent.settings import user_mappings
 
     user_mappings.prime_cache(
         [{"github_login": "bracesproul", "work_email": "brace@x.com", "status": "active"}]

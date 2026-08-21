@@ -10,13 +10,33 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from ..authz import SESSION
-from ..notion_oauth import (
+from ...settings.notion_oauth import (
     NotionOAuthError,
     exchange_notion_code,
     pop_notion_oauth_flow,
     store_notion_oauth_flow,
 )
+from ...settings.user_credentials import (
+    CurrentsCredentialsUpdate,
+    UserLangSmithCredentialsUpdate,
+    connect_currents,
+    connect_notion,
+    disconnect_currents,
+    disconnect_notion,
+    get_currents_status,
+    get_notion_status,
+)
+from ...settings.user_credentials import (
+    connect_langsmith as connect_user_langsmith,
+)
+from ...settings.user_credentials import (
+    disconnect_langsmith as disconnect_user_langsmith,
+)
+from ...settings.user_credentials import (
+    get_langsmith_status as get_user_langsmith_status,
+)
+from ...settings.user_mappings import upsert_mapping
+from ..authz import SESSION
 from ..oauth import (
     decode_state,
     hash_state_nonce,
@@ -37,26 +57,6 @@ from ..slack_oauth import (
     slack_oauth_configured,
     verify_team,
 )
-from ..user_credentials import (
-    CurrentsCredentialsUpdate,
-    UserLangSmithCredentialsUpdate,
-    connect_currents,
-    connect_notion,
-    disconnect_currents,
-    disconnect_notion,
-    get_currents_status,
-    get_notion_status,
-)
-from ..user_credentials import (
-    connect_langsmith as connect_user_langsmith,
-)
-from ..user_credentials import (
-    disconnect_langsmith as disconnect_user_langsmith,
-)
-from ..user_credentials import (
-    get_langsmith_status as get_user_langsmith_status,
-)
-from ..user_mappings import upsert_mapping
 
 router = APIRouter()
 

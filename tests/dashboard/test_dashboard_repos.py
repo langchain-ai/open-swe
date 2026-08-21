@@ -6,8 +6,9 @@ import pytest
 from fastapi import HTTPException
 
 from agent import store
-from agent.dashboard import repo_access, repo_cache
+from agent.dashboard import repo_access
 from agent.dashboard.routes import repos as repos_routes
+from agent.settings import repo_cache
 
 
 @pytest.fixture(autouse=True)

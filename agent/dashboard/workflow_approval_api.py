@@ -4,15 +4,15 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from .authz import thread_is_readable, user_owns_thread
-from .oauth import require_same_origin_for_mutations, require_session
-from .plan_api import thread_metadata_or_404
-from .threads.runs import dispatch_thread_followup
-from .workflow_approval import (
+from ..settings.workflow_approval import (
     decide_workflow_push_approval,
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from .authz import thread_is_readable, user_owns_thread
+from .oauth import require_same_origin_for_mutations, require_session
+from .plan_api import thread_metadata_or_404
+from .threads.runs import dispatch_thread_followup
 
 workflow_approval_router = APIRouter(
     prefix="/dashboard/api/workflow-approval",

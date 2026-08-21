@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import agent.tools.open_pull_request  # noqa: F401
-from agent.dashboard import agent_usage
+from agent.settings import agent_usage
 from agent.utils import github_http, run_references
 
 opr = sys.modules["agent.tools.open_pull_request"]
@@ -106,7 +106,7 @@ def _open() -> dict[str, Any]:
 def test_uses_user_token_for_slack_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import github_tokens
+    from agent.settings import github_tokens
 
     async def fake_user_token(login: str, **_kw: Any) -> str | None:
         assert login == "johannes117"
@@ -164,7 +164,7 @@ def test_profile_draft_preference_overrides_tool_argument(monkeypatch: pytest.Mo
 def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "linear", "github_login": "johannes117"})
 
-    from agent.dashboard import github_tokens
+    from agent.settings import github_tokens
 
     async def fake_user_token(login: str, **_kw: Any) -> str | None:
         assert login == "johannes117"
@@ -198,7 +198,7 @@ def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) 
 def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "github", "github_login": "johannes117"})
 
-    from agent.dashboard import github_tokens
+    from agent.settings import github_tokens
 
     async def fail_user_token(login: str, **_kw: Any) -> str | None:
         raise AssertionError("user token should not be resolved for github source")
@@ -226,7 +226,7 @@ def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) ->
 def test_falls_back_to_bot_when_user_token_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import github_tokens
+    from agent.settings import github_tokens
 
     async def no_user_token(login: str, **_kw: Any) -> str | None:
         return None
@@ -247,7 +247,7 @@ def test_falls_back_to_bot_when_user_token_missing(monkeypatch: pytest.MonkeyPat
 def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import github_tokens
+    from agent.settings import github_tokens
 
     monkeypatch.setattr(
         github_tokens, "get_valid_access_token", lambda *_a, **_k: _coro("user-tok")
@@ -277,7 +277,7 @@ def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_error_surfaced_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import github_tokens
+    from agent.settings import github_tokens
 
     monkeypatch.setattr(
         github_tokens, "get_valid_access_token", lambda *_a, **_k: _coro("user-tok")

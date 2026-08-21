@@ -32,7 +32,7 @@ def _reset_sandbox_backends() -> Iterator[None]:
 def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
     """Treat automatic reviews as enabled for every repo by default.
 
-    The dashboard's opt-in list (loaded by :func:`agent.dashboard.enabled_repos.is_review_repo_enabled`)
+    The dashboard's opt-in list (loaded by :func:`agent.settings.enabled_repos.is_review_repo_enabled`)
     is empty in the test environment because there is no live LangGraph Store.
 
     Tests targeting the automatic-review gate should override this fixture or set

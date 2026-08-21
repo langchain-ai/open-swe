@@ -4,8 +4,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..dashboard.agent_overrides import resolve_github_login
-from ..dashboard.skills import (
+from ..settings.agent_overrides import resolve_github_login
+from ..settings.skills import (
     SkillCreate,
     SkillUpdate,
     create_skill,

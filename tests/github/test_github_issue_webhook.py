@@ -90,7 +90,7 @@ def test_github_issue_thread_id_is_deterministic() -> None:
 
 
 def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
-    from agent.dashboard import user_mappings
+    from agent.settings import user_mappings
 
     user_mappings.prime_cache(
         [{"github_login": "bracesproul", "work_email": "brace@x.com", "status": "active"}]
@@ -1379,7 +1379,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
         ),
     )
     monkeypatch.setattr(
-        "agent.dashboard.user_mappings.is_login_mapped",
+        "agent.settings.user_mappings.is_login_mapped",
         lambda login: login == "octocat",
     )
 

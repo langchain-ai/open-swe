@@ -110,7 +110,7 @@ def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None
     github_login = _normalize_text(configurable.get("github_login"))
     if github_login:
         github_user_id = configurable.get("github_user_id")
-        from ..dashboard.user_mappings import cached_email_for_login
+        from ..settings.user_mappings import cached_email_for_login
 
         commit_email = _github_noreply_email(github_login, github_user_id) or _normalize_text(
             cached_email_for_login(github_login)

@@ -3,7 +3,7 @@ from collections.abc import Callable
 import pytest
 from support.langgraph_fakes import FakeLangGraphClient, FakeStore
 
-from agent.dashboard import user_mappings as um
+from agent.settings import user_mappings as um
 from agent.utils.run_metadata import resolve_run_email
 
 

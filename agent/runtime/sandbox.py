@@ -13,10 +13,10 @@ from typing import Any
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
-from ..dashboard.environments import environment_snapshot_id, resolve_environment
-from ..dashboard.repo_snapshots import resolve_repo_snapshot_id
-from ..dashboard.sandbox_settings import get_admin_base_snapshot_id
-from ..dashboard.team_settings import get_team_default_repo
+from ..settings.environments import environment_snapshot_id, resolve_environment
+from ..settings.repo_snapshots import resolve_repo_snapshot_id
+from ..settings.sandbox_settings import get_admin_base_snapshot_id
+from ..settings.team_settings import get_team_default_repo
 from ..utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from ..utils.github_proxy import configure_proxy_for_sandbox
 from ..utils.sandbox import (

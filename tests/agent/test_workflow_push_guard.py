@@ -120,7 +120,7 @@ async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
 
 
 def test_workflow_approval_response_serializes_review_fields() -> None:
-    from agent.dashboard.workflow_approval import workflow_push_approval_response
+    from agent.settings.workflow_approval import workflow_push_approval_response
 
     response = workflow_push_approval_response(
         {

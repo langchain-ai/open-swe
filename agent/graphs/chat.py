@@ -24,7 +24,6 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 
-from ..dashboard.team_settings import get_team_default_model, get_team_fable_enabled
 from ..middleware import (
     BasePrepareRunMiddleware,
     DynamicContextMiddleware,
@@ -34,6 +33,7 @@ from ..middleware import (
 from ..middleware.prepare_run import PrepareRunState
 from ..middleware.stack import core_stack, model_guard_middleware
 from ..runtime import graph_loaded_for_execution
+from ..settings.team_settings import get_team_default_model, get_team_fable_enabled
 from ..tools import (
     fetch_url,
     list_review_findings,

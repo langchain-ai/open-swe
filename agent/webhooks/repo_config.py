@@ -8,7 +8,7 @@ around it differs per channel and belongs with the channel.
 
 import logging
 
-from ..dashboard.agent_overrides import get_profile_default_repo, resolve_login_from_email_async
+from ..settings.agent_overrides import get_profile_default_repo, resolve_login_from_email_async
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@
 When the eval runs in the ``Reviewer eval`` GitHub Action it writes the same
 store record the dashboard reads (namespace ``["evals"]``, key ``"reviewer"``),
 so ``/admin/evals`` shows the run live. The dashboard reconciles a run whose
-heartbeat goes stale to ``failed`` (see ``agent.dashboard.eval_jobs``), so the
+heartbeat goes stale to ``failed`` (see ``agent.settings.eval_jobs``), so the
 reporter must keep heartbeating while the eval runs.
 """
 

@@ -19,6 +19,7 @@ from ..config import (
     service_auth_jwt_secret,
     user_id_api_key_map,
 )
+from .dashboard_links import build_settings_url
 from .github_app import get_github_app_installation_token_with_expiry
 from .github_token import (
     cache_github_token_for_thread,
@@ -264,8 +265,6 @@ async def leave_failure_comment(
             # which must not be posted in a shared thread (anyone could complete
             # it and bind the wrong account). Post a generic, token-free notice and
             # let the user finish sign-in from their own authenticated dashboard.
-            from ..dashboard.oauth import build_settings_url
-
             settings_url = build_settings_url()
             link = (
                 f"<{settings_url}|your Open SWE settings>"
@@ -395,7 +394,7 @@ async def _resolve_dashboard_user_token(
     if not login:
         raise ValueError("missing github_login")
 
-    from ..dashboard.github_tokens import get_oauth_token_record, get_valid_access_token
+    from ..settings.github_tokens import get_oauth_token_record, get_valid_access_token
 
     token = await get_valid_access_token(login)
     if not token:
@@ -485,7 +484,7 @@ async def resolve_github_token(
             )
             if cached_token:
                 return cached_token, cached_expires_at
-            from ..dashboard.user_mappings import email_for_login
+            from ..settings.user_mappings import email_for_login
 
             email = await email_for_login(github_login)
             if not email:

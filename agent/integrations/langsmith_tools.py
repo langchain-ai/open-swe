@@ -14,13 +14,13 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
 
-from ..dashboard.team_credentials import (
+from ..settings.team_credentials import (
     LangSmithCredentials,
 )
-from ..dashboard.team_credentials import (
+from ..settings.team_credentials import (
     get_langsmith_credentials as get_team_langsmith_credentials,
 )
-from ..dashboard.user_credentials import get_langsmith_credentials as get_user_langsmith_credentials
+from ..settings.user_credentials import get_langsmith_credentials as get_user_langsmith_credentials
 from ..utils.thread_participants import resolve_participant
 
 logger = logging.getLogger(__name__)

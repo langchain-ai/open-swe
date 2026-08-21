@@ -1,6 +1,5 @@
 """GitHub App OAuth code-exchange and signed-JWT session cookie."""
 
-import base64
 import hashlib
 import hmac
 import logging
@@ -10,7 +9,6 @@ import time
 from typing import Any
 from urllib.parse import quote, urlparse
 
-import httpx
 import jwt
 from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
@@ -22,9 +20,8 @@ from ..config import (
     dashboard_allowed_origins,
     dashboard_base_url,
     dashboard_jwt_secret,
-    github_app_oauth,
 )
-from ..utils.http import DEFAULT_HTTP_TIMEOUT
+from ..utils.pkce import s256_challenge
 from .github_token_auth import bearer_github_token
 
 logger = logging.getLogger(__name__)
@@ -230,12 +227,6 @@ def decode_state(state: str) -> dict[str, Any]:
 _S256_CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")
 
 
-def s256_challenge(verifier: str) -> str:
-    """The PKCE ``S256`` challenge for a verifier: unpadded base64url SHA-256."""
-    digest = hashlib.sha256(verifier.encode()).digest()
-    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
-
-
 def valid_handoff_challenge(value: str | None) -> str | None:
     """Return the desktop app's PKCE S256 challenge, or ``None`` when absent."""
     if not value:
@@ -302,23 +293,6 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
     )
 
 
-# Dashboard route where users manage their GitHub↔Slack link.
-PROFILE_SETTINGS_PATH = "/my-settings"
-
-
-def build_settings_url() -> str | None:
-    """Return the dashboard Profile Settings URL, or ``None`` if not configured.
-
-    This is a plain, token-free link: it carries no per-user identity, so it is
-    safe to share in a public Slack thread. The user signs in with GitHub from
-    their own session and connects Slack via verified OIDC on the settings page.
-    """
-    frontend_base = dashboard_base_url()
-    if not frontend_base:
-        return None
-    return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
-
-
 def require_session(request: HTTPConnection) -> dict[str, Any]:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
@@ -379,79 +353,3 @@ def require_same_origin_for_mutations(request: HTTPConnection) -> None:
     if bearer_github_token(request) and not request.cookies.get(COOKIE_NAME):
         return
     require_same_origin(request)
-
-
-class GithubOAuthError(HTTPException):
-    """A GitHub OAuth token endpoint error, carrying GitHub's ``error`` code."""
-
-    def __init__(self, status_code: int, detail: str, *, error_code: str | None = None) -> None:
-        super().__init__(status_code, detail)
-        self.error_code = error_code
-
-
-# Error codes GitHub returns when a refresh token can never mint a new access
-# token again (the user must re-authorize). Anything else is treated as
-# transient so we don't needlessly drop a usable authorization.
-UNRECOVERABLE_REFRESH_ERROR_CODES = frozenset({"bad_refresh_token", "unauthorized_client"})
-
-
-def is_unrecoverable_refresh_error(exc: BaseException) -> bool:
-    """Whether ``exc`` means the stored refresh token is permanently dead."""
-    return (
-        isinstance(exc, GithubOAuthError)
-        and (exc.error_code or "") in UNRECOVERABLE_REFRESH_ERROR_CODES
-    )
-
-
-async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
-    client_id, client_secret = github_app_oauth()
-    if not client_id or not client_secret:
-        raise HTTPException(500, "GitHub App OAuth not configured")
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        resp = await client.post(
-            "https://github.com/login/oauth/access_token",
-            headers={"Accept": "application/json"},
-            data=body,
-        )
-    resp.raise_for_status()
-    data = resp.json()
-    if not isinstance(data, dict):
-        raise HTTPException(502, "unexpected GitHub OAuth response")
-    if data.get("error"):
-        raise GithubOAuthError(
-            400,
-            f"github oauth error: {data.get('error_description') or data['error']}",
-            error_code=str(data["error"]),
-        )
-    return data
-
-
-async def exchange_code(code: str) -> dict[str, Any]:
-    """Exchange an OAuth authorization code for user-to-server tokens."""
-    client_id, client_secret = github_app_oauth()
-    data = await _request_github_tokens(
-        {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "code": code,
-        }
-    )
-    if not data.get("access_token"):
-        raise HTTPException(400, f"oauth exchange failed: {data}")
-    return data
-
-
-async def refresh_user_access_token(refresh_token: str) -> dict[str, Any]:
-    """Rotate an expiring user access token using its refresh token."""
-    client_id, client_secret = github_app_oauth()
-    data = await _request_github_tokens(
-        {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-        }
-    )
-    if not data.get("access_token"):
-        raise HTTPException(400, f"oauth refresh failed: {data}")
-    return data

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from ..dashboard.user_mappings import email_for_login
+from ..settings.user_mappings import email_for_login
 
 
 async def resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:

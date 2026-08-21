@@ -2,7 +2,7 @@ import httpx
 from fastapi import HTTPException, Request
 
 from ..config import DEFAULT_OPENAI_BASE_URL, openai_api_key, openai_base_url
-from .team_settings import get_team_transcription_model
+from ..settings.team_settings import get_team_transcription_model
 
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 SUPPORTED_AUDIO_TYPES = {

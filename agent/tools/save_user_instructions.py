@@ -5,8 +5,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..dashboard.agent_overrides import resolve_github_login
-from ..dashboard.user_instructions import MAX_USER_INSTRUCTIONS_CHARS, set_user_instructions
+from ..settings.agent_overrides import resolve_github_login
+from ..settings.user_instructions import MAX_USER_INSTRUCTIONS_CHARS, set_user_instructions
 from ..utils.json_types import as_json_object
 
 logger = logging.getLogger(__name__)

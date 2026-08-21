@@ -15,8 +15,8 @@ import pytest
 from cryptography.fernet import Fernet
 from support.langgraph_fakes import FakeLangGraphClient, FakeStore
 
-from agent.dashboard.token_vault import TokenFields, TokenVault, expires_at_from_response
 from agent.encryption import encrypt_token
+from agent.settings.token_vault import TokenFields, TokenVault, expires_at_from_response
 
 NAMESPACE = ("demo_tokens",)
 FIELDS = TokenFields(access="enc_access", refresh="enc_refresh", expires_at="expires")
