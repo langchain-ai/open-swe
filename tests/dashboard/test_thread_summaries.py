@@ -1,8 +1,8 @@
 """How a thread's metadata becomes the summary the Agents UI lists and renders.
 
 Everything here goes through a public handler (``get_dashboard_thread``,
-``list_dashboard_threads*``) rather than the summary builder itself, so that
-moving that builder does not move these tests.
+``list_dashboard_threads*``, ``admin_cancel_dashboard_thread``) rather than the
+summary builder itself, so that moving that builder does not move these tests.
 """
 
 from typing import Any, cast
@@ -235,12 +235,20 @@ async def test_summary_is_owner_true_for_matching_email(monkeypatch) -> None:
     assert summary["isOwner"] is True
 
 
-async def test_summary_is_owner_defaults_true_without_owner_login() -> None:
-    # No handler reaches this branch -- every one of them knows the session
-    # login -- so it is asserted against the builder directly.
-    summary = await thread_api._thread_summary(
-        {"thread_id": "tid", "metadata": {"source": "slack", "github_login": "octocat"}},
+async def test_summary_is_owner_defaults_true_without_owner_login(monkeypatch) -> None:
+    _install_client(
+        monkeypatch,
+        threads=[
+            {
+                "thread_id": "tid",
+                "status": "busy",
+                "metadata": {"source": "slack", "github_login": "octocat"},
+            }
+        ],
+        runs={"tid": [{"run_id": "run-1", "status": "running"}]},
     )
+
+    summary = await thread_api.admin_cancel_dashboard_thread("tid")
 
     assert summary["isOwner"] is True
 
