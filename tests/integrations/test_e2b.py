@@ -6,7 +6,7 @@ from e2b import NotFoundException
 from langchain_e2b import E2BSandbox
 
 from agent.integrations.e2b import E2B_WORK_DIR, E2BProvider
-from agent.utils.sandbox import SandboxGoneError
+from agent.sandboxes.providers import SandboxGoneError
 
 
 @pytest.fixture(autouse=True)

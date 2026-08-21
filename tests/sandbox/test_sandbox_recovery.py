@@ -8,7 +8,7 @@ from langsmith.sandbox import SandboxClientError
 from support.sandbox_fakes import FakeSandboxBackend
 
 from agent.middleware.tool_error_handler import ToolErrorMiddleware
-from agent.utils.sandbox_registry import SANDBOX_BACKENDS, set_sandbox_backend
+from agent.sandboxes.registry import SANDBOX_BACKENDS, set_sandbox_backend
 from agent.utils.source_channel import (
     post_sandbox_unreachable_notification,
     sandbox_unreachable_message,

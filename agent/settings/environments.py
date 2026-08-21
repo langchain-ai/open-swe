@@ -27,8 +27,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from ..config import environment_snapshot_prefix, sandbox_provider
+from ..sandboxes.providers import sandbox_provider_supports_snapshots
 from ..store import KeyedRecordStore, now_iso
-from ..utils.sandbox import sandbox_provider_supports_snapshots
 from .review_styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)

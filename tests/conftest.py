@@ -8,8 +8,8 @@ from support.langgraph_fakes import FakeLangGraphClient
 
 from agent import store as agent_store
 from agent.review import dispatch as review_dispatch
+from agent.sandboxes.registry import SANDBOX_BACKENDS
 from agent.utils import ttl_cache
-from agent.utils.sandbox_registry import SANDBOX_BACKENDS
 
 
 @pytest.fixture(autouse=True)

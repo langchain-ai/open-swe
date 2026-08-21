@@ -10,9 +10,9 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 from langgraph_sdk import get_client
 
+from ..sandboxes.registry import get_sandbox_backend
+from ..sandboxes.turn_checkpoint import mark_checkpoint_plan_mode, record_plan_checkpoint
 from ..settings.plan_store import PLAN_STATUS_PLANNING, set_plan_status
-from ..utils.sandbox_registry import get_sandbox_backend
-from ..utils.turn_checkpoint import mark_checkpoint_plan_mode, record_plan_checkpoint
 
 logger = logging.getLogger(__name__)
 

@@ -4,13 +4,13 @@ from importlib import resources
 from pathlib import Path
 
 from .config import allowed_github_orgs, default_prompt_path
-from .utils.authorship import (
+from .github.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,
     build_pr_attribution_footer,
 )
-from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
+from .github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
 logger = logging.getLogger(__name__)
 

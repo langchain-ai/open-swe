@@ -13,6 +13,7 @@ from ..config import (
     default_repo_owner,
 )
 from ..dispatch import dispatch_agent_run
+from ..github.refs import extract_repo_from_text
 from ..input_messages import (
     PersonIdentity,
     RunInput,
@@ -21,16 +22,15 @@ from ..input_messages import (
     system_input,
     system_introduction,
 )
+from ..linear.api import fetch_issue_details, post_linear_trace_comment, react_to_linear_comment
+from ..linear.team_repo_map import LINEAR_TEAM_TO_REPO
 from ..settings.agent_overrides import resolve_agent_model_id, resolve_login_from_email_async
 from ..settings.options import default_vision_model_pair, model_supports_images
 from ..settings.team_settings import get_team_default_repo
-from ..thread_ids import linear_issue_thread_id
+from ..threads.ids import linear_issue_thread_id
+from ..threads.ops import upsert_agent_thread_owner_metadata
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
-from ..utils.linear import fetch_issue_details, post_linear_trace_comment, react_to_linear_comment
-from ..utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
-from ..utils.repo import extract_repo_from_text
-from ..utils.thread_ops import upsert_agent_thread_owner_metadata
 from .repo_config import profile_default_repo_for_email
 
 logger = logging.getLogger(__name__)

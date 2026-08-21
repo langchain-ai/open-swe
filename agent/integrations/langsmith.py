@@ -28,7 +28,7 @@ from agent.config import (
     sandbox_mem_bytes,
     sandbox_vcpus,
 )
-from agent.utils.sandbox import SandboxGoneError, SandboxProvider
+from agent.sandboxes.providers import SandboxGoneError, SandboxProvider
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from ..utils.github_http import github_client, github_paginate, github_request, github_url
+from ..github.api import github_client, github_paginate, github_request, github_url
 
 logger = logging.getLogger(__name__)
 

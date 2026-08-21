@@ -12,7 +12,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-from ..utils.sandbox_registry import SANDBOX_BACKENDS
+from ..sandboxes.registry import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
 

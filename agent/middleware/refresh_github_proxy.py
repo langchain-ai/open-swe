@@ -14,7 +14,7 @@ from langchain.agents.middleware import AgentState, before_model
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
-from ..utils.github_proxy import maybe_refresh_proxy_token
+from ..github.proxy import maybe_refresh_proxy_token
 
 logger = logging.getLogger(__name__)
 

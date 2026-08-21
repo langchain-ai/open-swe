@@ -18,6 +18,14 @@ import httpx
 from fastapi import HTTPException, Response
 
 from ..config import langgraph_client
+from ..github.api import (
+    github_client,
+    github_error_message,
+    github_request,
+    github_url,
+)
+from ..github.app import get_github_app_installation_token
+from ..github.ci import fetch_pr
 from ..review.dispatch import trigger_pr_review_from_ref
 from ..review.findings import (
     REVIEWER_THREAD_KIND,
@@ -25,15 +33,7 @@ from ..review.findings import (
     comment_ids_for_finding,
     is_thread_resolved,
 )
-from ..thread_ids import reviewer_thread_id
-from ..utils.github_app import get_github_app_installation_token
-from ..utils.github_ci import fetch_pr
-from ..utils.github_http import (
-    github_client,
-    github_error_message,
-    github_request,
-    github_url,
-)
+from ..threads.ids import reviewer_thread_id
 from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
 from .pr_diff import build_pr_diff_files
 
@@ -702,7 +702,7 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
 
 
 async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
-    from ..utils.github_refs import GitHubPrRef
+    from ..github.refs import GitHubPrRef
 
     pr_ref = GitHubPrRef(
         owner=owner,
@@ -720,9 +720,9 @@ async def dry_run_trace_resolution(owner: str, repo: str, pr_number: int) -> dic
     """Resolve a PR to its author coding-agent thread without running a review."""
     from dataclasses import asdict
 
+    from ..github.app import get_github_app_installation_token_with_expiry
+    from ..github.refs import GitHubPrRef
     from ..review.trace_context import resolve_pr_trace
-    from ..utils.github_app import get_github_app_installation_token_with_expiry
-    from ..utils.github_refs import GitHubPrRef
 
     pr_ref = GitHubPrRef(
         owner=owner,

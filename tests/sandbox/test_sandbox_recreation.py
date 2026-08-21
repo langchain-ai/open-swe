@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.runtime.sandbox import recreate_sandbox_for_thread
-from agent.utils.sandbox_registry import SANDBOX_BACKENDS, set_sandbox_backend
+from agent.sandboxes.registry import SANDBOX_BACKENDS, set_sandbox_backend
 
 
 @pytest.mark.asyncio

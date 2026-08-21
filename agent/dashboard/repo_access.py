@@ -12,15 +12,15 @@ from typing import Any, TypeVar
 import httpx
 from fastapi import HTTPException
 
-from ..settings.github_tokens import get_valid_access_token
-from ..settings.review_styles import normalize_repo_full_name
-from ..utils.github_http import (
+from ..github.api import (
     DEFAULT_MAX_RETRIES,
     github_client,
     github_paginate,
     github_request,
     github_url,
 )
+from ..settings.github_tokens import get_valid_access_token
+from ..settings.review_styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)
 

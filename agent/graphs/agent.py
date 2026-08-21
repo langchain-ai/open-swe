@@ -33,6 +33,9 @@ from ..config import (
 )
 from ..dashboard.admin import is_admin, is_observability_authorized
 from ..dashboard.run_diffs import THREAD_DIFF_KEY, save_run_diff
+from ..github.auth import resolve_github_token
+from ..github.authorship import resolve_triggering_user_identity
+from ..github.org_membership import is_login_in_allowed_org
 from ..input_messages import append_message_data
 from ..integrations.corridor_mcp import load_corridor_tools
 from ..integrations.currents_tools import load_currents_tools
@@ -40,6 +43,7 @@ from ..integrations.datadog_mcp import load_datadog_tools
 from ..integrations.langsmith_tools import load_langsmith_tools
 from ..integrations.notion_mcp import load_notion_tools
 from ..integrations.stagehand_browser import load_browser_tools
+from ..langsmith.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 from ..middleware import (
     BasePrepareRunMiddleware,
     DynamicContextMiddleware,
@@ -58,6 +62,7 @@ from ..middleware import (
 )
 from ..middleware.prepare_run import PrepareRunState
 from ..middleware.stack import core_stack, model_guard_middleware
+from ..models.factory import DEFAULT_LLM_REASONING, ModelKwargs, fallback_model_id_for
 from ..prompt import construct_sender_context, construct_system_prompt, render_open_swe_shared_base
 from ..runtime.constants import DEFAULT_LLM_MAX_TOKENS, MODEL_CALL_RECURSION_LIMIT
 from ..runtime.constants import (
@@ -65,6 +70,10 @@ from ..runtime.constants import (
 )
 from ..runtime.execution import graph_loaded_for_execution
 from ..runtime.sandbox import environment_slug, get_cached_sandbox_backend, resolve_default_repo
+from ..sandboxes.paths import aresolve_sandbox_work_dir
+from ..sandboxes.providers import SandboxUnreachableError
+from ..sandboxes.registry import get_or_create_sandbox_backend_proxy
+from ..sandboxes.turn_checkpoint import merge_checkpoint, read_turn_diff, record_turn_checkpoint
 from ..settings.agent_overrides import (
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
@@ -75,6 +84,7 @@ from ..settings.agent_usage import record_agent_thread_usage
 from ..settings.environments import environment_prompt, resolve_environment
 from ..settings.user_mappings import email_for_login
 from ..thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from ..threads.settings import ThreadSettings, normalize_thread_settings
 from ..tools import (
     approve_plan,
     background_execute,
@@ -119,19 +129,9 @@ from ..tools import (
     web_search,
 )
 from ..utils import ttl_cache
-from ..utils.auth import resolve_github_token
-from ..utils.authorship import resolve_triggering_user_identity
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
-from ..utils.github_org_membership import is_login_in_allowed_org
 from ..utils.json_types import as_json_object
-from ..utils.model import DEFAULT_LLM_REASONING, ModelKwargs, fallback_model_id_for
-from ..utils.sandbox import SandboxUnreachableError
-from ..utils.sandbox_paths import aresolve_sandbox_work_dir
-from ..utils.sandbox_registry import get_or_create_sandbox_backend_proxy
 from ..utils.source_channel import post_sandbox_unreachable_notification
-from ..utils.thread_settings import ThreadSettings, normalize_thread_settings
-from ..utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
-from ..utils.turn_checkpoint import merge_checkpoint, read_turn_diff, record_turn_checkpoint
 from ._assembly import (
     make_model_or_defer,
     model_spec,

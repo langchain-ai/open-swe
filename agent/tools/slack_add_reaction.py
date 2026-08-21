@@ -3,8 +3,8 @@ from typing import Any
 from langgraph.config import get_config
 
 from ..config import langgraph_client
-from ..utils.slack_api import add_slack_reaction
-from ..utils.slack_threads import get_active_slack_thread
+from ..slack.api import add_slack_reaction
+from ..slack.threads import get_active_slack_thread
 
 
 async def slack_add_reaction(

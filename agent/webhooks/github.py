@@ -11,6 +11,28 @@ from typing import Any
 from ..baby_sit import handle_ci_webhook
 from ..config import agent_version_metadata, langgraph_client
 from ..dispatch import dispatch_agent_run
+from ..github.app import (
+    get_github_app_installation_token,
+    get_github_app_installation_token_with_expiry,
+)
+from ..github.auth import is_bot_token_only_mode, resolve_github_token_from_email
+from ..github.comments import (
+    GitHubAuthError,
+    build_pr_prompt,
+    derive_pr_state,
+    extract_pr_context,
+    fetch_issue_comments,
+    fetch_pr_comments_since_last_tag,
+    format_github_comment_body_for_prompt,
+    react_to_github_comment,
+    sanitize_github_comment_body,
+)
+from ..github.token import (
+    cache_github_token_for_thread,
+    get_github_token_from_thread,
+    github_token_principal,
+    invalidate_cached_github_token,
+)
 from ..input_messages import (
     RunInput,
     SystemIdentity,
@@ -29,30 +51,8 @@ from ..review.dispatch import (
 )
 from ..review.findings import REVIEWER_THREAD_KIND
 from ..settings.user_mappings import email_for_login
-from ..thread_ids import github_issue_thread_id, pr_comment_thread_id, thread_id_from_branch
-from ..utils.auth import is_bot_token_only_mode, resolve_github_token_from_email
-from ..utils.github_app import (
-    get_github_app_installation_token,
-    get_github_app_installation_token_with_expiry,
-)
-from ..utils.github_comments import (
-    GitHubAuthError,
-    build_pr_prompt,
-    derive_pr_state,
-    extract_pr_context,
-    fetch_issue_comments,
-    fetch_pr_comments_since_last_tag,
-    format_github_comment_body_for_prompt,
-    react_to_github_comment,
-    sanitize_github_comment_body,
-)
-from ..utils.github_token import (
-    cache_github_token_for_thread,
-    get_github_token_from_thread,
-    github_token_principal,
-    invalidate_cached_github_token,
-)
-from ..utils.thread_ops import (
+from ..threads.ids import github_issue_thread_id, pr_comment_thread_id, thread_id_from_branch
+from ..threads.ops import (
     is_not_found_error,
     thread_exists,
     upsert_agent_thread_owner_metadata,

@@ -13,7 +13,7 @@ from agent.dashboard.review_api import (
     classify_finding,
     get_pr_head_sha,
 )
-from agent.thread_ids import reviewer_thread_id
+from agent.threads.ids import reviewer_thread_id
 
 
 def test_classify_finding():

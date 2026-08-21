@@ -13,13 +13,14 @@ from httpx import Response
 from support.langgraph_fakes import FakeLangGraphClient
 
 from agent.api.app import app
+from agent.github.comments import describe_open_swe_tags
+from agent.github.refs import GitHubPrRef
 from agent.review import dispatch as review_dispatch
 from agent.review.findings import REVIEWER_THREAD_KIND
-from agent.thread_ids import github_issue_thread_id
+from agent.slack import api as slack_api
+from agent.threads import ops as thread_ops
+from agent.threads.ids import github_issue_thread_id
 from agent.tools import request_pr_review as request_pr_review_tool
-from agent.utils import slack_api, thread_ops
-from agent.utils.github_comments import describe_open_swe_tags
-from agent.utils.github_refs import GitHubPrRef
 from agent.webhooks import github as github_webhooks
 from agent.webhooks import github_routes, slack_routes
 from agent.webhooks import slack as slack_webhooks

@@ -1,0 +1,196 @@
+"""Helpers for collaborative commit and PR attribution."""
+
+import logging
+from dataclasses import dataclass
+from typing import Any
+
+import httpx
+
+from .api import github_headers, github_url
+
+logger = logging.getLogger(__name__)
+
+OPEN_SWE_BOT_NAME = "open-swe[bot]"
+# Use the open-swe user noreply address: the bot's numeric noreply
+# (215916821+open-swe[bot]@...) doesn't resolve to a GitHub account Vercel
+# accepts, which broke preview deploys on commits carrying this co-author.
+OPEN_SWE_BOT_EMAIL = "open-swe@users.noreply.github.com"
+
+PR_ATTRIBUTION_TEXT = "Made by [Open SWE]"
+PR_ATTRIBUTION_DEFAULT_URL = "https://openswe.vercel.app"
+PR_ATTRIBUTION_FOOTER = f"{PR_ATTRIBUTION_TEXT}({PR_ATTRIBUTION_DEFAULT_URL})"
+
+
+def build_pr_attribution_footer(thread_url: str | None = None) -> str:
+    """Build the Open SWE PR footer, linking the run's thread when available."""
+    url = thread_url.strip() if isinstance(thread_url, str) and thread_url.strip() else ""
+    return f"{PR_ATTRIBUTION_TEXT}({url or PR_ATTRIBUTION_DEFAULT_URL})"
+
+
+@dataclass(frozen=True)
+class CollaboratorIdentity:
+    """Identity used for git trailers and PR attribution."""
+
+    display_name: str
+    commit_name: str
+    commit_email: str
+    github_login: str = ""
+
+    @property
+    def pr_attribution_name(self) -> str:
+        """Display name with GitHub login when available."""
+        if self.github_login and self.github_login != self.display_name:
+            return f"{self.display_name} (@{self.github_login})"
+        return self.display_name
+
+
+def _normalize_text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _github_noreply_email(login: str, user_id: Any = None) -> str:
+    normalized_login = _normalize_text(login)
+    if not normalized_login:
+        return ""
+
+    normalized_user_id = str(user_id).strip() if user_id is not None else ""
+    if normalized_user_id:
+        return f"{normalized_user_id}+{normalized_login}@users.noreply.github.com"
+    return f"{normalized_login}@users.noreply.github.com"
+
+
+def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentity | None:
+    if not github_token:
+        return None
+
+    # Synchronous by design: the caller resolves the identity from a worker
+    # thread while assembling the agent, so it cannot await.
+    try:
+        response = httpx.get(
+            github_url("/user"),
+            headers=github_headers(github_token),
+            timeout=5.0,
+        )
+        if response.status_code != 200:  # noqa: PLR2004
+            logger.debug("GitHub user lookup returned %s", response.status_code)
+            return None
+
+        payload = response.json()
+        login = _normalize_text(payload.get("login"))
+        display_name = _normalize_text(payload.get("name")) or login
+        commit_email = _github_noreply_email(login, payload.get("id")) or _normalize_text(
+            payload.get("email")
+        )
+        if not display_name or not commit_email:
+            return None
+        if commit_email == OPEN_SWE_BOT_EMAIL and display_name == OPEN_SWE_BOT_NAME:
+            return None
+        return CollaboratorIdentity(
+            display_name=display_name,
+            commit_name=display_name,
+            commit_email=commit_email,
+            github_login=login,
+        )
+    except httpx.HTTPError:
+        logger.debug("Failed to resolve GitHub user identity from token", exc_info=True)
+        return None
+
+
+def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None:
+    configurable = config.get("configurable", {})
+    slack_thread = configurable.get("slack_thread", {})
+    linear_issue = configurable.get("linear_issue", {})
+
+    display_name = (
+        _normalize_text(slack_thread.get("triggering_user_name"))
+        or _normalize_text(linear_issue.get("triggering_user_name"))
+        or _normalize_text(configurable.get("user_email")).split("@", 1)[0]
+    )
+
+    github_login = _normalize_text(configurable.get("github_login"))
+    if github_login:
+        github_user_id = configurable.get("github_user_id")
+        from ..settings.user_mappings import cached_email_for_login
+
+        commit_email = _github_noreply_email(github_login, github_user_id) or _normalize_text(
+            cached_email_for_login(github_login)
+        )
+        if commit_email:
+            commit_name = display_name or github_login
+            return CollaboratorIdentity(
+                display_name=commit_name,
+                commit_name=commit_name,
+                commit_email=commit_email,
+                github_login=github_login,
+            )
+    commit_email = _normalize_text(configurable.get("user_email")) or _normalize_text(
+        slack_thread.get("triggering_user_email")
+    )
+    if display_name and commit_email:
+        return CollaboratorIdentity(
+            display_name=display_name,
+            commit_name=display_name,
+            commit_email=commit_email,
+        )
+    return None
+
+
+def resolve_triggering_user_identity(
+    config: dict[str, Any],
+    github_token: str | None = None,
+) -> CollaboratorIdentity | None:
+    """Resolve the triggering user's git identity.
+
+    Prefer the GitHub account identity derived from the token when available.
+    Fall back to config metadata when the run originated from GitHub or when
+    Slack/Linear supplied an explicit user name and email.
+    """
+
+    return _identity_from_github_token(github_token) or _identity_from_config(config)
+
+
+def add_bot_coauthor_trailer(commit_message: str) -> str:
+    """Append the open-swe[bot] Co-authored-by trailer.
+
+    Commits are authored by the triggering user (via the repo-local git
+    identity); open-swe[bot] is credited as the collaborator.
+    """
+    normalized_message = commit_message.rstrip()
+    trailer = f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
+    if trailer in normalized_message:
+        return normalized_message
+    return f"{normalized_message}\n\n{trailer}"
+
+
+def add_pr_collaboration_note(
+    pr_body: str,
+    identity: CollaboratorIdentity | None = None,
+    thread_url: str | None = None,
+) -> str:
+    """Append the Open SWE attribution footer to a PR body.
+
+    The PR is opened as the triggering user, so the body only credits Open SWE
+    as the collaborator. The footer links the run's thread when available. Any
+    legacy double-attribution footer is replaced.
+    """
+
+    normalized_body = pr_body.rstrip()
+    note = build_pr_attribution_footer(thread_url)
+    if note in normalized_body:
+        return normalized_body
+    if PR_ATTRIBUTION_TEXT in normalized_body:
+        return normalized_body
+
+    legacy_footers: list[str] = []
+    if identity is not None:
+        legacy_footers.append(
+            f"_Opened collaboratively by {identity.pr_attribution_name} and open-swe._"
+        )
+        legacy_footers.append(f"_Opened collaboratively by {identity.display_name} and open-swe._")
+    for legacy in legacy_footers:
+        if legacy in normalized_body:
+            return normalized_body.replace(legacy, note)
+
+    if not normalized_body:
+        return note
+    return f"{normalized_body}\n\n{note}"

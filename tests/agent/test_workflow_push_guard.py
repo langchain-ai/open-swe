@@ -7,7 +7,7 @@ from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 
 from agent.middleware import workflow_push_guard as guard
-from agent.utils.sandbox_proxy import SandboxBackendProxy
+from agent.sandboxes.proxy import SandboxBackendProxy
 
 
 class _Response:

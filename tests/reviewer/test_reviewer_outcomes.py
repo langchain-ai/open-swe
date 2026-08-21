@@ -1,8 +1,8 @@
 from typing import Any, cast
 
+from agent.review import outcomes as reviewer_outcomes
 from agent.review.findings import Finding
-from agent.utils import reviewer_outcomes
-from agent.utils.reviewer_outcomes import (
+from agent.review.outcomes import (
     FALSE_POSITIVE,
     TRUE_POSITIVE,
     emit_finding_status_outcome,

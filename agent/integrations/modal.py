@@ -5,7 +5,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_modal import ModalSandbox
 
 from ..config import modal_app_name
-from ..utils.sandbox import SandboxGoneError, SandboxProvider
+from ..sandboxes.providers import SandboxGoneError, SandboxProvider
 
 
 class ModalProvider(SandboxProvider):

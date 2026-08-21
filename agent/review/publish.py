@@ -21,15 +21,15 @@ from typing import Any, TypedDict
 
 import httpx
 
-from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.github_checks import CheckConclusion, complete_review_check_run
-from ..utils.github_http import (
+from ..github.api import (
     GITHUB_API_BASE,
     GITHUB_GRAPHQL,
     github_client,
     github_request,
 )
-from ..utils.github_token import GitHubAuthError
+from ..github.checks import CheckConclusion, complete_review_check_run
+from ..github.token import GitHubAuthError
+from ..utils.dashboard_links import dashboard_thread_url
 from .findings import (
     DiffSide,
     Finding,

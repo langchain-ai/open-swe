@@ -16,23 +16,23 @@ import httpx
 
 from ..config import agent_version_metadata, langgraph_client
 from ..dispatch import dispatch_agent_run
-from ..input_messages import InputMessageContext, SystemIdentity, github_person
-from ..settings.enabled_repos import is_review_repo_enabled
-from ..settings.profiles import get_profile
-from ..settings.team_settings import get_team_settings
-from ..thread_ids import reviewer_thread_id
-from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.github_app import get_github_app_installation_token_with_expiry
-from ..utils.github_checks import complete_review_check_run, create_review_check_run
-from ..utils.github_ci import fetch_open_pr_for_branch, fetch_pr
-from ..utils.github_http import (
+from ..github.api import (
     GITHUB_DIFF_ACCEPT,
     github_client,
     github_request,
     github_url,
 )
-from ..utils.github_refs import GitHubPrRef
-from ..utils.thread_ops import ensure_thread_exists, fetch_thread_metadata
+from ..github.app import get_github_app_installation_token_with_expiry
+from ..github.checks import complete_review_check_run, create_review_check_run
+from ..github.ci import fetch_open_pr_for_branch, fetch_pr
+from ..github.refs import GitHubPrRef
+from ..input_messages import InputMessageContext, SystemIdentity, github_person
+from ..settings.enabled_repos import is_review_repo_enabled
+from ..settings.profiles import get_profile
+from ..settings.team_settings import get_team_settings
+from ..threads.ids import reviewer_thread_id
+from ..threads.ops import ensure_thread_exists, fetch_thread_metadata
+from ..utils.dashboard_links import dashboard_thread_url
 from .findings import (
     REVIEWER_THREAD_KIND,
     FindingInteraction,

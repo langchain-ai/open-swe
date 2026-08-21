@@ -8,7 +8,7 @@ from langchain_runloop import RunloopSandbox
 from runloop_api_client import NotFoundError
 
 from agent.integrations.runloop import RunloopProvider
-from agent.utils.sandbox import SandboxGoneError
+from agent.sandboxes.providers import SandboxGoneError
 
 
 @pytest.fixture(autouse=True)

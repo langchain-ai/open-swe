@@ -15,7 +15,8 @@ from typing import Any
 import httpx
 import pytest
 
-from agent.utils import github_comments, github_token
+from agent.github import comments as github_comments
+from agent.github import token as github_token
 from agent.utils.timestamps import is_expired
 from agent.webhooks import github as github_webhooks
 

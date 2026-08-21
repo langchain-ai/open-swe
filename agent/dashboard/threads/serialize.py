@@ -8,11 +8,11 @@ re-guessed by each endpoint that returns a thread.
 from collections.abc import Mapping
 from typing import Any
 
+from ...github.refs import parse_github_pr_url
+from ...langsmith.api import get_langsmith_trace_url
 from ...settings.options import SUPPORTED_MODEL_IDS, canonical_model_pair
 from ...store import now_ms
-from ...utils.github_refs import parse_github_pr_url
 from ...utils.json_types import JsonObject, ThreadLike, as_json_object, thread_metadata
-from ...utils.langsmith import get_langsmith_trace_url
 from ..authz import thread_owner_login, thread_source, user_owns_thread
 
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.

@@ -1,6 +1,6 @@
 from typing import Any
 
-from ..utils.linear import update_issue
+from ..linear.api import update_issue
 
 
 async def linear_update_issue(

@@ -18,6 +18,8 @@ from ..config import (
     slack_repo_owner,
 )
 from ..dispatch import dispatch_agent_run
+from ..github.auth import is_bot_token_only_mode
+from ..github.refs import extract_repo_from_text
 from ..input_messages import (
     InputMessageContext,
     MessageKind,
@@ -30,6 +32,7 @@ from ..input_messages import (
     system_input,
     system_introduction,
 )
+from ..langsmith.api import get_langsmith_trace_url
 from ..settings.agent_overrides import resolve_agent_model_id
 from ..settings.environments import get_environment, parse_environment_tag
 from ..settings.github_tokens import get_valid_access_token, has_access_token_record
@@ -37,14 +40,7 @@ from ..settings.options import default_vision_model_pair, model_supports_images
 from ..settings.team_settings import get_team_default_repo
 from ..settings.user_mappings import login_for_email, login_for_slack_id
 from ..settings.user_mappings import refresh_cache as refresh_user_mapping_cache
-from ..utils.auth import is_bot_token_only_mode
-from ..utils.dashboard_links import build_settings_url, dashboard_thread_url
-from ..utils.http import DEFAULT_HTTP_TIMEOUT
-from ..utils.json_types import ThreadLike, as_json_object, as_thread_dict
-from ..utils.langsmith import get_langsmith_trace_url
-from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
-from ..utils.repo import extract_repo_from_text
-from ..utils.slack_api import (
+from ..slack.api import (
     fetch_slack_thread_messages,
     get_slack_channel_context,
     get_slack_channel_description,
@@ -54,7 +50,7 @@ from ..utils.slack_api import (
     post_slack_thread_reply,
     resolve_slack_links_in_context,
 )
-from ..utils.slack_format import (
+from ..slack.format import (
     format_slack_messages_for_prompt,
     get_slack_channel_context_description,
     is_own_slack_message,
@@ -66,12 +62,12 @@ from ..utils.slack_format import (
     slack_message_bot_name,
     strip_bot_mention,
 )
-from ..utils.slack_threads import (
+from ..slack.threads import (
     lookup_slack_thread_id,
     resolve_slack_thread_id,
     store_slack_run_mapping,
 )
-from ..utils.thread_ops import (
+from ..threads.ops import (
     fetch_thread_metadata,
     get_thread_environment,
     get_thread_plan_mode,
@@ -79,6 +75,10 @@ from ..utils.thread_ops import (
     thread_exists,
     upsert_agent_thread_owner_metadata,
 )
+from ..utils.dashboard_links import build_settings_url, dashboard_thread_url
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
+from ..utils.json_types import ThreadLike, as_json_object, as_thread_dict
+from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from ..utils.user_messages import warning
 from .repo_config import profile_default_repo_for_email
 

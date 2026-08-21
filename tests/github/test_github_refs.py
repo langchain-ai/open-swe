@@ -1,4 +1,4 @@
-from agent.utils.github_refs import parse_github_pr_url
+from agent.github.refs import parse_github_pr_url
 
 
 def test_parse_github_pr_url_raw_url() -> None:

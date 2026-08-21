@@ -13,7 +13,7 @@ from ..settings.user_credentials import (
     get_notion_status,
 )
 from ..settings.user_instructions import get_user_instructions
-from ..utils.thread_participants import resolve_thread_participant_logins
+from ..threads.participants import resolve_thread_participant_logins
 
 _PROFILE_SETTING_KEYS = (
     "default_model",

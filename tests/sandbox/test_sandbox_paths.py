@@ -6,9 +6,9 @@ import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from support.sandbox_fakes import FakeSandboxBackend
 
-from agent.utils.sandbox import SandboxProvider
-from agent.utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
-from agent.utils.sandbox_proxy import SandboxBackendProxy
+from agent.sandboxes.paths import aresolve_repo_dir, aresolve_sandbox_work_dir
+from agent.sandboxes.providers import SandboxProvider
+from agent.sandboxes.proxy import SandboxBackendProxy
 
 
 class _FakeProvider(SandboxProvider):
@@ -38,7 +38,7 @@ InstallProvider = Callable[[_FakeProvider], _FakeProvider]
 @pytest.fixture
 def provider(monkeypatch: pytest.MonkeyPatch) -> InstallProvider:
     def install(fake: _FakeProvider) -> _FakeProvider:
-        monkeypatch.setattr("agent.utils.sandbox_paths.current_sandbox_provider", lambda: fake)
+        monkeypatch.setattr("agent.sandboxes.paths.current_sandbox_provider", lambda: fake)
         return fake
 
     return install

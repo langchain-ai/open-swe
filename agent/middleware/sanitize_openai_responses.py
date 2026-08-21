@@ -8,7 +8,7 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, AnyMessage
 from langchain_openai import ChatOpenAI
 
-from ..utils.model import unwrap_chat_model
+from ..models.factory import unwrap_chat_model
 
 
 def _is_stateless_chat_openai(model: object) -> bool:

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.utils import slack_api
+from agent.slack import api as slack_api
 
 
 def _ok_response() -> MagicMock:

@@ -16,11 +16,11 @@ import logging
 from typing import Any
 
 from .config import langgraph_client, run_complete_webhook_secret
+from .github.app import get_github_app_installation_token
 from .review.findings import REVIEWER_THREAD_KIND
 from .review.publish import settle_review_check_run
 from .session_cost import schedule_session_cost_refresh
 from .utils.dashboard_links import dashboard_thread_url
-from .utils.github_app import get_github_app_installation_token
 from .utils.source_channel import notify_source_channel, source_context_from_thread_metadata
 from .utils.user_messages import warning
 

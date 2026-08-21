@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import agent.tools.open_pull_request  # noqa: F401
+from agent.github import api as github_api
+from agent.github import run_references
 from agent.settings import agent_usage
-from agent.utils import github_http, run_references
 
 opr = sys.modules["agent.tools.open_pull_request"]
 
@@ -79,7 +80,7 @@ class _BoundClient:
 
 def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _RoutingClient) -> None:
     monkeypatch.setattr(
-        github_http.httpx,
+        github_api.httpx,
         "AsyncClient",
         lambda **kwargs: client.bind(dict(kwargs.get("headers") or {})),
     )

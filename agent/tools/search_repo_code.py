@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 from langgraph.config import get_config
 
-from ..utils.github_http import (
+from ..github.api import (
     GITHUB_TEXT_MATCH_ACCEPT,
     github_client,
     github_request,

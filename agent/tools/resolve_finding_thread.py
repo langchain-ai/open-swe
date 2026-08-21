@@ -4,15 +4,15 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from ..github.token import get_github_token
 from ..review.findings import (
     TERMINAL_FINDING_STATUSES,
     ReviewerThreadMissingError,
     get_thread_id_from_runtime,
     thread_missing_tool_result,
 )
+from ..review.outcomes import emit_finding_status_outcome
 from ..review.thread_resolution import resolve_finding_on_github
-from ..utils.github_token import get_github_token
-from ..utils.reviewer_outcomes import emit_finding_status_outcome
 
 
 async def resolve_finding_thread(

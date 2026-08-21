@@ -8,7 +8,7 @@ from langchain_core.tools import BaseTool
 
 from ..settings.notion_oauth import NOTION_MCP_URL
 from ..settings.user_credentials import get_notion_access_token
-from ..utils.thread_participants import resolve_participant
+from ..threads.participants import resolve_participant
 
 logger = logging.getLogger(__name__)
 

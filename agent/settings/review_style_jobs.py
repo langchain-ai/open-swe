@@ -11,7 +11,7 @@ from ..review.style_collector import (
     collect_review_samples,
     format_samples_for_analyzer,
 )
-from ..thread_ids import review_style_thread_id
+from ..threads.ids import review_style_thread_id
 from ..utils.analyzer_skills import build_skill_files
 from .review_styles import (
     get_review_style,

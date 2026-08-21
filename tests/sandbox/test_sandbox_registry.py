@@ -8,7 +8,7 @@ import pytest
 from deepagents.backends.protocol import SandboxBackendProtocol
 from support.sandbox_fakes import FakeSandboxBackend
 
-from agent.utils.sandbox_registry import (
+from agent.sandboxes.registry import (
     SANDBOX_BACKENDS,
     clear_sandbox_backend,
     get_or_create_sandbox_backend_proxy,
@@ -34,10 +34,10 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
         return FakeSandboxBackend()
 
     monkeypatch.setattr(
-        "agent.utils.sandbox_registry.get_sandbox_id_from_metadata",
+        "agent.sandboxes.registry.get_sandbox_id_from_metadata",
         get_sandbox_id_from_metadata,
     )
-    monkeypatch.setattr("agent.utils.sandbox_registry.create_sandbox", create_sandbox)
+    monkeypatch.setattr("agent.sandboxes.registry.create_sandbox", create_sandbox)
 
     proxy = get_or_create_sandbox_backend_proxy(thread_id)
     assert SANDBOX_BACKENDS[thread_id] is proxy
@@ -72,7 +72,7 @@ async def test_sandbox_proxy_uses_registered_reconnect_once(
     async def create_sandbox(sandbox_id: str):
         raise AssertionError(f"unexpected direct reconnect to {sandbox_id}")
 
-    monkeypatch.setattr("agent.utils.sandbox_registry.create_sandbox", create_sandbox)
+    monkeypatch.setattr("agent.sandboxes.registry.create_sandbox", create_sandbox)
 
     proxy = get_or_create_sandbox_backend_proxy(
         thread_id,
@@ -101,7 +101,7 @@ async def test_missing_sandbox_id_in_metadata_fails_the_reconnect(
     async def no_sandbox_id(requested_thread_id: str) -> None:
         return None
 
-    monkeypatch.setattr("agent.utils.sandbox_registry.get_sandbox_id_from_metadata", no_sandbox_id)
+    monkeypatch.setattr("agent.sandboxes.registry.get_sandbox_id_from_metadata", no_sandbox_id)
 
     proxy = get_or_create_sandbox_backend_proxy(thread_id)
 
@@ -167,11 +167,11 @@ async def test_sandbox_id_metadata_falls_back_to_live_thread(
     )
 
     monkeypatch.setattr(
-        "agent.utils.sandbox_registry.get_config",
+        "agent.sandboxes.registry.get_config",
         lambda: {"metadata": {}},
     )
     monkeypatch.setattr(
-        "agent.utils.sandbox_registry.get_client",
+        "agent.sandboxes.registry.get_client",
         lambda: SimpleNamespace(threads=threads),
     )
 

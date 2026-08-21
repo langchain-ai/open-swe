@@ -7,7 +7,7 @@ from e2b import NotFoundException, Sandbox
 from langchain_e2b import E2BSandbox
 
 from ..config import e2b_api_key, e2b_template
-from ..utils.sandbox import SandboxGoneError, SandboxProvider
+from ..sandboxes.providers import SandboxGoneError, SandboxProvider
 
 DEFAULT_E2B_SANDBOX_TIMEOUT = 60 * 60
 # E2B's own default home, made explicit so the directory commands run in and the

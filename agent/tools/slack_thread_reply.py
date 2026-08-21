@@ -6,10 +6,10 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from ..config import langgraph_client
-from ..utils.run_usage import RunUsageSummary, summarize_run_usage
-from ..utils.slack_api import post_slack_thread_reply_with_ts
-from ..utils.slack_format import convert_mentions_to_slack_format
-from ..utils.slack_threads import get_active_slack_thread, store_slack_message_run_mapping
+from ..langsmith.run_usage import RunUsageSummary, summarize_run_usage
+from ..slack.api import post_slack_thread_reply_with_ts
+from ..slack.format import convert_mentions_to_slack_format
+from ..slack.threads import get_active_slack_thread, store_slack_message_run_mapping
 
 
 async def slack_thread_reply(

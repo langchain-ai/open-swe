@@ -12,11 +12,8 @@ from langgraph_sdk.errors import ConflictError
 
 from .config import in_process_langgraph_client
 from .dispatch import dispatch_agent_run
-from .scheduling.crons import delete_cron, ensure_scheduler_cron
-from .store import delete_value, get_value, now_iso, put_value, search_all_values
-from .thread_ids import baby_sit_lock_thread_id
-from .utils.github_app import get_github_app_installation_token
-from .utils.github_ci import (
+from .github.app import get_github_app_installation_token
+from .github.ci import (
     FAILING_CONCLUSIONS,
     branch_from_check_payload,
     fetch_pr,
@@ -25,7 +22,10 @@ from .utils.github_ci import (
     list_check_runs,
     list_commit_statuses,
 )
-from .utils.github_refs import GitHubPrRef
+from .github.refs import GitHubPrRef
+from .scheduling.crons import delete_cron, ensure_scheduler_cron
+from .store import delete_value, get_value, now_iso, put_value, search_all_values
+from .threads.ids import baby_sit_lock_thread_id
 from .utils.source_channel import notify_source_channel, source_context_from_watch
 
 logger = logging.getLogger(__name__)

@@ -7,7 +7,7 @@ from langgraph.config import get_config
 
 from ..review.diff import changed_files, materialize_review_diff, review_diff_range
 from ..runtime import get_cached_sandbox_backend
-from ..utils.sandbox_paths import aresolve_sandbox_work_dir
+from ..sandboxes.paths import aresolve_sandbox_work_dir
 
 _MAX_CHANGED_FILES = 200
 _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")

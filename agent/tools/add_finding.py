@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from ..github.token import get_github_token
 from ..review.diff import is_range_in_diff
 from ..review.findings import (
     CONFIDENCES,
@@ -26,7 +27,6 @@ from ..review.findings import (
     thread_missing_tool_result,
 )
 from ..review.publish_flow import resolve_diff_context
-from ..utils.github_token import get_github_token
 
 
 async def add_finding(

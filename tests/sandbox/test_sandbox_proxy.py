@@ -11,7 +11,7 @@ from deepagents.backends.protocol import (
 from deepagents.backends.sandbox import BaseSandbox
 from support.sandbox_fakes import FakeSandboxBackend
 
-from agent.utils.sandbox_proxy import SandboxBackendProxy, unwrap_sandbox_backend
+from agent.sandboxes.proxy import SandboxBackendProxy, unwrap_sandbox_backend
 
 
 class _OffloadCapableBackend(BaseSandbox):

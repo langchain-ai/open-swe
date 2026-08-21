@@ -11,9 +11,9 @@ from typing import Any
 from deepagents.backends.protocol import SandboxBackendProtocol
 
 from ..integrations.langsmith_tools import _client
+from ..langsmith.api import get_langsmith_trace_url
 from ..settings.team_credentials import get_langsmith_credentials
 from ..settings.team_settings import get_team_review_tracing_project
-from ..utils.langsmith import get_langsmith_trace_url
 from ..utils.timestamps import parse_expiry
 
 logger = logging.getLogger(__name__)
