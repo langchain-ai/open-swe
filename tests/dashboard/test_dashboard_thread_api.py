@@ -2359,7 +2359,10 @@ async def test_turn_diff_prefers_persisted_run_artifact(monkeypatch) -> None:
 
 
 async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) -> None:
-    metadata = {"sandbox_id": "sandbox-1"}
+    metadata = {
+        "sandbox_id": "sandbox-1",
+        "turn_checkpoints": [{"repo_path": "/work/repo"}],
+    }
     live = {
         "status": "ready",
         "files": [{"path": "new.py", "additions": 1, "deletions": 0}],
@@ -2369,13 +2372,17 @@ async def test_working_tree_diff_reads_live_sandbox_against_head(monkeypatch) ->
     monkeypatch.setattr(thread_api, "_readable_thread_metadata", AsyncMock(return_value=metadata))
     sandbox = object()
     monkeypatch.setattr(thread_api, "create_sandbox", AsyncMock(return_value=sandbox))
+    monkeypatch.setattr(
+        "agent.utils.sandbox_paths.aresolve_sandbox_work_dir",
+        AsyncMock(return_value="/work"),
+    )
     read_diff = AsyncMock(return_value=live)
     monkeypatch.setattr("agent.utils.turn_checkpoint.read_turn_diff", read_diff)
 
     result = await thread_api.get_dashboard_thread_working_tree_diff("thread-1", "owner")
 
     assert result == live
-    read_diff.assert_awaited_once_with(sandbox, None, "HEAD", None)
+    read_diff.assert_awaited_once_with(sandbox, "/work", "HEAD", None, repo_path="/work/repo")
 
 
 async def test_working_tree_diff_does_not_fall_back_to_persisted_artifact(monkeypatch) -> None:
