@@ -64,7 +64,7 @@ export interface ChatAttachment {
   snippet: string
 }
 
-interface ReviewChatComposer {
+export interface ReviewChatComposer {
   addAttachment: (attachment: ChatAttachment) => void
   registerSink: (fn: ((attachment: ChatAttachment) => void) | null) => void
 }
