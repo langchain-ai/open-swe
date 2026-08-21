@@ -1,4 +1,4 @@
-"""The user's GitHub OAuth tokens, encrypted at rest.
+"""The user's GitHub OAuth tokens: minted, refreshed, and encrypted at rest.
 
 They live in their own ``["oauth_tokens"]`` namespace, apart from the
 user-editable profile in ``["profiles"]``: each write touches only its own
@@ -8,14 +8,101 @@ clobbering each other's fields.
 
 from typing import Any
 
+import httpx
+
+from ..config import github_app_oauth
 from ..encryption import encrypt_token
 from ..store import now_iso
-from .oauth import is_unrecoverable_refresh_error, refresh_user_access_token
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from .token_vault import TokenFields, TokenVault, expires_at_from_response
 
 OAUTH_TOKENS_NAMESPACE: list[str] = ["oauth_tokens"]
 
 _FIELDS = TokenFields(access="encrypted_gh_token", refresh="encrypted_gh_refresh_token")
+
+GITHUB_OAUTH_TOKEN_URL = "https://github.com/login/oauth/access_token"
+
+
+class GithubOAuthError(Exception):
+    """A GitHub OAuth token endpoint error, carrying GitHub's ``error`` code.
+
+    ``status_code``/``detail`` are the HTTP answer the web layer should give;
+    it maps them itself so this module stays free of FastAPI.
+    """
+
+    def __init__(self, status_code: int, detail: str, *, error_code: str | None = None) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+        self.error_code = error_code
+
+
+# Error codes GitHub returns when a refresh token can never mint a new access
+# token again (the user must re-authorize). Anything else is treated as
+# transient so we don't needlessly drop a usable authorization.
+UNRECOVERABLE_REFRESH_ERROR_CODES = frozenset({"bad_refresh_token", "unauthorized_client"})
+
+
+def is_unrecoverable_refresh_error(exc: BaseException) -> bool:
+    """Whether ``exc`` means the stored refresh token is permanently dead."""
+    return (
+        isinstance(exc, GithubOAuthError)
+        and (exc.error_code or "") in UNRECOVERABLE_REFRESH_ERROR_CODES
+    )
+
+
+async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
+    client_id, client_secret = github_app_oauth()
+    if not client_id or not client_secret:
+        raise GithubOAuthError(500, "GitHub App OAuth not configured")
+    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+        resp = await client.post(
+            GITHUB_OAUTH_TOKEN_URL,
+            headers={"Accept": "application/json"},
+            data=body,
+        )
+    resp.raise_for_status()
+    data = resp.json()
+    if not isinstance(data, dict):
+        raise GithubOAuthError(502, "unexpected GitHub OAuth response")
+    if data.get("error"):
+        raise GithubOAuthError(
+            400,
+            f"github oauth error: {data.get('error_description') or data['error']}",
+            error_code=str(data["error"]),
+        )
+    return data
+
+
+async def exchange_code(code: str) -> dict[str, Any]:
+    """Exchange an OAuth authorization code for user-to-server tokens."""
+    client_id, client_secret = github_app_oauth()
+    data = await _request_github_tokens(
+        {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+        }
+    )
+    if not data.get("access_token"):
+        raise GithubOAuthError(400, f"oauth exchange failed: {data}")
+    return data
+
+
+async def refresh_user_access_token(refresh_token: str) -> dict[str, Any]:
+    """Rotate an expiring user access token using its refresh token."""
+    client_id, client_secret = github_app_oauth()
+    data = await _request_github_tokens(
+        {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+    )
+    if not data.get("access_token"):
+        raise GithubOAuthError(400, f"oauth refresh failed: {data}")
+    return data
 
 
 def _token_record(

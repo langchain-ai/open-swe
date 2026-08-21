@@ -20,7 +20,6 @@ from ..config import (
 from ..dashboard.agent_overrides import resolve_agent_model_id
 from ..dashboard.environments import get_environment, parse_environment_tag
 from ..dashboard.github_tokens import get_valid_access_token, has_access_token_record
-from ..dashboard.oauth import build_settings_url
 from ..dashboard.options import default_vision_model_pair, model_supports_images
 from ..dashboard.team_settings import get_team_default_repo
 from ..dashboard.user_mappings import login_for_email, login_for_slack_id
@@ -39,7 +38,7 @@ from ..input_messages import (
     system_introduction,
 )
 from ..utils.auth import is_bot_token_only_mode
-from ..utils.dashboard_links import dashboard_thread_url
+from ..utils.dashboard_links import build_settings_url, dashboard_thread_url
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.json_types import ThreadLike, as_json_object, as_thread_dict
 from ..utils.langsmith import get_langsmith_trace_url

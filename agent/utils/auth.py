@@ -19,6 +19,7 @@ from ..config import (
     service_auth_jwt_secret,
     user_id_api_key_map,
 )
+from .dashboard_links import build_settings_url
 from .github_app import get_github_app_installation_token_with_expiry
 from .github_token import (
     cache_github_token_for_thread,
@@ -264,8 +265,6 @@ async def leave_failure_comment(
             # which must not be posted in a shared thread (anyone could complete
             # it and bind the wrong account). Post a generic, token-free notice and
             # let the user finish sign-in from their own authenticated dashboard.
-            from ..dashboard.oauth import build_settings_url
-
             settings_url = build_settings_url()
             link = (
                 f"<{settings_url}|your Open SWE settings>"

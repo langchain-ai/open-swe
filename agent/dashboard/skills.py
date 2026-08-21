@@ -6,10 +6,23 @@ import json
 import re
 from typing import Any
 
-from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from ..store import delete_value, get_value, now_iso, put_value, search_values
+
+
+class SkillError(Exception):
+    """A skill request the store cannot satisfy.
+
+    ``status_code``/``detail`` are the HTTP answer the web layer should give;
+    it maps them itself so this module stays free of FastAPI.
+    """
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
 
 SKILLS_NAMESPACE = "user_skills"
 ORGANIZATION_SKILLS_NAMESPACE = "organization_skills"
@@ -110,7 +123,7 @@ async def _list_skills(namespace: list[str], *, limit: int, offset: int) -> dict
 
 async def _create_skill(namespace: list[str], body: SkillCreate) -> dict[str, Any]:
     if await _get_skill(namespace, body.name):
-        raise HTTPException(409, "skill already exists")
+        raise SkillError(409, "skill already exists")
     value = _record(body.name, body.description, body.instructions)
     await put_value(namespace, _key(body.name), value)
     return value
@@ -120,7 +133,7 @@ async def _update_skill(namespace: list[str], name: str, body: SkillUpdate) -> d
     SkillCreate(name=name, description=body.description, instructions=body.instructions)
     existing = await _get_skill(namespace, name)
     if not existing:
-        raise HTTPException(404, "skill not found")
+        raise SkillError(404, "skill not found")
     value = _record(name, body.description, body.instructions, existing)
     await put_value(namespace, _key(name), value)
     return value
@@ -129,7 +142,7 @@ async def _update_skill(namespace: list[str], name: str, body: SkillUpdate) -> d
 async def _delete_skill(namespace: list[str], name: str) -> None:
     SkillCreate(name=name, description="valid")
     if not await _get_skill(namespace, name):
-        raise HTTPException(404, "skill not found")
+        raise SkillError(404, "skill not found")
     await delete_value(namespace, _key(name))
 
 
@@ -161,7 +174,7 @@ def _decode_cursor(cursor: str | None) -> str:
     if cursor is None:
         return ""
     if not cursor:
-        raise HTTPException(400, "invalid cursor")
+        raise SkillError(400, "invalid cursor")
     try:
         encoded = cursor.encode("ascii")
         payload = json.loads(
@@ -174,16 +187,16 @@ def _decode_cursor(cursor: str | None) -> str:
         json.JSONDecodeError,
         ValueError,
     ):
-        raise HTTPException(400, "invalid cursor") from None
+        raise SkillError(400, "invalid cursor") from None
     if not isinstance(payload, dict) or set(payload) != {"name"}:
-        raise HTTPException(400, "invalid cursor")
+        raise SkillError(400, "invalid cursor")
     name = payload["name"]
     if (
         not isinstance(name, str)
         or not 1 <= len(name) <= MAX_SKILL_NAME_CHARS
         or not _SKILL_NAME_RE.fullmatch(name)
     ):
-        raise HTTPException(400, "invalid cursor")
+        raise SkillError(400, "invalid cursor")
     return name
 
 
@@ -191,7 +204,7 @@ async def list_organization_skills(*, limit: int, cursor: str | None) -> dict[st
     after = _decode_cursor(cursor)
     found = await search_values(_organization_namespace(), limit=MAX_ORGANIZATION_SKILLS + 1)
     if len(found) > MAX_ORGANIZATION_SKILLS:
-        raise HTTPException(409, "organization skill limit exceeded; delete a skill to continue")
+        raise SkillError(409, "organization skill limit exceeded; delete a skill to continue")
     skills = sorted(
         (value for value in found if value.get("name", "") > after),
         key=lambda skill: skill.get("name", ""),
@@ -206,7 +219,7 @@ async def list_organization_skills(*, limit: int, cursor: str | None) -> dict[st
 async def create_organization_skill(body: SkillCreate) -> dict[str, Any]:
     existing = await search_values(_organization_namespace(), limit=MAX_ORGANIZATION_SKILLS)
     if len(existing) >= MAX_ORGANIZATION_SKILLS:
-        raise HTTPException(409, "organization skill limit reached")
+        raise SkillError(409, "organization skill limit reached")
     return await _create_skill(_organization_namespace(), body)
 
 

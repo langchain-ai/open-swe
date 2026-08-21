@@ -7,7 +7,7 @@ from cryptography.fernet import Fernet
 from support.langgraph_fakes import FakeLangGraphClient, FakeStore
 
 from agent.dashboard import notion_oauth as no
-from agent.dashboard.oauth import s256_challenge
+from agent.utils.pkce import s256_challenge
 
 
 @pytest.fixture()

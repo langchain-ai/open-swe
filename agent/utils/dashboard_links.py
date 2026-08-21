@@ -4,6 +4,22 @@ from urllib.parse import quote
 
 from ..config import dashboard_base_url
 
+# Dashboard route where users manage their GitHub↔Slack link.
+PROFILE_SETTINGS_PATH = "/my-settings"
+
+
+def build_settings_url() -> str | None:
+    """Return the dashboard Profile Settings URL, or ``None`` if not configured.
+
+    This is a plain, token-free link: it carries no per-user identity, so it is
+    safe to share in a public Slack thread. The user signs in with GitHub from
+    their own session and connects Slack via verified OIDC on the settings page.
+    """
+    frontend_base = dashboard_base_url()
+    if not frontend_base:
+        return None
+    return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
+
 
 def dashboard_thread_url(thread_id: str) -> str | None:
     """Build the dashboard thread URL for a given thread id."""
