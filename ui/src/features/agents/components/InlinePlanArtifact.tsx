@@ -2,8 +2,8 @@ import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { ArrowUpRight } from "lucide-react"
 
+import { Markdown } from "@/components/markdown/Markdown"
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
-import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { getPlan } from "@/lib/plan"
 
 export function InlinePlanArtifact({ threadId }: { threadId: string }) {

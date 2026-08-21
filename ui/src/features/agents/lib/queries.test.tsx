@@ -15,7 +15,7 @@ import {
 } from "./queries"
 import type { InfiniteData } from "@tanstack/react-query"
 import type { ThreadTurnDiff, ThreadsPage, ThreadsPageParams } from "./api"
-import type { AgentThread } from "./types"
+import type { AgentThread } from "@/lib/agentTypes"
 
 const params: ThreadsPageParams = {
   limit: 100,

@@ -1,4 +1,4 @@
-import type { AcpToolKind } from "@/features/agents/lib/types"
+import type { AcpToolKind } from "@/lib/agentTypes"
 import { humanizeToolName } from "@/features/agents/lib/toolNames"
 
 function pathName(path: string): string {

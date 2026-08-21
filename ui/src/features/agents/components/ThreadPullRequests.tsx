@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { ChevronDown, ChevronUp, GitPullRequest } from "lucide-react"
 
-import type { AgentPullRequest } from "@/features/agents/lib/types"
+import type { AgentPullRequest } from "@/lib/agentTypes"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"

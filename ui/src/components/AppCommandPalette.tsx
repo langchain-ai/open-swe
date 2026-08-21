@@ -10,7 +10,7 @@ import {
 import { useEffect, useMemo, useState } from "react"
 
 import type { AppCommand } from "@/lib/appCommands"
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/lib/agentTypes"
 import type { DesktopLocalThreadSummary } from "@/desktop"
 import { Kbd } from "@/components/ui/kbd"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"

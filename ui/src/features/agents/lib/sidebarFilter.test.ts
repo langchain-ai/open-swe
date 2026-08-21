@@ -10,7 +10,7 @@ import {
   toggleArrayValue,
 } from "./sidebarFilter"
 import type { SidebarFilters } from "./sidebarFilter"
-import type { AgentThread } from "./types"
+import type { AgentThread } from "@/lib/agentTypes"
 
 const DAY = 24 * 60 * 60 * 1000
 

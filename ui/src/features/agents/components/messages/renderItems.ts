@@ -1,4 +1,4 @@
-import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
+import type { Chunk, ToolExecutionChunk } from "@/lib/agentTypes"
 
 export type RenderItem =
   | { type: "text-chunk"; key: string; chunk: Chunk }

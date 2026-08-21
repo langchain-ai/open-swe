@@ -11,7 +11,7 @@ import {
   SidebarSimpleIcon,
 } from "@phosphor-icons/react"
 
-import type { AgentPullRequest } from "@/features/agents/lib/types"
+import type { AgentPullRequest } from "@/lib/agentTypes"
 import type {
   PanelThreadRef,
   RightPanelSurface,

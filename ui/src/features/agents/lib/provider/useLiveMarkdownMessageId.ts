@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 
-import type { Message } from "@/features/agents/lib/types"
+import type { Message } from "@/lib/agentTypes"
 
 /** How long run-idle must persist before clearing the live markdown target. */
 const LIVE_MARKDOWN_CLEAR_MS = 2000

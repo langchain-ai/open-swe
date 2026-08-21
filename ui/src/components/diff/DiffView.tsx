@@ -1,8 +1,8 @@
 import { useMemo } from "react"
 import { MultiFileDiff } from "@pierre/diffs/react"
-import type { DiffData } from "@/features/agents/lib/types"
-import { useDiffOptions } from "@/features/agents/utils/diffUtils"
-import { countLineChanges } from "@/features/agents/utils/diffStats"
+import type { DiffData } from "@/lib/agentTypes"
+import { useDiffOptions } from "@/components/diff/diffUtils"
+import { countLineChanges } from "@/components/diff/diffStats"
 
 interface DiffViewProps {
   diffData: DiffData

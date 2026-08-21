@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/lib/agentTypes"
 import { AgentsApiError, agentsApi } from "@/features/agents/lib/api"
 import {
   agentThreadKeys,

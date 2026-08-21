@@ -1,7 +1,7 @@
 import { Menu } from "@base-ui/react/menu"
 import { CaretRightIcon, CheckIcon, FunnelIcon } from "@phosphor-icons/react"
 
-import type { AgentSource, AgentStatus } from "@/features/agents/lib/types"
+import type { AgentSource, AgentStatus } from "@/lib/agentTypes"
 import type {
   PrFilter,
   SidebarFacets,

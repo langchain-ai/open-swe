@@ -2,7 +2,7 @@ import { memo } from "react"
 import { Bot, Loader2 } from "lucide-react"
 
 import { SubagentActivity } from "./SubagentActivity"
-import type { ToolExecutionChunk } from "@/features/agents/lib/types"
+import type { ToolExecutionChunk } from "@/lib/agentTypes"
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 
 /** Coerce an unknown tool-argument value to a trimmed string, or `""`. */

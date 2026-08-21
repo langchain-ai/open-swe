@@ -30,7 +30,7 @@ import type { ComponentType, SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import type { DesktopLocalThreadSummary, DesktopProject } from "@/desktop"
-import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
+import type { AgentSource, AgentThread } from "@/lib/agentTypes"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { DesktopThreadSourceToggle } from "@/features/agents/components/DesktopThreadSourceToggle"

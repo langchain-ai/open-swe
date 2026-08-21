@@ -13,8 +13,7 @@ import { CaretDownIcon } from "@phosphor-icons/react"
 import type { FileContents } from "@pierre/diffs/react"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
-import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
-import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
+import { DiffWrapToggle } from "@/components/diff/DiffWrapToggle"
 import {
   DIFF_VIRTUALIZER_CONFIG,
   DIFF_VIRTUAL_METRICS,
@@ -22,7 +21,11 @@ import {
   DIFF_WORKER_POOL_OPTIONS,
   fileContentsCacheKey,
   useDiffOptions,
-} from "@/features/agents/utils/diffUtils"
+} from "@/components/diff/diffUtils"
+import {
+  TREE_UNSAFE_CSS,
+  treeThemeStyle,
+} from "@/components/diff/fileTreeTheme"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -35,92 +38,6 @@ export interface PanelFile {
   modifiedContent: string
   status: GitStatus
   unrenderable?: boolean
-}
-
-function prFileStatus(file: ThreadPrDiffFile): GitStatus {
-  if (file.status === "added") return "added"
-  if (file.status === "removed") return "deleted"
-  return "modified"
-}
-
-export function commonDirPrefix(paths: Array<string>): string {
-  const first = paths[0]
-  if (paths.length === 0 || first === undefined) return ""
-  const base = first.split("/").slice(0, -1)
-  let depth = base.length
-  for (const path of paths) {
-    const segments = path.split("/").slice(0, -1)
-    let i = 0
-    while (i < depth && i < segments.length && segments[i] === base[i]) i++
-    depth = i
-  }
-  return depth === 0 ? "" : `${base.slice(0, depth).join("/")}/`
-}
-
-export function toPanelFiles(
-  diffFiles: Array<ThreadPrDiffFile>
-): Array<PanelFile> {
-  const prefix = commonDirPrefix(diffFiles.map((file) => file.path))
-  return diffFiles.map((file) => ({
-    filePath: file.path,
-    treePath:
-      prefix && file.path.startsWith(prefix)
-        ? file.path.slice(prefix.length)
-        : file.path,
-    additions: file.additions,
-    deletions: file.deletions,
-    originalContent: file.originalContent ?? "",
-    modifiedContent: file.modifiedContent ?? "",
-    status: prFileStatus(file),
-    unrenderable: file.unrenderable,
-  }))
-}
-
-// Neutral filename foreground from the pierre Shiki themes (pierre-light /
-// pierre-dark sidebar foreground). The tree tints filename text by git status,
-// so feeding this keeps names neutral grey/white instead of accent-blue.
-const TREE_FILE_FG = "light-dark(#525252, #a3a3a3)"
-
-// Selected rows must read as high-contrast (white in dark, near-black in light)
-// while the rest stay neutral. The built-in git-status content color outranks
-// the selection color by specificity, so override it from the `unsafe` layer.
-export const TREE_UNSAFE_CSS = `
-  [data-item-selected="true"] [data-item-section="content"] {
-    color: var(--trees-selected-fg);
-  }
-
-  /* On click a row is focus-ringed a frame before it's marked selected, which
-   * flashes the accent outline. Pointer focus doesn't match :focus-visible, so
-   * drop the ring there; keyboard navigation keeps it. */
-  [data-item-focused="true"]:not(:focus-visible)::before {
-    outline-color: transparent;
-  }
-`
-
-export function treeThemeStyle(): React.CSSProperties {
-  return {
-    "--trees-theme-sidebar-bg": "var(--card)",
-    "--trees-theme-sidebar-fg": "var(--foreground)",
-    "--trees-theme-sidebar-border": "var(--border)",
-    "--trees-theme-sidebar-header-fg": "var(--muted-foreground)",
-    "--trees-theme-list-hover-bg":
-      "color-mix(in oklab, var(--primary) 10%, transparent)",
-    "--trees-theme-list-active-selection-bg":
-      "color-mix(in oklab, var(--primary) 22%, transparent)",
-    "--trees-theme-list-active-selection-fg": "var(--foreground)",
-    "--trees-selected-focused-border-color-override": "transparent",
-    "--trees-theme-input-bg": "var(--card)",
-    "--trees-theme-input-fg": "var(--foreground)",
-    "--trees-theme-input-border": "var(--border)",
-    "--trees-theme-focus-ring": "var(--primary)",
-    "--trees-theme-scrollbar-thumb": "var(--border)",
-    "--trees-theme-git-added-fg": TREE_FILE_FG,
-    "--trees-theme-git-modified-fg": TREE_FILE_FG,
-    "--trees-theme-git-deleted-fg": TREE_FILE_FG,
-    "--trees-theme-git-renamed-fg": TREE_FILE_FG,
-    "--trees-theme-git-untracked-fg": TREE_FILE_FG,
-    "--trees-theme-git-ignored-fg": "var(--muted-foreground)",
-  } as React.CSSProperties
 }
 
 interface DiffFilesViewProps {

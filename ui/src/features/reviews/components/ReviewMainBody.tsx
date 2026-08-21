@@ -67,9 +67,9 @@ import type {
   ReviewSidebarView,
 } from "@/features/reviews/components/ReviewSidebar"
 import type { ChatAttachment } from "@/features/reviews/components/ReviewChat"
-import type { DiffStyle } from "@/features/agents/utils/diffUtils"
-import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
+import type { DiffStyle } from "@/components/diff/diffUtils"
+import { Markdown } from "@/components/markdown/Markdown"
+import { DiffWrapToggle } from "@/components/diff/DiffWrapToggle"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
 import {
   ReviewChat,
@@ -88,7 +88,7 @@ import {
   fileContentsCacheKey,
   useDiffOptions,
   warmDiffHighlighter,
-} from "@/features/agents/utils/diffUtils"
+} from "@/components/diff/diffUtils"
 import { IconButton } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"

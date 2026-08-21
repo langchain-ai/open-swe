@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
-import type { Message, QueuedThreadMessage } from "@/features/agents/lib/types"
+import type { Message, QueuedThreadMessage } from "@/lib/agentTypes"
 
 describe("visibleQueuedMessages", () => {
   it("reconciles a queued follow-up with its streamed fallback timestamp", () => {

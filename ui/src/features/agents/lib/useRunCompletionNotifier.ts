@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react"
 
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/lib/agentTypes"
 import { showRunNotification } from "@/lib/notifications"
 
 const TERMINAL_STATUSES = new Set(["finished", "error", "interrupted"])

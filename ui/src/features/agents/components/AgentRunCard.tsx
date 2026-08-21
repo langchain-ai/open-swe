@@ -10,7 +10,7 @@ import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
 import type { ComponentType, SVGProps } from "react"
 
-import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
+import type { AgentSource, AgentThread } from "@/lib/agentTypes"
 import { cn, formatRelativeTime } from "@/lib/utils"
 
 type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>

@@ -1,4 +1,4 @@
-import type { Message, QueuedThreadMessage } from "@/features/agents/lib/types"
+import type { Message, QueuedThreadMessage } from "@/lib/agentTypes"
 
 function messageText(message: Message): string {
   return message.chunks

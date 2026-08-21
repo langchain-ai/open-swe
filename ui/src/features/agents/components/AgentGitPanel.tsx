@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { DownloadIcon } from "lucide-react"
 
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/lib/agentTypes"
 import { agentsApi } from "@/features/agents/lib/api"
 import { useAgentThreadTurnDiff } from "@/features/agents/lib/queries"
+import { toPanelFiles } from "@/features/agents/lib/panelFiles"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
-import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import {
   selectThreadRightPanelState,

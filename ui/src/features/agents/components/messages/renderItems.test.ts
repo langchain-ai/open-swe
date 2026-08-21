@@ -6,7 +6,7 @@ import {
   selectCollapsedTurnItems,
   splitWorkAndReply,
 } from "./renderItems"
-import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
+import type { Chunk, ToolExecutionChunk } from "@/lib/agentTypes"
 
 function iframeChunk(): ToolExecutionChunk {
   return {

@@ -1,4 +1,4 @@
-import type { AgentSource, AgentStatus, AgentThread } from "./types"
+import type { AgentSource, AgentStatus, AgentThread } from "@/lib/agentTypes"
 
 export type ThreadsLayout = "board" | "list"
 export type ThreadGrouping =

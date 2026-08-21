@@ -21,7 +21,7 @@ import {
 } from "lucide-react"
 
 import type { RightPanelSurface } from "@/features/agents/lib/rightPanelStore"
-import type { AgentPullRequest } from "@/features/agents/lib/types"
+import type { AgentPullRequest } from "@/lib/agentTypes"
 import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
 import {

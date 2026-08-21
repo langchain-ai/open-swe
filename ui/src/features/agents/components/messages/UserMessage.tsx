@@ -5,7 +5,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { SlackMrkdwn } from "./SlackMrkdwn"
-import type { Message } from "@/features/agents/lib/types"
+import type { Message } from "@/lib/agentTypes"
 
 export function UserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"

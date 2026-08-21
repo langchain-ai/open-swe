@@ -25,7 +25,7 @@ import { Menu } from "@base-ui/react/menu"
 import type { BaseMessage } from "@langchain/core/messages"
 
 import type { ReviewChatThread } from "@/lib/api"
-import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { Markdown } from "@/components/markdown/Markdown"
 import { IconButton } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -33,7 +33,7 @@ import { api, reviewChatApiBase } from "@/lib/api"
 import {
   collectStructuredEntities,
   parseStructuredInput,
-} from "@/features/agents/lib/structuredInputMessages"
+} from "@/lib/structuredInputMessages"
 import { cn } from "@/lib/utils"
 
 // --- Composer bridge ---------------------------------------------------------

@@ -13,11 +13,11 @@ import type {
   GitStatusEntry,
 } from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   TREE_UNSAFE_CSS,
   treeThemeStyle,
-} from "@/features/agents/components/DiffFilesView"
+} from "@/components/diff/fileTreeTheme"
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 
 function reviewFileGitStatus(status: ReviewDiffFile["status"]): GitStatus {

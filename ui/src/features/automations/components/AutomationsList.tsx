@@ -9,7 +9,7 @@ import {
   WarningCircleIcon,
 } from "@phosphor-icons/react"
 
-import type { AgentSchedule } from "@/features/agents/lib/types"
+import type { AgentSchedule } from "@/lib/agentTypes"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { AutomationTemplates } from "@/features/automations/components/AutomationTemplates"
 import { buttonVariants } from "@/components/ui/button"

@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/lib/agentTypes"
 import { ReviewMainBody } from "@/features/reviews/components/ReviewMainBody"
 import { api } from "@/lib/api"
 
