@@ -336,23 +336,42 @@ export function AgentsSidebar({
               onRemoveProject={(cwd) => void removeLocalProject(cwd)}
             />
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {visibleLocalGroups.map((group) => (
-                <LocalThreadGroup
-                  key={group.project.cwd}
-                  project={group.project}
-                  sessions={group.sessions}
-                  activeSessionId={activeLocalSessionId}
-                  onNavigate={layout.closeOnMobile}
-                  onDelete={deleteLocalSession}
-                  onRemove={() => void removeLocalProject(group.project.cwd)}
-                  compact={prefs.compact}
-                />
-              ))}
+              {activeProjectPath
+                ? visibleLocalGroups[0]?.sessions.map((session) => (
+                    <LocalThreadRow
+                      key={session.id}
+                      session={session}
+                      isActive={session.id === activeLocalSessionId}
+                      onNavigate={layout.closeOnMobile}
+                      onDelete={deleteLocalSession}
+                      compact={prefs.compact}
+                    />
+                  ))
+                : visibleLocalGroups.map((group) => (
+                    <LocalThreadGroup
+                      key={group.project.cwd}
+                      project={group.project}
+                      sessions={group.sessions}
+                      activeSessionId={activeLocalSessionId}
+                      onNavigate={layout.closeOnMobile}
+                      onDelete={deleteLocalSession}
+                      onRemove={() =>
+                        void removeLocalProject(group.project.cwd)
+                      }
+                      compact={prefs.compact}
+                    />
+                  ))}
               {localGroups.length === 0 && (
                 <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
                   No projects yet
                 </p>
               )}
+              {activeProjectPath &&
+                visibleLocalGroups[0]?.sessions.length === 0 && (
+                  <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
+                    No threads yet
+                  </p>
+                )}
             </div>
           </div>
         )}
