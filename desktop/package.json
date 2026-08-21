@@ -13,8 +13,9 @@
     "test": "pnpm run build && pnpm run test:run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build:ui",
-    "pack": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend && electron-builder --dir",
-    "dist": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend && electron-builder",
+    "build:app": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend",
+    "pack": "pnpm run build:app && electron-builder --dir",
+    "dist": "pnpm run build:app && electron-builder --publish never",
     "build:local-backend": "node scripts/build-local-backend.cjs"
   },
   "build": {
