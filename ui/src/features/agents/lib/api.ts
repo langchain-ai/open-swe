@@ -6,23 +6,9 @@ import type {
   SlackNotificationMode,
   WorkflowPushApprovalsResponse,
 } from "@/lib/agentTypes"
-import { dashboardApiBase } from "@/lib/api-base"
-import {
-  dashboardApiUrl,
-  dashboardForwardedHeaders,
-} from "@/lib/dashboard-fetch"
+import { dashboardApiHref, request, requestFile } from "@/lib/apiClient"
 
 export type { AgentSchedule, AgentThread, Message, SlackNotificationMode }
-
-export class AgentsApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string
-  ) {
-    super(message)
-    this.name = "AgentsApiError"
-  }
-}
 
 export interface ThreadMessageRequest {
   content: string
@@ -98,11 +84,6 @@ export interface ThreadTurnDiffOptions {
   includeContent?: boolean
 }
 
-export interface ThreadRecoveryPatch {
-  blob: Blob
-  filename: string
-}
-
 export interface CloudTerminalConnection {
   url: string
   protocol: string
@@ -143,74 +124,30 @@ export interface SidebarThreads {
   resolved: SidebarThreadsGroup
 }
 
-const API_BASE = dashboardApiBase()
-
-export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
-
-async function agentsRequest<T>(
-  path: string,
-  init: RequestInit = {}
-): Promise<T> {
-  const res = await fetch(dashboardApiUrl(path), {
-    ...init,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...dashboardForwardedHeaders(),
-      ...(init.headers ?? {}),
-    },
-  })
-  if (!res.ok) {
-    let message = res.statusText
-    try {
-      const body = await res.json()
-      if (body?.detail) {
-        message =
-          typeof body.detail === "string"
-            ? body.detail
-            : JSON.stringify(body.detail)
-      }
-    } catch {
-      /* ignore */
-    }
-    throw new AgentsApiError(res.status, message)
-  }
-  if (res.status === 204) return undefined as T
-  return (await res.json()) as T
+export interface Skill {
+  name: string
+  description: string
+  instructions: string
+  created_at?: string
+  updated_at?: string
 }
 
-function filenameFromContentDisposition(value: string | null): string | null {
-  const match = /filename="([^"]+)"/.exec(value ?? "")
-  return match?.[1] ?? null
+export interface SkillInput {
+  description: string
+  instructions: string
 }
 
-async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
-  const res = await fetch(dashboardApiUrl(path), {
-    credentials: "include",
-    headers: { Accept: "text/x-diff", ...dashboardForwardedHeaders() },
-  })
-  if (!res.ok) {
-    let message = res.statusText
-    try {
-      const body = await res.json()
-      if (body?.detail) {
-        message =
-          typeof body.detail === "string"
-            ? body.detail
-            : JSON.stringify(body.detail)
-      }
-    } catch {
-      /* ignore */
-    }
-    throw new AgentsApiError(res.status, message)
-  }
-  return {
-    blob: await res.blob(),
-    filename:
-      filenameFromContentDisposition(res.headers.get("content-disposition")) ??
-      "open-swe-recovery.patch",
-  }
+export interface SkillsPage {
+  items: Array<Skill>
+  next_offset: number | null
 }
+
+export interface OrganizationSkillsPage {
+  items: Array<Skill>
+  next_cursor: string | null
+}
+
+export const agentsLangGraphApiUrl = dashboardApiHref("")
 
 function buildThreadsPageQuery(params: ThreadsPageParams): string {
   const search = new URLSearchParams()
@@ -259,92 +196,76 @@ export const agentsApi = {
     activeThreadId?: string
     includeAutomations?: boolean
   }) =>
-    agentsRequest<SidebarThreads>(
+    request<SidebarThreads>(
       `/threads/sidebar${buildSidebarThreadsQuery(params)}`
     ),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
-    agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+    request<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
   resolveThread: (threadId: string, resolved: boolean) =>
-    agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}/resolve`,
-      {
-        method: "POST",
-        body: JSON.stringify({ resolved }),
-      }
-    ),
-  listSchedules: () => agentsRequest<Array<AgentSchedule>>("/schedules"),
+    request<AgentThread>(`/threads/${encodeURIComponent(threadId)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ resolved }),
+    }),
+  listSchedules: () => request<Array<AgentSchedule>>("/schedules"),
   createSchedule: (body: ScheduleCreateRequest) =>
-    agentsRequest<AgentSchedule>("/schedules", {
+    request<AgentSchedule>("/schedules", {
       method: "POST",
       body: JSON.stringify(body),
     }),
   updateSchedule: (scheduleId: string, body: ScheduleUpdateRequest) =>
-    agentsRequest<AgentSchedule>(
-      `/schedules/${encodeURIComponent(scheduleId)}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }
-    ),
+    request<AgentSchedule>(`/schedules/${encodeURIComponent(scheduleId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   triggerSchedule: (scheduleId: string) =>
-    agentsRequest<ScheduleTriggerResult>(
+    request<ScheduleTriggerResult>(
       `/schedules/${encodeURIComponent(scheduleId)}/trigger`,
       { method: "POST" }
     ),
   deleteSchedule: (scheduleId: string) =>
-    agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
+    request<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
       method: "DELETE",
     }),
   getThread: (threadId: string, options?: { markViewed?: boolean }) =>
-    agentsRequest<AgentThread>(
+    request<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}${
         options?.markViewed === false ? "?mark_viewed=false" : ""
       }`
     ),
   listWorkflowApprovals: (threadId: string) =>
-    agentsRequest<WorkflowPushApprovalsResponse>(
+    request<WorkflowPushApprovalsResponse>(
       `/workflow-approval/${encodeURIComponent(threadId)}`
     ),
   approveWorkflowPush: (threadId: string, fingerprint: string) =>
-    agentsRequest<{ status: string; fingerprint: string }>(
+    request<{ status: string; fingerprint: string }>(
       `/workflow-approval/${encodeURIComponent(threadId)}/${encodeURIComponent(fingerprint)}/approve`,
       { method: "POST" }
     ),
   rejectWorkflowPush: (threadId: string, fingerprint: string) =>
-    agentsRequest<{ status: string; fingerprint: string }>(
+    request<{ status: string; fingerprint: string }>(
       `/workflow-approval/${encodeURIComponent(threadId)}/${encodeURIComponent(fingerprint)}/reject`,
       { method: "POST" }
     ),
   queueMessage: (threadId: string, body: ThreadMessageRequest) =>
-    agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }
-    ),
+    request<AgentThread>(`/threads/${encodeURIComponent(threadId)}/messages`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   cancelThread: (threadId: string) =>
-    agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}/cancel`,
-      {
-        method: "POST",
-      }
-    ),
+    request<AgentThread>(`/threads/${encodeURIComponent(threadId)}/cancel`, {
+      method: "POST",
+    }),
   adminCancelThread: (threadId: string) =>
-    agentsRequest<AgentThread>(
+    request<AgentThread>(
       `/admin/threads/${encodeURIComponent(threadId)}/cancel`,
-      {
-        method: "POST",
-      }
+      { method: "POST" }
     ),
   deleteThread: (threadId: string) =>
-    agentsRequest<void>(`/threads/${encodeURIComponent(threadId)}`, {
+    request<void>(`/threads/${encodeURIComponent(threadId)}`, {
       method: "DELETE",
     }),
   getThreadPrDiff: (threadId: string) =>
-    agentsRequest<ThreadPrDiff>(
-      `/threads/${encodeURIComponent(threadId)}/pr-diff`
-    ),
+    request<ThreadPrDiff>(`/threads/${encodeURIComponent(threadId)}/pr-diff`),
   getThreadTurnDiff: (
     threadId: string,
     turnKey?: string | null,
@@ -359,21 +280,62 @@ export const agentsApi = {
       params.set("include_content", String(options.includeContent))
     }
     const query = params.size > 0 ? `?${params.toString()}` : ""
-    return agentsRequest<ThreadTurnDiff>(
+    return request<ThreadTurnDiff>(
       `/threads/${encodeURIComponent(threadId)}/turn-diff${query}`
     )
   },
   downloadThreadRecoveryPatch: (threadId: string) =>
-    agentsBlobRequest(
-      `/threads/${encodeURIComponent(threadId)}/recovery.patch`
-    ),
+    requestFile(`/threads/${encodeURIComponent(threadId)}/recovery.patch`, {
+      accept: "text/x-diff",
+      fallbackFilename: "open-swe-recovery.patch",
+    }),
   connectCloudTerminal: (threadId: string) =>
-    agentsRequest<CloudTerminalConnection>(
+    request<CloudTerminalConnection>(
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
       { method: "POST" }
     ),
   streamUrl: (threadId: string) =>
-    `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
+    dashboardApiHref(`/threads/${encodeURIComponent(threadId)}/stream`),
+  transcribeAudio: async (audio: Blob) => {
+    const response = await request<{ text: string }>("/voice/transcriptions", {
+      method: "POST",
+      body: audio,
+      headers: { "Content-Type": audio.type },
+    })
+    return response.text
+  },
+  listSkills: (offset = 0) =>
+    request<SkillsPage>(`/skills?limit=100&offset=${offset}`),
+  createSkill: (name: string, body: SkillInput) =>
+    request<Skill>("/skills", {
+      method: "POST",
+      body: JSON.stringify({ name, ...body }),
+    }),
+  saveSkill: (name: string, body: SkillInput) =>
+    request<Skill>(`/skills/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteSkill: (name: string) =>
+    request<void>(`/skills/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  listOrganizationSkills: (cursor: string | null = null) =>
+    request<OrganizationSkillsPage>(
+      `/organization-skills?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
+    ),
+  createOrganizationSkill: (name: string, body: SkillInput) =>
+    request<Skill>("/organization-skills", {
+      method: "POST",
+      body: JSON.stringify({ name, ...body }),
+    }),
+  saveOrganizationSkill: (name: string, body: SkillInput) =>
+    request<Skill>(`/organization-skills/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteOrganizationSkill: (name: string) =>
+    request<void>(`/organization-skills/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
 }
 
 export type ThreadGroup = "today" | "last7" | "last30" | "older"

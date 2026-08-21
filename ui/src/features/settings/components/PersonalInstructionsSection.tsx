@@ -5,13 +5,13 @@ import { SettingsPanel, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
+import { settingsApi } from "@/features/settings/lib/api"
 
 export function PersonalInstructionsSection() {
   const qc = useQueryClient()
   const instructions = useQuery({
     queryKey: ["myInstructions"],
-    queryFn: api.getMyInstructions,
+    queryFn: settingsApi.getMyInstructions,
   })
   const [draft, setDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -28,12 +28,12 @@ export function PersonalInstructionsSection() {
   const onError = (e: Error) => setError(e.message)
 
   const save = useMutation({
-    mutationFn: (next: string) => api.saveMyInstructions(next),
+    mutationFn: (next: string) => settingsApi.saveMyInstructions(next),
     onSuccess,
     onError,
   })
   const clear = useMutation({
-    mutationFn: () => api.deleteMyInstructions(),
+    mutationFn: () => settingsApi.deleteMyInstructions(),
     onSuccess,
     onError,
   })

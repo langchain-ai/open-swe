@@ -14,7 +14,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
-import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import { settingsApi } from "@/features/settings/lib/api"
+import { isGithubReauthError } from "@/lib/apiClient"
+import { loginUrl } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
 
@@ -33,14 +35,14 @@ export function AgentInstructionsPanel() {
 
   const instructions = useQuery({
     queryKey: ["agentInstructions"],
-    queryFn: api.listAgentInstructions,
+    queryFn: settingsApi.listAgentInstructions,
   })
 
   const repos = useRepos()
 
   const detail = useQuery({
     queryKey: ["agentInstruction", selected],
-    queryFn: () => api.getAgentInstructions(selected!),
+    queryFn: () => settingsApi.getAgentInstructions(selected!),
     enabled: !!selected,
   })
 
@@ -49,7 +51,8 @@ export function AgentInstructionsPanel() {
   }, [detail.data?.instructions, detail.data?.full_name])
 
   const create = useMutation({
-    mutationFn: (full_name: string) => api.createAgentInstructions(full_name),
+    mutationFn: (full_name: string) =>
+      settingsApi.createAgentInstructions(full_name),
     onSuccess: (record) => {
       void qc.invalidateQueries({ queryKey: ["agentInstructions"] })
       setSelected(record.full_name)
@@ -60,7 +63,7 @@ export function AgentInstructionsPanel() {
 
   const save = useMutation({
     mutationFn: ({ full_name, value }: { full_name: string; value: string }) =>
-      api.saveAgentInstructions(full_name, value),
+      settingsApi.saveAgentInstructions(full_name, value),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["agentInstructions"] })
       void qc.invalidateQueries({ queryKey: ["agentInstruction", selected] })
@@ -70,7 +73,8 @@ export function AgentInstructionsPanel() {
   })
 
   const remove = useMutation({
-    mutationFn: (full_name: string) => api.deleteAgentInstructions(full_name),
+    mutationFn: (full_name: string) =>
+      settingsApi.deleteAgentInstructions(full_name),
     onSuccess: (_data, full_name) => {
       void qc.invalidateQueries({ queryKey: ["agentInstructions"] })
       if (selected === full_name) {

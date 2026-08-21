@@ -12,6 +12,8 @@ import type { InfiniteData, QueryClient } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
   SidebarThreads,
+  Skill,
+  SkillInput,
   ThreadTurnDiffOptions,
   ThreadsPage,
   ThreadsPageParams,
@@ -23,7 +25,6 @@ import type {
   ImageChunk,
   Message,
 } from "@/lib/agentTypes"
-import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
 
 export const agentThreadKeys = {
@@ -152,7 +153,7 @@ async function listPersonalSkills() {
   const items = []
   let offset = 0
   do {
-    const page = await api.listSkills(offset)
+    const page = await agentsApi.listSkills(offset)
     items.push(...page.items)
     offset = page.next_offset ?? 0
   } while (offset)
@@ -163,7 +164,7 @@ async function listOrganizationSkills() {
   const items: Array<Skill> = []
   let cursor: string | null = null
   do {
-    const page = await api.listOrganizationSkills(cursor)
+    const page = await agentsApi.listOrganizationSkills(cursor)
     items.push(...page.items)
     cursor = page.next_cursor
   } while (cursor)
@@ -233,8 +234,8 @@ export function useCreateAgentSkill(organization = false) {
   return useSkillMutation(
     ({ name, ...body }) =>
       organization
-        ? api.createOrganizationSkill(name, body)
-        : api.createSkill(name, body),
+        ? agentsApi.createOrganizationSkill(name, body)
+        : agentsApi.createSkill(name, body),
     organization ? agentSkillKeys.organization : agentSkillKeys.personal
   )
 }
@@ -243,8 +244,8 @@ export function useUpdateAgentSkill(organization = false) {
   return useSkillMutation(
     ({ name, ...body }) =>
       organization
-        ? api.saveOrganizationSkill(name, body)
-        : api.saveSkill(name, body),
+        ? agentsApi.saveOrganizationSkill(name, body)
+        : agentsApi.saveSkill(name, body),
     organization ? agentSkillKeys.organization : agentSkillKeys.personal
   )
 }
@@ -255,7 +256,9 @@ export function useDeleteAgentSkill(organization = false) {
     ? agentSkillKeys.organization
     : agentSkillKeys.personal
   return useMutation({
-    mutationFn: organization ? api.deleteOrganizationSkill : api.deleteSkill,
+    mutationFn: organization
+      ? agentsApi.deleteOrganizationSkill
+      : agentsApi.deleteSkill,
     onSuccess: () => queryClient.invalidateQueries({ queryKey }),
   })
 }

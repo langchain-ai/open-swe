@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useSubmitAgentMessage } from "./useSubmitAgentMessage"
 import type { AgentThread } from "@/lib/agentTypes"
-import { AgentsApiError } from "@/features/agents/lib/api"
+import { ApiError } from "@/lib/apiClient"
 import type { SidebarThreads } from "@/features/agents/lib/api"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
 
@@ -20,14 +20,6 @@ const queueMessage = vi.fn()
 
 vi.mock("@/features/agents/lib/api", () => ({
   agentsApi: { queueMessage: () => queueMessage() },
-  AgentsApiError: class extends Error {
-    constructor(
-      public readonly status: number,
-      message: string
-    ) {
-      super(message)
-    }
-  },
 }))
 
 const THREAD_ID = "thread-1"
@@ -88,7 +80,7 @@ beforeEach(() => {
 
 describe("useSubmitAgentMessage", () => {
   it("never flashes a queued bubble when the send starts a new run", async () => {
-    queueMessage.mockRejectedValueOnce(new AgentsApiError(409, "no active run"))
+    queueMessage.mockRejectedValueOnce(new ApiError(409, "no active run"))
     const { client, queuedCounts, result } = setup()
 
     await result.current.mutateAsync({ content: "hi", images: [] })

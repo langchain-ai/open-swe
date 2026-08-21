@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
 import { ChatCircleIcon, MagnifyingGlassIcon } from "@phosphor-icons/react"
 
-import type { PrReviewComment } from "@/lib/api"
-import { api } from "@/lib/api"
+import type { PrReviewComment } from "@/features/reviews/lib/api"
+import { useReviewComments } from "@/features/reviews/lib/queries"
 import { cn } from "@/lib/utils"
 
 function basename(path: string): string {
@@ -29,12 +28,7 @@ export function ReviewCommentsMenu({
   const [query, setQuery] = useState("")
   const wrapperRef = useRef<HTMLDivElement | null>(null)
 
-  const comments = useQuery({
-    queryKey: ["reviewComments", owner, repo, number],
-    queryFn: () => api.listReviewComments(owner, repo, number),
-    enabled: Number.isFinite(number),
-    staleTime: 30_000,
-  })
+  const comments = useReviewComments(owner, repo, number)
 
   const otherComments = useMemo(
     () => (comments.data?.comments ?? []).filter((c) => !c.is_open_swe),

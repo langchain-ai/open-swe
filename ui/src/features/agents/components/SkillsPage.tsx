@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 
-import type { Skill } from "@/lib/api"
+import type { Skill } from "@/features/agents/lib/api"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"

@@ -1,7 +1,8 @@
 import { useEffect } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { ApiError, api } from "./api"
+import { api } from "./api"
+import { ApiError } from "./apiClient"
 import {
   REPOS_CACHE_MAX_AGE_MS,
   readCachedRepos,

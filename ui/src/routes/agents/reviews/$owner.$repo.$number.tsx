@@ -1,14 +1,18 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ArrowLeftIcon, GitPullRequestIcon } from "@phosphor-icons/react"
 
-import type { PrReviewComment } from "@/lib/api"
+import type { PrReviewComment } from "@/features/reviews/lib/api"
 import { ReviewCommentsMenu } from "@/features/reviews/components/ReviewCommentsMenu"
 import { ReviewMainBody } from "@/features/reviews/components/ReviewMainBody"
+import {
+  reviewKeys,
+  useReviewDetail,
+  useReviewDiff,
+} from "@/features/reviews/lib/queries"
 import { useSidebarControls } from "@/components/sidebar-layout"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
@@ -46,18 +50,9 @@ function ReviewDetailPage() {
     controls.setCollapsed(true)
     return () => controls.setCollapsed(false)
   }, [])
-  const detail = useQuery({
-    queryKey: ["review", owner, repo, prNumber],
-    queryFn: () => api.getReview(owner, repo, prNumber),
-    enabled: !!session.data && Number.isFinite(prNumber),
-    refetchInterval: (query) =>
-      query.state.data?.status === "running" ? 5000 : false,
-  })
-  const diff = useQuery({
-    queryKey: ["reviewDiff", owner, repo, prNumber],
-    queryFn: () => api.getReviewDiff(owner, repo, prNumber),
-    enabled: !!session.data && Number.isFinite(prNumber),
-  })
+  const enabled = !!session.data && Number.isFinite(prNumber)
+  const detail = useReviewDetail(owner, repo, prNumber, { enabled })
+  const diff = useReviewDiff(owner, repo, prNumber, { enabled })
 
   const queryClient = useQueryClient()
   const headSha = detail.data?.head_sha
@@ -65,7 +60,7 @@ function ReviewDetailPage() {
   useEffect(() => {
     if (headSha && seenShaRef.current && headSha !== seenShaRef.current) {
       void queryClient.invalidateQueries({
-        queryKey: ["reviewDiff", owner, repo, prNumber],
+        queryKey: reviewKeys.diff(owner, repo, prNumber),
       })
     }
     if (headSha) seenShaRef.current = headSha

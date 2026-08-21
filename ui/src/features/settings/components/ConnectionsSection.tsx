@@ -3,11 +3,16 @@ import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
 import { SiNotion } from "react-icons/si"
 
-import type { ApiKeyCredentialStatus, SessionUser } from "@/lib/api"
+import type { SessionUser } from "@/lib/api"
+import type { ApiKeyCredentialStatus } from "@/features/settings/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { api, notionConnectUrl, slackConnectUrl } from "@/lib/api"
+import {
+  notionConnectUrl,
+  settingsApi,
+  slackConnectUrl,
+} from "@/features/settings/lib/api"
 import { cn } from "@/lib/utils"
 
 type SetError = (message: string | null) => void
@@ -29,7 +34,10 @@ function StatusPill({ connected }: { connected: boolean }) {
 
 function SlackRow({ user }: { user: SessionUser }) {
   const qc = useQueryClient()
-  const mapping = useQuery({ queryKey: ["myMapping"], queryFn: api.myMapping })
+  const mapping = useQuery({
+    queryKey: ["myMapping"],
+    queryFn: settingsApi.myMapping,
+  })
   const [connecting, setConnecting] = useState(false)
 
   const slackUserId = mapping.data?.slack_user_id ?? null
@@ -83,12 +91,12 @@ function NotionRow({ setError }: { setError: SetError }) {
   const qc = useQueryClient()
   const creds = useQuery({
     queryKey: ["myNotion"],
-    queryFn: api.getMyNotionStatus,
+    queryFn: settingsApi.getMyNotionStatus,
   })
   const [connecting, setConnecting] = useState(false)
 
   const disconnect = useMutation({
-    mutationFn: () => api.disconnectNotion(),
+    mutationFn: () => settingsApi.disconnectNotion(),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["myNotion"] })
       setError(null)
@@ -234,9 +242,11 @@ export function ConnectionsSection({ user }: { user: SessionUser }) {
         label="LangSmith"
         description="Add your API key to let runs inspect LangSmith traces. Encrypted at rest and scoped to your account."
         placeholder="LangSmith API key"
-        load={api.getMyLangSmithStatus}
-        connect={(apiKey) => api.connectMyLangSmith({ api_key: apiKey })}
-        disconnect={api.disconnectMyLangSmith}
+        load={settingsApi.getMyLangSmithStatus}
+        connect={(apiKey) =>
+          settingsApi.connectMyLangSmith({ api_key: apiKey })
+        }
+        disconnect={settingsApi.disconnectMyLangSmith}
         setError={setError}
       />
       <ApiKeyRow
@@ -244,9 +254,9 @@ export function ConnectionsSection({ user }: { user: SessionUser }) {
         label="Currents.dev"
         description="Add your API key (Currents → Organization → API & Record Keys) to let runs inspect e2e test results. Encrypted at rest and scoped to your account."
         placeholder="Currents API key"
-        load={api.getMyCurrentsStatus}
-        connect={(apiKey) => api.connectCurrents({ api_key: apiKey })}
-        disconnect={api.disconnectCurrents}
+        load={settingsApi.getMyCurrentsStatus}
+        connect={(apiKey) => settingsApi.connectCurrents({ api_key: apiKey })}
+        disconnect={settingsApi.disconnectCurrents}
         setError={setError}
       />
       {error && <p className="px-4 py-2 text-xs text-destructive">{error}</p>}

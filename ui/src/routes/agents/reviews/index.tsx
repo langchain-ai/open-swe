@@ -1,9 +1,5 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
-import {
-  keepPreviousData,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import {
   BugBeetleIcon,
@@ -11,10 +7,13 @@ import {
   GitPullRequestIcon,
 } from "@phosphor-icons/react"
 
-import type { ReviewSummary } from "@/lib/api"
+import type { ReviewSummary } from "@/features/reviews/lib/api"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
+import {
+  reviewListQueryOptions,
+  useReviewList,
+} from "@/features/reviews/lib/queries"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
@@ -42,23 +41,11 @@ function ReviewsPage() {
   const queryClient = useQueryClient()
   const [mine, setMine] = useState(true)
   const [page, setPage] = useState(0)
-  const reviews = useQuery({
-    queryKey: ["reviews", mine, page],
-    queryFn: () => api.listReviews(page, mine),
-    enabled: !!session.data,
-    placeholderData: keepPreviousData,
-    refetchInterval: (query) =>
-      query.state.data?.reviews.some((r) => r.status === "running")
-        ? 5000
-        : false,
-  })
+  const reviews = useReviewList(page, mine, { enabled: !!session.data })
 
   const prefetch = (nextMine: boolean, nextPage: number) => {
     if (nextPage < 0) return
-    void queryClient.prefetchQuery({
-      queryKey: ["reviews", nextMine, nextPage],
-      queryFn: () => api.listReviews(nextPage, nextMine),
-    })
+    void queryClient.prefetchQuery(reviewListQueryOptions(nextPage, nextMine))
   }
 
   const items = reviews.data?.reviews ?? []

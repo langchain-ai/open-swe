@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
-import type { ReviewStyle } from "@/lib/api"
+import type { ReviewStyle } from "@/features/reviews/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -16,7 +16,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
-import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import { reviewsApi } from "@/features/reviews/lib/api"
+import { reviewKeys } from "@/features/reviews/lib/queries"
+import { isGithubReauthError } from "@/lib/apiClient"
+import { loginUrl } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
 
@@ -47,8 +50,8 @@ export function ReviewStylesPanel() {
   const [draftPrompt, setDraftPrompt] = useState("")
 
   const styles = useQuery({
-    queryKey: ["reviewStyles"],
-    queryFn: api.listReviewStyles,
+    queryKey: reviewKeys.styles,
+    queryFn: reviewsApi.listStyles,
     refetchInterval: (q) => {
       const hasRunning = (q.state.data ?? []).some(
         (r) => r.status === "running"
@@ -60,8 +63,8 @@ export function ReviewStylesPanel() {
   const repos = useRepos()
 
   const detail = useQuery({
-    queryKey: ["reviewStyle", selected],
-    queryFn: () => api.getReviewStyle(selected!),
+    queryKey: reviewKeys.style(selected),
+    queryFn: () => reviewsApi.getStyle(selected!),
     enabled: !!selected,
     refetchInterval: (q) => (q.state.data?.status === "running" ? 4000 : false),
   })
@@ -75,9 +78,9 @@ export function ReviewStylesPanel() {
   }, [detail.data?.custom_prompt, detail.data?.full_name])
 
   const createStyle = useMutation({
-    mutationFn: (full_name: string) => api.createReviewStyle(full_name),
+    mutationFn: (full_name: string) => reviewsApi.createStyle(full_name),
     onSuccess: (record) => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+      void qc.invalidateQueries({ queryKey: reviewKeys.styles })
       setSelected(record.full_name)
       setError(null)
     },
@@ -85,10 +88,10 @@ export function ReviewStylesPanel() {
   })
 
   const analyze = useMutation({
-    mutationFn: (full_name: string) => api.analyzeReviewStyle(full_name),
+    mutationFn: (full_name: string) => reviewsApi.analyzeStyle(full_name),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
+      void qc.invalidateQueries({ queryKey: reviewKeys.styles })
+      void qc.invalidateQueries({ queryKey: reviewKeys.style(selected) })
       setError(null)
     },
     onError: (e: Error) => setError(formatMutationError(e)),
@@ -101,29 +104,29 @@ export function ReviewStylesPanel() {
     }: {
       full_name: string
       custom_prompt: string
-    }) => api.saveReviewStylePrompt(full_name, custom_prompt),
+    }) => reviewsApi.saveStylePrompt(full_name, custom_prompt),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
+      void qc.invalidateQueries({ queryKey: reviewKeys.styles })
+      void qc.invalidateQueries({ queryKey: reviewKeys.style(selected) })
       setError(null)
     },
     onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const cancelAnalysis = useMutation({
-    mutationFn: (full_name: string) => api.cancelReviewStyle(full_name),
+    mutationFn: (full_name: string) => reviewsApi.cancelStyle(full_name),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
+      void qc.invalidateQueries({ queryKey: reviewKeys.styles })
+      void qc.invalidateQueries({ queryKey: reviewKeys.style(selected) })
       setError(null)
     },
     onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const removeStyle = useMutation({
-    mutationFn: (full_name: string) => api.deleteReviewStyle(full_name),
+    mutationFn: (full_name: string) => reviewsApi.deleteStyle(full_name),
     onSuccess: (_data, full_name) => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+      void qc.invalidateQueries({ queryKey: reviewKeys.styles })
       if (selected === full_name) {
         setSelected(null)
         setDraftPrompt("")

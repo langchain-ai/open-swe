@@ -12,7 +12,7 @@ import type {
   GitStatus,
   GitStatusEntry,
 } from "@pierre/trees"
-import type { ReviewDiffFile } from "@/lib/api"
+import type { ReviewDiffFile } from "@/features/reviews/lib/api"
 import {
   TREE_UNSAFE_CSS,
   treeThemeStyle,
