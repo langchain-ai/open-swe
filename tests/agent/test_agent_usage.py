@@ -4,213 +4,203 @@ from agent.dashboard import agent_usage
 
 
 class FakeStore:
-    def __init__(self, values: dict[tuple[tuple[str, ...], str], dict] | None = None):
-        self.values = values or {}
-        self.puts: list[tuple[list[str], str, dict]] = []
+    def __init__(self):
+        self.values: dict[tuple[tuple[str, ...], str], dict] = {}
+        self.search_calls: list[tuple[tuple[str, ...], int]] = []
 
     async def get_item(self, namespace: list[str], key: str) -> dict | None:
         value = self.values.get((tuple(namespace), key))
         return {"value": value} if value is not None else None
 
     async def put_item(self, namespace: list[str], key: str, value: dict) -> None:
-        self.puts.append((namespace, key, value))
         self.values[(tuple(namespace), key)] = value
+
+    async def search_items(self, namespace: list[str], *, limit: int, offset: int) -> dict:
+        self.search_calls.append((tuple(namespace), offset))
+        values = [
+            {"value": value}
+            for (item_namespace, _), value in self.values.items()
+            if item_namespace == tuple(namespace)
+        ]
+        return {"items": values[offset : offset + limit]}
 
 
 class FakeThreads:
-    def __init__(self, threads: list[dict]):
-        self.threads = threads
-        self.calls: list[dict] = []
+    def __init__(self, threads: list[dict] | None = None):
+        self.threads = threads or []
 
-    async def search(self, **kwargs) -> list[dict]:
-        self.calls.append(kwargs)
-        offset = kwargs.get("offset") or 0
-        limit = kwargs.get("limit") or len(self.threads)
+    async def search(self, *, metadata: dict, limit: int, offset: int) -> list[dict]:
         return self.threads[offset : offset + limit]
 
 
 class FakeClient:
-    def __init__(self, *, store: FakeStore | None = None, threads: FakeThreads | None = None):
-        self.store = store or FakeStore()
-        self.threads = threads or FakeThreads([])
+    def __init__(self, store: FakeStore, threads: list[dict] | None = None):
+        self.store = store
+        self.threads = FakeThreads(threads)
 
 
 @pytest.mark.asyncio
-async def test_cached_usage_payload_returns_stale_snapshot_and_schedules_refresh(monkeypatch):
-    usage_snapshot = {
-        "period": "30d",
-        "total_members": 2,
-        "users": [
-            {
-                "rank": 1,
-                "key": "github:octo",
-                "name": "octo",
-                "github_login": "octo",
-                "email": "octo@example.com",
-                "favorite_model": "claude",
-                "agent_runs": 3,
-                "prs_opened": 2,
-                "merged_prs": 1,
-                "agent_loc": 10,
-                "additions": 8,
-                "deletions": 2,
-            },
-            {
-                "rank": 2,
-                "key": "email:private@example.com",
-                "name": "private",
-                "github_login": None,
-                "email": "private@example.com",
-                "favorite_model": "default",
-                "agent_runs": 1,
-                "prs_opened": 0,
-                "merged_prs": 0,
-                "agent_loc": 0,
-                "additions": 0,
-                "deletions": 0,
-            },
-        ],
-    }
-    reviewer_snapshot = {
-        "period": "30d",
-        "reviewed_prs": 1,
-        "prs_with_findings": 1,
-        "findings_recorded": 1,
-        "surfaced_findings": 1,
-        "addressed_findings": 0,
-        "resolved_after_update": 0,
-        "dismissed_findings": 0,
-        "unresolved_surfaced_findings": 1,
-        "resolution_rate": 0.0,
-        "human_replies": 0,
-        "severity_counts": {"medium": 1},
-        "top_categories": [{"name": "correctness", "count": 1}],
-    }
-    store = FakeStore(
-        {
-            (tuple(agent_usage.USAGE_LEADERBOARD_CACHE_NAMESPACE), "30d"): {
-                "generated_at_ms": 1,
-                "snapshot": usage_snapshot,
-            },
-            (tuple(agent_usage.REVIEWER_STATS_CACHE_NAMESPACE), "30d"): {
-                "generated_at_ms": 1,
-                "snapshot": reviewer_snapshot,
-            },
-        }
-    )
-    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store=store))
-    monkeypatch.setattr(agent_usage, "_now_ms", lambda: agent_usage._CACHE_TTL_MS + 2)
+async def test_usage_records_runs_and_reads_every_page(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
+    monkeypatch.setattr(agent_usage, "_PAGE_SIZE", 1)
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_000_000)
+    agent_usage._USAGE_CACHE.clear()
 
-    usage_refreshes: list[str] = []
-    reviewer_refreshes: list[str] = []
+    for run_id in ("run-1", "run-2"):
+        await agent_usage.record_agent_run_usage(
+            run_id=run_id,
+            thread_id="shared-thread",
+            github_login="octo",
+            user_email="octo@example.com",
+            model_id="claude",
+            effort=None,
+            source="dashboard",
+        )
+    await agent_usage.record_agent_run_usage(
+        run_id="run-1",
+        thread_id="shared-thread",
+        github_login="octo",
+        user_email="octo@example.com",
+        model_id="claude",
+        effort=None,
+        source="dashboard",
+    )
+
     payload = await agent_usage.list_agent_usage_leaderboard(
-        period="30d",
-        limit=1,
-        current_login="octo",
-        current_email="octo@example.com",
-        schedule_usage_refresh=usage_refreshes.append,
-        schedule_reviewer_refresh=reviewer_refreshes.append,
+        period="all", limit=10, current_login="octo", current_email="octo@example.com"
     )
 
-    assert usage_refreshes == ["30d"]
-    assert reviewer_refreshes == ["30d"]
-    assert payload["rows"][0]["user"]["email"] == "octo@example.com"
-    assert payload["total_members"] == 2
+    assert payload["rows"][0]["agent_runs"] == 2
+    assert (tuple(agent_usage.AGENT_RUN_NAMESPACE), 1) in store.search_calls
+
+
+@pytest.mark.asyncio
+async def test_reviewer_stats_use_publication_and_resolution_events(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_000_000)
+    agent_usage._USAGE_CACHE.clear()
+    finding = {
+        "id": "finding-1",
+        "status": "open",
+        "severity": "high",
+        "category": "correctness",
+        "first_seen_sha": "bad",
+        "last_confirmed_sha": "bad",
+        "github_review_comment_id": 1,
+        "interactions": [],
+    }
+
+    await agent_usage.record_reviewer_publication(
+        thread_id="review-thread",
+        owner="langchain-ai",
+        repo="open-swe",
+        pr_number=1,
+        head_sha="bad",
+        findings=[finding],
+    )
+    finding.update(status="resolved", last_confirmed_sha="fixed")
+    await agent_usage.record_reviewer_finding_state("review-thread", finding)
+    payload = await agent_usage.list_agent_usage_leaderboard(
+        period="all", limit=10, current_login=None, current_email=None
+    )
+
+    stats = payload["reviewer_stats"]
+    assert stats["reviewed_prs"] == 1
+    assert stats["surfaced_findings"] == 1
+    assert stats["addressed_findings"] == 1
+    assert stats["resolved_after_update"] == 1
+
+
+@pytest.mark.asyncio
+async def test_republishing_keeps_the_original_publication_time(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_000)
+    await agent_usage.record_reviewer_publication(
+        thread_id="review-thread", owner="o", repo="r", pr_number=1, head_sha="sha", findings=[]
+    )
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_000_000)
+    await agent_usage.record_reviewer_publication(
+        thread_id="review-thread", owner="o", repo="r", pr_number=1, head_sha="sha", findings=[]
+    )
+
+    reviews = await agent_usage._all(agent_usage.REVIEW_NAMESPACE)
+    assert [review["published_at_ms"] for review in reviews] == [1_000]
+
+
+@pytest.mark.asyncio
+async def test_current_user_row_survives_the_limit(monkeypatch):
+    store = FakeStore()
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store))
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_000_000)
+    agent_usage._USAGE_CACHE.clear()
+    for index in range(4):
+        await agent_usage.record_agent_run_usage(
+            run_id=f"run-{index}",
+            thread_id=f"thread-{index}",
+            github_login=f"user-{index}",
+            user_email=None,
+            model_id="claude",
+            effort=None,
+            source="dashboard",
+        )
+
+    kwargs = {"period": "all", "limit": 1, "current_login": "user-3", "current_email": None}
+    payload = await agent_usage.list_agent_usage_leaderboard(**kwargs)
+    cached = await agent_usage.list_agent_usage_leaderboard(**kwargs)
+
+    for result in (payload, cached):
+        assert len(result["rows"]) == 2
+        assert result["rows"][-1]["user"]["github_login"] == "user-3"
+        assert result["current_user_rank"] == 4
+
+
+@pytest.mark.asyncio
+async def test_legacy_records_are_backfilled_once(monkeypatch):
+    store = FakeStore()
+    thread = {
+        "thread_id": "legacy-review",
+        "created_at": "2026-08-01T00:00:00Z",
+        "metadata": {
+            "kind": "reviewer",
+            "pr": {"owner": "o", "name": "r", "number": 3},
+            "last_reviewed_sha": "sha",
+            "findings": [{"id": "f_1", "status": "open", "github_review_comment_id": 1}],
+        },
+    }
+    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(store, [thread]))
+    monkeypatch.setattr(agent_usage, "_now_ms", lambda: 1_800_000_000_000)
+    agent_usage._USAGE_CACHE.clear()
+    store.values[(tuple(agent_usage.LEGACY_THREAD_NAMESPACE), "t-1")] = {
+        "thread_id": "t-1",
+        "github_login": "octo",
+        "model_id": "claude",
+        "source": "dashboard",
+        "created_at_ms": 1_700_000_000_000,
+    }
+    store.values[(tuple(agent_usage.LEGACY_PR_NAMESPACE), "o/r#1")] = {
+        "owner": "o",
+        "repo": "r",
+        "pr_number": 1,
+        "github_login": "octo",
+        "merged": True,
+        "additions": 5,
+        "deletions": 2,
+        "created_at_ms": 1_700_000_000_000,
+    }
+
+    payload = await agent_usage.list_agent_usage_leaderboard(
+        period="all", limit=10, current_login="octo", current_email=None
+    )
+    assert payload["rows"][0]["agent_runs"] == 1
+    assert payload["rows"][0]["merged_prs"] == 1
+    assert payload["reviewer_stats"]["reviewed_prs"] == 1
     assert payload["reviewer_stats"]["surfaced_findings"] == 1
-    assert store.puts == []
 
-
-@pytest.mark.asyncio
-async def test_reviewer_stats_snapshot_counts_surfaced_and_resolved_findings(monkeypatch):
-    threads = [
-        {
-            "created_at": "2025-01-01T00:00:00Z",
-            "metadata": {
-                "kind": "reviewer",
-                "head_sha": "fixed-sha",
-                "pr": {"owner": "langchain-ai", "name": "open-swe", "number": 1},
-                "findings": [
-                    {
-                        "id": "f_1",
-                        "status": "resolved",
-                        "severity": "high",
-                        "category": "correctness",
-                        "first_seen_sha": "buggy-sha",
-                        "github_thread_resolved": True,
-                        "github_review_comment_id": 10,
-                        "resolution_note": "Fixed in a follow-up commit.",
-                        "interactions": [{"kind": "human_reply"}],
-                    },
-                    {
-                        "id": "f_2",
-                        "status": "open",
-                        "severity": "medium",
-                        "category": "performance",
-                        "github_review_comment_id": 11,
-                    },
-                    {
-                        "id": "f_3",
-                        "status": "dismissed",
-                        "severity": "low",
-                        "category": "style",
-                        "github_review_id": 12,
-                    },
-                ],
-            },
-        }
-    ]
-    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(threads=FakeThreads(threads)))
-
-    snapshot = await agent_usage._build_reviewer_stats_snapshot("all")
-
-    assert snapshot["reviewed_prs"] == 1
-    assert snapshot["prs_with_findings"] == 1
-    assert snapshot["findings_recorded"] == 3
-    assert snapshot["surfaced_findings"] == 3
-    assert snapshot["addressed_findings"] == 1
-    assert snapshot["resolved_after_update"] == 1
-    assert snapshot["dismissed_findings"] == 1
-    assert snapshot["unresolved_surfaced_findings"] == 1
-    assert snapshot["human_replies"] == 1
-    assert snapshot["severity_counts"] == {"high": 1, "medium": 1, "low": 1}
-    assert snapshot["top_categories"] == [
-        {"name": "correctness", "count": 1},
-        {"name": "performance", "count": 1},
-        {"name": "style", "count": 1},
-    ]
-
-
-@pytest.mark.asyncio
-async def test_reviewer_stats_paginates_reviewer_threads(monkeypatch):
-    threads = [
-        {"created_at": "2025-01-03T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
-        {"created_at": "2025-01-02T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
-        {"created_at": "2025-01-01T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
-    ]
-    fake_threads = FakeThreads(threads)
-    monkeypatch.setattr(agent_usage, "_CACHE_SEARCH_LIMIT", 2)
-    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(threads=fake_threads))
-
-    snapshot = await agent_usage._build_reviewer_stats_snapshot("all")
-
-    assert snapshot["reviewed_prs"] == 3
-    assert [call["offset"] for call in fake_threads.calls] == [0, 2]
-    assert all(call["sort_by"] == "created_at" for call in fake_threads.calls)
-
-
-@pytest.mark.asyncio
-async def test_reviewer_stats_stops_after_page_older_than_cutoff(monkeypatch):
-    threads = [
-        {"created_at": "2025-01-03T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
-        {"created_at": "2025-01-01T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
-        {"created_at": "2024-12-31T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
-    ]
-    fake_threads = FakeThreads(threads)
-    monkeypatch.setattr(agent_usage, "_CACHE_SEARCH_LIMIT", 2)
-    monkeypatch.setattr(agent_usage, "_client", lambda: FakeClient(threads=fake_threads))
-    cutoff_ms = agent_usage._timestamp_ms("2025-01-02T00:00:00Z")
-
-    pages = [page async for page in agent_usage._iter_reviewer_thread_pages(cutoff_ms)]
-
-    assert len(pages) == 1
-    assert [call["offset"] for call in fake_threads.calls] == [0]
+    agent_usage._USAGE_CACHE.clear()
+    await agent_usage.list_agent_usage_leaderboard(
+        period="all", limit=10, current_login="octo", current_email=None
+    )
+    assert len(await agent_usage._all(agent_usage.AGENT_RUN_NAMESPACE)) == 1
