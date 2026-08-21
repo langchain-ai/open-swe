@@ -16,7 +16,7 @@ Open SWE has two runnable pieces:
 - [uv](https://docs.astral.sh/uv/) package manager
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli)
 - [ngrok](https://ngrok.com/) (for local development — exposes webhook endpoints to the internet)
-- [pnpm](https://pnpm.io/) (only if you want to run the dashboard UI locally — see step 8). Node 20+ also works, but `ui/pnpm-lock.yaml` is the canonical lockfile.
+- [pnpm](https://pnpm.io/) (only if you want to run the dashboard UI locally — see step 8). Node 20+ also works; `ui/` and `desktop/` are one pnpm workspace, so the canonical lockfile is `pnpm-lock.yaml` at the repo root.
 
 ## 1. Clone and install
 
@@ -322,7 +322,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 
 **Configure team-to-repo mapping:**
 
-Open SWE routes Linear issues to GitHub repos based on the Linear team and project. Edit the mapping in `agent/utils/linear_team_repo_map.py`:
+Open SWE routes Linear issues to GitHub repos based on the Linear team and project. Edit the mapping in `agent/linear/team_repo_map.py`:
 
 ```python
 LINEAR_TEAM_TO_REPO = {
