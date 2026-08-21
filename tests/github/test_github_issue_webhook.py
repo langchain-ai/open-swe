@@ -9,7 +9,7 @@ from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
-from httpx2 import Response
+from httpx import Response
 
 from agent.api.app import app
 from agent.tools import request_pr_review as request_pr_review_tool

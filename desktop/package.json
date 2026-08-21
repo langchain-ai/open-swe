@@ -8,6 +8,7 @@
     "build": "node scripts/build-main.cjs",
     "build:ui": "pnpm --filter open-swe-dashboard run build",
     "dev": "pnpm run build:ui && pnpm run build && electron . --dev",
+    "dev:full": "concurrently --kill-others --success first --names backend,desktop --prefix-colors blue,magenta \"uv --directory .. run langgraph dev --no-browser\" \"pnpm run dev\"",
     "start": "pnpm run build:ui && pnpm run build && electron .",
     "test:run": "node --test test/*.test.cjs",
     "test": "pnpm run build && pnpm run test:run",
@@ -100,6 +101,7 @@
   "devDependencies": {
     "@electron/notarize": "3.1.1",
     "@types/node": "26.2.0",
+    "concurrently": "10.0.5",
     "electron": "43.4.1",
     "electron-builder": "26.15.3",
     "typescript": "5.9.3"

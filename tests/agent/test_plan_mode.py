@@ -16,12 +16,17 @@ def test_construct_system_prompt_gates_active_plan_mode(enabled: bool) -> None:
     assert ("### Plan Mode (ACTIVE)" in prompt) is enabled
 
 
-def test_dashboard_only_enters_plan_mode_on_explicit_request() -> None:
-    dashboard_prompt = construct_system_prompt(working_dir="/work", source="dashboard")
-    slack_prompt = construct_system_prompt(working_dir="/work", source="slack", slack_context=True)
+@pytest.mark.parametrize(
+    "source", ["dashboard", "slack", "linear", "github", "schedule", "desktop", "generic"]
+)
+def test_plan_mode_requires_an_explicit_request_for_every_source(source: str) -> None:
+    prompt = construct_system_prompt(
+        working_dir="/work", source=source, slack_context=source == "slack"
+    )
 
-    assert "call `enter_plan_mode` only when the user explicitly asks" in dashboard_prompt
-    assert "If a task would genuinely benefit from a structured plan" in slack_prompt
+    assert "Call `enter_plan_mode` only when the user explicitly asks" in prompt
+    assert "Do not infer plan mode from task complexity, size, or ambiguity" in prompt
+    assert "If a task would genuinely benefit from a structured plan" not in prompt
 
 
 def test_plan_mode_prompt_requests_slack_approval_options() -> None:

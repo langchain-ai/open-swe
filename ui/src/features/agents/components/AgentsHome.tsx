@@ -24,7 +24,10 @@ import {
   useModelOptions,
 } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
-import { localThreadKeys } from "@/features/agents/lib/desktopLocal"
+import {
+  ensureDesktopModelCredential,
+  localThreadKeys,
+} from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
@@ -64,7 +67,8 @@ export function AgentsHome() {
   }
   const [planMode, setPlanMode] = useState(false)
   const [adminThread, setAdminThread] = useState(false)
-  const environmentOptions = useEnvironmentOptions()
+  const cloudEnabled = Boolean(session.data)
+  const environmentOptions = useEnvironmentOptions(cloudEnabled)
   const environments = environmentOptions.data?.environments ?? []
   // undefined = untouched, so the run falls back to the default environment.
   const [environmentOverride, setEnvironmentOverride] = useState<string | null>(
@@ -80,7 +84,11 @@ export function AgentsHome() {
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
-  const runTarget: RunTarget = isDesktop ? desktopThreadSource : "cloud"
+  const runTarget: RunTarget = isDesktop
+    ? cloudEnabled
+      ? desktopThreadSource
+      : "local"
+    : "cloud"
   const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
   const localProjectPathRef = useRef(localProjectPath)
   localProjectPathRef.current = localProjectPath
@@ -99,7 +107,7 @@ export function AgentsHome() {
 
   const reposQuery = useRepos()
   const profileQuery = useProfile()
-  const skills = useAgentSkills()
+  const skills = useAgentSkills({ enabled: cloudEnabled })
   // undefined = untouched (fall back to the profile default); null = explicitly "no repo".
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
     undefined
@@ -208,17 +216,17 @@ export function AgentsHome() {
       window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, localProjectPath)
       await refreshLocalProjectBranch()
       try {
-        const credential = await desktop.localModelCredentialStatus(
+        const credentialError = await ensureDesktopModelCredential(
           activeSelection?.modelId
         )
-        if (!credential.available) {
+        if (credentialError) {
           setSubmitting(false)
-          setLocalError(
-            `Set ${credential.variable} in the environment before starting Open SWE.`
-          )
+          setLocalError(credentialError)
           return
         }
-        const managedSkills = await skills.refetch()
+        const managedSkills = cloudEnabled
+          ? await skills.refetch()
+          : { personal: [], organization: [] }
         const localSession = await desktop.startLocalThread({
           cwd: localProjectPath,
           prompt,
@@ -298,7 +306,7 @@ export function AgentsHome() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
-      <OnboardingDialog />
+      {session.data && <OnboardingDialog />}
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center">
         <div className="flex w-full flex-col items-center gap-6">
           <Logo />
@@ -318,7 +326,9 @@ export function AgentsHome() {
             selectedRepo={repo}
             onRepoChange={setRepoOverride}
             runTarget={isDesktop ? runTarget : undefined}
-            onRunTargetChange={isDesktop ? handleRunTargetChange : undefined}
+            onRunTargetChange={
+              isDesktop && cloudEnabled ? handleRunTargetChange : undefined
+            }
             localProjects={localProjects}
             selectedLocalProjectPath={localProjectPath}
             selectedLocalProjectBranch={localProjectBranch}
