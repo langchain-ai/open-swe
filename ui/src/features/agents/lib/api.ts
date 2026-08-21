@@ -39,6 +39,7 @@ export interface ScheduleCreateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
+  admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
 }
@@ -50,6 +51,7 @@ export interface ScheduleUpdateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
+  admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
   enabled?: boolean | null
@@ -347,22 +349,24 @@ export const agentsApi = {
     agentsRequest<ThreadBranchDiff>(
       `/threads/${encodeURIComponent(threadId)}/branch-diff`
     ),
-  getThreadTurnDiff: (
+  getThreadWorkingTreeDiff: (threadId: string) =>
+    agentsRequest<ThreadTurnDiff>(
+      `/threads/${encodeURIComponent(threadId)}/working-tree-diff`
+    ),
+  getThreadRunDiff: (
     threadId: string,
-    turnKey?: string | null,
+    turnKey: string,
     options: ThreadTurnDiffOptions = {}
   ) => {
-    const params = new URLSearchParams()
-    if (turnKey) params.set("turn_key", turnKey)
+    const params = new URLSearchParams({ turn_key: turnKey })
     if (options.maxFiles != null) {
       params.set("max_files", String(options.maxFiles))
     }
     if (options.includeContent != null) {
       params.set("include_content", String(options.includeContent))
     }
-    const query = params.size > 0 ? `?${params.toString()}` : ""
     return agentsRequest<ThreadTurnDiff>(
-      `/threads/${encodeURIComponent(threadId)}/turn-diff${query}`
+      `/threads/${encodeURIComponent(threadId)}/run-diff?${params.toString()}`
     )
   },
   downloadThreadRecoveryPatch: (threadId: string) =>

@@ -450,6 +450,7 @@ export const ChatComposer = memo(function ChatComposer({
     setIsSubmitting(true)
     applyPrompt("", 0)
     setPendingImages([])
+    setDictationError(null)
     try {
       await onSubmit?.(trimmed, images)
     } catch {
