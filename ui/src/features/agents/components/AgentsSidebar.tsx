@@ -1026,6 +1026,14 @@ function ThreadRow({
           <span className="min-w-0 flex-1 truncate text-[13px]">
             {thread.title}
           </span>
+          {thread.automationActionPosted && (
+            <IoLogoSlack
+              className="size-3.5 shrink-0 text-success-foreground"
+              aria-label="Action posted to Slack"
+            >
+              <title>Action posted to Slack</title>
+            </IoLogoSlack>
+          )}
           {!compact && isAutomation && (
             <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground group-hover:hidden">
               Automation

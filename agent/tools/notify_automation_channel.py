@@ -41,6 +41,16 @@ async def _release_reservation(client: Any, thread_id: str) -> None:
         logger.exception("Failed to release automation notification for %s", thread_id)
 
 
+async def _mark_action_posted(client: Any, thread_id: str, notified_at: str) -> None:
+    try:
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={"automation_action_posted_at": notified_at},
+        )
+    except Exception:
+        logger.exception("Failed to mark automation action posted for %s", thread_id)
+
+
 async def notify_automation_channel(message: str) -> dict[str, Any]:
     """Notify the configured automation channel once after a concrete requested action."""
     config = get_config()
@@ -85,6 +95,9 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             return {"success": False, "error": "Could not check the Slack notification state"}
         existing = _stored_value(item)
         if existing is not None:
+            notified_at = existing.get("notified_at")
+            if existing.get("status") == "delivered" and isinstance(notified_at, str):
+                await _mark_action_posted(client, thread_id, notified_at)
             return {
                 "success": True,
                 "already_notified": True,
@@ -135,4 +148,5 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             await client.store.put_item(_NOTIFICATION_NAMESPACE, thread_id, delivered)
         except Exception:
             logger.exception("Failed to finalize automation notification for %s", thread_id)
+        await _mark_action_posted(client, thread_id, delivered["notified_at"])
         return {"success": True, "message_ts": message_ts}
