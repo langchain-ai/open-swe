@@ -99,6 +99,18 @@ describe("useSubmitAgentMessage", () => {
     expect(stream.submit).not.toHaveBeenCalled()
   })
 
+  it("starts a run when the streamed run ended before the send landed", async () => {
+    stream.isLoading = true
+    queueMessage.mockRejectedValueOnce(new ApiError(409, "thread is idle"))
+    const { client, result } = setup()
+
+    await result.current.mutateAsync({ content: "hi", images: [] })
+
+    await waitFor(() => expect(stream.submit).toHaveBeenCalled())
+    expect(queuedMessages(client)).toHaveLength(0)
+    expect(sidebarStatus(client)).toBe("running")
+  })
+
   it("shows the queued bubble immediately while this client streams", async () => {
     stream.isLoading = true
     let acceptQueue: () => void = () => {}

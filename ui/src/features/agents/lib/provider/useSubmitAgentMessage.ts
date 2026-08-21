@@ -111,15 +111,13 @@ export function useSubmitAgentMessage(threadId: string) {
         if (!optimistic) showQueued()
       }
 
-      if (stream.isLoading) {
-        await queue(true)
-        return
-      }
-
       try {
-        await queue(false)
+        await queue(stream.isLoading)
         return
       } catch (error) {
+        // 409 = the thread is idle. Either it always was, or the run this
+        // client is streaming finished between its last event and this send —
+        // start a run rather than dropping the message on the floor.
         if (!(error instanceof ApiError) || error.status !== 409) {
           throw error
         }
