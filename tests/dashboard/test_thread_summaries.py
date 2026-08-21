@@ -11,7 +11,6 @@ import pytest
 from fastapi import HTTPException
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.dashboard import authz
 from agent.dashboard.threads import listing as thread_listing
 from agent.dashboard.threads import runs as thread_runs
 
@@ -21,32 +20,20 @@ _LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
 _SEARCH_PAGE = 500
 
 
-def _patch_client(monkeypatch, client: FakeLangGraphClient) -> FakeLangGraphClient:
-    for module in (authz, thread_listing, thread_runs):
-        monkeypatch.setattr(module, "langgraph_client", lambda: client)
-    return client
-
-
-def _install_client(monkeypatch, **kwargs: Any) -> FakeLangGraphClient:
-    return _patch_client(monkeypatch, FakeLangGraphClient(**kwargs))
-
-
 async def _summary(
-    monkeypatch,
+    dashboard_client,
     metadata: dict[str, Any],
     *,
     login: str = "octocat",
     email: str | None = None,
 ) -> dict[str, Any]:
-    _install_client(
-        monkeypatch, threads=[{"thread_id": "tid", "status": "idle", "metadata": metadata}]
-    )
+    dashboard_client(threads=[{"thread_id": "tid", "status": "idle", "metadata": metadata}])
     return await thread_listing.get_dashboard_thread("tid", login, email=email)
 
 
-async def test_summary_includes_pr_and_diff_stats(monkeypatch) -> None:
+async def test_summary_includes_pr_and_diff_stats(dashboard_client) -> None:
     summary = await _summary(
-        monkeypatch,
+        dashboard_client,
         {
             "repo_full_name": "langchain-ai/open-swe",
             "title": "Add feature",
@@ -72,9 +59,9 @@ async def test_summary_includes_pr_and_diff_stats(monkeypatch) -> None:
     assert summary["pullRequests"][0]["repoFullName"] == "langchain-ai/open-swe"
 
 
-async def test_summary_includes_pull_requests_across_repositories(monkeypatch) -> None:
+async def test_summary_includes_pull_requests_across_repositories(dashboard_client) -> None:
     summary = await _summary(
-        monkeypatch,
+        dashboard_client,
         {
             "repo_full_name": "langchain-ai/open-swe",
             "title": "Cross-repo change",
@@ -122,13 +109,13 @@ async def test_summary_includes_pull_requests_across_repositories(monkeypatch) -
     assert summary["diffStats"] == {"files": 1, "additions": 4, "deletions": 0}
 
 
-async def test_summary_uses_configured_repo_for_display(monkeypatch) -> None:
+async def test_summary_uses_configured_repo_for_display(dashboard_client) -> None:
     metadata: dict[str, Any] = {
         "repo": {"owner": "trusted", "name": "default"},
         "working_repo_full_name": "observed/checkout",
     }
 
-    summary = await _summary(monkeypatch, metadata)
+    summary = await _summary(dashboard_client, metadata)
 
     assert summary["repo"] == "default"
     assert summary["repoFullName"] == "trusted/default"
@@ -136,37 +123,37 @@ async def test_summary_uses_configured_repo_for_display(monkeypatch) -> None:
     assert metadata["repo"] == {"owner": "trusted", "name": "default"}
 
 
-async def test_summary_defaults_unknown_pr_state_to_open(monkeypatch) -> None:
+async def test_summary_defaults_unknown_pr_state_to_open(dashboard_client) -> None:
     summary = await _summary(
-        monkeypatch,
+        dashboard_client,
         {"pr_number": 7, "pr_url": "https://example.com/pull/7", "pr_state": "bogus"},
     )
 
     assert summary["pr"]["state"] == "open"
 
 
-async def test_summary_omits_pr_when_no_pr_metadata(monkeypatch) -> None:
-    summary = await _summary(monkeypatch, {"title": "No PR"})
+async def test_summary_omits_pr_when_no_pr_metadata(dashboard_client) -> None:
+    summary = await _summary(dashboard_client, {"title": "No PR"})
 
     assert "pr" not in summary
     assert "diffStats" not in summary
 
 
-async def test_summary_exposes_sandbox_id(monkeypatch) -> None:
-    summary = await _summary(monkeypatch, {"sandbox_id": "sb-abc123"})
+async def test_summary_exposes_sandbox_id(dashboard_client) -> None:
+    summary = await _summary(dashboard_client, {"sandbox_id": "sb-abc123"})
 
     assert summary["sandboxId"] == "sb-abc123"
 
 
-async def test_summary_hides_creating_sandbox_sentinel(monkeypatch) -> None:
-    summary = await _summary(monkeypatch, {"sandbox_id": "__creating__"})
+async def test_summary_hides_creating_sandbox_sentinel(dashboard_client) -> None:
+    summary = await _summary(dashboard_client, {"sandbox_id": "__creating__"})
 
     assert summary["sandboxId"] is None
 
 
-async def test_summary_includes_slack_source_url_for_private_repo(monkeypatch) -> None:
+async def test_summary_includes_slack_source_url_for_private_repo(dashboard_client) -> None:
     summary = await _summary(
-        monkeypatch,
+        dashboard_client,
         {
             "source": "slack",
             "repo_private": True,
@@ -177,9 +164,9 @@ async def test_summary_includes_slack_source_url_for_private_repo(monkeypatch) -
     assert summary["sourceUrl"] == "https://slack.example/thread"
 
 
-async def test_summary_omits_slack_source_url_for_public_repo(monkeypatch) -> None:
+async def test_summary_omits_slack_source_url_for_public_repo(dashboard_client) -> None:
     summary = await _summary(
-        monkeypatch,
+        dashboard_client,
         {
             "source": "slack",
             "repo_private": False,
@@ -190,9 +177,9 @@ async def test_summary_omits_slack_source_url_for_public_repo(monkeypatch) -> No
     assert summary["sourceUrl"] is None
 
 
-async def test_summary_exposes_resolved_state(monkeypatch) -> None:
+async def test_summary_exposes_resolved_state(dashboard_client) -> None:
     summary = await _summary(
-        monkeypatch,
+        dashboard_client,
         {
             "source": "dashboard",
             "github_login": "octocat",
@@ -205,30 +192,30 @@ async def test_summary_exposes_resolved_state(monkeypatch) -> None:
     assert summary["resolvedAt"] == 1700
 
 
-async def test_summary_defaults_to_not_resolved(monkeypatch) -> None:
-    summary = await _summary(monkeypatch, {"source": "dashboard", "github_login": "octocat"})
+async def test_summary_defaults_to_not_resolved(dashboard_client) -> None:
+    summary = await _summary(dashboard_client, {"source": "dashboard", "github_login": "octocat"})
 
     assert summary["resolved"] is False
     assert summary["resolvedAt"] is None
 
 
-async def test_summary_is_owner_true_for_matching_login(monkeypatch) -> None:
-    summary = await _summary(monkeypatch, {"source": "slack", "github_login": "octocat"})
+async def test_summary_is_owner_true_for_matching_login(dashboard_client) -> None:
+    summary = await _summary(dashboard_client, {"source": "slack", "github_login": "octocat"})
 
     assert summary["isOwner"] is True
 
 
-async def test_summary_is_owner_false_for_non_owner(monkeypatch) -> None:
+async def test_summary_is_owner_false_for_non_owner(dashboard_client) -> None:
     summary = await _summary(
-        monkeypatch, {"source": "slack", "github_login": "octocat"}, login="teammate"
+        dashboard_client, {"source": "slack", "github_login": "octocat"}, login="teammate"
     )
 
     assert summary["isOwner"] is False
 
 
-async def test_summary_is_owner_true_for_matching_email(monkeypatch) -> None:
+async def test_summary_is_owner_true_for_matching_email(dashboard_client) -> None:
     summary = await _summary(
-        monkeypatch,
+        dashboard_client,
         {
             "source": "slack",
             "github_login": "octocat",
@@ -241,9 +228,8 @@ async def test_summary_is_owner_true_for_matching_email(monkeypatch) -> None:
     assert summary["isOwner"] is True
 
 
-async def test_summary_is_owner_defaults_true_without_owner_login(monkeypatch) -> None:
-    _install_client(
-        monkeypatch,
+async def test_summary_is_owner_defaults_true_without_owner_login(dashboard_client) -> None:
+    dashboard_client(
         threads=[
             {
                 "thread_id": "tid",
@@ -260,9 +246,13 @@ async def test_summary_is_owner_defaults_true_without_owner_login(monkeypatch) -
 
 
 def _activity_client(
-    metadata: dict[str, Any], run_status: str, *, thread_status: str = "idle"
+    dashboard_client,
+    metadata: dict[str, Any],
+    run_status: str,
+    *,
+    thread_status: str = "idle",
 ) -> FakeLangGraphClient:
-    return FakeLangGraphClient(
+    return dashboard_client(
         threads=[{"thread_id": "tid", "status": thread_status, "metadata": dict(metadata)}],
         runs={"tid": [{"run_id": "run-1", "status": run_status}]},
     )
@@ -272,8 +262,9 @@ def _metadata(client: FakeLangGraphClient) -> dict[str, Any]:
     return client.threads.threads["tid"]["metadata"]
 
 
-async def test_list_refreshes_finished_run_status(monkeypatch) -> None:
+async def test_list_refreshes_finished_run_status(dashboard_client) -> None:
     client = _activity_client(
+        dashboard_client,
         {
             "source": "dashboard",
             "github_login": "octocat",
@@ -282,7 +273,6 @@ async def test_list_refreshes_finished_run_status(monkeypatch) -> None:
         },
         "success",
     )
-    _patch_client(monkeypatch, client)
 
     results = await thread_listing.list_dashboard_threads("octocat")
 
@@ -292,8 +282,9 @@ async def test_list_refreshes_finished_run_status(monkeypatch) -> None:
     assert client.runs.list_calls == [{"thread_id": "tid", "limit": 1, "status": None}]
 
 
-async def test_get_thread_marks_finished_thread_viewed(monkeypatch) -> None:
+async def test_get_thread_marks_finished_thread_viewed(dashboard_client) -> None:
     client = _activity_client(
+        dashboard_client,
         {
             "source": "dashboard",
             "github_login": "octocat",
@@ -302,7 +293,6 @@ async def test_get_thread_marks_finished_thread_viewed(monkeypatch) -> None:
         },
         "success",
     )
-    _patch_client(monkeypatch, client)
 
     result = await thread_listing.get_dashboard_thread("tid", "octocat")
 
@@ -312,8 +302,9 @@ async def test_get_thread_marks_finished_thread_viewed(monkeypatch) -> None:
     assert _metadata(client)["last_viewed_run_id"] == "run-1"
 
 
-async def test_get_thread_readable_by_non_owner(monkeypatch) -> None:
+async def test_get_thread_readable_by_non_owner(dashboard_client) -> None:
     client = _activity_client(
+        dashboard_client,
         {
             "source": "slack",
             "github_login": "octocat",
@@ -322,7 +313,6 @@ async def test_get_thread_readable_by_non_owner(monkeypatch) -> None:
         },
         "success",
     )
-    _patch_client(monkeypatch, client)
 
     result = await thread_listing.get_dashboard_thread("tid", "someone-else")
 
@@ -330,8 +320,9 @@ async def test_get_thread_readable_by_non_owner(monkeypatch) -> None:
     assert "last_viewed_run_id" not in _metadata(client)
 
 
-async def test_get_thread_skips_mark_viewed_when_disabled(monkeypatch) -> None:
+async def test_get_thread_skips_mark_viewed_when_disabled(dashboard_client) -> None:
     client = _activity_client(
+        dashboard_client,
         {
             "source": "dashboard",
             "github_login": "octocat",
@@ -340,7 +331,6 @@ async def test_get_thread_skips_mark_viewed_when_disabled(monkeypatch) -> None:
         },
         "success",
     )
-    _patch_client(monkeypatch, client)
 
     result = await thread_listing.get_dashboard_thread("tid", "octocat", mark_viewed=False)
 
@@ -349,8 +339,9 @@ async def test_get_thread_skips_mark_viewed_when_disabled(monkeypatch) -> None:
     assert "last_viewed_run_id" not in _metadata(client)
 
 
-async def test_get_thread_does_not_mark_running_thread_viewed(monkeypatch) -> None:
+async def test_get_thread_does_not_mark_running_thread_viewed(dashboard_client) -> None:
     client = _activity_client(
+        dashboard_client,
         {
             "source": "dashboard",
             "github_login": "octocat",
@@ -360,7 +351,6 @@ async def test_get_thread_does_not_mark_running_thread_viewed(monkeypatch) -> No
         "running",
         thread_status="busy",
     )
-    _patch_client(monkeypatch, client)
 
     result = await thread_listing.get_dashboard_thread("tid", "octocat")
 
@@ -402,8 +392,8 @@ async def _filtered_ids(**filters: Any) -> list[str]:
     return [item["id"] for item in page["items"]]
 
 
-async def test_list_page_filters_on_metadata(monkeypatch) -> None:
-    _install_client(monkeypatch, threads=_FILTER_THREADS)
+async def test_list_page_filters_on_metadata(dashboard_client) -> None:
+    dashboard_client(threads=_FILTER_THREADS)
 
     assert await _filtered_ids(resolved=True) == ["interactive"]
     assert await _filtered_ids(resolved=False) == ["automation"]
@@ -414,10 +404,10 @@ async def test_list_page_filters_on_metadata(monkeypatch) -> None:
     assert await _filtered_ids(scope="automation", automation_id="schedule-2") == []
 
 
-async def test_list_page_filters_on_the_summary(monkeypatch) -> None:
+async def test_list_page_filters_on_the_summary(dashboard_client) -> None:
     """``status`` and ``viewed`` are only knowable once the summary is built."""
 
-    _install_client(monkeypatch, threads=_FILTER_THREADS)
+    dashboard_client(threads=_FILTER_THREADS)
 
     assert await _filtered_ids(status="finished") == ["interactive"]
     assert await _filtered_ids(status="error") == ["automation"]
@@ -455,11 +445,11 @@ def _assert_list_select(client: FakeLangGraphClient) -> None:
     assert all(call["select"] == _LIST_SELECT for call in searches)
 
 
-async def test_list_page_pages_beyond_first_search_batch(monkeypatch) -> None:
+async def test_list_page_pages_beyond_first_search_batch(dashboard_client) -> None:
     threads = _make_threads(_SEARCH_PAGE + 50, resolved_before=_SEARCH_PAGE)
     for thread in threads:
         cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
-    client = _install_client(monkeypatch, threads=threads)
+    client = dashboard_client(threads=threads)
 
     result = await thread_listing.list_dashboard_threads_page(
         "octocat", email=None, limit=25, offset=0, resolved=False
@@ -473,7 +463,7 @@ async def test_list_page_pages_beyond_first_search_batch(monkeypatch) -> None:
     assert client.runs.list_calls == []
 
 
-async def test_list_page_scopes_automation_runs(monkeypatch) -> None:
+async def test_list_page_scopes_automation_runs(dashboard_client) -> None:
     threads = _make_threads(3, resolved_before=0)
     for thread in threads:
         cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
@@ -494,7 +484,7 @@ async def test_list_page_scopes_automation_runs(monkeypatch) -> None:
         }
     )
 
-    _install_client(monkeypatch, threads=threads)
+    dashboard_client(threads=threads)
 
     interactive = await thread_listing.list_dashboard_threads_page(
         "octocat", email=None, scope="interactive"
@@ -508,7 +498,7 @@ async def test_list_page_scopes_automation_runs(monkeypatch) -> None:
     assert automation["items"][0]["automationId"] == "schedule-1"
 
 
-async def test_list_page_separates_filter_owner_from_viewer(monkeypatch) -> None:
+async def test_list_page_separates_filter_owner_from_viewer(dashboard_client) -> None:
     threads = [
         {
             "thread_id": "surfaced",
@@ -529,7 +519,7 @@ async def test_list_page_separates_filter_owner_from_viewer(monkeypatch) -> None
             },
         },
     ]
-    client = _install_client(monkeypatch, threads=threads)
+    client = dashboard_client(threads=threads)
 
     result = await thread_listing.list_dashboard_threads_page(
         "admin-user",
@@ -546,9 +536,9 @@ async def test_list_page_separates_filter_owner_from_viewer(monkeypatch) -> None
     assert result["items"][0]["isOwner"] is False
 
 
-async def test_list_sidebar_fills_buckets_with_one_endpoint(monkeypatch) -> None:
+async def test_list_sidebar_fills_buckets_with_one_endpoint(dashboard_client) -> None:
     threads = _make_threads(_SEARCH_PAGE + 10, resolved_before=_SEARCH_PAGE)
-    client = _install_client(monkeypatch, threads=threads)
+    client = dashboard_client(threads=threads)
 
     result = await thread_listing.list_dashboard_threads_sidebar(
         "octocat", email=None, active_limit=5, resolved_limit=5
@@ -562,13 +552,13 @@ async def test_list_sidebar_fills_buckets_with_one_endpoint(monkeypatch) -> None
     assert set(_search_offsets(client)) == {0, _SEARCH_PAGE}
 
 
-async def test_list_sidebar_excludes_automations_before_limiting(monkeypatch) -> None:
+async def test_list_sidebar_excludes_automations_before_limiting(dashboard_client) -> None:
     threads = _make_threads(_SEARCH_PAGE + 5, resolved_before=0)
     for thread in threads[:_SEARCH_PAGE]:
         metadata = cast(dict[str, object], thread["metadata"])
         metadata["source"] = "schedule"
         metadata["schedule_id"] = f"schedule-{thread['thread_id']}"
-    client = _install_client(monkeypatch, threads=threads)
+    client = dashboard_client(threads=threads)
 
     result = await thread_listing.list_dashboard_threads_sidebar(
         "octocat", email=None, active_limit=5, resolved_limit=5
@@ -580,7 +570,7 @@ async def test_list_sidebar_excludes_automations_before_limiting(monkeypatch) ->
     assert set(_search_offsets(client)) == {0, _SEARCH_PAGE}
 
 
-async def test_list_sidebar_includes_readable_active_thread(monkeypatch) -> None:
+async def test_list_sidebar_includes_readable_active_thread(dashboard_client) -> None:
     threads = _make_threads(1, resolved_before=0)
     shared_thread = {
         "thread_id": "shared-thread",
@@ -593,7 +583,7 @@ async def test_list_sidebar_includes_readable_active_thread(monkeypatch) -> None
             "sandbox_id": "sandbox-123",
         },
     }
-    client = _install_client(monkeypatch, threads=threads)
+    client = dashboard_client(threads=threads)
     # Fetchable by id, but not one of the viewer's own threads that search returns.
     client.threads.threads["shared-thread"] = shared_thread
 
@@ -612,7 +602,7 @@ async def test_list_sidebar_includes_readable_active_thread(monkeypatch) -> None
     _assert_list_select(client)
 
 
-async def test_list_sidebar_keeps_resolved_active_thread_resolved(monkeypatch) -> None:
+async def test_list_sidebar_keeps_resolved_active_thread_resolved(dashboard_client) -> None:
     threads = _make_threads(1, resolved_before=0)
     shared_thread = {
         "thread_id": "shared-resolved-thread",
@@ -626,7 +616,7 @@ async def test_list_sidebar_keeps_resolved_active_thread_resolved(monkeypatch) -
             "sandbox_id": "sandbox-456",
         },
     }
-    client = _install_client(monkeypatch, threads=threads)
+    client = dashboard_client(threads=threads)
     client.threads.threads["shared-resolved-thread"] = shared_thread
 
     result = await thread_listing.list_dashboard_threads_sidebar(
@@ -646,7 +636,7 @@ async def test_list_sidebar_keeps_resolved_active_thread_resolved(monkeypatch) -
     _assert_list_select(client)
 
 
-async def test_list_sidebar_ignores_unreadable_active_thread(monkeypatch) -> None:
+async def test_list_sidebar_ignores_unreadable_active_thread(dashboard_client) -> None:
     threads = _make_threads(1, resolved_before=0)
     private_thread = {
         "thread_id": "private-thread",
@@ -659,7 +649,7 @@ async def test_list_sidebar_ignores_unreadable_active_thread(monkeypatch) -> Non
         },
     }
 
-    client = _install_client(monkeypatch, threads=threads)
+    client = dashboard_client(threads=threads)
     client.threads.threads["private-thread"] = private_thread
 
     result = await thread_listing.list_dashboard_threads_sidebar(
@@ -674,14 +664,12 @@ async def test_list_sidebar_ignores_unreadable_active_thread(monkeypatch) -> Non
     _assert_list_select(client)
 
 
-async def test_list_page_refreshes_only_unsettled_threads(monkeypatch) -> None:
+async def test_list_page_refreshes_only_unsettled_threads(dashboard_client) -> None:
     threads = _make_threads(3, resolved_before=0)
     cast(dict[str, object], threads[0]["metadata"])["latest_run_status"] = "success"
     cast(dict[str, object], threads[1]["metadata"])["latest_run_status"] = "pending"
     cast(dict[str, object], threads[2]["metadata"])["latest_run_status"] = "error"
-    client = _install_client(
-        monkeypatch, threads=threads, runs=[{"id": "run-1", "status": "success"}]
-    )
+    client = dashboard_client(threads=threads, runs=[{"id": "run-1", "status": "success"}])
 
     result = await thread_listing.list_dashboard_threads_page(
         "octocat", email=None, limit=3, offset=0
@@ -697,12 +685,11 @@ async def test_list_page_refreshes_only_unsettled_threads(monkeypatch) -> None:
     assert [item["status"] for item in result["items"]] == ["finished", "finished", "error"]
 
 
-async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -> None:
+async def test_status_filter_refreshes_threads_missing_run_status(dashboard_client) -> None:
     threads = _make_threads(2, resolved_before=0)
     for thread in threads:
         cast(dict[str, object], thread["metadata"])["source"] = "slack"
-    client = _install_client(
-        monkeypatch,
+    client = dashboard_client(
         threads=threads,
         runs={
             "t0": [{"id": "run-t0", "status": "success"}],
@@ -719,10 +706,8 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
     assert {call["thread_id"] for call in client.runs.list_calls} == {"t0", "t1"}
 
 
-async def test_resolve_thread_marks_resolved(monkeypatch) -> None:
-    client = _install_client(
-        monkeypatch, thread_metadata={"source": "dashboard", "github_login": "octocat"}
-    )
+async def test_resolve_thread_marks_resolved(dashboard_client) -> None:
+    client = dashboard_client(thread_metadata={"source": "dashboard", "github_login": "octocat"})
 
     summary = await thread_runs.resolve_dashboard_thread("tid", "octocat", resolved=True)
 
@@ -732,9 +717,8 @@ async def test_resolve_thread_marks_resolved(monkeypatch) -> None:
     assert summary["resolved"] is True
 
 
-async def test_resolve_thread_clears_resolved(monkeypatch) -> None:
-    client = _install_client(
-        monkeypatch,
+async def test_resolve_thread_clears_resolved(dashboard_client) -> None:
+    client = dashboard_client(
         thread_metadata={
             "source": "dashboard",
             "github_login": "octocat",
@@ -751,8 +735,8 @@ async def test_resolve_thread_clears_resolved(monkeypatch) -> None:
     assert summary["resolved"] is False
 
 
-async def test_resolve_thread_enforces_ownership(monkeypatch) -> None:
-    _install_client(monkeypatch, thread_metadata={"source": "dashboard", "github_login": "owner"})
+async def test_resolve_thread_enforces_ownership(dashboard_client) -> None:
+    dashboard_client(thread_metadata={"source": "dashboard", "github_login": "owner"})
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_runs.resolve_dashboard_thread("tid", "intruder", resolved=True)
