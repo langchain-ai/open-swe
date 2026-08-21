@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 from deepagents.backends.protocol import (
-    DeleteResult,
     ExecuteOffloadResult,
     ExecuteResponse,
     SandboxBackendProtocol,
 )
 from deepagents.backends.sandbox import BaseSandbox
+from support.sandbox_fakes import FakeSandboxBackend
 
 from agent.utils.sandbox_state import (
     SANDBOX_BACKENDS,
@@ -21,16 +21,6 @@ from agent.utils.sandbox_state import (
     get_sandbox_backend,
     get_sandbox_id_from_metadata,
 )
-
-
-class _FakeSandboxBackend:
-    id = "sandbox-1"
-
-    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        return ExecuteResponse(output=f"{self.id}: {command}: {timeout}", exit_code=0)
-
-    async def adelete(self, file_path: str) -> DeleteResult:
-        return DeleteResult(path=file_path)
 
 
 class _OffloadCapableBackend(BaseSandbox):
@@ -110,7 +100,7 @@ async def test_sandbox_proxy_delegates_offload_to_live_backend() -> None:
 async def test_sandbox_proxy_offload_falls_back_when_backend_lacks_it() -> None:
     # A backend implementing only the protocol (no capture-offload) must not
     # error: the proxy runs it plainly and reports offloaded=False.
-    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, _FakeSandboxBackend()), thread_id="t")
+    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, FakeSandboxBackend()), thread_id="t")
 
     result = await proxy.aexecute_with_offload("cmd", "/capture/path", max_inline_bytes=80_000)
 
@@ -131,7 +121,7 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
     async def create_sandbox(sandbox_id: str):
         created.append(sandbox_id)
         await asyncio.sleep(0)
-        return _FakeSandboxBackend()
+        return FakeSandboxBackend()
 
     monkeypatch.setattr(
         "agent.utils.sandbox_state.get_sandbox_id_from_metadata",
@@ -167,7 +157,7 @@ async def test_sandbox_proxy_uses_registered_reconnect_once(
     async def reconnect():
         reconnected.append(thread_id)
         await asyncio.sleep(0)
-        return _FakeSandboxBackend()
+        return FakeSandboxBackend()
 
     async def create_sandbox(sandbox_id: str):
         raise AssertionError(f"unexpected direct reconnect to {sandbox_id}")
@@ -193,7 +183,7 @@ async def test_sandbox_proxy_uses_registered_reconnect_once(
 
 @pytest.mark.asyncio
 async def test_sandbox_proxy_refreshes_initialized_backend_when_started() -> None:
-    refreshed = _FakeSandboxBackend()
+    refreshed = FakeSandboxBackend()
     calls = 0
 
     async def reconnect():
@@ -202,7 +192,7 @@ async def test_sandbox_proxy_refreshes_initialized_backend_when_started() -> Non
         return refreshed
 
     proxy = SandboxBackendProxy(
-        cast(SandboxBackendProtocol, _FakeSandboxBackend()),
+        cast(SandboxBackendProtocol, FakeSandboxBackend()),
         thread_id="thread-1",
         reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
     )
@@ -220,7 +210,7 @@ async def test_sandbox_proxy_starts_reconnect_before_first_operation() -> None:
     async def reconnect():
         started.set()
         await release.wait()
-        return _FakeSandboxBackend()
+        return FakeSandboxBackend()
 
     proxy = SandboxBackendProxy(
         thread_id="thread-1",
@@ -248,7 +238,7 @@ async def test_sandbox_proxy_startup_survives_waiter_cancellation() -> None:
         calls += 1
         started.set()
         await release.wait()
-        return _FakeSandboxBackend()
+        return FakeSandboxBackend()
 
     proxy = SandboxBackendProxy(
         thread_id="thread-1",
@@ -277,7 +267,7 @@ async def test_sandbox_proxy_retries_failed_startup() -> None:
         calls += 1
         if calls == 1:
             raise RuntimeError("startup failed")
-        return _FakeSandboxBackend()
+        return FakeSandboxBackend()
 
     proxy = SandboxBackendProxy(
         thread_id="thread-1",
@@ -296,7 +286,7 @@ async def test_sandbox_proxy_retries_failed_startup() -> None:
 @pytest.mark.asyncio
 async def test_sandbox_proxy_delegates_delete_after_lazy_startup() -> None:
     async def reconnect():
-        return _FakeSandboxBackend()
+        return FakeSandboxBackend()
 
     proxy = SandboxBackendProxy(
         thread_id="thread-1",
@@ -316,7 +306,7 @@ async def test_get_sandbox_backend_awaits_registered_startup() -> None:
 
     async def reconnect():
         await release.wait()
-        return _FakeSandboxBackend()
+        return FakeSandboxBackend()
 
     proxy = get_or_create_sandbox_backend_proxy(
         thread_id,

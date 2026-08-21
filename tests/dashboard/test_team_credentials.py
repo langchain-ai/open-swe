@@ -1,10 +1,10 @@
-from typing import Any
+from collections.abc import Callable
 
 import pytest
 from cryptography.fernet import Fernet
 from pydantic import ValidationError
+from support.langgraph_fakes import FakeLangGraphClient, FakeStore
 
-from agent import store as agent_store
 from agent.dashboard import team_credentials as tc
 from agent.dashboard.team_credentials import (
     DatadogCredentialsUpdate,
@@ -12,32 +12,13 @@ from agent.dashboard.team_credentials import (
 )
 
 
-class _FakeStore:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-
-    async def get_item(self, namespace: list[str], key: str):
-        value = self.items.get((tuple(namespace), key))
-        return {"value": value} if value is not None else None
-
-    async def put_item(self, namespace: list[str], key: str, value: dict[str, Any]) -> None:
-        self.items[(tuple(namespace), key)] = value
-
-    async def delete_item(self, namespace: list[str], key: str) -> None:
-        self.items.pop((tuple(namespace), key), None)
-
-
-class _FakeClient:
-    def __init__(self, store: _FakeStore) -> None:
-        self.store = store
-
-
 @pytest.fixture()
-def fake_store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
-    store = _FakeStore()
-    monkeypatch.setattr(agent_store, "store_client", lambda: _FakeClient(store))
+def fake_store(
+    patched_langgraph_client: Callable[..., FakeLangGraphClient],
+    monkeypatch: pytest.MonkeyPatch,
+) -> FakeStore:
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    return store
+    return patched_langgraph_client().store
 
 
 class TestValidators:
@@ -73,7 +54,7 @@ class TestMcpUrl:
 
 
 @pytest.mark.asyncio
-async def test_datadog_roundtrip_and_redaction(fake_store: _FakeStore) -> None:
+async def test_datadog_roundtrip_and_redaction(fake_store: FakeStore) -> None:
     status = await tc.connect_datadog(
         DatadogCredentialsUpdate(site="datadoghq.com", api_key="secret-api-1234", app_key="appk")
     )
@@ -94,7 +75,7 @@ async def test_datadog_roundtrip_and_redaction(fake_store: _FakeStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_langsmith_roundtrip(fake_store: _FakeStore) -> None:
+async def test_langsmith_roundtrip(fake_store: FakeStore) -> None:
     status = await tc.connect_langsmith(LangSmithCredentialsUpdate(api_key="ls-key-9999"))
     assert status["langsmith"]["connected"] is True
     assert status["langsmith"]["api_key_last4"] == "9999"
@@ -109,14 +90,14 @@ async def test_langsmith_roundtrip(fake_store: _FakeStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_status_empty_when_unset(fake_store: _FakeStore) -> None:
+async def test_status_empty_when_unset(fake_store: FakeStore) -> None:
     status = await tc.get_team_credentials_status()
     assert status["datadog"]["connected"] is False
     assert status["langsmith"]["connected"] is False
 
 
 @pytest.mark.asyncio
-async def test_connecting_one_keeps_other(fake_store: _FakeStore) -> None:
+async def test_connecting_one_keeps_other(fake_store: FakeStore) -> None:
     await tc.connect_datadog(DatadogCredentialsUpdate(api_key="dd", app_key="app"))
     await tc.connect_langsmith(LangSmithCredentialsUpdate(api_key="ls"))
     status = await tc.get_team_credentials_status()

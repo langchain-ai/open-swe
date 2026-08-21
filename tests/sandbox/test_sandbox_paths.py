@@ -2,6 +2,7 @@ import shlex
 from typing import cast
 
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+from support.sandbox_fakes import FakeSandboxBackend
 
 from agent.utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
 
@@ -22,44 +23,32 @@ class _FakeProvider:
         return self._home_dir
 
 
-class _FakeSandboxBackend:
-    def __init__(
-        self,
-        *,
-        provider: _FakeProvider | None = None,
-        shell_paths: dict[str, str] | None = None,
-        writable_dirs: set[str] | None = None,
-    ) -> None:
-        self.sandbox = provider
-        self.shell_paths = shell_paths or {}
-        self.writable_dirs = writable_dirs or set()
-        self.commands: list[str] = []
+def _backend(
+    *,
+    provider: _FakeProvider | None = None,
+    shell_paths: dict[str, str] | None = None,
+    writable_dirs: set[str] | None = None,
+) -> FakeSandboxBackend:
+    """A backend where ``test -d <path>`` succeeds only for ``writable_dirs``."""
+    writable = writable_dirs or set()
 
-    @property
-    def id(self) -> str:
-        return "fake-sandbox"
+    def respond(command: str) -> ExecuteResponse | None:
+        if not command.startswith("test -d "):
+            return None
+        exit_code = 0 if shlex.split(command)[2] in writable else 1
+        return ExecuteResponse(output="", exit_code=exit_code, truncated=False)
 
-    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        del timeout
-        self.commands.append(command)
-
-        if command in self.shell_paths:
-            return ExecuteResponse(
-                output=self.shell_paths[command],
-                exit_code=0,
-                truncated=False,
-            )
-
-        if command.startswith("test -d "):
-            path = shlex.split(command)[2]
-            exit_code = 0 if path in self.writable_dirs else 1
-            return ExecuteResponse(output="", exit_code=exit_code, truncated=False)
-
-        return ExecuteResponse(output="", exit_code=1, truncated=False)
+    return FakeSandboxBackend(
+        "fake-sandbox",
+        provider=provider,
+        respond=respond,
+        results=shell_paths or {},
+        default=ExecuteResponse(output="", exit_code=1, truncated=False),
+    )
 
 
 async def test_resolve_repo_dir_uses_provider_work_dir() -> None:
-    backend = _FakeSandboxBackend(
+    backend = _backend(
         provider=_FakeProvider(work_dir="/workspace"),
         writable_dirs={"/workspace"},
     )
@@ -71,7 +60,7 @@ async def test_resolve_repo_dir_uses_provider_work_dir() -> None:
 
 
 async def test_resolve_sandbox_work_dir_falls_back_to_home_when_work_dir_is_not_writable() -> None:
-    backend = _FakeSandboxBackend(
+    backend = _backend(
         provider=_FakeProvider(work_dir="/workspace", home_dir="/home/daytona"),
         shell_paths={
             "pwd": "/workspace",
@@ -91,7 +80,7 @@ async def test_resolve_sandbox_work_dir_falls_back_to_home_when_work_dir_is_not_
 
 
 async def test_resolve_sandbox_work_dir_caches_the_result() -> None:
-    backend = _FakeSandboxBackend(
+    backend = _backend(
         provider=_FakeProvider(work_dir="/workspace"),
         writable_dirs={"/workspace"},
     )
@@ -105,7 +94,7 @@ async def test_resolve_sandbox_work_dir_caches_the_result() -> None:
 
 
 async def test_aresolve_repo_dir_resolves_home_dir() -> None:
-    backend = _FakeSandboxBackend(
+    backend = _backend(
         provider=_FakeProvider(work_dir="/home/daytona"),
         writable_dirs={"/home/daytona"},
     )

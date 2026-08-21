@@ -1,8 +1,8 @@
 import importlib
 import json
 import sys
-import types
-from typing import Any
+
+from support.exa_fakes import fake_exa_module
 
 sandbox_output = importlib.import_module("agent.tools._sandbox_output")
 web_search_tool = importlib.import_module("agent.tools.web_search")
@@ -10,19 +10,6 @@ web_search_tool = importlib.import_module("agent.tools.web_search")
 
 def _decode_jsonl(content: str) -> str:
     return "".join(json.loads(line)["text"] for line in content.splitlines())
-
-
-class FakeExa:
-    result = ""
-
-    def __init__(self, api_key: str) -> None:
-        self.api_key = api_key
-
-    def search_and_contents(self, *args: Any, **kwargs: Any) -> str:
-        return self.result
-
-    def search(self, *args: Any, **kwargs: Any) -> str:
-        return self.result
 
 
 def test_chunk_output_as_jsonl_is_lossless_and_bounds_source_lines() -> None:
@@ -69,8 +56,7 @@ async def test_write_sandbox_output_uses_current_thread_backend(monkeypatch) -> 
 
 async def test_web_search_saves_results_and_returns_only_path(monkeypatch) -> None:
     raw_results = "untrusted result\n" + "x" * 200_000
-    FakeExa.result = raw_results
-    monkeypatch.setitem(sys.modules, "exa_py", types.SimpleNamespace(Exa=FakeExa))
+    monkeypatch.setitem(sys.modules, "exa_py", fake_exa_module(raw_results))
     monkeypatch.setenv("EXA_API_KEY", "test-key")
     writes: list[tuple[str, str, str]] = []
 
@@ -96,8 +82,7 @@ async def test_web_search_saves_results_and_returns_only_path(monkeypatch) -> No
 
 async def test_web_search_returns_bounded_inline_results_without_sandbox(monkeypatch) -> None:
     raw_results = "search marker " + "x" * 200_000
-    FakeExa.result = raw_results
-    monkeypatch.setitem(sys.modules, "exa_py", types.SimpleNamespace(Exa=FakeExa))
+    monkeypatch.setitem(sys.modules, "exa_py", fake_exa_module(raw_results))
     monkeypatch.setenv("EXA_API_KEY", "test-key")
 
     async def fail_write(tool_name: str, content: str, extension: str) -> str:

@@ -9,7 +9,6 @@ from agent.utils.sandbox_state import SANDBOX_BACKENDS, set_sandbox_backend
 @pytest.mark.asyncio
 async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
     thread_id = "thread-recreate"
-    SANDBOX_BACKENDS.clear()
     old_sandbox = MagicMock(id="sandbox-old")
     new_sandbox = MagicMock(id="sandbox-new")
     proxy = set_sandbox_backend(thread_id, old_sandbox)
@@ -53,13 +52,11 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
     )
     assert SANDBOX_BACKENDS[thread_id] is proxy
     assert proxy.current is new_sandbox
-    SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
 async def test_recreate_sandbox_keeps_old_binding_when_metadata_update_fails() -> None:
     thread_id = "thread-recreate-failure"
-    SANDBOX_BACKENDS.clear()
     old_sandbox = MagicMock(id="sandbox-old")
     new_sandbox = MagicMock(id="sandbox-new")
     proxy = set_sandbox_backend(thread_id, old_sandbox)
@@ -87,13 +84,11 @@ async def test_recreate_sandbox_keeps_old_binding_when_metadata_update_fails() -
 
     assert SANDBOX_BACKENDS[thread_id] is proxy
     assert proxy.current is old_sandbox
-    SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
 async def test_recreate_sandbox_rejects_non_distinct_provider_result() -> None:
     thread_id = "thread-recreate-same-id"
-    SANDBOX_BACKENDS.clear()
     old_sandbox = MagicMock(id="sandbox-same")
     set_sandbox_backend(thread_id, old_sandbox)
 
@@ -117,4 +112,3 @@ async def test_recreate_sandbox_rejects_non_distinct_provider_result() -> None:
     configure.assert_not_awaited()
     update.assert_not_awaited()
     assert SANDBOX_BACKENDS[thread_id].current is old_sandbox
-    SANDBOX_BACKENDS.clear()

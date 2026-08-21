@@ -2,51 +2,16 @@ from typing import Any
 
 import pytest
 from fastapi import HTTPException
+from support.langgraph_fakes import FakeLangGraphClient
 
 from agent.dashboard import thread_api
 
 
-class _FakeThreads:
-    def __init__(self, metadata: dict[str, Any]) -> None:
-        self.metadata = metadata
-        self.updates: list[dict[str, Any]] = []
-
-    async def get(self, thread_id: str) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": self.metadata}
-
-    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
-        self.updates.append(metadata)
-        self.metadata.update(metadata)
-
-
-class _FakeRuns:
-    def __init__(self) -> None:
-        self.created: list[dict[str, Any]] = []
-
-    async def create(self, *args: Any, **kwargs: Any) -> dict[str, str]:
-        self.created.append({"args": args, "kwargs": kwargs})
-        return {"run_id": "run-1"}
-
-
-class _FakeStore:
-    def __init__(
-        self, items: dict[tuple[tuple[str, ...], str], dict[str, Any]] | None = None
-    ) -> None:
-        self.items = items or {}
-
-    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
-        return self.items.get((namespace, key))
-
-
-class _FakeClient:
-    def __init__(
-        self,
-        metadata: dict[str, Any],
-        store_items: dict[tuple[tuple[str, ...], str], dict[str, Any]] | None = None,
-    ) -> None:
-        self.threads = _FakeThreads(metadata)
-        self.runs = _FakeRuns()
-        self.store = _FakeStore(store_items)
+def _client(
+    metadata: dict[str, Any],
+    store_items: dict[tuple[tuple[str, ...], str], dict[str, Any]] | None = None,
+) -> FakeLangGraphClient:
+    return FakeLangGraphClient(thread_metadata=metadata, items=store_items)
 
 
 async def _inactive_thread(thread_id: str) -> bool:
@@ -83,7 +48,7 @@ async def test_dashboard_followup_on_slack_thread_uses_dashboard_source(
             "slack_thread": {"channel_id": "C1", "thread_ts": "123.45"},
         },
     }
-    client = _FakeClient(metadata)
+    client = _client(metadata)
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_thread_active_status", _inactive_thread)
@@ -112,7 +77,7 @@ async def test_dashboard_followup_sends_image_content_blocks(
         "repo_owner": "octo",
         "repo_name": "repo",
     }
-    client = _FakeClient(metadata)
+    client = _client(metadata)
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_thread_active_status", _inactive_thread)
@@ -153,7 +118,7 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
         "github_login": "octocat",
         "triggering_user_email": "octocat@example.com",
     }
-    client = _FakeClient(metadata)
+    client = _client(metadata)
     queued_messages: list[object] = []
 
     async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
@@ -204,7 +169,7 @@ async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
             }
         },
     }
-    client = _FakeClient(metadata)
+    client = _client(metadata)
     queued_messages: list[object] = []
     handoff_updates: list[dict[str, str]] = []
 
@@ -261,11 +226,13 @@ async def test_dashboard_followup_uses_stored_trace_reply_timestamp(
         "triggering_user_email": "octocat@example.com",
         "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "123.45"}},
     }
-    client = _FakeClient(
+    client = _client(
         metadata,
         {
             (("slack_run_map", "C1"), "thread:123.45"): {
-                "value": {"run_id": "run-1", "thread_ts": "123.45", "trace_message_ts": "123.46"}
+                "run_id": "run-1",
+                "thread_ts": "123.45",
+                "trace_message_ts": "123.46",
             }
         },
     )
@@ -308,7 +275,7 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
         "github_login": "octocat",
         "resolved_model": "openai:gpt-5.6-sol",
     }
-    client = _FakeClient(metadata)
+    client = _client(metadata)
     queued_messages: list[object] = []
 
     async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
@@ -358,7 +325,7 @@ async def test_dashboard_followup_on_busy_text_only_thread_rejects_images(
         "github_login": "octocat",
         "resolved_model": "fireworks:accounts/fireworks/models/deepseek-v4-pro",
     }
-    client = _FakeClient(metadata)
+    client = _client(metadata)
     queued_messages: list[object] = []
 
     async def fake_queue_message_for_thread(thread_id: str, message_content: object) -> bool:
@@ -395,7 +362,7 @@ async def test_dashboard_followup_on_busy_unknown_model_rejects_images(
         "source": "dashboard",
         "github_login": "octocat",
     }
-    client = _FakeClient(metadata)
+    client = _client(metadata)
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_thread_active_status", _active_thread)
@@ -424,7 +391,7 @@ async def test_dashboard_followup_preserves_explicit_repo_less_thread(
         "github_login": "octocat",
         "repo_explicitly_none": True,
     }
-    client = _FakeClient(metadata)
+    client = _client(metadata)
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_thread_active_status", _inactive_thread)
@@ -450,7 +417,7 @@ async def test_dashboard_followup_without_repo_metadata_allows_team_default(
         "source": "dashboard",
         "github_login": "octocat",
     }
-    client = _FakeClient(metadata)
+    client = _client(metadata)
 
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_api, "get_thread_active_status", _inactive_thread)

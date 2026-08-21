@@ -2,29 +2,17 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langsmith.sandbox import SandboxClientError
+from support.sandbox_fakes import FakeSandboxBackend
 
 from agent.middleware.sandbox_circuit_breaker import (
     post_sandbox_unreachable_notification,
     sandbox_unreachable_message,
 )
 from agent.middleware.tool_error_handler import ToolErrorMiddleware
-from agent.utils.sandbox_state import SANDBOX_BACKENDS, clear_sandbox_backend, set_sandbox_backend
-
-
-class FakeSandboxBackend(SandboxBackendProtocol):
-    def __init__(self, sandbox_id: str = "sb-new") -> None:
-        self._sandbox_id = sandbox_id
-
-    @property
-    def id(self) -> str:
-        return self._sandbox_id
-
-    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        return ExecuteResponse(output=f"{self.id}: {command}: {timeout}", exit_code=0)
+from agent.utils.sandbox_state import SANDBOX_BACKENDS, set_sandbox_backend
 
 
 def _tool_request(thread_id: str = "thread-1") -> ToolCallRequest:
@@ -51,33 +39,30 @@ async def test_sandbox_client_error_notifies_and_never_recreates() -> None:
     async def handler(_request: ToolCallRequest) -> ToolMessage:
         raise SandboxClientError("Sandbox request timed out: sb-dead")
 
-    try:
-        with (
-            patch(
-                "agent.middleware.tool_error_handler.post_sandbox_unreachable_notification",
-                new_callable=AsyncMock,
-            ) as mock_notify,
-            patch(
-                "agent.runtime.sandbox._create_sandbox_with_proxy", new_callable=AsyncMock
-            ) as mock_create,
-        ):
-            result = await middleware.awrap_tool_call(request, handler)
+    with (
+        patch(
+            "agent.middleware.tool_error_handler.post_sandbox_unreachable_notification",
+            new_callable=AsyncMock,
+        ) as mock_notify,
+        patch(
+            "agent.runtime.sandbox._create_sandbox_with_proxy", new_callable=AsyncMock
+        ) as mock_create,
+    ):
+        result = await middleware.awrap_tool_call(request, handler)
 
-        mock_create.assert_not_awaited()
-        mock_notify.assert_awaited_once()
-        # The dead backend must not linger for the next tool call.
-        assert "thread-1" not in SANDBOX_BACKENDS
+    mock_create.assert_not_awaited()
+    mock_notify.assert_awaited_once()
+    # The dead backend must not linger for the next tool call.
+    assert "thread-1" not in SANDBOX_BACKENDS
 
-        assert isinstance(result, ToolMessage)
-        assert isinstance(result.content, str)
-        payload = json.loads(result.content)
-        assert payload["status"] == "error"
-        assert payload["error_type"] == "SandboxClientError"
-        assert payload["recovery"] == "sandbox_unreachable"
-        assert payload["previous_error"] == "Sandbox request timed out: sb-dead"
-        assert "will not be replaced" in payload["error"]
-    finally:
-        clear_sandbox_backend("thread-1")
+    assert isinstance(result, ToolMessage)
+    assert isinstance(result.content, str)
+    payload = json.loads(result.content)
+    assert payload["status"] == "error"
+    assert payload["error_type"] == "SandboxClientError"
+    assert payload["recovery"] == "sandbox_unreachable"
+    assert payload["previous_error"] == "Sandbox request timed out: sb-dead"
+    assert "will not be replaced" in payload["error"]
 
 
 def test_unreachable_message_names_the_sandbox_without_claiming_permanence() -> None:
