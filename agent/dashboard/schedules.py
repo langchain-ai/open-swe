@@ -19,6 +19,7 @@ from ..utils.slack import (
 )
 from ..utils.thread_ops import langgraph_client
 from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
+from .admin import is_admin
 from .options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
@@ -506,12 +507,22 @@ def _scheduled_prompt(record: dict[str, Any], slack_thread: dict[str, Any] | Non
     return prompt
 
 
+def _admin_thread_enabled(record: dict[str, Any]) -> bool:
+    email = record.get("user_email")
+    login = record.get("created_by")
+    return record.get("admin_thread") is True and is_admin(
+        email if isinstance(email, str) else None,
+        login=login if isinstance(login, str) else None,
+    )
+
+
 def _agent_run_metadata(
     record: dict[str, Any],
     thread_id: str,
     slack_thread: dict[str, Any] | None = None,
     *,
     test_run: bool = False,
+    admin_thread: bool = False,
 ) -> dict[str, Any]:
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     now_ms = _now_ms()
@@ -540,7 +551,7 @@ def _agent_run_metadata(
         metadata["repo_name"] = repo["name"]
     if slack_thread:
         metadata["source_context"] = {"slack_thread": slack_thread}
-    if record.get("admin_thread") is True:
+    if admin_thread:
         metadata["admin_thread"] = True
     return metadata
 
@@ -551,6 +562,7 @@ async def _agent_run_config(
     slack_thread: dict[str, Any] | None = None,
     *,
     test_run: bool = False,
+    admin_thread: bool = False,
 ) -> dict[str, Any]:
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
@@ -566,7 +578,7 @@ async def _agent_run_config(
         configurable["repo"] = repo
     if slack_thread:
         configurable["slack_thread"] = slack_thread
-    if record.get("admin_thread") is True:
+    if admin_thread:
         configurable["admin_thread"] = True
     slack_channel_id = record.get("slack_channel_id")
     if (
@@ -665,7 +677,14 @@ async def _launch_agent_schedule_record(
         }
         await bind_slack_thread_id(client, slack_channel_id, message_ts, thread_id)
 
-    metadata = _agent_run_metadata(record, thread_id, slack_thread, test_run=test_run)
+    admin_thread = _admin_thread_enabled(record)
+    metadata = _agent_run_metadata(
+        record,
+        thread_id,
+        slack_thread,
+        test_run=test_run,
+        admin_thread=admin_thread,
+    )
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     input_context: InputMessageContext = {
@@ -695,7 +714,13 @@ async def _launch_agent_schedule_record(
             ),
         ),
         source="schedule",
-        config=await _agent_run_config(record, thread_id, slack_thread, test_run=test_run),
+        config=await _agent_run_config(
+            record,
+            thread_id,
+            slack_thread,
+            test_run=test_run,
+            admin_thread=admin_thread,
+        ),
         client=client,
         stream_mode=["values", "updates", "messages-tuple"],
         stream_resumable=True,

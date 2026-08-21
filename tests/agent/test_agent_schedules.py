@@ -638,7 +638,10 @@ async def test_launch_scheduled_agent_run_skips_when_repo_access_revoked(
     assert stored["last_error"] == "no access to this private repository"
 
 
-async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client, auth) -> None:  # noqa: ANN001, ARG001
+async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     record = {
         "id": "sched_1",
         "name": "Weekly dependencies",
@@ -689,6 +692,37 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client,
     stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
     assert stored["last_thread_id"] == thread_id
     assert stored["last_run_id"] == "run_123"
+
+
+async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_thread(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    monkeypatch.setenv("CONFIGURED_ADMINS", "bob")
+    record = {
+        "id": "sched_1",
+        "name": "Weekly dependencies",
+        "prompt": "Check dependencies",
+        "schedule": "0 9 * * 1",
+        "repo": None,
+        "model": "Default",
+        "effort": None,
+        "admin_thread": True,
+        "enabled": True,
+        "cron_id": "cron_1",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    result = await schedules.launch_scheduled_agent_run("sched_1")
+
+    assert result["status"] == "started"
+    metadata = fake_client.threads.created[0]["metadata"]
+    assert "admin_thread" not in metadata
+    configurable = fake_client.runs.created[0]["config"]["configurable"]
+    assert "admin_thread" not in configurable
 
 
 async def test_launch_scheduled_agent_run_connects_slack_thread(
