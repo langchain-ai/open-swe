@@ -18,6 +18,7 @@ import httpx
 from fastapi import HTTPException, Response
 
 from ..review.findings import REVIEWER_THREAD_KIND
+from ..thread_ids import reviewer_thread_id
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_checks import github_headers
 from ..utils.json_types import ThreadLike, as_json_object, thread_metadata
@@ -98,13 +99,6 @@ async def _github_write(
 
 async def _github_post(path: str, token: str, *, json: dict[str, Any]) -> Any:
     return await _github_write("POST", path, token, json=json)
-
-
-def reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
-    import uuid
-
-    stable_key = f"{owner}/{repo}/pr/{pr_number}/reviewer"
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
 
 
 def _findings_list(metadata: dict[str, Any]) -> list[dict[str, Any]]:
