@@ -5,6 +5,7 @@ import pytest
 from support.langgraph_fakes import FakeLangGraphClient
 
 from agent import completion
+from agent.utils import source_channel
 
 
 def _client(metadata: dict[str, Any]) -> FakeLangGraphClient:
@@ -23,7 +24,7 @@ async def test_error_status_posts_slack_failure_reply(monkeypatch: pytest.Monkey
     client = _client(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", reply)
     monkeypatch.setattr(
         completion, "dashboard_thread_url", lambda thread_id: f"https://ui/{thread_id}"
     )
@@ -126,7 +127,7 @@ async def test_ordinary_agent_error_does_not_settle_review_check(
     metadata["review_check_run_id"] = 42
     client = _client(metadata)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", AsyncMock(return_value=True))
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", AsyncMock(return_value=True))
     token = AsyncMock(return_value="token")
     settle = AsyncMock()
     monkeypatch.setattr(completion, "get_github_app_installation_token", token)
@@ -194,7 +195,7 @@ async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
         completion, "settle_review_check_run", AsyncMock(side_effect=RuntimeError("boom"))
     )
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", reply)
 
     result = await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": "error"}
@@ -213,7 +214,7 @@ async def test_schedule_source_with_slack_context_posts_failure_reply(
     client = _client(metadata)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", reply)
 
     result = await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": "error"}
@@ -228,7 +229,7 @@ async def test_success_status_is_ignored(monkeypatch: pytest.MonkeyPatch) -> Non
     client = _client(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", reply)
 
     result = await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": "success"}
@@ -306,7 +307,7 @@ async def test_idempotent_when_already_replied(monkeypatch: pytest.MonkeyPatch) 
     client = _client(metadata)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", reply)
 
     result = await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": "timeout"}
@@ -326,7 +327,7 @@ async def test_later_failed_run_posts_even_if_prior_run_replied(
     client = _client(metadata)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", reply)
 
     result = await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-2", "status": "timeout"}
@@ -347,7 +348,7 @@ async def test_linear_source_comments_on_issue(monkeypatch: pytest.MonkeyPatch) 
     client = _client({"source": "linear", "source_context": {"linear_issue": {"id": "iss_1"}}})
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     comment = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "comment_on_linear_issue", comment)
+    monkeypatch.setattr(source_channel, "comment_on_linear_issue", comment)
 
     result = await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": "timeout"}
@@ -373,7 +374,7 @@ async def test_missing_run_id_falls_back_to_thread_level_dedupe(
     client = _client(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", reply)
 
     result = await completion.handle_run_completion({"thread_id": "t1", "status": "error"})
 
@@ -391,7 +392,7 @@ async def test_missing_run_id_respects_thread_level_dedupe(
     client = _client(metadata)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", reply)
 
     result = await completion.handle_run_completion({"thread_id": "t1", "status": "error"})
 
@@ -420,7 +421,7 @@ async def test_automated_wakeup_failure_preserves_prior_silent_behavior(
     client = _client(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", reply)
 
     result = await completion.handle_run_completion(
         {
@@ -442,7 +443,7 @@ async def test_interrupted_status_is_ignored(monkeypatch: pytest.MonkeyPatch) ->
     client = _client(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     reply = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", reply)
 
     result = await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": "interrupted"}

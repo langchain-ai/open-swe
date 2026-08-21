@@ -7,12 +7,12 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langsmith.sandbox import SandboxClientError
 from support.sandbox_fakes import FakeSandboxBackend
 
-from agent.middleware.sandbox_circuit_breaker import (
+from agent.middleware.tool_error_handler import ToolErrorMiddleware
+from agent.utils.sandbox_registry import SANDBOX_BACKENDS, set_sandbox_backend
+from agent.utils.source_channel import (
     post_sandbox_unreachable_notification,
     sandbox_unreachable_message,
 )
-from agent.middleware.tool_error_handler import ToolErrorMiddleware
-from agent.utils.sandbox_registry import SANDBOX_BACKENDS, set_sandbox_backend
 
 
 def _tool_request(thread_id: str = "thread-1") -> ToolCallRequest:
@@ -88,15 +88,15 @@ async def test_unreachable_notification_goes_to_slack_only() -> None:
 
     with (
         patch(
-            "agent.middleware.sandbox_circuit_breaker.post_slack_thread_reply",
+            "agent.utils.source_channel.post_slack_thread_reply",
             new_callable=AsyncMock,
         ) as mock_slack,
         patch(
-            "agent.middleware.sandbox_circuit_breaker.comment_on_linear_issue",
+            "agent.utils.source_channel.comment_on_linear_issue",
             new_callable=AsyncMock,
         ) as mock_linear,
         patch(
-            "agent.middleware.sandbox_circuit_breaker.post_github_comment",
+            "agent.utils.source_channel.post_github_comment",
             new_callable=AsyncMock,
         ) as mock_github,
     ):

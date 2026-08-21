@@ -66,7 +66,6 @@ from ..middleware import (
     task_retry_on,
 )
 from ..middleware.prepare_run import PrepareRunState
-from ..middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from ..middleware.stack import core_stack, model_guard_middleware
 from ..prompt import construct_sender_context, construct_system_prompt, render_open_swe_shared_base
 from ..runtime.constants import DEFAULT_LLM_MAX_TOKENS, MODEL_CALL_RECURSION_LIMIT
@@ -129,6 +128,7 @@ from ..utils.model import DEFAULT_LLM_REASONING, ModelKwargs, fallback_model_id_
 from ..utils.sandbox import SandboxUnreachableError
 from ..utils.sandbox_paths import aresolve_sandbox_work_dir
 from ..utils.sandbox_registry import get_or_create_sandbox_backend_proxy
+from ..utils.source_channel import post_sandbox_unreachable_notification
 from ..utils.thread_settings import ThreadSettings, normalize_thread_settings
 from ..utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
 from ..utils.turn_checkpoint import merge_checkpoint, read_turn_diff, record_turn_checkpoint

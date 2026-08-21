@@ -21,9 +21,7 @@ from .review.publish import settle_review_check_run
 from .session_cost import schedule_session_cost_refresh
 from .utils.dashboard_links import dashboard_thread_url
 from .utils.github_app import get_github_app_installation_token
-from .utils.github_comments import post_github_comment
-from .utils.linear import comment_on_linear_issue
-from .utils.slack import post_slack_thread_reply
+from .utils.source_channel import notify_source_channel, source_context_from_thread_metadata
 from .utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
@@ -120,47 +118,19 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
 
 
 async def _post_failure_reply(thread_id: str, metadata: dict[str, Any], status: str) -> bool:
-    """Post a failure reply to the run's originating channel. Best-effort."""
-    source = metadata.get("source")
-    ctx = metadata.get("source_context")
-    ctx = ctx if isinstance(ctx, dict) else {}
-    text = _failure_text(status)
+    """Post a failure reply to the run's originating channel. Best-effort.
 
-    slack_thread = ctx.get("slack_thread")
-    if source == "slack" or isinstance(slack_thread, dict):
-        if isinstance(slack_thread, dict):
-            channel_id = slack_thread.get("channel_id")
-            thread_ts = slack_thread.get("thread_ts")
-            if channel_id and thread_ts:
-                slack_text = _failure_text(status, dashboard_thread_url(thread_id))
-                return await post_slack_thread_reply(
-                    channel_id, thread_ts, slack_text, agent_thread_id=thread_id
-                )
-        return False
-
-    if source == "linear":
-        linear_issue = ctx.get("linear_issue")
-        if isinstance(linear_issue, dict):
-            issue_id = linear_issue.get("id")
-            if issue_id:
-                return await comment_on_linear_issue(issue_id, text)
-        return False
-
-    if source in ("github", "github_issue"):
-        repo_config = metadata.get("repo")
-        number = ctx.get("pr_number")
-        if number is None:
-            github_issue = ctx.get("github_issue")
-            if isinstance(github_issue, dict):
-                number = github_issue.get("number")
-        if isinstance(repo_config, dict) and isinstance(number, int):
-            token = await get_github_app_installation_token()
-            if token:
-                return await post_github_comment(repo_config, number, text, token=token)
-        return False
-
-    logger.info("No failure-reply channel for thread %s (source=%s)", thread_id, source)
-    return False
+    Runs outside the graph, where the only GitHub credential available is the
+    app installation token, and ``metadata`` was just read from the thread —
+    so there is nothing fresher to re-resolve the Slack location against.
+    """
+    return await notify_source_channel(
+        source_context_from_thread_metadata(metadata),
+        _failure_text(status),
+        slack_text=_failure_text(status, dashboard_thread_url(thread_id)),
+        github_token=get_github_app_installation_token,
+        agent_thread_id=thread_id,
+    )
 
 
 def _posted_failure_run_ids(metadata: dict[str, Any]) -> list[str]:
