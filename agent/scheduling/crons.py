@@ -6,9 +6,11 @@ create one when none exists. Search and create are not atomic, so duplicates
 happen; healing them in one place is what keeps recovery identical across jobs.
 
 A scheduler tick carries its whole payload in the run **input**, shaped as
-``{"task": kind, "payload": {...}}``. Nothing is read from
-``config.configurable``: the graph declares three channels and never grows one
-per task, and a producer that forgets to mirror a field cannot exist.
+``{"task": kind, "payload": {...}}``. No producer here writes
+``config.configurable``: the graph gets one channel pair instead of one channel
+per task, and a producer that forgets to mirror a field cannot exist. Crons
+already registered against the pre-migration shape keep firing it, and
+:func:`agent.scheduling.tasks.normalize_scheduler_input` reads them.
 
 Every helper takes the client to use, because the transport belongs to the
 caller: code running inside the LangGraph server passes
@@ -29,9 +31,12 @@ SCHEDULER_ASSISTANT_ID = "scheduler"
 _SEARCH_LIMIT = 10
 
 # Crons registered before the metadata became uniformly ``{"kind", "key"}``.
-# Searched next to the current shape so the ensure/delete that manages a job's
-# cron also retires the predecessor it would otherwise leave firing forever.
-# Drop this table once no pre-migration cron survives.
+# Searched next to the current shape so an ensure/delete for a job also retires
+# the predecessor it would otherwise leave firing beside its replacement. This
+# is opportunistic cleanup only: a pre-migration cron nobody re-registers or
+# deletes is never reached here, and goes on firing — correctly, because
+# ``normalize_scheduler_input`` reads its input shape. Drop this table when the
+# duplicates are gone; the graph-side adapter is what makes them harmless.
 _LEGACY_METADATA: dict[str, Callable[[str], dict[str, str]]] = {
     "baby_sit": lambda key: {"kind": "baby_sit_watch", "watch_key": key},
     "background_tasks": lambda key: {"kind": "background_tasks", "thread_id": key},

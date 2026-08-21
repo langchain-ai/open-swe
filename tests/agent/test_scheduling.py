@@ -211,7 +211,7 @@ async def test_scheduler_graph_reads_the_payload_from_the_run_input(
     monitor.assert_awaited_once_with("thread-1")
 
 
-async def test_scheduler_task_ignores_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_current_shape_tick_ignores_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     monitor = AsyncMock(return_value={"status": "idle", "delivered": 0})
     monkeypatch.setattr(tasks, "monitor_background_tasks", monitor)
 
@@ -222,6 +222,107 @@ async def test_scheduler_task_ignores_configurable(monkeypatch: pytest.MonkeyPat
 
     assert state["result"] == {"status": "missing_thread_id"}
     monitor.assert_not_awaited()
+
+
+async def test_pre_migration_schedule_tick_launches_the_schedule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launch = AsyncMock(return_value={"status": "started", "thread_id": "thread-9"})
+    monkeypatch.setattr(tasks, "launch_scheduled_agent_run", launch)
+
+    state = await scheduler.get_scheduler().ainvoke(
+        {"schedule_id": "sched_1"},
+        config={"configurable": {"schedule_id": "sched_1"}},
+    )
+
+    assert state["result"] == {"status": "started", "thread_id": "thread-9"}
+    launch.assert_awaited_once_with("sched_1")
+
+
+async def test_pre_migration_baby_sit_tick_evaluates_the_watch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evaluate = AsyncMock(return_value="checked")
+    monkeypatch.setattr(tasks, "evaluate_watch", evaluate)
+
+    state = await scheduler.get_scheduler().ainvoke(
+        {"task": "baby_sit", "watch_key": "acme/repo#7"},
+        config={"configurable": {"task": "baby_sit", "watch_key": "acme/repo#7"}},
+    )
+
+    assert state["result"] == {"status": "checked"}
+    evaluate.assert_awaited_once_with("acme/repo#7")
+
+
+async def test_pre_migration_background_tasks_tick_monitors_the_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor = AsyncMock(return_value={"status": "idle", "delivered": 0})
+    monkeypatch.setattr(tasks, "monitor_background_tasks", monitor)
+
+    state = await scheduler.get_scheduler().ainvoke(
+        {"task": "background_tasks", "thread_id": "thread-1"},
+        config={"configurable": {"task": "background_tasks", "thread_id": "thread-1"}},
+    )
+
+    assert state["result"] == {"status": "idle", "delivered": 0}
+    monitor.assert_awaited_once_with("thread-1")
+
+
+async def test_pre_migration_session_cost_tick_refreshes_the_footer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    refresh = AsyncMock(return_value={"status": "updated", "reason": "Slack footer updated"})
+    monkeypatch.setattr(tasks, "run_session_cost_refresh", refresh)
+
+    state = await scheduler.get_scheduler().ainvoke(
+        {
+            "task": "session_cost",
+            "agent_thread_id": "thread-1",
+            "run_id": "run-1",
+            "prepare_run_id": "prep-1",
+            "channel_id": "C0123456789",
+            "thread_ts": "1784302353.900029",
+            "attempt": 0,
+        }
+    )
+
+    assert state["result"] == {"status": "updated", "reason": "Slack footer updated"}
+    refresh.assert_awaited_once_with(
+        {
+            "agent_thread_id": "thread-1",
+            "run_id": "run-1",
+            "prepare_run_id": "prep-1",
+            "channel_id": "C0123456789",
+            "thread_ts": "1784302353.900029",
+            "attempt": 0,
+        }
+    )
+
+
+async def test_pre_migration_reconcile_tick_runs_the_sweep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sweep = AsyncMock(return_value={"threads_checked": 3, "stale_runs": 1, "cancelled": 1})
+    monkeypatch.setattr(tasks, "reconcile_stale_runs", sweep)
+
+    state = await scheduler.get_scheduler().ainvoke({"task": "reconcile"})
+
+    assert state["result"] == {"threads_checked": 3, "stale_runs": 1, "cancelled": 1}
+    sweep.assert_awaited_once_with()
+
+
+async def test_normalize_scheduler_input_reads_the_configurable_mirror_alone() -> None:
+    assert tasks.normalize_scheduler_input(
+        {}, {"task": "baby_sit", "watch_key": "acme/repo#7"}
+    ) == (
+        "baby_sit",
+        {"watch_key": "acme/repo#7"},
+    )
+
+
+async def test_normalize_scheduler_input_reports_a_tick_it_cannot_place() -> None:
+    assert tasks.normalize_scheduler_input({}, {}) == (None, {})
 
 
 async def test_scheduler_task_rejects_an_unregistered_task() -> None:
