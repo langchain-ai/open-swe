@@ -40,12 +40,14 @@ Open SWE makes the same core architectural decisions as the best internal coding
 Rather than forking an existing agent or building from scratch, Open SWE **composes** on the [Deep Agents](https://github.com/langchain-ai/deepagents) framework — similar to how Ramp built on top of OpenCode. This gives you an upgrade path (pull in upstream improvements) while letting you customize the orchestration, tools, and middleware for your org.
 
 ```python
+# agent/server.py — get_agent(), simplified
 create_deep_agent(
-    model="openai:gpt-5.6-sol",
-    system_prompt=construct_system_prompt(...),
-    tools=[http_request, fetch_url, linear_comment, slack_thread_reply],
+    model=main_model,
+    system_prompt="",  # rendered per run by PrepareAgentRunMiddleware
+    tools=static_tools,
+    subagents=[general_purpose, browser],
     backend=sandbox_backend,
-    middleware=[ToolErrorMiddleware(), check_message_queue_before_model, ...],
+    middleware=[PrepareAgentRunMiddleware(...), ToolErrorMiddleware(), ...],
 )
 ```
 
@@ -58,27 +60,28 @@ Open SWE supports multiple sandbox providers out of the box — [Modal](https://
 This follows the principle all three companies converge on: **isolate first, then give full permissions inside the boundary.**
 
 - Each thread gets a persistent sandbox (reused across follow-up messages)
-- Sandboxes auto-recreate if they become unreachable
+- A sandbox that stops responding is **never** silently swapped out: a replacement is empty, so the agent would keep working as if its uncommitted changes were still there. The run stops and tells you instead. A sandbox that has actually been deleted holds nothing, so that one is recreated — as is the read-only reviewer's, which re-derives its checkout every run
 - Multiple tasks run in parallel — each in its own sandbox, no queuing
 
 ### 3. Tools — Curated, Not Accumulated
 
-Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE follows this principle with a small, focused toolset:
+Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE follows it by curating **categories**, not by keeping the count artificially low. The main agent gets roughly three dozen first-party tools, and every one of them exists because the agent cannot do that job with a shell:
 
-| Tool | Purpose |
+| Category | What it covers |
 |---|---|
-| `execute` | Shell commands in the sandbox |
-| `fetch_url` | Fetch web pages as markdown |
-| `http_request` | API calls (GET, POST, etc.) |
-| `list_threads` / `get_thread` | Discover and inspect readable Open SWE threads |
-| `manage_thread` | Perform authorization-checked dashboard thread actions |
-| `linear_comment` | Post updates to Linear tickets |
-| `linear_search_issues` | Search Linear issues by free text |
-| `output_iframe` | Render sandboxed HTML visualizations in the dashboard |
-| `slack_add_reaction` | React to Slack messages |
-| `slack_thread_reply` | Reply in Slack threads |
+| Web / HTTP | `fetch_url` (pages as markdown), `http_request`, `web_search` |
+| Slack | Reply in-thread, react, read thread history, move or start a thread |
+| Linear | Comment, search, read, and create/update/delete issues |
+| GitHub / PR | `open_pull_request`, `request_pr_review`, `manage_baby_sit` (opt-in CI watching) |
+| Planning | `enter_plan_mode`, `save_plan`, `approve_plan` |
+| Threads & scheduling | Discover and inspect readable threads, act on them, schedule a wakeup, notify an automation channel |
+| Sandbox / environment | Background execution, sandbox recreation, signed file downloads, `output_iframe`, admin environment management |
+| Skills & settings | Read user settings, save user instructions, save or delete a user skill |
+| Integrations (per run) | Corridor, Datadog/LangSmith observability, Currents, Notion — loaded only when configured and authorized |
 
-GitHub operations are performed with `gh` inside the sandbox, backed by the LangSmith proxy. Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `delete`, `ls`, `glob`, `grep`, `execute`, and `task` (subagent spawning). Thread discovery and management tools run only on the parent agent, derive the actor from trusted run configuration plus application-generated follow-up attribution, recheck allowed-organization membership, and preserve the dashboard's owner, participant, and admin authorization checks.
+The exact list is the `static_tools` list in [`agent/server.py`](agent/server.py); parts of it are conditional (Slack tools need trusted Slack context, environment tools need an admin thread). Browser automation is a dedicated subagent rather than a tool.
+
+Most GitHub work is done with `gh` and `git` inside the sandbox, backed by the LangSmith proxy — but **creating** a pull request goes through the `open_pull_request` tool, and a middleware guard blocks `gh pr create` (and the equivalent `gh api .../pulls` and `curl` fallbacks) so the PR is always attributed to the triggering user. Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `delete`, `ls`, `glob`, `grep`, `execute`, and `task` (subagent spawning). Thread discovery and management tools run only on the parent agent, derive the actor from trusted run configuration plus application-generated follow-up attribution, recheck allowed-organization membership, and preserve the dashboard's owner, participant, and admin authorization checks.
 
 **Optional observability tools (server-side):** Admins can connect Datadog and LangSmith from team settings (Admin → Observability credentials). When connected, the agent gains Datadog tools (via Datadog's hosted MCP server, default `toolsets=core`) and read-only LangSmith tools (`langsmith_get_trace`, `langsmith_list_runs`). These run in the LangGraph server process using credentials encrypted at rest — the sandbox never holds Datadog or LangSmith keys. They are loaded **only for runs triggered by an authorized user** (admins plus any emails in `OBSERVABILITY_AUTHORIZED_EMAILS`; active members of `ALLOWED_GITHUB_ORGS` also receive LangSmith tools), so a prompt-injected run from an untrusted contributor cannot reach team observability data. Use scoped, read-oriented keys regardless: observability data (logs, traces) is attacker-influenced content that can carry prompt injection, and the agent has network egress — the same residual-risk class as `web_search` / `fetch_url`.
 
@@ -118,6 +121,16 @@ Each invocation creates a deterministic thread ID, so follow-up messages on the 
 The agent is instructed to run linters, formatters, and tests before committing, and is responsible end-to-end for committing, pushing, opening/updating the draft PR, and replying in the source channel.
 This is an area where you can extend Open SWE for your org: add deterministic CI checks, visual verification, or review gates as additional middleware. See the [Customization Guide](docs/CUSTOMIZATION.md#6-middleware) for how.
 
+### 8. More Than One Graph
+
+The coding agent is one of five LangGraph graphs, all served together and all declared in `langgraph.json`:
+
+- **`agent`** — the coding agent described above.
+- **`reviewer`** — a read-only code reviewer. It runs automatically on PRs that opt in, keeps a single evolving set of findings, and publishes them as a GitHub review.
+- **`analyzer`** — learns a repo's review style, first from its historical PR reviews and then nightly from how this reviewer's own findings landed. The result is appended to the reviewer's prompt.
+- **`chat`** — a sandbox-less "chat with this PR" agent behind the review UI: the diff, the findings, and read-only repo access over the GitHub API.
+- **`scheduler`** — fans cron ticks into work: scheduled agent runs, `/baby-sit` CI checks, stale-run reconciliation, and cost refreshes.
+
 ---
 
 ## Comparison
@@ -126,7 +139,7 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 |---|---|---|---|---|
 | **Harness** | Composed (Deep Agents/LangGraph) | Forked (Goose) | Composed (OpenCode) | Built from scratch |
 | **Sandbox** | Pluggable (Modal, Daytona, Runloop, etc.) | AWS EC2 devboxes (pre-warmed) | Modal containers (pre-warmed) | In-house |
-| **Tools** | ~15, curated | ~500, curated per-agent | OpenCode SDK + extensions | MCPs + custom Skills |
+| **Tools** | ~35 first-party + optional integrations, curated by category | ~500, curated per-agent | OpenCode SDK + extensions | MCPs + custom Skills |
 | **Context** | AGENTS.md + issue/thread | Rule files + pre-hydration | OpenCode built-in | Linear-first + MCPs |
 | **Orchestration** | Subagents + middleware | Blueprints (deterministic + agentic) | Sessions + child sessions | Three modes |
 | **Invocation** | Slack, Linear, GitHub | Slack + embedded buttons | Slack + web + Chrome extension | Slack-native |
