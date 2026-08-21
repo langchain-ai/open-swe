@@ -1883,7 +1883,12 @@ async def api_create_schedule(
     body: ScheduleCreateBody,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    return await create_agent_schedule(session["sub"], body, email=session.get("email"))
+    return await create_agent_schedule(
+        session["sub"],
+        body,
+        email=session.get("email"),
+        allow_admin_thread=_session_is_admin(session),
+    )
 
 
 @router.patch("/schedules/{schedule_id}")
@@ -1893,7 +1898,11 @@ async def api_update_schedule(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     return await update_agent_schedule(
-        schedule_id, session["sub"], body, email=session.get("email")
+        schedule_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        allow_admin_thread=_session_is_admin(session),
     )
 
 

@@ -65,6 +65,7 @@ class ScheduleCreateBody(BaseModel):
     effort: str | None = None
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode = _DEFAULT_SLACK_NOTIFICATION_MODE
+    admin_thread: bool = False
 
     @field_validator("schedule")
     @classmethod
@@ -87,6 +88,7 @@ class ScheduleUpdateBody(BaseModel):
     enabled: bool | None = None
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode | None = None
+    admin_thread: bool | None = None
 
     @field_validator("schedule")
     @classmethod
@@ -183,6 +185,7 @@ def _schedule_summary(
         "repo": _repo_full_name(repo),
         "slackChannelId": record.get("slack_channel_id"),
         "slackNotificationMode": _slack_notification_mode(record),
+        "adminThread": record.get("admin_thread") is True,
         "model": record.get("model"),
         "effort": record.get("effort"),
         "enabled": bool(record.get("enabled")),
@@ -346,8 +349,14 @@ async def _delete_cron(cron_id: str | None) -> None:
 
 
 async def create_agent_schedule(
-    login: str, body: ScheduleCreateBody, *, email: str | None = None
+    login: str,
+    body: ScheduleCreateBody,
+    *,
+    email: str | None = None,
+    allow_admin_thread: bool = False,
 ) -> dict[str, Any]:
+    if body.admin_thread and not allow_admin_thread:
+        raise HTTPException(403, "admin only")
     await _ensure_dashboard_github_token(login)
     profile = await get_profile(login) or {}
     chosen_model, chosen_effort = _normalize_model_choice(body.model_id, body.effort)
@@ -362,6 +371,7 @@ async def create_agent_schedule(
         "repo": repo,
         "slack_channel_id": body.slack_channel_id,
         "slack_notification_mode": body.slack_notification_mode,
+        "admin_thread": body.admin_thread,
         "model": chosen_model or profile.get("default_model") or "Default",
         "effort": chosen_effort or profile.get("reasoning_effort"),
         "base_branch": profile.get("base_branch") or "main",
@@ -390,11 +400,22 @@ async def create_agent_schedule(
 
 
 async def update_agent_schedule(
-    schedule_id: str, login: str, body: ScheduleUpdateBody, *, email: str | None = None
+    schedule_id: str,
+    login: str,
+    body: ScheduleUpdateBody,
+    *,
+    email: str | None = None,
+    allow_admin_thread: bool = False,
 ) -> dict[str, Any]:
     existing = await get_agent_schedule(schedule_id)
     _assert_schedule_owner(existing, login, email)
     assert existing is not None
+    if (
+        body.admin_thread is True
+        and existing.get("admin_thread") is not True
+        and not allow_admin_thread
+    ):
+        raise HTTPException(403, "admin only")
 
     patch: dict[str, Any] = {}
     if body.prompt is not None:
@@ -418,6 +439,8 @@ async def update_agent_schedule(
         patch["slack_notification_mode"] = (
             body.slack_notification_mode or _DEFAULT_SLACK_NOTIFICATION_MODE
         )
+    if body.admin_thread is not None:
+        patch["admin_thread"] = body.admin_thread
 
     updated = {**existing, **patch}
     schedule_changed = updated.get("schedule") != existing.get("schedule")
@@ -517,6 +540,8 @@ def _agent_run_metadata(
         metadata["repo_name"] = repo["name"]
     if slack_thread:
         metadata["source_context"] = {"slack_thread": slack_thread}
+    if record.get("admin_thread") is True:
+        metadata["admin_thread"] = True
     return metadata
 
 
@@ -541,6 +566,8 @@ async def _agent_run_config(
         configurable["repo"] = repo
     if slack_thread:
         configurable["slack_thread"] = slack_thread
+    if record.get("admin_thread") is True:
+        configurable["admin_thread"] = True
     slack_channel_id = record.get("slack_channel_id")
     if (
         _slack_notification_mode(record) == "on_action"

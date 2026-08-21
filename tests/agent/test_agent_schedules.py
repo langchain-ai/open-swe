@@ -192,6 +192,41 @@ async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth)
     assert created["metadata"]["kind"] == "agent_schedule"
 
 
+async def test_create_admin_schedule_requires_admin_session(fake_client, auth) -> None:  # noqa: ANN001, ARG001
+    body = ScheduleCreateBody(
+        name="Admin cleanup",
+        prompt="Clean up workspace environments",
+        schedule="0 9 * * *",
+        admin_thread=True,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await schedules.create_agent_schedule("alice", body, email="alice@example.com")
+
+    assert exc.value.status_code == 403
+    assert fake_client.crons.created == []
+
+
+async def test_create_admin_schedule_persists_admin_intent(fake_client, auth) -> None:  # noqa: ANN001, ARG001
+    body = ScheduleCreateBody(
+        name="Admin cleanup",
+        prompt="Clean up workspace environments",
+        schedule="0 9 * * *",
+        admin_thread=True,
+    )
+
+    result = await schedules.create_agent_schedule(
+        "alice",
+        body,
+        email="alice@example.com",
+        allow_admin_thread=True,
+    )
+
+    assert result["adminThread"] is True
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), result["id"])]
+    assert stored["admin_thread"] is True
+
+
 async def test_create_agent_schedule_requires_dashboard_token(fake_client, monkeypatch) -> None:  # noqa: ANN001, ARG001
     async def no_token(login: str) -> None:
         return None
@@ -279,6 +314,7 @@ async def test_list_agent_schedules_uses_owner_filters_and_paginates(fake_client
     assert len(result) == 125
     assert {item["id"] for item in result} == {f"alice_{i}" for i in range(125)}
     assert all(item["slackNotificationMode"] == "always" for item in result)
+    assert all(item["adminThread"] is False for item in result)
     alice_zero = next(item for item in result if item["id"] == "alice_0")
     assert alice_zero["lastTriggeredAt"] == "2026-01-02T00:00:00+00:00"
 
@@ -375,6 +411,68 @@ async def test_update_agent_schedule_changes_slack_notification_mode(fake_client
     assert result["slackNotificationMode"] == "on_action"
     stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
     assert stored["slack_notification_mode"] == "on_action"
+
+
+async def test_update_agent_schedule_rejects_non_admin_elevation(fake_client) -> None:  # noqa: ANN001
+    record = {
+        "id": "sched_1",
+        "name": "Daily",
+        "prompt": "Run daily",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "admin_thread": False,
+        "model": "Default",
+        "effort": None,
+        "enabled": True,
+        "cron_id": "cron_old",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    with pytest.raises(HTTPException) as exc:
+        await schedules.update_agent_schedule(
+            "sched_1",
+            "alice",
+            ScheduleUpdateBody(admin_thread=True),
+            email="alice@example.com",
+        )
+
+    assert exc.value.status_code == 403
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert stored["admin_thread"] is False
+
+
+async def test_update_agent_schedule_allows_admin_elevation(fake_client) -> None:  # noqa: ANN001
+    record = {
+        "id": "sched_1",
+        "name": "Daily",
+        "prompt": "Run daily",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "admin_thread": False,
+        "model": "Default",
+        "effort": None,
+        "enabled": True,
+        "cron_id": "cron_old",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    result = await schedules.update_agent_schedule(
+        "sched_1",
+        "alice",
+        ScheduleUpdateBody(admin_thread=True),
+        email="alice@example.com",
+        allow_admin_thread=True,
+    )
+
+    assert result["adminThread"] is True
 
 
 async def test_update_agent_schedule_pause_deletes_cron(fake_client) -> None:  # noqa: ANN001
@@ -551,6 +649,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client,
         "effort": None,
         "base_branch": "main",
         "branch_prefix": "open-swe",
+        "admin_thread": True,
         "enabled": True,
         "cron_id": "cron_1",
         "created_by": "alice",
@@ -570,6 +669,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client,
     assert metadata["origin"] == "schedule"
     assert metadata["thread_category"] == "automation"
     assert metadata["trigger_kind"] == "schedule"
+    assert metadata["admin_thread"] is True
     assert metadata["repo_owner"] == "langchain-ai"
     assert metadata["repo_name"] == "open-swe"
     run = fake_client.runs.created[0]
@@ -583,6 +683,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client,
     assert run["multitask_strategy"] == "interrupt"
     assert run["if_not_exists"] == "create"
     assert run["config"]["configurable"]["source"] == "schedule"
+    assert run["config"]["configurable"]["admin_thread"] is True
     assert run["config"]["configurable"]["repo"] == record["repo"]
 
     stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
