@@ -4,16 +4,11 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from langgraph_sdk import get_client
+from ..store import get_value, store_client
 
 RUN_DIFF_NAMESPACE = ("open_swe", "run_diffs")
 THREAD_DIFF_KEY = "__thread__"
 _MAX_BYTES = 5 * 1024 * 1024
-
-
-def _value(item: Any) -> dict[str, Any] | None:
-    value = item.get("value") if isinstance(item, Mapping) else getattr(item, "value", None)
-    return dict(value) if isinstance(value, Mapping) else None
 
 
 def _bounded(diff: Mapping[str, Any]) -> dict[str, Any]:
@@ -56,13 +51,17 @@ def project_run_diff(
 
 
 async def save_run_diff(thread_id: str, turn_key: str, diff: Mapping[str, Any]) -> None:
-    await get_client().store.put_item(
-        (*RUN_DIFF_NAMESPACE, thread_id), turn_key, _bounded(diff), index=False
+    # Not ``store.put_value``: a diff is opaque blob data, and letting the store
+    # index it would embed megabytes of file contents for nothing.
+    await store_client().store.put_item(
+        [*RUN_DIFF_NAMESPACE, thread_id], turn_key, _bounded(diff), index=False
     )
 
 
 async def get_run_diff(thread_id: str, turn_key: str) -> dict[str, Any] | None:
     try:
-        return _value(await get_client().store.get_item((*RUN_DIFF_NAMESPACE, thread_id), turn_key))
+        return await get_value((*RUN_DIFF_NAMESPACE, thread_id), turn_key)
     except Exception:
+        # A stored diff is a cache: on a store outage the caller falls back to
+        # reading the sandbox's own checkpoint rather than failing the panel.
         return None

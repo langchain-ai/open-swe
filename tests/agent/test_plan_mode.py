@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock
 import pytest
 from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.dashboard import thread_api
+from agent.dashboard.threads import runs as thread_runs
+from agent.dashboard.threads import serialize as thread_serialize
 from agent.graphs import agent as agent_graph
 from agent.prompt import construct_system_prompt
 
@@ -75,10 +76,10 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> FakeLangGraphClient
     async def fake_resolve_email(login: str, profile: dict[str, Any]) -> str:
         return "octo@example.com"
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
-    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "resolve_run_email", fake_resolve_email)
+    monkeypatch.setattr(thread_runs, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_runs, "get_profile", fake_get_profile)
+    monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(thread_runs, "resolve_run_email", fake_resolve_email)
     return client
 
 
@@ -99,7 +100,7 @@ def test_run_start_passes_plan_mode_when_enabled(
     dashboard_run_client: FakeLangGraphClient,
 ) -> None:
     enriched = asyncio.run(
-        thread_api._enrich_run_start_command(
+        thread_runs.enrich_run_start_command(
             "thread-id",
             "octo",
             _run_start_command(True),
@@ -116,7 +117,7 @@ def test_run_start_omits_plan_mode_when_disabled(
     dashboard_run_client: FakeLangGraphClient,
 ) -> None:
     enriched = asyncio.run(
-        thread_api._enrich_run_start_command(
+        thread_runs.enrich_run_start_command(
             "thread-id",
             "octo",
             _run_start_command(None),
@@ -130,12 +131,12 @@ def test_run_start_omits_plan_mode_when_disabled(
 
 
 async def test_thread_summary_reports_plan_mode() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_serialize.thread_summary(
         {"thread_id": "t1", "metadata": {"source": "dashboard", "plan_mode": True}}
     )
     assert summary["planMode"] is True
 
-    summary_off = await thread_api._thread_summary(
+    summary_off = await thread_serialize.thread_summary(
         {"thread_id": "t2", "metadata": {"source": "dashboard"}}
     )
     assert summary_off["planMode"] is False

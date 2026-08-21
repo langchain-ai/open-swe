@@ -10,7 +10,7 @@ async def test_list_workflow_push_approvals_returns_records_for_non_owner(monkey
         assert thread_id == "thread-1"
         return {"fp-1": {"fingerprint": "fp-1", "status": "pending"}}
 
-    monkeypatch.setattr(workflow_approval_api, "_thread_metadata", fake_thread_metadata)
+    monkeypatch.setattr(workflow_approval_api, "thread_metadata_or_404", fake_thread_metadata)
     monkeypatch.setattr(
         workflow_approval_api,
         "get_workflow_push_approvals",
@@ -48,7 +48,7 @@ async def test_list_workflow_push_approvals_returns_records_for_owner(monkeypatc
             }
         }
 
-    monkeypatch.setattr(workflow_approval_api, "_thread_metadata", fake_thread_metadata)
+    monkeypatch.setattr(workflow_approval_api, "thread_metadata_or_404", fake_thread_metadata)
     monkeypatch.setattr(
         workflow_approval_api,
         "get_workflow_push_approvals",

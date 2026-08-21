@@ -62,7 +62,7 @@ def patched_langgraph_client(
     ``get_client``, via ``attr=``) alongside it, and pass ``client=`` to install
     a differently seeded one::
 
-        client = patched_langgraph_client(thread_api)
+        client = patched_langgraph_client(authz, threads.runs)
     """
 
     def _install(

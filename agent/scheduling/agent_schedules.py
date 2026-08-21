@@ -12,12 +12,7 @@ from typing import Any, Literal, TypedDict
 from fastapi import HTTPException
 
 from ..config import agent_version_metadata, langgraph_client
-from ..dashboard.options import (
-    SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
-    gate_fable_model,
-    model_supports_effort,
-)
+from ..dashboard.options import gate_fable_model, normalize_model_choice
 from ..dashboard.repo_access import require_repo_access_for_user
 from ..dashboard.team_settings import get_team_fable_enabled
 from ..dashboard.user_mappings import slack_id_for_login
@@ -53,19 +48,6 @@ def repo_full_name(repo: dict[str, str] | None) -> str | None:
     owner = repo.get("owner")
     name = repo.get("name")
     return f"{owner}/{name}" if owner and name else None
-
-
-def normalize_model_choice(
-    model_id: str | None, effort: str | None
-) -> tuple[str | None, str | None]:
-    if not isinstance(model_id, str):
-        return None, None
-    if model_id not in SUPPORTED_MODEL_IDS:
-        canonical = canonical_model_pair(model_id, effort)
-        return canonical if canonical is not None else (None, None)
-    if not isinstance(effort, str) or not model_supports_effort(model_id, effort):
-        return None, None
-    return model_id, effort
 
 
 async def get_agent_schedule(schedule_id: str) -> dict[str, Any] | None:

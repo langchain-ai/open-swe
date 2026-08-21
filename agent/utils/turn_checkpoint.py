@@ -163,7 +163,8 @@ PY"""
     return f"{_cd_repo(work_dir, repo_path)}; {script}"
 
 
-def _output(response: Any) -> str:
+def response_output(response: Any) -> str:
+    """A sandbox response's stdout, whichever shape the provider returned it in."""
     output = getattr(response, "output", None)
     if isinstance(output, str):
         return output
@@ -174,7 +175,8 @@ def _output(response: Any) -> str:
     return str(response or "")
 
 
-def _ok(response: Any) -> bool:
+def response_ok(response: Any) -> bool:
+    """Whether the command succeeded; a response with no exit code counts as success."""
     exit_code = getattr(response, "exit_code", None)
     if not isinstance(exit_code, int) and isinstance(response, Mapping):
         exit_code = response.get("exit_code")
@@ -325,7 +327,7 @@ async def record_plan_checkpoint(
     except Exception:
         logger.debug("plan checkpoint failed for %s", turn_key, exc_info=True)
         return None
-    return ref if _ok(response) else None
+    return ref if response_ok(response) else None
 
 
 async def record_turn_checkpoint(
@@ -346,10 +348,12 @@ async def record_turn_checkpoint(
     except Exception:
         logger.debug("turn checkpoint failed for %s", turn_key, exc_info=True)
         return None
-    if not _ok(response):
-        logger.debug("turn checkpoint command failed for %s: %s", turn_key, _output(response))
+    if not response_ok(response):
+        logger.debug(
+            "turn checkpoint command failed for %s: %s", turn_key, response_output(response)
+        )
         return None
-    lines = _output(response).strip().splitlines()
+    lines = response_output(response).strip().splitlines()
     if len(lines) < 2 or not lines[-2] or not lines[-1].startswith("/"):
         logger.debug("turn checkpoint returned invalid output for %s: %s", turn_key, lines)
         return None
@@ -383,7 +387,7 @@ async def read_turn_diff(
             "truncated": False,
             "summary": empty_summary,
         }
-    if not _ok(response):
+    if not response_ok(response):
         return {
             "status": "missing",
             "files": [],
@@ -392,7 +396,7 @@ async def read_turn_diff(
         }
 
     try:
-        payload = json.loads(_output(response).strip().splitlines()[-1])
+        payload = json.loads(response_output(response).strip().splitlines()[-1])
         if not isinstance(payload, Mapping):
             raise TypeError
         summary_payload = payload["summary"]
@@ -424,7 +428,7 @@ async def read_turn_diff(
                 _contents_command(work_dir, base, head_tree, paths, repo_path),
                 DIFF_TIMEOUT_SECONDS,
             )
-            decoded = json.loads(_output(blobs).strip().splitlines()[-1])
+            decoded = json.loads(response_output(blobs).strip().splitlines()[-1])
             contents = decoded if isinstance(decoded, dict) else {}
         except Exception:
             logger.debug("turn diff contents failed for %s", base, exc_info=True)

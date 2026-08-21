@@ -1,7 +1,7 @@
 """Agent threads: listing, reading, messaging, cancelling, and the SDK proxies.
 
-Every endpoint here is a thin delegate to :mod:`agent.dashboard.thread_api`,
-which owns ownership checks and the LangGraph round-trips.
+Every endpoint here is a thin delegate into :mod:`agent.dashboard.threads`,
+which owns the authorization checks and the LangGraph round-trips.
 """
 
 import logging
@@ -13,19 +13,18 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from ...utils.timing import server_timing_header
 from ..authz import SESSION, session_is_admin
-from ..thread_api import (
+from ..threads.listing import (
+    get_dashboard_thread,
+    list_dashboard_threads,
+    list_dashboard_threads_page,
+    list_dashboard_threads_sidebar,
+)
+from ..threads.runs import (
     ThreadMessageBody,
     ThreadResolveBody,
     cancel_dashboard_thread,
     delete_dashboard_thread,
-    get_dashboard_thread,
-    get_dashboard_thread_pr_diff,
-    get_dashboard_thread_recovery_patch,
     get_dashboard_thread_state,
-    get_dashboard_thread_turn_diff,
-    list_dashboard_threads,
-    list_dashboard_threads_page,
-    list_dashboard_threads_sidebar,
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
@@ -33,6 +32,11 @@ from ..thread_api import (
     resolve_dashboard_thread,
     send_dashboard_message,
     stream_dashboard_thread,
+)
+from ..threads.sandbox import (
+    get_dashboard_thread_pr_diff,
+    get_dashboard_thread_recovery_patch,
+    get_dashboard_thread_turn_diff,
 )
 
 logger = logging.getLogger(__name__)

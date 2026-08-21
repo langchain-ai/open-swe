@@ -7,7 +7,7 @@ request it is given in :attr:`FakeHttpx.requests` and replays one canned
 response for all of them::
 
     proxy = FakeHttpx(content=b'{"type": "success", "result": {"run_id": "r1"}}')
-    monkeypatch.setattr(thread_api.httpx, "AsyncClient", proxy.client)
+    monkeypatch.setattr(thread_proxy.httpx, "AsyncClient", proxy.client)
 
 ``chunks`` makes the canned response streamable through ``client.stream(...)``;
 with none given a streamed response yields its ``content`` as a single chunk.

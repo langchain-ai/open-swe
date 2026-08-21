@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
+from ...review.eval_store import ReviewerEvalRecord
 from ..authz import ADMIN, ADMIN_OR_CI_TOKEN
 from ..eval_jobs import get_reviewer_eval_status
 from ..sandbox_settings import (
@@ -11,7 +12,7 @@ from ..sandbox_settings import (
     get_sandbox_settings,
     upsert_sandbox_settings,
 )
-from ..thread_api import admin_cancel_dashboard_thread
+from ..threads.runs import admin_cancel_dashboard_thread
 from ..user_mappings import delete_mapping, list_mappings
 
 router = APIRouter()
@@ -64,7 +65,7 @@ async def admin_delete_user_mapping(
 @router.get("/admin/evals/reviewer")
 async def admin_get_reviewer_eval(
     _admin: dict[str, Any] = ADMIN,
-) -> dict[str, Any]:
+) -> ReviewerEvalRecord:
     """Read-only status for the reviewer eval (triggered from the GitHub Action)."""
     return await get_reviewer_eval_status()
 
