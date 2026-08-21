@@ -40,14 +40,15 @@ Open SWE makes the same core architectural decisions as the best internal coding
 Rather than forking an existing agent or building from scratch, Open SWE **composes** on the [Deep Agents](https://github.com/langchain-ai/deepagents) framework — similar to how Ramp built on top of OpenCode. This gives you an upgrade path (pull in upstream improvements) while letting you customize the orchestration, tools, and middleware for your org.
 
 ```python
-# agent/server.py — get_agent(), simplified
+# agent/graphs/agent.py — get_agent(), simplified
 create_deep_agent(
     model=main_model,
     system_prompt="",  # rendered per run by PrepareAgentRunMiddleware
     tools=static_tools,
     subagents=[general_purpose, browser],
     backend=sandbox_backend,
-    middleware=[PrepareAgentRunMiddleware(...), ToolErrorMiddleware(), ...],
+    # the ordering lives in agent/middleware/stack.py, not in the factory
+    middleware=core_stack(PrepareAgentRunMiddleware(...), call_limit=..., extras=[...]),
 )
 ```
 
@@ -55,12 +56,12 @@ create_deep_agent(
 
 Every task runs in its own **isolated cloud sandbox** — a remote Linux environment with full shell access. The repo is cloned in, the agent gets full permissions, and the blast radius of any mistake is fully contained. No production access, no confirmation prompts.
 
-Open SWE supports multiple sandbox providers out of the box — [Modal](https://modal.com/), [Daytona](https://www.daytona.io/), [Runloop](https://www.runloop.ai/), [E2B](https://e2b.dev/), and [LangSmith](https://smith.langchain.com/) — and you can plug in your own. See the [Customization Guide](docs/CUSTOMIZATION.md#1-sandbox) for details.
+Open SWE supports multiple sandbox providers out of the box — [Modal](https://modal.com/), [Daytona](https://www.daytona.io/), [Runloop](https://www.runloop.ai/), [E2B](https://e2b.dev/), and [LangSmith](https://smith.langchain.com/) — and you can plug in your own: each is one `SandboxProvider` class in `agent/integrations/`, selected by `SANDBOX_TYPE`. See the [Customization Guide](docs/CUSTOMIZATION.md#1-sandbox) for details.
 
 This follows the principle all three companies converge on: **isolate first, then give full permissions inside the boundary.**
 
 - Each thread gets a persistent sandbox (reused across follow-up messages)
-- A sandbox that stops responding is **never** silently swapped out: a replacement is empty, so the agent would keep working as if its uncommitted changes were still there. The run stops and tells you instead. A sandbox that has actually been deleted holds nothing, so that one is recreated — as is the read-only reviewer's, which re-derives its checkout every run
+- A sandbox that stops responding is **never** silently swapped out: a replacement is empty, so the agent would keep working as if its uncommitted changes were still there. The run stops and tells you instead. A sandbox the provider reports as *deleted* holds nothing, so that one is always recreated — as is the read-only reviewer's, which re-derives its checkout every run. The whole rule lives in `ensure_sandbox_for_thread` (`agent/runtime/sandbox.py`)
 - Multiple tasks run in parallel — each in its own sandbox, no queuing
 
 ### 3. Tools — Curated, Not Accumulated
@@ -79,7 +80,7 @@ Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE 
 | Skills & settings | Read user settings, save user instructions, save or delete a user skill |
 | Integrations (per run) | Corridor, Datadog/LangSmith observability, Currents, Notion — loaded only when configured and authorized |
 
-The exact list is the `static_tools` list in [`agent/server.py`](agent/server.py); parts of it are conditional (Slack tools need trusted Slack context, environment tools need an admin thread). Browser automation is a dedicated subagent rather than a tool.
+The exact list is the `static_tools` list in [`agent/graphs/agent.py`](agent/graphs/agent.py); the tools themselves live in [`agent/tools/`](agent/tools). Parts of the list are conditional (Slack tools need trusted Slack context, environment tools need an admin thread). Browser automation is a dedicated subagent rather than a tool.
 
 Most GitHub work is done with `gh` and `git` inside the sandbox, backed by the LangSmith proxy — but **creating** a pull request goes through the `open_pull_request` tool, and a middleware guard blocks `gh pr create` (and the equivalent `gh api .../pulls` and `curl` fallbacks) so the PR is always attributed to the triggering user. Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `delete`, `ls`, `glob`, `grep`, `execute`, and `task` (subagent spawning). Thread discovery and management tools run only on the parent agent, derive the actor from trusted run configuration plus application-generated follow-up attribution, recheck allowed-organization membership, and preserve the dashboard's owner, participant, and admin authorization checks.
 
@@ -100,8 +101,9 @@ Open SWE's orchestration has two layers:
 
 **Subagents:** The Deep Agents framework natively supports spawning child agents via the `task` tool. The main agent can fan out independent subtasks to isolated subagents — each with its own middleware stack and file operations. This is similar to Ramp's child sessions for parallel work.
 
-**Middleware:** Deterministic middleware hooks run around the agent loop:
+**Middleware:** Deterministic hooks run around the agent loop. Each one is a module in `agent/middleware/`, and every graph's stack is built by `core_stack()` in [`agent/middleware/stack.py`](agent/middleware/stack.py) — so the ordering is written once instead of copied into each factory:
 
+- **`PrepareAgentRunMiddleware`** — Outermost. Awaits the sandbox, renders the system prompt for this run, and records the turn checkpoint.
 - **`check_message_queue_before_model`** — Injects follow-up messages (Linear comments or Slack messages that arrive mid-run) before the next model call. You can message the agent while it's working and it'll pick up your input at its next step.
 - **`notify_step_limit_reached`** — After-agent hook that posts a Slack reply when the agent hits the model-call limit, so users get a clear signal instead of silence.
 - **`ToolErrorMiddleware`** — Catches and handles tool errors gracefully.
@@ -123,13 +125,13 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 
 ### 8. More Than One Graph
 
-The coding agent is one of five LangGraph graphs, all served together and all declared in `langgraph.json`:
+The coding agent is one of five LangGraph graphs, all served together, all declared in `langgraph.json`, and each a factory module in [`agent/graphs/`](agent/graphs) assembled from the shared `_assembly.py` and `agent/middleware/stack.py`:
 
-- **`agent`** — the coding agent described above.
-- **`reviewer`** — a read-only code reviewer. It runs automatically on PRs that opt in, keeps a single evolving set of findings, and publishes them as a GitHub review.
-- **`analyzer`** — learns a repo's review style, first from its historical PR reviews and then nightly from how this reviewer's own findings landed. The result is appended to the reviewer's prompt.
-- **`chat`** — a sandbox-less "chat with this PR" agent behind the review UI: the diff, the findings, and read-only repo access over the GitHub API.
-- **`scheduler`** — fans cron ticks into work: scheduled agent runs, `/baby-sit` CI checks, stale-run reconciliation, and cost refreshes.
+- **`agent`** (`agent/graphs/agent.py`) — the coding agent described above.
+- **`reviewer`** (`agent/graphs/reviewer.py`) — a read-only code reviewer. It runs automatically on PRs that opt in, keeps a single evolving set of findings, and publishes them as a GitHub review. The findings and publishing logic live in `agent/review/`.
+- **`analyzer`** (`agent/graphs/analyzer.py`) — learns a repo's review style, first from its historical PR reviews and then nightly from how this reviewer's own findings landed. The result is appended to the reviewer's prompt.
+- **`chat`** (`agent/graphs/chat.py`) — a sandbox-less "chat with this PR" agent behind the review UI: the diff, the findings, and read-only repo access over the GitHub API.
+- **`scheduler`** (`agent/graphs/scheduler.py`) — fans cron ticks into work: scheduled agent runs, `/baby-sit` CI checks, stale-run reconciliation, and cost refreshes. It only forwards `(task, payload)`; the handler registry is `agent/scheduling/tasks.py`.
 
 ---
 
