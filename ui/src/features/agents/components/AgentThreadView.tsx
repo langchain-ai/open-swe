@@ -24,6 +24,7 @@ import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
+import { threadMessages } from "@/features/agents/lib/threadMessages"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
@@ -148,12 +149,12 @@ export function AgentThreadView({
   )
 
   const baseMessages = useMemo<Array<Message>>(() => {
-    if (thread.messages.length > 0) return thread.messages
-    return streamMessagesToUi(
+    const liveMessages = streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
       messageArrivalTimestamp
     )
+    return threadMessages(liveMessages, thread.messages)
   }, [stream.messages, stream.toolCalls, thread.messages])
 
   const isStreaming =
