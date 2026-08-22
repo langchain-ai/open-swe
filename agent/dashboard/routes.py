@@ -217,6 +217,7 @@ from .team_settings import (
 )
 from .thread_api import (
     ThreadMessageBody,
+    ThreadProjectBody,
     ThreadResolveBody,
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -238,6 +239,7 @@ from .thread_api import (
     proxy_dashboard_thread_stream_events,
     resolve_dashboard_thread,
     send_dashboard_message,
+    set_dashboard_thread_project,
     stream_dashboard_thread,
 )
 from .user_credentials import (
@@ -2262,6 +2264,20 @@ async def api_resolve_thread(
         thread_id,
         session["sub"],
         resolved=body.resolved,
+        email=session.get("email"),
+    )
+
+
+@router.post("/threads/{thread_id}/project")
+async def api_set_thread_project(
+    thread_id: str,
+    body: ThreadProjectBody,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    return await set_dashboard_thread_project(
+        thread_id,
+        session["sub"],
+        project=body.project,
         email=session.get("email"),
     )
 

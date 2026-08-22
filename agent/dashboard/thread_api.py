@@ -166,6 +166,10 @@ class ThreadResolveBody(BaseModel):
     resolved: bool = True
 
 
+class ThreadProjectBody(BaseModel):
+    project: str | None = Field(default=None, max_length=80)
+
+
 def _normalize_model_choice(
     model_id: str | None, effort: str | None
 ) -> tuple[str | None, str | None]:
@@ -581,6 +585,7 @@ async def _thread_summary(
             if isinstance(metadata.get("resolved_at_ms"), (int, float))
             else None
         ),
+        "project": _metadata_string(metadata, "board_project"),
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "ownerLogin": _thread_owner_login(metadata),
@@ -1987,6 +1992,27 @@ async def resolve_dashboard_thread(
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not update resolved state for thread %s", thread_id, exc_info=True)
+        raise HTTPException(502, "failed to update thread") from exc
+    thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
+    return await _thread_summary(thread)
+
+
+async def set_dashboard_thread_project(
+    thread_id: str,
+    login: str,
+    *,
+    project: str | None,
+    email: str | None = None,
+) -> dict[str, Any]:
+    client = langgraph_client()
+    thread = await _authorized_thread(thread_id, login, email=email)
+    metadata = thread_metadata(thread)
+    normalized_project = project.strip() if isinstance(project, str) else None
+    metadata_update = {"board_project": normalized_project or None}
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not update project for thread %s", thread_id, exc_info=True)
         raise HTTPException(502, "failed to update thread") from exc
     thread = {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     return await _thread_summary(thread)

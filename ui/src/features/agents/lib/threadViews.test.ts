@@ -89,6 +89,24 @@ describe("groupThreadsForView", () => {
       "z/repo",
     ])
   })
+
+  it("groups projects alphabetically and leaves unassigned threads last", () => {
+    const groups = groupThreadsForView(
+      [
+        thread({ id: "launch", project: "Launch week" }),
+        thread({ id: "none" }),
+        thread({ id: "quality", project: "Quality" }),
+      ],
+      "project"
+    )
+
+    expect(groups.map((group) => group.label)).toEqual([
+      "Launch week",
+      "Quality",
+      "No project",
+    ])
+    expect(groups.at(-1)?.threads[0]?.id).toBe("none")
+  })
 })
 
 describe("column ordering", () => {

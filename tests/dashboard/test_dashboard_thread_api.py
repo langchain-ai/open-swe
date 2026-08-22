@@ -1647,6 +1647,60 @@ async def test_resolve_dashboard_thread_enforces_ownership(monkeypatch) -> None:
     assert exc_info.value.status_code == 404
 
 
+async def test_set_dashboard_thread_project_persists_trimmed_name(monkeypatch) -> None:
+    updates: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {"source": "dashboard", "github_login": "octocat"},
+            }
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            updates.append(dict(metadata))
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    summary = await thread_api.set_dashboard_thread_project(
+        "tid", "octocat", project="  Launch week  "
+    )
+
+    assert updates == [{"board_project": "Launch week"}]
+    assert summary["project"] == "Launch week"
+
+
+async def test_set_dashboard_thread_project_clears_empty_name(monkeypatch) -> None:
+    updates: list[dict[str, object]] = []
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "octocat",
+                    "board_project": "Launch week",
+                },
+            }
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            updates.append(dict(metadata))
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    summary = await thread_api.set_dashboard_thread_project("tid", "octocat", project=" ")
+
+    assert updates == [{"board_project": None}]
+    assert summary["project"] is None
+
+
 async def test_enrich_run_start_command_unresolves_thread(monkeypatch) -> None:
     updates: list[dict[str, object]] = []
 

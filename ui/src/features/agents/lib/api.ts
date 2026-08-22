@@ -280,6 +280,14 @@ export const agentsApi = {
         body: JSON.stringify({ resolved }),
       }
     ),
+  setThreadProject: (threadId: string, project: string | null) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/project`,
+      {
+        method: "POST",
+        body: JSON.stringify({ project }),
+      }
+    ),
   listSchedules: () => agentsRequest<Array<AgentSchedule>>("/schedules"),
   createSchedule: (body: ScheduleCreateRequest) =>
     agentsRequest<AgentSchedule>("/schedules", {

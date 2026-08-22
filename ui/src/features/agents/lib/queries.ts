@@ -692,6 +692,23 @@ export function useResolveAgentThread() {
   })
 }
 
+export function useSetAgentThreadProject() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: { threadId: string; project: string | null }) =>
+      agentsApi.setThreadProject(vars.threadId, vars.project),
+    onSuccess: (thread, vars) => {
+      queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
+      queryClient.setQueryData(
+        agentThreadKeys.sidebarActive(vars.threadId),
+        thread
+      )
+      invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
 export function useInfiniteThreadsPages(
   params: Omit<ThreadsPageParams, "offset">,
   options: {
