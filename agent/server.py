@@ -348,6 +348,7 @@ async def _create_sandbox_with_proxy(
     github_proxy_repositories: Sequence[str] | None = None,
     repo: dict[str, str] | None = None,
     environment_slug: str | None = None,
+    datadog_authorized: bool = False,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     snapshot_id, resources, create_params = await _resolve_sandbox_create_config(
@@ -375,7 +376,10 @@ async def _create_sandbox_with_proxy(
                 sandbox_backend.id,
                 token,
                 base_proxy_config=proxy_config,
+                **({"datadog_authorized": True} if datadog_authorized else {}),
             )
+        elif datadog_authorized:
+            await _configure_github_proxy(sandbox_backend.id, token, datadog_authorized=True)
         else:
             await _configure_github_proxy(sandbox_backend.id, token)
         record_proxy_token_expiry(
@@ -384,6 +388,7 @@ async def _create_sandbox_with_proxy(
             repositories=github_proxy_repositories,
             permissions=permissions,
             base_proxy_config=proxy_config,
+            datadog_authorized=datadog_authorized,
         )
 
     return sandbox_backend
@@ -396,6 +401,7 @@ async def _refresh_github_proxy(
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     base_proxy_config: dict[str, Any] | None = None,
+    datadog_authorized: bool = False,
 ) -> None:
     """Refresh GitHub proxy credentials for reused LangSmith sandboxes."""
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
@@ -415,7 +421,10 @@ async def _refresh_github_proxy(
             current_backend.id,
             token,
             base_proxy_config=base_proxy_config,
+            **({"datadog_authorized": True} if datadog_authorized else {}),
         )
+    elif datadog_authorized:
+        await _configure_github_proxy(current_backend.id, token, datadog_authorized=True)
     else:
         await _configure_github_proxy(current_backend.id, token)
     record_proxy_token_expiry(
@@ -424,6 +433,7 @@ async def _refresh_github_proxy(
         repositories=github_proxy_repositories,
         permissions=permissions,
         base_proxy_config=base_proxy_config,
+        datadog_authorized=datadog_authorized,
     )
 
 
@@ -433,6 +443,7 @@ async def _refresh_github_proxy_or_fail(
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     base_proxy_config: dict[str, Any] | None = None,
+    datadog_authorized: bool = False,
 ) -> SandboxBackendProtocol:
     """Refresh proxy credentials; a sandbox we can't reconfigure is unreachable."""
     try:
@@ -442,6 +453,7 @@ async def _refresh_github_proxy_or_fail(
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
             base_proxy_config=base_proxy_config,
+            datadog_authorized=datadog_authorized,
         )
     except Exception as exc:
         logger.warning(
@@ -469,6 +481,7 @@ async def _connect_existing_sandbox(
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     base_proxy_config: dict[str, Any] | None = None,
+    datadog_authorized: bool = False,
 ) -> SandboxBackendProtocol:
     """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
 
@@ -494,6 +507,7 @@ async def _connect_existing_sandbox(
         github_proxy_token,
         github_proxy_repositories,
         base_proxy_config,
+        datadog_authorized,
     )
 
 
@@ -505,6 +519,7 @@ async def ensure_sandbox_for_thread(
     repo: dict[str, str] | None = None,
     environment_slug: str | None = None,
     allow_replacement: bool = False,
+    datadog_authorized: bool = False,
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
 
@@ -559,6 +574,7 @@ async def ensure_sandbox_for_thread(
             github_proxy_repositories=github_proxy_repositories,
             repo=repo,
             environment_slug=environment_slug,
+            datadog_authorized=datadog_authorized,
         )
         created_proxy_config = get_recorded_proxy_base_config(thread_id)
         logger.info("Sandbox created: %s", sandbox_backend.id)
@@ -571,6 +587,7 @@ async def ensure_sandbox_for_thread(
                 github_proxy_token=github_proxy_token,
                 github_proxy_repositories=github_proxy_repositories,
                 base_proxy_config=base_proxy_config,
+                datadog_authorized=datadog_authorized,
             )
         except (SandboxGoneError, SandboxUnreachableError) as exc:
             gone = isinstance(exc, SandboxGoneError)
@@ -589,6 +606,7 @@ async def ensure_sandbox_for_thread(
                     github_proxy_repositories=github_proxy_repositories,
                     repo=repo,
                     environment_slug=environment_slug,
+                    datadog_authorized=datadog_authorized,
                 )
                 created_proxy_config = get_recorded_proxy_base_config(thread_id)
             except Exception as create_exc:
@@ -1023,6 +1041,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         plan_mode: bool,
         corridor_enabled: bool,
         admin_environments: bool,
+        observability_authorized: bool,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
@@ -1039,6 +1058,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._plan_mode = plan_mode
         self._corridor_enabled = corridor_enabled
         self._admin_environments = admin_environments
+        self._observability_authorized = observability_authorized
 
     def _prepare_config_fingerprint(self) -> Any:
         configurable = (self._config or {}).get("configurable") or {}
@@ -1222,7 +1242,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         environment = await resolve_environment(_environment_slug(configurable))
         from .dashboard.team_credentials import get_datadog_credentials
 
-        datadog = await get_datadog_credentials()
+        datadog = (
+            await get_datadog_credentials()
+            if self._observability_authorized
+            and os.getenv("SANDBOX_TYPE", "langsmith") == "langsmith"
+            else None
+        )
         sender_instructions = await _resolve_user_custom_instructions(self._profile_login)
         sender_context = construct_sender_context(
             triggering_user_identity,
@@ -1307,6 +1332,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             tools=[],
         ).with_config(config)
 
+    local_run = is_desktop_run(configurable)
+    profile_login = resolve_github_login(as_json_object(config))
+    observability_authorized = not local_run and await _observability_authorized(
+        config, profile_login
+    )
+
     async def reconnect_backend(
         _thread_id: str = thread_id,
         _configurable: dict[str, Any] = configurable,
@@ -1318,6 +1349,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             _thread_id,
             repo=prompt_default_repo,
             environment_slug=_environment_slug(_configurable),
+            datadog_authorized=observability_authorized,
         )
 
     backend = _get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
@@ -1327,8 +1359,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # authorization and credentialed integrations, which stay personal to them.
     # Everything else comes from the thread's own settings, resolved from the
     # owner's profile on the first run and frozen there afterwards.
-    local_run = is_desktop_run(configurable)
-    profile_login = resolve_github_login(as_json_object(config))
     thread_settings, settings_changed = normalize_thread_settings(
         {} if local_run else await load_thread_settings(client, thread_id)
     )
@@ -1514,7 +1544,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        observability_authorized = await _observability_authorized(config, profile_login)
         if observability_authorized:
             observability_tools = await _load_observability_tools(True, profile_login)
         elif await _allowed_org_member(config, profile_login):
@@ -1681,6 +1710,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     plan_mode=plan_mode,
                     corridor_enabled=bool(corridor_tools),
                     admin_environments=admin_thread,
+                    observability_authorized=observability_authorized,
                 ),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                 SanitizeToolInputsMiddleware(),

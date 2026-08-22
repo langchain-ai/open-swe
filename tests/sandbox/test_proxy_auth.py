@@ -81,6 +81,7 @@ class TestDatadogProxy:
         rule = _datadog_proxy_rule("us5.datadoghq.com", api_key, app_key)
 
         assert rule["match_hosts"] == ["api.us5.datadoghq.com"]
+        assert rule["match_paths"] == ["/api/*"]
         assert rule["headers"] == [
             {"name": "DD-API-KEY", "type": "opaque", "value": api_key},
             {"name": "DD-APPLICATION-KEY", "type": "opaque", "value": app_key},
@@ -163,7 +164,7 @@ class TestConfigureGithubProxy:
             mock_client.patch = AsyncMock(return_value=mock_response)
             _mock_async_client(mock_client_cls, mock_client)
 
-            await _configure_github_proxy("sandbox-abc123", "token")
+            await _configure_github_proxy("sandbox-abc123", "token", datadog_authorized=True)
 
         rules = mock_client.patch.call_args.kwargs["json"]["proxy_config"]["rules"]
         assert [rule["name"] for rule in rules] == ["datadog-api", "github-api", "github"]

@@ -53,6 +53,7 @@ def _datadog_proxy_rule(site: str, api_key: str, app_key: str) -> dict[str, Any]
     return {
         "name": "datadog-api",
         "match_hosts": [f"api.{site}"],
+        "match_paths": ["/api/*"],
         "headers": [
             {"name": "DD-API-KEY", "type": "opaque", "value": api_key},
             {"name": "DD-APPLICATION-KEY", "type": "opaque", "value": app_key},
@@ -401,6 +402,7 @@ async def _configure_github_proxy(
     github_token: str,
     *,
     base_proxy_config: dict[str, Any] | None = None,
+    datadog_authorized: bool = False,
 ) -> None:
     """Configure sandbox proxy to inject service credentials into outbound traffic.
 
@@ -422,7 +424,7 @@ async def _configure_github_proxy(
 
     proxy_config = dict(base_proxy_config or {})
     custom_rules = proxy_config.get("rules")
-    datadog = await get_datadog_credentials()
+    datadog = await get_datadog_credentials() if datadog_authorized else None
     proxy_config["rules"] = [
         *(custom_rules if isinstance(custom_rules, list) else []),
         *([_datadog_proxy_rule(datadog.site, datadog.api_key, datadog.app_key)] if datadog else []),

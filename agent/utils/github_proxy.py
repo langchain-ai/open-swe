@@ -33,6 +33,7 @@ _PROXY_TOKEN_EXPIRY: dict[
     str, tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
 ] = {}
 _PROXY_BASE_CONFIGS: dict[str, dict[str, Any]] = {}
+_DATADOG_AUTHORIZED: set[str] = set()
 ProxyTokenRecord = tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
 
 
@@ -68,6 +69,7 @@ def record_proxy_token_expiry(
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
     base_proxy_config: dict[str, Any] | None = None,
+    datadog_authorized: bool = False,
 ) -> None:
     """Record when ``thread_id``'s proxy token expires and the repo scope it was minted with.
 
@@ -87,6 +89,10 @@ def record_proxy_token_expiry(
         _PROXY_BASE_CONFIGS[thread_id] = dict(base_proxy_config)
     else:
         _PROXY_BASE_CONFIGS.pop(thread_id, None)
+    if datadog_authorized:
+        _DATADOG_AUTHORIZED.add(thread_id)
+    else:
+        _DATADOG_AUTHORIZED.discard(thread_id)
 
 
 def get_recorded_proxy_base_config(thread_id: str | None) -> dict[str, Any] | None:
@@ -100,6 +106,7 @@ def clear_proxy_token_expiry(thread_id: str | None) -> None:
     if thread_id:
         _PROXY_TOKEN_EXPIRY.pop(thread_id, None)
         _PROXY_BASE_CONFIGS.pop(thread_id, None)
+        _DATADOG_AUTHORIZED.discard(thread_id)
 
 
 def _unpack_proxy_token_record(record: tuple[Any, ...]) -> ProxyTokenRecord:
@@ -161,7 +168,10 @@ async def refresh_proxy_token(
             current_backend.id,
             token,
             base_proxy_config=base_proxy_config,
+            **({"datadog_authorized": True} if thread_id in _DATADOG_AUTHORIZED else {}),
         )
+    elif thread_id in _DATADOG_AUTHORIZED:
+        await _configure_github_proxy(current_backend.id, token, datadog_authorized=True)
     else:
         await _configure_github_proxy(current_backend.id, token)
     record_proxy_token_expiry(
