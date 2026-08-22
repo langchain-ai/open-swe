@@ -8,7 +8,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
 
 import { agentsApi } from "./api"
-import type { InfiniteData, QueryClient } from "@tanstack/react-query"
+import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
   SidebarThreads,
@@ -95,6 +95,122 @@ export function setAgentThreadStatus(
     agentThreadKeys.sidebarActive(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
+}
+
+function updateThreadPageResolved(
+  page: ThreadsPage,
+  params: ThreadsPageParams,
+  threadId: string,
+  resolved: boolean
+): ThreadsPage {
+  const thread = page.items.find((item) => item.id === threadId)
+  if (!thread) return page
+  if (params.resolved != null && params.resolved !== resolved) {
+    return {
+      ...page,
+      items: page.items.filter((item) => item.id !== threadId),
+      ...(page.total != null ? { total: Math.max(0, page.total - 1) } : {}),
+    }
+  }
+  return {
+    ...page,
+    items: page.items.map((item) =>
+      item.id === threadId ? { ...item, resolved } : item
+    ),
+  }
+}
+
+type AgentThreadQuerySnapshot = [QueryKey, unknown, boolean]
+
+function snapshotAgentThreadQueries(
+  queryClient: QueryClient,
+  threadId: string
+): Array<AgentThreadQuerySnapshot> {
+  const directKeys = [
+    agentThreadKeys.detail(threadId),
+    agentThreadKeys.sidebarActive(threadId),
+  ]
+  const direct = directKeys.map((key): AgentThreadQuerySnapshot => {
+    const state = queryClient.getQueryState(key)
+    return [key, state?.data, Boolean(state)]
+  })
+  const lists = [
+    ...queryClient.getQueriesData({
+      queryKey: ["agent-threads", "lists", "infinite-pages"],
+    }),
+    ...queryClient.getQueriesData({
+      queryKey: ["agent-threads", "lists", "page"],
+    }),
+  ].map(([key, data]): AgentThreadQuerySnapshot => [key, data, true])
+  return [...direct, ...lists]
+}
+
+function restoreAgentThreadQueries(
+  queryClient: QueryClient,
+  snapshots: Array<AgentThreadQuerySnapshot>,
+  optimistic: Map<QueryKey, number | undefined>
+): void {
+  for (const [key, data, existed] of snapshots) {
+    if (queryClient.getQueryState(key)?.dataUpdatedAt !== optimistic.get(key)) {
+      continue
+    }
+    if (existed) queryClient.setQueryData(key, data)
+    else queryClient.removeQueries({ queryKey: key, exact: true })
+  }
+}
+
+function setAgentThreadResolved(
+  queryClient: QueryClient,
+  threadId: string,
+  resolved: boolean
+): void {
+  const update = (thread: AgentThread) =>
+    thread.id === threadId ? { ...thread, resolved } : thread
+  const detail = queryClient.getQueryData<AgentThread>(
+    agentThreadKeys.detail(threadId)
+  )
+  const sidebarActive = queryClient.getQueryData<AgentThread>(
+    agentThreadKeys.sidebarActive(threadId)
+  )
+  let cachedThread = detail ?? sidebarActive
+
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.detail(threadId),
+    (prev) => (prev ? update(prev) : prev)
+  )
+  for (const [key, data] of queryClient.getQueriesData<
+    InfiniteData<ThreadsPage>
+  >({ queryKey: ["agent-threads", "lists", "infinite-pages"] })) {
+    const params = key[3] as Omit<ThreadsPageParams, "offset">
+    cachedThread ??= data?.pages
+      .flatMap((page) => page.items)
+      .find((thread) => thread.id === threadId)
+    queryClient.setQueryData<InfiniteData<ThreadsPage>>(key, (prev) =>
+      prev
+        ? {
+            ...prev,
+            pages: prev.pages.map((page) =>
+              updateThreadPageResolved(page, params, threadId, resolved)
+            ),
+          }
+        : prev
+    )
+  }
+  for (const [key, data] of queryClient.getQueriesData<ThreadsPage>({
+    queryKey: ["agent-threads", "lists", "page"],
+  })) {
+    const params = key[3] as ThreadsPageParams
+    cachedThread ??= data?.items.find((thread) => thread.id === threadId)
+    queryClient.setQueryData<ThreadsPage>(key, (prev) =>
+      prev ? updateThreadPageResolved(prev, params, threadId, resolved) : prev
+    )
+  }
+  if (cachedThread) {
+    queryClient.setQueryData(
+      agentThreadKeys.sidebarActive(threadId),
+      update(cachedThread)
+    )
+  }
 }
 
 export function seedAgentThreadLists(
@@ -681,14 +797,50 @@ export function useResolveAgentThread() {
   return useMutation({
     mutationFn: (vars: { threadId: string; resolved: boolean }) =>
       agentsApi.resolveThread(vars.threadId, vars.resolved),
+    onMutate: async (vars) => {
+      await Promise.all([
+        queryClient.cancelQueries({
+          queryKey: agentThreadKeys.detail(vars.threadId),
+          exact: true,
+        }),
+        queryClient.cancelQueries({
+          queryKey: agentThreadKeys.sidebarActive(vars.threadId),
+          exact: true,
+        }),
+        queryClient.cancelQueries({
+          queryKey: ["agent-threads", "lists", "infinite-pages"],
+        }),
+        queryClient.cancelQueries({
+          queryKey: ["agent-threads", "lists", "page"],
+        }),
+      ])
+      const previous = snapshotAgentThreadQueries(queryClient, vars.threadId)
+      setAgentThreadResolved(queryClient, vars.threadId, vars.resolved)
+      const optimistic = new Map<QueryKey, number | undefined>(
+        previous.map(([key]) => [
+          key,
+          queryClient.getQueryState(key)?.dataUpdatedAt,
+        ])
+      )
+      return { previous, optimistic }
+    },
+    onError: (_error, _vars, context) => {
+      if (context) {
+        restoreAgentThreadQueries(
+          queryClient,
+          context.previous,
+          context.optimistic
+        )
+      }
+    },
     onSuccess: (thread, vars) => {
       queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
       queryClient.setQueryData(
         agentThreadKeys.sidebarActive(vars.threadId),
         thread
       )
-      invalidateAgentThreadLists(queryClient)
     },
+    onSettled: () => invalidateAgentThreadLists(queryClient),
   })
 }
 
