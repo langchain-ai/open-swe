@@ -1,6 +1,6 @@
 import type { Message } from "./types"
 
-export function threadMessages(
+export function selectThreadMessages(
   hydrated: Array<Message>,
   optimistic: Array<Message>
 ): Array<Message> {

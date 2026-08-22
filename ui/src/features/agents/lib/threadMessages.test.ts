@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { threadMessages } from "./threadMessages"
+import { selectThreadMessages } from "./threadMessages"
 import type { Message } from "./types"
 
 const optimistic: Message = {
@@ -16,15 +16,15 @@ const response: Message = {
   chunks: [{ kind: "text", text: "Done" }],
 }
 
-describe("threadMessages", () => {
+describe("selectThreadMessages", () => {
   it("replaces the optimistic transcript after hydration", () => {
-    expect(threadMessages([optimistic, response], [optimistic])).toEqual([
+    expect(selectThreadMessages([optimistic, response], [optimistic])).toEqual([
       optimistic,
       response,
     ])
   })
 
   it("keeps the optimistic transcript while hydration is empty", () => {
-    expect(threadMessages([], [optimistic])).toEqual([optimistic])
+    expect(selectThreadMessages([], [optimistic])).toEqual([optimistic])
   })
 })
