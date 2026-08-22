@@ -193,6 +193,29 @@ function resolvedOverflowThreads(): Array<ThreadSeed> {
   });
 }
 
+function activeOverflowThreads(): Array<ThreadSeed> {
+  const now = Date.now();
+  return Array.from({ length: 7 }, (_, index) => {
+    const number = index + 1;
+    const runId = `e2e-run-active-overflow-${number}`;
+    return {
+      id: `75000000-0000-4000-8000-${String(number).padStart(12, "0")}`,
+      metadata: baseMetadata(
+        now,
+        `E2E Workspace Active overflow ${String(number).padStart(2, "0")}`,
+        number * 100,
+        {
+          created_at_ms: now - number * 100,
+          latest_run_id: runId,
+          latest_run_status: "success",
+          last_viewed_run_id: runId,
+          last_viewed_at_ms: now - number * 100,
+        },
+      ),
+    };
+  });
+}
+
 function automationThreads(): Array<ThreadSeed> {
   const now = Date.now();
   return [
@@ -680,6 +703,7 @@ test.describe("threads workspace", () => {
   }, testInfo) => {
     await seedThreads(request, [
       ...workspaceThreads(),
+      ...activeOverflowThreads(),
       ...resolvedOverflowThreads(),
     ]);
     await loginAs(page);
@@ -705,24 +729,34 @@ test.describe("threads workspace", () => {
     const ready = sidebarGroup(sidebar, "Ready");
     const done = sidebarGroup(sidebar, "Done");
 
+    await expect(attention.locator("> button > span").last()).toHaveText("1+");
+    await expect(progress).toContainText(TITLES.running);
+    await expect(progress.locator("> button > span").last()).toHaveText("1+");
+    await expect(ready).toContainText(TITLES.ready);
+    await expect(ready.locator("> button > span").last()).toHaveText("8+");
+    const loadMoreThreads = sidebar.getByRole("button", {
+      name: "Load more threads",
+      exact: true,
+    });
+    await loadMoreThreads.click();
     await expect(attention).toContainText(TITLES.attention);
     await expect(attention).toContainText(TITLES.error);
     await expect(attention).toContainText(TITLES.interrupted);
     await expect(attention.locator("> button > span").last()).toHaveText("3");
-    await expect(progress).toContainText(TITLES.running);
     await expect(progress.locator("> button > span").last()).toHaveText("1");
-    await expect(ready).toContainText(TITLES.ready);
-    await expect(ready.locator("> button > span").last()).toHaveText("1");
+    await expect(ready.locator("> button > span").last()).toHaveText("8");
+    await expect(loadMoreThreads).toHaveCount(0);
+
     await expect(done).toContainText("E2E Workspace Resolved overflow 21");
     await expect(done.locator("> button > span").last()).toHaveText("10+");
-    const loadMore = sidebar.getByRole("button", {
+    const loadMoreResolved = sidebar.getByRole("button", {
       name: "Load more resolved threads",
     });
-    await loadMore.click();
+    await loadMoreResolved.click();
     await expect(done.locator("> button > span").last()).toHaveText("20+");
-    await loadMore.click();
+    await loadMoreResolved.click();
     await expect(done.locator("> button > span").last()).toHaveText("22");
-    await expect(loadMore).toHaveCount(0);
+    await expect(loadMoreResolved).toHaveCount(0);
 
     const screenshotPath = testInfo.outputPath("focus-grouping-sidebar.png");
     await sidebar.screenshot({ path: screenshotPath });

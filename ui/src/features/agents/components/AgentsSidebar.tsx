@@ -441,7 +441,7 @@ export function AgentsSidebar({
                       hasMore={
                         prefs.group === "focus" && section.key === "done"
                           ? resolvedHasMore
-                          : false
+                          : activeHasMore
                       }
                       count={
                         prefs.group === "focus" && section.key === "done"
