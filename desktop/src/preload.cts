@@ -74,6 +74,7 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
 })
 
 const DRAG_REGION_ID = "open-swe-desktop-drag-region"
+const DRAG_REGION_HEIGHT = 44
 
 ipcRenderer.on("desktop:fullscreen-change", (_event, fullscreen) => {
   document.documentElement.classList.toggle("desktop-fullscreen", fullscreen)
@@ -86,28 +87,29 @@ window.addEventListener("DOMContentLoaded", () => {
   style.textContent = `
     #${DRAG_REGION_ID} {
       -webkit-app-region: drag;
+      pointer-events: none;
       position: fixed;
       top: 0;
       left: 90px;
       right: 0;
-      height: 12px;
+      height: ${DRAG_REGION_HEIGHT}px;
       z-index: 2147483647;
       user-select: none;
     }
 
-    [data-sidebar-frame] > div:first-child {
-      -webkit-app-region: drag;
+    .desktop-fullscreen #${DRAG_REGION_ID} {
+      left: 0;
     }
 
-    [data-sidebar-frame] > div:first-child :is(a, button, input, textarea, select, [role="button"]) {
-      -webkit-app-region: no-drag;
-    }
-
+    [data-sidebar-frame] > div:first-child,
     [data-desktop-drag-region] {
       -webkit-app-region: drag;
     }
 
-    [data-desktop-drag-region] :is(a, button, input, textarea, select, [role="button"]) {
+    a, button, input, textarea, select, summary, [contenteditable="true"],
+    [role="button"], [role="checkbox"], [role="combobox"], [role="link"],
+    [role="menuitem"], [role="separator"], [role="switch"], [role="tab"],
+    [role="textbox"], [data-no-drag] {
       -webkit-app-region: no-drag;
     }
 
@@ -125,5 +127,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const dragRegion = document.createElement("div")
   dragRegion.id = DRAG_REGION_ID
   dragRegion.setAttribute("aria-hidden", "true")
-  document.body.append(dragRegion)
+  // Draggable regions compose in document order: the strip has to come first so
+  // the app's own no-drag elements subtract from it instead of the reverse.
+  document.body.prepend(dragRegion)
 })
