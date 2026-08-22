@@ -50,7 +50,8 @@ and **Sign in for cloud mode** remains available from the local sidebar.
 
 ## Install on macOS
 
-Install Git, Node.js 24, and pnpm, clone this repository, then run this from its root:
+Install Git, Node.js 24.18.1 (the version in `.node-version`), and pnpm, clone this repository,
+then run this from its root:
 
 ```bash
 make install-desktop

@@ -28,6 +28,22 @@ test("packaged application target shares the bundled Node 24 runtime", () => {
   })
 })
 
+test("application targets select the Windows runtime executables", () => {
+  const repoRoot = path.resolve("/work/open-swe")
+  expectTarget(devApplicationTarget(repoRoot, "win32"), {
+    command: path.join(repoRoot, "desktop/node_modules/node/bin/node.exe"),
+    script: path.join(repoRoot, "ui/.output/server/index.mjs"),
+    cwd: path.join(repoRoot, "ui/.output"),
+  })
+
+  const resources = path.resolve("/Applications/Open SWE.app/Contents/Resources")
+  expectTarget(packagedApplicationTarget(resources, "win32"), {
+    command: path.join(resources, "local-backend/runtime/node.exe"),
+    script: path.join(resources, "ui/server/index.mjs"),
+    cwd: path.join(resources, "ui"),
+  })
+})
+
 test("restarts after the TanStack server exits after becoming healthy", async (t) => {
   const harness = createSupervisorHarness()
   t.after(() => harness.close())

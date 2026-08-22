@@ -54,19 +54,37 @@ interface ApplicationSupervisorOptions {
   reservePort?: (host?: string) => Promise<number>
 }
 
-export function devApplicationTarget(repoRoot: string): ApplicationTarget {
+export function devApplicationTarget(
+  repoRoot: string,
+  platform: NodeJS.Platform = process.platform
+): ApplicationTarget {
   const outputRoot = path.join(repoRoot, "ui", ".output")
   return {
-    command: path.join(repoRoot, "desktop", "node_modules", "node", "bin", "node"),
+    command: path.join(
+      repoRoot,
+      "desktop",
+      "node_modules",
+      "node",
+      "bin",
+      platform === "win32" ? "node.exe" : "node"
+    ),
     args: [path.join(outputRoot, "server", "index.mjs")],
     cwd: outputRoot,
   }
 }
 
-export function packagedApplicationTarget(resourcesPath: string): ApplicationTarget {
+export function packagedApplicationTarget(
+  resourcesPath: string,
+  platform: NodeJS.Platform = process.platform
+): ApplicationTarget {
   const outputRoot = path.join(resourcesPath, "ui")
   return {
-    command: path.join(resourcesPath, "local-backend", "runtime", "bin", "node"),
+    command: path.join(
+      resourcesPath,
+      "local-backend",
+      "runtime",
+      platform === "win32" ? "node.exe" : "bin/node"
+    ),
     args: [path.join(outputRoot, "server", "index.mjs")],
     cwd: outputRoot,
   }
