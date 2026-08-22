@@ -154,8 +154,18 @@ export function AgentThreadView({
       stream.toolCalls,
       messageArrivalTimestamp
     )
-    return selectThreadMessages(liveMessages, thread.messages)
-  }, [stream.messages, stream.toolCalls, thread.messages])
+    return selectThreadMessages(
+      liveMessages,
+      thread.messages,
+      stream.threadId === thread.id
+    )
+  }, [
+    stream.messages,
+    stream.threadId,
+    stream.toolCalls,
+    thread.id,
+    thread.messages,
+  ])
 
   const isStreaming =
     thread.status === "running" ||
