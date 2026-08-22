@@ -661,7 +661,7 @@ async function completeExternalLogin(verifier, code) {
     url: hostedSessionCookieUrl(runtimeOrigin),
     name: SESSION_COOKIE_NAME,
     value: payload.session,
-    path: "/dashboard/api",
+    path: "/",
     httpOnly: true,
     secure: new URL(runtimeOrigin).protocol === "https:",
     expirationDate: Date.now() / 1000 + Number(payload.expires_in),

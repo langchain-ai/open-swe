@@ -90,8 +90,10 @@ function desktopExchangeUrl(backendUrl) {
   return new URL(DESKTOP_EXCHANGE_PATH, backendUrl).toString()
 }
 
+// Root path, not /dashboard/api: the application server resolves the session
+// while rendering the document, and only cookies matching `/` reach that request.
 function hostedSessionCookieUrl(runtimeOrigin) {
-  return new URL("/dashboard/api", runtimeOrigin).toString()
+  return new URL("/", runtimeOrigin).toString()
 }
 
 function isTrustedPermissionRequest(

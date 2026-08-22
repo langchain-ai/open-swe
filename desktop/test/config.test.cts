@@ -150,10 +150,10 @@ test("carries the loopback port and PKCE challenge into the browser login", () =
   )
 })
 
-test("stores hosted sessions on the TanStack origin that sends dashboard requests", () => {
+test("stores hosted sessions at the root of the TanStack origin so document renders carry them", () => {
   assert.equal(
     hostedSessionCookieUrl("http://127.0.0.1:41000"),
-    "http://127.0.0.1:41000/dashboard/api"
+    "http://127.0.0.1:41000/"
   )
 })
 
