@@ -13,6 +13,7 @@ from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
 from ..input_messages import wrap_system_prompt
+from ..utils.startup_trace import flush_phases
 
 
 class PrepareRunState(AgentState):
@@ -63,7 +64,11 @@ class BasePrepareRunMiddleware(AgentMiddleware):
             and prepared_state.get("run_prepared_for") == fingerprint
         ):
             return None
-        updates = await self._prepare(prepared_state, runtime)
+        try:
+            updates = await self._prepare(prepared_state, runtime)
+        finally:
+            # This hook is the first span the startup work can hang off of.
+            flush_phases(getattr(self, "_thread_id", None))
         return {"run_prepared": True, "run_prepared_for": fingerprint, **updates}
 
     def _prepare_fingerprint(self, state: PrepareRunState, runtime: Runtime) -> str:  # noqa: ARG002
