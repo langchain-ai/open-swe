@@ -287,7 +287,7 @@ def test_admin_section_only_for_admin_threads() -> None:
     prompt = construct_system_prompt(working_dir="/workspace", admin_environments=True)
     assert "### Admin Thread: Environment Setup" in prompt
     assert "optional VM sizing" in prompt
-    assert "Every environment must include `rg`" in prompt
+    assert "Every environment must include `rg` and `gh`" in prompt
     assert "direct them to an admin thread" not in prompt
 
 
