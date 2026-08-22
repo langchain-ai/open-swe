@@ -1,13 +1,24 @@
 packages:
+  - apps/*
+  - packages/*
   - ui
   - desktop
+  - tests/e2e
+
+injectWorkspacePackages: true
+syncInjectedDepsAfterScripts:
+  - build
 
 allowBuilds:
   electron: true
   electron-winstaller: false
   esbuild: true
+  node: true
   node-pty: true
   unrs-resolver: true
+
+minimumReleaseAgeExclude:
+  - deepagents@1.13.1
 
 overrides:
   '@hono/node-server': 2.0.10

@@ -19,10 +19,11 @@ export function useProfile() {
   })
 }
 
-export function useOptions() {
+export function useOptions(enabled = true) {
   return useQuery({
     queryKey: ["options"],
     queryFn: api.options,
+    enabled,
   })
 }
 

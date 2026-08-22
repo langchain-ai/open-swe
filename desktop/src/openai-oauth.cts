@@ -1,12 +1,11 @@
 const fs = require("node:fs");
 const http = require("node:http");
-const path = require("node:path");
 const { createHash, randomBytes, timingSafeEqual } = require("node:crypto");
 
 const AUTH_ISSUER = "https://auth.openai.com";
 const TOKEN_URL = `${AUTH_ISSUER}/oauth/token`;
 const API_BASE_URL = "https://chatgpt.com/backend-api/codex";
-const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+const OAUTH_APPLICATION_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const CALLBACK_PORTS = [1455, 1457];
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const REFRESH_WINDOW_MS = 5 * 60 * 1000;
@@ -78,7 +77,7 @@ function validCredentials(value) {
 function buildAuthorizeUrl({ redirectUri, challenge, state }) {
   const url = new URL("/oauth/authorize", AUTH_ISSUER);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", CLIENT_ID);
+  url.searchParams.set("client_id", OAUTH_APPLICATION_ID);
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set(
     "scope",
@@ -197,6 +196,7 @@ class OpenAiOAuthManager {
   fetch: any;
   now: () => number;
   credentials: any;
+  credentialsSource: "app" | "shared" | null;
   loginFlow: any;
   refreshing: Promise<any> | null;
   broker: any;
@@ -207,7 +207,12 @@ class OpenAiOAuthManager {
     this.options = options;
     this.fetch = options.fetchImpl || fetch;
     this.now = options.now || Date.now;
-    this.credentials = this.readCredentials();
+    const sharedCredentials = this.readSharedCredentials();
+    this.credentials =
+      sharedCredentials && !this.needsRefresh(sharedCredentials)
+        ? sharedCredentials
+        : null;
+    this.credentialsSource = this.credentials ? "shared" : null;
     this.loginFlow = null;
     this.refreshing = null;
     this.broker = null;
@@ -215,11 +220,20 @@ class OpenAiOAuthManager {
     this.brokerSecret = randomBytes(32).toString("base64url");
   }
 
-  readCredentials() {
+  readSharedCredentials() {
+    if (!this.options.sharedCredentialsPath) return null;
     try {
-      const encrypted = fs.readFileSync(this.options.storagePath);
-      const serialized = this.options.decryptString(encrypted);
-      return validCredentials(JSON.parse(serialized));
+      const value = JSON.parse(
+        fs.readFileSync(this.options.sharedCredentialsPath, "utf8"),
+      );
+      const tokens = value?.tokens;
+      return validCredentials({
+        accessToken: tokens?.access_token,
+        refreshToken: tokens?.refresh_token,
+        idToken: tokens?.id_token,
+        accountId: tokens?.account_id,
+        refreshedAt: Date.parse(value?.last_refresh || "") || 0,
+      });
     } catch {
       return null;
     }
@@ -231,26 +245,31 @@ class OpenAiOAuthManager {
       throw new Error(
         "The sign-in response did not include usable credentials",
       );
-    const encrypted = this.options.encryptString(JSON.stringify(credentials));
-    fs.mkdirSync(path.dirname(this.options.storagePath), { recursive: true });
-    const temporary = `${this.options.storagePath}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, encrypted, { mode: 0o600 });
-    fs.renameSync(temporary, this.options.storagePath);
     this.credentials = credentials;
+    this.credentialsSource = "app";
     return credentials;
   }
 
   clearCredentials() {
     this.credentials = null;
-    try {
-      fs.unlinkSync(this.options.storagePath);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
+    this.credentialsSource = null;
+  }
+
+  syncSharedCredentials() {
+    if (this.credentialsSource === "app") return;
+    this.credentials = this.readSharedCredentials();
+    this.credentialsSource = this.credentials ? "shared" : null;
   }
 
   status() {
-    return { signedIn: Boolean(this.credentials) };
+    this.syncSharedCredentials();
+    return {
+      signedIn: Boolean(
+        this.credentials &&
+          (this.credentialsSource !== "shared" ||
+            !this.needsRefresh(this.credentials)),
+      ),
+    };
   }
 
   backendEnv() {
@@ -266,7 +285,7 @@ class OpenAiOAuthManager {
       grant_type: "authorization_code",
       code,
       redirect_uri: redirectUri,
-      client_id: CLIENT_ID,
+      client_id: OAUTH_APPLICATION_ID,
       code_verifier: verifier,
     });
     const response = await this.fetch(TOKEN_URL, {
@@ -313,7 +332,7 @@ class OpenAiOAuthManager {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        client_id: CLIENT_ID,
+        client_id: OAUTH_APPLICATION_ID,
         grant_type: "refresh_token",
         refresh_token: current.refreshToken,
       }),
@@ -348,7 +367,14 @@ class OpenAiOAuthManager {
   }
 
   async accessToken() {
+    this.syncSharedCredentials();
     if (!this.credentials) throw new Error("Sign in to use OpenAI models");
+    if (this.credentialsSource === "shared") {
+      if (this.needsRefresh(this.credentials)) {
+        throw new Error("Your local OpenAI session has expired; sign in again");
+      }
+      return this.credentials.accessToken;
+    }
     if (this.needsRefresh(this.credentials)) {
       if (!this.refreshing) {
         this.refreshing = this.refresh().finally(() => {
@@ -412,7 +438,7 @@ class OpenAiOAuthManager {
 module.exports = {
   API_BASE_URL,
   AUTH_ISSUER,
-  CLIENT_ID,
+  OAUTH_APPLICATION_ID,
   OpenAiOAuthManager,
   accountIdFromTokens,
   beginOpenAiLogin,

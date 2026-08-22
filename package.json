@@ -2,21 +2,27 @@
   "name": "open-swe",
   "private": true,
   "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": "24.18.1"
+  },
   "scripts": {
     "dev": "turbo run dev --filter=open-swe-dashboard",
     "dev:desktop": "pnpm --dir desktop run dev:full",
     "dev:mock": "bash tests/e2e/dev-mock.sh",
     "build": "turbo run build",
+    "build:graphs": "turbo run build --filter=@open-swe/graphs",
     "check": "turbo run check",
     "format:check": "turbo run format:check",
     "lint": "turbo run lint",
-    "test": "turbo run test",
-    "test:e2e": "npm --prefix tests/e2e run test",
-    "test:e2e:desktop": "npm --prefix tests/e2e run test:desktop",
-    "test:e2e:install": "npm --prefix tests/e2e ci && npm --prefix tests/e2e exec -- playwright install --with-deps chromium",
+    "test": "turbo run test --filter=!open-swe-e2e",
+    "test:e2e": "pnpm --dir tests/e2e run test",
+    "test:e2e:desktop": "pnpm --dir tests/e2e run test:desktop",
+    "test:e2e:install": "pnpm --dir tests/e2e install --frozen-lockfile && pnpm --dir tests/e2e exec playwright install --with-deps chromium",
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
+    "@langchain/langgraph-cli": "^1.4.5",
+    "tsx": "4.21.0",
     "turbo": "^2.10.9"
   }
 }

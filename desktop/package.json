@@ -3,20 +3,23 @@
   "version": "0.2.3",
   "private": true,
   "description": "Experimental Open SWE desktop client",
+  "engines": {
+    "node": "24.18.1"
+  },
   "main": "build/main.cjs",
   "scripts": {
-    "build": "node scripts/build-main.cjs",
+    "build": "tsx scripts/build-main.ts",
     "build:ui": "pnpm --filter open-swe-dashboard run build",
     "dev": "pnpm run build:ui && pnpm run build && electron . --dev",
-    "dev:full": "concurrently --kill-others --success first --names backend,desktop --prefix-colors blue,magenta \"uv --directory .. run langgraph dev --no-browser\" \"pnpm run dev\"",
+    "dev:full": "pnpm --dir .. run build:graphs && pnpm run dev",
     "start": "pnpm run build:ui && pnpm run build && electron .",
-    "test:run": "node --test test/*.test.cjs",
+    "test:run": "node --import tsx --test test/*.test.cts",
     "test": "pnpm run build && pnpm run test:run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build:ui",
-    "pack": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend && electron-builder --dir",
-    "dist": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend && electron-builder",
-    "build:local-backend": "node scripts/build-local-backend.cjs"
+    "pack": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend && tsx scripts/package-local.ts --dir",
+    "dist": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend && tsx scripts/package-local.ts",
+    "build:local-backend": "tsx scripts/build-local-backend.ts"
   },
   "build": {
     "appId": "com.langchain.openswe",
@@ -25,8 +28,9 @@
     "asarUnpack": [
       "node_modules/node-pty/**/*"
     ],
+    "afterPack": "build/verify-package.cjs",
     "afterSign": "build/notarize.cjs",
-    "npmRebuild": true,
+    "npmRebuild": false,
     "icon": "resources/icon.png",
     "directories": {
       "output": "dist"
@@ -34,7 +38,8 @@
     "files": [
       "build/**/*",
       "src/setup.html",
-      "package.json"
+      "package.json",
+      "!node_modules/node-pty/deps/**/*"
     ],
     "extraResources": [
       {
@@ -42,7 +47,7 @@
         "to": "icon.png"
       },
       {
-        "from": "../ui/.output/public",
+        "from": "../ui/.output",
         "to": "ui",
         "filter": [
           "**/*"
@@ -63,6 +68,14 @@
       {
         "from": "resources/local-backend",
         "to": "local-backend",
+        "filter": [
+          "**/*",
+          "!node_modules/**/*"
+        ]
+      },
+      {
+        "from": "resources/local-backend/node_modules",
+        "to": "local-backend/node_modules",
         "filter": [
           "**/*"
         ]
@@ -99,11 +112,13 @@
   "license": "MIT",
   "homepage": "https://github.com/langchain-ai/open-swe",
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@electron/notarize": "3.1.1",
-    "@types/node": "22.20.1",
-    "concurrently": "10.0.5",
-    "electron": "41.10.3",
+    "@types/node": "24.10.1",
+    "electron": "43.4.1",
     "electron-builder": "26.15.3",
+    "node": "24.18.1",
+    "tsx": "4.21.0",
     "typescript": "5.9.3"
   },
   "dependencies": {

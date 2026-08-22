@@ -3,18 +3,26 @@
 > [!IMPORTANT]
 > This desktop client is experimental. The web UI is the recommended way to use Open SWE.
 
-The Electron package ships the compiled Open SWE web UI. Users configure only the URL of a
-compatible Open SWE backend; they do not need a separately hosted dashboard.
+The Electron package ships the compiled Open SWE web UI and a local TypeScript graph server. A
+hosted Open SWE backend is optional and is needed only for cloud features.
 
-Desktop users can choose **This Mac** in the new-task composer to run the same Open SWE LangGraph agent over a selected local project. Electron owns a loopback-only LangGraph server, proxies it to the bundled UI, and stops it with the app. Local threads use the same streaming protocol, graph, tools, subagents, and middleware assembly as cloud threads; only the filesystem backend and unavailable cloud integrations differ.
+Desktop users can choose **This Mac** in the new-task composer to run the generic coding agent over
+an allowlisted local project. Electron owns loopback-only graph and TanStack servers, connects them
+to the bundled UI, and stops them with the app. Local threads use the standard graph streaming
+protocol and local filesystem and shell tools. Cloud integrations are unavailable in local mode.
 
-The packaged app bundles its Python runtime and locked Open SWE dependencies. Source development uses `uv run langgraph dev`. Provider credentials stay in the local LangGraph process and are not inherited by agent shell commands. Added projects and local thread history are persisted in the desktop app's local data.
+The packaged app bundles Node.js 24 and its locked TypeScript dependencies. Desktop development and
+packaging use pnpm and do not invoke or bundle Python. Provider credentials stay in the local graph
+process and are not inherited by agent shell commands. Added projects and local thread history are
+persisted in the desktop app's local data.
 
 For local OpenAI models, the app can use either `OPENAI_API_KEY` or Sign in with ChatGPT. When no
 API key is configured, sending the first local task opens the system browser for sign-in. OAuth
-credentials are encrypted with the operating system's secure storage, refreshed by Electron, and
-made available to the local model client through an authenticated loopback broker. Refresh tokens
-are never placed in the local backend environment or inherited by agent shell commands.
+credentials are kept in Electron memory, refreshed by Electron, and made available to the local
+model client through an authenticated loopback broker. The desktop app does not invoke operating-
+system credential storage. Refresh tokens are never placed in the local backend environment or
+inherited by agent shell commands. A valid shared local OpenAI login cache can also be used
+read-only.
 
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
 started, so it shows what the agent changed and not the working tree's prior state. It also shows
@@ -22,10 +30,10 @@ the current branch and discovers its pull request when the GitHub CLI is install
 
 ## How it connects
 
-The bundled UI runs at an internal `open-swe://app` origin. Electron proxies its
-`/dashboard/api/*` requests to the selected backend, so the browser never receives a LangSmith API
-key and never calls the raw LangGraph API directly. GitHub login creates the same signed dashboard
-session used by the web UI.
+The bundled TanStack server runs on a private loopback origin. It proxies local graph requests with
+a process-private bearer token, so the renderer never receives provider credentials or direct
+access to the graph server. When a hosted backend is configured, its dashboard requests use the
+same signed session as the web UI.
 
 Packaged builds ask for the organization's backend URL on first launch and store it in the app's
 local user data. They have no maintainer-hosted default. Use **Open SWE → Backend URL…** to switch
@@ -42,7 +50,7 @@ and **Sign in for cloud mode** remains available from the local sidebar.
 
 ## Install on macOS
 
-Install Git, Node.js 22, and `uv`, clone this repository, then run this from its root:
+Install Git, Node.js 24, and pnpm, clone this repository, then run this from its root:
 
 ```bash
 make install-desktop
@@ -54,7 +62,8 @@ backend settings, login sessions, and projects are preserved.
 
 ## Local development
 
-Install the workspace dependencies, then start the backend and Electron together:
+Install the workspace dependencies, then start the TypeScript graph, TanStack, and Electron
+processes together:
 
 ```bash
 pnpm install                  # from the repo root
@@ -69,16 +78,16 @@ beside an installed `Open SWE` app without sharing its login session, backend co
 projects, or single-instance lock. The dev window is labeled **Open SWE Development**; its first
 launch may require signing in and adding projects again.
 
-A separate agent installation is not required. Confirm `uv --version` succeeds before starting the desktop app in development.
+A separate agent installation and Python are not required.
 
-Development defaults to `http://localhost:2024`. Point to another backend with:
+Development starts in local-only mode. Enable cloud features by pointing it to a hosted backend:
 
 ```bash
 pnpm --dir desktop run start -- --backend-url=https://open-swe-api.example.com
 ```
 
 `OPEN_SWE_BACKEND_URL` provides the same override. Resolution order is command-line argument,
-environment variable, saved first-launch configuration, then the local development default.
+environment variable, then saved configuration.
 The original `--url` and `OPEN_SWE_DESKTOP_URL` names remain accepted for compatibility.
 
 ## Packaging
@@ -88,8 +97,9 @@ pnpm --dir desktop run pack # unpacked application for the current platform
 pnpm --dir desktop run dist # installer for the current platform
 ```
 
-Both commands build `ui/` and package its static output with Electron. Build outputs are written
-to `desktop/dist/`.
+Both commands build the TanStack application and TypeScript graph, bundle the exact Node.js 24
+runtime, and package them with Electron. Build outputs are written to `desktop/dist/`; packaged
+resources are rejected if they contain Python source, a Python runtime, or `uv`.
 
 ## macOS releases
 

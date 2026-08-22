@@ -1,6 +1,9 @@
 {
   "name": "open-swe-e2e",
   "private": true,
+  "engines": {
+    "node": "24.18.1"
+  },
   "description": "Playwright E2E tests driving mock GitHub/Slack control panels against the real webhook routes.",
   "scripts": {
     "test": "playwright test",
@@ -9,6 +12,9 @@
     "report": "playwright show-report"
   },
   "devDependencies": {
-    "@playwright/test": "1.61.0"
+    "@langchain/core": "^1.2.9",
+    "@open-swe/agent": "workspace:*",
+    "@open-swe/workspace": "workspace:*",
+    "@playwright/test": "1.60.0"
   }
 }

@@ -7,7 +7,6 @@ const DEVELOPMENT_APP_NAME = "Open SWE Development"
 const APP_USER_MODEL_ID = "com.langchain.openswe"
 const DEVELOPMENT_APP_USER_MODEL_ID = "com.langchain.openswe.dev"
 const DEVELOPMENT_USER_DATA_DIRECTORY = "Open SWE Development"
-const DEFAULT_DEVELOPMENT_BACKEND_URL = "http://localhost:2024"
 const ALLOWED_PERMISSIONS = new Set(["clipboard-sanitized-write", "notifications"])
 const SESSION_COOKIE_NAME = "osw_session"
 const LOGIN_PATH = "/dashboard/api/auth/login"
@@ -51,8 +50,7 @@ function resolveBackendUrl({ argv, env, isPackaged, storedUrl }) {
     cliBackendUrl(argv) ||
     env.OPEN_SWE_BACKEND_URL ||
     env.OPEN_SWE_DESKTOP_URL ||
-    storedUrl ||
-    (isPackaged ? undefined : DEFAULT_DEVELOPMENT_BACKEND_URL)
+    storedUrl
   return value ? validateBackendUrl(value.trim()) : null
 }
 
@@ -73,6 +71,14 @@ function isAppLoginUrl(value) {
   }
 }
 
+function isNavigationAbort(error) {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    (error.code === "ERR_ABORTED" || error.errno === -3)
+  )
+}
+
 function desktopLoginUrl(backendUrl, { challenge, port }) {
   const target = new URL(LOGIN_PATH, backendUrl)
   target.searchParams.set("desktop_handoff", challenge)
@@ -84,8 +90,23 @@ function desktopExchangeUrl(backendUrl) {
   return new URL(DESKTOP_EXCHANGE_PATH, backendUrl).toString()
 }
 
-function isTrustedPermissionRequest(permission, requestingUrl, details: any = {}) {
-  if (!isAppUrl(requestingUrl)) return false
+function hostedSessionCookieUrl(runtimeOrigin) {
+  return new URL("/dashboard/api", runtimeOrigin).toString()
+}
+
+function isTrustedPermissionRequest(
+  permission,
+  requestingUrl,
+  details: any = {},
+  runtimeOrigin = null,
+) {
+  let trustedRuntime = false
+  if (runtimeOrigin) {
+    try {
+      trustedRuntime = new URL(requestingUrl).origin === runtimeOrigin
+    } catch {}
+  }
+  if (!isAppUrl(requestingUrl) && !trustedRuntime) return false
   if (ALLOWED_PERMISSIONS.has(permission)) return true
   const mediaTypes = details.mediaTypes ?? [details.mediaType]
   return (
@@ -144,15 +165,16 @@ function staticFilePath(root, appRequestUrl) {
 module.exports = {
   APP_ORIGIN,
   APP_URL,
-  DEFAULT_DEVELOPMENT_BACKEND_URL,
   SESSION_COOKIE_NAME,
   appRedirectUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
+  hostedSessionCookieUrl,
   resolveAppRuntime,
   backendRequestUrl,
   isAppLoginUrl,
   isAppUrl,
+  isNavigationAbort,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,

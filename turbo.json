@@ -6,7 +6,8 @@
       "persistent": true
     },
     "build": {
-      "outputs": [".output/**", ".vercel/output/**", "build/**"],
+      "dependsOn": ["^build"],
+      "outputs": [".output/**", ".vercel/output/**", "build/**", "dist/**"],
       "env": ["DASHBOARD_API_URL", "VERCEL", "E2E_HARNESS", "VITE_*"]
     },
     "typecheck": {},

@@ -14,6 +14,16 @@ export interface ModelOptionsResult {
 }
 
 const STORAGE_KEY = "open-swe.agents.model-selection"
+const LOCAL_LOGIN = "local"
+const LOCAL_MODELS: Array<ModelOption> = [
+  {
+    id: "openai:gpt-5.6-sol",
+    label: "GPT-5.6",
+    efforts: ["none", "low", "medium", "high", "xhigh"],
+    default_effort: "high",
+    supports_images: true,
+  },
+]
 
 function storedSelection(
   models: Array<ModelOption>,
@@ -41,11 +51,11 @@ export function persistModelSelection(
   selection: ModelSelection,
   login: string
 ): void {
-  if (typeof window === "undefined" || !login) return
+  if (typeof window === "undefined") return
   try {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ ...selection, login })
+      JSON.stringify({ ...selection, login: login || LOCAL_LOGIN })
     )
   } catch {}
 }
@@ -63,9 +73,13 @@ function toSupportedSelection(
 }
 
 export function useModelOptions(): ModelOptionsResult {
-  const optionsQuery = useOptions()
   const session = useSession()
-  const models = optionsQuery.data?.models ?? []
+  const localMode =
+    typeof window !== "undefined" &&
+    Boolean(window.openSweDesktop) &&
+    !session.data
+  const optionsQuery = useOptions(!localMode)
+  const models = localMode ? LOCAL_MODELS : (optionsQuery.data?.models ?? [])
   const teamDefaultSelection = toSupportedSelection(
     models,
     optionsQuery.data?.default_agent_model,
@@ -75,7 +89,10 @@ export function useModelOptions(): ModelOptionsResult {
   const firstSelection = firstModel
     ? { modelId: firstModel.id, effort: firstModel.default_effort }
     : null
-  const defaultSelection = optionsQuery.data
+  const selectionLogin = session.data?.login ?? LOCAL_LOGIN
+  const defaultSelection = localMode
+    ? (storedSelection(models, selectionLogin) ?? firstSelection)
+    : optionsQuery.data
     ? (storedSelection(models, session.data?.login ?? "") ??
       teamDefaultSelection ??
       firstSelection)
@@ -84,7 +101,7 @@ export function useModelOptions(): ModelOptionsResult {
   return {
     models,
     defaultSelection,
-    isLoading: optionsQuery.isLoading || session.isLoading,
+    isLoading: localMode ? false : optionsQuery.isLoading || session.isLoading,
   }
 }
 

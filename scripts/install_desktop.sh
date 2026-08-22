@@ -13,18 +13,12 @@ for command in node ditto; do
   }
 done
 
-command -v uv >/dev/null || {
-  echo "Missing uv. Install it from https://docs.astral.sh/uv/, then try again." >&2
-  exit 1
-}
-
-# Node 25 dropped the bundled corepack shim, so neither launcher is guaranteed.
 if command -v pnpm >/dev/null; then
   pnpm=(pnpm)
 elif command -v corepack >/dev/null; then
   pnpm=(corepack pnpm)
 else
-  echo "Missing pnpm. Install it with 'npm install -g pnpm', then try again." >&2
+  echo "Missing pnpm. Install pnpm 11.18.0, then try again." >&2
   exit 1
 fi
 

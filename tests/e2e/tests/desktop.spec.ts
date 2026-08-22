@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
-import { execFileSync } from "node:child_process";
-import { createRequire } from "node:module";
+import { expect, test } from "@playwright/test"
+import { execFileSync } from "node:child_process"
+import { createRequire } from "node:module"
 import {
   existsSync,
   mkdirSync,
@@ -9,232 +9,151 @@ import {
   realpathSync,
   rmSync,
   writeFileSync,
-} from "node:fs";
-import { delimiter, join, resolve } from "node:path";
-import { _electron as electron } from "playwright";
+} from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { _electron as electron } from "playwright"
 
-const repoRoot = resolve(__dirname, "..", "..", "..");
-const desktopRoot = join(repoRoot, "desktop");
-const e2eRoot = join(repoRoot, "tests", "e2e");
-const baseURL = `http://127.0.0.1:${process.env.E2E_PORT ?? "2024"}`;
-const e2eTmp = resolve(process.env.E2E_TMP ?? join(e2eRoot, ".e2e-tmp"));
-const fakeRemote = join(e2eTmp, "github", "fakeorg__demo.git");
-const electronPath = createRequire(join(desktopRoot, "package.json"))(
-  "electron",
-) as string;
+const repoRoot = path.resolve(__dirname, "..", "..", "..")
+const desktopRoot = path.join(repoRoot, "desktop")
+const graphEntrypoint = path.join(repoRoot, "tests", "e2e", "desktop-agent.ts")
+const electronPath = createRequire(path.join(desktopRoot, "package.json"))(
+  "electron"
+) as string
 
-function sessionCookie(setCookie: string): string {
-  const match = setCookie.match(/(?:^|,\s*)osw_session=([^;]+)/);
-  if (!match)
-    throw new Error("Harness login did not return an osw_session cookie");
-  return match[1];
+function runGit(cwd: string, ...args: string[]): void {
+  execFileSync("git", args, { cwd, stdio: "pipe" })
 }
 
 async function typeIntoComposer(
   page: import("@playwright/test").Page,
-  text: string,
-) {
-  const editor = page.getByTestId("composer-editor");
-  await editor.click();
-  await editor.pressSequentially(text);
-  await editor.press("Enter");
+  text: string
+): Promise<void> {
+  const editor = page.getByTestId("composer-editor")
+  await editor.click()
+  await editor.pressSequentially(text)
+  await editor.press("Enter")
 }
 
-test("Desktop runs a local thread on the Open SWE graph against the shared fakes", async ({
-  request,
-}, testInfo) => {
-  mkdirSync(e2eTmp, { recursive: true });
-  const stateRoot = mkdtempSync(join(e2eTmp, "desktop-"));
-  const home = join(stateRoot, "home");
-  const project = join(stateRoot, "demo");
-  const gitConfig = join(stateRoot, "gitconfig");
-  mkdirSync(home, { recursive: true });
-  writeFileSync(gitConfig, "");
-
-  const reset = await request.post("/control/reset");
-  expect(reset.ok()).toBeTruthy();
-  execFileSync("git", ["clone", fakeRemote, project], {
-    env: { ...process.env, GIT_CONFIG_GLOBAL: gitConfig },
-    stdio: "pipe",
-  });
-
-  const login = await request.post("/control/login", {
-    data: { login: "alice", email: "alice@example.com" },
-  });
-  expect(login.ok()).toBeTruthy();
-  const cookie = sessionCookie(login.headers()["set-cookie"] ?? "");
-  const pythonPath = [e2eRoot, process.env.PYTHONPATH]
-    .filter((value): value is string => Boolean(value))
-    .join(delimiter);
+test("This Mac runs and restores the TypeScript coding agent", async ({}, testInfo) => {
+  const stateRoot = mkdtempSync(path.join(os.tmpdir(), "open-swe-desktop-e2e-"))
+  const home = path.join(stateRoot, "home")
+  const project = path.join(stateRoot, "project")
+  const gitConfig = path.join(stateRoot, "gitconfig")
+  mkdirSync(home)
+  mkdirSync(project)
+  writeFileSync(gitConfig, "")
+  writeFileSync(path.join(project, "README.md"), "# TypeScript fixture\n")
+  runGit(project, "init", "-q")
+  runGit(project, "config", "user.name", "Test")
+  runGit(project, "config", "user.email", "test@example.com")
+  runGit(project, "add", ".")
+  runGit(project, "commit", "-qm", "fixture")
 
   const electronApp = await electron.launch({
     executablePath: electronPath,
     args: [
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+      "--password-store=basic",
       desktopRoot,
       "--dev",
-      `--backend-url=${baseURL}`,
     ],
     cwd: repoRoot,
     env: {
       ...process.env,
       HOME: home,
-      XDG_CONFIG_HOME: join(stateRoot, "xdg-config"),
-      APPDATA: join(stateRoot, "app-data"),
-      OPEN_SWE_BACKEND_URL: baseURL,
-      // The local backend runs the real graph with the scripted fake model, so
-      // the provider keys only have to satisfy the composer's credential gate.
-      OPEN_SWE_LOCAL_BACKEND_CONFIG: join(e2eRoot, "langgraph.desktop.json"),
-      ANTHROPIC_API_KEY: "e2e-fake-key",
-      OPENAI_API_KEY: "e2e-fake-key",
-      E2E_BASE: baseURL,
-      E2E_FAKE_GITHUB_API: `${baseURL}/fake-gh`,
-      E2E_REMOTE: fakeRemote,
-      E2E_TMP: e2eTmp,
+      XDG_CONFIG_HOME: path.join(stateRoot, "xdg-config"),
+      APPDATA: path.join(stateRoot, "app-data"),
       GIT_CONFIG_GLOBAL: gitConfig,
-      PYTHONPATH: pythonPath,
-      UV_CACHE_DIR: join(e2eTmp, "uv-cache"),
+      OPENAI_API_KEY: "e2e-fake-key",
+      OPEN_SWE_LOCAL_GRAPH_ENTRYPOINT: graphEntrypoint,
+      OPEN_SWE_LOCAL_SERVER_LOGS: "1",
     },
-  });
+  })
 
-  const context = electronApp.context();
-  await context.tracing.start({
-    screenshots: true,
-    snapshots: true,
-    sources: true,
-  });
-  const trace = testInfo.outputPath("electron-trace.zip");
-  let page: Awaited<ReturnType<typeof electronApp.firstWindow>> | null = null;
-  try {
-    page = await electronApp.firstWindow();
-    const userData = await electronApp.evaluate(({ app }) =>
-      app.getPath("userData"),
-    );
-    mkdirSync(userData, { recursive: true });
-    writeFileSync(
-      join(userData, "desktop-projects.json"),
-      `${JSON.stringify(
-        [{ cwd: realpathSync(project), name: "demo", addedAt: Date.now() }],
-        null,
-        2,
-      )}\n`,
-      { mode: 0o600 },
-    );
-    await electronApp.evaluate(
-      async ({ session }, details) => {
-        await session.defaultSession.cookies.set(details);
-      },
-      {
-        url: `${baseURL}/`,
-        name: "osw_session",
-        value: cookie,
-        path: "/",
-        httpOnly: true,
-      },
-    );
-
-    const profileResponse = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === "/dashboard/api/profile",
-    );
-    await page.goto("open-swe://app/agents");
-    const profile = (await (await profileResponse).json()) as {
-      default_model?: string | null;
-    };
-    if (!profile.default_model) {
-      const maybeLater = page.getByRole("button", { name: "Maybe later" });
-      await expect(maybeLater).toBeVisible();
-      await maybeLater.click();
-    }
-
-    const cloudSource = page.getByRole("button", {
-      name: /Cloud threads, \d+/,
-    });
-    const localSource = page.getByRole("button", {
-      name: /This Mac threads, \d+/,
-    });
-    await expect(localSource).toHaveAttribute("aria-pressed", "true");
-
-    await cloudSource.click();
-    await expect(cloudSource).toHaveAttribute("aria-pressed", "true");
-    await expect(
-      page.getByRole("button", { name: "Cloud", exact: true }),
-    ).toBeVisible();
-    const cloudScreenshot = testInfo.outputPath("desktop-cloud-threads.png");
-    await page.screenshot({ path: cloudScreenshot, fullPage: true });
-    await testInfo.attach("desktop-cloud-threads", {
-      path: cloudScreenshot,
-      contentType: "image/png",
-    });
-
-    await localSource.click();
-    await expect(localSource).toHaveAttribute("aria-pressed", "true");
-    await expect(
-      page.getByRole("button", { name: "demo", exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "main", exact: true }),
-    ).toBeVisible();
-    const localScreenshot = testInfo.outputPath("desktop-local-threads.png");
-    await page.screenshot({ path: localScreenshot, fullPage: true });
-    await testInfo.attach("desktop-local-threads", {
-      path: localScreenshot,
-      contentType: "image/png",
-    });
-
-    await typeIntoComposer(
-      page,
-      "E2E_DESKTOP_LOCAL please add a greet() helper and open a PR",
-    );
-
-    await expect(page).toHaveURL(/open-swe:\/\/app\/agents\/local\//);
-    await expect(page.getByText(/Done! I added/)).toBeVisible();
-    const prLink = page.getByRole("link", {
-      name: "Add greet() helper",
-      exact: true,
-    });
-    await expect(prLink).toHaveAttribute(
-      "href",
-      `${baseURL}/mock/github/fakeorg/demo/pull/1`,
-    );
-
-    await expect.poll(() => existsSync(join(project, "greet.py"))).toBe(true);
-    expect(readFileSync(join(project, "greet.py"), "utf8")).toContain(
-      'return f"Hello, {name}!"',
-    );
-
-    await expect
-      .poll(async () => {
-        const response = await request.get("/mock/github/data");
-        if (!response.ok()) return [];
-        return response.json();
-      })
-      .toMatchObject([
-        {
-          title: "Add greet() helper",
-          head: "add-greet",
-          base: "main",
-          draft: true,
-          files: [{ filename: "greet.py" }],
-        },
-      ]);
-
-    const screenshot = testInfo.outputPath("desktop-local-agent.png");
-    await page.screenshot({ path: screenshot, fullPage: true });
-    await testInfo.attach("desktop-local-agent", {
-      path: screenshot,
-      contentType: "image/png",
-    });
-  } finally {
-    await context.tracing.stop({ path: trace }).catch(() => {});
-    if (existsSync(trace)) {
-      await testInfo.attach("electron-trace", {
-        path: trace,
-        contentType: "application/zip",
-      });
-    }
-    await electronApp.close().catch(() => {});
-    if (!process.env.E2E_KEEP_TMP)
-      rmSync(stateRoot, { recursive: true, force: true });
+  const electronProcess = electronApp.process()
+  const events: string[] = []
+  const record = (message: string): void => {
+    events.push(`${new Date().toISOString()} ${message}`)
   }
-});
+  electronProcess.stdout?.on("data", (chunk) => record(`electron stdout: ${chunk}`))
+  electronProcess.stderr?.on("data", (chunk) => record(`electron stderr: ${chunk}`))
+  try {
+    const page = await electronApp.firstWindow()
+    page.on("console", (message) => record(`console ${message.type()}: ${message.text()}`))
+    page.on("requestfailed", (request) =>
+      record(`request failed: ${request.method()} ${request.url()} ${request.failure()?.errorText}`)
+    )
+    page.on("response", (response) => {
+      if (response.status() >= 400) {
+        record(`response ${response.status()}: ${response.request().method()} ${response.url()}`)
+      }
+    })
+    record(`first window: ${page.url()}`)
+    const userData = await electronApp.evaluate(({ app }) => app.getPath("userData"))
+    writeFileSync(
+      path.join(userData, "desktop-projects.json"),
+      `${JSON.stringify(
+        [{ cwd: realpathSync(project), name: "project", addedAt: Date.now() }],
+        null,
+        2
+      )}\n`,
+      { mode: 0o600 }
+    )
+
+    await page.reload()
+    record(`reloaded after project registration: ${page.url()}`)
+    const localMode = page.getByRole("link", { name: "Continue in local mode" })
+    if (!/\/agents(?:\/|$)/.test(new URL(page.url()).pathname)) {
+      await expect(localMode).toBeVisible({ timeout: 30_000 })
+      await localMode.click()
+      record("entered local mode")
+    }
+    await expect(page).toHaveURL(/\/agents/)
+    record(`agents route ready: ${page.url()}`)
+    await expect(page.getByRole("button", { name: "project", exact: true })).toBeVisible()
+    record("project visible")
+
+    await typeIntoComposer(page, "Add and verify a typed greeting helper.")
+    record("prompt submitted")
+
+    await expect(page).toHaveURL(/\/agents\/local\//)
+    await expect(
+      page.getByText("Done. I added and verified the TypeScript greeting helper.")
+    ).toBeVisible()
+    record("stream completed")
+    await expect.poll(() => existsSync(path.join(project, "greeting.ts"))).toBe(true)
+    expect(readFileSync(path.join(project, "greeting.ts"), "utf8")).toContain(
+      "function greet(name: string): string"
+    )
+
+    await page.getByRole("button", { name: "Show panel" }).click()
+    await page.getByRole("button", { name: /Changes/ }).click()
+    await expect(page.getByText("greeting.ts", { exact: true })).toBeVisible()
+    await page.getByRole("button", { name: "Add panel surface" }).click()
+    await page.getByRole("menuitem", { name: /Terminal/ }).click()
+    await expect(page.getByRole("textbox", { name: "Terminal input" })).toBeVisible()
+    record("diff and terminal visible")
+
+    const threadUrl = page.url()
+    await page.reload()
+    await expect(page).toHaveURL(threadUrl)
+    await expect(
+      page.getByText("Done. I added and verified the TypeScript greeting helper.")
+    ).toBeVisible()
+    record("thread restored")
+  } finally {
+    const eventsPath = testInfo.outputPath("desktop-events.txt")
+    writeFileSync(eventsPath, `${events.join("\n")}\n`)
+    await testInfo.attach("desktop-events", {
+      path: eventsPath,
+      contentType: "text/plain",
+    })
+    await Promise.race([
+      electronApp.close().catch(() => {}),
+      new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+    ])
+    if (electronProcess.exitCode === null) electronProcess.kill("SIGKILL")
+    if (!process.env.E2E_KEEP_TMP) rmSync(stateRoot, { recursive: true, force: true })
+  }
+})

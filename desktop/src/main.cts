@@ -1,19 +1,17 @@
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
-const { pathToFileURL } = require("node:url");
 const {
   app,
   BrowserWindow,
   ipcMain,
   Menu,
   dialog,
-  net,
-  protocol,
-  safeStorage,
   session,
   shell,
 } = require("electron");
 const { BackendSupervisor } = require("./backend-supervisor.cjs");
+const { ApplicationSupervisor } = require("./application-supervisor.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
   captureCheckpoint,
@@ -43,20 +41,17 @@ const { OpenAiOAuthManager } = require("./openai-oauth.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
 const {
   APP_ORIGIN,
-  APP_URL,
   SESSION_COOKIE_NAME,
-  appRedirectUrl,
-  backendRequestUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
+  hostedSessionCookieUrl,
   isAppLoginUrl,
   isAppUrl,
+  isNavigationAbort,
   isTrustedPermissionRequest,
-  isTrustedProxyRequest,
   localCallbackUrl,
   resolveBackendUrl,
   resolveAppRuntime,
-  staticFilePath,
   validateBackendUrl,
 } = require("./config.cjs");
 
@@ -73,20 +68,6 @@ if (appRuntime.userDataPath) {
 }
 app.setAppUserModelId(appRuntime.appUserModelId);
 
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: "open-swe",
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      stream: true,
-      codeCache: true,
-    },
-  },
-]);
-
 let backendUrl = null;
 let mainWindow = null;
 let setupWindow = null;
@@ -95,6 +76,7 @@ let quitting = false;
 let localThreadStore = null;
 let lastActivity = {};
 let backendSupervisor = null;
+let applicationSupervisor = null;
 let openAiOAuth = null;
 
 function sendDesktopCommand(commandId) {
@@ -105,7 +87,8 @@ function sendDesktopCommand(commandId) {
 
 function requireTrustedDesktopIpc(event) {
   const senderUrl = event.senderFrame?.url || event.sender.getURL();
-  if (!isAppUrl(senderUrl)) throw new Error("Forbidden");
+  if (!applicationSupervisor?.isTrustedUrl(senderUrl) && !isAppUrl(senderUrl))
+    throw new Error("Forbidden");
 }
 
 function projectsPath() {
@@ -451,12 +434,6 @@ function iconPath() {
     : path.resolve(__dirname, "../resources/icon.png");
 }
 
-function bundledUiPath() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, "ui")
-    : path.resolve(__dirname, "../../ui/.output/public");
-}
-
 function errorPage(error) {
   const message = String(error?.message || error);
   const html = `<!doctype html>
@@ -496,92 +473,6 @@ function escapeHtml(value) {
   });
 }
 
-async function proxyBackendRequest(request) {
-  const source = new URL(request.url);
-  const headers = new Headers(request.headers);
-  const pageUrl = mainWindow?.webContents.getURL() || "";
-  if (!isTrustedProxyRequest(pageUrl)) {
-    return new Response("Forbidden", { status: 403 });
-  }
-  headers.delete("host");
-  headers.set("accept-encoding", "identity");
-  headers.set("origin", APP_ORIGIN);
-  const targetUrl = backendRequestUrl(backendUrl, request.url);
-  const cookies = await session.defaultSession.cookies.get({ url: targetUrl });
-  if (cookies.length) {
-    headers.set(
-      "cookie",
-      cookies.map(({ name, value }) => `${name}=${value}`).join("; "),
-    );
-  } else {
-    headers.delete("cookie");
-  }
-
-  const body = ["GET", "HEAD"].includes(request.method)
-    ? undefined
-    : request.body;
-  const upstream = await fetch(targetUrl, {
-    method: request.method,
-    headers,
-    body,
-    redirect: "manual",
-    ...(body ? { duplex: "half" } : {}),
-  });
-  await storeResponseCookies(targetUrl, upstream);
-
-  const location = upstream.headers.get("location");
-  if (location && source.pathname.endsWith("/callback")) {
-    const responseHeaders = new Headers(upstream.headers);
-    responseHeaders.set("location", appRedirectUrl(location));
-    return new Response(upstream.body, {
-      status: upstream.status,
-      statusText: upstream.statusText,
-      headers: responseHeaders,
-    });
-  }
-  return upstream;
-}
-
-async function storeResponseCookies(targetUrl, response) {
-  const values = response.headers.getSetCookie?.() ?? [];
-  for (const value of values) {
-    const [pair, ...attributes] = value.split(";");
-    const separator = pair.indexOf("=");
-    if (separator <= 0) continue;
-    const name = pair.slice(0, separator).trim();
-    const cookieValue = pair.slice(separator + 1).trim();
-    const details: Electron.CookiesSetDetails = {
-      url: targetUrl,
-      name,
-      value: cookieValue,
-      path: "/",
-    };
-    let remove = false;
-    for (const rawAttribute of attributes) {
-      const [rawName, ...rawValue] = rawAttribute.trim().split("=");
-      const attributeName = rawName.toLowerCase();
-      const attributeValue = rawValue.join("=");
-      if (attributeName === "path" && attributeValue)
-        details.path = attributeValue;
-      else if (attributeName === "domain" && attributeValue)
-        details.domain = attributeValue;
-      else if (attributeName === "secure") details.secure = true;
-      else if (attributeName === "httponly") details.httpOnly = true;
-      else if (attributeName === "max-age") {
-        const seconds = Number(attributeValue);
-        if (Number.isFinite(seconds) && seconds > 0) {
-          details.expirationDate = Date.now() / 1000 + seconds;
-        } else if (seconds === 0) {
-          remove = true;
-        }
-      }
-    }
-    const cookieUrl = new URL(details.path, targetUrl).toString();
-    if (remove) await session.defaultSession.cookies.remove(cookieUrl, name);
-    else await session.defaultSession.cookies.set(details);
-  }
-}
-
 async function clearBackendCookies(url) {
   for (const cookie of await session.defaultSession.cookies.get({ url })) {
     await session.defaultSession.cookies.remove(
@@ -591,46 +482,17 @@ async function clearBackendCookies(url) {
   }
 }
 
-async function serveBundledUi(request) {
-  if (!backendUrl)
-    return new Response("Backend is not configured", { status: 503 });
-  const url = new URL(request.url);
-  if (url.pathname.startsWith("/dashboard/api"))
-    return proxyBackendRequest(request);
-  if (
-    url.pathname === "/local-graph" ||
-    url.pathname.startsWith("/local-graph/")
-  )
-    return backendSupervisor.proxy(request);
-  if (!["GET", "HEAD"].includes(request.method)) {
-    return new Response("Method not allowed", { status: 405 });
-  }
-
-  const root = bundledUiPath();
-  let filePath = staticFilePath(root, request.url);
-  if (
-    !filePath ||
-    !fs.existsSync(filePath) ||
-    !fs.statSync(filePath).isFile()
-  ) {
-    if (path.extname(url.pathname))
-      return new Response("Not found", { status: 404 });
-    filePath = path.join(root, "_shell.html");
-  }
-  if (!fs.existsSync(filePath)) {
-    return new Response("Bundled UI is missing. Run pnpm run build:ui.", {
-      status: 500,
-    });
-  }
-  return net.fetch(pathToFileURL(filePath).toString());
-}
-
 async function loadApp(window) {
-  if (!backendUrl) return;
   try {
-    await window.loadURL(APP_URL);
+    const { appUrl } = await applicationSupervisor.start();
+    await window.loadURL(appUrl);
   } catch (error) {
-    if (!window.isDestroyed()) await window.loadURL(errorPage(error));
+    if (isNavigationAbort(error) || window.isDestroyed()) return;
+    try {
+      await window.loadURL(errorPage(error));
+    } catch (loadError) {
+      if (!isNavigationAbort(loadError)) throw loadError;
+    }
   }
 }
 
@@ -793,13 +655,15 @@ async function completeExternalLogin(verifier, code) {
   if (typeof payload?.session !== "string") {
     throw new Error("Backend returned no session");
   }
+  const runtimeOrigin = applicationSupervisor?.origin();
+  if (!runtimeOrigin) throw new Error("Desktop application server is not running");
   await session.defaultSession.cookies.set({
-    url: backendUrl,
+    url: hostedSessionCookieUrl(runtimeOrigin),
     name: SESSION_COOKIE_NAME,
     value: payload.session,
-    path: "/",
+    path: "/dashboard/api",
     httpOnly: true,
-    secure: new URL(backendUrl).protocol === "https:",
+    secure: new URL(runtimeOrigin).protocol === "https:",
     expirationDate: Date.now() / 1000 + Number(payload.expires_in),
   });
 
@@ -813,7 +677,11 @@ async function completeExternalLogin(verifier, code) {
 }
 
 function handleNavigation(window, event, url) {
-  if (isAppLoginUrl(url)) {
+  if (
+    isAppLoginUrl(url) ||
+    (applicationSupervisor?.isTrustedUrl(url) &&
+      new URL(url).pathname === "/dashboard/api/auth/login")
+  ) {
     event.preventDefault();
     void startExternalLogin();
     return;
@@ -824,7 +692,7 @@ function handleNavigation(window, event, url) {
     void window.loadURL(callback);
     return;
   }
-  if (isAppUrl(url)) return;
+  if (isAppUrl(url) || applicationSupervisor?.isTrustedUrl(url)) return;
   event.preventDefault();
   const target = new URL(url);
   if (["http:", "https:", "mailto:"].includes(target.protocol)) {
@@ -833,7 +701,6 @@ function handleNavigation(window, event, url) {
 }
 
 function createWindow() {
-  if (!backendUrl) return createSetupWindow();
   const window = new BrowserWindow({
     title: appRuntime.name,
     width: 1440,
@@ -864,7 +731,11 @@ function createWindow() {
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
     const protocol = new URL(url).protocol;
-    if (isAppLoginUrl(url)) {
+    if (
+      isAppLoginUrl(url) ||
+      (applicationSupervisor?.isTrustedUrl(url) &&
+        new URL(url).pathname === "/dashboard/api/auth/login")
+    ) {
       void startExternalLogin();
     } else if (["http:", "https:", "mailto:"].includes(protocol)) {
       void shell.openExternal(url);
@@ -930,9 +801,14 @@ function createSetupWindow() {
       if (!value) throw new Error("Enter a backend URL");
       const previousUrl = backendUrl;
       backendUrl = storeBackendUrl(value);
-      if (previousUrl && previousUrl !== backendUrl) {
-        await clearBackendCookies(previousUrl);
-        await session.defaultSession.clearStorageData({ origin: APP_URL });
+      if (previousUrl !== backendUrl) {
+        const previousRuntimeOrigin = applicationSupervisor?.origin();
+        if (previousUrl) await clearBackendCookies(previousUrl);
+        if (previousRuntimeOrigin) {
+          await clearBackendCookies(hostedSessionCookieUrl(previousRuntimeOrigin));
+          await session.defaultSession.clearStorageData({ origin: previousRuntimeOrigin });
+        }
+        await applicationSupervisor?.setBackendUrl(backendUrl);
       }
       if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
       else createWindow();
@@ -958,13 +834,19 @@ function configurePermissions() {
           permission,
           details.requestingUrl || webContents.getURL(),
           details,
+          applicationSupervisor?.origin(),
         ),
       );
     },
   );
   session.defaultSession.setPermissionCheckHandler(
     (_webContents, permission, requestingOrigin, details) =>
-      isTrustedPermissionRequest(permission, requestingOrigin, details),
+      isTrustedPermissionRequest(
+        permission,
+        requestingOrigin,
+        details,
+        applicationSupervisor?.origin(),
+      ),
   );
 }
 
@@ -1006,14 +888,10 @@ if (!hasSingleInstanceLock) {
       path.join(app.getPath("userData"), "desktop-local-threads.json"),
     );
     openAiOAuth = new OpenAiOAuthManager({
-      storagePath: path.join(app.getPath("userData"), "openai-auth.bin"),
-      encryptString: (value) => {
-        if (!safeStorage.isEncryptionAvailable()) {
-          throw new Error("Secure credential storage is unavailable");
-        }
-        return safeStorage.encryptString(value);
-      },
-      decryptString: (value) => safeStorage.decryptString(value),
+      sharedCredentialsPath: path.join(
+        process.env.CODEX_HOME || path.join(os.homedir(), ".codex"),
+        "auth.json",
+      ),
     });
     await openAiOAuth.startBroker().catch((error) => {
       console.warn("Could not start the local OpenAI credential broker", error);
@@ -1025,11 +903,15 @@ if (!hasSingleInstanceLock) {
       stateDir: path.join(app.getPath("userData"), "local-backend"),
       projectsFile: projectsPath(),
       providerEnv: () => openAiOAuth?.backendEnv() || {},
-      openAiOAuthAvailable: () =>
-        openAiOAuth?.status().signedIn === true &&
-        Boolean(openAiOAuth?.backendEnv().OPEN_SWE_OPENAI_OAUTH_BROKER_URL),
+      openAiOAuthAvailable: () => openAiOAuth?.status().signedIn === true,
     });
-    protocol.handle("open-swe", serveBundledUi);
+    applicationSupervisor = new ApplicationSupervisor({
+      graph: backendSupervisor,
+      isPackaged: app.isPackaged,
+      repoRoot: path.resolve(__dirname, "../.."),
+      resourcesPath: process.resourcesPath,
+      backendUrl,
+    });
     configurePermissions();
     configureDesktopIpc();
     createMenu();
@@ -1058,6 +940,7 @@ if (!hasSingleInstanceLock) {
     quitting = true;
     void Promise.all([
       closeAllTerminals(),
+      applicationSupervisor?.close(),
       backendSupervisor?.close(),
       openAiOAuth?.close(),
     ]).finally(() => {
