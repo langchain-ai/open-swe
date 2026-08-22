@@ -45,7 +45,24 @@ PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 5
 PROXY_CONFIG_NOT_READY_STATUS = 400
 PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
-PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
+PROXY_SECRET_PLACEHOLDER = "proxy-injected"
+PROXY_GH_TOKEN_PLACEHOLDER = PROXY_SECRET_PLACEHOLDER
+
+
+def _datadog_proxy_rule(site: str, api_key: str, app_key: str) -> dict[str, Any]:
+    return {
+        "name": "datadog-api",
+        "match_hosts": [f"api.{site}"],
+        "headers": [
+            {"name": "DD-API-KEY", "type": "opaque", "value": api_key},
+            {"name": "DD-APPLICATION-KEY", "type": "opaque", "value": app_key},
+        ],
+        "env_vars": {
+            "DD_API_KEY": PROXY_SECRET_PLACEHOLDER,
+            "DD_APP_KEY": PROXY_SECRET_PLACEHOLDER,
+            "DD_SITE": site,
+        },
+    }
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -385,11 +402,10 @@ async def _configure_github_proxy(
     *,
     base_proxy_config: dict[str, Any] | None = None,
 ) -> None:
-    """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
+    """Configure sandbox proxy to inject service credentials into outbound traffic.
 
-    Uses the LangSmith proxy-config API to set up header injection so that
-    git operations (clone, pull, push) authenticate via the proxy rather than
-    writing credentials to disk in the sandbox.
+    Uses the LangSmith proxy-config API so GitHub and connected Datadog operations
+    authenticate through the proxy rather than writing credentials to the sandbox.
 
     Args:
         sandbox_name: The sandbox name/ID returned by the LangSmith API.
@@ -402,10 +418,14 @@ async def _configure_github_proxy(
         return
     langsmith_endpoint = _get_sandbox_endpoint()
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
+    from agent.dashboard.team_credentials import get_datadog_credentials
+
     proxy_config = dict(base_proxy_config or {})
     custom_rules = proxy_config.get("rules")
+    datadog = await get_datadog_credentials()
     proxy_config["rules"] = [
         *(custom_rules if isinstance(custom_rules, list) else []),
+        *([_datadog_proxy_rule(datadog.site, datadog.api_key, datadog.app_key)] if datadog else []),
         *_github_proxy_rules(github_token),
     ]
     payload = {"proxy_config": proxy_config}

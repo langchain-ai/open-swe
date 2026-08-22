@@ -979,6 +979,18 @@ def _slack_tools_enabled(configurable: dict[str, Any]) -> bool:
     )
 
 
+def _environment_prompt(environment: dict[str, Any] | None, datadog_site: str | None) -> str | None:
+    instructions = environment_prompt(environment)
+    if not datadog_site:
+        return instructions
+    datadog = (
+        f"Datadog Pup CLI is authenticated through the sandbox proxy for "
+        f"`{datadog_site}`. `DD_API_KEY` and `DD_APP_KEY` are placeholders; never print or "
+        "treat them as credentials."
+    )
+    return f"{instructions}\n\n{datadog}" if instructions else datadog
+
+
 def _make_model_or_defer(
     model_id: str,
     *,
@@ -1208,6 +1220,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         del github_token
         work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
         environment = await resolve_environment(_environment_slug(configurable))
+        from .dashboard.team_credentials import get_datadog_credentials
+
+        datadog = await get_datadog_credentials()
         sender_instructions = await _resolve_user_custom_instructions(self._profile_login)
         sender_context = construct_sender_context(
             triggering_user_identity,
@@ -1267,7 +1282,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 repo_custom_instructions=self._repo_instructions,
                 corridor_enabled=self._corridor_enabled,
                 environment_name=(environment or {}).get("name"),
-                environment_instructions=environment_prompt(environment),
+                environment_instructions=_environment_prompt(
+                    environment, datadog.site if datadog else None
+                ),
                 admin_environments=self._admin_environments,
                 source=self._source,
                 slack_context=_slack_tools_enabled(configurable),

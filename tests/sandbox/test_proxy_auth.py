@@ -10,7 +10,12 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.integrations.langsmith import PROXY_GH_TOKEN_PLACEHOLDER, _configure_github_proxy
+from agent.integrations.langsmith import (
+    PROXY_GH_TOKEN_PLACEHOLDER,
+    PROXY_SECRET_PLACEHOLDER,
+    _configure_github_proxy,
+    _datadog_proxy_rule,
+)
 from agent.utils.sandbox_state import SandboxBackendProxy
 
 
@@ -68,6 +73,27 @@ class TestSandboxFactoryLoading:
         )
 
 
+class TestDatadogProxy:
+    def test_injects_credentials_without_exposing_them_as_environment_variables(self) -> None:
+        api_key = "api-secret"
+        app_key = "app-secret"
+
+        rule = _datadog_proxy_rule("us5.datadoghq.com", api_key, app_key)
+
+        assert rule["match_hosts"] == ["api.us5.datadoghq.com"]
+        assert rule["headers"] == [
+            {"name": "DD-API-KEY", "type": "opaque", "value": api_key},
+            {"name": "DD-APPLICATION-KEY", "type": "opaque", "value": app_key},
+        ]
+        assert rule["env_vars"] == {
+            "DD_API_KEY": PROXY_SECRET_PLACEHOLDER,
+            "DD_APP_KEY": PROXY_SECRET_PLACEHOLDER,
+            "DD_SITE": "us5.datadoghq.com",
+        }
+        assert api_key not in rule["env_vars"].values()
+        assert app_key not in rule["env_vars"].values()
+
+
 class TestConfigureGithubProxy:
     """Tests for _configure_github_proxy payload shape and error handling."""
 
@@ -118,6 +144,30 @@ class TestConfigureGithubProxy:
             assert headers[0]["name"] == "Authorization"
             assert headers[0]["type"] == "opaque"
             assert headers[0]["value"] == f"Basic {expected_basic}"
+
+    async def test_adds_connected_datadog_credentials(self) -> None:
+        credentials = MagicMock(
+            site="us5.datadoghq.com", api_key="api-secret", app_key="app-secret"
+        )
+        with (
+            patch("agent.integrations.langsmith.httpx.AsyncClient") as mock_client_cls,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
+            patch(
+                "agent.dashboard.team_credentials.get_datadog_credentials",
+                AsyncMock(return_value=credentials),
+            ),
+        ):
+            mock_client = MagicMock()
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_client.patch = AsyncMock(return_value=mock_response)
+            _mock_async_client(mock_client_cls, mock_client)
+
+            await _configure_github_proxy("sandbox-abc123", "token")
+
+        rules = mock_client.patch.call_args.kwargs["json"]["proxy_config"]["rules"]
+        assert [rule["name"] for rule in rules] == ["datadog-api", "github-api", "github"]
+        assert rules[0] == _datadog_proxy_rule("us5.datadoghq.com", "api-secret", "app-secret")
 
     async def test_preserves_custom_proxy_config_when_adding_github_auth(self) -> None:
         custom_rule = {"name": "public-api", "match_hosts": ["example.com"]}
