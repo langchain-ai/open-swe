@@ -1867,6 +1867,40 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     assert run_list_calls == 0
 
 
+async def test_list_dashboard_threads_page_returns_projects_beyond_current_page(
+    monkeypatch,
+) -> None:
+    threads = _make_threads(3, resolved_before=1)
+    projects = ["Launch", "Quality", "No project"]
+    for thread, project in zip(threads, projects, strict=True):
+        metadata = cast(dict[str, object], thread["metadata"])
+        metadata.update({"latest_run_status": "success", "board_project": project})
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_api.list_dashboard_threads_page(
+        "octocat", email=None, limit=1, offset=0, resolved=False
+    )
+
+    assert [item["id"] for item in result["items"]] == ["t1"]
+    assert result["projects"] == ["Launch", "No project", "Quality"]
+
+
 async def test_list_dashboard_threads_page_scopes_automation_runs(monkeypatch) -> None:
     threads = _make_threads(3, resolved_before=0)
     for thread in threads:

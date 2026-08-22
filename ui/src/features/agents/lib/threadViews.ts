@@ -70,6 +70,16 @@ const PR_GROUPS = [
   { key: "closed", label: "Closed" },
 ]
 
+const NO_PROJECT_KEY = "project:none"
+
+function projectKey(project?: string | null): string {
+  if (!project) return NO_PROJECT_KEY
+  const bytes = new TextEncoder().encode(project)
+  let binary = ""
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return `project:${btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")}`
+}
+
 function focusKey(thread: AgentThread): string {
   if (thread.resolved) return "done"
   if (thread.status === "running") return "progress"
@@ -141,20 +151,22 @@ export function groupThreadsForView(
     )
   }
   if (grouping === "project") {
-    const labels = new Set(
-      threads.map((thread) => thread.project || "No project")
-    )
-    const definitions = [...labels]
-      .sort((left, right) => {
-        if (left === "No project") return 1
-        if (right === "No project") return -1
-        return left.localeCompare(right)
-      })
-      .map((label) => ({ key: label, label }))
-    return buildGroups(
-      definitions,
-      threads,
-      (thread) => thread.project || "No project"
+    const projects = [
+      ...new Set(
+        threads
+          .map((thread) => thread.project)
+          .filter((project): project is string => Boolean(project))
+      ),
+    ].sort((left, right) => left.localeCompare(right))
+    const definitions = projects.map((project) => ({
+      key: projectKey(project),
+      label: project,
+    }))
+    if (threads.some((thread) => !thread.project)) {
+      definitions.push({ key: NO_PROJECT_KEY, label: "No project" })
+    }
+    return buildGroups(definitions, threads, (thread) =>
+      projectKey(thread.project)
     )
   }
   const labels = new Set(
@@ -170,8 +182,22 @@ export function groupThreadsForView(
   )
 }
 
+export function serializeColumnOrder(order: Array<string>): string {
+  return JSON.stringify(order)
+}
+
 export function parseColumnOrder(value?: string): Array<string> {
-  return value?.split("|").filter(Boolean) ?? []
+  if (!value) return []
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (key): key is string => typeof key === "string" && Boolean(key)
+        )
+      : []
+  } catch {
+    return value.split("|").filter(Boolean)
+  }
 }
 
 export function reconcileColumnOrder(

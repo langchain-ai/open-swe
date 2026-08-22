@@ -1214,7 +1214,34 @@ async def list_dashboard_threads_page(
         )
         has_more = len(candidates) > safe_offset + safe_limit
 
-    return {"items": items, "limit": safe_limit, "offset": safe_offset, "hasMore": has_more}
+    project_candidates = candidates
+    if resolved is not None or source or query or automation_id:
+        project_candidates = await _collect_thread_candidates(
+            client,
+            searches,
+            include_all=include_all,
+            login=search_login,
+            email=search_email,
+            scope=scope,
+            surfaced_only=surfaced_only,
+            sort_by=sort_by,
+        )
+    projects = sorted(
+        {
+            project
+            for thread in project_candidates
+            if (project := _metadata_string(_thread_metadata(thread), "board_project"))
+        },
+        key=str.casefold,
+    )
+
+    return {
+        "items": items,
+        "projects": projects,
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "hasMore": has_more,
+    }
 
 
 async def _mark_thread_viewed(

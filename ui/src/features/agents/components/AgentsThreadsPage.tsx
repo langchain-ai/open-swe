@@ -39,6 +39,7 @@ import {
   moveColumnBefore,
   parseColumnOrder,
   reconcileColumnOrder,
+  serializeColumnOrder,
 } from "@/features/agents/lib/threadViews"
 import { cn, formatRelativeTime } from "@/lib/utils"
 
@@ -148,17 +149,7 @@ export function AgentsThreadsPage({
     () => groupThreadsForView(items, filters.group),
     [filters.group, items]
   )
-  const projects = useMemo(
-    () =>
-      [
-        ...new Set(
-          items
-            .map((thread) => thread.project)
-            .filter((project): project is string => Boolean(project))
-        ),
-      ].sort((left, right) => left.localeCompare(right)),
-    [items]
-  )
+  const projects = data?.projects ?? []
   const defaultKeys = groups.map((group) => group.key)
   const columnOrder = reconcileColumnOrder(
     defaultKeys,
@@ -183,7 +174,7 @@ export function AgentsThreadsPage({
   }
 
   const setColumnOrder = (next: Array<string>) => {
-    const value = next.join("|")
+    const value = serializeColumnOrder(next)
     setPersonalOrder(value)
     if (typeof window !== "undefined") {
       window.localStorage.setItem(

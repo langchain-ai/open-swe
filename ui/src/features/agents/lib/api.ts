@@ -133,6 +133,7 @@ export interface ThreadsPageParams {
 
 export interface ThreadsPage {
   items: Array<AgentThread>
+  projects?: Array<string>
   total?: number
   limit: number
   offset: number
