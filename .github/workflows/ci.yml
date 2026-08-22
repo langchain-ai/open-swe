@@ -160,7 +160,7 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/azure-cli.list /etc/apt/sources.list.d/microsoft-prod.list
           pnpm run test:e2e:install
       - name: Run browser E2E
-        run: pnpm run test:e2e -- --shard=${{ matrix.shard }}/3
+        run: pnpm run test:e2e --shard=${{ matrix.shard }}/3
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7

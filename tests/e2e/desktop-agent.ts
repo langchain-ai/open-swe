@@ -12,14 +12,14 @@ export async function agent(config: GraphConfig = {}) {
   void config
   const model = fakeModel()
     .respondWithTools([
-      { name: "read_file", id: "read", args: { file_path: "/README.md" } },
+      { name: "read_file", id: "read", args: { file_path: "README.md" } },
     ])
     .respondWithTools([
       {
         name: "write_file",
         id: "write",
         args: {
-          file_path: "/greeting.ts",
+          file_path: "greeting.ts",
           content:
             'export function greet(name: string): string {\n  return `Hello, ${name}!`\n}\n',
         },
