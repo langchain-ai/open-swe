@@ -1,4 +1,4 @@
-import { getRequestURL, proxyRequest } from "h3"
+import { createError, getRequestHeader, getRequestURL, proxyRequest } from "h3"
 
 interface LocalGraphConfiguration {
   origin: string
@@ -31,10 +31,41 @@ export function localGraphTarget(requestUrl: URL, origin: string): string {
   return `${origin}${pathname}${requestUrl.search}`
 }
 
+/**
+ * Whether a request may carry the graph's bearer token.
+ *
+ * This route runs on loopback inside the user's browser profile, so any page
+ * they visit can reach it. Without this gate a cross-site request would be
+ * proxied to the graph fully authenticated, which starts agent runs — code
+ * execution on the user's machine.
+ *
+ * A cross-origin `fetch` or form post always carries `Origin`; a same-origin
+ * GET may omit it, so an absent `Origin` is only trusted when `Sec-Fetch-Site`
+ * does not contradict it.
+ */
+export function isSameOriginRequest(
+  requestOrigin: string | undefined,
+  fetchSite: string | undefined,
+  serverOrigin: string
+): boolean {
+  if (fetchSite && !["same-origin", "none"].includes(fetchSite)) return false
+  if (requestOrigin === undefined) return true
+  return requestOrigin === serverOrigin
+}
+
 export default async function localGraphProxy(
   event: Parameters<typeof proxyRequest>[0]
 ) {
   const { origin, token } = localGraphConfiguration()
+  if (
+    !isSameOriginRequest(
+      getRequestHeader(event, "origin"),
+      getRequestHeader(event, "sec-fetch-site"),
+      getRequestURL(event).origin
+    )
+  ) {
+    throw createError({ statusCode: 403, statusMessage: "Forbidden" })
+  }
   return proxyRequest(event, localGraphTarget(getRequestURL(event), origin), {
     headers: {
       authorization: `Bearer ${token}`,
