@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { adaptCodexPayload, requiresResponsesLite } from "./codex-payload.js"
+import { adaptCodexPayload, requiresResponsesLite } from "./payload.js"
 
 describe("requiresResponsesLite", () => {
   it("selects the model families Codex serves over responses-lite", () => {
