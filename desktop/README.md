@@ -70,7 +70,7 @@ pnpm install                  # from the repo root
 make desktop
 ```
 
-`pnpm run dev:desktop` is the equivalent workspace command. Both commands stop the backend when
+`pnpm run desktop:dev:full` is the equivalent workspace command. Both commands stop the backend when
 the desktop app exits, and stop the desktop app if the backend fails.
 
 Source launches use an isolated `Open SWE Development` Electron profile, so the dev app can run

@@ -14,7 +14,7 @@ run:
 	uv run uvicorn agent.webapp:app --reload --port 8000
 
 desktop:
-	pnpm run dev:desktop
+	pnpm run desktop:dev:full
 
 install-desktop:
 	@test -z "$$(git status --porcelain)" || { echo 'Commit or stash repository changes first.' >&2; exit 1; }

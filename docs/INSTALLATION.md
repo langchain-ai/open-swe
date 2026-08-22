@@ -668,7 +668,7 @@ backend to be running:
 
 ```bash
 pnpm install                  # from the repo root
-pnpm run dev:desktop
+pnpm run desktop:dev:full
 ```
 
 Development connects to `http://localhost:2024`. To use a hosted backend instead, run

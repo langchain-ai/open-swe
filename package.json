@@ -7,7 +7,8 @@
   },
   "scripts": {
     "dev": "turbo run dev --filter=open-swe-dashboard",
-    "dev:desktop": "pnpm --dir desktop run dev:full",
+    "desktop:dev": "pnpm --dir desktop run build && pnpm --dir desktop exec electron . --dev",
+    "desktop:dev:full": "pnpm --dir desktop run dev:full",
     "dev:mock": "bash tests/e2e/dev-mock.sh",
     "build": "turbo run build",
     "build:graphs": "turbo run build --filter=@open-swe/graphs",
