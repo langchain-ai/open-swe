@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import {
   Copy,
+  LoaderCircle,
   Plus,
   RefreshCw,
   SquareSplitHorizontal,
@@ -224,6 +225,12 @@ function TerminalViewport({
           >
             <Copy className="size-3" />
           </button>
+        </div>
+      )}
+      {target.kind === "cloud" && state.status === "starting" && (
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 rounded-md border border-border bg-background/95 px-2 py-1 text-xs text-muted-foreground shadow-sm">
+          <LoaderCircle className="size-3 animate-spin" />
+          {state.buffer ? "Reconnecting…" : "Connecting…"}
         </div>
       )}
       {(error || state.error) && (
