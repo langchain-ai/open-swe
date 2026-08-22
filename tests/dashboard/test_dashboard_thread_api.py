@@ -2146,6 +2146,175 @@ async def test_list_dashboard_threads_sidebar_ignores_unreadable_active_thread(
     assert [item["id"] for item in result["active"]["items"]] == ["t0"]
 
 
+async def test_list_dashboard_thread_focus_counts_classifies_and_filters(monkeypatch) -> None:
+    def thread(thread_id: str, status: str, **metadata: object) -> dict[str, object]:
+        return {
+            "thread_id": thread_id,
+            "status": "idle",
+            "metadata": {
+                "source": "dashboard",
+                "github_login": "octocat",
+                "title": thread_id,
+                "updated_at_ms": 1,
+                "latest_run_id": f"run-{thread_id}",
+                "latest_run_status": status,
+                **metadata,
+            },
+        }
+
+    threads = [
+        thread("attention", "success"),
+        thread("error", "error"),
+        thread("interrupted", "interrupted"),
+        thread("plan", "success", plan_status="ready", last_viewed_run_id="run-plan"),
+        thread("progress", "running"),
+        thread("ready", "success", last_viewed_run_id="run-ready"),
+        thread("idle", "missing"),
+        thread("done", "success", resolved=True, last_viewed_run_id="run-done"),
+    ]
+    run_list_thread_ids: list[str] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            run_list_thread_ids.append(thread_id)
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    counts = await thread_api.list_dashboard_thread_focus_counts(
+        "octocat", email=None, include_resolved=True
+    )
+    filtered = await thread_api.list_dashboard_thread_focus_counts(
+        "octocat", email=None, statuses={"finished"}, include_resolved=True
+    )
+
+    assert counts == {"attention": 4, "progress": 1, "ready": 2, "done": 1}
+    assert filtered == {"attention": 2, "progress": 0, "ready": 1, "done": 1}
+    assert run_list_thread_ids == ["progress", "progress"]
+
+
+async def test_list_dashboard_thread_focus_counts_refreshes_unsettled_threads(monkeypatch) -> None:
+    threads = _make_threads(2, resolved_before=0)
+    settled = cast(dict[str, object], threads[0]["metadata"])
+    settled.update({"latest_run_id": "run-settled", "latest_run_status": "success"})
+    pending = cast(dict[str, object], threads[1]["metadata"])
+    pending.update({"latest_run_id": "run-pending", "latest_run_status": "pending"})
+    run_list_thread_ids: list[str] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            run_list_thread_ids.append(thread_id)
+            return [{"id": "run-finished", "status": "success"}]
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    counts = await thread_api.list_dashboard_thread_focus_counts("octocat", email=None)
+
+    assert counts == {"attention": 2, "progress": 0, "ready": 0, "done": 0}
+    assert run_list_thread_ids == ["t1"]
+
+
+async def test_list_dashboard_thread_focus_counts_includes_readable_active_thread(
+    monkeypatch,
+) -> None:
+    active = _make_threads(1, resolved_before=0)[0]
+    active["thread_id"] = "shared"
+    metadata = cast(dict[str, object], active["metadata"])
+    metadata.update(
+        {
+            "github_login": "teammate",
+            "latest_run_id": "run-shared",
+            "latest_run_status": "success",
+        }
+    )
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return []
+
+        async def get(self, thread_id):
+            return active
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            raise AssertionError("settled threads must not refresh runs")
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    counts = await thread_api.list_dashboard_thread_focus_counts(
+        "octocat", email=None, ownership="shared", active_thread_id="shared"
+    )
+
+    assert counts == {"attention": 1, "progress": 0, "ready": 0, "done": 0}
+
+
+async def test_list_dashboard_thread_focus_counts_scans_and_deduplicates(monkeypatch) -> None:
+    page_size = thread_api._THREADS_SEARCH_PAGE
+    threads = _make_threads(page_size + 1, resolved_before=0)
+    for thread in threads:
+        metadata = cast(dict[str, object], thread["metadata"])
+        metadata.update(
+            {
+                "triggering_user_email": "octocat@example.com",
+                "latest_run_id": f"run-{thread['thread_id']}",
+                "latest_run_status": "success",
+            }
+        )
+    offsets: list[int] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            offsets.append(offset)
+            return threads[offset : offset + limit]
+
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            raise AssertionError("settled threads must not refresh runs")
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
+
+    counts = await thread_api.list_dashboard_thread_focus_counts(
+        "octocat", email="octocat@example.com"
+    )
+
+    assert counts == {"attention": page_size + 1, "progress": 0, "ready": 0, "done": 0}
+    assert offsets.count(0) == 2
+    assert offsets.count(page_size) == 2
+
+
 async def test_list_dashboard_threads_page_can_sort_by_creation_time(monkeypatch) -> None:
     threads = _make_threads(2, resolved_before=0)
     older = cast(dict[str, object], threads[0]["metadata"])

@@ -405,6 +405,31 @@ def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("resolved") is True
 
 
+def _thread_focus_key(
+    thread: ThreadLike, *, latest_run_status: str | None = None, latest_run_id: str | None = None
+) -> Literal["attention", "progress", "ready", "done"]:
+    metadata = _thread_metadata(thread)
+    if _is_thread_resolved(metadata):
+        return "done"
+    metadata_run_status = metadata.get("latest_run_status")
+    run_status = latest_run_status or (
+        metadata_run_status if isinstance(metadata_run_status, str) else None
+    )
+    status = _run_status_to_agent_status(
+        thread.get("status") if isinstance(thread.get("status"), str) else "idle",
+        run_status,
+    )
+    if status == "running":
+        return "progress"
+    if (
+        status in {"error", "interrupted"}
+        or metadata.get("plan_status") in {"ready", "shared"}
+        or (status == "finished" and not _is_thread_viewed(metadata, latest_run_id))
+    ):
+        return "attention"
+    return "ready"
+
+
 def _thread_source_url(metadata: Mapping[str, Any]) -> str | None:
     if metadata.get("repo_private") is not True:
         return None
@@ -897,6 +922,7 @@ async def _collect_thread_candidates(
     target_per_search: int | None = None,
     surfaced_only: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
+    scan_cap: int | None = _THREADS_PAGE_SCAN_CAP,
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
     for owner_filter in searches:
@@ -908,7 +934,7 @@ async def _collect_thread_candidates(
             source=source,
             automation_id=automation_id,
         )
-        while offset < _THREADS_PAGE_SCAN_CAP:
+        while scan_cap is None or offset < scan_cap:
             batch = await _search_threads_batch(
                 client,
                 metadata_filter,
@@ -1131,6 +1157,103 @@ async def list_dashboard_threads_sidebar(
             "hasMore": resolved_has_more,
         },
     }
+
+
+async def list_dashboard_thread_focus_counts(
+    login: str,
+    *,
+    email: str | None = None,
+    include_all: bool = False,
+    scope: Literal["all", "interactive", "automation"] = "interactive",
+    ownership: Literal["all", "mine", "shared"] = "all",
+    statuses: set[str] | None = None,
+    sources: set[str] | None = None,
+    pr_states: set[str] | None = None,
+    models: set[str] | None = None,
+    repos: set[str] | None = None,
+    include_resolved: bool = False,
+    active_thread_id: str | None = None,
+) -> dict[str, int]:
+    client = langgraph_client()
+    searches = _owner_search_filters(login, email=email, include_all=include_all)
+    candidates = await _collect_thread_candidates(
+        client,
+        searches,
+        include_all=include_all,
+        login=login,
+        email=email,
+        scope=scope,
+        target_per_search=None,
+        scan_cap=None,
+    )
+    candidates_by_id = {
+        thread_id: thread for thread in candidates if (thread_id := _thread_id(thread)) is not None
+    }
+    if active_thread_id and active_thread_id not in candidates_by_id:
+        try:
+            active_thread = await client.threads.get(active_thread_id)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "Could not fetch active sidebar count thread %s", active_thread_id, exc_info=True
+            )
+        else:
+            if isinstance(active_thread, Mapping):
+                metadata = _thread_metadata(active_thread)
+                if _thread_is_readable(metadata):
+                    candidates_by_id[active_thread_id] = active_thread
+
+    semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
+
+    async def classify(thread: ThreadLike) -> tuple[ThreadLike, str | None, str | None]:
+        if not _should_refresh_latest_run(thread):
+            return thread, None, None
+        async with semaphore:
+            return await _refresh_latest_run_metadata(client, thread)
+
+    filtered_candidates: list[ThreadLike] = []
+    for thread in candidates_by_id.values():
+        metadata = _thread_metadata(thread)
+        is_owner = _user_owns_thread(metadata, login, email)
+        if ownership == "mine" and not is_owner:
+            continue
+        if ownership == "shared" and is_owner:
+            continue
+        if not include_resolved and _is_thread_resolved(metadata):
+            continue
+        if sources and _thread_source(metadata) not in sources:
+            continue
+        model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
+        if models and model not in models:
+            continue
+        if repos and _metadata_repo(metadata)[2] not in repos:
+            continue
+        pr_state = metadata.get("pr_state") if metadata.get("pr_state") in _PR_STATES else "none"
+        if pr_states and pr_state not in pr_states:
+            continue
+        filtered_candidates.append(thread)
+
+    classified = await asyncio.gather(*(classify(thread) for thread in filtered_candidates))
+    counts = {"attention": 0, "progress": 0, "ready": 0, "done": 0}
+    for thread, latest_run_status, latest_run_id in classified:
+        metadata = _thread_metadata(thread)
+        status = _run_status_to_agent_status(
+            thread.get("status") if isinstance(thread.get("status"), str) else "idle",
+            latest_run_status
+            or (
+                metadata.get("latest_run_status")
+                if isinstance(metadata.get("latest_run_status"), str)
+                else None
+            ),
+        )
+        if statuses and status not in statuses:
+            continue
+        focus_key = _thread_focus_key(
+            thread,
+            latest_run_status=latest_run_status,
+            latest_run_id=latest_run_id,
+        )
+        counts[focus_key] += 1
+    return counts
 
 
 async def list_dashboard_threads_page(

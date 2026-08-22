@@ -11,6 +11,7 @@ import { agentsApi } from "./api"
 import type { InfiniteData, QueryClient } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
+  SidebarFocusCountParams,
   SidebarThreads,
   ThreadTurnDiffOptions,
   ThreadsPage,
@@ -36,6 +37,8 @@ export const agentThreadKeys = {
   }) => ["agent-threads", "lists", "sidebar", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
+  sidebarFocusCounts: (params: SidebarFocusCountParams) =>
+    ["agent-threads", "lists", "sidebar-focus-counts", params] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   pullRequestStatus: (threadId: string) =>
     ["agent-threads", threadId, "pull-request-status"] as const,
@@ -294,6 +297,20 @@ export function useSeedAgentThreadDetails(
 }
 
 export const SIDEBAR_PAGE_SIZE = 10
+
+export function useSidebarFocusCounts(
+  params: SidebarFocusCountParams,
+  enabled = true
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.sidebarFocusCounts(params),
+    queryFn: () => agentsApi.listSidebarFocusCounts(params),
+    enabled,
+    refetchInterval: (query) =>
+      (query.state.data?.progress ?? 0) > 0 ? 2000 : false,
+    retry: false,
+  })
+}
 
 function infinitePageThreads(
   data?: InfiniteData<ThreadsPage>
