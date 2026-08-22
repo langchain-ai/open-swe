@@ -103,6 +103,14 @@ window.addEventListener("DOMContentLoaded", () => {
       -webkit-app-region: no-drag;
     }
 
+    [data-desktop-drag-region] {
+      -webkit-app-region: drag;
+    }
+
+    [data-desktop-drag-region] :is(a, button, input, textarea, select, [role="button"]) {
+      -webkit-app-region: no-drag;
+    }
+
     [data-sidebar-expand] {
       -webkit-app-region: no-drag;
       left: 90px !important;
