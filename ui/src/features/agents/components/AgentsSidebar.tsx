@@ -47,6 +47,7 @@ import {
   filterThreads,
   groupThreadsByMode,
   hasActiveFilters,
+  reconcilePinnedAttentionThread,
 } from "@/features/agents/lib/sidebarFilter"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
@@ -224,15 +225,17 @@ export function AgentsSidebar({
   const activeAttentionThread = naturalSections
     .find((section) => section.key === "attention")
     ?.threads.find((thread) => thread.id === activeThreadId)
-  const [previousActiveThreadId, setPreviousActiveThreadId] =
-    useState(activeThreadId)
-  const [pinnedAttentionThread, setPinnedAttentionThread] = useState(
-    activeAttentionThread
-  )
-  if (activeThreadId !== previousActiveThreadId) {
-    setPreviousActiveThreadId(activeThreadId)
-    setPinnedAttentionThread(activeAttentionThread)
-  }
+  const [pinnedAttentionThread, setPinnedAttentionThread] =
+    useState<AgentThread>()
+  useEffect(() => {
+    setPinnedAttentionThread((current) =>
+      reconcilePinnedAttentionThread(
+        current,
+        activeThreadId,
+        activeAttentionThread
+      )
+    )
+  }, [activeAttentionThread, activeThreadId])
   const sections = pinnedAttentionThread
     ? groupThreadsByMode(groupedThreads, prefs.group, pinnedAttentionThread)
     : naturalSections
