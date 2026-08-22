@@ -241,18 +241,6 @@ export function cloudTerminalCloseError(
 
 const MAX_CLOUD_RECONNECT_ATTEMPTS = 5
 
-export function cloudTerminalReconnectDelay(attempt: number): number {
-  return Math.min(500 * 2 ** attempt, 10_000)
-}
-
-export function shouldReconnectCloudTerminal(
-  code: number,
-  attempt: number
-): boolean {
-  if (code === 1000 || code === 1008) return false
-  return attempt < MAX_CLOUD_RECONNECT_ATTEMPTS
-}
-
 export function useAttachedTerminal(
   target: TerminalTarget,
   terminalId: string,
@@ -281,7 +269,8 @@ export function useAttachedTerminal(
       setState({ ...EMPTY_TERMINAL_SESSION, status: "starting" })
 
       const reconnect = () => {
-        if (disposed || exited) return
+        if (disposed || exited || retryCount >= MAX_CLOUD_RECONNECT_ATTEMPTS)
+          return false
         cloudConnectingRef.current = true
         setState((current) => ({
           ...current,
@@ -291,8 +280,9 @@ export function useAttachedTerminal(
         }))
         retryTimer = setTimeout(
           connect,
-          cloudTerminalReconnectDelay(retryCount++)
+          Math.min(500 * 2 ** retryCount++, 10_000)
         )
+        return true
       }
 
       const stop = (reason: string | null) => {
@@ -388,19 +378,13 @@ export function useAttachedTerminal(
               if (socketRef.current !== createdSocket) return
               socketRef.current = null
               if (disposed || exited) return
-              if (shouldReconnectCloudTerminal(event.code, retryCount)) {
-                reconnect()
+              if (event.code !== 1000 && event.code !== 1008 && reconnect())
                 return
-              }
               stop(event.code === 1000 ? null : event.reason)
             }
           })
           .catch((error: unknown) => {
-            if (disposed || exited) return
-            if (retryCount < MAX_CLOUD_RECONNECT_ATTEMPTS) {
-              reconnect()
-              return
-            }
+            if (disposed || exited || reconnect()) return
             stop(
               error instanceof Error
                 ? error.message

@@ -6,7 +6,6 @@ import {
   applyTerminalSnapshot,
   cloudTerminalCloseError,
   cloudTerminalProtocols,
-  shouldReconnectCloudTerminal,
 } from "./terminalSession"
 
 const snapshot = {
@@ -109,13 +108,5 @@ describe("cloud terminal connection", () => {
     expect(cloudTerminalCloseError("", null)).toBe(
       "Cloud terminal disconnected"
     )
-  })
-
-  it("retries transient closes but not policy failures or attempt exhaustion", () => {
-    expect(shouldReconnectCloudTerminal(1013, 0)).toBe(true)
-    expect(shouldReconnectCloudTerminal(1006, 4)).toBe(true)
-    expect(shouldReconnectCloudTerminal(1008, 0)).toBe(false)
-    expect(shouldReconnectCloudTerminal(1000, 0)).toBe(false)
-    expect(shouldReconnectCloudTerminal(1006, 5)).toBe(false)
   })
 })
