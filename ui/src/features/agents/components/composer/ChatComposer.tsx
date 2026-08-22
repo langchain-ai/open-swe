@@ -298,6 +298,23 @@ export const ChatComposer = memo(function ChatComposer({
   useRegisterAppCommands(composerShortcuts)
 
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null)
+  const valueRef = useRef(value)
+  const pendingImagesRef = useRef(pendingImages)
+  valueRef.current = value
+  pendingImagesRef.current = pendingImages
+  const updatePendingImages = useCallback(
+    (
+      update:
+        Array<ImageChunk> | ((current: Array<ImageChunk>) => Array<ImageChunk>)
+    ) => {
+      setPendingImages((current) => {
+        const next = typeof update === "function" ? update(current) : update
+        pendingImagesRef.current = next
+        return next
+      })
+    },
+    []
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
   const recorderRef = useRef<MediaRecorder | null>(null)
@@ -359,6 +376,7 @@ export const ChatComposer = memo(function ChatComposer({
     (value.trim().length > 0 || pendingImages.length > 0)
 
   const applyPrompt = useCallback((nextValue: string, nextCursor: number) => {
+    valueRef.current = nextValue
     setValue(nextValue)
     setCursor(nextCursor)
     setDismissedTriggerKey(null)
@@ -449,17 +467,27 @@ export const ChatComposer = memo(function ChatComposer({
     submittingRef.current = true
     setIsSubmitting(true)
     applyPrompt("", 0)
-    setPendingImages([])
+    updatePendingImages([])
     setDictationError(null)
     try {
       await onSubmit?.(trimmed, images)
     } catch {
-      // Caller surfaces send errors (e.g. via react-query mutation state).
+      if (!valueRef.current && pendingImagesRef.current.length === 0) {
+        applyPrompt(trimmed, trimmed.length)
+        updatePendingImages(images)
+      }
     } finally {
       submittingRef.current = false
       setIsSubmitting(false)
     }
-  }, [applyPrompt, disabled, onSubmit, pendingImages, value])
+  }, [
+    applyPrompt,
+    disabled,
+    onSubmit,
+    pendingImages,
+    updatePendingImages,
+    value,
+  ])
 
   const selectCommandItem = useCallback(
     (item: ComposerCommandItem) => {
@@ -546,18 +574,21 @@ export const ChatComposer = memo(function ChatComposer({
     ]
   )
 
-  const addFiles = useCallback(async (files: FileList | Array<File>) => {
-    const nextImages = await Promise.all(
-      Array.from(files).map(fileToImageChunk)
-    )
-    const validImages = nextImages.filter(
-      (image): image is ImageChunk => image !== null
-    )
-    if (validImages.length === 0) return
-    setPendingImages((prev) =>
-      [...prev, ...validImages].slice(0, MAX_IMAGE_COUNT)
-    )
-  }, [])
+  const addFiles = useCallback(
+    async (files: FileList | Array<File>) => {
+      const nextImages = await Promise.all(
+        Array.from(files).map(fileToImageChunk)
+      )
+      const validImages = nextImages.filter(
+        (image): image is ImageChunk => image !== null
+      )
+      if (validImages.length === 0) return
+      updatePendingImages((prev) =>
+        [...prev, ...validImages].slice(0, MAX_IMAGE_COUNT)
+      )
+    },
+    [updatePendingImages]
+  )
 
   const handleFileChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -778,7 +809,7 @@ export const ChatComposer = memo(function ChatComposer({
                   aria-label="Remove image"
                   className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 hover:text-foreground"
                   onClick={() =>
-                    setPendingImages((prev) =>
+                    updatePendingImages((prev) =>
                       prev.filter((_, i) => i !== index)
                     )
                   }
@@ -797,6 +828,7 @@ export const ChatComposer = memo(function ChatComposer({
           disabled={disabled}
           editorRef={editorRef}
           onChange={(nextValue, nextCursor) => {
+            valueRef.current = nextValue
             setValue(nextValue)
             setCursor(nextCursor)
           }}

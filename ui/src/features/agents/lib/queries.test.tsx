@@ -7,16 +7,24 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { agentsApi } from "./api"
 import {
   SIDEBAR_PAGE_SIZE,
+  agentScheduleKeys,
   agentThreadKeys,
   setAgentThreadStatus,
   useAgentThreadWorkingTreeDiff,
+  useDeleteAgentThread,
   useResolveAgentThread,
   useSidebarThreads,
   useThreadsPage,
+  useUpdateAgentSchedule,
+  useWorkflowApprovalDecision,
 } from "./queries"
 import type { InfiniteData } from "@tanstack/react-query"
 import type { ThreadTurnDiff, ThreadsPage, ThreadsPageParams } from "./api"
-import type { AgentThread } from "./types"
+import type {
+  AgentSchedule,
+  AgentThread,
+  WorkflowPushApprovalsResponse,
+} from "./types"
 
 const params: ThreadsPageParams = {
   limit: 100,
@@ -520,5 +528,141 @@ describe("useSidebarThreads", () => {
     expect(
       client.getQueryData<AgentThread>(agentThreadKeys.detail(unrelated.id))
     ).toMatchObject({ title: "After" })
+  })
+})
+
+describe("optimistic cloud mutations", () => {
+  it("removes a thread immediately and restores it when deletion fails", async () => {
+    const thread = { id: "thread-1", status: "idle" } as AgentThread
+    const key = agentThreadKeys.page({ resolved: false })
+    let failDelete: ((error: Error) => void) | undefined
+    vi.spyOn(agentsApi, "deleteThread").mockReturnValue(
+      new Promise<void>((_resolve, reject) => {
+        failDelete = reject
+      })
+    )
+    const client = testClient()
+    client.setQueryData(key, { ...page, items: [thread] })
+    client.setQueryData(agentThreadKeys.detail(thread.id), thread)
+    let mutation: ReturnType<typeof useDeleteAgentThread> | undefined
+
+    function Probe() {
+      mutation = useDeleteAgentThread()
+      return null
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <Probe />
+      </QueryClientProvider>
+    )
+    act(() => mutation?.mutate(thread.id))
+    await waitFor(() =>
+      expect(client.getQueryData<ThreadsPage>(key)?.items).toEqual([])
+    )
+    act(() => failDelete?.(new Error("request failed")))
+    await waitFor(() =>
+      expect(client.getQueryData<ThreadsPage>(key)?.items).toEqual([thread])
+    )
+  })
+
+  it("updates workflow decisions immediately and rolls them back", async () => {
+    const key = agentThreadKeys.workflowApprovals("thread-1")
+    const approvals: WorkflowPushApprovalsResponse = {
+      threadId: "thread-1",
+      isOwner: true,
+      approvals: [
+        {
+          fingerprint: "abc",
+          status: "pending",
+          repo: "langchain-ai/open-swe",
+          branch: "main",
+          baseSha: "a",
+          headSha: "b",
+          files: [],
+          diffStats: { files: 0, additions: 0, deletions: 0 },
+          diffPreview: "",
+          diffPreviewTruncated: false,
+          approvalUrl: null,
+          requestedAt: null,
+          decidedAt: null,
+          decidedBy: null,
+        },
+      ],
+    }
+    let failDecision: ((error: Error) => void) | undefined
+    vi.spyOn(agentsApi, "approveWorkflowPush").mockReturnValue(
+      new Promise((_resolve, reject) => {
+        failDecision = reject
+      })
+    )
+    const client = testClient()
+    client.setQueryData(key, approvals)
+    let mutation: ReturnType<typeof useWorkflowApprovalDecision> | undefined
+
+    function Probe() {
+      mutation = useWorkflowApprovalDecision("thread-1")
+      return null
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <Probe />
+      </QueryClientProvider>
+    )
+    act(() => mutation?.mutate({ fingerprint: "abc", decision: "approve" }))
+    await waitFor(() =>
+      expect(
+        client.getQueryData<WorkflowPushApprovalsResponse>(key)?.approvals[0]
+          ?.status
+      ).toBe("approved")
+    )
+    act(() => failDecision?.(new Error("request failed")))
+    await waitFor(() =>
+      expect(
+        client.getQueryData<WorkflowPushApprovalsResponse>(key)?.approvals[0]
+          ?.status
+      ).toBe("pending")
+    )
+  })
+
+  it("toggles an automation immediately and rolls it back", async () => {
+    const schedule = { id: "schedule-1", enabled: true } as AgentSchedule
+    let failUpdate: ((error: Error) => void) | undefined
+    vi.spyOn(agentsApi, "updateSchedule").mockReturnValue(
+      new Promise<AgentSchedule>((_resolve, reject) => {
+        failUpdate = reject
+      })
+    )
+    const client = testClient()
+    client.setQueryData(agentScheduleKeys.all, [schedule])
+    let mutation: ReturnType<typeof useUpdateAgentSchedule> | undefined
+
+    function Probe() {
+      mutation = useUpdateAgentSchedule()
+      return null
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <Probe />
+      </QueryClientProvider>
+    )
+    act(() =>
+      mutation?.mutate({ scheduleId: schedule.id, body: { enabled: false } })
+    )
+    await waitFor(() =>
+      expect(
+        client.getQueryData<Array<AgentSchedule>>(agentScheduleKeys.all)?.[0]
+          ?.enabled
+      ).toBe(false)
+    )
+    act(() => failUpdate?.(new Error("request failed")))
+    await waitFor(() =>
+      expect(
+        client.getQueryData<Array<AgentSchedule>>(agentScheduleKeys.all)?.[0]
+          ?.enabled
+      ).toBe(true)
+    )
   })
 })

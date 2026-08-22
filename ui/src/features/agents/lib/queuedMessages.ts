@@ -7,6 +7,10 @@ function messageText(message: Message): string {
     .trim()
 }
 
+function messageImageCount(message: Message): number {
+  return message.chunks.filter((chunk) => chunk.kind === "image").length
+}
+
 export function visibleQueuedMessages(
   queuedMessages: Array<QueuedThreadMessage> | undefined,
   messages: Array<Message>
@@ -18,16 +22,23 @@ export function visibleQueuedMessages(
     .filter((message) => message.author === "user")
     .map((message) => ({
       text: messageText(message),
+      imageCount: messageImageCount(message),
       timestamp: Date.parse(message.timestamp),
       consumed: false,
     }))
 
   return queued.filter((queuedMessage) => {
     const queuedText = queuedMessage.content.trim()
-    if (!queuedText) return true
+    const queuedImageCount = queuedMessage.images?.length ?? 0
 
     const match = userMessages.find((message) => {
-      if (message.consumed || !message.text.includes(queuedText)) return false
+      if (
+        message.consumed ||
+        message.text !== queuedText ||
+        message.imageCount !== queuedImageCount
+      ) {
+        return false
+      }
       if (!Number.isFinite(message.timestamp)) return true
       return message.timestamp >= queuedMessage.createdAt - 1000
     })

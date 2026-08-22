@@ -40,9 +40,11 @@ function QueuedMessages({
           >
             <div className="mb-1 flex items-center gap-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
               <span>
-                {queuedMessages.length > 1
-                  ? `Queued next #${index + 1}`
-                  : "Queued next"}
+                {message.status === "sending"
+                  ? "Sending"
+                  : queuedMessages.length > 1
+                    ? `Queued next #${index + 1}`
+                    : "Queued next"}
               </span>
               <span className="size-1.5 animate-status-pulse rounded-full bg-foreground/60" />
             </div>

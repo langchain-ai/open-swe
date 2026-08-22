@@ -31,7 +31,6 @@ import {
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
-import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
@@ -97,13 +96,13 @@ export function AgentThreadView({
   )
   const submitMessage = useCallback(
     async (content: string, images: Array<ImageChunk>) => {
-      if (planFeedbackPending) await rejectPlan(thread.id, false)
       await sendMessage.mutateAsync({
         content,
         images,
         model_id: activeSelection?.modelId ?? null,
         effort: activeSelection?.effort ?? null,
         plan_mode: activePlanMode,
+        reject_plan: planFeedbackPending,
       })
       setPlanFeedbackPending(false)
     },

@@ -8,13 +8,9 @@ import {
   agentThreadKeys,
   setAgentThreadStatus,
 } from "@/features/agents/lib/queries"
+import { PlanApiError, rejectPlan } from "@/lib/plan"
+import { onAgentRunCreated } from "@/features/agents/lib/provider/runAcceptance"
 
-/**
- * Construct the message content for the LangGraph run.
- *
- * @param vars - The variables for the message.
- * @returns The message content.
- */
 function messageContent(vars: SendAgentMessageVariables) {
   const text = vars.content.trim()
   const imageBlocks =
@@ -42,8 +38,22 @@ function appendQueuedMessage(
         content: vars.content.trim(),
         images: vars.images,
         createdAt,
+        status: "sending",
       },
     ],
+  }
+}
+
+function updateQueuedMessage(
+  thread: AgentThread,
+  id: string,
+  status: "sending" | "queued"
+): AgentThread {
+  return {
+    ...thread,
+    queuedMessages: thread.queuedMessages?.map((message) =>
+      message.id === id ? { ...message, status } : message
+    ),
   }
 }
 
@@ -56,71 +66,54 @@ function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
   }
 }
 
-/**
- * User-initiated sends from the prompt bar. Prefer this over calling `stream.submit`
- * directly so cache updates and the busy-thread queue path stay consistent.
- *
- * When the thread is idle, submits a new run via the stream commands endpoint.
- * When a run is already in flight (`stream.isLoading`), posts to the dashboard
- * `/messages` endpoint instead of using LangGraph `multitaskStrategy: "enqueue"`.
- * That endpoint writes to the thread store; `check_message_queue_before_model`
- * injects the message into the *current* run before the next model call — the
- * same mid-run follow-up path used by Slack, Linear, and GitHub webhooks.
- *
- * @param threadId - The ID of the thread to submit the message to.
- * @returns The mutation object.
- */
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
   const stream = useAgentThreadStream()
 
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {
-      // `optimistic` is only safe when a run is known to be in flight. Idle
-      // sends still probe `/messages` first (a run may have started elsewhere),
-      // and that probe answers 409 — showing the bubble up front would flash a
-      // "Queued next" card for the length of the round trip.
-      const queue = async (optimistic: boolean) => {
-        const queuedAt = Date.now()
-        const queuedId = `queued-${queuedAt}-${Math.random().toString(36).slice(2)}`
-        const showQueued = () =>
-          queryClient.setQueryData<AgentThread>(
-            agentThreadKeys.detail(threadId),
-            (prev) =>
-              prev ? appendQueuedMessage(prev, vars, queuedId, queuedAt) : prev
-          )
-        if (optimistic) showQueued()
-        try {
-          await agentsApi.queueMessage(threadId, {
-            content: vars.content,
-            images: vars.images,
-            model_id: vars.model_id,
-            effort: vars.effort,
-            plan_mode: vars.plan_mode,
-          })
-        } catch (error) {
-          if (optimistic) {
-            queryClient.setQueryData<AgentThread>(
-              agentThreadKeys.detail(threadId),
-              (prev) => (prev ? removeQueuedMessage(prev, queuedId) : prev)
-            )
-          }
-          throw error
-        }
-        if (!optimistic) showQueued()
-      }
-
-      if (stream.isLoading) {
-        await queue(true)
-        return
-      }
+      const queuedAt = Date.now()
+      const queuedId = `queued-${queuedAt}-${Math.random().toString(36).slice(2)}`
+      const removeOptimisticMessage = () =>
+        queryClient.setQueryData<AgentThread>(
+          agentThreadKeys.detail(threadId),
+          (prev) => (prev ? removeQueuedMessage(prev, queuedId) : prev)
+        )
+      queryClient.setQueryData<AgentThread>(
+        agentThreadKeys.detail(threadId),
+        (prev) =>
+          prev ? appendQueuedMessage(prev, vars, queuedId, queuedAt) : prev
+      )
 
       try {
-        await queue(false)
+        await agentsApi.queueMessage(threadId, {
+          content: vars.content,
+          images: vars.images,
+          model_id: vars.model_id,
+          effort: vars.effort,
+          plan_mode: vars.plan_mode,
+        })
+        queryClient.setQueryData<AgentThread>(
+          agentThreadKeys.detail(threadId),
+          (prev) =>
+            prev ? updateQueuedMessage(prev, queuedId, "queued") : prev
+        )
         return
       } catch (error) {
         if (!(error instanceof AgentsApiError) || error.status !== 409) {
+          removeOptimisticMessage()
           throw error
+        }
+      }
+
+      if (vars.reject_plan) {
+        try {
+          await rejectPlan(threadId, false)
+        } catch (error) {
+          if (!(error instanceof PlanApiError) || error.status !== 409) {
+            removeOptimisticMessage()
+            throw error
+          }
         }
       }
 
@@ -129,31 +122,39 @@ export function useSubmitAgentMessage(threadId: string) {
         configurable.agent_model_id = vars.model_id
         configurable.agent_effort = vars.effort
       }
-      if (vars.plan_mode) {
-        configurable.plan_mode = true
-      }
+      if (vars.plan_mode) configurable.plan_mode = true
       const config =
         Object.keys(configurable).length > 0 ? { configurable } : undefined
 
-      // Don't await: `stream.submit` resolves only when the run *finishes*, so
-      // awaiting would keep the mutation `isPending` (and the prompt bar
-      // disabled) for the entire run, blocking the user from queueing a
-      // follow-up while it streams.
-      void stream
-        .submit(
-          { messages: [{ type: "human", content: messageContent(vars) }] },
-          { config }
-        )
-        .catch(() => {
-          // The run failed to start (e.g. expired OAuth token → 401, or a
-          // 409 active-run race), but `onSuccess` already optimistically set
-          // `status: "running"`. Surface the failure and clear the busy state
-          // instead of leaving the thread falsely running.
-          setAgentThreadStatus(queryClient, threadId, "error")
+      const accepted = new Promise<void>((resolve, reject) => {
+        const unsubscribe = onAgentRunCreated(threadId, () => {
+          unsubscribe()
+          resolve()
         })
+        void stream
+          .submit(
+            { messages: [{ type: "human", content: messageContent(vars) }] },
+            {
+              config,
+              onError: (error) => {
+                unsubscribe()
+                reject(error)
+              },
+            }
+          )
+          .catch((error) => {
+            unsubscribe()
+            reject(error)
+          })
+      })
+      try {
+        await accepted
+      } catch (error) {
+        removeOptimisticMessage()
+        setAgentThreadStatus(queryClient, threadId, "error")
+        throw error
+      }
     },
-    onSuccess: () => {
-      setAgentThreadStatus(queryClient, threadId, "running")
-    },
+    onSuccess: () => setAgentThreadStatus(queryClient, threadId, "running"),
   })
 }

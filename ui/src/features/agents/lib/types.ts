@@ -212,6 +212,7 @@ export interface QueuedThreadMessage {
   content: string
   images?: Array<ImageChunk>
   createdAt: number
+  status?: "sending" | "queued"
 }
 
 export type WorkflowApprovalStatus = "pending" | "approved" | "rejected"

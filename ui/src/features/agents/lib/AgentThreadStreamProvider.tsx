@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query"
 
 import { agentsApi } from "./api"
 import { agentThreadKeys, invalidateAgentThreadLists } from "./queries"
+import { notifyAgentRunCreated } from "./provider/runAcceptance"
 import type { ReactNode } from "react"
 
 const AGENT_ASSISTANT_ID = "agent"
@@ -79,7 +80,11 @@ export function AgentThreadStreamProvider({
   threadIdRef.current = threadId
 
   const onCreated = useCallback(() => {
-    if (transport === "cloud") invalidateAgentThreadLists(queryClient)
+    if (transport === "cloud") {
+      const id = threadIdRef.current
+      if (id) notifyAgentRunCreated(id)
+      invalidateAgentThreadLists(queryClient)
+    }
   }, [queryClient, transport])
 
   const onCompleted = useCallback(() => {

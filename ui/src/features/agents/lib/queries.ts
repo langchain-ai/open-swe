@@ -17,11 +17,13 @@ import type {
   ThreadsPageParams,
 } from "./api"
 import type {
+  AgentSchedule,
   AgentStatus,
   AgentThread,
   Chunk,
   ImageChunk,
   Message,
+  WorkflowPushApprovalsResponse,
 } from "./types"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
@@ -157,6 +159,103 @@ function restoreAgentThreadQueries(
     if (existed) queryClient.setQueryData(key, data)
     else queryClient.removeQueries({ queryKey: key, exact: true })
   }
+}
+
+function restoreDeletedThreadInPage(
+  current: ThreadsPage | undefined,
+  previous: ThreadsPage,
+  threadId: string
+): ThreadsPage | undefined {
+  if (!current || current.items.some((thread) => thread.id === threadId)) {
+    return current
+  }
+  const index = previous.items.findIndex((thread) => thread.id === threadId)
+  if (index < 0) return current
+  const restored = previous.items[index]
+  if (!restored) return current
+  const items = [...current.items]
+  items.splice(Math.min(index, items.length), 0, restored)
+  return {
+    ...current,
+    items,
+    ...(current.total != null ? { total: current.total + 1 } : {}),
+  }
+}
+
+function restoreDeletedAgentThread(
+  queryClient: QueryClient,
+  snapshots: Array<AgentThreadQuerySnapshot>,
+  threadId: string
+): void {
+  for (const [key, data, existed] of snapshots) {
+    if (!existed) continue
+    if (key[2] === "infinite-pages") {
+      const previous = data as InfiniteData<ThreadsPage>
+      queryClient.setQueryData<InfiniteData<ThreadsPage>>(key, (current) =>
+        current
+          ? {
+              ...current,
+              pages: current.pages.map((page, index) => {
+                const previousPage = previous.pages[index]
+                return previousPage
+                  ? (restoreDeletedThreadInPage(page, previousPage, threadId) ??
+                      page)
+                  : page
+              }),
+            }
+          : previous
+      )
+    } else if (key[2] === "page") {
+      const previous = data as ThreadsPage
+      queryClient.setQueryData<ThreadsPage>(key, (current) =>
+        restoreDeletedThreadInPage(current, previous, threadId)
+      )
+    } else if (queryClient.getQueryData(key) === undefined) {
+      queryClient.setQueryData(key, data)
+    }
+  }
+}
+
+function removeAgentThreadFromLists(
+  queryClient: QueryClient,
+  threadId: string
+): void {
+  queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
+    { queryKey: ["agent-threads", "lists", "infinite-pages"] },
+    (current) =>
+      current && {
+        ...current,
+        pages: current.pages.map((page) => {
+          const containsThread = page.items.some(
+            (thread) => thread.id === threadId
+          )
+          return {
+            ...page,
+            items: page.items.filter((thread) => thread.id !== threadId),
+            ...(containsThread && page.total != null
+              ? { total: Math.max(0, page.total - 1) }
+              : {}),
+          }
+        }),
+      }
+  )
+  queryClient.setQueriesData<ThreadsPage>(
+    { queryKey: ["agent-threads", "lists", "page"] },
+    (current) => {
+      const containsThread = current?.items.some(
+        (thread) => thread.id === threadId
+      )
+      return (
+        current && {
+          ...current,
+          items: current.items.filter((thread) => thread.id !== threadId),
+          ...(containsThread && current.total != null
+            ? { total: Math.max(0, current.total - 1) }
+            : {}),
+        }
+      )
+    }
+  )
 }
 
 function setAgentThreadResolved(
@@ -622,7 +721,36 @@ export function useWorkflowApprovalDecision(threadId: string) {
       vars.decision === "approve"
         ? agentsApi.approveWorkflowPush(threadId, vars.fingerprint)
         : agentsApi.rejectWorkflowPush(threadId, vars.fingerprint),
-    onSuccess: () => {
+    onMutate: async (vars) => {
+      const queryKey = agentThreadKeys.workflowApprovals(threadId)
+      await queryClient.cancelQueries({ queryKey })
+      const previous =
+        queryClient.getQueryData<WorkflowPushApprovalsResponse>(queryKey)
+      queryClient.setQueryData<WorkflowPushApprovalsResponse>(
+        queryKey,
+        (current) =>
+          current && {
+            ...current,
+            approvals: current.approvals.map((approval) =>
+              approval.fingerprint === vars.fingerprint
+                ? {
+                    ...approval,
+                    status:
+                      vars.decision === "approve" ? "approved" : "rejected",
+                  }
+                : approval
+            ),
+          }
+      )
+      return { previous }
+    },
+    onError: (_error, _vars, context) => {
+      queryClient.setQueryData(
+        agentThreadKeys.workflowApprovals(threadId),
+        context?.previous
+      )
+    },
+    onSettled: () => {
       void queryClient.invalidateQueries({
         queryKey: agentThreadKeys.workflowApprovals(threadId),
       })
@@ -658,8 +786,46 @@ export function useUpdateAgentSchedule() {
   return useMutation({
     mutationFn: (vars: { scheduleId: string; body: ScheduleUpdateRequest }) =>
       agentsApi.updateSchedule(vars.scheduleId, vars.body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+    onMutate: async (vars) => {
+      await queryClient.cancelQueries({ queryKey: agentScheduleKeys.all })
+      const previous = queryClient.getQueryData<Array<AgentSchedule>>(
+        agentScheduleKeys.all
+      )
+      if (vars.body.enabled != null) {
+        queryClient.setQueryData<Array<AgentSchedule>>(
+          agentScheduleKeys.all,
+          (current) =>
+            current?.map((schedule) =>
+              schedule.id === vars.scheduleId
+                ? { ...schedule, enabled: vars.body.enabled! }
+                : schedule
+            )
+        )
+      }
+      return { previous }
+    },
+    onError: (_error, vars, context) => {
+      const previous = context?.previous?.find(
+        (schedule) => schedule.id === vars.scheduleId
+      )
+      if (!previous) return
+      queryClient.setQueryData<Array<AgentSchedule>>(
+        agentScheduleKeys.all,
+        (current) =>
+          current?.map((schedule) =>
+            schedule.id === vars.scheduleId ? previous : schedule
+          )
+      )
+    },
+    onSuccess: (schedule) => {
+      queryClient.setQueryData<Array<AgentSchedule>>(
+        agentScheduleKeys.all,
+        (current) =>
+          current?.map((item) => (item.id === schedule.id ? schedule : item))
+      )
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
     },
   })
 }
@@ -748,6 +914,7 @@ export interface SendAgentMessageVariables {
   model_id?: string | null
   effort?: string | null
   plan_mode?: boolean
+  reject_plan?: boolean
 }
 
 export function useCancelAgentThread(threadId: string) {
@@ -780,14 +947,41 @@ export function useDeleteAgentThread() {
 
   return useMutation({
     mutationFn: (threadId: string) => agentsApi.deleteThread(threadId),
-    onSuccess: (_, threadId) => {
-      queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
-      invalidateAgentThreadLists(queryClient)
-      const path = window.location.pathname
-      if (path.includes(`/agents/${threadId}`)) {
-        navigate({ to: "/agents" })
+    onMutate: async (threadId) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: agentThreadKeys.lists }),
+        queryClient.cancelQueries({
+          queryKey: agentThreadKeys.detail(threadId),
+          exact: true,
+        }),
+        queryClient.cancelQueries({
+          queryKey: agentThreadKeys.sidebarActive(threadId),
+          exact: true,
+        }),
+      ])
+      const previous = snapshotAgentThreadQueries(queryClient, threadId)
+      removeAgentThreadFromLists(queryClient, threadId)
+      queryClient.removeQueries({
+        queryKey: agentThreadKeys.sidebarActive(threadId),
+        exact: true,
+      })
+      return { previous }
+    },
+    onError: (_error, threadId, context) => {
+      if (context) {
+        restoreDeletedAgentThread(queryClient, context.previous, threadId)
       }
     },
+    onSuccess: (_, threadId) => {
+      queryClient.removeQueries({
+        queryKey: agentThreadKeys.detail(threadId),
+        exact: true,
+      })
+      if (window.location.pathname.includes(`/agents/${threadId}`)) {
+        void navigate({ to: "/agents" })
+      }
+    },
+    onSettled: () => invalidateAgentThreadLists(queryClient),
   })
 }
 
