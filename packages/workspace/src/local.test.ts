@@ -92,8 +92,35 @@ describe("createLocalWorkspace", () => {
       },
     } as never)
 
-    expect(await backend.read("/marker.txt")).toMatchObject({
+    expect(await backend.read(path.join(project, "marker.txt"))).toMatchObject({
       content: "selected\n",
+    })
+    expect(await backend.read("marker.txt")).toMatchObject({
+      content: "selected\n",
+    })
+  })
+
+  it("reads skill directories outside the selected project", async () => {
+    const root = temporaryDirectory()
+    const project = path.join(root, "project")
+    const outside = path.join(root, "skills", "demo")
+    fs.mkdirSync(project)
+    fs.mkdirSync(outside, { recursive: true })
+    fs.writeFileSync(path.join(outside, "SKILL.md"), "instructions\n")
+    const allowlist = path.join(root, "projects.json")
+    fs.writeFileSync(allowlist, JSON.stringify([project]))
+
+    const backend = await createLocalWorkspace(
+      { localProjectPath: project, threadId: "thread" },
+      {
+        OPEN_SWE_LOCAL_PROJECTS_FILE: allowlist,
+        OPEN_SWE_LOCAL_ARTIFACTS_DIR: path.join(root, "artifacts"),
+        PATH: process.env.PATH,
+      }
+    )
+
+    expect(await backend.read(path.join(outside, "SKILL.md"))).toMatchObject({
+      content: "instructions\n",
     })
   })
 

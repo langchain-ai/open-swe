@@ -60,13 +60,20 @@ describe("coding agent", () => {
     )
     const model = fakeModel()
       .respondWithTools([
-        { name: "read_file", id: "read", args: { file_path: "/message.txt" } },
+        {
+          name: "read_file",
+          id: "read",
+          args: { file_path: path.join(project, "message.txt") },
+        },
       ])
       .respondWithTools([
         {
           name: "write_file",
           id: "write",
-          args: { file_path: "/message.txt", content: "after\n" },
+          args: {
+            file_path: path.join(project, "message.txt"),
+            content: "after\n",
+          },
         },
       ])
       .respondWithTools([

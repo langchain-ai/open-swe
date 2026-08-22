@@ -116,9 +116,12 @@ export async function createLocalWorkspace(
   environment: Environment = process.env
 ): Promise<CompositeBackend> {
   const project = resolveLocalProject(configurable, environment)
+  // Real host paths, not a virtual root: the agent reads skills, configs, and
+  // tooling that live outside the project, and shell commands never saw the
+  // virtual root anyway.
   const shell = await LocalShellBackend.create({
     rootDir: project,
-    virtualMode: true,
+    virtualMode: false,
     env: sanitizeShellEnvironment(environment),
     inheritEnv: false,
   })
