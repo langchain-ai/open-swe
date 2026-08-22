@@ -8,7 +8,7 @@ import os
 import posixpath
 import shlex
 from time import perf_counter
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
 import httpx
@@ -229,6 +229,7 @@ from .thread_api import (
     get_dashboard_thread_run_diff,
     get_dashboard_thread_state,
     get_dashboard_thread_working_tree_diff,
+    list_dashboard_thread_focus_counts,
     list_dashboard_threads,
     list_dashboard_threads_page,
     list_dashboard_threads_sidebar,
@@ -1956,6 +1957,38 @@ async def api_list_threads_sidebar(
     header = server_timing_header(timings, counts)
     logger.info("thread sidebar timings login=%s %s", session["sub"], header)
     return JSONResponse(payload, headers={"Server-Timing": header})
+
+
+@router.get("/threads/sidebar/counts")
+async def api_list_thread_focus_counts(
+    scope: Literal["all", "interactive", "automation"] = "interactive",
+    ownership: Literal["all", "mine", "shared"] = "all",
+    status: Annotated[list[str] | None, Query()] = None,
+    source: Annotated[list[str] | None, Query()] = None,
+    pr: Annotated[list[str] | None, Query()] = None,
+    model: Annotated[list[str] | None, Query()] = None,
+    repo: Annotated[list[str] | None, Query()] = None,
+    include_resolved: bool = False,
+    active_thread_id: str | None = None,
+    all: bool = False,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, int]:
+    if all and not _session_is_admin(session):
+        raise HTTPException(403, "admin only")
+    return await list_dashboard_thread_focus_counts(
+        session["sub"],
+        email=session.get("email"),
+        include_all=all,
+        scope=scope,
+        ownership=ownership,
+        statuses=set(status or []),
+        sources=set(source or []),
+        pr_states=set(pr or []),
+        models=set(model or []),
+        repos=set(repo or []),
+        include_resolved=include_resolved,
+        active_thread_id=active_thread_id,
+    )
 
 
 @router.get("/threads/page")

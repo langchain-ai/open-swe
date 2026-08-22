@@ -150,6 +150,25 @@ export interface SidebarThreads {
   resolved: SidebarThreadsGroup
 }
 
+export interface SidebarFocusCounts {
+  attention: number
+  progress: number
+  ready: number
+  done: number
+}
+
+export interface SidebarFocusCountParams {
+  scope?: ThreadScope
+  ownership?: "all" | "mine" | "shared"
+  statuses?: Array<string>
+  sources?: Array<string>
+  pr?: Array<string>
+  models?: Array<string>
+  repos?: Array<string>
+  includeResolved?: boolean
+  activeThreadId?: string
+}
+
 const API_BASE = dashboardApiBase()
 
 export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
@@ -236,6 +255,25 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   return query ? `?${query}` : ""
 }
 
+function buildSidebarFocusCountQuery(params: SidebarFocusCountParams): string {
+  const search = new URLSearchParams()
+  if (params.scope) search.set("scope", params.scope)
+  if (params.ownership) search.set("ownership", params.ownership)
+  for (const status of params.statuses ?? []) search.append("status", status)
+  for (const source of params.sources ?? []) search.append("source", source)
+  for (const pr of params.pr ?? []) search.append("pr", pr)
+  for (const model of params.models ?? []) search.append("model", model)
+  for (const repo of params.repos ?? []) search.append("repo", repo)
+  if (params.includeResolved != null) {
+    search.set("include_resolved", String(params.includeResolved))
+  }
+  if (params.activeThreadId) {
+    search.set("active_thread_id", params.activeThreadId)
+  }
+  const query = search.toString()
+  return query ? `?${query}` : ""
+}
+
 function buildSidebarThreadsQuery(params: {
   activeLimit?: number
   resolvedLimit?: number
@@ -261,6 +299,10 @@ function buildSidebarThreadsQuery(params: {
 
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
+  listSidebarFocusCounts: (params: SidebarFocusCountParams = {}) =>
+    agentsRequest<SidebarFocusCounts>(
+      `/threads/sidebar/counts${buildSidebarFocusCountQuery(params)}`
+    ),
   listSidebarThreads: (params: {
     activeLimit?: number
     resolvedLimit?: number

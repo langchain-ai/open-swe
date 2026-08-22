@@ -53,6 +53,7 @@ import {
   useDeleteAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
+  useSidebarFocusCounts,
   useSidebarThreads,
 } from "@/features/agents/lib/queries"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
@@ -172,14 +173,29 @@ export function AgentsSidebar({
   )
   const { prefs, setGroup, setCompact, setFilters, resetFilters } =
     useSidebarPrefs()
+  const includeAutomations =
+    prefs.filters.includeAutomations ||
+    prefs.filters.sources.includes("schedule")
   const sidebar = useSidebarThreads({
     activeThreadId,
-    includeAutomations:
-      prefs.filters.includeAutomations ||
-      prefs.filters.sources.includes("schedule"),
+    includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     enabled: !localOnly,
   })
+  const focusCounts = useSidebarFocusCounts(
+    {
+      scope: includeAutomations ? "all" : "interactive",
+      ownership: prefs.filters.ownership,
+      statuses: prefs.filters.statuses,
+      sources: prefs.filters.sources,
+      pr: prefs.filters.pr,
+      models: prefs.filters.models,
+      repos: prefs.filters.repos,
+      includeResolved: prefs.filters.includeResolved,
+      activeThreadId,
+    },
+    !localOnly && prefs.group === "focus"
+  )
   const localSessions = useDesktopLocalThreads().data ?? []
   const activity = useLocalThreadActivity()
   const refreshLocalThreads = useRefreshLocalThreads()
@@ -439,14 +455,20 @@ export function AgentsSidebar({
                       defaultCollapsed={section.defaultCollapsed}
                       compact={prefs.compact}
                       hasMore={
-                        prefs.group === "focus" && section.key === "done"
-                          ? resolvedHasMore
-                          : activeHasMore
+                        prefs.group === "focus" && focusCounts.data
+                          ? false
+                          : prefs.group === "focus" && section.key === "done"
+                            ? resolvedHasMore
+                            : activeHasMore
                       }
                       count={
-                        prefs.group === "focus" && section.key === "done"
-                          ? filteredResolved.length
-                          : section.threads.length
+                        prefs.group === "focus" && focusCounts.data
+                          ? focusCounts.data[
+                              section.key as keyof typeof focusCounts.data
+                            ]
+                          : prefs.group === "focus" && section.key === "done"
+                            ? filteredResolved.length
+                            : section.threads.length
                       }
                     />
                   )))}
