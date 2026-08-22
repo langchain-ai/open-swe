@@ -2092,7 +2092,7 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
             "exec ${SHELL:-/bin/bash} -l",
             cwd=cwd,
             timeout=0,
-            idle_timeout=300,
+            idle_timeout=-1,
             kill_on_disconnect=True,
             pty=True,
             wait=False,
