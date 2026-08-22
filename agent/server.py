@@ -229,7 +229,10 @@ DEEP_AGENT_TOOL_NAMES = {
     "task",
     "write_file",
 }
-STOP_SUMMARY_EXCLUDED_TOOLS = frozenset({"delete", "edit_file", "execute", "task", "write_file"})
+DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
+STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
+    {"delete", "edit_file", "execute", "task", "write_file"}
+)
 
 
 def _registered_tool_name(value: Any) -> str:
@@ -745,6 +748,7 @@ def _general_purpose_subagent(
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
         "middleware": [
             *([dynamic_tools] if dynamic_tools else []),
+            ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS),
             *_subagent_model_middleware(),
         ],
     }
@@ -1669,10 +1673,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
-                *(
-                    [ExcludeToolsMiddleware(excluded=STOP_SUMMARY_EXCLUDED_TOOLS)]
-                    if stop_summary_mode
-                    else []
+                ExcludeToolsMiddleware(
+                    excluded=(
+                        STOP_SUMMARY_EXCLUDED_TOOLS
+                        if stop_summary_mode
+                        else DEEP_AGENT_EXCLUDED_TOOLS
+                    )
                 ),
                 SubdirAgentsReadMiddleware(),
                 ToolRetryMiddleware(
