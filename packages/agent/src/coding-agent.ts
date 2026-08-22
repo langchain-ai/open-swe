@@ -5,11 +5,22 @@ import {
   type CreateDeepAgentParams,
 } from "deepagents"
 
-import { createLocalWorkspaceBackend } from "@open-swe/workspace"
+import {
+  createLocalWorkspaceBackend,
+  resolveLocalProject,
+} from "@open-swe/workspace"
+
+import {
+  RESPONSES_LITE_HEADER,
+  adaptCodexPayload,
+  requiresResponsesLite,
+} from "./codex-payload.js"
+import { createLocalSkillsMiddleware } from "./skills.js"
 
 const DEFAULT_MODEL_ID = "openai:gpt-5.6-sol"
 const OPENAI_EFFORTS = ["none", "low", "medium", "high", "xhigh"] as const
 const CHATGPT_API_BASE_URL = "https://chatgpt.com/backend-api/codex"
+const CODEX_ORIGINATOR = process.env.OPEN_SWE_CODEX_ORIGINATOR || "langchain"
 type OpenAIEffort = (typeof OPENAI_EFFORTS)[number]
 
 function isOpenAIEffort(value: unknown): value is OpenAIEffort {
@@ -66,8 +77,37 @@ export function createOpenAiOAuthFetch(
     const headers = new Headers(request.headers)
     headers.set("authorization", `Bearer ${credentials.access_token}`)
     headers.set("chatgpt-account-id", credentials.account_id)
-    headers.set("originator", "open_swe_desktop")
-    return fetchImpl(new Request(request, { headers }))
+    // Codex serves its model allowlist per originator; an unrecognized value
+    // gets a stale list that no longer carries current models.
+    headers.set("originator", CODEX_ORIGINATOR)
+
+    const payload = await readJsonBody(request)
+    if (!payload) return fetchImpl(new Request(request, { headers }))
+    if (requiresResponsesLite(payload.model)) {
+      headers.set(RESPONSES_LITE_HEADER, "true")
+    }
+    return fetchImpl(
+      new Request(request.url, {
+        method: request.method,
+        headers,
+        body: JSON.stringify(adaptCodexPayload(payload)),
+        signal: request.signal,
+      })
+    )
+  }
+}
+
+async function readJsonBody(
+  request: Request
+): Promise<Record<string, unknown> | null> {
+  if (!["POST", "PATCH", "PUT"].includes(request.method)) return null
+  try {
+    const parsed: unknown = await request.clone().json()
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null
+  } catch {
+    return null
   }
 }
 
@@ -78,9 +118,18 @@ export interface CodingAgentConfig {
 export interface CodingAgentDependencies {
   model: NonNullable<CreateDeepAgentParams["model"]>
   backend?: CreateDeepAgentParams["backend"] | BackendFactory
+  middleware?: CreateDeepAgentParams["middleware"]
 }
 
-export function resolveCodingModel(configurable: Record<string, unknown> = {}) {
+export interface CodingModelDependencies {
+  env?: NodeJS.ProcessEnv
+  fetchImpl?: typeof fetch
+}
+
+export function resolveCodingModel(
+  configurable: Record<string, unknown> = {},
+  { env = process.env, fetchImpl }: CodingModelDependencies = {}
+) {
   const requested = configurable.agent_model_id
   const modelId =
     typeof requested === "string" && requested.startsWith("openai:")
@@ -91,15 +140,25 @@ export function resolveCodingModel(configurable: Record<string, unknown> = {}) {
     ? requestedEffort
     : "high"
 
-  const oauthFetch = createOpenAiOAuthFetch(process.env)
+  // An explicit key wins over the ChatGPT session: the OAuth transport rewrites
+  // `Authorization`, so binding it alongside a key would discard the key and
+  // silently route to Codex, whose catalog is per-account.
+  const apiKey = env.OPENAI_API_KEY
+  const oauthFetch = apiKey
+    ? null
+    : createOpenAiOAuthFetch(env, fetchImpl ?? globalThis.fetch)
+  const baseURL =
+    env.OPENAI_BASE_URL || (oauthFetch ? CHATGPT_API_BASE_URL : undefined)
+  const transport = oauthFetch ?? fetchImpl
+
   return new ChatOpenAI({
     model: modelId.slice("openai:".length),
-    apiKey: process.env.OPENAI_API_KEY || (oauthFetch ? "oauth" : undefined),
-    ...(oauthFetch
+    apiKey: apiKey || (oauthFetch ? "oauth" : undefined),
+    ...(baseURL || transport
       ? {
           configuration: {
-            baseURL: CHATGPT_API_BASE_URL,
-            fetch: oauthFetch,
+            ...(baseURL ? { baseURL } : {}),
+            ...(transport ? { fetch: transport } : {}),
           },
         }
       : {}),
@@ -115,11 +174,12 @@ export function resolveCodingModel(configurable: Record<string, unknown> = {}) {
 
 const SYSTEM_PROMPT = `You are a coding agent working directly in a local repository selected by the user.
 
-Inspect existing files before changing them. Make focused edits, run the repository's relevant tests or checks, and iterate until the requested outcome is complete. Treat the repository root as /. Never attempt to access paths outside it. Do not expose environment variables or credentials. Avoid destructive commands unless the user explicitly asks for them. Summarize the result and any unresolved issue when finished.`
+Inspect existing files before changing them. Make focused edits, run the repository's relevant tests or checks, and iterate until the requested outcome is complete. Paths are real absolute paths on the user's machine; the selected repository is the working directory that relative paths resolve against. Confine edits to the selected repository unless the user asks otherwise. Do not expose environment variables or credentials. Avoid destructive commands unless the user explicitly asks for them. Summarize the result and any unresolved issue when finished.`
 
 export function createCodingAgentGraph({
   model,
   backend,
+  middleware,
 }: CodingAgentDependencies): ReturnType<typeof createDeepAgent> {
   // Deep Agents supports async backend factories at runtime, but the public
   // createDeepAgent parameter type currently narrows factories to sync returns.
@@ -128,16 +188,29 @@ export function createCodingAgentGraph({
     model,
     systemPrompt: SYSTEM_PROMPT,
     ...(graphBackend ? { backend: graphBackend } : {}),
+    ...(middleware?.length ? { middleware } : {}),
   })
+}
+
+function localProject(configurable: Record<string, unknown>): string | null {
+  try {
+    return resolveLocalProject({
+      localProjectPath: configurable.local_project_path,
+    })
+  } catch {
+    return null
+  }
 }
 
 export async function createCodingAgent(
   config: CodingAgentConfig = {}
 ): Promise<ReturnType<typeof createDeepAgent>> {
   const configurable = config.configurable ?? {}
+  const skills = createLocalSkillsMiddleware(localProject(configurable))
 
   return createCodingAgentGraph({
     model: resolveCodingModel(configurable),
     backend: createLocalWorkspaceBackend(),
+    ...(skills ? { middleware: [skills] } : {}),
   })
 }
