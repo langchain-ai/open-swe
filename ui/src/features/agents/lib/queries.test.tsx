@@ -10,6 +10,7 @@ import {
   agentThreadKeys,
   setAgentThreadStatus,
   useAgentThreadWorkingTreeDiff,
+  useResolveAgentThread,
   useSidebarThreads,
   useThreadsPage,
 } from "./queries"
@@ -395,5 +396,67 @@ describe("useSidebarThreads", () => {
 
     await waitFor(() => expect(sidebar?.data.active.items).toEqual([opened]))
     expect(getThread).toHaveBeenCalledWith(opened.id, { markViewed: false })
+  })
+
+  it("keeps the opened thread visible while resolving it", async () => {
+    const opened = {
+      id: "opened-thread",
+      status: "idle",
+      resolved: false,
+    } as AgentThread
+    const resolved = { ...opened, resolved: true }
+    const listThreads = vi
+      .spyOn(agentsApi, "listThreadsPage")
+      .mockResolvedValueOnce({
+        items: [opened],
+        limit: SIDEBAR_PAGE_SIZE,
+        offset: 0,
+        hasMore: false,
+      })
+      .mockResolvedValue({
+        items: [],
+        limit: SIDEBAR_PAGE_SIZE,
+        offset: 0,
+        hasMore: false,
+      })
+    vi.spyOn(agentsApi, "resolveThread").mockResolvedValue(resolved)
+    let finishGetThread: ((thread: AgentThread) => void) | undefined
+    const getThreadRequest = new Promise<AgentThread>((resolve) => {
+      finishGetThread = resolve
+    })
+    const getThread = vi
+      .spyOn(agentsApi, "getThread")
+      .mockReturnValue(getThreadRequest)
+    const client = testClient()
+    let sidebar: ReturnType<typeof useSidebarThreads> | undefined
+    let resolveThread: ReturnType<typeof useResolveAgentThread> | undefined
+
+    function Probe() {
+      sidebar = useSidebarThreads({ activeThreadId: opened.id })
+      resolveThread = useResolveAgentThread()
+      return null
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <Probe />
+      </QueryClientProvider>
+    )
+
+    await waitFor(() => expect(sidebar?.data.active.items).toEqual([opened]))
+    await act(async () => {
+      await resolveThread?.mutateAsync({
+        threadId: opened.id,
+        resolved: true,
+      })
+    })
+
+    await waitFor(() => expect(listThreads).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(getThread).toHaveBeenCalledTimes(1))
+    expect(sidebar?.data.active.items).toEqual([resolved])
+    await act(async () => {
+      finishGetThread?.(resolved)
+      await getThreadRequest
+    })
   })
 })
