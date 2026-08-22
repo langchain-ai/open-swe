@@ -586,12 +586,12 @@ function ComposerPromptEditorInner({
   }, [editor, skillNamesKey])
 
   const focusAt = useCallback(
-    (cursor: number) => {
+    (offset: number) => {
       const rootElement = editor.getRootElement()
       if (!rootElement) return
       rootElement.focus({ preventScroll: true })
       editor.update(() => {
-        $setSelectionAtOffset(cursor)
+        $setSelectionAtOffset(offset)
       })
     },
     [editor]

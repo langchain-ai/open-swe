@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 
-import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { formatJsonToolResult } from "./toolResultJson"
+import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 
 export function ToolResultBody({ value }: { value: string }) {
   const json = useMemo(() => formatJsonToolResult(value), [value])

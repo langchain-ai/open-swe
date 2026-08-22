@@ -212,7 +212,7 @@ export function buildCommandItems(
  * mode, attachments, context)
  * and the send/stop button.
  */
-export const ChatComposer = memo(function ChatComposer({
+export const ChatComposer = memo(function ChatComposerComponent({
   placeholder = "Ask Open SWE to build, fix bugs, explore",
   autoFocus = false,
   compact = false,

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 
 const COPIED_RESET_MS = 1500
 
-export const MessageCopyButton = memo(function MessageCopyButton({
+export const MessageCopyButton = memo(function MessageCopyButtonComponent({
   text,
   className,
 }: {

@@ -1466,7 +1466,7 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
   )
 }
 
-const FileDiffCard = memo(function FileDiffCard({
+const FileDiffCard = memo(function FileDiffCardComponent({
   file,
   findings,
   selectedLines,

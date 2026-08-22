@@ -53,10 +53,7 @@ export function PreferencesSection() {
         label="Appearance"
         description="Theme used across the dashboard."
         control={
-          <Select
-            value={theme}
-            onValueChange={(v) => v && setTheme(v as Theme)}
-          >
+          <Select value={theme} onValueChange={(v) => v && setTheme(v)}>
             <SelectTrigger className="w-40">
               <SelectValue />
             </SelectTrigger>

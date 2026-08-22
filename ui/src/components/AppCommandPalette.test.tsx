@@ -3,10 +3,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { DesktopLocalThreadSummary } from "@/desktop"
+import { AppCommandPalette } from "./AppCommandPalette"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "@/lib/appCommands"
-import { AppCommandPalette } from "./AppCommandPalette"
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
@@ -22,7 +21,7 @@ const mocks = vi.hoisted(() => ({
     updatedAt: 2,
     modelId: null,
     effort: null,
-  } as DesktopLocalThreadSummary,
+  },
 }))
 
 vi.mock("@tanstack/react-router", () => ({

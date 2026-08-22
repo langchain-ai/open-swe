@@ -1,11 +1,11 @@
 import { redirect } from "@tanstack/react-router"
 import { createIsomorphicFn } from "@tanstack/react-start"
 import { getRequestUrl } from "@tanstack/react-start/server"
-import type { QueryClient } from "@tanstack/react-query"
 
 import { isCrossOriginApiBase } from "./api-base"
 import { sanitizeAuthRedirect } from "./auth-redirect-core"
 import { sessionQueryOptions } from "./session"
+import type { QueryClient } from "@tanstack/react-query"
 
 const PUBLIC_PATH_RE = /^\/(?:login|dashboard\/api|_serverFn)(?:[/?#]|$)/
 

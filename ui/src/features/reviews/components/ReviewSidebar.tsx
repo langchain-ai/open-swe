@@ -187,7 +187,7 @@ export function renderInlineCode(text: string): Array<ReactNode> {
 // outline. Clicking (or Enter/Space) scrolls the diff to that block. The active
 // block (scroll-spy) gets an accent rule + emphasis. memo'd so scroll-spy
 // re-renders only repaint the rows whose active state actually changed.
-const ReviewGroupRow = memo(function ReviewGroupRow({
+const ReviewGroupRow = memo(function ReviewGroupRowComponent({
   group,
   active,
   onSelectGroup,

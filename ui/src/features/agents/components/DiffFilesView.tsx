@@ -264,7 +264,7 @@ export function DiffFilesView({
 }
 
 const FileDiffSection = memo(
-  function FileDiffSection({
+  function FileDiffSectionComponent({
     file,
     sectionRef,
   }: {

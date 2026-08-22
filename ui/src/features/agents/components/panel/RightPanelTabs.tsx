@@ -1,13 +1,4 @@
-import {
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
-  type ReactElement,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Bot,
   FileDiff,
@@ -18,8 +9,15 @@ import {
   TerminalSquare,
   X,
 } from "lucide-react"
+import type {
+  ReactElement,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from "react"
 
 import type { RightPanelSurface } from "@/features/agents/lib/rightPanelStore"
+import type { RightPanelMode } from "@/features/agents/components/panel/RightPanelShell"
 import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
 import {
@@ -31,10 +29,7 @@ import {
 } from "@/components/ui/menu"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
-import {
-  RightPanelShell,
-  type RightPanelMode,
-} from "@/features/agents/components/panel/RightPanelShell"
+import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
 import { cn } from "@/lib/utils"
 
 interface RightPanelTabsProps {
@@ -89,8 +84,11 @@ type SurfaceShortcutEvent = Pick<
 >
 
 export function surfaceShortcutActionForKey<
-  const Action extends { available: boolean; shortcut: string },
->(actions: ReadonlyArray<Action>, event: SurfaceShortcutEvent): Action | null {
+  const TAction extends { available: boolean; shortcut: string },
+>(
+  actions: ReadonlyArray<TAction>,
+  event: SurfaceShortcutEvent
+): TAction | null {
   if (event.defaultPrevented || event.isComposing) return null
   if (event.metaKey || event.ctrlKey || event.altKey) return null
   return (

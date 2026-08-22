@@ -140,7 +140,7 @@ class MarkdownErrorBoundary extends Component<BoundaryProps, BoundaryState> {
   }
 }
 
-export const Markdown = memo(function Markdown({
+export const Markdown = memo(function MarkdownComponent({
   content,
   isLive = false,
   transformImageUrl,
