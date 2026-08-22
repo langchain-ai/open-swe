@@ -210,6 +210,23 @@ describe("groupThreadsByMode", () => {
     })
   })
 
+  it("keeps the active finished thread in attention after it is viewed", () => {
+    const pinnedThread = makeThread({
+      id: "active",
+      status: "finished",
+      viewed: false,
+    })
+    const sections = groupThreadsByMode(
+      [{ ...pinnedThread, viewed: true }],
+      "focus",
+      pinnedThread
+    )
+
+    expect(sections).toHaveLength(1)
+    expect(sections[0]?.key).toBe("attention")
+    expect(sections[0]?.threads[0]?.id).toBe("active")
+  })
+
   it("buckets by date and drops empty buckets", () => {
     const now = Date.now()
     const sections = groupThreadsByMode(

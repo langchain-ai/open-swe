@@ -220,7 +220,22 @@ export function AgentsSidebar({
     prefs.group === "focus" && showResolved
       ? [...filteredActive, ...filteredResolved]
       : filteredActive
-  const sections = groupThreadsByMode(groupedThreads, prefs.group)
+  const naturalSections = groupThreadsByMode(groupedThreads, prefs.group)
+  const activeAttentionThread = naturalSections
+    .find((section) => section.key === "attention")
+    ?.threads.find((thread) => thread.id === activeThreadId)
+  const [previousActiveThreadId, setPreviousActiveThreadId] =
+    useState(activeThreadId)
+  const [pinnedAttentionThread, setPinnedAttentionThread] = useState(
+    activeAttentionThread
+  )
+  if (activeThreadId !== previousActiveThreadId) {
+    setPreviousActiveThreadId(activeThreadId)
+    setPinnedAttentionThread(activeAttentionThread)
+  }
+  const sections = pinnedAttentionThread
+    ? groupThreadsByMode(groupedThreads, prefs.group, pinnedAttentionThread)
+    : naturalSections
   const resolvedLoading =
     !sidebar.isPending && showResolved && sidebar.resolvedQuery.isLoading
   const isCloudEmpty =
