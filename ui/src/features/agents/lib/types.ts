@@ -320,6 +320,7 @@ export interface AgentThread {
   viewedAt?: number | null
   resolved?: boolean
   resolvedAt?: number | null
+  project?: string | null
   isOwner?: boolean
   createdAt: number
   updatedAt: number

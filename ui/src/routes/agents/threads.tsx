@@ -24,6 +24,7 @@ const STATUSES: ReadonlyArray<AgentStatus> = [
 const LAYOUTS: ReadonlyArray<ThreadsLayout> = ["board", "list"]
 const GROUPINGS: ReadonlyArray<ThreadGrouping> = [
   "focus",
+  "project",
   "status",
   "repo",
   "source",

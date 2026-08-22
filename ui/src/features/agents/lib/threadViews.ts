@@ -2,7 +2,7 @@ import type { AgentSource, AgentStatus, AgentThread } from "./types"
 
 export type ThreadsLayout = "board" | "list"
 export type ThreadGrouping =
-  "focus" | "status" | "repo" | "source" | "pr" | "none"
+  "focus" | "project" | "status" | "repo" | "source" | "pr" | "none"
 
 export interface ThreadViewGroup {
   key: string
@@ -15,6 +15,7 @@ export const THREAD_GROUPING_OPTIONS: Array<{
   label: string
 }> = [
   { value: "focus", label: "Focus" },
+  { value: "project", label: "Project" },
   { value: "status", label: "Status" },
   { value: "repo", label: "Repository" },
   { value: "source", label: "Source" },
@@ -137,6 +138,23 @@ export function groupThreadsForView(
       PR_GROUPS,
       threads,
       (thread) => thread.pr?.state ?? "none"
+    )
+  }
+  if (grouping === "project") {
+    const labels = new Set(
+      threads.map((thread) => thread.project || "No project")
+    )
+    const definitions = [...labels]
+      .sort((left, right) => {
+        if (left === "No project") return 1
+        if (right === "No project") return -1
+        return left.localeCompare(right)
+      })
+      .map((label) => ({ key: label, label }))
+    return buildGroups(
+      definitions,
+      threads,
+      (thread) => thread.project || "No project"
     )
   }
   const labels = new Set(
