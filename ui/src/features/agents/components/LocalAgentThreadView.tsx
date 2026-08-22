@@ -59,12 +59,15 @@ function promptContent(text: string, images: Array<ImageChunk>) {
 }
 
 function skillFiles(skills: DesktopLocalPromptInput["skills"]) {
+  const timestamp = new Date().toISOString()
   return Object.fromEntries(
     skills.map(({ name, description, instructions }) => [
       `/${name}/SKILL.md`,
       {
         content: `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n---\n\n${instructions.trim()}\n`,
-        encoding: "utf-8",
+        mimeType: "text/markdown",
+        created_at: timestamp,
+        modified_at: timestamp,
       },
     ])
   )
