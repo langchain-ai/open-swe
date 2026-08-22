@@ -121,6 +121,24 @@ const PR_STATE_META: Record<
   },
 }
 
+function openContextMenuFromKeyboard(
+  event: React.KeyboardEvent<HTMLAnchorElement>
+) {
+  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
+    return
+  }
+  event.preventDefault()
+  const rect = event.currentTarget.getBoundingClientRect()
+  event.currentTarget.dispatchEvent(
+    new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    })
+  )
+}
+
 interface AgentsSidebarProps {
   user: SessionUser | null
   localOnly?: boolean
@@ -637,6 +655,7 @@ function LocalThreadRow({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const running = useLocalThreadActivity()[session.id] === "running"
 
   const confirmDelete = async () => {
@@ -663,14 +682,21 @@ function LocalThreadRow({
 
   return (
     <>
-      <ContextMenu.Root>
+      <ContextMenu.Root onOpenChange={setContextMenuOpen}>
         <ContextMenu.Trigger
           className={cn("group relative mb-0.5", isDeleting && "opacity-50")}
         >
           <Link
             to="/agents/local/$sessionId"
             params={{ sessionId: session.id }}
-            onClick={onNavigate}
+            onClick={(event) => {
+              if (contextMenuOpen) {
+                event.preventDefault()
+                return
+              }
+              onNavigate?.()
+            }}
+            onKeyDown={openContextMenuFromKeyboard}
             className={cn(
               "flex items-center gap-2 rounded-lg px-2.5 transition-colors",
               compact ? "h-7 gap-1.5" : "h-8",
@@ -914,6 +940,7 @@ function ThreadRow({
   const deleteThread = useDeleteAgentThread()
   const resolveThread = useResolveAgentThread()
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const isReadOnly = thread.isOwner === false
   const badge =
     thread.diffStats && thread.diffStats.additions > 0
@@ -962,14 +989,21 @@ function ThreadRow({
 
   return (
     <>
-      <ContextMenu.Root>
+      <ContextMenu.Root onOpenChange={setContextMenuOpen}>
         <ContextMenu.Trigger
           className={cn("group relative mb-0.5", isDeleting && "opacity-50")}
         >
           <Link
             to="/agents/$threadId"
             params={{ threadId: thread.id }}
-            onClick={onNavigate}
+            onClick={(event) => {
+              if (contextMenuOpen) {
+                event.preventDefault()
+                return
+              }
+              onNavigate?.()
+            }}
+            onKeyDown={openContextMenuFromKeyboard}
             className={cn(
               "flex items-center gap-2 rounded-lg px-2.5 transition-colors",
               compact ? "h-7 gap-1.5" : "h-8",
