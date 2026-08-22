@@ -8,7 +8,7 @@ import type {
   DesktopLocalPromptInput,
   DesktopLocalThreadSummary,
 } from "@/desktop"
-import type { ImageChunk } from "@/lib/agentTypes"
+import type { ImageChunk, Message } from "@/lib/agentTypes"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
@@ -19,6 +19,10 @@ import { Messages } from "@/features/agents/components/messages"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import {
+  selectThreadDiffScope,
+  useDiffPanelStore,
+} from "@/features/agents/lib/diffPanelStore"
+import {
   selectThreadRightPanelState,
   useRightPanelStore,
 } from "@/features/agents/lib/rightPanelStore"
@@ -26,9 +30,12 @@ import { useAgentSkills } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
+  ensureDesktopModelCredential,
   localThreadKeys,
   useDesktopLocalThread,
+  useLocalThreadActivity,
   useLocalThreadDiff,
+  useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
 import {
   readStoredPanelCollapsed,
@@ -38,6 +45,7 @@ import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
+import { useSession } from "@/lib/session"
 
 function promptContent(text: string, images: Array<ImageChunk>) {
   const trimmed = text.trim()
@@ -67,11 +75,12 @@ function errorMessage(error: unknown): string {
 }
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
+  const session = useSession()
   const stream = useAgentThreadStream()
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
   const queryClient = useQueryClient()
-  const skills = useAgentSkills()
+  const skills = useAgentSkills({ enabled: Boolean(session.data) })
   const {
     models,
     defaultSelection,
@@ -91,6 +100,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   }, [models, thread?.effort, thread?.modelId])
   const activeSelection = selection ?? threadSelection ?? defaultSelection
   const initialPromptRef = useRef<string | null>(null)
+  const acknowledgedRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isMobile = useIsMobile()
   const sidebarCollapsed = useSidebarCollapsed()
@@ -128,38 +138,64 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [handlePanelCollapsedChange, openSurface, threadRef]
   )
 
-  const isRunning = stream.isLoading || thread?.status === "running"
-  const diff = useLocalThreadDiff(
+  const activity = useLocalThreadActivity()[sessionId]
+  const isRunning =
+    stream.isLoading ||
+    (Boolean(thread?.pending) && !error) ||
+    activity === "running"
+  const diffVisible =
+    !panelCollapsed && activeSurfaceId === "diff" && Boolean(thread)
+  const selectScope = useDiffPanelStore((state) => state.selectScope)
+  // Also the source of the branch/PR metadata, so it stays enabled in either
+  // scope: it is what tells us the branch has a pull request at all.
+  const checkpointDiff = useLocalThreadDiff(sessionId, diffVisible, isRunning)
+  // The pull request is what tells us the base to diff the branch against.
+  const branchScopeAvailable = Boolean(checkpointDiff.data?.repository?.pr)
+  const scope = useDiffPanelStore((state) =>
+    selectThreadDiffScope(state.byThreadKey, threadRef, branchScopeAvailable)
+  )
+  const branchDiff = useLocalThreadPrDiff(
     sessionId,
-    !panelCollapsed && activeSurfaceId === "diff" && Boolean(thread),
+    diffVisible && scope === "branch",
     isRunning
   )
+  const repository =
+    branchDiff.data?.repository ?? checkpointDiff.data?.repository
+  const pr = repository?.pr ?? null
+  const diff = scope === "branch" ? branchDiff : checkpointDiff
   const files = useMemo(
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
   )
-  const repository = diff.data?.repository
-  const pr = repository?.pr
-  const messages = useMemo(
-    () =>
-      streamMessagesToUi(
-        stream.messages,
-        stream.toolCalls,
-        messageArrivalTimestamp
-      ),
-    [stream.messages, stream.toolCalls]
-  )
+  const messages = useMemo(() => {
+    const live = streamMessagesToUi(
+      stream.messages,
+      stream.toolCalls,
+      messageArrivalTimestamp
+    )
+    if (live.length > 0 || !thread?.pending) return live
+    const text = thread.pending.prompt.trim()
+    return [
+      {
+        id: `optimistic-user-${sessionId}`,
+        author: "user",
+        timestamp: new Date(thread.createdAt).toISOString(),
+        chunks: [
+          ...thread.pending.images,
+          ...(text ? [{ kind: "text" as const, text }] : []),
+        ],
+      } satisfies Message,
+    ]
+  }, [sessionId, stream.messages, stream.toolCalls, thread])
 
-  const updateStatus = useCallback(
-    async (
-      status: "idle" | "running" | "error",
-      model?: ModelSelection | null
-    ) => {
+  const rememberSelection = useCallback(
+    async (model?: ModelSelection | null) => {
+      if (!model) return
       const updated = await window.openSweDesktop?.updateLocalThread({
         threadId: sessionId,
-        status,
-        viewed: status === "running",
-        ...(model && { modelId: model.modelId, effort: model.effort }),
+        viewed: true,
+        modelId: model.modelId,
+        effort: model.effort,
       })
       if (!updated) return
       queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
@@ -173,13 +209,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
 
   useEffect(() => {
-    if (!thread || thread.viewed || isRunning) return
+    if (isRunning) {
+      acknowledgedRef.current = null
+      return
+    }
+    if (!thread || acknowledgedRef.current === sessionId) return
+    acknowledgedRef.current = sessionId
     void window.openSweDesktop
-      ?.updateLocalThread({
-        threadId: sessionId,
-        status: thread.status,
-        viewed: true,
-      })
+      ?.updateLocalThread({ threadId: sessionId, viewed: true })
       .then((updated) => {
         if (!updated) return
         queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
@@ -199,18 +236,15 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     ) => {
       if (!thread) return false
       setError(null)
-      const credential =
-        await window.openSweDesktop?.localModelCredentialStatus(
-          activeSelection?.modelId
-        )
-      if (credential && !credential.available) {
-        setError(
-          `Set ${credential.variable} in the environment before starting Open SWE.`
-        )
+      const credentialError = await ensureDesktopModelCredential(
+        activeSelection?.modelId
+      )
+      if (credentialError) {
+        setError(credentialError)
         return false
       }
       try {
-        await updateStatus("running", activeSelection)
+        await rememberSelection(activeSelection)
         await stream.submit(
           {
             messages: [
@@ -231,15 +265,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             },
           }
         )
-        await updateStatus("idle")
         return true
       } catch (cause) {
         setError(errorMessage(cause))
-        await updateStatus("error")
         return false
       }
     },
-    [activeSelection, stream, thread, updateStatus]
+    [activeSelection, rememberSelection, stream, thread]
   )
 
   useEffect(() => {
@@ -251,7 +283,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       .then(async (pending) => {
         if (!pending) return
         if (await submit(pending.prompt, pending.images, pending.skills)) {
-          await window.openSweDesktop?.clearLocalPrompt(sessionId)
+          const updated =
+            await window.openSweDesktop?.clearLocalPrompt(sessionId)
+          if (updated)
+            queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
         } else {
           initialPromptRef.current = null
         }
@@ -259,22 +294,19 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       .catch((cause) => {
         initialPromptRef.current = null
         setError(errorMessage(cause))
-        void updateStatus("error")
       })
   }, [
     modelsLoading,
+    queryClient,
     sessionId,
     stream.hydrationPromise,
     submit,
     thread,
-    updateStatus,
   ])
 
   useEffect(() => {
-    if (!stream.error) return
-    setError(errorMessage(stream.error))
-    void updateStatus("error")
-  }, [stream.error, updateStatus])
+    if (stream.error) setError(errorMessage(stream.error))
+  }, [stream.error])
 
   if (!thread) {
     return (
@@ -321,7 +353,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             </span>
           </div>
         </header>
-        {(error || thread.status === "error") && (
+        {(error || activity === "error") && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
             <Alert variant="error">
               <CircleAlert />
@@ -335,7 +367,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           <Messages
             contentWidthClass="max-w-3xl"
             isStreaming={isRunning}
-            isThinking={stream.isLoading}
+            isThinking={isRunning}
             messages={messages}
             onOpenFile={handleOpenFile}
             streamIsLoading={stream.isLoading}
@@ -380,10 +412,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 onStop={async () => {
                   try {
                     await stream.stop()
-                    await updateStatus("idle")
                   } catch (cause) {
                     setError(errorMessage(cause))
-                    await updateStatus("error")
                   }
                 }}
                 onSubmit={async (prompt, images) => {
@@ -410,7 +440,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         cwd={thread.cwd}
         terminalAvailable
         diffAvailable
-        pullRequests={[]}
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
         onTerminalOpenFile={handleOpenFile}
@@ -430,6 +459,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             revealFilePath={revealFilePath}
             fullScreen={fullScreen}
             onRefresh={() => void diff.refetch()}
+            scope={scope}
+            branchScopeAvailable={branchScopeAvailable}
+            onScopeChange={(next) => selectScope(threadRef, next)}
           />
         )}
       />

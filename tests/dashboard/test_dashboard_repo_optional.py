@@ -62,6 +62,22 @@ async def test_thread_summary_classifies_legacy_schedule_metadata() -> None:
     assert summary["triggerKind"] == "schedule"
     assert summary["automationId"] == "schedule-1"
     assert summary["automationName"] == "Daily triage"
+    assert summary["automationActionPosted"] is False
+
+
+async def test_thread_summary_marks_automation_actions_posted_to_slack() -> None:
+    summary = await thread_serialize.thread_summary(
+        {
+            "thread_id": "scheduled-action",
+            "metadata": {
+                "source": "schedule",
+                "schedule_id": "schedule-1",
+                "automation_action_posted_at": "2026-08-21T12:00:00+00:00",
+            },
+        }
+    )
+
+    assert summary["automationActionPosted"] is True
 
 
 async def test_thread_summary_derives_issue_category_from_source_context() -> None:

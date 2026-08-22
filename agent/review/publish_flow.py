@@ -7,6 +7,7 @@ one already on the PR, how a rejected anchor is retried, and how the GitHub
 review / comment / thread ids get stamped back onto the findings.
 """
 
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -16,6 +17,7 @@ from langgraph.config import get_config
 from ..github.checks import review_check_conclusion
 from ..langsmith.api import get_langsmith_trace_url
 from ..langsmith.tracing import REVIEW_TRACING_PROJECT
+from ..settings.agent_usage import record_reviewer_publication
 from ..settings.team_settings import get_team_review_trace_links_enabled
 from ..slack.api import post_slack_thread_reply
 from ..utils.dashboard_links import dashboard_review_url
@@ -55,6 +57,8 @@ from .publish import (
 )
 from .reconcile import sync_findings_with_github
 from .thread_resolution import resolve_github_threads_for_finding
+
+logger = logging.getLogger(__name__)
 
 InlineWithPayload = list[tuple[Finding, dict[str, Any]]]
 
@@ -125,7 +129,14 @@ async def publish_review(
             token=token,
             findings=findings,
         )
-        await _settle_run(thread_id, owner=owner, repo=repo, token=token, head_sha=head_sha)
+        await _settle_run(
+            thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+            head_sha=head_sha,
+        )
         return {
             "success": True,
             "review_id": None,
@@ -228,6 +239,7 @@ async def publish_review(
         thread_id,
         owner=owner,
         repo=repo,
+        pr_number=pr_number,
         token=token,
         head_sha=head_sha,
         surfaced_count=len(inline_comments),
@@ -731,11 +743,24 @@ async def _settle_run(
     *,
     owner: str,
     repo: str,
+    pr_number: int,
     token: str,
     head_sha: str,
     surfaced_count: int = 0,
 ) -> None:
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+    try:
+        await record_reviewer_publication(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            findings=await list_findings_async(thread_id),
+        )
+    except Exception:  # noqa: BLE001
+        # Telemetry must not turn a published review into a failed run.
+        logger.debug("Failed to record reviewer usage", exc_info=True)
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
     conclusion, check_title, check_summary = review_check_conclusion(surfaced_count)
     await settle_review_check_run(

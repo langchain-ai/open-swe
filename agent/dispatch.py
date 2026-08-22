@@ -17,6 +17,12 @@ busy-check and the custom store-queue) with one function that uses:
   event that drives ``stream.isLoading`` when it can replay the run's events, so
   a Slack/Linear/GitHub-triggered run looked idle in the web UI (no stop button)
   until it happened to emit its next event.
+- the Protocol v2 run shape — the same ``stream_mode`` set, ``stream_subgraphs``
+  and ``configurable`` marker that ``langgraph_api``'s ``run.start`` command
+  applies when the dashboard submits a run. The server fixes a run's streaming
+  protocol at creation: without the marker a run streams ``values`` only, so
+  the dashboard saw no ``tools`` events and no subagent namespaces for runs
+  triggered outside it (subagent cards never showed nested activity).
 """
 
 import logging
@@ -46,6 +52,23 @@ logger = logging.getLogger(__name__)
 
 ContentBlocks = str | list[dict[str, Any]]
 RunConfig = dict[str, Any]
+
+# Mirrors ``langgraph_api.event_streaming``'s ``EVENT_STREAMING_V2_CONFIG_KEY``.
+# Not imported: ``langgraph-api`` is the serving runtime, not a dependency of
+# this package. The marker alone selects the v3 stream path, which emits every
+# protocol channel (``tools``, ``lifecycle``, namespaced subagent events)
+# regardless of ``stream_mode``.
+EVENT_STREAMING_V2_CONFIG_KEY = "__event_streaming_v2"
+# The dashboard's ``run.start`` defaults, minus ``tools`` / ``lifecycle``: those
+# are protocol channels the REST ``POST /runs`` schema does not accept.
+V2_RUN_STREAM_MODES: tuple[str, ...] = (
+    "values",
+    "updates",
+    "messages",
+    "custom",
+    "tasks",
+    "checkpoints",
+)
 
 
 def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str, Any]) -> RunInput:
@@ -182,6 +205,7 @@ def prepare_run_config(
     configurable = run_config.get("configurable")
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
     configurable.setdefault("prepare_run_id", str(uuid.uuid4()))
+    configurable[EVENT_STREAMING_V2_CONFIG_KEY] = True
     run_config["configurable"] = configurable
     existing_metadata = run_config.get("metadata")
     merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
@@ -204,7 +228,6 @@ async def create_durable_run(
     multitask_strategy: str = "interrupt",
     durability: str = "sync",
     if_not_exists: str = "create",
-    stream_mode: Any | None = None,
     stream_resumable: bool = True,
     after_seconds: int | float | None = None,
 ) -> Run:
@@ -218,13 +241,13 @@ async def create_durable_run(
         "multitask_strategy": multitask_strategy,
         "durability": durability,
         "if_not_exists": if_not_exists,
+        "stream_mode": list(V2_RUN_STREAM_MODES),
+        "stream_subgraphs": True,
         "stream_resumable": stream_resumable,
     }
     webhook = completion_webhook_url()
     if webhook:
         create_kwargs["webhook"] = webhook
-    if stream_mode is not None:
-        create_kwargs["stream_mode"] = stream_mode
     if after_seconds is not None:
         create_kwargs["after_seconds"] = after_seconds
 

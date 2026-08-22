@@ -10,7 +10,7 @@ broadening it.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -38,6 +38,7 @@ PROXY_TOKEN_FALLBACK_TTL = timedelta(minutes=50)
 _PROXY_TOKEN_EXPIRY: dict[
     str, tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
 ] = {}
+_PROXY_BASE_CONFIGS: dict[str, dict[str, Any]] = {}
 ProxyTokenRecord = tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
 
 
@@ -47,11 +48,14 @@ def record_proxy_token_expiry(
     *,
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
+    base_proxy_config: Mapping[str, Any] | None = None,
 ) -> None:
     """Record when ``thread_id``'s proxy token expires and the repo scope it was minted with.
 
     ``repositories`` and ``permissions`` preserve the original token scope so a
-    later refresh doesn't broaden it to an installation-wide or more privileged token.
+    later refresh doesn't broaden it to an installation-wide or more privileged
+    token; ``base_proxy_config`` preserves the sandbox's own proxy rules so a
+    refresh doesn't drop them.
     """
     if not thread_id:
         return
@@ -62,11 +66,23 @@ def record_proxy_token_expiry(
         scope,
         normalize_permissions(permissions),
     )
+    if base_proxy_config is not None:
+        _PROXY_BASE_CONFIGS[thread_id] = dict(base_proxy_config)
+    else:
+        _PROXY_BASE_CONFIGS.pop(thread_id, None)
+
+
+def get_recorded_proxy_base_config(thread_id: str | None) -> dict[str, Any] | None:
+    if not thread_id:
+        return None
+    config = _PROXY_BASE_CONFIGS.get(thread_id)
+    return dict(config) if config is not None else None
 
 
 def clear_proxy_token_expiry(thread_id: str | None) -> None:
     if thread_id:
         _PROXY_TOKEN_EXPIRY.pop(thread_id, None)
+        _PROXY_BASE_CONFIGS.pop(thread_id, None)
 
 
 def _unpack_proxy_token_record(record: tuple[Any, ...]) -> ProxyTokenRecord:
@@ -97,14 +113,17 @@ async def configure_proxy_for_sandbox(
     github_token: str | None = None,
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
+    base_proxy_config: Mapping[str, Any] | None = None,
 ) -> bool:
     """Point ``sandbox_backend``'s proxy at a GitHub token and record its expiry.
 
     ``github_token`` overrides minting for callers that already hold a token
     (a dashboard user's OAuth token, say); otherwise an installation token is
-    minted for exactly ``repositories``/``permissions``. Returns False — without
-    touching the sandbox — when the provider has no proxy or no token could be
-    minted; the caller decides whether that is fatal.
+    minted for exactly ``repositories``/``permissions``. ``base_proxy_config``
+    is the sandbox's own proxy settings, which the GitHub rules are layered on
+    rather than replacing; it is recorded with the expiry so a refresh re-sends
+    it. Returns False — without touching the sandbox — when the provider has no
+    proxy or no token could be minted; the caller decides whether that is fatal.
     """
     if not sandbox_provider_uses_proxy():
         return False
@@ -130,12 +149,15 @@ async def configure_proxy_for_sandbox(
     # module that only wants to record an expiry.
     from ..integrations.langsmith import configure_github_proxy
 
-    await configure_github_proxy(unwrap_sandbox_backend(sandbox_backend).id, token)
+    await configure_github_proxy(
+        unwrap_sandbox_backend(sandbox_backend).id, token, base_proxy_config=base_proxy_config
+    )
     record_proxy_token_expiry(
         thread_id,
         expires_at,
         repositories=scope,
         permissions=dict(permission_key) if permission_key else None,
+        base_proxy_config=base_proxy_config,
     )
     return True
 
@@ -166,6 +188,7 @@ async def refresh_proxy_for_thread(
         thread_id=thread_id,
         repositories=repositories or recorded_repositories,
         permissions=dict(permission_key) if permission_key else None,
+        base_proxy_config=_PROXY_BASE_CONFIGS.get(thread_id),
     )
     if refreshed:
         logger.info("Refreshed GitHub proxy token for thread %s", thread_id)

@@ -1,6 +1,7 @@
 """Runloop devbox provider."""
 
 import asyncio
+from collections.abc import Mapping
 from typing import Any, cast
 
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -8,7 +9,7 @@ from langchain_runloop import RunloopSandbox
 from runloop_api_client import Client, NotFoundError
 
 from ..config import runloop_api_key
-from ..sandboxes.providers import SandboxGoneError, SandboxProvider
+from ..sandboxes.providers import SandboxGoneError, SandboxProvider, SandboxResources
 
 
 class RunloopProvider(SandboxProvider):
@@ -24,13 +25,20 @@ class RunloopProvider(SandboxProvider):
     async def connect(self, sandbox_id: str) -> SandboxBackendProtocol:
         return await asyncio.to_thread(self._connect, sandbox_id)
 
-    async def create(self, *, snapshot_id: str | None = None) -> SandboxBackendProtocol:
+    async def create(
+        self,
+        *,
+        snapshot_id: str | None = None,
+        resources: SandboxResources | None = None,
+        create_params: Mapping[str, Any] | None = None,
+    ) -> SandboxBackendProtocol:
         if snapshot_id is not None:
             msg = (
                 f"Runloop cannot boot from snapshot {snapshot_id!r}; a devbox starts from a "
                 "Runloop blueprint"
             )
             raise ValueError(msg)
+        self._reject_sizing("Runloop", resources, create_params)
         return await asyncio.to_thread(self._create)
 
     def _connect(self, sandbox_id: str) -> SandboxBackendProtocol:

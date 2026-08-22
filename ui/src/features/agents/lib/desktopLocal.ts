@@ -1,7 +1,13 @@
 import { useEffect } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
-import type { DesktopLocalDiff, DesktopLocalThreadSummary } from "@/desktop"
+import type {
+  DesktopLocalActivity,
+  DesktopLocalDiff,
+  DesktopLocalThreadSummary,
+} from "@/desktop"
+
+const NO_ACTIVITY: DesktopLocalActivity = {}
 
 const NO_DIFF: DesktopLocalDiff = {
   status: "missing",
@@ -11,9 +17,31 @@ const NO_DIFF: DesktopLocalDiff = {
 
 export const localThreadKeys = {
   all: ["local-threads"] as const,
+  activity: ["local-thread-activity"] as const,
   detail: (threadId: string) => ["local-threads", threadId] as const,
   ready: (threadId: string) => ["local-thread-ready", threadId] as const,
   diff: (threadId: string) => ["local-thread-diff", threadId] as const,
+  prDiff: (threadId: string) => ["local-thread-pr-diff", threadId] as const,
+}
+
+export async function ensureDesktopModelCredential(
+  modelId?: string
+): Promise<string | null> {
+  const desktop = window.openSweDesktop
+  if (!desktop) return null
+  const credential = await desktop.localModelCredentialStatus(modelId)
+  if (credential.available) return null
+  if (credential.canSignIn) {
+    try {
+      const result = await desktop.signInLocalOpenAI()
+      if (result.signedIn) return null
+    } catch (cause) {
+      return cause instanceof Error ? cause.message : "OpenAI sign-in failed"
+    }
+  }
+  return credential.variable
+    ? `Set ${credential.variable} in the environment before starting Open SWE.`
+    : "Sign in to use the selected model."
 }
 
 export function useReadyDesktopLocalThread(threadId: string) {
@@ -54,6 +82,17 @@ export function useDesktopLocalThreads(options: { enabled?: boolean } = {}) {
   })
 }
 
+export function useLocalThreadActivity(): DesktopLocalActivity {
+  return (
+    useQuery({
+      queryKey: localThreadKeys.activity,
+      queryFn: () => window.openSweDesktop?.localActivity() ?? NO_ACTIVITY,
+      enabled: typeof window !== "undefined" && Boolean(window.openSweDesktop),
+      refetchInterval: 1000,
+    }).data ?? NO_ACTIVITY
+  )
+}
+
 export function useLocalThreadDiff(
   threadId: string,
   enabled: boolean,
@@ -62,6 +101,31 @@ export function useLocalThreadDiff(
   const query = useQuery({
     queryKey: localThreadKeys.diff(threadId),
     queryFn: () => window.openSweDesktop?.getLocalDiff(threadId) ?? NO_DIFF,
+    enabled,
+    refetchInterval: isRunning ? 5000 : false,
+  })
+
+  const { refetch } = query
+  useEffect(() => {
+    if (enabled && !isRunning) void refetch()
+  }, [enabled, isRunning, refetch])
+
+  return query
+}
+
+/**
+ * What the thread's branch has committed on top of its pull request's base.
+ * Unlike the checkpoint diff this ignores the worktree, which every session in
+ * the project shares.
+ */
+export function useLocalThreadPrDiff(
+  threadId: string,
+  enabled: boolean,
+  isRunning: boolean
+) {
+  const query = useQuery({
+    queryKey: localThreadKeys.prDiff(threadId),
+    queryFn: () => window.openSweDesktop?.getLocalPrDiff(threadId) ?? NO_DIFF,
     enabled,
     refetchInterval: isRunning ? 5000 : false,
   })

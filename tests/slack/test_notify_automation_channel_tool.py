@@ -35,7 +35,7 @@ def fake_client(
     patched_langgraph_client: Callable[..., FakeLangGraphClient],
     monkeypatch: pytest.MonkeyPatch,
 ) -> FakeLangGraphClient:
-    client = patched_langgraph_client()
+    client = patched_langgraph_client(notification_tool, attr="in_process_langgraph_client")
     monkeypatch.setattr(
         notification_tool,
         "dashboard_thread_url",
@@ -118,6 +118,12 @@ async def test_notify_automation_channel_posts_to_trusted_destination(
     stored = fake_client.store.items[(("automation_notifications",), "thread_1")]
     assert stored["status"] == "delivered"
     assert stored["message_ts"] == "1786504009.596419"
+    assert fake_client.threads.update_calls == [
+        {
+            "thread_id": "thread_1",
+            "metadata": {"automation_action_posted_at": stored["notified_at"]},
+        }
+    ]
 
 
 async def test_notify_automation_channel_suppresses_duplicate_posts(

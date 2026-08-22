@@ -503,11 +503,34 @@ def openai_api_key() -> str | None:
     return _opt("OPENAI_API_KEY")
 
 
+def openai_oauth_broker() -> tuple[str, str] | None:
+    """The desktop app's local OpenAI credential broker: ``(token_url, bearer)``.
+
+    Only a loopback ``/token`` endpoint is accepted — the broker hands out the
+    signed-in user's ChatGPT access token, so it must never be reachable off
+    this machine.
+    """
+    url = _opt("OPEN_SWE_OPENAI_OAUTH_BROKER_URL")
+    token = _opt("OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN")
+    if not url or not token:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or parsed.path != "/token":
+        return None
+    return url, token
+
+
 def missing_provider_api_key(model_id: str) -> str | None:
-    """Name of the provider key ``model_id`` needs but the environment lacks."""
+    """Name of the provider key ``model_id`` needs but the environment lacks.
+
+    OpenAI models can run on the desktop broker's OAuth credentials instead of
+    a key, so with the broker configured nothing is missing.
+    """
     for prefix, name in _PROVIDER_API_KEY_ENV.items():
         if model_id.startswith(prefix):
-            return None if _opt(name) else name
+            if _opt(name) or (prefix == "openai:" and openai_oauth_broker() is not None):
+                return None
+            return name
     return None
 
 
@@ -602,6 +625,11 @@ def local_sandbox_root_dir() -> str | None:
 def local_projects_file() -> str | None:
     """Allow-list of local project directories desktop runs may open."""
     return _opt("OPEN_SWE_LOCAL_PROJECTS_FILE")
+
+
+def local_artifacts_dir() -> str | None:
+    """Where desktop runs keep the agent's scratch files, outside the project."""
+    return _opt("OPEN_SWE_LOCAL_ARTIFACTS_DIR")
 
 
 def modal_app_name() -> str:

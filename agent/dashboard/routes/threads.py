@@ -34,9 +34,11 @@ from ..threads.runs import (
     stream_dashboard_thread,
 )
 from ..threads.sandbox import (
-    get_dashboard_thread_pr_diff,
+    get_dashboard_thread_branch_diff,
+    get_dashboard_thread_pull_request_status,
     get_dashboard_thread_recovery_patch,
-    get_dashboard_thread_turn_diff,
+    get_dashboard_thread_run_diff,
+    get_dashboard_thread_working_tree_diff,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,6 +102,7 @@ async def api_list_threads_page(
     q: str | None = None,
     scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
+    sort_by: Literal["created_at", "updated_at"] = "updated_at",
     session: dict[str, Any] = SESSION,
 ) -> dict[str, Any]:
     _require_admin_for_all(session, all)
@@ -116,6 +119,7 @@ async def api_list_threads_page(
         query=q,
         scope=scope,
         automation_id=automation_id,
+        sort_by=sort_by,
     )
 
 
@@ -150,15 +154,25 @@ async def api_get_thread_recovery_patch(
     )
 
 
-@router.get("/threads/{thread_id}/turn-diff")
-async def api_get_thread_turn_diff(
+@router.get("/threads/{thread_id}/working-tree-diff")
+async def api_get_thread_working_tree_diff(
     thread_id: str,
-    turn_key: str | None = None,
+    session: dict[str, Any] = SESSION,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_working_tree_diff(
+        thread_id, session["sub"], email=session.get("email")
+    )
+
+
+@router.get("/threads/{thread_id}/run-diff")
+async def api_get_thread_run_diff(
+    thread_id: str,
+    turn_key: str,
     max_files: int = Query(200, ge=1, le=200),
     include_content: bool = True,
     session: dict[str, Any] = SESSION,
 ) -> dict[str, Any]:
-    return await get_dashboard_thread_turn_diff(
+    return await get_dashboard_thread_run_diff(
         thread_id,
         session["sub"],
         turn_key=turn_key,
@@ -168,12 +182,26 @@ async def api_get_thread_turn_diff(
     )
 
 
+@router.get("/threads/{thread_id}/branch-diff")
+# The pre-branch-diff name, kept for desktop bundles already in the wild.
 @router.get("/threads/{thread_id}/pr-diff")
-async def api_get_thread_pr_diff(
+async def api_get_thread_branch_diff(
     thread_id: str,
     session: dict[str, Any] = SESSION,
 ) -> dict[str, Any]:
-    return await get_dashboard_thread_pr_diff(
+    return await get_dashboard_thread_branch_diff(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
+    )
+
+
+@router.get("/threads/{thread_id}/pull-request-status")
+async def api_get_thread_pull_request_status(
+    thread_id: str,
+    session: dict[str, Any] = SESSION,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_pull_request_status(
         thread_id,
         session["sub"],
         email=session.get("email"),

@@ -106,7 +106,10 @@ async def test_runtime_prefers_repo_snapshot_then_admin_base() -> None:
             sandbox, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
         ),
     ):
-        assert await sandbox._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "repo-snap"
+        assert (
+            await sandbox._resolve_snapshot_id({"owner": "acme", "name": "repo"}, None)
+            == "repo-snap"
+        )
 
     with (
         patch.object(
@@ -116,5 +119,8 @@ async def test_runtime_prefers_repo_snapshot_then_admin_base() -> None:
             sandbox, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
         ),
     ):
-        assert await sandbox._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "admin-snap"
-        assert await sandbox._resolve_snapshot_id(None) == "admin-snap"
+        assert (
+            await sandbox._resolve_snapshot_id({"owner": "acme", "name": "repo"}, None)
+            == "admin-snap"
+        )
+        assert await sandbox._resolve_snapshot_id(None, None) == "admin-snap"

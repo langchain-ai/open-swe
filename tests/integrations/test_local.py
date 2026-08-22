@@ -32,7 +32,7 @@ async def test_create_creates_a_missing_root_dir(
     stub = cast(_StubLocalShellBackend, backend)
     assert stub.root_dir == str(root)
     assert stub.virtual_mode is True
-    assert stub.inherit_env is True
+    assert stub.inherit_env is False
 
 
 async def test_create_defaults_to_cwd(
@@ -77,8 +77,33 @@ async def test_create_keeps_an_explicit_global_git_config(
     backend = await LocalProvider().create()
 
     stub = cast(_StubLocalShellBackend, backend)
-    assert "GIT_CONFIG_GLOBAL" not in stub.env
+    assert stub.env["GIT_CONFIG_GLOBAL"] == str(tmp_path / "chosen-gitconfig")
     assert not (tmp_path / "work" / local_mod.SANDBOX_GITCONFIG).exists()
+
+
+async def test_create_excludes_the_servers_credentials_from_the_shell(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, stub_backend: None
+) -> None:
+    monkeypatch.setenv("LOCAL_SANDBOX_ROOT_DIR", str(tmp_path / "work"))
+    monkeypatch.setenv("OPEN_SWE_OPENAI_OAUTH_BROKER_URL", "http://127.0.0.1:3210/token")
+    monkeypatch.setenv("OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN", "broker-secret")
+    monkeypatch.setenv("OPEN_SWE_OPENAI_OAUTH_ACCOUNT_FILE", "/tmp/legacy-account.json")
+    monkeypatch.setenv("OPENAI_API_KEY", "provider-secret")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "provider-secret")
+    monkeypatch.setenv("VISIBLE_TO_AGENT", "visible")
+
+    backend = await LocalProvider().create()
+
+    stub = cast(_StubLocalShellBackend, backend)
+    assert stub.env["VISIBLE_TO_AGENT"] == "visible"
+    for secret in (
+        "OPEN_SWE_OPENAI_OAUTH_BROKER_URL",
+        "OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN",
+        "OPEN_SWE_OPENAI_OAUTH_ACCOUNT_FILE",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+    ):
+        assert secret not in stub.env
 
 
 async def test_connect_returns_the_same_host_root_and_is_never_gone(

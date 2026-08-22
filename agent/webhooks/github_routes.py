@@ -14,6 +14,7 @@ from ..github.org_membership import (
     is_user_active_org_member,
 )
 from ..review.dispatch import auto_review_enabled
+from ..settings.agent_usage import update_agent_pr_usage_from_webhook
 from . import github as service
 from .signatures import verify_github_signature
 
@@ -41,13 +42,14 @@ _SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
         "converted_to_draft",
         "closed",
         "reopened",
+        "synchronize",
     ]
 )
 _GH_PR_WATCH_TOGGLE_ACTIONS = frozenset(["closed", "reopened", "converted_to_draft"])
 _GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
 # PR lifecycle actions that should refresh the agent thread's tracked pr_state.
 _GH_PR_AGENT_STATE_ACTIONS = frozenset(
-    ["closed", "reopened", "converted_to_draft", "ready_for_review"]
+    ["closed", "reopened", "converted_to_draft", "ready_for_review", "synchronize"]
 )
 _SUPPORTED_GH_COMMENT_ACTIONS = {
     "issue_comment": frozenset(["created", "edited"]),
@@ -150,6 +152,11 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
             }
         if action in _GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(service.update_agent_thread_pr_state, payload)
+            try:
+                await update_agent_pr_usage_from_webhook(payload)
+            except Exception:  # noqa: BLE001
+                # Telemetry only; the webhook is still acknowledged and acted on.
+                logger.debug("Failed to update Agent PR usage", exc_info=True)
         if action in _GH_PR_WATCH_TOGGLE_ACTIONS:
             logger.info("Accepted GitHub PR %s webhook, scheduling reviewer watch update", action)
             background_tasks.add_task(service.process_github_pr_close, payload)
@@ -163,6 +170,8 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
             logger.info("Accepted GitHub PR %s webhook, scheduling auto-review task", action)
             background_tasks.add_task(service.process_github_pr_ready, payload)
             return {"status": "accepted", "message": f"Processing PR {action} for auto-review"}
+        if action in _GH_PR_AGENT_STATE_ACTIONS:
+            return {"status": "accepted", "message": f"Processing PR {action} state"}
         logger.info("Ignoring unsupported GitHub pull_request action: %s", action)
         return {
             "status": "ignored",

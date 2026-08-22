@@ -1,6 +1,8 @@
 """Daytona sandbox provider."""
 
 import asyncio
+from collections.abc import Mapping
+from typing import Any
 
 from daytona import (
     CreateSandboxFromSnapshotParams,
@@ -13,7 +15,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_daytona import DaytonaSandbox
 
 from ..config import daytona_api_key, daytona_snapshot
-from ..sandboxes.providers import SandboxGoneError, SandboxProvider
+from ..sandboxes.providers import SandboxGoneError, SandboxProvider, SandboxResources
 
 DEFAULT_DAYTONA_SANDBOX_SNAPSHOT = "daytonaio/sandbox:0.6.0"
 
@@ -48,13 +50,20 @@ class DaytonaProvider(SandboxProvider):
     async def connect(self, sandbox_id: str) -> SandboxBackendProtocol:
         return await asyncio.to_thread(self._connect, sandbox_id)
 
-    async def create(self, *, snapshot_id: str | None = None) -> SandboxBackendProtocol:
+    async def create(
+        self,
+        *,
+        snapshot_id: str | None = None,
+        resources: SandboxResources | None = None,
+        create_params: Mapping[str, Any] | None = None,
+    ) -> SandboxBackendProtocol:
         if snapshot_id is not None:
             msg = (
                 f"Daytona cannot boot from snapshot {snapshot_id!r}; its image is set by "
                 "DAYTONA_SANDBOX_SNAPSHOT"
             )
             raise ValueError(msg)
+        self._reject_sizing("Daytona", resources, create_params)
         return await asyncio.to_thread(self._create)
 
     async def work_dir(self, backend: SandboxBackendProtocol) -> str | None:

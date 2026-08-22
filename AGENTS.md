@@ -76,6 +76,8 @@ Where a provider `uses_github_proxy` (LangSmith does; modal, daytona, runloop, e
 
 Every run re-applies `git config --global user.name/email` for the bot identity, because reused/reconnected sandboxes can lose `--global` config and Vercel preview deploys reject commits whose author email doesn't resolve to a GitHub account.
 
+`PrepareAgentRunMiddleware` also snapshots the worktree into `refs/open-swe/turns/<user-message-id>` at run start (`agent/sandboxes/turn_checkpoint.py`), recording the refs in thread metadata. `GET /threads/{id}/run-diff` reads them back so the dashboard's changed-files views come from git rather than from replaying edit tool calls — which is the only way to catch edits made through `execute` and to drop files that were later reverted.
+
 ### Middleware stack (order matters)
 
 Every graph's stack comes from the builders in `agent/middleware/stack.py`, and the lists they return are outermost-first: the first entry wraps every later one, the last sits closest to the provider call.

@@ -6,7 +6,8 @@ re-guessed by each endpoint that returns a thread.
 """
 
 from collections.abc import Mapping
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal
 
 from ...github.refs import parse_github_pr_url
 from ...langsmith.api import get_langsmith_trace_url
@@ -19,6 +20,27 @@ from ..authz import thread_owner_login, thread_source, user_owns_thread
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 # Written while a sandbox is being created, so the id is not yet connectable.
 SANDBOX_CREATING_SENTINEL = "__creating__"
+
+ThreadTimestampField = Literal["created_at", "updated_at"]
+
+
+def thread_timestamp_ms(thread: ThreadLike, field: ThreadTimestampField) -> int:
+    """A thread's ``created_at``/``updated_at`` in epoch ms.
+
+    Open SWE stamps its own ``*_ms`` copy in metadata; threads created outside
+    it (or before the stamp existed) fall back to the LangGraph timestamp.
+    """
+    value = thread_metadata(thread).get(f"{field}_ms")
+    if isinstance(value, int | float):
+        return int(value)
+    timestamp = thread.get(field)
+    if isinstance(timestamp, str) and timestamp:
+        try:
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            return 0
+        return int(parsed.timestamp() * 1000)
+    return 0
 
 
 def thread_id_of(thread: ThreadLike) -> str | None:
@@ -257,7 +279,11 @@ async def thread_summary(
     metadata = thread_metadata(thread)
     _, name, full_name = metadata_repo(metadata)
     created_at = metadata.get("created_at_ms")
+    if not isinstance(created_at, int | float):
+        created_at = thread_timestamp_ms(thread, "created_at")
     updated_at = metadata.get("updated_at_ms")
+    if not isinstance(updated_at, int | float):
+        updated_at = thread_timestamp_ms(thread, "updated_at")
     raw_title = metadata.get("title")
     title: str = raw_title if isinstance(raw_title, str) else "Untitled agent"
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
@@ -299,6 +325,10 @@ async def thread_summary(
         "triggerKind": trigger_kind,
         "automationId": metadata_string(metadata, "schedule_id"),
         "automationName": metadata_string(metadata, "schedule_name"),
+        "automationActionPosted": (
+            thread_category == "automation"
+            and metadata_string(metadata, "automation_action_posted_at") is not None
+        ),
         "status": run_status_to_agent_status(thread_status, run_status),
         "viewed": is_thread_viewed(metadata, latest_run_id),
         "viewedAt": (

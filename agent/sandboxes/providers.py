@@ -9,8 +9,9 @@ than by branching on the provider's name.
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from importlib import import_module
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from ..config import sandbox_provider
 
@@ -20,6 +21,14 @@ if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
 
 logger = logging.getLogger(__name__)
+
+
+class SandboxResources(TypedDict, total=False):
+    """VM sizing for a new sandbox; a missing key means the platform default."""
+
+    mem_bytes: int
+    vcpus: int
+    fs_capacity_bytes: int
 
 
 class SandboxGoneError(RuntimeError):
@@ -76,13 +85,42 @@ class SandboxProvider(ABC):
         """
 
     @abstractmethod
-    async def create(self, *, snapshot_id: str | None = None) -> "SandboxBackendProtocol":
+    async def create(
+        self,
+        *,
+        snapshot_id: str | None = None,
+        resources: SandboxResources | None = None,
+        create_params: Mapping[str, Any] | None = None,
+    ) -> "SandboxBackendProtocol":
         """Provision a fresh sandbox, booting it from ``snapshot_id`` when given.
 
-        A provider that cannot boot from Open SWE snapshots raises on a
-        non-``None`` ``snapshot_id`` rather than silently starting a sandbox
-        with contents the caller did not ask for.
+        ``resources`` sizes the VM and ``create_params`` are extra fields for the
+        platform's create request, both as an environment configured them. A
+        provider that cannot honour a non-empty one raises — as it does for a
+        snapshot it cannot boot from — rather than silently starting a sandbox
+        that is not what the caller asked for.
         """
+
+    @staticmethod
+    def _reject_sizing(
+        platform: str,
+        resources: SandboxResources | None,
+        create_params: Mapping[str, Any] | None,
+    ) -> None:
+        if resources or create_params:
+            msg = (
+                f"{platform} sandboxes are sized by the platform configuration; an environment's "
+                "resources and create_params are not supported"
+            )
+            raise ValueError(msg)
+
+    def proxy_config(self, create_params: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        """The proxy settings a sandbox created with ``create_params`` carries.
+
+        Only meaningful where ``uses_github_proxy``: the GitHub auth rules are
+        layered on top of these, so they have to be re-sent with every token.
+        """
+        return None
 
     def validate_startup_config(self) -> None:  # noqa: B027 - optional: most providers read no env
         """Reject env-var configuration this provider cannot run with, at server boot."""
@@ -134,18 +172,23 @@ async def create_sandbox(
     sandbox_id: str | None = None,
     *,
     snapshot_id: str | None = None,
+    resources: SandboxResources | None = None,
+    create_params: Mapping[str, Any] | None = None,
 ) -> "SandboxBackendProtocol":
     """Reconnect to ``sandbox_id``, or provision a new sandbox from ``snapshot_id``.
 
-    The two are alternatives, not a pair: a snapshot only ever seeds a sandbox
-    being created, so passing both is a caller bug rather than a preference.
+    The two are alternatives, not a pair: a snapshot (like the sizing and create
+    params) only ever seeds a sandbox being created, so passing both is a caller
+    bug rather than a preference.
     """
-    if sandbox_id and snapshot_id:
+    if sandbox_id and (snapshot_id or resources or create_params):
         raise ValueError("snapshot_id seeds a new sandbox; it cannot be applied to sandbox_id")
     provider = current_sandbox_provider()
     if sandbox_id:
         return await provider.connect(sandbox_id)
-    return await provider.create(snapshot_id=snapshot_id)
+    return await provider.create(
+        snapshot_id=snapshot_id, resources=resources, create_params=create_params
+    )
 
 
 def validate_sandbox_startup_config() -> None:

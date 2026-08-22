@@ -3,10 +3,17 @@ import { DownloadIcon } from "lucide-react"
 
 import type { AgentThread } from "@/lib/agentTypes"
 import { agentsApi } from "@/features/agents/lib/api"
-import { useAgentThreadTurnDiff } from "@/features/agents/lib/queries"
+import {
+  useAgentThreadBranchDiff,
+  useAgentThreadWorkingTreeDiff,
+} from "@/features/agents/lib/queries"
 import { toPanelFiles } from "@/features/agents/lib/panelFiles"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
+import {
+  selectThreadDiffScope,
+  useDiffPanelStore,
+} from "@/features/agents/lib/diffPanelStore"
 import {
   selectThreadRightPanelState,
   useRightPanelStore,
@@ -48,17 +55,63 @@ export function AgentGitPanel({
   const terminalAvailable =
     thread.isOwner !== false && Boolean(thread.sandboxId)
 
-  const turnDiff = useAgentThreadTurnDiff(
+  // Served from GitHub, so it needs a repository — with or without a PR.
+  const branchScopeAvailable =
+    Boolean(thread.repoFullName) && Boolean(thread.branch)
+  const selectScope = useDiffPanelStore((state) => state.selectScope)
+  const scope = useDiffPanelStore((state) =>
+    selectThreadDiffScope(
+      state.byThreadKey,
+      threadRef,
+      branchScopeAvailable,
+      Boolean(thread.pr)
+    )
+  )
+  const diffVisible = !collapsed && activeSurfaceId === "diff"
+
+  const turnDiff = useAgentThreadWorkingTreeDiff(
     thread.id,
-    null,
-    !collapsed && activeSurfaceId === "diff",
-    {},
+    diffVisible && scope === "working-tree",
     thread.status === "running"
   )
-  const files = useMemo(
-    () => toPanelFiles(turnDiff.data?.files ?? []),
-    [turnDiff.data?.files]
+  const branchDiff = useAgentThreadBranchDiff(
+    thread.id,
+    diffVisible && scope === "branch"
   )
+  const diff =
+    scope === "branch"
+      ? {
+          files: branchDiff.data?.files ?? [],
+          // The branch endpoint answers from GitHub: a successful response is
+          // always a real diff, and a failure surfaces through `error`.
+          status: branchDiff.data ? ("ready" as const) : undefined,
+          truncated: branchDiff.data?.truncated,
+          isPending: branchDiff.isPending,
+          isFetching: branchDiff.isFetching,
+          error: branchDiff.error,
+          refetch: branchDiff.refetch,
+        }
+      : {
+          files: turnDiff.data?.files ?? [],
+          status: turnDiff.data?.status,
+          truncated: turnDiff.data?.truncated,
+          isPending: turnDiff.isPending,
+          isFetching: turnDiff.isFetching,
+          error: turnDiff.error,
+          refetch: turnDiff.refetch,
+        }
+  const files = useMemo(() => toPanelFiles(diff.files), [diff.files])
+
+  // Refresh whenever the window regains focus: the diff is read live, so a
+  // push or a review landing elsewhere should be visible on return.
+  const refetchDiff = diff.refetch
+  useEffect(() => {
+    if (!diffVisible) return
+    const onFocus = () => void refetchDiff()
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [diffVisible, refetchDiff])
+
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const canDownloadRecovery =
@@ -95,22 +148,24 @@ export function AgentGitPanel({
       cwd=""
       terminalAvailable={terminalAvailable}
       diffAvailable
-      pullRequests={thread.pullRequests ?? []}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
       renderDiff={({ fullScreen }) => (
         <ChangesPanel
           files={files}
-          status={turnDiff.data?.status}
-          isLoading={turnDiff.isPending}
-          isFetching={turnDiff.isFetching}
-          error={turnDiff.error}
-          truncated={turnDiff.data?.truncated}
+          status={diff.status}
+          isLoading={diff.isPending}
+          isFetching={diff.isFetching}
+          error={diff.error}
+          truncated={diff.truncated}
           branch={thread.branch}
           pr={thread.pr}
           revealFilePath={revealFilePath}
           fullScreen={fullScreen}
-          onRefresh={() => void turnDiff.refetch()}
+          onRefresh={() => void diff.refetch()}
+          scope={scope}
+          branchScopeAvailable={branchScopeAvailable}
+          onScopeChange={(next) => selectScope(threadRef, next)}
           extraActions={
             canDownloadRecovery ? (
               <button

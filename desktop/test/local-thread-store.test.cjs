@@ -10,11 +10,12 @@ function temporaryStore(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-local-threads-"))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   let now = 100
+  let nextId = 0
   return {
     path: path.join(root, "threads.json"),
     create: () => new LocalThreadStore(path.join(root, "threads.json"), {
       now: () => ++now,
-      uuid: () => "thread-1",
+      uuid: () => `thread-${++nextId}`,
     }),
   }
 }
@@ -48,15 +49,30 @@ test("persists a prompt until it is acknowledged", (t) => {
   assert.equal(restored.modelId, "anthropic:test")
 })
 
-test("reconciles interrupted threads and retains checkpoint refs until deletion", (t) => {
+test("keeps threads in creation order when an older thread is updated", (t) => {
+  const fixture = temporaryStore(t)
+  const store = fixture.create()
+  const older = store.create({ cwd: path.resolve("/tmp/project"), prompt: "older" })
+  const newer = store.create({ cwd: path.resolve("/tmp/project"), prompt: "newer" })
+
+  store.update(older.id, { title: "older updated" })
+
+  assert.deepEqual(store.list().map((thread) => thread.id), [newer.id, older.id])
+})
+
+test("retains checkpoint refs until deletion", (t) => {
   const fixture = temporaryStore(t)
   const store = fixture.create()
   const thread = store.create({ cwd: path.resolve("/tmp/project"), prompt: "work" })
-  store.setCheckpoint(thread.id, { repo: path.resolve("/tmp/project"), ref: "refs/open-swe/local/thread-1" })
-  store.update(thread.id, { status: "running", viewed: false })
+  store.setCheckpoint(thread.id, {
+    repo: path.resolve("/tmp/project"),
+    ref: "refs/open-swe/local/thread-1",
+    branch: "feature",
+  })
+  assert.equal(store.get(thread.id).checkpoint.branch, "feature")
+  store.update(thread.id, { viewed: false })
 
   const restored = fixture.create()
-  assert.equal(restored.get(thread.id).status, "error")
   assert.equal(restored.get(thread.id).viewed, false)
   assert.equal(restored.get(thread.id).checkpoint.ref, "refs/open-swe/local/thread-1")
   assert.equal(restored.delete(thread.id).checkpoint.ref, "refs/open-swe/local/thread-1")

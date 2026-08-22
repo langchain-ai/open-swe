@@ -2,10 +2,10 @@
 
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter
 from fastapi.responses import Response
 
-from ..authz import SESSION
+from ..authz import SESSION, session_is_admin
 from ..schedule_models import ScheduleCreateBody, ScheduleUpdateBody
 from ..schedules import (
     create_agent_schedule,
@@ -14,18 +14,13 @@ from ..schedules import (
     trigger_agent_schedule,
     update_agent_schedule,
 )
-from ..usage_reports import (
-    list_agent_usage_leaderboard,
-    refresh_reviewer_stats_cache,
-    refresh_usage_leaderboard_cache,
-)
+from ..usage_reports import list_agent_usage_leaderboard
 
 router = APIRouter()
 
 
 @router.get("/agent-usage-leaderboard")
 async def api_agent_usage_leaderboard(
-    background_tasks: BackgroundTasks,
     period: str | None = "30d",
     limit: int = 10,
     session: dict[str, Any] = SESSION,
@@ -35,12 +30,6 @@ async def api_agent_usage_leaderboard(
         limit=limit,
         current_login=session["sub"],
         current_email=session.get("email"),
-        schedule_usage_refresh=lambda cache_period: background_tasks.add_task(
-            refresh_usage_leaderboard_cache, cache_period
-        ),
-        schedule_reviewer_refresh=lambda cache_period: background_tasks.add_task(
-            refresh_reviewer_stats_cache, cache_period
-        ),
     )
 
 
@@ -56,7 +45,12 @@ async def api_create_schedule(
     body: ScheduleCreateBody,
     session: dict[str, Any] = SESSION,
 ) -> dict[str, Any]:
-    return await create_agent_schedule(session["sub"], body, email=session.get("email"))
+    return await create_agent_schedule(
+        session["sub"],
+        body,
+        email=session.get("email"),
+        allow_admin_thread=session_is_admin(session),
+    )
 
 
 @router.patch("/schedules/{schedule_id}")
@@ -66,7 +60,11 @@ async def api_update_schedule(
     session: dict[str, Any] = SESSION,
 ) -> dict[str, Any]:
     return await update_agent_schedule(
-        schedule_id, session["sub"], body, email=session.get("email")
+        schedule_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        allow_admin_thread=session_is_admin(session),
     )
 
 

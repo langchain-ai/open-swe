@@ -97,10 +97,10 @@ export function PlanReview({
   return (
     <main
       data-testid="plan-review"
-      className="@container min-h-0 flex-1 overflow-y-auto bg-background text-foreground"
+      className="@container flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground"
     >
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-4 md:px-8 md:py-6">
-        <header className="flex flex-col gap-3 border-b border-border pb-4 @3xl:flex-row @3xl:items-center @3xl:justify-between">
+      <div className="flex min-h-0 w-full flex-1 flex-col gap-3 p-3 md:p-4">
+        <header className="flex flex-col gap-3 border-b border-border pb-3 @3xl:flex-row @3xl:items-center @3xl:justify-between">
           <div data-testid="plan-summary" className="min-w-0">
             <h1 className="text-lg font-semibold text-foreground">
               {isShared ? "Shared response" : "Implementation plan"}
@@ -151,13 +151,16 @@ export function PlanReview({
 
         <section
           data-testid="plan-document"
-          className="min-w-0 overflow-hidden rounded-xl border border-border bg-card"
+          className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-border bg-card"
         >
           {content.trim() ? (
             format === "html" ? (
-              <PlanArtifactFrame html={content} className="min-h-[70vh]" />
+              <PlanArtifactFrame html={content} className="h-full min-h-0" />
             ) : (
-              <div data-testid="plan-markdown" className="min-h-[70vh] p-6">
+              <div
+                data-testid="plan-markdown"
+                className="h-full w-full overflow-y-auto p-4 md:p-6"
+              >
                 <Markdown content={content} />
               </div>
             )

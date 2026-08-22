@@ -49,3 +49,42 @@ async def test_initialization_failure_publishes_nothing(failing_step: str) -> No
     # the cached-backend fast path.
     assert not proxy.has_backend
     assert not SANDBOX_BACKENDS[thread_id].has_backend
+    SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
+async def test_new_sandbox_persists_its_base_proxy_config() -> None:
+    thread_id = "thread-proxy-config"
+    SANDBOX_BACKENDS.clear()
+    created = MagicMock(id="sandbox-new")
+    base_proxy_config = {"rules": [{"name": "public-api", "match_hosts": ["example.com"]}]}
+    update = AsyncMock()
+
+    with (
+        patch(
+            "agent.runtime.sandbox.get_sandbox_id_from_metadata",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "agent.runtime.sandbox._create_sandbox_with_proxy",
+            new_callable=AsyncMock,
+            return_value=created,
+        ),
+        patch(
+            "agent.runtime.sandbox.get_recorded_proxy_base_config",
+            return_value=base_proxy_config,
+        ),
+        patch("agent.runtime.sandbox._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox.client.threads.update", update),
+    ):
+        await ensure_sandbox_for_thread(thread_id)
+
+    update.assert_awaited_once_with(
+        thread_id=thread_id,
+        metadata={
+            "sandbox_id": "sandbox-new",
+            "sandbox_base_proxy_config": base_proxy_config,
+        },
+    )
+    SANDBOX_BACKENDS.clear()

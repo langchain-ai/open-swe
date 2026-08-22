@@ -6,6 +6,7 @@ from weakref import WeakValueDictionary
 
 from langgraph.config import get_config
 
+from ..config import in_process_langgraph_client
 from ..slack.api import post_slack_top_level_message_with_ts
 from ..slack.format import append_slack_web_link_footer
 from ..store import delete_value, get_value, now_iso, put_value
@@ -31,6 +32,16 @@ async def _release_reservation(thread_id: str) -> None:
         await delete_value(_NOTIFICATION_NAMESPACE, thread_id)
     except Exception:
         logger.exception("Failed to release automation notification for %s", thread_id)
+
+
+async def _mark_action_posted(thread_id: str, notified_at: str) -> None:
+    try:
+        await in_process_langgraph_client().threads.update(
+            thread_id=thread_id,
+            metadata={"automation_action_posted_at": notified_at},
+        )
+    except Exception:
+        logger.exception("Failed to mark automation action posted for %s", thread_id)
 
 
 async def notify_automation_channel(message: str) -> dict[str, Any]:
@@ -75,6 +86,9 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             logger.exception("Failed to check automation notification for %s", thread_id)
             return {"success": False, "error": "Could not check the Slack notification state"}
         if existing is not None:
+            notified_at = existing.get("notified_at")
+            if existing.get("status") == "delivered" and isinstance(notified_at, str):
+                await _mark_action_posted(thread_id, notified_at)
             return {
                 "success": True,
                 "already_notified": True,
@@ -125,4 +139,5 @@ async def notify_automation_channel(message: str) -> dict[str, Any]:
             await put_value(_NOTIFICATION_NAMESPACE, thread_id, delivered)
         except Exception:
             logger.exception("Failed to finalize automation notification for %s", thread_id)
+        await _mark_action_posted(thread_id, delivered["notified_at"])
         return {"success": True, "message_ts": message_ts}

@@ -86,7 +86,14 @@ async def auth_login(
 @router.get("/auth/callback")
 async def auth_callback(request: Request, code: str, state: str) -> Response:
     state_payload = decode_state(state)
-    GITHUB_LOGIN_STATE.verify(request, state_payload)
+    challenge = state_payload.get("handoff_challenge")
+    port = state_payload.get("handoff_port")
+    is_desktop = isinstance(challenge, str) and isinstance(port, int)
+    # A desktop login completes in the user's own browser, which never received
+    # the state cookie bound to the dashboard origin; the PKCE challenge in the
+    # signed state is what binds that callback to the app instead.
+    if not is_desktop:
+        GITHUB_LOGIN_STATE.verify(request, state_payload)
 
     redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
 
@@ -103,8 +110,6 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
 
     await upsert_access_token_from_github_response(identity.login, identity.email or "", token_data)
 
-    challenge = state_payload.get("handoff_challenge")
-    port = state_payload.get("handoff_port")
     if isinstance(challenge, str) and isinstance(port, int):
         # Desktop login runs in the user's own browser, so the session belongs to
         # the app rather than to this browser: hand back a PKCE-bound code the

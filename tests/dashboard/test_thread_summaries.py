@@ -16,7 +16,7 @@ from agent.dashboard.threads import runs as thread_runs
 
 # The columns the list endpoints ask the platform for, and the page size they
 # scan it in -- paging is only observable once the seeded threads exceed it.
-_LIST_SELECT = ["thread_id", "status", "metadata", "updated_at"]
+_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
 _SEARCH_PAGE = 500
 
 
@@ -461,6 +461,46 @@ async def test_list_page_pages_beyond_first_search_batch(dashboard_client) -> No
     _assert_list_select(client)
     assert _SEARCH_PAGE in _search_offsets(client)
     assert client.runs.list_calls == []
+
+
+async def test_list_page_can_sort_by_creation_time(dashboard_client) -> None:
+    threads = _make_threads(2, resolved_before=0)
+    older = cast(dict[str, object], threads[0]["metadata"])
+    older.update({"created_at_ms": 1, "updated_at_ms": 3, "latest_run_status": "success"})
+    newer = cast(dict[str, object], threads[1]["metadata"])
+    newer.update({"created_at_ms": 2, "updated_at_ms": 2, "latest_run_status": "success"})
+    client = dashboard_client(threads=threads)
+
+    result = await thread_listing.list_dashboard_threads_page(
+        "octocat", email=None, limit=2, offset=0, sort_by="created_at"
+    )
+
+    assert [call["sort_by"] for call in client.threads.searches] == ["created_at"]
+    assert [item["id"] for item in result["items"]] == ["t1", "t0"]
+    assert [item["createdAt"] for item in result["items"]] == [2, 1]
+
+
+async def test_list_page_falls_back_to_platform_timestamps(dashboard_client) -> None:
+    client = dashboard_client(
+        threads=[
+            {
+                "thread_id": "platform-stamped",
+                "created_at": "2026-08-01T00:00:00Z",
+                "updated_at": "2026-08-02T00:00:00Z",
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "octocat",
+                    "latest_run_status": "success",
+                },
+            }
+        ]
+    )
+
+    result = await thread_listing.list_dashboard_threads_page("octocat", email=None)
+
+    assert result["items"][0]["createdAt"] == 1_785_542_400_000
+    assert result["items"][0]["updatedAt"] == 1_785_628_800_000
+    _assert_list_select(client)
 
 
 async def test_list_page_scopes_automation_runs(dashboard_client) -> None:

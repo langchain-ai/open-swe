@@ -1,9 +1,16 @@
-import { useMemo } from "react"
-import { GitPullRequestIcon, RefreshCwIcon } from "lucide-react"
+import { useMemo, useState } from "react"
+import {
+  ChevronDownIcon,
+  GitPullRequestIcon,
+  RefreshCwIcon,
+} from "lucide-react"
 
 import type { AgentThread } from "@/lib/agentTypes"
+import type { DiffScopeKind } from "@/features/agents/lib/diffPanelStore"
 import type { PanelFile } from "@/components/diff/DiffFilesView"
 import { DiffFilesView } from "@/components/diff/DiffFilesView"
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 
 export type ChangesStatus = "ready" | "missing" | "error"
 
@@ -20,6 +27,10 @@ interface ChangesPanelProps {
   fullScreen: boolean
   onRefresh: () => void
   extraActions?: React.ReactNode
+  scope: DiffScopeKind
+  onScopeChange: (scope: DiffScopeKind) => void
+  /** False when nothing tells us what this branch is based on. */
+  branchScopeAvailable: boolean
 }
 
 function errorMessage(error: unknown): string | null {
@@ -31,13 +42,77 @@ export function changesEmptyLabel({
   status,
   isLoading,
   error,
-}: Pick<ChangesPanelProps, "status" | "isLoading" | "error">): string {
+  scope,
+}: Pick<ChangesPanelProps, "status" | "isLoading" | "error"> & {
+  scope?: DiffScopeKind
+}): string {
   if (isLoading) return "Reading changes…"
   if (error) return errorMessage(error) ?? "Could not load changes."
   if (status === "missing")
     return "Changes are not available for this workspace."
   if (status === "error") return "Could not read changes. Try refreshing."
+  if (scope === "branch") return "This branch changes nothing yet."
   return "No changes yet."
+}
+
+const SCOPE_LABELS: Record<DiffScopeKind, string> = {
+  "working-tree": "Working tree",
+  branch: "Branch changes",
+}
+
+function ScopeSwitcher(props: {
+  scope: DiffScopeKind
+  branchScopeAvailable: boolean
+  onScopeChange: (scope: DiffScopeKind) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const label = SCOPE_LABELS[props.scope]
+
+  const branchItem = (
+    <MenuItem
+      className={
+        props.branchScopeAvailable
+          ? undefined
+          : "data-disabled:pointer-events-auto"
+      }
+      disabled={!props.branchScopeAvailable}
+      onClick={() => props.onScopeChange("branch")}
+    >
+      {SCOPE_LABELS.branch}
+    </MenuItem>
+  )
+
+  return (
+    <Menu open={open} onOpenChange={setOpen}>
+      <MenuTrigger
+        className="flex h-6 min-w-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+        aria-label={`Diff scope: ${label}`}
+      >
+        <span className="min-w-0 truncate">{label}</span>
+        <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+      </MenuTrigger>
+      <MenuPopup
+        align="start"
+        side="bottom"
+        sideOffset={6}
+        className="min-w-52"
+      >
+        <MenuItem onClick={() => props.onScopeChange("working-tree")}>
+          {SCOPE_LABELS["working-tree"]}
+        </MenuItem>
+        {props.branchScopeAvailable ? (
+          branchItem
+        ) : (
+          <Tooltip>
+            <TooltipTrigger render={branchItem} />
+            <TooltipPopup side="right">
+              This thread has no branch to compare against its base yet.
+            </TooltipPopup>
+          </Tooltip>
+        )}
+      </MenuPopup>
+    </Menu>
+  )
 }
 
 export function ChangesPanel({
@@ -53,8 +128,11 @@ export function ChangesPanel({
   fullScreen,
   onRefresh,
   extraActions,
+  scope,
+  onScopeChange,
+  branchScopeAvailable,
 }: ChangesPanelProps) {
-  const emptyLabel = changesEmptyLabel({ status, isLoading, error })
+  const emptyLabel = changesEmptyLabel({ status, isLoading, error, scope })
   const actions = useMemo(
     () => (
       <>
@@ -102,9 +180,18 @@ export function ChangesPanel({
         emptyLabel={emptyLabel}
         truncated={truncated}
         leading={
-          <span className="min-w-0 truncate text-sm font-medium text-foreground">
-            Changes{branch ? ` · ${branch}` : ""}
-          </span>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <ScopeSwitcher
+              scope={scope}
+              branchScopeAvailable={branchScopeAvailable}
+              onScopeChange={onScopeChange}
+            />
+            {branch && (
+              <span className="min-w-0 truncate text-xs text-muted-foreground">
+                {branch}
+              </span>
+            )}
+          </div>
         }
         actions={actions}
       />

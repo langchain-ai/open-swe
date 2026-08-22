@@ -68,10 +68,21 @@ async function currentBranch(cwd) {
   }
 }
 
+function count(value) {
+  return Number.isInteger(value) && value >= 0 ? value : 0
+}
+
+/** `owner/repo` from an already-validated pull request URL. */
+function repoFullNameFromUrl(url: URL) {
+  const [owner, repo] = url.pathname.split("/").filter(Boolean)
+  return owner && repo ? `${owner}/${repo}` : null
+}
+
 function parsePullRequest(raw) {
   try {
     const value = JSON.parse(raw)
     const url = new URL(value.url)
+    const repoFullName = repoFullNameFromUrl(url)
     if (
       !Number.isInteger(value.number) ||
       value.number < 1 ||
@@ -80,10 +91,12 @@ function parsePullRequest(raw) {
       typeof value.isDraft !== "boolean" ||
       typeof value.headRefName !== "string" ||
       typeof value.baseRefName !== "string" ||
-      !["http:", "https:"].includes(url.protocol)
+      !["http:", "https:"].includes(url.protocol) ||
+      !repoFullName
     ) {
       return null
     }
+    const login = value.author?.login
     return {
       number: value.number,
       title: value.title,
@@ -94,13 +107,22 @@ function parsePullRequest(raw) {
       headRef: value.headRefName,
       baseRef: value.baseRefName,
       url: url.href,
+      repoFullName,
+      author: typeof login === "string" && login ? login : null,
+      authorAvatarUrl: null,
+      createdAt: typeof value.createdAt === "string" ? value.createdAt : null,
+      diffStats: {
+        files: count(value.changedFiles),
+        additions: count(value.additions),
+        deletions: count(value.deletions),
+      },
     }
   } catch {
     return null
   }
 }
 
-async function pullRequest(repo, env) {
+async function pullRequest(repo, env, branch = null) {
   try {
     const output = await new Promise<string>((resolve, reject) => {
       execFile(
@@ -108,8 +130,9 @@ async function pullRequest(repo, env) {
         [
           "pr",
           "view",
+          ...(branch ? [branch] : []),
           "--json",
-          "number,title,state,isDraft,headRefName,baseRefName,url",
+          "number,title,state,isDraft,headRefName,baseRefName,url,author,createdAt,additions,deletions,changedFiles",
         ],
         {
           cwd: repo,
@@ -127,9 +150,15 @@ async function pullRequest(repo, env) {
   }
 }
 
-async function repositoryMetadata(repo, env) {
-  const branch = await currentBranch(repo)
-  return { branch, pr: branch ? await pullRequest(repo, env) : null }
+/**
+ * `threadBranch` is the branch the thread last worked on. Every session in the
+ * project shares one worktree, so the branch that happens to be checked out
+ * right now is not necessarily the one this thread's pull request belongs to.
+ */
+async function repositoryMetadata(repo, env, threadBranch = null) {
+  const named = await validBranchName(repo, threadBranch)
+  const branch = named ?? (await currentBranch(repo))
+  return { branch, pr: branch ? await pullRequest(repo, env, named) : null }
 }
 
 function gitStdin(cwd, args, input) {
@@ -316,9 +345,12 @@ function decode(blob: Buffer | false | null) {
   return content.includes("\u0000") ? [null, true] : [content, false]
 }
 
-/** Files changed between `base` and the live worktree, shaped like the cloud turn diff. */
-async function readDiff(repo, base) {
-  const head = await writeWorktreeTree(repo)
+/**
+ * Files changed between `base` and `head`, shaped like the cloud turn diff.
+ * `head` defaults to the live worktree.
+ */
+async function readDiff(repo, base, headish = null) {
+  const head = headish ?? (await writeWorktreeTree(repo))
   const range = ["--no-renames", "--no-ext-diff", "--no-textconv", base, head]
   const numstat = (await git(repo, ["diff", "--numstat", "-z", ...range])).toString("utf8")
   const nameStatus = (await git(repo, ["diff", "--name-status", "-z", ...range])).toString("utf8")
@@ -350,8 +382,62 @@ async function readDiff(repo, base) {
   }
 }
 
+/** First ref spec that resolves to a commit, preferring the pushed remote. */
+/** A branch name safe to pass as a positional argument, or null. */
+async function validBranchName(repo, branch) {
+  if (typeof branch !== "string" || !branch.trim()) return null
+  const name = branch.trim()
+  if (name.startsWith("-")) return null
+  try {
+    await git(repo, ["check-ref-format", "--branch", name], null, 5_000)
+  } catch {
+    return null
+  }
+  return name
+}
+
+async function resolveBaseRef(repo, baseRef) {
+  const name = await validBranchName(repo, baseRef)
+  if (!name) return null
+  for (const spec of [`origin/${name}`, name]) {
+    try {
+      return text(await git(repo, ["rev-parse", "--verify", "-q", `${spec}^{commit}`], null, 5_000))
+    } catch {}
+  }
+  return null
+}
+
+/**
+ * What `headRef` has *committed* on top of `baseRef` — the pull request's own
+ * content. Committed refs only: the worktree is shared with every other
+ * session in the project, so its uncommitted state says nothing about which
+ * thread made a change. `headRef` defaults to the checkout only when the
+ * thread's own branch is unknown.
+ */
+async function readBranchDiff(repo, baseRef, headRef = null) {
+  const missing = { status: "missing", files: [], truncated: false }
+  const base = await resolveBaseRef(repo, baseRef)
+  if (!base) return missing
+  const named = await validBranchName(repo, headRef)
+  let head = "HEAD"
+  if (named) {
+    try {
+      head = text(await git(repo, ["rev-parse", "--verify", "-q", `${named}^{commit}`], null, 5_000))
+    } catch {
+      return missing
+    }
+    if (!head) return missing
+  } else if (headRef) {
+    return missing
+  }
+  const mergeBase = text(await git(repo, ["merge-base", base, head], null, 10_000))
+  if (!mergeBase) return missing
+  return readDiff(repo, mergeBase, head)
+}
+
 module.exports = {
   captureCheckpoint,
+  readBranchDiff,
   checkpointRef,
   checkoutBranch,
   currentBranch,

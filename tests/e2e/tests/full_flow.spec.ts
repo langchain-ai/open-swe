@@ -76,6 +76,11 @@ test.describe("Open SWE full flow", () => {
     await expect(
       page.locator(".msg.bot").filter({ hasText: "I started a separate Open SWE thread" }),
     ).toBeVisible({ timeout: 60_000 });
+
+    // The breakout thread's own run does the work: wait for its PR reply so the
+    // run is finished before the next test resets the channel underneath it.
+    const done = breakoutThreadMessages.filter({ hasText: "Add greet() helper" });
+    await expect(done.locator('a[href*="/pull/"]')).toBeVisible({ timeout: 60_000 });
   });
 
   test("a message that does not mention the bot produces no run and no PR", async ({ page }) => {

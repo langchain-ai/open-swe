@@ -16,12 +16,16 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
+import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
-import { useAgentSkills } from "@/features/agents/lib/queries"
+import {
+  useAgentSkills,
+  useAgentThreadPullRequestStatus,
+} from "@/features/agents/lib/queries"
 import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
 import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
@@ -61,6 +65,13 @@ export function AgentThreadView({
   const skills = useAgentSkills()
   const session = useSession()
   const canPost = !thread.adminThread || session.data?.is_admin === true
+  const pullRequestStatus = useAgentThreadPullRequestStatus(
+    thread.id,
+    (thread.pullRequests?.length ?? 0) > 0
+  )
+  const pullRequestHealth = pullRequestStatus.isError
+    ? undefined
+    : pullRequestStatus.data?.pullRequests
 
   const { models, defaultSelection } = useModelOptions()
   const threadSelection = useMemo<ModelSelection | null>(() => {
@@ -101,6 +112,10 @@ export function AgentThreadView({
       thread.id,
     ]
   )
+  const fixPullRequest = useCallback(
+    (prompt: string) => submitMessage(prompt, []),
+    [submitMessage]
+  )
   const usedTokens = useMemo(
     () => latestContextTokens(stream.messages),
     [stream.messages]
@@ -129,21 +144,18 @@ export function AgentThreadView({
   )
 
   const baseMessages = useMemo<Array<Message>>(() => {
-    const live = streamMessagesToUi(
+    if (thread.messages.length > 0) return thread.messages
+    return streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
       messageArrivalTimestamp
     )
-    if (live.length > 0) return live
-    // Optimistic transcript seeded by `AgentsHome` on thread creation (the
-    // only case where a fetched thread carries messages — `getThread` returns
-    // none). Bridges the brief gap before the SDK's optimistic `submit` echo
-    // lands in `stream.messages`.
-    if (thread.messages.length > 0) return thread.messages
-    return live
   }, [stream.messages, stream.toolCalls, thread.messages])
 
-  const isStreaming = thread.status === "running" || stream.isLoading
+  const isStreaming =
+    thread.status === "running" ||
+    stream.isLoading ||
+    thread.messages.length > 0
   const activeRun = useMemo(
     () => ({ threadId: thread.id, running: thread.status === "running" }),
     [thread.id, thread.status]
@@ -180,6 +192,10 @@ export function AgentThreadView({
 
   return (
     <div className="flex min-w-0 flex-1">
+      <OptimisticThreadHydrationRecovery
+        threadId={thread.id}
+        enabled={thread.messages.length > 0}
+      />
       <div
         className={cn(
           "flex min-w-0 flex-1 flex-col",
@@ -255,7 +271,13 @@ export function AgentThreadView({
             />
             <div className="shrink-0 px-4 pb-4">
               <div className="mx-auto w-full max-w-3xl min-w-0">
-                <ThreadPullRequests pullRequests={thread.pullRequests ?? []} />
+                <ThreadPullRequests
+                  pullRequests={thread.pullRequests ?? []}
+                  health={pullRequestHealth}
+                  healthUnavailable={pullRequestStatus.isError}
+                  onFix={fixPullRequest}
+                  fixDisabled={!canPost || sendMessage.isPending}
+                />
                 <AgentPromptBar
                   placeholder={
                     canPost
@@ -309,7 +331,12 @@ export function AgentThreadView({
               </p>
             )}
             <div className="w-full max-w-3xl">
-              <ThreadPullRequests pullRequests={thread.pullRequests ?? []} />
+              <ThreadPullRequests
+                pullRequests={thread.pullRequests ?? []}
+                health={pullRequestHealth}
+                onFix={fixPullRequest}
+                fixDisabled={!canPost || sendMessage.isPending}
+              />
               <AgentPromptBar
                 placeholder={
                   canPost

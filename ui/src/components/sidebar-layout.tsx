@@ -227,6 +227,7 @@ export function SidebarCollapseButton({
     <button
       type="button"
       aria-label="Collapse sidebar"
+      data-sidebar-collapse=""
       onClick={onToggle}
       className={cn(
         "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",

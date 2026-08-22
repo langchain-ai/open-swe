@@ -21,11 +21,9 @@ export function useProfile() {
 }
 
 export function useOptions() {
-  const session = useSession()
   return useQuery({
     queryKey: ["options"],
     queryFn: api.options,
-    enabled: !!session.data,
   })
 }
 

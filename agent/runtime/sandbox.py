@@ -8,28 +8,36 @@ sandbox. Per-thread state lives in the sandbox itself plus thread metadata
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
 from ..github.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
-from ..github.proxy import configure_proxy_for_sandbox
+from ..github.proxy import configure_proxy_for_sandbox, get_recorded_proxy_base_config
 from ..sandboxes.providers import (
     SandboxGoneError,
+    SandboxResources,
     SandboxUnreachableError,
     create_sandbox,
+    current_sandbox_provider,
     sandbox_provider_supports_snapshots,
-    sandbox_provider_uses_proxy,
 )
 from ..sandboxes.proxy import SandboxBackendProxy, unwrap_sandbox_backend
 from ..sandboxes.registry import (
     SANDBOX_BACKENDS,
     get_or_create_sandbox_backend_proxy,
     get_sandbox_id_from_metadata,
+    get_sandbox_metadata,
     set_sandbox_backend,
 )
-from ..settings.environments import environment_snapshot_id, resolve_environment
+from ..settings.environments import (
+    environment_sandbox_create_params,
+    environment_sandbox_resources,
+    environment_snapshot_id,
+    resolve_environment,
+)
 from ..settings.repo_snapshots import resolve_repo_snapshot_id
 from ..settings.sandbox_settings import get_admin_base_snapshot_id
 from ..settings.team_settings import get_team_default_repo
@@ -37,6 +45,9 @@ from ..settings.team_settings import get_team_default_repo
 logger = logging.getLogger(__name__)
 
 client = get_client()
+
+# Thread metadata key for the proxy config the bound sandbox was created with.
+SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
 
 
 def environment_slug(configurable: Mapping[str, Any] | None) -> str | None:
@@ -64,24 +75,47 @@ async def resolve_default_repo(configurable: Mapping[str, Any]) -> dict[str, str
         return None
 
 
-async def _resolve_snapshot_id(
+@dataclass(frozen=True)
+class SandboxCreateConfig:
+    """What a thread's new sandbox boots as: its snapshot, sizing and create params."""
+
+    snapshot_id: str | None
+    resources: SandboxResources
+    create_params: dict[str, Any]
+
+
+async def _resolve_sandbox_create_config(
     repo: dict[str, str] | None,
     environment: str | None = None,
-) -> str | None:
-    """Resolve the snapshot a new sandbox boots from.
+) -> SandboxCreateConfig:
+    """Resolve the snapshot a new sandbox boots from, plus the environment's sizing.
 
     The run's environment (its selection, else ``default``) wins, then the repo's
     built snapshot, then the admin-configured base snapshot. Never raises: any
     failure resolves to ``None`` so sandbox creation falls back to the configured
     ``DEFAULT_SANDBOX_SNAPSHOT_ID``.
 
-    Resolves to ``None`` outright on a provider that cannot boot from a snapshot:
-    the ids stored here are only meaningful to the provider that captured them,
-    and handing one to another provider is an error rather than a preference.
+    The snapshot resolves to ``None`` outright on a provider that cannot boot
+    from one: the ids stored here are only meaningful to the provider that
+    captured them, and handing one to another provider is an error rather than
+    a preference. Sizing and create params are passed through regardless; the
+    provider rejects what it cannot honour.
     """
-    if not sandbox_provider_supports_snapshots():
-        return None
-    environment_snapshot = environment_snapshot_id(await resolve_environment(environment))
+    environment_record = await resolve_environment(environment)
+    resources = environment_sandbox_resources(environment_record)
+    create_params = environment_sandbox_create_params(environment_record)
+    snapshot_id = (
+        await _resolve_snapshot_id(repo, environment_record)
+        if sandbox_provider_supports_snapshots()
+        else None
+    )
+    return SandboxCreateConfig(snapshot_id, resources, create_params)
+
+
+async def _resolve_snapshot_id(
+    repo: dict[str, str] | None, environment_record: dict[str, Any] | None
+) -> str | None:
+    environment_snapshot = environment_snapshot_id(environment_record)
     if environment_snapshot:
         return environment_snapshot
     if repo:
@@ -104,14 +138,20 @@ async def _create_sandbox_with_proxy(
     environment_slug: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
-    snapshot_id = await _resolve_snapshot_id(repo, environment_slug)
-    sandbox_backend = await create_sandbox(snapshot_id=snapshot_id)
+    config = await _resolve_sandbox_create_config(repo, environment_slug)
+    sandbox_backend = await create_sandbox(
+        snapshot_id=config.snapshot_id,
+        resources=config.resources,
+        create_params=config.create_params,
+    )
 
-    if sandbox_provider_uses_proxy() and not await configure_proxy_for_sandbox(
+    provider = current_sandbox_provider()
+    if provider.uses_github_proxy and not await configure_proxy_for_sandbox(
         sandbox_backend,
         thread_id=thread_id,
         github_token=github_proxy_token,
         repositories=github_proxy_repositories,
+        base_proxy_config=provider.proxy_config(config.create_params),
     ):
         msg = "Cannot configure proxy: GitHub App installation token is unavailable"
         logger.error(msg)
@@ -125,6 +165,7 @@ async def _refresh_github_proxy_or_fail(
     thread_id: str,
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
+    base_proxy_config: Mapping[str, Any] | None = None,
 ) -> SandboxBackendProtocol:
     """Refresh proxy credentials; a sandbox we can't reconfigure is unreachable."""
     try:
@@ -133,6 +174,7 @@ async def _refresh_github_proxy_or_fail(
             thread_id=thread_id,
             github_token=github_proxy_token,
             repositories=github_proxy_repositories,
+            base_proxy_config=base_proxy_config,
         )
     except Exception as exc:
         logger.warning(
@@ -159,6 +201,7 @@ async def _connect_existing_sandbox(
     sandbox_id: str | None,
     github_proxy_token: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
+    base_proxy_config: Mapping[str, Any] | None = None,
 ) -> SandboxBackendProtocol:
     """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
 
@@ -179,8 +222,27 @@ async def _connect_existing_sandbox(
             logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
             raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
     return await _refresh_github_proxy_or_fail(
-        sandbox_backend, thread_id, github_proxy_token, github_proxy_repositories
+        sandbox_backend,
+        thread_id,
+        github_proxy_token,
+        github_proxy_repositories,
+        base_proxy_config,
     )
+
+
+def _sandbox_binding(
+    sandbox_id: str, base_proxy_config: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """The thread metadata that binds it to a sandbox.
+
+    The proxy config the sandbox was created with travels with the id: a later
+    process that reconnects has no in-memory record of it, and refreshing the
+    token without it would drop the sandbox's own proxy rules.
+    """
+    binding: dict[str, Any] = {"sandbox_id": sandbox_id}
+    if base_proxy_config is not None:
+        binding[SANDBOX_PROXY_CONFIG_METADATA_KEY] = dict(base_proxy_config)
+    return binding
 
 
 async def ensure_sandbox_for_thread(
@@ -228,6 +290,13 @@ async def ensure_sandbox_for_thread(
         else None
     )
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
+    metadata = await get_sandbox_metadata(thread_id) if sandbox_id is not None else {}
+    recorded_proxy_config = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
+    base_proxy_config = (
+        recorded_proxy_config
+        if isinstance(recorded_proxy_config, dict)
+        else get_recorded_proxy_base_config(thread_id)
+    )
 
     if sandbox_backend is None and sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
@@ -238,6 +307,7 @@ async def ensure_sandbox_for_thread(
             repo=repo,
             environment_slug=environment_slug,
         )
+        base_proxy_config = get_recorded_proxy_base_config(thread_id)
         logger.info("Sandbox created: %s", sandbox_backend.id)
     else:
         try:
@@ -247,6 +317,7 @@ async def ensure_sandbox_for_thread(
                 sandbox_id=sandbox_id,
                 github_proxy_token=github_proxy_token,
                 github_proxy_repositories=github_proxy_repositories,
+                base_proxy_config=base_proxy_config,
             )
         except (SandboxGoneError, SandboxUnreachableError) as exc:
             gone = isinstance(exc, SandboxGoneError)
@@ -264,7 +335,9 @@ async def ensure_sandbox_for_thread(
                     thread_id=thread_id,
                     github_proxy_repositories=github_proxy_repositories,
                     repo=repo,
+                    environment_slug=environment_slug,
                 )
+                base_proxy_config = get_recorded_proxy_base_config(thread_id)
             except Exception as create_exc:
                 # Keep the failure typed so callers still recognize "this run has no
                 # sandbox" and can notify the user.
@@ -286,7 +359,8 @@ async def ensure_sandbox_for_thread(
     # rather than adopting a half-built box.
     if sandbox_id != sandbox_backend.id:
         await client.threads.update(
-            thread_id=thread_id, metadata={"sandbox_id": sandbox_backend.id}
+            thread_id=thread_id,
+            metadata=_sandbox_binding(sandbox_backend.id, base_proxy_config),
         )
 
     # Publishing last is what makes a failure above visible. Callers reach the
@@ -320,7 +394,7 @@ async def recreate_sandbox_for_thread(
     await _configure_git_identity(new_sandbox)
     await client.threads.update(
         thread_id=thread_id,
-        metadata={"sandbox_id": new_sandbox.id},
+        metadata=_sandbox_binding(new_sandbox.id, get_recorded_proxy_base_config(thread_id)),
     )
     set_sandbox_backend(thread_id, new_sandbox)
     logger.info(

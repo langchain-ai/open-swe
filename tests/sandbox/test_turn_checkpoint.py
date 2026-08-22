@@ -70,6 +70,16 @@ def test_diff_command_bounds_file_metadata_and_keeps_full_summary(tmp_path: Path
     stats = parse_numstat(payload["numstat"])
 
     assert len(stats) == 10
+    assert (
+        payload["base"]
+        == subprocess.run(
+            ["git", "rev-parse", "HEAD^{tree}"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
     assert any(additions is None and deletions is None for _, additions, deletions in stats)
     assert payload["summary"] == {"files": 13, "additions": 12, "deletions": 0}
     assert "change-09.txt" not in payload["numstat"]
@@ -94,6 +104,7 @@ async def test_read_turn_diff_metadata_only_skips_file_contents() -> None:
     statuses.extend(("A", "binary.bin"))
     sandbox = _FakeSandbox(
         {
+            "base": "base-tree",
             "head": "head-tree",
             "numstat": "\0".join([*records, ""]),
             "nameStatus": "\0".join([*statuses, ""]),
@@ -122,6 +133,7 @@ async def test_read_turn_diff_metadata_only_skips_file_contents() -> None:
 async def test_read_turn_diff_includes_contents_by_default() -> None:
     sandbox = _FakeSandbox(
         {
+            "base": "base-tree",
             "head": "head-tree",
             "numstat": "1\t1\tchange.txt\0",
             "nameStatus": "M\0change.txt\0",
@@ -142,6 +154,41 @@ async def test_read_turn_diff_includes_contents_by_default() -> None:
     assert result["files"][0]["originalContent"] == "before\n"
     assert result["files"][0]["modifiedContent"] == "after\n"
     assert result["summary"] == {"files": 1, "additions": 1, "deletions": 1}
+
+
+async def test_read_working_tree_diff_supports_an_unborn_branch(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "new.txt").write_text("new\n")
+
+    class Sandbox:
+        async def aexecute(self, command: str, *, timeout: int):
+            result = subprocess.run(
+                ["bash", "-lc", command],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            return SimpleNamespace(
+                exit_code=result.returncode, output=result.stdout + result.stderr
+            )
+
+    result = await read_turn_diff(Sandbox(), str(tmp_path), "HEAD", None)
+
+    assert result["status"] == "ready"
+    assert result["summary"] == {"files": 1, "additions": 1, "deletions": 0}
+    assert result["files"] == [
+        {
+            "path": "new.txt",
+            "previousPath": None,
+            "status": "added",
+            "additions": 1,
+            "deletions": 0,
+            "originalContent": None,
+            "modifiedContent": "new\n",
+            "unrenderable": False,
+        }
+    ]
 
 
 def test_merge_checkpoint_keeps_the_first_snapshot_for_a_turn() -> None:

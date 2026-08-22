@@ -139,6 +139,41 @@ async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth)
     assert created["metadata"] == {"kind": "schedule", "key": result["id"]}
 
 
+async def test_create_admin_schedule_requires_admin_session(fake_client, auth) -> None:  # noqa: ANN001, ARG001
+    body = ScheduleCreateBody(
+        name="Admin cleanup",
+        prompt="Clean up workspace environments",
+        schedule="0 9 * * *",
+        admin_thread=True,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await schedules.create_agent_schedule("alice", body, email="alice@example.com")
+
+    assert exc.value.status_code == 403
+    assert fake_client.crons.created == []
+
+
+async def test_create_admin_schedule_persists_admin_intent(fake_client, auth) -> None:  # noqa: ANN001, ARG001
+    body = ScheduleCreateBody(
+        name="Admin cleanup",
+        prompt="Clean up workspace environments",
+        schedule="0 9 * * *",
+        admin_thread=True,
+    )
+
+    result = await schedules.create_agent_schedule(
+        "alice",
+        body,
+        email="alice@example.com",
+        allow_admin_thread=True,
+    )
+
+    assert result["adminThread"] is True
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), result["id"])]
+    assert stored["admin_thread"] is True
+
+
 async def test_create_agent_schedule_requires_dashboard_token(fake_client, monkeypatch) -> None:  # noqa: ANN001
     async def no_token(login: str) -> None:
         return None
@@ -226,6 +261,7 @@ async def test_list_agent_schedules_uses_owner_filters_and_paginates(fake_client
     assert len(result) == 125
     assert {item["id"] for item in result} == {f"alice_{i}" for i in range(125)}
     assert all(item["slackNotificationMode"] == "always" for item in result)
+    assert all(item["adminThread"] is False for item in result)
     alice_zero = next(item for item in result if item["id"] == "alice_0")
     assert alice_zero["lastTriggeredAt"] == "2026-01-02T00:00:00+00:00"
 
@@ -287,6 +323,43 @@ async def test_update_agent_schedule_changes_slack_notification_mode(fake_client
     assert result["slackNotificationMode"] == "on_action"
     stored = fake_client.store.items[(tuple(agent_schedules.SCHEDULES_NAMESPACE), "sched_1")]
     assert stored["slack_notification_mode"] == "on_action"
+
+
+async def test_update_agent_schedule_rejects_non_admin_elevation(fake_client) -> None:  # noqa: ANN001
+    await fake_client.store.put_item(
+        agent_schedules.SCHEDULES_NAMESPACE, "sched_1", _stored_schedule(admin_thread=False)
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await schedules.update_agent_schedule(
+            "sched_1",
+            "alice",
+            ScheduleUpdateBody(admin_thread=True),
+            email="alice@example.com",
+        )
+
+    assert exc.value.status_code == 403
+    stored = fake_client.store.items[(tuple(agent_schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert stored["admin_thread"] is False
+
+
+async def test_update_agent_schedule_allows_admin_elevation(fake_client) -> None:  # noqa: ANN001
+    await fake_client.store.put_item(
+        agent_schedules.SCHEDULES_NAMESPACE, "sched_1", _stored_schedule(admin_thread=False)
+    )
+    _existing_cron(fake_client)
+
+    result = await schedules.update_agent_schedule(
+        "sched_1",
+        "alice",
+        ScheduleUpdateBody(admin_thread=True),
+        email="alice@example.com",
+        allow_admin_thread=True,
+    )
+
+    assert result["adminThread"] is True
+    stored = fake_client.store.items[(tuple(agent_schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert stored["admin_thread"] is True
 
 
 async def test_update_agent_schedule_replaces_cron_when_expression_changes(fake_client) -> None:  # noqa: ANN001

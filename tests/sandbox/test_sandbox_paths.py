@@ -1,13 +1,13 @@
 import shlex
-from collections.abc import Callable
-from typing import cast
+from collections.abc import Callable, Mapping
+from typing import Any, cast
 
 import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from support.sandbox_fakes import FakeSandboxBackend
 
 from agent.sandboxes.paths import aresolve_repo_dir, aresolve_sandbox_work_dir
-from agent.sandboxes.providers import SandboxProvider
+from agent.sandboxes.providers import SandboxProvider, SandboxResources
 from agent.sandboxes.proxy import SandboxBackendProxy
 
 
@@ -22,7 +22,13 @@ class _FakeProvider(SandboxProvider):
     async def connect(self, sandbox_id: str) -> SandboxBackendProtocol:
         raise AssertionError("work-dir resolution must not connect")
 
-    async def create(self, *, snapshot_id: str | None = None) -> SandboxBackendProtocol:
+    async def create(
+        self,
+        *,
+        snapshot_id: str | None = None,
+        resources: SandboxResources | None = None,
+        create_params: Mapping[str, Any] | None = None,
+    ) -> SandboxBackendProtocol:
         raise AssertionError("work-dir resolution must not create")
 
     async def work_dir(self, backend: SandboxBackendProtocol) -> str | None:

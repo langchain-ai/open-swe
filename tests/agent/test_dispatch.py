@@ -85,6 +85,18 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["webhook"] == "https://app/webhooks/run-complete?token=s3cret"
     # Resumable by default so the dashboard can join (and stop) a run it did not start.
     assert created["stream_resumable"] is True
+    # The Protocol v2 run shape, so the dashboard gets `tools` events and subagent
+    # namespaces from runs it did not start — exactly what its own `run.start` sends.
+    assert created["stream_mode"] == [
+        "values",
+        "updates",
+        "messages",
+        "custom",
+        "tasks",
+        "checkpoints",
+    ]
+    assert created["stream_subgraphs"] is True
+    assert created["config"]["configurable"]["__event_streaming_v2"] is True
     prepare_run_id = created["config"]["configurable"]["prepare_run_id"]
     assert created["config"]["metadata"] == {
         "kind": "test",
@@ -96,7 +108,7 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-async def test_create_durable_run_preserves_existing_prepare_id_and_stream_kwargs(
+async def test_create_durable_run_preserves_existing_prepare_id_and_resumable_opt_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _client()
@@ -108,16 +120,26 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_stream_kwarg
         input={"messages": []},
         source="schedule",
         config={"configurable": {"prepare_run_id": "existing"}},
-        stream_mode=["values"],
         stream_resumable=False,
         client=client,
     )
 
     created = client.runs.created[0]
     assert "webhook" not in created
-    assert created["stream_mode"] == ["values"]
     assert created["stream_resumable"] is False
     assert created["config"]["configurable"]["prepare_run_id"] == "existing"
+    assert created["config"]["configurable"]["__event_streaming_v2"] is True
+
+
+def test_prepare_run_config_marks_every_run_as_protocol_v2() -> None:
+    # The marker is fixed per run by the server: a caller cannot opt a run out of
+    # v2 by passing its own `configurable`, or the dashboard silently loses `tools`.
+    run_config = dispatch.prepare_run_config(
+        {"configurable": {"__event_streaming_v2": False, "thread_id": "t"}}, None
+    )
+
+    assert run_config["configurable"]["__event_streaming_v2"] is True
+    assert run_config["configurable"]["thread_id"] == "t"
 
 
 @pytest.mark.asyncio

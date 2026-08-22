@@ -394,8 +394,11 @@ async def test_launch_scheduled_agent_run_skips_when_repo_access_revoked(
     assert stored["last_error"] == "no access to this private repository"
 
 
-async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client, auth) -> None:  # noqa: ANN001, ARG001
-    record = _schedule_record()
+async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
+    fake_client, auth, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ANN001, ARG001
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
+    record = _schedule_record(admin_thread=True)
     await fake_client.store.put_item(agent_schedules.SCHEDULES_NAMESPACE, "sched_1", record)
 
     result = await agent_schedules.launch_scheduled_agent_run("sched_1")
@@ -408,6 +411,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client,
     assert metadata["origin"] == "schedule"
     assert metadata["thread_category"] == "automation"
     assert metadata["trigger_kind"] == "schedule"
+    assert metadata["admin_thread"] is True
     assert metadata["repo_owner"] == "langchain-ai"
     assert metadata["repo_name"] == "open-swe"
     run = fake_client.runs.created[0]
@@ -421,6 +425,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client,
     assert run["multitask_strategy"] == "interrupt"
     assert run["if_not_exists"] == "create"
     assert run["config"]["configurable"]["source"] == "schedule"
+    assert run["config"]["configurable"]["admin_thread"] is True
     assert run["config"]["configurable"]["repo"] == record["repo"]
 
     stored = fake_client.store.items[
@@ -428,6 +433,20 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(fake_client,
     ]
     assert stored["last_thread_id"] == thread_id
     assert stored["last_run_id"] == "run_123"
+
+
+async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_thread(
+    fake_client, auth, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ANN001, ARG001
+    monkeypatch.setenv("CONFIGURED_ADMINS", "bob")
+    record = _schedule_record(repo=None, admin_thread=True)
+    await fake_client.store.put_item(agent_schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    result = await agent_schedules.launch_scheduled_agent_run("sched_1")
+
+    assert result["status"] == "started"
+    assert "admin_thread" not in fake_client.threads.created[0]["metadata"]
+    assert "admin_thread" not in fake_client.runs.created[0]["config"]["configurable"]
 
 
 async def test_launch_scheduled_agent_run_connects_slack_thread(

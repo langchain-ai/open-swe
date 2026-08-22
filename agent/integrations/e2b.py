@@ -1,13 +1,15 @@
 """E2B sandbox provider."""
 
 import asyncio
+from collections.abc import Mapping
+from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from e2b import NotFoundException, Sandbox
 from langchain_e2b import E2BSandbox
 
 from ..config import e2b_api_key, e2b_template
-from ..sandboxes.providers import SandboxGoneError, SandboxProvider
+from ..sandboxes.providers import SandboxGoneError, SandboxProvider, SandboxResources
 
 DEFAULT_E2B_SANDBOX_TIMEOUT = 60 * 60
 # E2B's own default home, made explicit so the directory commands run in and the
@@ -25,10 +27,17 @@ class E2BProvider(SandboxProvider):
     async def connect(self, sandbox_id: str) -> SandboxBackendProtocol:
         return await asyncio.to_thread(self._connect, sandbox_id)
 
-    async def create(self, *, snapshot_id: str | None = None) -> SandboxBackendProtocol:
+    async def create(
+        self,
+        *,
+        snapshot_id: str | None = None,
+        resources: SandboxResources | None = None,
+        create_params: Mapping[str, Any] | None = None,
+    ) -> SandboxBackendProtocol:
         if snapshot_id is not None:
             msg = f"E2B cannot boot from snapshot {snapshot_id!r}; its image is set by E2B_TEMPLATE"
             raise ValueError(msg)
+        self._reject_sizing("E2B", resources, create_params)
         return await asyncio.to_thread(self._create)
 
     async def work_dir(self, backend: SandboxBackendProtocol) -> str:

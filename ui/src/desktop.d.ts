@@ -1,5 +1,5 @@
 import type { Skill, ThreadPrDiffFile } from "@/features/agents/lib/api"
-import type { AgentThread, ImageChunk } from "@/lib/agentTypes"
+import type { AgentPullRequest, ImageChunk } from "@/lib/agentTypes"
 
 export type DesktopCommandId =
   | "new-thread"
@@ -18,19 +18,21 @@ export interface DesktopLocalThreadSummary {
   id: string
   cwd: string
   title: string
-  status: "starting" | "idle" | "running" | "error"
   viewed: boolean
   createdAt: number
   updatedAt: number
   modelId: string | null
   effort: string | null
+  pending?: DesktopLocalPromptInput | null
 }
+
+export type DesktopLocalActivity = Record<string, "running" | "error">
 
 export interface DesktopLocalDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
   files: Array<ThreadPrDiffFile>
-  repository?: { branch: string | null; pr: AgentThread["pr"] | null }
+  repository?: { branch: string | null; pr: AgentPullRequest | null }
 }
 
 export interface DesktopLocalPromptInput {
@@ -155,9 +157,12 @@ declare global {
         localSessionId: string
         path: string
       }) => Promise<string | null>
-      localModelCredentialStatus: (
-        modelId?: string
-      ) => Promise<{ available: boolean; variable: string | null }>
+      localModelCredentialStatus: (modelId?: string) => Promise<{
+        available: boolean
+        variable: string | null
+        canSignIn?: boolean
+      }>
+      signInLocalOpenAI: () => Promise<{ signedIn: boolean }>
       startLocalThread: (
         input: DesktopLocalPromptInput & {
           cwd: string
@@ -175,15 +180,16 @@ declare global {
         threadId: string
       ) => Promise<DesktopLocalThreadSummary | null>
       listLocalThreads: () => Promise<Array<DesktopLocalThreadSummary>>
+      localActivity: () => Promise<DesktopLocalActivity>
       updateLocalThread: (input: {
         threadId: string
-        status: DesktopLocalThreadSummary["status"]
         viewed?: boolean
         modelId?: string
         effort?: string
       }) => Promise<DesktopLocalThreadSummary | null>
       deleteLocalThread: (threadId: string) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
+      getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
       terminal: DesktopTerminalBridge
     }
   }

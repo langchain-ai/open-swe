@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import { ArrowSquareOutIcon, CircleNotchIcon } from "@phosphor-icons/react"
+import { IoLogoSlack } from "react-icons/io5"
 
 import type { AgentStatus, AgentThread } from "@/lib/agentTypes"
 import { Button } from "@/components/ui/button"
@@ -144,6 +145,15 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
           <span>{STATUS_LABELS[run.status]}</span>
           <span>{isTest ? "Test run" : "Scheduled run"}</span>
+          {run.automationActionPosted && (
+            <span
+              className="flex items-center gap-1 text-success-foreground"
+              aria-label="Action posted to Slack"
+            >
+              <IoLogoSlack className="size-3.5" />
+              Posted to Slack
+            </span>
+          )}
           {run.repoFullName && <span>{run.repoFullName}</span>}
           <span>{formatRelativeTime(run.updatedAt)}</span>
         </div>

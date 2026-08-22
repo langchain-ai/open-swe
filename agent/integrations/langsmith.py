@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
@@ -28,7 +29,7 @@ from agent.config import (
     sandbox_mem_bytes,
     sandbox_vcpus,
 )
-from agent.sandboxes.providers import SandboxGoneError, SandboxProvider
+from agent.sandboxes.providers import SandboxGoneError, SandboxProvider, SandboxResources
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,24 @@ def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]
         sandbox_idle_ttl_seconds(DEFAULT_SANDBOX_IDLE_TTL_SECONDS),
         sandbox_delete_after_stop_seconds(DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS),
     )
+
+
+def merge_sandbox_create_extra_fields(
+    create_params: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """The deployment's ``SANDBOX_CREATE_EXTRA_JSON`` fields, overridden per key
+    by the environment's own ``create_params``."""
+    return {**sandbox_create_extra_fields(), **(create_params or {})}
+
+
+def sandbox_proxy_config(create_params: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """The ``proxy_config`` a sandbox is created with, if its create body sets one.
+
+    GitHub auth rules are layered on top of it at configure time, so the custom
+    rules have to be kept and re-sent on every token refresh.
+    """
+    proxy_config = merge_sandbox_create_extra_fields(create_params).get("proxy_config")
+    return dict(proxy_config) if isinstance(proxy_config, dict) else None
 
 
 def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, Any]) -> None:
@@ -309,7 +328,12 @@ async def _start_sandbox_best_effort(sandbox_name: str) -> None:
         await client.aclose()
 
 
-async def configure_github_proxy(sandbox_name: str, github_token: str) -> None:
+async def configure_github_proxy(
+    sandbox_name: str,
+    github_token: str,
+    *,
+    base_proxy_config: Mapping[str, Any] | None = None,
+) -> None:
     """Configure sandbox proxy to inject GitHub auth for GitHub traffic.
 
     Uses the LangSmith proxy-config API to set up header injection so that
@@ -319,13 +343,21 @@ async def configure_github_proxy(sandbox_name: str, github_token: str) -> None:
     Args:
         sandbox_name: The sandbox name/ID returned by the LangSmith API.
         github_token: GitHub token to inject as Authorization header.
+        base_proxy_config: The sandbox's own proxy settings (from its create
+            body), kept in place with the GitHub rules appended after them.
     """
     api_key = _get_sandbox_api_key()
     if not api_key:
         logger.warning("No LangSmith API key found, skipping GitHub proxy configuration")
         return
     url = f"{sandbox_langsmith_endpoint()}/v2/sandboxes/boxes/{sandbox_name}"
-    payload = {"proxy_config": {"rules": _github_proxy_rules(github_token)}}
+    proxy_config = dict(base_proxy_config or {})
+    custom_rules = proxy_config.get("rules")
+    proxy_config["rules"] = [
+        *(custom_rules if isinstance(custom_rules, list) else []),
+        *_github_proxy_rules(github_token),
+    ]
+    payload = {"proxy_config": proxy_config}
     async with httpx.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         try:
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
@@ -467,17 +499,26 @@ class LangSmithProvider(SandboxProvider):
         _execute_client_grace_seconds()
         sandbox_create_extra_fields()
 
+    def proxy_config(self, create_params: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        return sandbox_proxy_config(create_params)
+
     async def connect(self, sandbox_id: str) -> SandboxBackendProtocol:
         async with self._client() as client:
             sandbox = await _reuse_existing_sandbox(client, sandbox_id)
             return TimeoutLangSmithSandbox(sandbox.to_sync())
 
-    async def create(self, *, snapshot_id: str | None = None) -> SandboxBackendProtocol:
+    async def create(
+        self,
+        *,
+        snapshot_id: str | None = None,
+        resources: SandboxResources | None = None,
+        create_params: Mapping[str, Any] | None = None,
+    ) -> SandboxBackendProtocol:
         (
             default_snapshot_id,
-            fs_capacity_bytes,
-            vcpus,
-            mem_bytes,
+            default_fs_capacity_bytes,
+            default_vcpus,
+            default_mem_bytes,
             idle_ttl_seconds,
             delete_after_stop_seconds,
         ) = _get_sandbox_snapshot_config()
@@ -488,9 +529,19 @@ class LangSmithProvider(SandboxProvider):
                 "DEFAULT_SANDBOX_SNAPSHOT_ID"
             )
             raise ValueError(msg)
+        sizing = resources or {}
+        fs_capacity_bytes = sizing.get("fs_capacity_bytes", default_fs_capacity_bytes)
+        # CPU and memory are sized together: overriding only one leaves the other
+        # unset so the platform derives it, rather than pairing it with a
+        # deployment default it may not fit.
+        if "vcpus" in sizing or "mem_bytes" in sizing:
+            vcpus = sizing.get("vcpus")
+            mem_bytes = sizing.get("mem_bytes")
+        else:
+            vcpus, mem_bytes = default_vcpus, default_mem_bytes
 
         async with self._client() as client:
-            _install_create_extra_fields(client, sandbox_create_extra_fields())
+            _install_create_extra_fields(client, merge_sandbox_create_extra_fields(create_params))
             try:
                 sandbox = await _create_sandbox_with_retry(
                     client,

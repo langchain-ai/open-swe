@@ -11,25 +11,18 @@ import {
   SidebarSimpleIcon,
 } from "@phosphor-icons/react"
 
-import type { AgentPullRequest } from "@/lib/agentTypes"
 import type {
   PanelThreadRef,
   RightPanelSurface,
 } from "@/features/agents/lib/rightPanelStore"
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { TerminalPanel } from "@/features/agents/components/TerminalPanel"
-import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
-import {
-  RightPanelTabs,
-  type PullRequestTabStatus,
-} from "@/features/agents/components/panel/RightPanelTabs"
+import { RightPanelTabs } from "@/features/agents/components/panel/RightPanelTabs"
 import { RightPanelSheet } from "@/features/agents/components/panel/RightPanelSheet"
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "@/features/agents/components/panel/rightPanelLayout"
 import {
-  pullRequestSurfaceId,
   selectThreadRightPanelState,
   useRightPanelStore,
 } from "@/features/agents/lib/rightPanelStore"
@@ -46,7 +39,6 @@ export interface AgentRightPanelProps {
   diffAvailable: boolean
   /** Rendered for the Changes surface; `fullScreen` drives layout-only extras. */
   renderDiff: (state: { fullScreen: boolean }) => ReactNode
-  pullRequests: ReadonlyArray<AgentPullRequest>
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
   onTerminalOpenFile?: (path: string) => void
@@ -91,7 +83,7 @@ function PanelControl(props: {
 
 /**
  * The right-hand column shared by cloud threads and local desktop sessions.
- * Surfaces (changes, terminals, pull requests) live in the right-panel store so
+ * Surfaces (changes, terminals) live in the right-panel store so
  * a thread's tabs survive navigation; this component owns only the layout
  * controls and the mapping from a surface to the component that renders it.
  */
@@ -103,7 +95,6 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
     cwd,
     terminalAvailable,
     diffAvailable,
-    pullRequests,
     collapsed,
     onCollapsedChange,
   } = props
@@ -111,9 +102,6 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
   const byThreadKey = useRightPanelStore((state) => state.byThreadKey)
   const openSurface = useRightPanelStore((state) => state.open)
   const openTerminalSurface = useRightPanelStore((state) => state.openTerminal)
-  const openPullRequestSurface = useRightPanelStore(
-    (state) => state.openPullRequest
-  )
   const activateSurface = useRightPanelStore((state) => state.activateSurface)
   const closeSurfaceById = useRightPanelStore((state) => state.closeSurface)
   const closeOtherSurfaces = useRightPanelStore(
@@ -159,22 +147,6 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
     return labels
   }, [terminals])
 
-  const pullRequestStatuses = useMemo(() => {
-    const statuses: Record<string, PullRequestTabStatus> = {}
-    for (const pullRequest of pullRequests) {
-      const id = pullRequestSurfaceId({
-        repository: pullRequest.repoFullName,
-        number: pullRequest.number,
-      })
-      statuses[id] = {
-        repository: pullRequest.repoFullName,
-        number: pullRequest.number,
-        state: pullRequest.state,
-      }
-    }
-    return statuses
-  }, [pullRequests])
-
   const handleAddTerminal = useCallback(() => {
     openTerminalSurface(threadRef, terminals.addGroup())
   }, [openTerminalSurface, terminals, threadRef])
@@ -182,15 +154,6 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
   const handleAddDiff = useCallback(() => {
     openSurface(threadRef, "diff")
   }, [openSurface, threadRef])
-
-  const handleAddPullRequest = useCallback(() => {
-    const pullRequest = pullRequests[0]
-    if (!pullRequest) return
-    openPullRequestSurface(threadRef, {
-      repository: pullRequest.repoFullName,
-      number: pullRequest.number,
-    })
-  }, [openPullRequestSurface, pullRequests, threadRef])
 
   const handleActivate = useCallback(
     (surface: RightPanelSurface) => {
@@ -310,24 +273,6 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       {activeSurface?.kind === "diff"
         ? props.renderDiff({ fullScreen: maximized })
         : null}
-      {activeSurface?.kind === "pull-request"
-        ? (() => {
-            const pullRequest = pullRequests.find(
-              (candidate) =>
-                candidate.repoFullName === activeSurface.repository &&
-                candidate.number === activeSurface.number
-            )
-            return (
-              <ScrollArea className="min-h-0 flex-1">
-                <div className="p-3">
-                  <ThreadPullRequests
-                    pullRequests={pullRequest ? [pullRequest] : []}
-                  />
-                </div>
-              </ScrollArea>
-            )
-          })()
-        : null}
       {/* Terminals stay mounted while hidden so their scrollback survives tab
           switches; every other surface unmounts. */}
       {surfaces
@@ -381,11 +326,8 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       }}
       onAddTerminal={handleAddTerminal}
       onAddDiff={handleAddDiff}
-      onAddPullRequest={handleAddPullRequest}
       terminalAvailable={terminalAvailable}
       diffAvailable={diffAvailable}
-      pullRequestAvailable={pullRequests.length > 0}
-      pullRequestStatuses={pullRequestStatuses}
       layoutControls={layoutControls}
     >
       {body}

@@ -31,6 +31,7 @@ import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useUnsavedChangesWarning } from "@/features/automations/lib/useUnsavedChangesWarning"
 import { useRepos } from "@/lib/profile"
+import { useSession } from "@/lib/session"
 
 interface AutomationEditorProps {
   mode: "create" | "edit"
@@ -57,6 +58,7 @@ export function AutomationEditor({
   template,
 }: AutomationEditorProps) {
   const navigate = useNavigate()
+  const session = useSession()
   const reposQuery = useRepos()
   const { models, defaultSelection } = useModelOptions()
 
@@ -80,6 +82,7 @@ export function AutomationEditor({
   const [slackNotificationMode, setSlackNotificationMode] =
     useState<SlackNotificationMode>(schedule?.slackNotificationMode ?? "always")
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
+  const [adminThread, setAdminThread] = useState(schedule?.adminThread ?? false)
   // undefined = untouched (derive from the schedule / default as models load).
   const [selectionOverride, setSelectionOverride] = useState<
     ModelSelection | null | undefined
@@ -97,6 +100,7 @@ export function AutomationEditor({
     slackChannelId !== (schedule?.slackChannelId ?? "") ||
     slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
     enabled !== (schedule?.enabled ?? true) ||
+    adminThread !== (schedule?.adminThread ?? false) ||
     activeSelection?.modelId !== initialSelection?.modelId ||
     activeSelection?.effort !== initialSelection?.effort
   const allowNavigation = useUnsavedChangesWarning(isDirty)
@@ -133,6 +137,7 @@ export function AutomationEditor({
           repo,
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
+          admin_thread: adminThread,
           model_id: modelId,
           effort,
         },
@@ -156,6 +161,7 @@ export function AutomationEditor({
           repo: repo ?? "",
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
+          admin_thread: adminThread,
           model_id: modelId,
           effort,
           enabled,
@@ -336,6 +342,24 @@ export function AutomationEditor({
               onSelectionChange={setSelectionOverride}
             />
           </div>
+          {session.data?.is_admin === true && (
+            <label className="mt-3 flex cursor-pointer items-start gap-2 border-t border-border/60 pt-3">
+              <input
+                type="checkbox"
+                checked={adminThread}
+                onChange={(event) => setAdminThread(event.target.checked)}
+                className="mt-0.5 size-4 accent-destructive"
+              />
+              <span>
+                <span className="block text-xs font-medium text-foreground">
+                  Run as admin thread
+                </span>
+                <span className="mt-0.5 block text-xs text-muted-foreground/70">
+                  Allow this automation to use workspace admin capabilities.
+                </span>
+              </span>
+            </label>
+          )}
         </div>
 
         {mode === "edit" && schedule && (

@@ -8,6 +8,8 @@ rather than a dozen ``source == "desktop"`` branches spread through the factory.
 import asyncio
 import json
 import os
+import re
+import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,7 +21,12 @@ from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
 
-from ..config import in_process_langgraph_client, is_langsmith_sandbox, local_projects_file
+from ..config import (
+    in_process_langgraph_client,
+    is_langsmith_sandbox,
+    local_artifacts_dir,
+    local_projects_file,
+)
 from ..middleware import PullRequestCreationGuardMiddleware
 from ..runtime.sandbox import ensure_sandbox_for_thread, environment_slug, resolve_default_repo
 from ..sandboxes.read_only_backend import ReadOnlyBackend
@@ -133,6 +140,14 @@ class RunEnvironment(ABC):
         self, profile_login: str | None
     ) -> tuple[dict[str, BackendProtocol], list[str]]:
         """Skill backends by route, and the routes to load them from, in order."""
+
+    async def scratch_routes(self, thread_id: str) -> dict[str, BackendProtocol]:
+        """Backends for the agent's own scratch files (offloaded results, evicted history).
+
+        Empty where the default backend is a disposable sandbox those files can
+        simply land in.
+        """
+        return {}
 
     @abstractmethod
     def extra_middleware(self) -> list[Any]:
@@ -265,11 +280,38 @@ class DesktopRunEnvironment(RunEnvironment):
         routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(StateBackend())
         return routes, [USER_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
 
+    async def scratch_routes(self, thread_id: str) -> dict[str, BackendProtocol]:
+        """Route the agent's scratch files out of the developer's repository.
+
+        The default backend is the user's project, so offloads would land in it:
+        the dumps would show up as changes and be swept into the next
+        ``git add -A``. The virtual paths the model sees are unchanged.
+        """
+        # The thread id becomes a path segment, so it may only be a plain name.
+        safe_id = re.sub(r"[^A-Za-z0-9._-]", "-", thread_id or "thread").lstrip(".") or "thread"
+        root = _artifacts_root() / safe_id
+        routes: dict[str, BackendProtocol] = {}
+        for name in ("large_tool_results", "conversation_history"):
+            directory = root / name
+            await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
+            # FilesystemBackend stats its root on construction; keep that off the loop.
+            routes[f"/{name}/"] = await asyncio.to_thread(
+                FilesystemBackend, root_dir=directory, virtual_mode=True
+            )
+        return routes
+
     def extra_middleware(self) -> list[Any]:
         return []
 
     def sandbox_file_downloads(self, *, stop_summary: bool) -> bool:
         return False
+
+
+def _artifacts_root() -> Path:
+    configured = local_artifacts_dir()
+    if configured:
+        return Path(configured)
+    return Path(tempfile.gettempdir()) / f"open-swe-artifacts-{os.getuid()}"
 
 
 def resolve_desktop_project(configurable: dict[str, Any]) -> str:

@@ -70,6 +70,7 @@ class ScheduleCreateBody(BaseModel):
     effort: str | None = None
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode = DEFAULT_SLACK_NOTIFICATION_MODE
+    admin_thread: bool = False
 
     @field_validator("schedule")
     @classmethod
@@ -92,6 +93,7 @@ class ScheduleUpdateBody(BaseModel):
     enabled: bool | None = None
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode | None = None
+    admin_thread: bool | None = None
 
     @field_validator("schedule")
     @classmethod

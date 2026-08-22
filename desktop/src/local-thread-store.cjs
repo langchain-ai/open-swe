@@ -2,8 +2,7 @@ const fs = require("node:fs")
 const path = require("node:path")
 const { randomUUID } = require("node:crypto")
 
-const STATUSES = new Set(["starting", "idle", "running", "error"])
-const MUTABLE_FIELDS = new Set(["title", "modelId", "effort", "status", "viewed"])
+const MUTABLE_FIELDS = new Set(["title", "modelId", "effort", "viewed"])
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 function isRecord(value) {
@@ -72,8 +71,9 @@ function normalizeThread(value) {
     ? {
         repo: stringOrNull(value.checkpoint.repo, 8_192),
         ref: stringOrNull(value.checkpoint.ref, 1_024),
+        branch: stringOrNull(value.checkpoint.branch, 1_024),
       }
-    : { repo: null, ref: null }
+    : { repo: null, ref: null, branch: null }
   const pending = isRecord(value.pending)
     ? {
         prompt: stringOrNull(value.pending.prompt, 2_000_000) || "",
@@ -87,7 +87,6 @@ function normalizeThread(value) {
     title: value.title.slice(0, 80) || "New local agent",
     modelId: stringOrNull(value.modelId),
     effort: stringOrNull(value.effort),
-    status: STATUSES.has(value.status) ? value.status : "error",
     viewed: value.viewed !== false,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
@@ -130,18 +129,10 @@ class LocalThreadStore {
       const parsed = JSON.parse(this.fs.readFileSync(this.filePath, "utf8"))
       values = Array.isArray(parsed) ? parsed : []
     } catch {}
-    let reconciled = false
     for (const value of values) {
       const thread = normalizeThread(value)
-      if (!thread) continue
-      if (thread.status === "running" || thread.status === "starting") {
-        thread.status = "error"
-        thread.updatedAt = this.now()
-        reconciled = true
-      }
-      this.threads.set(thread.id, thread)
+      if (thread) this.threads.set(thread.id, thread)
     }
-    if (reconciled) this.persist()
   }
 
   persist() {
@@ -150,7 +141,7 @@ class LocalThreadStore {
 
   list() {
     return [...this.threads.values()]
-      .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
+      .sort((left, right) => right.createdAt - left.createdAt || left.id.localeCompare(right.id))
       .map((thread) => structuredClone(thread))
   }
 
@@ -168,11 +159,10 @@ class LocalThreadStore {
       title: sessionTitle(prompt),
       modelId: stringOrNull(input.modelId),
       effort: stringOrNull(input.effort),
-      status: "idle",
       viewed: true,
       createdAt: now,
       updatedAt: now,
-      checkpoint: { repo: null, ref: null },
+      checkpoint: { repo: null, ref: null, branch: null },
       pending: { prompt, images: cleanImages(input.images), skills: cleanSkills(input.skills) },
     }
     this.threads.set(thread.id, thread)
@@ -194,10 +184,6 @@ class LocalThreadStore {
     }
     if ("modelId" in patch) next.modelId = stringOrNull(patch.modelId)
     if ("effort" in patch) next.effort = stringOrNull(patch.effort)
-    if ("status" in patch) {
-      if (!STATUSES.has(patch.status)) throw new Error("Invalid local thread status")
-      next.status = patch.status
-    }
     if ("viewed" in patch) {
       if (typeof patch.viewed !== "boolean") throw new Error("Invalid viewed state")
       next.viewed = patch.viewed
@@ -213,7 +199,11 @@ class LocalThreadStore {
     if (!current) return null
     const next = {
       ...current,
-      checkpoint: { repo: checkpoint.repo, ref: checkpoint.ref },
+      checkpoint: {
+        repo: checkpoint.repo,
+        ref: checkpoint.ref,
+        branch: stringOrNull(checkpoint.branch, 1_024),
+      },
       updatedAt: this.now(),
     }
     this.threads.set(id, next)

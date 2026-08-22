@@ -15,6 +15,7 @@ from ..config import agent_version_metadata, langgraph_client
 from ..dashboard.repo_access import require_repo_access_for_user
 from ..dispatch import create_durable_run
 from ..input_messages import InputMessageContext, build_run_input
+from ..settings.admin import is_admin
 from ..settings.options import gate_fable_model, normalize_model_choice
 from ..settings.team_settings import get_team_fable_enabled
 from ..settings.user_mappings import slack_id_for_login
@@ -121,11 +122,26 @@ def _scheduled_prompt(record: dict[str, Any], slack_thread: dict[str, Any] | Non
     return prompt
 
 
+def admin_thread_enabled(record: dict[str, Any]) -> bool:
+    """Whether this automation's runs get admin tools.
+
+    Re-checked at every launch rather than trusted from the record: the owner
+    may have stopped being an admin since the schedule was saved.
+    """
+    email = record.get("user_email")
+    login = record.get("created_by")
+    return record.get("admin_thread") is True and is_admin(
+        email if isinstance(email, str) else None,
+        login=login if isinstance(login, str) else None,
+    )
+
+
 def _agent_run_metadata(
     record: dict[str, Any],
     slack_thread: dict[str, Any] | None = None,
     *,
     test_run: bool = False,
+    admin_thread: bool = False,
 ) -> dict[str, Any]:
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     created_ms = now_ms()
@@ -154,6 +170,8 @@ def _agent_run_metadata(
         metadata["repo_name"] = repo["name"]
     if slack_thread:
         metadata["source_context"] = {"slack_thread": slack_thread}
+    if admin_thread:
+        metadata["admin_thread"] = True
     return metadata
 
 
@@ -163,6 +181,7 @@ async def _agent_run_config(
     slack_thread: dict[str, Any] | None = None,
     *,
     test_run: bool = False,
+    admin_thread: bool = False,
 ) -> dict[str, Any]:
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
@@ -178,6 +197,8 @@ async def _agent_run_config(
         configurable["repo"] = repo
     if slack_thread:
         configurable["slack_thread"] = slack_thread
+    if admin_thread:
+        configurable["admin_thread"] = True
     conditional_channel = _conditional_slack_channel(record)
     if conditional_channel:
         configurable["automation_slack_notification"] = {
@@ -267,7 +288,10 @@ async def launch_agent_schedule_record(
         return await _fail_run(record, f"Slack post failed: {exc}", status="error")
 
     client = langgraph_client()
-    metadata = _agent_run_metadata(record, slack_thread, test_run=test_run)
+    admin_thread = admin_thread_enabled(record)
+    metadata = _agent_run_metadata(
+        record, slack_thread, test_run=test_run, admin_thread=admin_thread
+    )
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
     await client.threads.update(thread_id=thread_id, metadata=metadata)
 
@@ -298,9 +322,10 @@ async def launch_agent_schedule_record(
             ),
         ),
         source="schedule",
-        config=await _agent_run_config(record, thread_id, slack_thread, test_run=test_run),
+        config=await _agent_run_config(
+            record, thread_id, slack_thread, test_run=test_run, admin_thread=admin_thread
+        ),
         client=client,
-        stream_mode=["values", "updates", "messages-tuple"],
         stream_resumable=True,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)

@@ -164,6 +164,15 @@ export interface ThreadGroupSection {
   defaultCollapsed: boolean
 }
 
+export function reconcilePinnedAttentionThread(
+  pinnedThread: AgentThread | undefined,
+  activeThreadId: string | undefined,
+  activeAttentionThread: AgentThread | undefined
+): AgentThread | undefined {
+  if (pinnedThread?.id === activeThreadId) return pinnedThread
+  return activeAttentionThread
+}
+
 const STATUS_GROUP_ORDER: Array<AgentStatus> = [
   "running",
   "finished",
@@ -180,14 +189,15 @@ const STATUS_GROUP_LABEL: Record<AgentStatus, string> = {
   idle: "Idle",
 }
 
-function sortedByRecency(threads: Array<AgentThread>): Array<AgentThread> {
-  return [...threads].sort((a, b) => b.updatedAt - a.updatedAt)
+function sortedByCreation(threads: Array<AgentThread>): Array<AgentThread> {
+  return [...threads].sort((a, b) => b.createdAt - a.createdAt)
 }
 
 /** Split threads into ordered, labelled sections according to the group mode. */
 export function groupThreadsByMode(
   threads: Array<AgentThread>,
-  mode: SidebarGroupMode
+  mode: SidebarGroupMode,
+  pinnedThread?: AgentThread
 ): Array<ThreadGroupSection> {
   if (threads.length === 0) return []
 
@@ -196,21 +206,35 @@ export function groupThreadsByMode(
       {
         key: "all",
         label: "All",
-        threads: sortedByRecency(threads),
+        threads: sortedByCreation(threads),
         defaultCollapsed: false,
       },
     ]
   }
 
   if (mode === "focus") {
-    return groupThreadsForView(threads, "focus").map((group) => ({
+    const currentPinnedThread = pinnedThread
+      ? threads.find((thread) => thread.id === pinnedThread.id)
+      : undefined
+    const groupedThreads =
+      pinnedThread && currentPinnedThread
+        ? threads.map((thread) =>
+            thread.id === pinnedThread.id
+              ? { ...thread, viewed: pinnedThread.viewed }
+              : thread
+          )
+        : threads
+    return groupThreadsForView(groupedThreads, "focus").map((group) => ({
       ...group,
+      threads: sortedByCreation(group.threads).map((thread) =>
+        thread.id === currentPinnedThread?.id ? currentPinnedThread : thread
+      ),
       defaultCollapsed: false,
     }))
   }
 
   if (mode === "date") {
-    const groups = groupThreads(threads)
+    const groups = groupThreads(threads, "createdAt")
     return (
       [
         {
@@ -259,7 +283,7 @@ export function groupThreadsByMode(
       (status) => ({
         key: status,
         label: STATUS_GROUP_LABEL[status],
-        threads: sortedByRecency(byStatus.get(status) ?? []),
+        threads: sortedByCreation(byStatus.get(status) ?? []),
         defaultCollapsed: false,
       })
     )
@@ -277,7 +301,7 @@ export function groupThreadsByMode(
     .map((repo) => ({
       key: repo,
       label: repo,
-      threads: sortedByRecency(byRepo.get(repo) ?? []),
+      threads: sortedByCreation(byRepo.get(repo) ?? []),
       defaultCollapsed: false,
     }))
 }

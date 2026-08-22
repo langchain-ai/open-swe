@@ -1,244 +1,243 @@
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 from support.langgraph_fakes import FakeLangGraphClient
 
 from agent.dashboard import usage_reports
+from agent.settings import agent_usage
+
+NOW_MS = 1_800_000_000_000
 
 
-def _client(
-    *,
-    items: dict[tuple[tuple[str, ...], str], dict] | None = None,
-    threads: list[dict] | None = None,
+@pytest.fixture
+def fake_client(
+    patched_langgraph_client: Callable[..., FakeLangGraphClient],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> FakeLangGraphClient:
-    return FakeLangGraphClient(items=items, threads=threads)
+    client = patched_langgraph_client(usage_reports, attr="_client")
+    monkeypatch.setattr(agent_usage, "now_ms", lambda: NOW_MS)
+    monkeypatch.setattr(usage_reports, "now_ms", lambda: NOW_MS)
+    usage_reports._USAGE_CACHE.clear()
+    return client
 
 
-@pytest.mark.asyncio
-async def test_cached_usage_payload_returns_stale_snapshot_and_schedules_refresh(
-    monkeypatch, patched_langgraph_client
-):
-    usage_snapshot = {
-        "period": "30d",
-        "total_members": 2,
-        "users": [
-            {
-                "rank": 1,
-                "key": "github:octo",
-                "name": "octo",
-                "github_login": "octo",
-                "email": "octo@example.com",
-                "favorite_model": "claude",
-                "agent_runs": 3,
-                "prs_opened": 2,
-                "merged_prs": 1,
-                "agent_loc": 10,
-                "additions": 8,
-                "deletions": 2,
-            },
-            {
-                "rank": 2,
-                "key": "email:private@example.com",
-                "name": "private",
-                "github_login": None,
-                "email": "private@example.com",
-                "favorite_model": "default",
-                "agent_runs": 1,
-                "prs_opened": 0,
-                "merged_prs": 0,
-                "agent_loc": 0,
-                "additions": 0,
-                "deletions": 0,
-            },
-        ],
-    }
-    reviewer_snapshot = {
-        "period": "30d",
-        "reviewed_prs": 1,
-        "prs_with_findings": 1,
-        "findings_recorded": 1,
-        "surfaced_findings": 1,
-        "addressed_findings": 0,
-        "resolved_after_update": 0,
-        "dismissed_findings": 0,
-        "unresolved_surfaced_findings": 1,
-        "resolution_rate": 0.0,
-        "human_replies": 0,
-        "severity_counts": {"medium": 1},
-        "top_categories": [{"name": "correctness", "count": 1}],
-    }
-    client = _client(
-        items={
-            (tuple(usage_reports.USAGE_LEADERBOARD_CACHE_NAMESPACE), "30d"): {
-                "generated_at_ms": 1,
-                "snapshot": usage_snapshot,
-            },
-            (tuple(usage_reports.REVIEWER_STATS_CACHE_NAMESPACE), "30d"): {
-                "generated_at_ms": 1,
-                "snapshot": reviewer_snapshot,
-            },
-        }
+async def _record_run(run_id: str, *, thread_id: str = "thread", login: str = "octo") -> None:
+    await agent_usage.record_agent_run_usage(
+        run_id=run_id,
+        thread_id=thread_id,
+        github_login=login,
+        user_email=f"{login}@example.com",
+        model_id="claude",
+        effort=None,
+        source="dashboard",
     )
-    patched_langgraph_client(usage_reports, attr="_client", client=client)
-    monkeypatch.setattr(usage_reports, "now_ms", lambda: usage_reports._CACHE_TTL_MS + 2)
 
-    usage_refreshes: list[str] = []
-    reviewer_refreshes: list[str] = []
+
+async def test_usage_records_runs_once_and_reads_every_page(
+    fake_client: FakeLangGraphClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(usage_reports, "_PAGE_SIZE", 1)
+    await _record_run("run-1", thread_id="shared-thread")
+    await _record_run("run-2", thread_id="shared-thread")
+    await _record_run("run-1", thread_id="shared-thread")
+
     payload = await usage_reports.list_agent_usage_leaderboard(
-        period="30d",
-        limit=1,
-        current_login="octo",
-        current_email="octo@example.com",
-        schedule_usage_refresh=usage_refreshes.append,
-        schedule_reviewer_refresh=reviewer_refreshes.append,
+        period="all", limit=10, current_login="octo", current_email="octo@example.com"
     )
 
-    assert usage_refreshes == ["30d"]
-    assert reviewer_refreshes == ["30d"]
-    assert payload["rows"][0]["user"]["email"] == "octo@example.com"
-    assert payload["total_members"] == 2
+    assert payload["rows"][0]["agent_runs"] == 2
+    run_searches = [
+        kwargs["offset"]
+        for method, kwargs in fake_client.calls
+        if method == "store.search_items"
+        and kwargs["namespace"] == tuple(agent_usage.AGENT_RUN_NAMESPACE)
+    ]
+    assert run_searches == [0, 1, 2]
+
+
+async def test_reviewer_stats_use_publication_and_resolution_events(
+    fake_client: FakeLangGraphClient,
+) -> None:
+    finding: dict[str, Any] = {
+        "id": "finding-1",
+        "status": "open",
+        "severity": "high",
+        "category": "correctness",
+        "first_seen_sha": "bad",
+        "last_confirmed_sha": "bad",
+        "github_review_comment_id": 1,
+        "interactions": [],
+    }
+
+    await agent_usage.record_reviewer_publication(
+        thread_id="review-thread",
+        owner="langchain-ai",
+        repo="open-swe",
+        pr_number=1,
+        head_sha="bad",
+        findings=[finding],
+    )
+    finding.update(status="resolved", last_confirmed_sha="fixed")
+    await agent_usage.record_reviewer_finding_state("review-thread", finding)
+    payload = await usage_reports.list_agent_usage_leaderboard(
+        period="all", limit=10, current_login=None, current_email=None
+    )
+
+    stats = payload["reviewer_stats"]
+    assert stats["reviewed_prs"] == 1
+    assert stats["prs_with_findings"] == 1
+    assert stats["surfaced_findings"] == 1
+    assert stats["addressed_findings"] == 1
+    assert stats["resolved_after_update"] == 1
+    assert stats["resolution_rate"] == 1.0
+
+
+async def test_unknown_finding_state_is_not_recorded(fake_client: FakeLangGraphClient) -> None:
+    await agent_usage.record_reviewer_finding_state(
+        "review-thread", {"id": "never-published", "status": "resolved"}
+    )
+
+    assert fake_client.store.items == {}
+
+
+async def test_republishing_keeps_the_original_publication_time(
+    fake_client: FakeLangGraphClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_usage, "now_ms", lambda: 1_000)
+    await agent_usage.record_reviewer_publication(
+        thread_id="review-thread", owner="o", repo="r", pr_number=1, head_sha="sha", findings=[]
+    )
+    monkeypatch.setattr(agent_usage, "now_ms", lambda: NOW_MS)
+    await agent_usage.record_reviewer_publication(
+        thread_id="review-thread", owner="o", repo="r", pr_number=1, head_sha="sha", findings=[]
+    )
+
+    reviews = await usage_reports._all(agent_usage.REVIEW_NAMESPACE)
+    assert [review["published_at_ms"] for review in reviews] == [1_000]
+
+
+async def test_current_user_row_survives_the_limit(fake_client: FakeLangGraphClient) -> None:
+    for index in range(4):
+        await _record_run(f"run-{index}", thread_id=f"thread-{index}", login=f"user-{index}")
+
+    kwargs = {"period": "all", "limit": 1, "current_login": "user-3", "current_email": None}
+    payload = await usage_reports.list_agent_usage_leaderboard(**kwargs)
+    cached = await usage_reports.list_agent_usage_leaderboard(**kwargs)
+
+    for result in (payload, cached):
+        assert len(result["rows"]) == 2
+        assert result["rows"][-1]["user"]["github_login"] == "user-3"
+        assert result["current_user_rank"] == 4
+
+
+async def test_pr_webhook_updates_a_known_pr_and_ignores_unknown_ones(
+    fake_client: FakeLangGraphClient,
+) -> None:
+    await agent_usage.record_agent_pr_usage(
+        thread_id="thread-1",
+        github_login="octo",
+        user_email=None,
+        owner="o",
+        repo="r",
+        pr_number=1,
+        pr_url="https://github.com/o/r/pull/1",
+        head="feature",
+        base="main",
+        additions=1,
+        deletions=0,
+        changed_files=1,
+        created_at="2026-08-01T00:00:00Z",
+    )
+    payload = {
+        "repository": {"name": "r", "owner": {"login": "o"}},
+        "pull_request": {
+            "number": 1,
+            "html_url": "https://github.com/o/r/pull/1",
+            "state": "closed",
+            "merged": True,
+            "merged_at": "2026-08-02T00:00:00Z",
+            "additions": 5,
+            "deletions": 2,
+            "changed_files": 3,
+            "head": {"ref": "feature"},
+            "base": {"ref": "main"},
+        },
+    }
+
+    await agent_usage.update_agent_pr_usage_from_webhook(payload)
+    await agent_usage.update_agent_pr_usage_from_webhook(
+        {**payload, "pull_request": {**payload["pull_request"], "number": 2}}
+    )
+
+    prs = await usage_reports._all(agent_usage.AGENT_PR_NAMESPACE)
+    assert len(prs) == 1
+    assert prs[0]["merged"] is True
+    assert prs[0]["state"] == "closed"
+    assert prs[0]["merged_at_ms"] == 1_785_628_800_000
+    assert prs[0]["created_at_ms"] == 1_785_542_400_000
+    assert prs[0]["github_login"] == "octo"
+    assert (prs[0]["additions"], prs[0]["deletions"], prs[0]["changed_files"]) == (5, 2, 3)
+
+
+async def test_legacy_records_are_backfilled_once(
+    patched_langgraph_client: Callable[..., FakeLangGraphClient],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    thread = {
+        "thread_id": "legacy-review",
+        "created_at": "2026-08-01T00:00:00Z",
+        "metadata": {
+            "kind": "reviewer",
+            "pr": {"owner": "o", "name": "r", "number": 3},
+            "last_reviewed_sha": "sha",
+            "findings": [{"id": "f_1", "status": "open", "github_review_comment_id": 1}],
+        },
+    }
+    client = patched_langgraph_client(
+        usage_reports,
+        attr="_client",
+        client=FakeLangGraphClient(
+            threads=[thread],
+            items={
+                (tuple(usage_reports.LEGACY_THREAD_NAMESPACE), "t-1"): {
+                    "thread_id": "t-1",
+                    "github_login": "octo",
+                    "model_id": "claude",
+                    "source": "dashboard",
+                    "created_at_ms": 1_700_000_000_000,
+                },
+                (tuple(usage_reports.LEGACY_PR_NAMESPACE), "o/r#1"): {
+                    "owner": "o",
+                    "repo": "r",
+                    "pr_number": 1,
+                    "github_login": "octo",
+                    "merged": True,
+                    "additions": 5,
+                    "deletions": 2,
+                    "created_at_ms": 1_700_000_000_000,
+                },
+            },
+        ),
+    )
+    monkeypatch.setattr(agent_usage, "now_ms", lambda: NOW_MS)
+    monkeypatch.setattr(usage_reports, "now_ms", lambda: NOW_MS)
+    usage_reports._USAGE_CACHE.clear()
+
+    payload = await usage_reports.list_agent_usage_leaderboard(
+        period="all", limit=10, current_login="octo", current_email=None
+    )
+    assert payload["rows"][0]["agent_runs"] == 1
+    assert payload["rows"][0]["merged_prs"] == 1
+    assert payload["reviewer_stats"]["reviewed_prs"] == 1
     assert payload["reviewer_stats"]["surfaced_findings"] == 1
-    assert client.store.puts == []
+    assert client.store.items[(tuple(usage_reports.BACKFILL_NAMESPACE), "legacy_v1")] == {
+        "completed_at_ms": NOW_MS
+    }
 
-
-@pytest.mark.asyncio
-async def test_reviewer_stats_snapshot_counts_surfaced_and_resolved_findings(monkeypatch):
-    threads = [
-        {
-            "created_at": "2025-01-01T00:00:00Z",
-            "metadata": {
-                "kind": "reviewer",
-                "head_sha": "fixed-sha",
-                "pr": {"owner": "langchain-ai", "name": "open-swe", "number": 1},
-                "findings": [
-                    {
-                        "id": "f_1",
-                        "status": "resolved",
-                        "severity": "high",
-                        "category": "correctness",
-                        "first_seen_sha": "buggy-sha",
-                        "surface_state": "resolved",
-                        "github_review_comment_ids": [10],
-                        "resolution_note": "Fixed in a follow-up commit.",
-                        "interactions": [{"kind": "human_reply"}],
-                    },
-                    {
-                        "id": "f_2",
-                        "status": "open",
-                        "severity": "medium",
-                        "category": "performance",
-                        "surface_state": "surfaced",
-                        "github_review_comment_ids": [11],
-                    },
-                    {
-                        "id": "f_3",
-                        "status": "dismissed",
-                        "severity": "low",
-                        "category": "style",
-                        "github_review_id": 12,
-                    },
-                ],
-            },
-        }
-    ]
-    monkeypatch.setattr(usage_reports, "_client", lambda: _client(threads=threads))
-
-    snapshot = await usage_reports._build_reviewer_stats_snapshot("all")
-
-    assert snapshot["reviewed_prs"] == 1
-    assert snapshot["prs_with_findings"] == 1
-    assert snapshot["findings_recorded"] == 3
-    assert snapshot["surfaced_findings"] == 3
-    assert snapshot["addressed_findings"] == 1
-    assert snapshot["resolved_after_update"] == 1
-    assert snapshot["dismissed_findings"] == 1
-    assert snapshot["unresolved_surfaced_findings"] == 1
-    assert snapshot["human_replies"] == 1
-    assert snapshot["severity_counts"] == {"high": 1, "medium": 1, "low": 1}
-    assert snapshot["top_categories"] == [
-        {"name": "correctness", "count": 1},
-        {"name": "performance", "count": 1},
-        {"name": "style", "count": 1},
-    ]
-
-
-@pytest.mark.asyncio
-async def test_reviewer_stats_classifies_legacy_shaped_findings(monkeypatch):
-    """Findings persisted before the identity fields were unified still count."""
-    threads = [
-        {
-            "created_at": "2025-01-01T00:00:00Z",
-            "metadata": {
-                "kind": "reviewer",
-                "head_sha": "fixed-sha",
-                "pr": {"owner": "langchain-ai", "name": "open-swe", "number": 1},
-                "findings": [
-                    {
-                        "id": "f_1",
-                        "status": "resolved",
-                        "severity": "high",
-                        "category": "correctness",
-                        "first_seen_sha": "buggy-sha",
-                        "github_thread_resolved": True,
-                        "github_review_comment_id": 10,
-                        "resolution_note": "Fixed in a follow-up commit.",
-                    },
-                    {
-                        "id": "f_2",
-                        "status": "open",
-                        "severity": "medium",
-                        "category": "performance",
-                        "surface": {"finding_id": "f_2", "state": "surfaced"},
-                    },
-                    {
-                        "id": "f_3",
-                        "status": "open",
-                        "severity": "low",
-                        "category": "style",
-                    },
-                ],
-            },
-        }
-    ]
-    monkeypatch.setattr(usage_reports, "_client", lambda: _client(threads=threads))
-
-    snapshot = await usage_reports._build_reviewer_stats_snapshot("all")
-
-    assert snapshot["findings_recorded"] == 3
-    assert snapshot["surfaced_findings"] == 2
-    assert snapshot["addressed_findings"] == 1
-    assert snapshot["resolved_after_update"] == 1
-
-
-@pytest.mark.asyncio
-async def test_reviewer_stats_paginates_reviewer_threads(monkeypatch):
-    threads = [
-        {"created_at": "2025-01-03T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
-        {"created_at": "2025-01-02T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
-        {"created_at": "2025-01-01T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
-    ]
-    client = _client(threads=threads)
-    monkeypatch.setattr(usage_reports, "_CACHE_SEARCH_LIMIT", 2)
-    monkeypatch.setattr(usage_reports, "_client", lambda: client)
-
-    snapshot = await usage_reports._build_reviewer_stats_snapshot("all")
-
-    assert snapshot["reviewed_prs"] == 3
-    assert [call["offset"] for call in client.threads.searches] == [0, 2]
-    assert all(call["sort_by"] == "created_at" for call in client.threads.searches)
-
-
-@pytest.mark.asyncio
-async def test_reviewer_stats_stops_after_page_older_than_cutoff(monkeypatch):
-    threads = [
-        {"created_at": "2025-01-03T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
-        {"created_at": "2025-01-01T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
-        {"created_at": "2024-12-31T00:00:00Z", "metadata": {"kind": "reviewer", "findings": []}},
-    ]
-    client = _client(threads=threads)
-    monkeypatch.setattr(usage_reports, "_CACHE_SEARCH_LIMIT", 2)
-    monkeypatch.setattr(usage_reports, "_client", lambda: client)
-    cutoff_ms = usage_reports._timestamp_ms("2025-01-02T00:00:00Z")
-
-    pages = [page async for page in usage_reports._iter_reviewer_thread_pages(cutoff_ms)]
-
-    assert len(pages) == 1
-    assert [call["offset"] for call in client.threads.searches] == [0]
+    usage_reports._USAGE_CACHE.clear()
+    await usage_reports.list_agent_usage_leaderboard(
+        period="all", limit=10, current_login="octo", current_email=None
+    )
+    assert len(await usage_reports._all(agent_usage.AGENT_RUN_NAMESPACE)) == 1
+    assert len(client.threads.searches) == 1

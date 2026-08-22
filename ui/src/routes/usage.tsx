@@ -48,7 +48,8 @@ function UsagePage() {
     queryKey: ["usageLeaderboard", activePeriod],
     queryFn: () => usageApi.leaderboard(activePeriod, 10),
     enabled: !!session.data,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
   })
 
   if (session.isLoading) {
@@ -135,6 +136,11 @@ function UsagePage() {
           </div>
         )}
       </SettingsSection>
+      {leaderboard.data?.generated_at_ms ? (
+        <p className="text-right text-xs text-muted-foreground">
+          Updated {formatTime(leaderboard.data.generated_at_ms)}
+        </p>
+      ) : null}
     </AppShell>
   )
 }
@@ -324,6 +330,13 @@ function initialsFor(name: string): string {
   const second = parts[1]
   if (!second) return first.slice(0, 2).toUpperCase()
   return `${first[0] ?? ""}${second[0] ?? ""}`.toUpperCase()
+}
+
+function formatTime(value: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(value)
 }
 
 function formatNumber(value: number): string {

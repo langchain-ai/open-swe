@@ -1,4 +1,4 @@
-import { Menu } from "@base-ui/react/menu"
+import { ContextMenu } from "@base-ui/react/context-menu"
 import { Dialog } from "@base-ui/react/dialog"
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
@@ -10,9 +10,7 @@ import {
   CheckCircleIcon,
   CircleNotchIcon,
   CopyIcon,
-  DotsThreeVerticalIcon,
   FolderOpenIcon,
-  FolderPlusIcon,
   GitMergeIcon,
   GitPullRequestIcon,
   LightningIcon,
@@ -35,6 +33,7 @@ import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { DesktopThreadSourceToggle } from "@/features/agents/components/DesktopThreadSourceToggle"
 import { SidebarFilterMenu } from "@/features/agents/components/SidebarFilterMenu"
+import { SidebarProjectSelector } from "@/features/agents/components/SidebarProjectSelector"
 import { Button } from "@/components/ui/button"
 import {
   SidebarCollapseButton,
@@ -47,6 +46,7 @@ import {
   filterThreads,
   groupThreadsByMode,
   hasActiveFilters,
+  reconcilePinnedAttentionThread,
 } from "@/features/agents/lib/sidebarFilter"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
@@ -58,6 +58,7 @@ import {
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
   useDesktopLocalThreads,
+  useLocalThreadActivity,
   useRefreshLocalThreads,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
@@ -121,8 +122,27 @@ const PR_STATE_META: Record<
   },
 }
 
+function openContextMenuFromKeyboard(
+  event: React.KeyboardEvent<HTMLAnchorElement>
+) {
+  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
+    return
+  }
+  event.preventDefault()
+  const rect = event.currentTarget.getBoundingClientRect()
+  event.currentTarget.dispatchEvent(
+    new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    })
+  )
+}
+
 interface AgentsSidebarProps {
-  user: SessionUser
+  user: SessionUser | null
+  localOnly?: boolean
   activeThreadId?: string
   activeLocalSessionId?: string
   layout: SidebarLayout
@@ -137,6 +157,7 @@ const NAV = [
 
 export function AgentsSidebar({
   user,
+  localOnly = false,
   activeThreadId,
   activeLocalSessionId,
   layout,
@@ -157,8 +178,10 @@ export function AgentsSidebar({
       prefs.filters.includeAutomations ||
       prefs.filters.sources.includes("schedule"),
     includeResolved: prefs.filters.includeResolved,
+    enabled: !localOnly,
   })
   const localSessions = useDesktopLocalThreads().data ?? []
+  const activity = useLocalThreadActivity()
   const refreshLocalThreads = useRefreshLocalThreads()
   const deleteLocalSession = async (sessionId: string) => {
     const deleted =
@@ -172,6 +195,17 @@ export function AgentsSidebar({
     removeProject: removeLocalProject,
   } = useDesktopProjects()
   const localGroups = groupLocalProjects(localProjects, localSessions)
+  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(
+    null
+  )
+  const activeProjectPath = localProjects.some(
+    (project) => project.cwd === selectedProjectPath
+  )
+    ? selectedProjectPath
+    : null
+  const visibleLocalGroups = activeProjectPath
+    ? localGroups.filter((group) => group.project.cwd === activeProjectPath)
+    : localGroups
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
@@ -204,7 +238,24 @@ export function AgentsSidebar({
     prefs.group === "focus" && showResolved
       ? [...filteredActive, ...filteredResolved]
       : filteredActive
-  const sections = groupThreadsByMode(groupedThreads, prefs.group)
+  const naturalSections = groupThreadsByMode(groupedThreads, prefs.group)
+  const activeAttentionThread = naturalSections
+    .find((section) => section.key === "attention")
+    ?.threads.find((thread) => thread.id === activeThreadId)
+  const [pinnedAttentionThread, setPinnedAttentionThread] =
+    useState<AgentThread>()
+  useEffect(() => {
+    setPinnedAttentionThread((current) =>
+      reconcilePinnedAttentionThread(
+        current,
+        activeThreadId,
+        activeAttentionThread
+      )
+    )
+  }, [activeAttentionThread, activeThreadId])
+  const sections = pinnedAttentionThread
+    ? groupThreadsByMode(groupedThreads, prefs.group, pinnedAttentionThread)
+    : naturalSections
   const resolvedLoading =
     !sidebar.isPending && showResolved && sidebar.resolvedQuery.isLoading
   const isCloudEmpty =
@@ -221,18 +272,16 @@ export function AgentsSidebar({
     ).length,
   }
   const localActivity = {
-    running: localSessions.filter(
-      (thread) => thread.status === "running" || thread.status === "starting"
-    ).length,
+    running: localSessions.filter((thread) => activity[thread.id] === "running")
+      .length,
     completed: localSessions.filter(
-      (thread) =>
-        !thread.viewed &&
-        thread.status !== "running" &&
-        thread.status !== "starting"
+      (thread) => !thread.viewed && activity[thread.id] !== "running"
     ).length,
   }
-  const showLocalThreads = isDesktop && desktopThreadSource === "local"
-  const showCloudThreads = !isDesktop || desktopThreadSource === "cloud"
+  const showLocalThreads =
+    isDesktop && (localOnly || desktopThreadSource === "local")
+  const showCloudThreads =
+    !localOnly && (!isDesktop || desktopThreadSource === "cloud")
 
   return (
     <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
@@ -243,7 +292,7 @@ export function AgentsSidebar({
         )}
       >
         <Link
-          to="/my-settings"
+          to={localOnly ? "/agents" : "/my-settings"}
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
           <img src="/logo-mark.png" alt="" className="size-5" />
@@ -278,28 +327,36 @@ export function AgentsSidebar({
         </Link>
       </div>
 
-      <nav className="flex flex-col gap-0.5 px-2 pb-4">
-        {NAV.map((item) => {
-          const Icon = item.icon
-          return (
-            <Link
-              key={item.to}
-              to={item.to}
-              onClick={layout.closeOnMobile}
-              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-              activeProps={{
-                className: "bg-sidebar-row-hover !text-foreground font-medium",
-              }}
-            >
-              <Icon className="size-4" />
-              {item.label}
-            </Link>
-          )
-        })}
-      </nav>
+      {!localOnly && (
+        <nav
+          className={cn(
+            "flex flex-col gap-0.5 px-2",
+            isDesktop ? "pb-3" : "pb-4"
+          )}
+        >
+          {NAV.map((item) => {
+            const Icon = item.icon
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                onClick={layout.closeOnMobile}
+                className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+                activeProps={{
+                  className:
+                    "bg-sidebar-row-hover !text-foreground font-medium",
+                }}
+              >
+                <Icon className="size-4" />
+                {item.label}
+              </Link>
+            )
+          })}
+        </nav>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">
-        {isDesktop && (
+        {isDesktop && !localOnly && (
           <DesktopThreadSourceToggle
             source={desktopThreadSource}
             localActivity={localActivity}
@@ -309,38 +366,50 @@ export function AgentsSidebar({
         )}
         {showLocalThreads && (
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="mb-1 flex items-center px-2 py-1">
-              <span className="min-w-0 flex-1 truncate font-heading text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
-                Projects and threads
-              </span>
-              <button
-                aria-label="Add project"
-                className="flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
-                onClick={() => void addLocalProject()}
-                title="Add project"
-                type="button"
-              >
-                <FolderPlusIcon className="size-3.5" />
-              </button>
-            </div>
+            <SidebarProjectSelector
+              projects={localProjects}
+              selectedProjectPath={activeProjectPath}
+              onSelectProject={setSelectedProjectPath}
+              onAddProject={() => void addLocalProject()}
+              onRemoveProject={(cwd) => void removeLocalProject(cwd)}
+            />
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {localGroups.map((group) => (
-                <LocalThreadGroup
-                  key={group.project.cwd}
-                  project={group.project}
-                  sessions={group.sessions}
-                  activeSessionId={activeLocalSessionId}
-                  onNavigate={layout.closeOnMobile}
-                  onDelete={deleteLocalSession}
-                  onRemove={() => void removeLocalProject(group.project.cwd)}
-                  compact={prefs.compact}
-                />
-              ))}
+              {activeProjectPath
+                ? visibleLocalGroups[0]?.sessions.map((session) => (
+                    <LocalThreadRow
+                      key={session.id}
+                      session={session}
+                      isActive={session.id === activeLocalSessionId}
+                      onNavigate={layout.closeOnMobile}
+                      onDelete={deleteLocalSession}
+                      compact={prefs.compact}
+                    />
+                  ))
+                : visibleLocalGroups.map((group) => (
+                    <LocalThreadGroup
+                      key={group.project.cwd}
+                      project={group.project}
+                      sessions={group.sessions}
+                      activeSessionId={activeLocalSessionId}
+                      onNavigate={layout.closeOnMobile}
+                      onDelete={deleteLocalSession}
+                      onRemove={() =>
+                        void removeLocalProject(group.project.cwd)
+                      }
+                      compact={prefs.compact}
+                    />
+                  ))}
               {localGroups.length === 0 && (
                 <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
                   No projects yet
                 </p>
               )}
+              {activeProjectPath &&
+                visibleLocalGroups[0]?.sessions.length === 0 && (
+                  <p className="px-2.5 py-3 text-center text-xs text-muted-foreground/70">
+                    No threads yet
+                  </p>
+                )}
             </div>
           </div>
         )}
@@ -426,7 +495,16 @@ export function AgentsSidebar({
 
       <div className="flex items-center gap-1 p-2">
         <div className="min-w-0 flex-1">
-          <SidebarUserMenu user={user} showSettingsLink />
+          {user ? (
+            <SidebarUserMenu user={user} showSettingsLink />
+          ) : (
+            <Link
+              to="/login"
+              className="flex w-full items-center justify-center rounded-md border border-border px-2 py-1.5 text-xs font-medium hover:bg-sidebar-accent"
+            >
+              Sign in for cloud mode
+            </Link>
+          )}
         </div>
         {showCloudThreads && (
           <SidebarFilterMenu
@@ -512,16 +590,10 @@ function groupLocalProjects(
     .map((project) => ({
       project,
       sessions: (sessionsByProject.get(project.cwd) ?? []).sort(
-        (left, right) => right.updatedAt - left.updatedAt
-      ),
-      updatedAt: Math.max(
-        project.addedAt,
-        ...(sessionsByProject.get(project.cwd) ?? []).map(
-          (session) => session.updatedAt
-        )
+        (left, right) => right.createdAt - left.createdAt
       ),
     }))
-    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .sort((left, right) => right.project.addedAt - left.project.addedAt)
 }
 
 function LocalThreadGroup({
@@ -601,7 +673,8 @@ function LocalThreadRow({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const running = session.status === "running" || session.status === "starting"
+  const [contextMenuOpen, setContextMenuOpen] = useState(false)
+  const running = useLocalThreadActivity()[session.id] === "running"
 
   const confirmDelete = async () => {
     if (isDeleting) return
@@ -627,63 +700,57 @@ function LocalThreadRow({
 
   return (
     <>
-      <div className={cn("group relative mb-0.5", isDeleting && "opacity-50")}>
-        <Link
-          to="/agents/local/$sessionId"
-          params={{ sessionId: session.id }}
-          onClick={onNavigate}
-          className={cn(
-            "flex items-center gap-2 rounded-lg px-2.5 transition-colors group-hover:pr-8 [@media(hover:none)]:pr-8",
-            compact ? "h-7 gap-1.5" : "h-8",
-            isActive
-              ? "bg-accent text-foreground"
-              : "text-muted-foreground group-hover:bg-sidebar-row-hover"
-          )}
+      <ContextMenu.Root onOpenChange={setContextMenuOpen}>
+        <ContextMenu.Trigger
+          className={cn("group relative mb-0.5", isDeleting && "opacity-50")}
         >
-          {running ? (
-            <CircleNotchIcon
-              className="size-3 shrink-0 animate-spin text-primary"
-              aria-label="Local thread running"
-            />
-          ) : (
-            <span className="size-2 shrink-0 rounded-full bg-border" />
-          )}
-          <span className="min-w-0 flex-1 truncate text-[13px]">
-            {session.title}
-          </span>
-        </Link>
-        <Menu.Root>
-          <Menu.Trigger
-            render={
-              <button
-                type="button"
-                aria-label="Local thread actions"
-                className="absolute top-1/2 right-1 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 group-hover:flex hover:bg-accent hover:text-foreground data-popup-open:flex [@media(hover:none)]:flex"
+          <Link
+            to="/agents/local/$sessionId"
+            params={{ sessionId: session.id }}
+            onClick={(event) => {
+              if (contextMenuOpen) {
+                event.preventDefault()
+                return
+              }
+              onNavigate?.()
+            }}
+            onKeyDown={openContextMenuFromKeyboard}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-2.5 transition-colors",
+              compact ? "h-7 gap-1.5" : "h-8",
+              isActive
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground group-hover:bg-sidebar-row-hover"
+            )}
+          >
+            {running ? (
+              <CircleNotchIcon
+                className="size-3 shrink-0 animate-spin text-primary"
+                aria-label="Local thread running"
+              />
+            ) : (
+              <span className="size-2 shrink-0 rounded-full bg-border" />
+            )}
+            <span className="min-w-0 flex-1 truncate text-[13px]">
+              {session.title}
+            </span>
+          </Link>
+        </ContextMenu.Trigger>
+        <ContextMenu.Portal>
+          <ContextMenu.Positioner className="z-50 outline-none">
+            <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+              <ContextMenu.Item
+                onClick={() => setDeleteOpen(true)}
+                disabled={isDeleting}
+                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
               >
-                <DotsThreeVerticalIcon className="size-4" weight="bold" />
-              </button>
-            }
-          />
-          <Menu.Portal>
-            <Menu.Positioner
-              align="end"
-              sideOffset={4}
-              className="z-50 outline-none"
-            >
-              <Menu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-                <Menu.Item
-                  onClick={() => setDeleteOpen(true)}
-                  disabled={isDeleting}
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                >
-                  <TrashIcon className="size-3.5" />
-                  Delete thread
-                </Menu.Item>
-              </Menu.Popup>
-            </Menu.Positioner>
-          </Menu.Portal>
-        </Menu.Root>
-      </div>
+                <TrashIcon className="size-3.5" />
+                Delete thread
+              </ContextMenu.Item>
+            </ContextMenu.Popup>
+          </ContextMenu.Positioner>
+        </ContextMenu.Portal>
+      </ContextMenu.Root>
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={(open) => {
@@ -891,6 +958,7 @@ function ThreadRow({
   const deleteThread = useDeleteAgentThread()
   const resolveThread = useResolveAgentThread()
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const isReadOnly = thread.isOwner === false
   const badge =
     thread.diffStats && thread.diffStats.additions > 0
@@ -932,16 +1000,6 @@ function ThreadRow({
     thread.threadCategory === "automation" || thread.source === "schedule"
   const showFinishedIndicator = thread.status === "finished" && !thread.viewed
 
-  const openTrace = () => {
-    if (!thread.traceUrl) return
-    window.open(thread.traceUrl, "_blank", "noopener,noreferrer")
-  }
-
-  const openSource = () => {
-    if (!thread.sourceUrl) return
-    window.open(thread.sourceUrl, "_blank", "noopener,noreferrer")
-  }
-
   const copySandboxId = () => {
     if (!thread.sandboxId) return
     void navigator.clipboard.writeText(thread.sandboxId)
@@ -949,149 +1007,152 @@ function ThreadRow({
 
   return (
     <>
-      <div className={cn("group relative mb-0.5", isDeleting && "opacity-50")}>
-        <Link
-          to="/agents/$threadId"
-          params={{ threadId: thread.id }}
-          onClick={onNavigate}
-          className={cn(
-            "flex items-center gap-2 rounded-lg px-2.5 transition-colors group-hover:pr-8 [@media(hover:none)]:pr-8",
-            compact ? "h-7 gap-1.5" : "h-8",
-            isActive
-              ? thread.adminThread
-                ? "bg-destructive/10 text-foreground"
-                : "bg-accent text-foreground"
-              : thread.adminThread
-                ? "bg-destructive/5 text-muted-foreground group-hover:bg-destructive/10"
-                : "text-muted-foreground group-hover:bg-sidebar-row-hover"
-          )}
+      <ContextMenu.Root onOpenChange={setContextMenuOpen}>
+        <ContextMenu.Trigger
+          className={cn("group relative mb-0.5", isDeleting && "opacity-50")}
         >
-          {thread.status === "running" ? (
-            <CircleNotchIcon
-              className="size-3 shrink-0 animate-spin text-primary"
-              aria-label="Thread running"
-            />
-          ) : (
-            <span
-              className={cn(
-                "size-2 shrink-0 rounded-full",
-                showFinishedIndicator ? "bg-primary" : "bg-border"
-              )}
-              aria-label={
-                showFinishedIndicator ? "Thread finished" : "Thread viewed"
+          <Link
+            to="/agents/$threadId"
+            params={{ threadId: thread.id }}
+            onClick={(event) => {
+              if (contextMenuOpen) {
+                event.preventDefault()
+                return
               }
-            />
-          )}
-          {source && SourceIcon && (
-            <SourceIcon
-              className="size-3.5 shrink-0 text-muted-foreground/70"
-              aria-label={source.label}
-            >
-              <title>{source.label}</title>
-            </SourceIcon>
-          )}
-          <span className="min-w-0 flex-1 truncate text-[13px]">
-            {thread.title}
-          </span>
-          {!compact && isAutomation && (
-            <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground group-hover:hidden">
-              Automation
-            </span>
-          )}
-          {!compact && prMeta && PrIcon && (
-            <PrIcon
-              className={cn(
-                "size-3.5 shrink-0 group-hover:hidden",
-                prMeta.className
-              )}
-              aria-label={prMeta.label}
-            >
-              <title>{prMeta.label}</title>
-            </PrIcon>
-          )}
-          {!compact && badge && (
-            <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-success-foreground group-hover:hidden">
-              {badge}
-            </span>
-          )}
-        </Link>
-        {/* One actions menu for every input: revealed on hover, kept while
-            open, and always shown on devices that can't hover (touch). It sits
-            outside the Link so opening it never navigates the row. */}
-        <Menu.Root>
-          <Menu.Trigger
-            render={
-              <button
-                type="button"
-                aria-label="Thread actions"
-                className="absolute top-1/2 right-1 hidden size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 group-hover:flex hover:bg-accent hover:text-foreground data-popup-open:flex [@media(hover:none)]:flex"
+              onNavigate?.()
+            }}
+            onKeyDown={openContextMenuFromKeyboard}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-2.5 transition-colors",
+              compact ? "h-7 gap-1.5" : "h-8",
+              isActive
+                ? thread.adminThread
+                  ? "bg-destructive/10 text-foreground"
+                  : "bg-accent text-foreground"
+                : thread.adminThread
+                  ? "bg-destructive/5 text-muted-foreground group-hover:bg-destructive/10"
+                  : "text-muted-foreground group-hover:bg-sidebar-row-hover"
+            )}
+          >
+            {thread.status === "running" ? (
+              <CircleNotchIcon
+                className="size-3 shrink-0 animate-spin text-primary"
+                aria-label="Thread running"
+              />
+            ) : (
+              <span
+                className={cn(
+                  "size-2 shrink-0 rounded-full",
+                  showFinishedIndicator ? "bg-primary" : "bg-border"
+                )}
+                aria-label={
+                  showFinishedIndicator ? "Thread finished" : "Thread viewed"
+                }
+              />
+            )}
+            {source && SourceIcon && (
+              <SourceIcon
+                className="size-3.5 shrink-0 text-muted-foreground/70"
+                aria-label={source.label}
               >
-                <DotsThreeVerticalIcon className="size-4" weight="bold" />
-              </button>
-            }
-          />
-          <Menu.Portal>
-            <Menu.Positioner
-              align="end"
-              sideOffset={4}
-              className="z-50 outline-none"
-            >
-              <Menu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-                <Menu.Item
-                  disabled={!thread.traceUrl}
-                  onClick={openTrace}
-                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
+                <title>{source.label}</title>
+              </SourceIcon>
+            )}
+            <span className="min-w-0 flex-1 truncate text-[13px]">
+              {thread.title}
+            </span>
+            {thread.automationActionPosted && (
+              <IoLogoSlack
+                className="size-3.5 shrink-0 text-success-foreground"
+                aria-label="Action posted to Slack"
+              >
+                <title>Action posted to Slack</title>
+              </IoLogoSlack>
+            )}
+            {!compact && isAutomation && (
+              <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                Automation
+              </span>
+            )}
+            {!compact && prMeta && PrIcon && (
+              <PrIcon
+                className={cn("size-3.5 shrink-0", prMeta.className)}
+                aria-label={prMeta.label}
+              >
+                <title>{prMeta.label}</title>
+              </PrIcon>
+            )}
+            {!compact && badge && (
+              <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] text-success-foreground">
+                {badge}
+              </span>
+            )}
+          </Link>
+        </ContextMenu.Trigger>
+        <ContextMenu.Portal>
+          <ContextMenu.Positioner className="z-50 outline-none">
+            <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+              {thread.traceUrl && (
+                <ContextMenu.LinkItem
+                  href={thread.traceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  closeOnClick
+                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
                 >
                   <TreeStructureIcon className="size-3.5" />
                   Open trace
-                </Menu.Item>
-                {thread.sourceUrl && (
-                  <Menu.Item
-                    onClick={openSource}
-                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                  >
-                    <IoLogoSlack className="size-3.5" />
-                    Open Slack thread
-                  </Menu.Item>
-                )}
-                <Menu.Item
-                  disabled={!thread.sandboxId}
-                  onClick={copySandboxId}
-                  title={thread.sandboxId ?? undefined}
+                </ContextMenu.LinkItem>
+              )}
+              {thread.sourceUrl && (
+                <ContextMenu.LinkItem
+                  href={thread.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  closeOnClick
+                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
+                >
+                  <IoLogoSlack className="size-3.5" />
+                  Open Slack thread
+                </ContextMenu.LinkItem>
+              )}
+              <ContextMenu.Item
+                disabled={!thread.sandboxId}
+                onClick={copySandboxId}
+                title={thread.sandboxId ?? undefined}
+                className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
+              >
+                <CopyIcon className="size-3.5" />
+                Copy sandbox ID
+              </ContextMenu.Item>
+              {!isReadOnly && (
+                <ContextMenu.Item
+                  onClick={() => onToggleResolved()}
+                  disabled={resolveThread.isPending}
                   className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
                 >
-                  <CopyIcon className="size-3.5" />
-                  Copy sandbox ID
-                </Menu.Item>
-                {!isReadOnly && (
-                  <Menu.Item
-                    onClick={() => onToggleResolved()}
-                    disabled={resolveThread.isPending}
-                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                  >
-                    {isResolved ? (
-                      <ArrowCounterClockwiseIcon className="size-3.5" />
-                    ) : (
-                      <CheckCircleIcon className="size-3.5" />
-                    )}
-                    {isResolved ? "Unresolve thread" : "Resolve thread"}
-                  </Menu.Item>
-                )}
-                {!isReadOnly && (
-                  <Menu.Item
-                    onClick={() => onDelete()}
-                    disabled={isDeleting}
-                    className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
-                  >
-                    <TrashIcon className="size-3.5" />
-                    Delete thread
-                  </Menu.Item>
-                )}
-              </Menu.Popup>
-            </Menu.Positioner>
-          </Menu.Portal>
-        </Menu.Root>
-      </div>
+                  {isResolved ? (
+                    <ArrowCounterClockwiseIcon className="size-3.5" />
+                  ) : (
+                    <CheckCircleIcon className="size-3.5" />
+                  )}
+                  {isResolved ? "Unresolve thread" : "Resolve thread"}
+                </ContextMenu.Item>
+              )}
+              {!isReadOnly && (
+                <ContextMenu.Item
+                  onClick={() => onDelete()}
+                  disabled={isDeleting}
+                  className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50"
+                >
+                  <TrashIcon className="size-3.5" />
+                  Delete thread
+                </ContextMenu.Item>
+              )}
+            </ContextMenu.Popup>
+          </ContextMenu.Positioner>
+        </ContextMenu.Portal>
+      </ContextMenu.Root>
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
@@ -1105,11 +1166,13 @@ function ThreadRow({
 
 export function AgentsShell({
   user,
+  localOnly = false,
   activeThreadId,
   activeLocalSessionId,
   children,
 }: {
-  user: SessionUser
+  user: SessionUser | null
+  localOnly?: boolean
   activeThreadId?: string
   activeLocalSessionId?: string
   children: React.ReactNode
@@ -1137,6 +1200,7 @@ export function AgentsShell({
       <div className="agents-ui flex h-svh overflow-hidden bg-background">
         <AgentsSidebar
           user={user}
+          localOnly={localOnly}
           activeThreadId={activeThreadId}
           activeLocalSessionId={activeLocalSessionId}
           layout={layout}

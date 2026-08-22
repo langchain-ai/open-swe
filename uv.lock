@@ -2125,7 +2125,7 @@ requires-dist = [
     { name = "langchain-google-genai", specifier = ">=4.3.2" },
     { name = "langchain-mcp-adapters", specifier = ">=0.3.1" },
     { name = "langchain-modal", specifier = ">=0.0.6" },
-    { name = "langchain-openai", specifier = ">=1.4.1" },
+    { name = "langchain-openai", specifier = ">=1.4.1,<2.0.0" },
     { name = "langchain-runloop", specifier = ">=0.0.7" },
     { name = "langgraph", specifier = ">=1.2.10" },
     { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.31" },

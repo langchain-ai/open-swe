@@ -47,10 +47,16 @@ test("reports whether the selected provider is configured", () => {
   assert.deepEqual(modelCredentialStatus("openai:gpt-test", {}), {
     available: false,
     variable: "OPENAI_API_KEY",
+    canSignIn: true,
   })
   assert.deepEqual(modelCredentialStatus("openai:gpt-test", { OPENAI_API_KEY: "secret" }), {
     available: true,
     variable: "OPENAI_API_KEY",
+  })
+  assert.deepEqual(modelCredentialStatus("openai:gpt-test", {}, { openAiOAuth: true }), {
+    available: true,
+    variable: null,
+    canSignIn: true,
   })
   assert.deepEqual(modelCredentialStatus("google_genai:test", { GEMINI_API_KEY: "secret" }), {
     available: true,
@@ -90,6 +96,35 @@ test("rejects a failed local LangGraph thread creation", async () => {
     supervisor.createThread("thread-1"),
     /Could not create local LangGraph thread \(503\)/
   )
+})
+
+test("derives thread activity from the backend without starting it", async () => {
+  const idle = new BackendSupervisor({
+    fetch: () => assert.fail("must not reach a backend that is not running"),
+  })
+  assert.deepEqual(await idle.threadActivity(), {})
+
+  const supervisor = new BackendSupervisor({
+    fetch: async () =>
+      Response.json([
+        { thread_id: "thread-1", status: "busy" },
+        { thread_id: "thread-2", status: "idle" },
+        { thread_id: "thread-3", status: "error" },
+      ]),
+  })
+  supervisor.child = {}
+  supervisor.port = 49152
+  supervisor.token = "token"
+
+  assert.deepEqual(await supervisor.threadActivity(), {
+    "thread-1": "running",
+    "thread-3": "error",
+  })
+
+  supervisor.fetch = async () => {
+    throw new Error("connection refused")
+  }
+  assert.equal(await supervisor.threadActivity(), null)
 })
 
 test("packaged target runs the bundled backend", () => {

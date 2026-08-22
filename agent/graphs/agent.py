@@ -80,7 +80,7 @@ from ..settings.agent_overrides import (
     profile_draft_prs,
     resolve_github_login,
 )
-from ..settings.agent_usage import record_agent_thread_usage
+from ..settings.agent_usage import record_agent_run_usage
 from ..settings.environments import environment_prompt, resolve_environment
 from ..settings.run_diffs import THREAD_DIFF_KEY, save_run_diff
 from ..settings.user_mappings import email_for_login
@@ -93,6 +93,7 @@ from ..tools import (
     capture_environment_snapshot,
     create_sandbox_file_download_url,
     delete_environment,
+    delete_organization_skill,
     delete_user_skill,
     enter_plan_mode,
     fetch_url,
@@ -118,6 +119,7 @@ from ..tools import (
     report_platform_issue,
     request_pr_review,
     save_environment,
+    save_organization_skill,
     save_plan,
     save_user_instructions,
     save_user_skill,
@@ -338,11 +340,13 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
 
 
 # Added to an admin thread's tools; see the admin-thread section of the prompt.
-ENVIRONMENT_TOOLS = (
+ADMIN_TOOLS = (
     list_environments,
     save_environment,
     capture_environment_snapshot,
     delete_environment,
+    save_organization_skill,
+    delete_organization_skill,
 )
 
 
@@ -357,7 +361,7 @@ async def _workspace_admin(config: RunnableConfig, profile_login: str | None) ->
 
 
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
-    """Whether this run may manage environments.
+    """Whether this run may manage environments and organization skills.
 
     The dashboard only stamps ``admin_thread`` for an admin session, but the flag
     is re-checked here against ``CONFIGURED_ADMINS`` so a thread cannot carry the
@@ -674,14 +678,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     **({"turn_checkpoints": turn_checkpoints} if turn_checkpoints else {}),
                 },
             )
-            await record_agent_thread_usage(
-                thread_id=self._thread_id,
-                github_login=self._profile_login,
-                user_email=self._user_email,
-                model_id=self._model_id,
-                effort=self._effort,
-                source=self._source,
-            )
+            prepare_run_id = configurable.get("prepare_run_id")
+            if isinstance(prepare_run_id, str):
+                await record_agent_run_usage(
+                    run_id=prepare_run_id,
+                    thread_id=self._thread_id,
+                    github_login=self._profile_login,
+                    user_email=self._user_email,
+                    model_id=self._model_id,
+                    effort=self._effort,
+                    source=self._source,
+                )
         except Exception:
             logger.debug(
                 "Failed to record agent usage for thread %s", self._thread_id, exc_info=True
@@ -874,7 +881,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     admin_environments = await _admin_thread(config, profile_login)
     if admin_environments:
-        logger.info("Admin thread %s: adding environment management tools", thread_id)
+        logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
     stop_summary_mode = configurable.get("stop_summary") is True
     sandbox_file_downloads = environment.sandbox_file_downloads(stop_summary=stop_summary_mode)
@@ -952,7 +959,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,
-        *(ENVIRONMENT_TOOLS if admin_environments else ()),
+        *(ADMIN_TOOLS if admin_environments else ()),
     ]
     static_tools = environment.static_tools(
         [slack_read_thread_messages, slack_thread_reply] if stop_summary_mode else hosted_tools
@@ -975,7 +982,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     skill_routes, skill_sources = environment.skill_routes(profile_login)
-    agent_backend: BackendProtocol = CompositeBackend(default=backend, routes=skill_routes)
+    agent_backend: BackendProtocol = CompositeBackend(
+        default=backend,
+        routes={**skill_routes, **await environment.scratch_routes(thread_id)},
+    )
     main_model = main_spec.build(use_gateway=use_gateway)
     subagent_model = subagent_spec.build(use_gateway=use_gateway)
     subagent_tools = [

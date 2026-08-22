@@ -69,7 +69,7 @@ describe("buildRenderItems", () => {
     ])
   })
 
-  it("hides routine live work while preserving failures, approvals, and final output", () => {
+  it("keeps tool failures collapsed while preserving approvals and final output", () => {
     const chunks: Array<Chunk> = [
       { kind: "reasoning", text: "Inspecting the code" },
       {
@@ -100,7 +100,6 @@ describe("buildRenderItems", () => {
     const collapsed = selectCollapsedTurnItems(items)
 
     expect(collapsed.map((item) => item.type)).toEqual([
-      "shell-item",
       "tool-item",
       "text-chunk",
     ])
@@ -110,7 +109,7 @@ describe("buildRenderItems", () => {
           ? [item.chunk.toolCallId]
           : []
       )
-    ).toEqual(["shell-1", "search-1"])
+    ).toEqual(["search-1"])
   })
 
   it("keeps unfinished work visible after a turn is interrupted", () => {

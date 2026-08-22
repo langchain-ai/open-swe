@@ -1,43 +1,22 @@
 """Admin-thread tools for managing environments.
 
-Wired into the agent only for admin threads (see ``agent/server.py``). Every tool
-re-checks the triggering user against ``CONFIGURED_ADMINS`` so a thread whose
-metadata says "admin" cannot act on behalf of someone who is not one.
+Wired into the agent only for admin threads (see ``agent/graphs/agent.py``).
+Every tool re-checks the triggering user against ``CONFIGURED_ADMINS`` so a
+thread whose metadata says "admin" cannot act on behalf of someone who is not one.
 """
 
 import logging
 from typing import Any
 
-from langgraph.config import get_config
-
 from ..settings import environments as store
-from ..settings.admin import is_admin
+from .admin_gate import configurable as _configurable
+from .admin_gate import require_admin
 
 logger = logging.getLogger(__name__)
 
-_NOT_ADMIN = "Only workspace admins can manage environments."
-
-
-def _configurable() -> dict[str, Any]:
-    try:
-        config = get_config()
-    except Exception:
-        return {}
-    configurable = config.get("configurable") if isinstance(config, dict) else None
-    return configurable if isinstance(configurable, dict) else {}
-
 
 def _require_admin() -> str | None:
-    """Return an error message when the triggering user is not an admin."""
-    configurable = _configurable()
-    login = configurable.get("github_login")
-    email = configurable.get("user_email")
-    if is_admin(
-        email if isinstance(email, str) else None,
-        login=login if isinstance(login, str) else None,
-    ):
-        return None
-    return _NOT_ADMIN
+    return require_admin("manage environments")
 
 
 def _summary(record: dict[str, Any]) -> dict[str, Any]:
@@ -46,6 +25,10 @@ def _summary(record: dict[str, Any]) -> dict[str, Any]:
         "slug": record.get("slug"),
         "prompt": record.get("prompt"),
         "repos": record.get("repos") or [],
+        "mem_bytes": record.get("mem_bytes"),
+        "vcpus": record.get("vcpus"),
+        "fs_capacity_bytes": record.get("fs_capacity_bytes"),
+        "create_params": record.get("create_params") or {},
         "snapshot_status": record.get("snapshot_status"),
         "snapshot_id": record.get("snapshot_id"),
         "snapshot_name": record.get("snapshot_name"),
@@ -78,8 +61,14 @@ async def save_environment(
     name: str,
     prompt: str,
     repos: list[str] | None = None,
+    mem_bytes: int | None = None,
+    vcpus: int | None = None,
+    fs_capacity_bytes: int | None = None,
+    clear_sizing: bool = False,
+    create_params: dict[str, Any] | None = None,
+    clear_create_params: bool = False,
 ) -> dict[str, Any]:
-    """Create an environment, or replace the prompt and repo list of an existing one.
+    """Create an environment, or update an existing one's configuration.
 
     Does not touch the environment's snapshot: capture that separately with
     ``capture_environment_snapshot`` once this sandbox is provisioned.
@@ -95,12 +84,34 @@ async def save_environment(
             whole text, not a delta. Empty string clears it.
         repos: Optional ``owner/repo`` list this environment covers, for the
             dashboard. Does not clone anything by itself.
+        mem_bytes: Optional memory capacity for newly-created sandbox VMs.
+        vcpus: Optional virtual CPU count for newly-created sandbox VMs.
+        fs_capacity_bytes: Optional filesystem capacity for newly-created sandbox VMs.
+            Omitted sizing fields keep provider defaults when creating an environment,
+            or preserve the existing values when updating one.
+        clear_sizing: Restore provider defaults by clearing all three sizing overrides.
+            Cannot be combined with a sizing value.
+        create_params: Additional LangSmith sandbox create-body fields, such as
+            ``_internal_runtime`` or ``proxy_config``. This object is persisted and
+            must never contain secrets or authentication credentials. Omit it when
+            updating to preserve the existing object.
+        clear_create_params: Clear all additional create parameters. Cannot be combined
+            with ``create_params``.
 
     Returns:
         ``{"ok": True, "environment": {...}, "created": bool}``.
     """
     if error := _require_admin():
         return {"ok": False, "error": error}
+    sizing = {
+        "mem_bytes": mem_bytes,
+        "vcpus": vcpus,
+        "fs_capacity_bytes": fs_capacity_bytes,
+    }
+    if clear_sizing and any(value is not None for value in sizing.values()):
+        return {"ok": False, "error": "clear_sizing cannot be combined with sizing values"}
+    if clear_create_params and create_params is not None:
+        return {"ok": False, "error": "clear_create_params cannot be combined with create_params"}
     try:
         slug = store.slugify(name)
     except ValueError as exc:
@@ -111,13 +122,31 @@ async def save_environment(
         if existing is None:
             login = _configurable().get("github_login")
             record = await store.create_environment(
-                store.EnvironmentCreate(name=name, prompt=prompt, repos=repos or []),
+                store.EnvironmentCreate(
+                    name=name,
+                    prompt=prompt,
+                    repos=repos or [],
+                    mem_bytes=mem_bytes,
+                    vcpus=vcpus,
+                    fs_capacity_bytes=fs_capacity_bytes,
+                    create_params=create_params or {},
+                ),
                 login if isinstance(login, str) else "open-swe",
             )
         else:
+            update_values: dict[str, Any] = {"name": name, "prompt": prompt, "repos": repos}
+            update_values.update(
+                dict.fromkeys(sizing)
+                if clear_sizing
+                else {field: value for field, value in sizing.items() if value is not None}
+            )
+            if create_params is not None:
+                update_values["create_params"] = create_params
+            elif clear_create_params:
+                update_values["create_params"] = {}
             record = await store.update_environment(
                 slug,
-                store.EnvironmentUpdate(name=name, prompt=prompt, repos=repos),
+                store.EnvironmentUpdate(**update_values),
             )
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}

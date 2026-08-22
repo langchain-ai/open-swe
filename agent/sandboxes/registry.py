@@ -7,6 +7,7 @@ middleware and tools all reach a thread's sandbox through here.
 
 import logging
 from collections.abc import Callable
+from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph.config import get_config
@@ -21,15 +22,18 @@ logger = logging.getLogger(__name__)
 SANDBOX_BACKENDS: dict[str, SandboxBackendProxy] = {}
 
 
-async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
-    """Fetch sandbox_id from thread metadata."""
+async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:
+    """The thread metadata its sandbox binding lives in.
+
+    The run config's inline copy is used when it already names a sandbox; it
+    otherwise falls back to the live thread, which a previous run may have bound
+    since this one was scheduled.
+    """
     try:
         config = get_config()
         metadata = config.get("metadata", {})
-        if isinstance(metadata, dict):
-            sandbox_id = metadata.get("sandbox_id")
-            if isinstance(sandbox_id, str):
-                return sandbox_id
+        if isinstance(metadata, dict) and isinstance(metadata.get("sandbox_id"), str):
+            return metadata
     except Exception:
         logger.debug(
             "Failed to read inline thread metadata for sandbox; falling back to live lookup",
@@ -41,10 +45,15 @@ async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
         thread = await client.threads.get(thread_id)
     except Exception:
         logger.exception("Failed to fetch live thread metadata for sandbox")
-        return None
+        return {}
 
     metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
-    sandbox_id = metadata.get("sandbox_id") if isinstance(metadata, dict) else None
+    return metadata if isinstance(metadata, dict) else {}
+
+
+async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
+    """Fetch sandbox_id from thread metadata."""
+    sandbox_id = (await get_sandbox_metadata(thread_id)).get("sandbox_id")
     return sandbox_id if isinstance(sandbox_id, str) else None
 
 

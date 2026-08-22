@@ -54,6 +54,7 @@ def _schedule_summary(
         "repo": repo_full_name(repo),
         "slackChannelId": record.get("slack_channel_id"),
         "slackNotificationMode": slack_notification_mode(record),
+        "adminThread": record.get("admin_thread") is True,
         "model": record.get("model"),
         "effort": record.get("effort"),
         "enabled": bool(record.get("enabled")),
@@ -133,8 +134,14 @@ async def _retire_cron(record: dict[str, Any]) -> bool:
 
 
 async def create_agent_schedule(
-    login: str, body: ScheduleCreateBody, *, email: str | None = None
+    login: str,
+    body: ScheduleCreateBody,
+    *,
+    email: str | None = None,
+    allow_admin_thread: bool = False,
 ) -> dict[str, Any]:
+    if body.admin_thread and not allow_admin_thread:
+        raise HTTPException(403, "admin only")
     await _ensure_dashboard_github_token(login)
     profile = await get_profile(login) or {}
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
@@ -149,6 +156,7 @@ async def create_agent_schedule(
         "repo": repo,
         "slack_channel_id": body.slack_channel_id,
         "slack_notification_mode": body.slack_notification_mode,
+        "admin_thread": body.admin_thread,
         "model": chosen_model or profile.get("default_model") or "Default",
         "effort": chosen_effort or profile.get("reasoning_effort"),
         "base_branch": profile.get("base_branch") or "main",
@@ -177,11 +185,22 @@ async def create_agent_schedule(
 
 
 async def update_agent_schedule(
-    schedule_id: str, login: str, body: ScheduleUpdateBody, *, email: str | None = None
+    schedule_id: str,
+    login: str,
+    body: ScheduleUpdateBody,
+    *,
+    email: str | None = None,
+    allow_admin_thread: bool = False,
 ) -> dict[str, Any]:
     existing = await get_agent_schedule(schedule_id)
     _assert_schedule_owner(existing, login, email)
     assert existing is not None
+    if (
+        body.admin_thread is True
+        and existing.get("admin_thread") is not True
+        and not allow_admin_thread
+    ):
+        raise HTTPException(403, "admin only")
 
     patch: dict[str, Any] = {}
     if body.prompt is not None:
@@ -205,6 +224,8 @@ async def update_agent_schedule(
         patch["slack_notification_mode"] = (
             body.slack_notification_mode or DEFAULT_SLACK_NOTIFICATION_MODE
         )
+    if body.admin_thread is not None:
+        patch["admin_thread"] = body.admin_thread
 
     updated = {**existing, **patch}
     enabled = bool(updated.get("enabled"))

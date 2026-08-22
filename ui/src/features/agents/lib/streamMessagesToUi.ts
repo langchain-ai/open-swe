@@ -316,7 +316,7 @@ function outputIframeDisplay(
  *   already persisted) so the in-progress card renders instantly.
  * - `diffData` is derived from the call's own args, which is all that is
  *   available before an edit is applied (what a pending approval renders). What
- *   a turn actually changed comes from git, via the turn-diff endpoint.
+ *   a turn actually changed comes from its persisted run diff.
  */
 export function streamMessagesToUi(
   messages: Array<BaseMessage>,
