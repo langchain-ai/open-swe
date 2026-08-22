@@ -1199,16 +1199,14 @@ async def list_dashboard_thread_focus_counts(
         else:
             if isinstance(active_thread, Mapping):
                 metadata = _thread_metadata(active_thread)
-                if _thread_is_readable(metadata):
+                if _thread_is_readable(metadata) and _metadata_matches_filters(
+                    metadata,
+                    resolved=None,
+                    source=None,
+                    query=None,
+                    scope=scope,
+                ):
                     candidates_by_id[active_thread_id] = active_thread
-
-    semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
-
-    async def classify(thread: ThreadLike) -> tuple[ThreadLike, str | None, str | None]:
-        if not _should_refresh_latest_run(thread):
-            return thread, None, None
-        async with semaphore:
-            return await _refresh_latest_run_metadata(client, thread)
 
     filtered_candidates: list[ThreadLike] = []
     for thread in candidates_by_id.values():
@@ -1232,27 +1230,17 @@ async def list_dashboard_thread_focus_counts(
             continue
         filtered_candidates.append(thread)
 
-    classified = await asyncio.gather(*(classify(thread) for thread in filtered_candidates))
     counts = {"attention": 0, "progress": 0, "ready": 0, "done": 0}
-    for thread, latest_run_status, latest_run_id in classified:
+    for thread in filtered_candidates:
         metadata = _thread_metadata(thread)
+        metadata_run_status = metadata.get("latest_run_status")
         status = _run_status_to_agent_status(
             thread.get("status") if isinstance(thread.get("status"), str) else "idle",
-            latest_run_status
-            or (
-                metadata.get("latest_run_status")
-                if isinstance(metadata.get("latest_run_status"), str)
-                else None
-            ),
+            metadata_run_status if isinstance(metadata_run_status, str) else None,
         )
         if statuses and status not in statuses:
             continue
-        focus_key = _thread_focus_key(
-            thread,
-            latest_run_status=latest_run_status,
-            latest_run_id=latest_run_id,
-        )
-        counts[focus_key] += 1
+        counts[_thread_focus_key(thread)] += 1
     return counts
 
 

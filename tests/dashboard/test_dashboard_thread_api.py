@@ -2172,19 +2172,14 @@ async def test_list_dashboard_thread_focus_counts_classifies_and_filters(monkeyp
         thread("idle", "missing"),
         thread("done", "success", resolved=True, last_viewed_run_id="run-done"),
     ]
-    run_list_thread_ids: list[str] = []
 
     class FakeThreads:
         async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
             return threads[offset : offset + limit]
 
-        async def update(self, *, thread_id, metadata):
-            return None
-
     class FakeRuns:
         async def list(self, thread_id, limit=1):
-            run_list_thread_ids.append(thread_id)
-            return []
+            raise AssertionError("focus counts must not refresh runs")
 
     class FakeClient:
         threads = FakeThreads()
@@ -2201,39 +2196,6 @@ async def test_list_dashboard_thread_focus_counts_classifies_and_filters(monkeyp
 
     assert counts == {"attention": 4, "progress": 1, "ready": 2, "done": 1}
     assert filtered == {"attention": 2, "progress": 0, "ready": 1, "done": 1}
-    assert run_list_thread_ids == ["progress", "progress"]
-
-
-async def test_list_dashboard_thread_focus_counts_refreshes_unsettled_threads(monkeypatch) -> None:
-    threads = _make_threads(2, resolved_before=0)
-    settled = cast(dict[str, object], threads[0]["metadata"])
-    settled.update({"latest_run_id": "run-settled", "latest_run_status": "success"})
-    pending = cast(dict[str, object], threads[1]["metadata"])
-    pending.update({"latest_run_id": "run-pending", "latest_run_status": "pending"})
-    run_list_thread_ids: list[str] = []
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            return threads[offset : offset + limit]
-
-        async def update(self, *, thread_id, metadata):
-            return None
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            run_list_thread_ids.append(thread_id)
-            return [{"id": "run-finished", "status": "success"}]
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: FakeClient())
-
-    counts = await thread_api.list_dashboard_thread_focus_counts("octocat", email=None)
-
-    assert counts == {"attention": 2, "progress": 0, "ready": 0, "done": 0}
-    assert run_list_thread_ids == ["t1"]
 
 
 async def test_list_dashboard_thread_focus_counts_includes_readable_active_thread(
@@ -2270,8 +2232,13 @@ async def test_list_dashboard_thread_focus_counts_includes_readable_active_threa
     counts = await thread_api.list_dashboard_thread_focus_counts(
         "octocat", email=None, ownership="shared", active_thread_id="shared"
     )
+    metadata["schedule_id"] = "schedule-1"
+    scoped_counts = await thread_api.list_dashboard_thread_focus_counts(
+        "octocat", email=None, ownership="shared", active_thread_id="shared"
+    )
 
     assert counts == {"attention": 1, "progress": 0, "ready": 0, "done": 0}
+    assert scoped_counts == {"attention": 0, "progress": 0, "ready": 0, "done": 0}
 
 
 async def test_list_dashboard_thread_focus_counts_scans_and_deduplicates(monkeypatch) -> None:

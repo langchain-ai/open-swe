@@ -306,8 +306,6 @@ export function useSidebarFocusCounts(
     queryKey: agentThreadKeys.sidebarFocusCounts(params),
     queryFn: () => agentsApi.listSidebarFocusCounts(params),
     enabled,
-    refetchInterval: (query) =>
-      (query.state.data?.progress ?? 0) > 0 ? 2000 : false,
     retry: false,
   })
 }
