@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
@@ -37,7 +37,7 @@ const MAX_VISIBLE_WORK_LOG_ENTRIES = 1
  * the turn's changed-files card and the side panel, both of which read git —
  * rendering a per-call diff here made repeated edits of one file look duplicated.
  */
-function EditWorkEntry({
+const EditWorkEntry = memo(function EditWorkEntryComponent({
   chunk,
   projectPath,
 }: {
@@ -53,27 +53,30 @@ function EditWorkEntry({
       defaultExpanded={chunk.status === "pending"}
     />
   )
-}
+})
 
 /**
  * A run of related tool calls (exploration, mostly). Collapsed, it shows only
  * the most recent entries plus a toggle for the rest.
  */
-function WorkGroup({
+const WorkGroup = memo(function WorkGroupComponent({
+  id,
   chunks,
   projectPath,
   expanded,
   onToggle,
 }: {
+  id: string
   chunks: Array<ToolExecutionChunk>
   projectPath?: string
   expanded: boolean
-  onToggle: () => void
+  onToggle: (id: string) => void
 }) {
   const hiddenCount = Math.max(0, chunks.length - MAX_VISIBLE_WORK_LOG_ENTRIES)
   const visible = expanded
     ? chunks
     : chunks.slice(chunks.length - MAX_VISIBLE_WORK_LOG_ENTRIES)
+  const toggle = useCallback(() => onToggle(id), [id, onToggle])
 
   return (
     <div>
@@ -81,7 +84,7 @@ function WorkGroup({
         <WorkGroupToggleRow
           hiddenCount={hiddenCount}
           expanded={expanded}
-          onToggle={onToggle}
+          onToggle={toggle}
         />
       )}
       {visible.map((chunk, index) => (
@@ -93,9 +96,9 @@ function WorkGroup({
       ))}
     </div>
   )
-}
+})
 
-export function AgentTurn({
+export const AgentTurn = memo(function AgentTurnComponent({
   message,
   isStreaming,
   isMarkdownLive,
@@ -211,10 +214,11 @@ export function AgentTurn({
         return (
           <WorkGroup
             key={item.key}
+            id={item.id}
             chunks={item.chunks}
             projectPath={projectPath}
             expanded={expandedGroups[item.id] ?? false}
-            onToggle={() => toggleGroup(item.id)}
+            onToggle={toggleGroup}
           />
         )
 
@@ -291,7 +295,7 @@ export function AgentTurn({
         : renderItems
 
   return (
-    <div className="group/turn my-2 min-w-0 space-y-1.5">
+    <div className="group/turn my-2 min-w-0 space-y-1.5 [contain-intrinsic-size:auto_150px] [content-visibility:auto]">
       {canFoldWork && (
         <TurnFoldRow
           label={foldLabelWithCount}
@@ -329,4 +333,4 @@ export function AgentTurn({
       </div>
     </div>
   )
-}
+})

@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import http from "node:http"
 import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
@@ -158,6 +159,9 @@ const SHELL_PAGE = {
 
 const config = defineConfig({
   base: "/",
+  test: {
+    setupFiles: ["./vitest.setup.ts"],
+  },
   optimizeDeps: {
     include: [
       "streamdown",

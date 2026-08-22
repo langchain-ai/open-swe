@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { memo, useEffect, useMemo, useState } from "react"
 import { getSingletonHighlighter } from "shiki"
 import type { ThemedToken } from "shiki"
 import { useResolvedTheme } from "@/lib/theme"
@@ -45,7 +45,10 @@ function languageLabel(language: string): string {
   return language
 }
 
-export function CodeBlock({ text, language }: CodeBlockProps) {
+export const CodeBlock = memo(function CodeBlockComponent({
+  text,
+  language,
+}: CodeBlockProps) {
   const [tokens, setTokens] = useState<Array<Array<ThemedToken>> | null>(null)
   const [copied, setCopied] = useState(false)
   const resolvedTheme = useResolvedTheme()
@@ -147,4 +150,4 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
       </pre>
     </div>
   )
-}
+})

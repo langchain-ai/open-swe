@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { memo, useCallback, useState } from "react"
 import {
   Bot,
   Check,
@@ -14,13 +14,13 @@ import {
   X,
   Zap,
 } from "lucide-react"
+import { ToolResultBody } from "./ToolResultBody"
 import type { KeyboardEvent, ReactNode } from "react"
 
 import type { WorkEntryIconName, WorkEntryView } from "./workEntry"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { cn } from "@/lib/utils"
-import { ToolResultBody } from "./ToolResultBody"
 
 const ICONS: Record<WorkEntryIconName, typeof Bot> = {
   bot: Bot,
@@ -101,7 +101,7 @@ function StatusIndicator({ status }: { status: WorkEntryView["status"] }) {
  * Expanding reveals `body` when a tool has a richer renderer (a diff, terminal
  * output) and falls back to the entry's plain text otherwise.
  */
-export function WorkEntryRow({
+export const WorkEntryRow = memo(function WorkEntryRowComponent({
   entry,
   timestamp,
   body,
@@ -265,4 +265,4 @@ export function WorkEntryRow({
       )}
     </div>
   )
-}
+})

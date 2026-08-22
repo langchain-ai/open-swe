@@ -1,3 +1,4 @@
+import { memo } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -6,7 +7,7 @@ import { cn } from "@/lib/utils"
  * Collapses a settled turn's work log behind a single "Worked for …" line, so
  * the transcript reads as replies until the reader asks for the details.
  */
-export function TurnFoldRow({
+export const TurnFoldRow = memo(function TurnFoldRowComponent({
   label,
   active,
   expanded,
@@ -32,13 +33,13 @@ export function TurnFoldRow({
       </button>
     </div>
   )
-}
+})
 
 /**
  * Reveals the earlier entries of a work group; only the most recent stay
  * visible while a group is collapsed.
  */
-export function WorkGroupToggleRow({
+export const WorkGroupToggleRow = memo(function WorkGroupToggleRowComponent({
   hiddenCount,
   expanded,
   onToggle,
@@ -70,4 +71,4 @@ export function WorkGroupToggleRow({
       </span>
     </button>
   )
-}
+})

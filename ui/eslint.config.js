@@ -10,6 +10,7 @@ export default [
       ".tanstack/**",
       "dev-dist/**",
       "dist/**",
+      "public/**",
       "src/routeTree.gen.ts",
       "src/components/ui/**",
       "src/features/agents/experiments/**",

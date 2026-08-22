@@ -1,13 +1,17 @@
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
-import { useCallback, useLayoutEffect, useRef, useState } from "react"
+import { memo, useCallback, useLayoutEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
 
-export function UserMessage({ message }: { message: Message }) {
+export const UserMessage = memo(function UserMessageComponent({
+  message,
+}: {
+  message: Message
+}) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const text = message.chunks
@@ -43,7 +47,7 @@ export function UserMessage({ message }: { message: Message }) {
 
   return (
     <div
-      className={`group/turn my-4 flex flex-col gap-1 ${isSystem ? "items-start" : "items-end"}`}
+      className={`group/turn my-4 flex flex-col gap-1 [contain-intrinsic-size:auto_100px] [content-visibility:auto] ${isSystem ? "items-start" : "items-end"}`}
       data-testid="user-message"
       data-message-sender-kind={message.structuredSenderKind}
       data-message-surface={message.structuredSurface}
@@ -138,4 +142,4 @@ export function UserMessage({ message }: { message: Message }) {
       </div>
     </div>
   )
-}
+})

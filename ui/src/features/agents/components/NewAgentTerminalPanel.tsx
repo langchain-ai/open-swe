@@ -32,7 +32,6 @@ export function NewAgentTerminalPanel({
     openTerminal(threadRef, terminals.addGroup())
     // Only on the first mount for this session; adding `terminals` here would
     // spawn a second pty whenever the controller identity changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (

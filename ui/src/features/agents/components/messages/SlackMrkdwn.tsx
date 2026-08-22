@@ -1,4 +1,4 @@
-import { Fragment } from "react"
+import { Fragment, memo } from "react"
 import type { ReactNode } from "react"
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"])
@@ -200,6 +200,10 @@ export function renderSlackMrkdwn(text: string): Array<ReactNode> {
   return renderRange(text, 0, text.length, "slack")
 }
 
-export function SlackMrkdwn({ text }: { text: string }) {
+export const SlackMrkdwn = memo(function SlackMrkdwnComponent({
+  text,
+}: {
+  text: string
+}) {
   return <>{renderSlackMrkdwn(text)}</>
-}
+})

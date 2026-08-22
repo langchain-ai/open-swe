@@ -41,7 +41,7 @@ import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
-import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import { createUiMessageProjector } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
@@ -167,8 +167,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
   )
+  // Incremental: unchanged turns keep their Message identity across stream
+  // flushes, so the memoized message components re-render only the streaming turn.
+  const [projectMessages] = useState(() => createUiMessageProjector())
   const messages = useMemo(() => {
-    const live = streamMessagesToUi(
+    const live = projectMessages(
       stream.messages,
       stream.toolCalls,
       messageArrivalTimestamp
@@ -186,7 +189,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         ],
       } satisfies Message,
     ]
-  }, [sessionId, stream.messages, stream.toolCalls, thread])
+  }, [projectMessages, sessionId, stream.messages, stream.toolCalls, thread])
 
   const rememberSelection = useCallback(
     async (model?: ModelSelection | null) => {
@@ -202,7 +205,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
         localThreadKeys.all,
         (threads = []) =>
-          threads.map((thread) => (thread.id === sessionId ? updated : thread))
+          threads.map((item) => (item.id === sessionId ? updated : item))
       )
     },
     [queryClient, sessionId]
@@ -232,7 +235,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     async (
       prompt: string,
       images: Array<ImageChunk>,
-      skills: DesktopLocalPromptInput["skills"] = []
+      promptSkills: DesktopLocalPromptInput["skills"] = []
     ) => {
       if (!thread) return false
       setError(null)
@@ -250,7 +253,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             messages: [
               { type: "human", content: promptContent(prompt, images) },
             ],
-            ...(skills.length ? { files: skillFiles(skills) } : {}),
+            ...(promptSkills.length ? { files: skillFiles(promptSkills) } : {}),
           },
           {
             config: {

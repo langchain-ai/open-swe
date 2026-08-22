@@ -1,3 +1,5 @@
+import { memo } from "react"
+
 import { SubagentCard } from "./SubagentCard"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 
@@ -10,7 +12,7 @@ const MAX_SUBAGENT_COLUMNS = 4
  * {@link MAX_SUBAGENT_COLUMNS}, so 1–4 subagents fill the row evenly and 5+
  * wrap onto additional rows.
  */
-export function SubagentGroup({
+export const SubagentGroup = memo(function SubagentGroupComponent({
   chunks,
 }: {
   chunks: Array<ToolExecutionChunk>
@@ -26,4 +28,4 @@ export function SubagentGroup({
       ))}
     </div>
   )
-}
+})

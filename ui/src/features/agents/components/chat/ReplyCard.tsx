@@ -111,7 +111,9 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
   )
 }
 
-export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
+export const ReplyCard = memo(function ReplyCardComponent({
+  chunk,
+}: ReplyCardProps) {
   const isLinear = chunk.toolKind === "linear"
   const body =
     ((isLinear ? chunk.input?.comment_body : chunk.input?.message) as string) ||

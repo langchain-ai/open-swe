@@ -5,8 +5,8 @@ import type {
   DesktopTerminalSessionSnapshot,
   DesktopTerminalSummary,
 } from "@/desktop"
-import { agentsApi } from "@/features/agents/lib/api"
 import type { CloudTerminalConnection } from "@/features/agents/lib/api"
+import { agentsApi } from "@/features/agents/lib/api"
 
 export type TerminalTarget =
   { kind: "local"; sessionId: string } | { kind: "cloud"; threadId: string }
@@ -228,7 +228,7 @@ export interface AttachedTerminal extends TerminalSessionState {
 
 export function cloudTerminalProtocols(
   connection: CloudTerminalConnection
-): string[] {
+): Array<string> {
   return [connection.protocol, connection.ticket]
 }
 

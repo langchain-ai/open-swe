@@ -14,7 +14,7 @@ function asString(value: unknown): string {
  * A single subagent spawned via the `task` tool. Shows the subagent type and
  * the task input (its `description`) as a compact rectangle.
  */
-export const SubagentCard = memo(function SubagentCard({
+export const SubagentCard = memo(function SubagentCardComponent({
   chunk,
 }: {
   chunk: ToolExecutionChunk

@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { memo, useMemo } from "react"
 import { MultiFileDiff } from "@pierre/diffs/react"
 import type { DiffData } from "@/features/agents/lib/types"
 import { useDiffOptions } from "@/features/agents/utils/diffUtils"
@@ -9,7 +9,10 @@ interface DiffViewProps {
   snippet?: boolean
 }
 
-export function DiffView({ diffData, snippet = false }: DiffViewProps) {
+export const DiffView = memo(function DiffViewComponent({
+  diffData,
+  snippet = false,
+}: DiffViewProps) {
   const diffOptions = useDiffOptions()
   const options = useMemo(
     () =>
@@ -54,4 +57,4 @@ export function DiffView({ diffData, snippet = false }: DiffViewProps) {
       </div>
     </div>
   )
-}
+})

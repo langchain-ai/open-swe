@@ -17,7 +17,7 @@ type SandboxedHtmlFrameProps = (
 export const SandboxedHtmlFrame = forwardRef<
   HTMLIFrameElement,
   SandboxedHtmlFrameProps
->(function SandboxedHtmlFrame(
+>(function SandboxedHtmlFrameComponent(
   { html, src, title, sandbox = "", allow, className, style, testId },
   ref
 ) {

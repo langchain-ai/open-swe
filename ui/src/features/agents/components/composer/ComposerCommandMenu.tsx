@@ -41,7 +41,7 @@ interface ComposerCommandMenuProps {
  * navigation lives in the composer (the editor keeps focus while this is open),
  * so this only reflects the active item and reports pointer intent back up.
  */
-export const ComposerCommandMenu = memo(function ComposerCommandMenu({
+export const ComposerCommandMenu = memo(function ComposerCommandMenuComponent({
   items,
   triggerKind,
   activeItemId,

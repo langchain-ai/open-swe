@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { ChevronRight } from "lucide-react"
 
 import { formatElapsed } from "@/lib/utils"
@@ -15,7 +15,7 @@ function reasoningLabel(elapsedMs: number | null): string {
  * reasoning ends it auto-collapses into a "Thought for …" toggle the user can
  * expand on demand.
  */
-export function ReasoningBlock({
+export const ReasoningBlock = memo(function ReasoningBlockComponent({
   text,
   isLive,
 }: {
@@ -76,4 +76,4 @@ export function ReasoningBlock({
       )}
     </div>
   )
-}
+})

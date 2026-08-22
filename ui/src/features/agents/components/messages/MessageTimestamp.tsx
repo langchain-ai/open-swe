@@ -1,3 +1,5 @@
+import { memo } from "react"
+
 type MessageTimestampProps = {
   timestamp: string
   startedAt?: string
@@ -44,7 +46,7 @@ function shortTimestamp(date: Date): string {
     : datedTimeFormatter.format(date)
 }
 
-export function MessageTimestamp({
+export const MessageTimestamp = memo(function MessageTimestampComponent({
   timestamp,
   startedAt,
   align = "left",
@@ -72,4 +74,4 @@ export function MessageTimestamp({
       </time>
     </div>
   )
-}
+})
