@@ -132,6 +132,11 @@ def flush_phases(thread_id: str | None) -> None:
     phases = _PHASES.pop(thread_id, None) if thread_id else None
     if not phases:
         return
+    # A phase still open here belongs to the detached sandbox task, which
+    # outlives a prepare that failed early. Hand it back for the next flush.
+    pending = [entry for entry in phases if entry.end is None]
+    if pending and thread_id:
+        _PHASES.setdefault(thread_id, []).extend(pending)
     try:
         parent = _parent_run_tree()
         if parent is None:

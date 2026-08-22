@@ -93,6 +93,23 @@ async def test_flush_without_a_run_tree_drops_the_phases() -> None:
     assert "thread-3" not in startup_trace._PHASES
 
 
+async def test_unfinished_phase_is_kept_for_the_next_flush() -> None:
+    phase = startup_trace._open("thread-5", "sandbox.boot", {})
+    assert phase is not None
+
+    client = await _flush_in_traced_node("thread-5")
+
+    assert [run["name"] for run in client.created] == ["LangGraph", "node"]
+    startup_trace._close(phase, None)
+    client = await _flush_in_traced_node("thread-5")
+    assert [run["name"] for run in client.created] == [
+        "LangGraph",
+        "node",
+        "startup",
+        "sandbox.boot",
+    ]
+
+
 async def test_prepare_middleware_flushes_phases_even_when_prepare_fails() -> None:
     class _Failing(BasePrepareRunMiddleware):
         _thread_id = "thread-4"
@@ -110,3 +127,31 @@ async def test_prepare_middleware_flushes_phases_even_when_prepare_fails() -> No
         )
 
     assert "thread-4" not in startup_trace._PHASES
+
+
+async def test_prepare_middleware_flushes_phases_when_the_latch_skips_prepare() -> None:
+    class _Latched(BasePrepareRunMiddleware):
+        _thread_id = "thread-6"
+
+        async def _prepare(self, state: Any, runtime: Any) -> dict[str, Any]:
+            del state, runtime
+            raise AssertionError("prepare should be latched out")
+
+    middleware = _Latched()
+    fingerprint = middleware._prepare_fingerprint(
+        cast(Any, {"messages": []}), cast(Runtime[None], MagicMock())
+    )
+    async with aphase("thread-6", "factory.thread_settings"):
+        pass
+
+    assert (
+        await middleware.abefore_agent(
+            cast(
+                AgentState, {"messages": [], "run_prepared": True, "run_prepared_for": fingerprint}
+            ),
+            cast(Runtime[None], MagicMock()),
+        )
+        is None
+    )
+
+    assert "thread-6" not in startup_trace._PHASES
