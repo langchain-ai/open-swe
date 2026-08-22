@@ -20,6 +20,7 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
+import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
@@ -195,6 +196,10 @@ export function AgentThreadView({
 
   return (
     <div className="flex min-w-0 flex-1">
+      <OptimisticThreadHydrationRecovery
+        threadId={thread.id}
+        enabled={thread.messages.length > 0}
+      />
       <div
         className={cn(
           "flex min-w-0 flex-1 flex-col",
