@@ -272,6 +272,19 @@ def test_sender_context_includes_workspace_admin_status() -> None:
     assert "Workspace admin: no." in construct_sender_context(None)
 
 
+def test_datadog_prompt_is_conditional_and_contains_no_secrets() -> None:
+    environment = {"prompt": "Checkouts live in /workspace/repos."}
+
+    prompt = server._environment_prompt(environment, "us5.datadoghq.com")
+
+    assert prompt is not None
+    assert "Datadog Pup CLI is authenticated through the sandbox proxy" in prompt
+    assert "`us5.datadoghq.com`" in prompt
+    assert "`DD_API_KEY` and `DD_APP_KEY` are placeholders" in prompt
+    assert "Checkouts live in /workspace/repos." in prompt
+    assert server._environment_prompt(environment, None) == "Checkouts live in /workspace/repos."
+
+
 def test_environment_instructions_render_in_system_prompt() -> None:
     prompt = construct_system_prompt(
         working_dir="/workspace",
