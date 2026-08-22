@@ -183,12 +183,7 @@ async function openThreadActionsMenu(page: Page) {
   await page
     .getByRole("link", { name: /please add a greet/ })
     .first()
-    .hover();
-  const actionsButton = page
-    .getByRole("button", { name: "Thread actions" })
-    .first();
-  await expect(actionsButton).toBeVisible();
-  await actionsButton.click();
+    .click({ button: "right" });
 }
 
 test.describe("Slack → web handoff (real dashboard UI)", () => {
