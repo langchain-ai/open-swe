@@ -1,7 +1,7 @@
 {
   "name": "open-swe",
   "private": true,
-  "packageManager": "pnpm@11.18.0",
+  "packageManager": "pnpm@11.22.0",
   "scripts": {
     "dev": "turbo run dev --filter=open-swe-dashboard",
     "dev:desktop": "pnpm --dir desktop run dev:full",
@@ -17,6 +17,6 @@
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
-    "turbo": "^2.10.9"
+    "turbo": "^2.10.11"
   }
 }
