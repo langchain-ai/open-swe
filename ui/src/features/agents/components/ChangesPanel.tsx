@@ -5,10 +5,10 @@ import {
   RefreshCwIcon,
 } from "lucide-react"
 
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/lib/agentTypes"
 import type { DiffScopeKind } from "@/features/agents/lib/diffPanelStore"
-import type { PanelFile } from "@/features/agents/components/DiffFilesView"
-import { DiffFilesView } from "@/features/agents/components/DiffFilesView"
+import type { PanelFile } from "@/components/diff/DiffFilesView"
+import { DiffFilesView } from "@/components/diff/DiffFilesView"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 

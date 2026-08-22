@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 from xml.etree import ElementTree
 
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient, FakeStore
 
 from agent.middleware.check_message_queue import (
     LinearNotifyState,
@@ -12,22 +13,8 @@ from agent.middleware.check_message_queue import (
 from agent.prompt import construct_system_prompt
 
 
-class _QueuedItem:
-    def __init__(self, value: dict[str, Any]) -> None:
-        self.value = value
-
-
-class _FakeStore:
-    def __init__(self, items: dict[tuple[tuple[str, ...], str], dict[str, Any]]) -> None:
-        self.items = items
-        self.deleted: list[tuple[tuple[str, ...], str]] = []
-
-    async def aget(self, namespace: tuple[str, ...], key: str) -> _QueuedItem | None:
-        value = self.items.get((namespace, key))
-        return _QueuedItem(value) if value is not None else None
-
-    async def adelete(self, namespace: tuple[str, ...], key: str) -> None:
-        self.deleted.append((namespace, key))
+def _store(items: dict[tuple[tuple[str, ...], str], dict[str, Any]]) -> FakeStore:
+    return FakeLangGraphClient(items=items).store
 
 
 def _envelope(message: dict) -> str:
@@ -40,7 +27,7 @@ def _envelope(message: dict) -> str:
 
 @pytest.mark.asyncio
 async def test_check_message_queue_injects_dashboard_handoff_instruction() -> None:
-    store = _FakeStore(
+    store = _store(
         {
             (("queue", "thread-1"), "pending_messages"): {
                 "messages": [
@@ -100,7 +87,7 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
 
 @pytest.mark.asyncio
 async def test_check_message_queue_allows_owner_dashboard_approval() -> None:
-    store = _FakeStore(
+    store = _store(
         {
             (("queue", "thread-1"), "pending_messages"): {
                 "messages": [
@@ -140,7 +127,7 @@ async def test_check_message_queue_allows_owner_dashboard_approval() -> None:
 
 @pytest.mark.asyncio
 async def test_check_message_queue_injects_pending_autofix_event() -> None:
-    store = _FakeStore(
+    store = _store(
         {
             (("autofix", "thread-1"), "pending_event"): {
                 "reason": "review_feedback",

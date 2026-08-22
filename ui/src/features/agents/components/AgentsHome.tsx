@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 
 import type { DesktopLocalThreadSummary } from "@/desktop"
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { ImageChunk } from "@/lib/agentTypes"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"

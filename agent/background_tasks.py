@@ -2,68 +2,41 @@
 
 import logging
 import shlex
-from typing import Any
+from typing import Any, TypedDict
 
-from langgraph_sdk import get_client
-
+from .config import in_process_langgraph_client
 from .dispatch import dispatch_agent_run
+from .sandboxes.providers import create_sandbox
+from .scheduling.crons import delete_scheduler_crons, ensure_scheduler_cron
 from .tools.background_execute import TASK_ROOT, _control_script, _encoded, _execute
-from .utils.sandbox import create_sandbox
-from .utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
 
-CRON_KIND = "background_tasks"
+BACKGROUND_TASKS_TASK = "background_tasks"
 CRON_SCHEDULE = "* * * * *"
 TERMINAL_STATES = {"completed", "failed", "timed_out", "stopped", "lost"}
 MONITOR_LOCK = f"{TASK_ROOT}/monitor.lock"
 
 
-def _client():
-    return get_client(url=langgraph_url())
+class BackgroundTasksPayload(TypedDict):
+    thread_id: str
 
 
 async def ensure_background_task_cron(thread_id: str) -> str:
-    client = _client()
-    crons = await client.crons.search(
-        assistant_id="scheduler",
-        metadata={"kind": CRON_KIND, "thread_id": thread_id},
-        limit=10,
-    )
-    ids = [
-        cron_id
-        for cron in crons or []
-        if isinstance(cron, dict) and isinstance((cron_id := cron.get("cron_id")), str)
-    ]
-    if ids:
-        for duplicate in ids[1:]:
-            await client.crons.delete(duplicate)
-        return ids[0]
-    cron = await client.crons.create(
-        "scheduler",
+    payload: BackgroundTasksPayload = {"thread_id": thread_id}
+    return await ensure_scheduler_cron(
+        in_process_langgraph_client(),
+        kind=BACKGROUND_TASKS_TASK,
+        key=thread_id,
         schedule=CRON_SCHEDULE,
-        input={"task": CRON_KIND, "thread_id": thread_id},
-        config={"configurable": {"task": CRON_KIND, "thread_id": thread_id}},
-        metadata={"kind": CRON_KIND, "thread_id": thread_id},
-        timezone="UTC",
+        payload=payload,
     )
-    cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
-    if not isinstance(cron_id, str) or not cron_id:
-        raise RuntimeError("background-task cron creation did not return a cron_id")
-    return cron_id
 
 
 async def _delete_crons(thread_id: str) -> None:
-    client = _client()
-    crons = await client.crons.search(
-        assistant_id="scheduler",
-        metadata={"kind": CRON_KIND, "thread_id": thread_id},
-        limit=10,
+    await delete_scheduler_crons(
+        in_process_langgraph_client(), kind=BACKGROUND_TASKS_TASK, key=thread_id
     )
-    for cron in crons or []:
-        cron_id = cron.get("cron_id") if isinstance(cron, dict) else None
-        if isinstance(cron_id, str):
-            await client.crons.delete(cron_id)
 
 
 def _notification(task: dict[str, Any]) -> str:
@@ -125,7 +98,7 @@ async def _list_tasks(backend: Any) -> list[dict[str, Any]]:
 
 
 async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
-    client = _client()
+    client = in_process_langgraph_client()
     thread = await client.threads.get(thread_id)
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}

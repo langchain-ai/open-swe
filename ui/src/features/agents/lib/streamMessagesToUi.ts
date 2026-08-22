@@ -1,21 +1,21 @@
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import { messageArrivalTimestamp } from "./messageTimestamps"
-import {
-  collectStructuredEntities,
-  parseStructuredInput,
-} from "./structuredInputMessages"
 import { humanizeToolName } from "./toolNames"
 import type { BaseMessage, ContentBlock } from "@langchain/core/messages"
 import type { AssembledToolCall } from "@langchain/react"
 
-import type { StructuredEntity } from "./structuredInputMessages"
+import type { StructuredEntity } from "@/lib/structuredInputMessages"
 import type {
   Chunk,
   DiffData,
   Message,
   OutputIframeDisplay,
   ToolExecutionChunk,
-} from "./types"
+} from "@/lib/agentTypes"
+import {
+  collectStructuredEntities,
+  parseStructuredInput,
+} from "@/lib/structuredInputMessages"
 
 function senderNote(entity: StructuredEntity | undefined): string | undefined {
   if (entity?.senderType === "bot") return "bot"

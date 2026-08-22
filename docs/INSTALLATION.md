@@ -5,7 +5,7 @@ This guide walks you through setting up Open SWE end-to-end: local development, 
 
 Open SWE has two runnable pieces:
 
-- **The backend** — a LangGraph app (three graphs: `agent`, `reviewer`, `analyzer`) plus a FastAPI app (`agent.webapp:app`) that owns the webhooks and the dashboard API. Both are served together by `langgraph dev`.
+- **The backend** — a LangGraph app (five graphs: `agent`, `reviewer`, `analyzer`, `chat`, `scheduler`) plus a FastAPI app (`agent.webapp:app`) that owns the webhooks and the dashboard API. Both are served together by `langgraph dev`.
 - **The dashboard** — a TanStack Start + Vite web app in `ui/` (package name `open-swe-dashboard`). It's a thin client over the FastAPI dashboard API (`/dashboard/api/*`): GitHub-login, per-user model/profile settings, team defaults, enabled-repo and review-style management, user mappings, and the Agents chat UI. It's optional for pure webhook-driven use, but recommended.
 
 > **The steps are ordered to avoid forward references.** Each step only depends on things you've already completed.
@@ -16,7 +16,7 @@ Open SWE has two runnable pieces:
 - [uv](https://docs.astral.sh/uv/) package manager
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli)
 - [ngrok](https://ngrok.com/) (for local development — exposes webhook endpoints to the internet)
-- [pnpm](https://pnpm.io/) (only if you want to run the dashboard UI locally — see step 8). Node 20+ also works, but `ui/pnpm-lock.yaml` is the canonical lockfile.
+- [pnpm](https://pnpm.io/) (only if you want to run the dashboard UI locally — see step 8). Node 20+ also works; `ui/` and `desktop/` are one pnpm workspace, so the canonical lockfile is `pnpm-lock.yaml` at the repo root.
 
 ## 1. Clone and install
 
@@ -322,7 +322,7 @@ Open SWE listens for Linear comments that mention `@openswe`.
 
 **Configure team-to-repo mapping:**
 
-Open SWE routes Linear issues to GitHub repos based on the Linear team and project. Edit the mapping in `agent/utils/linear_team_repo_map.py`:
+Open SWE routes Linear issues to GitHub repos based on the Linear team and project. Edit the mapping in `agent/linear/team_repo_map.py`:
 
 ```python
 LINEAR_TEAM_TO_REPO = {
@@ -622,7 +622,7 @@ make dev          # uv run langgraph dev
 # or: uv run langgraph dev --no-browser
 ```
 
-`langgraph dev` serves **all three graphs** (`agent`, `reviewer`, `analyzer`) *and* the FastAPI app (`agent.webapp:app`) together on `http://localhost:2024`. The FastAPI app owns both the webhooks and the dashboard API:
+`langgraph dev` serves **all five graphs** (`agent`, `reviewer`, `analyzer`, `chat`, `scheduler`) *and* the FastAPI app (`agent.webapp:app`) together on `http://localhost:2024`. The FastAPI app owns both the webhooks and the dashboard API:
 
 | Endpoint | Purpose |
 |---|---|

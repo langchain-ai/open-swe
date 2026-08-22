@@ -10,7 +10,7 @@ import {
 } from "react"
 import { StreamProvider, useStreamContext } from "@langchain/react"
 import { overrideFetchImplementation } from "@langchain/langgraph-sdk"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   ArrowClockwiseIcon,
   ArrowUpIcon,
@@ -24,16 +24,27 @@ import {
 import { Menu } from "@base-ui/react/menu"
 import type { BaseMessage } from "@langchain/core/messages"
 
-import type { ReviewChatThread } from "@/lib/api"
-import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { Markdown } from "@/components/markdown/Markdown"
 import { IconButton } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api, reviewChatApiBase } from "@/lib/api"
+import { reviewChatApiBase } from "@/features/reviews/lib/api"
+import {
+  DEFAULT_CHAT_TITLE,
+  chatStorageKey,
+  deriveChatTitle,
+  useConversations,
+} from "@/features/reviews/lib/chatStorage"
+import {
+  reviewKeys,
+  useDeleteReviewChatThread,
+  useReviewChatMeta,
+  useReviewChatThreads,
+} from "@/features/reviews/lib/queries"
 import {
   collectStructuredEntities,
   parseStructuredInput,
-} from "@/features/agents/lib/structuredInputMessages"
+} from "@/lib/structuredInputMessages"
 import { cn } from "@/lib/utils"
 
 // --- Composer bridge ---------------------------------------------------------
@@ -53,7 +64,7 @@ export interface ChatAttachment {
   snippet: string
 }
 
-interface ReviewChatComposer {
+export interface ReviewChatComposer {
   addAttachment: (attachment: ChatAttachment) => void
   registerSink: (fn: ((attachment: ChatAttachment) => void) | null) => void
 }
@@ -185,16 +196,6 @@ const SUGGESTED_PROMPTS = [
   "What are the riskiest parts of this change?",
 ]
 
-// Kept in sync with the backend's `_derive_title` so the optimistic tab label
-// matches the title the server persists for the thread.
-const DEFAULT_TITLE = "New chat"
-const TITLE_MAX_CHARS = 60
-
-function deriveTitle(text: string): string {
-  const flattened = text.trim().split(/\s+/).join(" ")
-  return flattened ? flattened.slice(0, TITLE_MAX_CHARS) : DEFAULT_TITLE
-}
-
 function messageType(message: BaseMessage): string {
   const candidate = message as unknown as {
     getType?: () => string
@@ -218,164 +219,6 @@ function messageText(content: BaseMessage["content"]): string {
     })
     .filter(Boolean)
     .join("\n")
-}
-
-// --- Conversation store ------------------------------------------------------
-//
-// The client owns the conversation list. Each conversation is a client-minted
-// thread id; the thread is created server-side lazily on its first message.
-// The server thread list is only used to recover conversations on a fresh
-// browser and to reconcile titles — it is never the sole source for the tabs,
-// so an empty/lagging server response can no longer make open chats vanish.
-
-interface Conversation {
-  id: string
-  title: string
-  createdAt: number
-}
-
-interface ChatState {
-  conversations: Array<Conversation>
-  activeId: string
-}
-
-function storageKey(owner: string, repo: string, number: number): string {
-  return `osw:review-chat:${owner}/${repo}/${number}`
-}
-
-function newDraft(): Conversation {
-  return {
-    id: crypto.randomUUID(),
-    title: DEFAULT_TITLE,
-    createdAt: Date.now(),
-  }
-}
-
-function isConversation(value: unknown): value is Conversation {
-  if (!value || typeof value !== "object") return false
-  const candidate = value as Record<string, unknown>
-  return (
-    typeof candidate.id === "string" &&
-    typeof candidate.title === "string" &&
-    typeof candidate.createdAt === "number"
-  )
-}
-
-function loadState(key: string): ChatState {
-  if (typeof window !== "undefined") {
-    try {
-      const raw = window.localStorage.getItem(key)
-      if (raw) {
-        const parsed: unknown = JSON.parse(raw)
-        const source = (parsed ?? {}) as Record<string, unknown>
-        const conversations = Array.isArray(source.conversations)
-          ? source.conversations.filter(isConversation)
-          : []
-        const first = conversations[0]
-        if (first) {
-          const activeId =
-            typeof source.activeId === "string" &&
-            conversations.some((c) => c.id === source.activeId)
-              ? source.activeId
-              : first.id
-          return { conversations, activeId }
-        }
-      }
-    } catch {
-      /* fall through to a fresh draft */
-    }
-  }
-  const draft = newDraft()
-  return { conversations: [draft], activeId: draft.id }
-}
-
-function saveState(key: string, state: ChatState): void {
-  if (typeof window === "undefined") return
-  try {
-    window.localStorage.setItem(key, JSON.stringify(state))
-  } catch {
-    /* ignore quota / availability errors */
-  }
-}
-
-function useConversations(key: string) {
-  const [state, setState] = useState<ChatState>(() => loadState(key))
-
-  const update = useCallback(
-    (fn: (prev: ChatState) => ChatState) => {
-      setState((prev) => {
-        const next = fn(prev)
-        if (next === prev) return prev
-        saveState(key, next)
-        return next
-      })
-    },
-    [key]
-  )
-
-  const select = useCallback(
-    (conversation: Conversation) => {
-      update((prev) => ({
-        conversations: prev.conversations.some((c) => c.id === conversation.id)
-          ? prev.conversations
-          : [...prev.conversations, conversation],
-        activeId: conversation.id,
-      }))
-    },
-    [update]
-  )
-
-  const newChat = useCallback(() => {
-    update((prev) => {
-      const active = prev.conversations.find((c) => c.id === prev.activeId)
-      // Reuse a pristine, never-sent draft instead of stacking empty tabs.
-      if (active && active.title === DEFAULT_TITLE) return prev
-      const draft = newDraft()
-      return {
-        conversations: [...prev.conversations, draft],
-        activeId: draft.id,
-      }
-    })
-  }, [update])
-
-  // Names a conversation from its first message; later messages don't rename it.
-  const nameConversation = useCallback(
-    (id: string, title: string) => {
-      update((prev) => {
-        const current = prev.conversations.find((c) => c.id === id)
-        if (!current || current.title !== DEFAULT_TITLE) return prev
-        return {
-          ...prev,
-          conversations: prev.conversations.map((c) =>
-            c.id === id ? { ...c, title } : c
-          ),
-        }
-      })
-    },
-    [update]
-  )
-
-  const close = useCallback(
-    (id: string) => {
-      update((prev) => {
-        const index = prev.conversations.findIndex((c) => c.id === id)
-        if (index === -1) return prev
-        const remaining = prev.conversations.filter((c) => c.id !== id)
-        const fallback = remaining[Math.max(0, index - 1)]
-        if (!fallback) {
-          const draft = newDraft()
-          return { conversations: [draft], activeId: draft.id }
-        }
-        return {
-          conversations: remaining,
-          activeId: prev.activeId === id ? fallback.id : prev.activeId,
-        }
-      })
-    },
-    [update]
-  )
-
-  return { ...state, select, newChat, nameConversation, close }
 }
 
 // --- View --------------------------------------------------------------------
@@ -658,38 +501,22 @@ function ChatPanel({
   assistantId: string
 }) {
   const qc = useQueryClient()
-  const threadsKey = useMemo(
-    () => ["review-chat-threads", owner, repo, number] as const,
-    [owner, repo, number]
-  )
   const { conversations, activeId, select, newChat, nameConversation, close } =
-    useConversations(storageKey(owner, repo, number))
+    useConversations(chatStorageKey(owner, repo, number))
 
-  const threadsQuery = useQuery({
-    queryKey: threadsKey,
-    queryFn: () => api.listReviewChatThreads(owner, repo, number),
-  })
+  const threadsQuery = useReviewChatThreads(owner, repo, number)
   const serverThreads = useMemo(
     () => threadsQuery.data?.threads ?? [],
     [threadsQuery.data]
   )
 
   const invalidateThreads = useCallback(() => {
-    void qc.invalidateQueries({ queryKey: threadsKey })
-  }, [qc, threadsKey])
+    void qc.invalidateQueries({
+      queryKey: reviewKeys.chatThreads(owner, repo, number),
+    })
+  }, [qc, owner, repo, number])
 
-  const deleteThread = useMutation({
-    mutationFn: (id: string) =>
-      api.deleteReviewChatThread(owner, repo, number, id),
-    onMutate: (id: string) => {
-      qc.setQueryData<{ threads: Array<ReviewChatThread> }>(
-        threadsKey,
-        (old) =>
-          old ? { threads: old.threads.filter((t) => t.thread_id !== id) } : old
-      )
-    },
-    onSettled: invalidateThreads,
-  })
+  const deleteThread = useDeleteReviewChatThread(owner, repo, number)
 
   // Open tabs are the client's conversations (titles reconciled from the
   // server). The history dropdown is the full set — open tabs plus every other
@@ -700,13 +527,13 @@ function ChatPanel({
     for (const thread of serverThreads) {
       const existing = byId.get(thread.thread_id)
       if (existing) {
-        if (thread.title && thread.title !== DEFAULT_TITLE) {
+        if (thread.title && thread.title !== DEFAULT_CHAT_TITLE) {
           existing.title = thread.title
         }
       } else {
         byId.set(thread.thread_id, {
           id: thread.thread_id,
-          title: thread.title || DEFAULT_TITLE,
+          title: thread.title || DEFAULT_CHAT_TITLE,
           createdAt: thread.updated_at ? Date.parse(thread.updated_at) || 0 : 0,
         })
       }
@@ -731,7 +558,7 @@ function ChatPanel({
 
   const handleUserSend = useCallback(
     (text: string) => {
-      nameConversation(activeId, deriveTitle(text))
+      nameConversation(activeId, deriveChatTitle(text))
     },
     [nameConversation, activeId]
   )
@@ -742,7 +569,7 @@ function ChatPanel({
   const expectsHistory = useMemo(() => {
     if (serverThreads.some((t) => t.thread_id === activeId)) return true
     const active = conversations.find((c) => c.id === activeId)
-    return active !== undefined && active.title !== DEFAULT_TITLE
+    return active !== undefined && active.title !== DEFAULT_CHAT_TITLE
   }, [serverThreads, conversations, activeId])
 
   return (
@@ -872,10 +699,7 @@ export function ReviewChat({
   repo: string
   number: number
 }) {
-  const meta = useQuery({
-    queryKey: ["review-chat", owner, repo, number],
-    queryFn: () => api.getReviewChat(owner, repo, number),
-  })
+  const meta = useReviewChatMeta(owner, repo, number)
 
   if (meta.isPending) {
     return (

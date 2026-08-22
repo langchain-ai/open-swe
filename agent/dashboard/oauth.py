@@ -1,25 +1,26 @@
 """GitHub App OAuth code-exchange and signed-JWT session cookie."""
 
-import base64
 import hashlib
 import hmac
 import logging
-import os
 import re
 import secrets
 import time
-from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote, urlparse
 
-import httpx
 import jwt
 from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
 
-from agent.utils.github_org_membership import is_user_active_org_member
-
-from ..utils.http import DEFAULT_HTTP_TIMEOUT
+from ..config import (
+    allowed_github_orgs,
+    dashboard_allowed_origins,
+    dashboard_base_url,
+    dashboard_jwt_secret,
+)
+from ..github.org_membership import is_login_in_allowed_org
+from ..utils.pkce import s256_challenge
 from .github_token_auth import bearer_github_token
 
 logger = logging.getLogger(__name__)
@@ -69,12 +70,8 @@ def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
     return {"sub": login, "email": email if isinstance(email, str) else None}
 
 
-GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID", "")
-GITHUB_APP_CLIENT_SECRET = os.environ.get("GITHUB_APP_CLIENT_SECRET", "")
-
-
 def _secret() -> str:
-    s = os.environ.get("DASHBOARD_JWT_SECRET", "")
+    s = dashboard_jwt_secret()
     if not s:
         raise HTTPException(500, "DASHBOARD_JWT_SECRET not configured")
     return s
@@ -87,14 +84,9 @@ def allowed_dashboard_origins() -> set[str]:
     so the dashboard itself and its preview deploys are allowed — but nothing
     else.
     """
-    origins: set[str] = set()
-    base = os.environ.get("DASHBOARD_BASE_URL", "").strip()
-    if base:
-        origins.add(_origin_of(base))
-    for entry in os.environ.get("DASHBOARD_ALLOWED_ORIGINS", "").split(","):
-        entry = entry.strip()
-        if entry:
-            origins.add(_origin_of(entry))
+    origins = {
+        _origin_of(entry) for entry in (dashboard_base_url() or "", *dashboard_allowed_origins())
+    }
     origins.discard("")
     return origins
 
@@ -129,7 +121,7 @@ def _is_blocked_redirect_path(path: str) -> bool:
 
 def sanitize_redirect_to(redirect_to: str | None) -> str:
     """Return a safe post-login redirect URL."""
-    fallback = os.environ.get("DASHBOARD_BASE_URL", "").strip()
+    fallback = dashboard_base_url() or ""
     if not redirect_to:
         return fallback
     trimmed = redirect_to.strip()
@@ -155,33 +147,16 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
     return fallback
 
 
-def _allowed_login_orgs() -> frozenset[str]:
-    """Orgs whose members may log in to the dashboard.
-
-    Reuses the webhook-side ``ALLOWED_GITHUB_ORGS`` allowlist so deployments
-    configure a single org gate. When empty the dashboard login gate is
-    disabled (fail-open) to preserve existing deployments.
-    """
-    return frozenset(
-        org.strip().lower()
-        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
-        if org.strip()
-    )
-
-
 async def enforce_org_login_gate(login: str) -> None:
     """Reject dashboard login for users outside the allowed GitHub org(s).
 
-    No-op when ``ALLOWED_GITHUB_ORGS`` is unset. Otherwise the user must be an
-    active member of at least one configured org; membership is checked with
-    the GitHub App installation token (fail-closed on any API error).
+    Shares the webhook-side ``ALLOWED_GITHUB_ORGS`` allow-list, so a deployment
+    configures one org gate. No-op when it is unset (fail-open, to preserve
+    existing deployments); otherwise membership is checked with the GitHub App
+    installation token, fail-closed on any API error.
     """
-    orgs = _allowed_login_orgs()
-    if not orgs:
+    if not allowed_github_orgs() or await is_login_in_allowed_org(login):
         return
-    for org in orgs:
-        if await is_user_active_org_member(login, org):
-            return
     logger.warning("Rejected dashboard login for %r — not in allowed org(s)", login)
     raise HTTPException(403, "your GitHub account is not a member of an authorized organization")
 
@@ -251,11 +226,6 @@ def decode_state(state: str) -> dict[str, Any]:
 _S256_CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")
 
 
-def _s256(verifier: str) -> str:
-    digest = hashlib.sha256(verifier.encode()).digest()
-    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
-
-
 def valid_handoff_challenge(value: str | None) -> str | None:
     """Return the desktop app's PKCE S256 challenge, or ``None`` when absent."""
     if not value:
@@ -311,7 +281,7 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
     login = payload.get("sub")
     if not isinstance(challenge, str) or not isinstance(login, str) or not login:
         raise HTTPException(400, "malformed handoff code")
-    if not hmac.compare_digest(_s256(verifier), challenge):
+    if not hmac.compare_digest(s256_challenge(verifier), challenge):
         raise HTTPException(400, "handoff verifier mismatch")
     email = payload.get("email")
     avatar_url = payload.get("avatar_url")
@@ -320,23 +290,6 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
         email=email if isinstance(email, str) else None,
         avatar_url=avatar_url if isinstance(avatar_url, str) else None,
     )
-
-
-# Dashboard route where users manage their GitHub↔Slack link.
-PROFILE_SETTINGS_PATH = "/my-settings"
-
-
-def build_settings_url() -> str | None:
-    """Return the dashboard Profile Settings URL, or ``None`` if not configured.
-
-    This is a plain, token-free link: it carries no per-user identity, so it is
-    safe to share in a public Slack thread. The user signs in with GitHub from
-    their own session and connects Slack via verified OIDC on the settings page.
-    """
-    frontend_base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
-    if not frontend_base:
-        return None
-    return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
 
 
 def require_session(request: HTTPConnection) -> dict[str, Any]:
@@ -399,105 +352,3 @@ def require_same_origin_for_mutations(request: HTTPConnection) -> None:
     if bearer_github_token(request) and not request.cookies.get(COOKIE_NAME):
         return
     require_same_origin(request)
-
-
-def expires_at_from_github_response(data: dict[str, Any], *, field: str) -> str | None:
-    """Convert GitHub ``expires_in`` / ``refresh_token_expires_in`` to an ISO timestamp."""
-    raw = data.get(field)
-    if not isinstance(raw, int | float) or raw <= 0:
-        return None
-    return (datetime.now(UTC) + timedelta(seconds=int(raw))).isoformat()
-
-
-class GithubOAuthError(HTTPException):
-    """A GitHub OAuth token endpoint error, carrying GitHub's ``error`` code."""
-
-    def __init__(self, status_code: int, detail: str, *, error_code: str | None = None) -> None:
-        super().__init__(status_code, detail)
-        self.error_code = error_code
-
-
-# Error codes GitHub returns when a refresh token can never mint a new access
-# token again (the user must re-authorize). Anything else is treated as
-# transient so we don't needlessly drop a usable authorization.
-UNRECOVERABLE_REFRESH_ERROR_CODES = frozenset({"bad_refresh_token", "unauthorized_client"})
-
-
-def is_unrecoverable_refresh_error(exc: BaseException) -> bool:
-    """Whether ``exc`` means the stored refresh token is permanently dead."""
-    return (
-        isinstance(exc, GithubOAuthError)
-        and (exc.error_code or "") in UNRECOVERABLE_REFRESH_ERROR_CODES
-    )
-
-
-async def _request_github_tokens(body: dict[str, str]) -> dict[str, Any]:
-    if not GITHUB_APP_CLIENT_ID or not GITHUB_APP_CLIENT_SECRET:
-        raise HTTPException(500, "GitHub App OAuth not configured")
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        resp = await client.post(
-            "https://github.com/login/oauth/access_token",
-            headers={"Accept": "application/json"},
-            data=body,
-        )
-    resp.raise_for_status()
-    data = resp.json()
-    if not isinstance(data, dict):
-        raise HTTPException(502, "unexpected GitHub OAuth response")
-    if data.get("error"):
-        raise GithubOAuthError(
-            400,
-            f"github oauth error: {data.get('error_description') or data['error']}",
-            error_code=str(data["error"]),
-        )
-    return data
-
-
-async def exchange_code(code: str) -> dict[str, Any]:
-    """Exchange an OAuth authorization code for user-to-server tokens."""
-    data = await _request_github_tokens(
-        {
-            "client_id": GITHUB_APP_CLIENT_ID,
-            "client_secret": GITHUB_APP_CLIENT_SECRET,
-            "code": code,
-        }
-    )
-    if not data.get("access_token"):
-        raise HTTPException(400, f"oauth exchange failed: {data}")
-    return data
-
-
-async def refresh_user_access_token(refresh_token: str) -> dict[str, Any]:
-    """Rotate an expiring user access token using its refresh token."""
-    data = await _request_github_tokens(
-        {
-            "client_id": GITHUB_APP_CLIENT_ID,
-            "client_secret": GITHUB_APP_CLIENT_SECRET,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-        }
-    )
-    if not data.get("access_token"):
-        raise HTTPException(400, f"oauth refresh failed: {data}")
-    return data
-
-
-async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
-    """Return ``(user, primary_email)`` for the authenticated user."""
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        u = await client.get("https://api.github.com/user", headers=headers)
-        u.raise_for_status()
-        user = u.json()
-        email = user.get("email")
-        if not email:
-            e = await client.get("https://api.github.com/user/emails", headers=headers)
-            if e.status_code == 200:
-                primary = next((x for x in e.json() if x.get("primary")), None)
-                if primary:
-                    email = primary.get("email")
-    return user, email

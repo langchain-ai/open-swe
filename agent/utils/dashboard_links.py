@@ -1,14 +1,24 @@
 """Shared builders for dashboard ("Open in Web") URLs."""
 
-import os
 from urllib.parse import quote
 
-_DEFAULT_DASHBOARD_BASE_URL = "https://openswe.vercel.app"
+from ..config import dashboard_base_url
+
+# Dashboard route where users manage their GitHub↔Slack link.
+PROFILE_SETTINGS_PATH = "/my-settings"
 
 
-def dashboard_base_url() -> str:
-    """Return the configured dashboard base URL."""
-    return os.environ.get("DASHBOARD_BASE_URL", _DEFAULT_DASHBOARD_BASE_URL).strip().rstrip("/")
+def build_settings_url() -> str | None:
+    """Return the dashboard Profile Settings URL, or ``None`` if not configured.
+
+    This is a plain, token-free link: it carries no per-user identity, so it is
+    safe to share in a public Slack thread. The user signs in with GitHub from
+    their own session and connects Slack via verified OIDC on the settings page.
+    """
+    frontend_base = dashboard_base_url()
+    if not frontend_base:
+        return None
+    return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
 
 
 def dashboard_thread_url(thread_id: str) -> str | None:

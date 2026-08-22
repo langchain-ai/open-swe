@@ -1,9 +1,10 @@
 """Encryption utilities for sensitive data like tokens."""
 
 import logging
-import os
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
+
+from .config import token_encryption_key
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ def _get_encryption_keys() -> list[bytes]:
     Raises:
         EncryptionKeyMissingError: If TOKEN_ENCRYPTION_KEY is unset or empty.
     """
-    explicit_key = os.environ.get("TOKEN_ENCRYPTION_KEY")
+    explicit_key = token_encryption_key()
     if not explicit_key:
         raise EncryptionKeyMissingError
 

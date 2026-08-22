@@ -1,6 +1,6 @@
 from typing import Any
 
-from ..utils.linear import delete_issue
+from ..linear.api import delete_issue
 
 
 async def linear_delete_issue(issue_id: str) -> dict[str, Any]:

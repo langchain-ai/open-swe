@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from fastapi import HTTPException
+from support.exa_fakes import fake_exa_module
 
 from agent.dashboard import review_chat_api
 
@@ -224,7 +225,7 @@ async def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
                 "title": "Open one",
                 "status": "open",
                 "severity": "high",
-                "github_review_comment_id": 999,
+                "github_review_comment_ids": [999],
             },
             {"id": "f2", "title": "Closed one", "status": "resolved", "severity": "low"},
         ]
@@ -236,7 +237,7 @@ async def test_list_review_findings_compacts_and_filters(monkeypatch) -> None:
     finding = result["findings"][0]
     assert finding["id"] == "f1"
     # compact view drops GitHub plumbing fields
-    assert "github_review_comment_id" not in finding
+    assert "github_review_comment_ids" not in finding
 
 
 @pytest.mark.asyncio
@@ -596,13 +597,13 @@ async def test_enrich_chat_command_ignores_non_run_start(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_proxy_state_normalizes_missing_thread(monkeypatch) -> None:
-    async def fake_passthrough(method, thread_id, suffix, body, content_type):
+    async def fake_passthrough(method, thread_id, suffix, **kwargs):
         return 404, b"not found", "text/plain"
 
     async def no_thread(thread_id: str) -> None:
         return None
 
-    monkeypatch.setattr(review_chat_api, "_proxy_passthrough", fake_passthrough)
+    monkeypatch.setattr(review_chat_api, "passthrough", fake_passthrough)
     monkeypatch.setattr(review_chat_api, "_get_chat_thread_metadata", no_thread)
     status, content, media_type = await review_chat_api.proxy_review_chat_state(
         "acme", "repo", 7, "octocat", "ct-1"
@@ -613,13 +614,13 @@ async def test_proxy_state_normalizes_missing_thread(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_proxy_history_normalizes_missing_thread(monkeypatch) -> None:
-    async def fake_passthrough(method, thread_id, suffix, body, content_type):
+    async def fake_passthrough(method, thread_id, suffix, **kwargs):
         return 404, b"not found", "text/plain"
 
     async def no_thread(thread_id: str) -> None:
         return None
 
-    monkeypatch.setattr(review_chat_api, "_proxy_passthrough", fake_passthrough)
+    monkeypatch.setattr(review_chat_api, "passthrough", fake_passthrough)
     monkeypatch.setattr(review_chat_api, "_get_chat_thread_metadata", no_thread)
     status, content, _ = await review_chat_api.proxy_review_chat_history(
         "acme", "repo", 7, "octocat", "ct-1", b"{}"
@@ -643,7 +644,7 @@ async def test_proxy_state_rejects_foreign_thread(monkeypatch) -> None:
         raise AssertionError("must not proxy a thread the caller doesn't own")
 
     monkeypatch.setattr(review_chat_api, "_get_chat_thread_metadata", other_owner)
-    monkeypatch.setattr(review_chat_api, "_proxy_passthrough", fake_passthrough)
+    monkeypatch.setattr(review_chat_api, "passthrough", fake_passthrough)
     with pytest.raises(Exception):  # noqa: B017,PT011 - HTTPException(404)
         await review_chat_api.proxy_review_chat_state("acme", "repo", 7, "octocat", "ct-1")
 
@@ -652,13 +653,13 @@ async def test_proxy_state_rejects_foreign_thread(monkeypatch) -> None:
 
 
 def test_chat_excludes_mutating_filesystem_tools() -> None:
-    from agent.chat import _EXCLUDED_TOOLS
+    from agent.graphs.chat import _EXCLUDED_TOOLS
 
     assert {"write_file", "edit_file", "delete", "execute"} <= _EXCLUDED_TOOLS
 
 
 def test_chat_general_purpose_subagent_is_read_only() -> None:
-    from agent.chat import _chat_general_purpose_subagent
+    from agent.graphs.chat import _chat_general_purpose_subagent
 
     spec = _chat_general_purpose_subagent()
 
@@ -673,17 +674,10 @@ def test_chat_general_purpose_subagent_is_read_only() -> None:
 
 @pytest.mark.asyncio
 async def test_chat_web_search_returns_inline_results_without_sandbox(monkeypatch) -> None:
-    class FakeExa:
-        def __init__(self, api_key: str) -> None:
-            self.api_key = api_key
-
-        def search_and_contents(self, *args: Any, **kwargs: Any) -> str:
-            return "chat search result"
-
     async def no_sandbox(tool_name: str, content: str, extension: str) -> str:
         raise ValueError("Missing sandbox_id in thread metadata for chat-thread")
 
-    monkeypatch.setitem(sys.modules, "exa_py", SimpleNamespace(Exa=FakeExa))
+    monkeypatch.setitem(sys.modules, "exa_py", fake_exa_module("chat search result"))
     monkeypatch.setenv("EXA_API_KEY", "test-key")
     monkeypatch.setattr(web_search, "write_sandbox_output", no_sandbox)
 
@@ -695,7 +689,7 @@ async def test_chat_web_search_returns_inline_results_without_sandbox(monkeypatc
 
 
 def test_get_chat_agent_returns_trivial_when_not_for_execution() -> None:
-    from agent.chat import get_chat_agent
+    from agent.graphs.chat import get_chat_agent
 
     graph = asyncio.run(get_chat_agent({"configurable": {"thread_id": None}}))
     assert graph is not None

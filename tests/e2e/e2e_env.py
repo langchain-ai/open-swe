@@ -63,8 +63,10 @@ _DEFAULTS = {
     "LANGSMITH_API_KEY_PROD": "test-bot-mode",
     # SDK client target (same dev server).
     "LANGGRAPH_URL": BASE_URL,
-    # Dashboard: the "Open in Web" link target + session-cookie signing. Use
-    # 127.0.0.1 (not localhost) so the local-dev LLM-key check stays skipped.
+    # The LLM is faked (patches.py), but the dev server's startup check still
+    # wants a key for the default model's provider; a placeholder satisfies it.
+    "OPENAI_API_KEY": "e2e-fake-llm",
+    # Dashboard: the "Open in Web" link target + session-cookie signing.
     "DASHBOARD_BASE_URL": BASE_URL,
     "DASHBOARD_API_BASE_URL": BASE_URL,
     "DASHBOARD_ALLOWED_ORIGINS": f"{BASE_URL},open-swe://app",

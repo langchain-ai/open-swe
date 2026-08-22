@@ -7,10 +7,8 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.utils import slack_events
-from agent.webhooks import common as webhook_common
 from agent.webhooks import slack as slack_service
-from agent.webhooks import slack_routes
+from agent.webhooks import slack_events, slack_routes
 
 
 class _ConflictError(Exception):
@@ -102,12 +100,12 @@ def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
-    monkeypatch.setattr(slack_events, "get_client", lambda url: client)
-    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
-    monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
-    monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
-    monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
-    monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
+    monkeypatch.setattr(slack_events, "langgraph_client", lambda: client)
+    monkeypatch.setattr(slack_routes, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(slack_routes, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
+    monkeypatch.setattr(slack_service, "resolve_slack_channel_context", channel_context)
+    monkeypatch.setattr(slack_service, "is_docs_plz_slack_channel", not_docs_plz)
+    monkeypatch.setattr(slack_service, "get_slack_repo_config", repo_config)
     return client
 
 
@@ -137,7 +135,7 @@ async def test_mention_and_message_deliveries_start_one_run(
     _patch_slack_webhook: _FakeClient,
 ) -> None:
     background_tasks = _FakeBackgroundTasks()
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "BOT")
 
     first = await _post(_mention_payload("Ev1"), background_tasks)
     slack_events.reset_slack_event_claims()
@@ -194,10 +192,10 @@ async def test_preprocessing_failure_does_not_claim_event(monkeypatch: pytest.Mo
     async def failed_repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         raise RuntimeError
 
-    original_repo_config = webhook_common.get_slack_repo_config
-    monkeypatch.setattr(webhook_common, "get_slack_repo_config", failed_repo_config)
+    original_repo_config = slack_service.get_slack_repo_config
+    monkeypatch.setattr(slack_service, "get_slack_repo_config", failed_repo_config)
     with pytest.raises(RuntimeError):
         await _post(_mention_payload(), background_tasks)
 
-    monkeypatch.setattr(webhook_common, "get_slack_repo_config", original_repo_config)
+    monkeypatch.setattr(slack_service, "get_slack_repo_config", original_repo_config)
     assert (await _post(_mention_payload(), background_tasks))["status"] == "accepted"

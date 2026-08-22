@@ -6,13 +6,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
-from langgraph_sdk.schema import Run
 from pydantic import BaseModel
 
-from ..dispatch import dispatch_agent_run
-from ..utils.slack import post_slack_thread_reply
-from .oauth import require_same_origin_for_mutations, require_session
-from .plan_store import (
+from ..settings.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_CANCELLED,
     PLAN_STATUS_READY,
@@ -28,12 +24,12 @@ from .plan_store import (
     set_plan_status,
     write_plan_to_sandbox,
 )
-from .thread_api import (
-    _repo_config_from_metadata,
-    _thread_is_readable,
-    _thread_source,
-    _user_owns_thread,
-)
+from ..slack.api import post_slack_thread_reply
+from ..utils.json_types import JsonObject, thread_metadata
+from .authz import thread_is_readable, user_owns_thread
+from .oauth import require_same_origin_for_mutations, require_session
+from .threads.runs import dispatch_thread_followup
+from .threads.serialize import slack_thread_context, slack_thread_ids
 
 logger = logging.getLogger(__name__)
 _plan_approval_locks: dict[str, asyncio.Lock] = {}
@@ -59,23 +55,29 @@ class PlanRejection(BaseModel):
     dispatch: bool = True
 
 
-async def _thread_metadata(thread_id: str) -> dict[str, Any]:
-    client = get_client()
+async def thread_metadata_or_404(thread_id: str) -> JsonObject:
+    """A thread's metadata, or 404 — read through the in-process client.
+
+    Not ``authz.get_thread_metadata``: the ``manage_thread`` tool calls these
+    endpoints from inside a graph, where the loopback client is the only one
+    allowed. The 404-on-any-failure rule is the same either way.
+    """
     try:
-        thread = await client.threads.get(thread_id)
+        return thread_metadata(await get_client().threads.get(thread_id))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
-    metadata = (
-        thread.get("metadata") if isinstance(thread, dict) else getattr(thread, "metadata", None)
-    )
-    return metadata if isinstance(metadata, dict) else {}
+
+
+async def _readable_thread_metadata(thread_id: str) -> JsonObject:
+    metadata = await thread_metadata_or_404(thread_id)
+    if not thread_is_readable(metadata):
+        raise HTTPException(404, "thread not found")
+    return metadata
 
 
 @plan_router.get("/{thread_id}")
 async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
-        raise HTTPException(404, "thread not found")
+    metadata = await _readable_thread_metadata(thread_id)
     login = session["sub"]
     email = session.get("email")
     content = await get_plan_content(thread_id) or {}
@@ -94,7 +96,7 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
         "status": content.get("status") or metadata.get("plan_status") or "planning",
         "html": content.get("html", ""),
         "markdown": content.get("markdown", ""),
-        "isOwner": _user_owns_thread(metadata, login, email),
+        "isOwner": user_owns_thread(metadata, login, email),
         "approvedBy": approved_by,
         "approvedAt": approved_at if isinstance(approved_at, str) else None,
         "user": {
@@ -111,8 +113,8 @@ async def update_plan(
     thread_id: str, body: PlanUpdate, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     """Save an owner-edited HTML artifact while preserving review comments."""
-    metadata = await _thread_metadata(thread_id)
-    if not _user_owns_thread(metadata, session["sub"], session.get("email")):
+    metadata = await thread_metadata_or_404(thread_id)
+    if not user_owns_thread(metadata, session["sub"], session.get("email")):
         raise HTTPException(403, "only the plan owner can edit the plan")
     content = await get_plan_content(thread_id) or {}
     _reject_shared_content(content)
@@ -153,9 +155,7 @@ async def update_plan(
 async def get_plan_comments(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
-        raise HTTPException(404, "thread not found")
+    await _readable_thread_metadata(thread_id)
     return {"comments": await list_plan_comments(thread_id)}
 
 
@@ -163,9 +163,7 @@ async def get_plan_comments(
 async def post_plan_comment(
     thread_id: str, body: CommentBody, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
-        raise HTTPException(404, "thread not found")
+    await _readable_thread_metadata(thread_id)
     _reject_shared_content(await get_plan_content(thread_id) or {})
     text = body.body.strip()
     if not text:
@@ -180,16 +178,14 @@ async def post_plan_comment(
 async def remove_plan_comment(
     thread_id: str, comment_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
-        raise HTTPException(404, "thread not found")
+    metadata = await _readable_thread_metadata(thread_id)
     _reject_shared_content(await get_plan_content(thread_id) or {})
     comments = await list_plan_comments(thread_id)
     target = next((c for c in comments if c.get("id") == comment_id), None)
     if target is None:
         raise HTTPException(404, "comment not found")
     login = session["sub"]
-    is_owner = _user_owns_thread(metadata, login, session.get("email"))
+    is_owner = user_owns_thread(metadata, login, session.get("email"))
     if target.get("author_login") != login and not is_owner:
         raise HTTPException(403, "only the author or the plan owner can delete a comment")
     await delete_plan_comment(thread_id, comment_id)
@@ -198,9 +194,7 @@ async def remove_plan_comment(
 
 @plan_router.post("/{thread_id}/approve")
 async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
-        raise HTTPException(404, "thread not found")
+    await _readable_thread_metadata(thread_id)
     actor_id = str(session.get("sub") or "").strip()
     return await approve_plan_for_thread(
         thread_id,
@@ -220,7 +214,7 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
     )
     lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
     async with lock:
-        metadata = await _thread_metadata(thread_id)
+        metadata = await thread_metadata_or_404(thread_id)
         content = await get_plan_content(thread_id, raise_on_error=True) or {}
         _reject_shared_content(content)
         if (
@@ -259,7 +253,7 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
         if feedback:
             text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
         try:
-            run = await _dispatch_followup(thread_id, metadata, text, plan_mode=False)
+            run = await dispatch_thread_followup(thread_id, metadata, text, plan_mode=False)
         except Exception:
             await set_plan_status(thread_id, PLAN_STATUS_READY, plan_mode=True)
             raise
@@ -278,12 +272,10 @@ async def reject_plan(
     rejection: PlanRejection | None = None,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
-        raise HTTPException(404, "thread not found")
+    metadata = await _readable_thread_metadata(thread_id)
     lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
     async with lock:
-        metadata = await _thread_metadata(thread_id)
+        metadata = await thread_metadata_or_404(thread_id)
         content = await get_plan_content(thread_id, raise_on_error=True) or {}
         _reject_shared_content(content)
         if (
@@ -300,7 +292,7 @@ async def reject_plan(
         "existing self-contained HTML file under /workspace/plans/, then publish an updated "
         f"artifact with the save_plan tool:\n\n{feedback or '(no specific comments were left)'}"
     )
-    await _dispatch_followup(thread_id, metadata, text, plan_mode=True)
+    await dispatch_thread_followup(thread_id, metadata, text, plan_mode=True)
     return {"status": PLAN_STATUS_REVISING}
 
 
@@ -314,22 +306,6 @@ def _approval_actor_name(session: dict[str, Any]) -> str:
     return str(actor).strip() or "User"
 
 
-def _slack_thread_from_metadata(metadata: dict[str, Any]) -> tuple[str, str] | None:
-    source_context = metadata.get("source_context")
-    if not isinstance(source_context, dict):
-        return None
-    slack_thread = source_context.get("slack_thread")
-    if not isinstance(slack_thread, dict):
-        return None
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
-    if not isinstance(channel_id, str) or not channel_id.strip():
-        return None
-    if not isinstance(thread_ts, str) or not thread_ts.strip():
-        return None
-    return channel_id.strip(), thread_ts.strip()
-
-
 def _plan_approved_slack_text(comment_count: int, actor: str) -> str:
     return f"Plan approved with {comment_count} comments by {actor}"
 
@@ -341,10 +317,10 @@ def _plan_approved_slack_blocks(text: str) -> list[dict[str, Any]]:
 async def _maybe_post_plan_approved_to_slack(
     metadata: dict[str, Any], *, thread_id: str, comment_count: int, actor: str
 ) -> None:
-    slack_thread = _slack_thread_from_metadata(metadata)
-    if slack_thread is None:
+    ids = slack_thread_ids(slack_thread_context(metadata))
+    if ids is None:
         return
-    channel_id, thread_ts = slack_thread
+    channel_id, thread_ts = ids
     text = _plan_approved_slack_text(comment_count, actor)
     try:
         ok = await post_slack_thread_reply(
@@ -372,35 +348,3 @@ def _format_comments(comments: list[dict[str, Any]]) -> str:
         lines.append(f"{index}. {author}: {body}")
         index += 1
     return "\n".join(lines)
-
-
-async def _dispatch_followup(
-    thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
-) -> Run:
-    """Continue the existing thread with the decision as a new instruction run."""
-    configurable: dict[str, Any] = {
-        "thread_id": thread_id,
-        "source": _thread_source(metadata) or "slack",
-    }
-    email = metadata.get("triggering_user_email")
-    if isinstance(email, str) and email:
-        configurable["user_email"] = email
-    login = metadata.get("github_login")
-    if isinstance(login, str) and login:
-        configurable["github_login"] = login
-    repo = _repo_config_from_metadata(metadata)
-    if repo:
-        configurable["repo"] = repo
-    source_context = metadata.get("source_context")
-    if isinstance(source_context, dict):
-        slack_thread = source_context.get("slack_thread")
-        if isinstance(slack_thread, dict):
-            configurable["slack_thread"] = slack_thread
-    configurable["plan_mode"] = plan_mode
-
-    return await dispatch_agent_run(
-        thread_id,
-        text,
-        configurable,
-        source=configurable["source"],
-    )

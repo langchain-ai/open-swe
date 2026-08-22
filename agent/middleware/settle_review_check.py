@@ -14,9 +14,9 @@ from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
+from ..github.token import get_github_token
 from ..review.findings import get_thread_metadata
 from ..review.publish import settle_review_check_run
-from ..utils.github_token import get_github_token
 
 logger = logging.getLogger(__name__)
 

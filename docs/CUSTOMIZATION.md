@@ -1,27 +1,26 @@
 # Customization Guide
 
-Open SWE is designed to be forked and customized for your org. The core agent is assembled in a single function — `get_agent()` in `agent/server.py` — where you can swap out the sandbox, model, tools, and triggers.
+Open SWE is designed to be forked and customized for your org. The core agent is assembled in a single function — `get_agent()` in `agent/graphs/agent.py` — where you can swap out the sandbox, model, tools, and triggers.
 
 ```python
-# agent/server.py — the key lines
-model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
-model_kwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
-if model_id == DEFAULT_LLM_MODEL_ID:
-    model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
+# agent/graphs/agent.py — the shape of get_agent(), simplified
+static_tools = [http_request, fetch_url, web_search, ..., slack_thread_reply]  # ~35 tools
 
 return create_deep_agent(
-    model=make_model(model_id, **model_kwargs),
-    system_prompt=construct_system_prompt(...),
-    tools=[http_request, fetch_url, linear_comment, slack_thread_reply],
+    model=main_model,  # resolved per run; see "2. Model" below
+    system_prompt="",  # rendered per run by PrepareAgentRunMiddleware
+    tools=static_tools,
+    subagents=[general_purpose_subagent, browser_subagent],
     backend=sandbox_backend,
-    middleware=[
-        ToolErrorMiddleware(),
-        check_message_queue_before_model,
-        ensure_no_empty_msg,
-        notify_step_limit_reached,
-    ],
-)
+    middleware=core_stack(  # agent/middleware/stack.py
+        PrepareAgentRunMiddleware(...),  # awaits the sandbox, renders the prompt
+        call_limit=MODEL_CALL_RECURSION_LIMIT,
+        extras=[...],  # what this graph adds, in order
+    ),
+).with_config(config)
 ```
+
+`get_agent` is called once per run, so anything you want to vary by repo, trigger source, or user can be decided right here. The other four graphs (`reviewer`, `analyzer`, `chat`, `scheduler`) are sibling modules in `agent/graphs/`, assembled from the same `_assembly.py` helpers and the same middleware-stack builders.
 
 ---
 
@@ -49,7 +48,7 @@ This is useful for pre-installing languages, frameworks, or internal tools that 
 
 `REPO_SNAPSHOT_BASE_IMAGE` should point to the published Docker image used to create your default Open SWE sandbox snapshot (typically the image built from this repository's `Dockerfile.sandbox`). The admin **Repository Snapshots** page uses it as the base image when generating per-repo Dockerfile templates. If it is not configured, template generation fails closed instead of suggesting a bare image that would be missing Open SWE's required sandbox tools.
 
-For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
+For providers whose `uses_github_proxy` is `True` (LangSmith is the only built-in one), Open SWE configures two GitHub proxy rules — in `agent/github/proxy.py` — whenever a sandbox is created or reattached to a run:
 
 - `github.com` / `*.github.com` receive Basic auth for git-over-HTTPS operations.
 - `api.github.com` receives Bearer auth for `gh` and REST API operations.
@@ -58,16 +57,16 @@ The proxy token is minted at runtime from the GitHub App installation credential
 
 ### Using a different sandbox provider
 
-Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/integrations/` and a factory function registered in `agent/utils/sandbox.py`:
+Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider is one `SandboxProvider` class in `agent/integrations/`, registered by name in `_PROVIDERS` in `agent/sandboxes/providers.py` and imported on demand — so only the selected platform's SDK has to be installed:
 
-| `SANDBOX_TYPE` | Integration file | Required env vars |
+| `SANDBOX_TYPE` | Provider class | Required env vars |
 |---|---|---|
-| `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
-| `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
-| `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
-| `e2b` | `agent/integrations/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
-| `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
-| `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
+| `langsmith` (default) | `LangSmithProvider` (`agent/integrations/langsmith.py`) | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
+| `daytona` | `DaytonaProvider` (`agent/integrations/daytona.py`) | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
+| `runloop` | `RunloopProvider` (`agent/integrations/runloop.py`) | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
+| `e2b` | `E2BProvider` (`agent/integrations/e2b.py`) | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
+| `modal` | `ModalProvider` (`agent/integrations/modal.py`) | Modal credentials, `SANDBOX_TYPE="modal"` |
+| `local` | `LocalProvider` (`agent/integrations/local.py`) | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
@@ -75,32 +74,55 @@ For `langsmith`, sandboxes default to the same LangSmith credentials as tracing.
 
 ### Adding a new sandbox provider
 
-1. **Create an integration file** at `agent/integrations/my_provider.py` with a factory function matching this signature:
+A platform is one class implementing the `SandboxProvider` protocol in `agent/sandboxes/providers.py`. The protocol exists so the rest of Open SWE never branches on the provider's *name*: how to reach a sandbox, whether its GitHub traffic goes through a proxy, whether it can boot from a snapshot, and where it keeps a writable tree are all answered by the provider.
+
+1. **Create the provider** at `agent/integrations/my_provider.py`:
 
 ```python
-def create_my_provider_sandbox(sandbox_id: str | None = None):
-    """Create or reconnect to a sandbox.
+from deepagents.backends.protocol import SandboxBackendProtocol
 
-    Args:
-        sandbox_id: Optional existing sandbox ID to reconnect to.
-            If None, creates a new sandbox.
+from ..config import my_provider_api_key  # env reads live in agent/config.py
+from ..sandboxes.providers import SandboxGoneError, SandboxProvider
 
-    Returns:
-        An object implementing SandboxBackendProtocol.
-    """
-    ...
+
+class MyProvider(SandboxProvider):
+    uses_github_proxy = False  # True only if we configure a token-bearing proxy for it
+    supports_snapshots = False  # True only if `create` accepts an Open SWE snapshot id
+
+    async def connect(self, sandbox_id: str) -> SandboxBackendProtocol:
+        # Raise SandboxGoneError when — and only when — the platform reports
+        # not-found. The lifecycle replaces a gone sandbox and refuses to replace
+        # a merely unreachable one, so a not-found that arrives as some other
+        # error type bricks the thread permanently.
+        ...
+
+    async def create(self, *, snapshot_id: str | None = None) -> SandboxBackendProtocol:
+        if snapshot_id is not None:
+            raise ValueError("MyProvider cannot boot from an Open SWE snapshot")
+        ...
+
+    def validate_startup_config(self) -> None:
+        # Optional: reject env-var configuration at server boot rather than on
+        # the first sandbox creation.
+        ...
+
+    async def work_dir(self, backend: SandboxBackendProtocol) -> str | None:
+        # Optional: return None to let the caller ask the sandbox's own shell.
+        return None
 ```
 
-2. **Register it** in `agent/utils/sandbox.py` by adding it to `SANDBOX_FACTORIES`:
+2. **Register it** in `_PROVIDERS` in `agent/sandboxes/providers.py`:
 
 ```python
-SANDBOX_FACTORIES = {
+_PROVIDERS: dict[str, tuple[str, str]] = {
     ...
-    "my_provider": ("agent.integrations.my_provider", "create_my_provider_sandbox"),
+    "my_provider": ("agent.integrations.my_provider", "MyProvider"),
 }
 ```
 
-The factory must return an object implementing `SandboxBackendProtocol` from `deepagents`. See the existing integration files for reference.
+Registration is by module + class name, not by import, so a deployment only needs the SDK of the platform its `SANDBOX_TYPE` selects. `connect` and `create` return anything implementing `SandboxBackendProtocol` from `deepagents`. Any env vars your provider needs become accessors in `agent/config.py`. See `agent/integrations/e2b.py` for a compact reference.
+
+There is deliberately no `delete` on the protocol: the sandbox holds the agent's only copy of its working tree, so reclamation is left to the platform's idle TTL and delete-after-stop settings.
 
 ### Building a custom sandbox provider
 
@@ -134,20 +156,24 @@ class MySandbox(BaseSandbox):
         )
 ```
 
+Open SWE only ever calls the async methods (`aexecute`, `aread`, …); `BaseSandbox` derives them from the sync ones with `asyncio.to_thread`, so override `aexecute` directly if your client is natively async.
+
 See `deepagents.backends.LangSmithSandbox` and `agent/integrations/langsmith.py` for a full reference implementation.
 
 ---
 
 ## 2. Model
 
-The model is configured in the `get_agent()` function in `agent/server.py`. By default it uses `openai:gpt-5.6-sol` with medium reasoning effort, but you can override the model with the `LLM_MODEL_ID` environment variable:
+The model is resolved per run in `get_agent()` (`agent/graphs/agent.py`). There is no single "the model" env var: the effective choice is settings-driven, and the last rule that applies wins.
 
-```bash
-# Set the model via environment variable (uses provider:model format)
-LLM_MODEL_ID="anthropic:claude-sonnet-5"
-```
+1. **Team default** — set in the dashboard under **Admin → Models**, read via `get_team_default_model_pair("agent")` (`agent/settings/team_settings.py`). With nothing configured this falls back to `default_model_pair()` in `agent/settings/options.py` (`openai:gpt-5.6-sol`, medium effort).
+2. **Per-user profile override** — a dashboard profile can pin a model (and a separate subagent model) for runs triggered by that GitHub login (`agent/settings/agent_overrides.py`).
+3. **Thread settings** — the resolved pair is frozen onto the thread on its first run (`agent/threads/settings.py`), so a long-lived Slack or Linear thread does not silently change models mid-conversation.
+4. **Per-run config** — `agent_model_id` + `agent_effort` in `configurable`, set by the UI or a webhook. This is the only thing allowed to move a thread off its stored settings, and the new choice is stored in turn.
 
-If `LLM_MODEL_ID` is not set, the default model (`openai:gpt-5.6-sol`) is used.
+Supported ids and the per-model effort/reasoning rules live in `agent/settings/options.py`; add a model there before it can be selected anywhere. A `(model_id, effort)` pair that arrives from somewhere else — a browser configurable, a stored schedule, a chat request — is filtered through `normalize_model_choice()` in the same module, which keeps it only when both halves are supported together, migrates a retired id onto its replacement, and otherwise returns `(None, None)` so the caller falls back to its own default.
+
+`LLM_MODEL_ID` does **not** select the runtime model. It is only read by `validate_local_dev_llm_config()` (`agent/models/factory.py`), which fails fast at startup on `localhost` when the API key for your locally configured default is missing. Set `LLM_FALLBACK_MODEL_ID` to override the automatic fallback model. Every env var Open SWE reads is an accessor function in `agent/config.py`.
 
 `max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
 
@@ -166,7 +192,7 @@ model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort"
 model = make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
 ```
 
-The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
+The `make_model()` helper in `agent/models/factory.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
 
 ```python
 from langchain_anthropic import ChatAnthropic
@@ -212,7 +238,7 @@ Routing is opt-in and off by default. Enable it either way:
 
 The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
 
-Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Fireworks, and Google Gemini** are routed (their LangChain integrations accept `base_url` + `api_key`); Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
+Routing is applied centrally in `make_model` (`agent/models/factory.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/models/gateway.py`. **OpenAI, Anthropic, Fireworks, and Google Gemini** are routed (their LangChain integrations accept `base_url` + `api_key`); Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
 
 **Caveat — OpenAI endpoint:** Open SWE uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions. Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled. Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions. Anthropic and Fireworks are unaffected.
 
@@ -220,7 +246,7 @@ Routing is applied centrally in `make_model` (`agent/utils/model.py`), which res
 
 ## 3. Tools
 
-Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents). GitHub operations are handled by `gh` inside the sandbox.
+Open SWE ships with around three dozen first-party tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents). They all live in `agent/tools/`, are re-exported lazily from `agent/tools/__init__.py`, and are assembled into `static_tools` in `get_agent()` (`agent/graphs/agent.py`) — that list is the authoritative inventory. A representative slice:
 
 | Tool | File | Purpose |
 |---|---|---|
@@ -228,6 +254,10 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
 | `linear_comment` | `agent/tools/linear_comment.py` | Post comments on Linear tickets |
 | `slack_thread_reply` | `agent/tools/slack_thread_reply.py` | Reply in Slack threads |
+| `open_pull_request` | `agent/tools/open_pull_request.py` | Open a PR attributed to the triggering user |
+| `save_plan` | `agent/tools/save_plan.py` | Publish a plan for dashboard review |
+
+Day-to-day git and GitHub work is done with `git` and `gh` inside the sandbox; PR *creation* is the exception — it goes through `open_pull_request`, and `PullRequestCreationGuardMiddleware` blocks the shell fallbacks.
 
 ### Adding a tool
 
@@ -255,21 +285,17 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
     ...
 ```
 
-Then register it in `agent/server.py`:
+Register the name in `_TOOL_MODULES` (and `__all__`, and the `TYPE_CHECKING` block) in `agent/tools/__init__.py` — the package resolves tools lazily so importing one does not import them all — then add it to `static_tools` in `agent/graphs/agent.py`:
 
 ```python
-from .tools import fetch_url, http_request, linear_comment, slack_thread_reply
-from .tools.datadog_search import datadog_search
+from .tools import datadog_search, fetch_url, http_request, ...
 
-return create_deep_agent(
-    ...
-    tools=[
-        http_request, fetch_url,
-        linear_comment, slack_thread_reply,
-        datadog_search,  # new tool
-    ],
-    ...
-)
+static_tools = [
+    http_request,
+    fetch_url,
+    ...,
+    datadog_search,  # new tool
+]
 ```
 
 The agent will automatically see the tool's name, docstring, and parameter types — the docstring serves as the tool description, so write it clearly.
@@ -280,7 +306,7 @@ If you only use Linear (not Slack), remove `slack_thread_reply` from the tools l
 
 ### Conditional tools
 
-You can vary the toolset based on the trigger source:
+`get_agent()` already does this — Slack tools are dropped unless the run carries trusted Slack context, environment tools are added only for admin threads — and you can extend the same pattern:
 
 ```python
 base_tools = [http_request, fetch_url]
@@ -300,7 +326,7 @@ return create_deep_agent(tools=tools, ...)
 
 A `browser` subagent drives a real Chromium via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK, exposing `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close`. The main agent delegates to it for tasks that need live interaction or JS-rendered pages (logging in, clicking flows, reproducing UI bugs, scraping structured data); static reads should still use `fetch_url`.
 
-The tools are added in `agent/server.py` (gated by `load_browser_tools()`), and live in `agent/integrations/stagehand_browser.py`. One browser session is kept per agent thread and reused across calls. The tools are a no-op unless configured:
+The tools are added in `agent/graphs/agent.py` (gated by `load_browser_tools()`), and live in `agent/integrations/stagehand_browser.py`. One browser session is kept per agent thread and reused across calls. The tools are a no-op unless configured:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -317,16 +343,20 @@ For `LOCAL` mode the sandbox image in `Dockerfile.sandbox` installs `chromium`; 
 
 ## 4. Triggers
 
-Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each is implemented as a webhook endpoint in `agent/webapp.py`. You can add, remove, or modify triggers independently.
+Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each lives in `agent/webhooks/`, split in two: a `<source>_routes.py` module with the FastAPI endpoints and request plumbing, and a `<source>.py` module with the event handling. There is no shared grab-bag module: every signature check is in `agent/webhooks/signatures.py`, deterministic thread ids are derived in `agent/threads/ids.py`, and the one repo-resolution step Slack and Linear genuinely share is `agent/webhooks/repo_config.py` — everything else belongs to its own channel. All three end at the same place: `dispatch_agent_run()` in `agent/dispatch.py`, which owns the durable-run contract (interrupt-on-follow-up, sync checkpointing, completion webhook). Routers are mounted in `agent/api/app.py:create_app()`.
+
+Webhooks run *outside* the LangGraph graph, so they talk to the runtime over HTTP via `langgraph_client()` from `agent/config.py` — never `in_process_langgraph_client()`, which is the loopback for code running inside a graph.
+
+You can add, remove, or modify triggers independently.
 
 ### Removing a trigger
 
 If you don't use Linear, simply don't configure the Linear webhook and remove the env vars. Same for Slack. The webhook endpoints still exist but won't receive events.
 
-To fully remove a trigger's code, delete the corresponding endpoint from `agent/webapp.py`:
+To fully remove a trigger's code, drop its router from `create_app()` in `agent/api/app.py` and delete the pair of modules:
 
-- **Linear**: `linear_webhook()` and `process_linear_issue()`
-- **Slack**: `slack_webhook()` and `process_slack_mention()`
+- **Linear**: `agent/webhooks/linear_routes.py` and `agent/webhooks/linear.py`
+- **Slack**: `agent/webhooks/slack_routes.py`, `agent/webhooks/slack.py`, and the event/interaction handlers beside them (`slack_events.py`, `slack_stop.py`, `slack_feedback.py`)
 
 ### Default repository
 
@@ -344,7 +374,7 @@ These are used as the fallback when:
 
 ### Repository extraction from messages
 
-Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `agent/utils/repo.py` handles parsing these formats:
+Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `agent/github/refs.py` handles parsing these formats:
 
 - `repo:owner/name` — explicit org and repo
 - `repo owner/name` — space syntax (same result)
@@ -353,7 +383,7 @@ Both Slack and Linear support specifying a target repo directly in the message o
 
 ### Customizing Linear routing
 
-The `LINEAR_TEAM_TO_REPO` dict in `agent/utils/linear_team_repo_map.py` maps Linear teams and projects to GitHub repos:
+The `LINEAR_TEAM_TO_REPO` dict in `agent/linear/team_repo_map.py` maps Linear teams and projects to GitHub repos:
 
 ```python
 LINEAR_TEAM_TO_REPO = {
@@ -371,7 +401,7 @@ Users can also override the team/project mapping on a per-comment basis by inclu
 
 ### Customizing Slack routing
 
-Slack repo resolution (`get_slack_repo_config` in `agent/webapp.py`) checks, in order:
+Slack repo resolution (`get_slack_repo_config` in `agent/webhooks/slack.py`) checks, in order:
 
 1. Repo carried over from the existing Slack thread's metadata.
 2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description"). This lets a channel be pinned to a repo without anyone repeating it per-message.
@@ -387,42 +417,41 @@ Reading the channel topic/purpose requires the bot's Slack token to have the `ch
 
 To add a new invocation surface (e.g. Jira, Discord, a custom API):
 
-1. **Add a webhook endpoint** in `agent/webapp.py`:
+1. **Add a router** at `agent/webhooks/my_trigger_routes.py` and include it in `create_app()` (`agent/api/app.py`):
 
 ```python
-@app.post("/webhooks/my-trigger")
+# agent/webhooks/my_trigger_routes.py
+from fastapi import APIRouter, BackgroundTasks, Request
+
+from . import my_trigger
+
+router = APIRouter()
+
+
+@router.post("/webhooks/my-trigger")
 async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks):
-    # Parse the incoming event
-    payload = await request.json()
-    
-    # Extract task description and repo info
-    task_description = payload["description"]
-    repo_config = {"owner": "my-org", "name": "my-repo"}
-    
-    # Create a LangGraph run
-    background_tasks.add_task(process_my_trigger, task_description, repo_config)
+    payload = await request.json()  # verify the signature via agent/webhooks/signatures.py
+    background_tasks.add_task(my_trigger.process, payload)
     return {"status": "accepted"}
 ```
 
-2. **Create a processing function** that builds the prompt and starts an agent run:
+2. **Create the handler** in `agent/webhooks/my_trigger.py`. Add your deterministic thread-id derivation to `agent/threads/ids.py` — that is where every surface's lives, and `tests/threads/test_thread_ids.py` pins each formula because the ids are persisted — and dispatch through `dispatch_agent_run` rather than calling `runs.create` yourself; that is what gives your trigger interrupt-on-follow-up, sync checkpointing, and a completion signal:
 
 ```python
-async def process_my_trigger(task_description: str, repo_config: dict):
-    thread_id = generate_deterministic_id(task_description)
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+from ..dispatch import dispatch_agent_run
+from ..threads.ids import my_trigger_thread_id  # add the derivation there
 
-    await langgraph_client.runs.create(
-        thread_id,
-        "agent",
-        input={"messages": [{"role": "user", "content": task_description}]},
-        config={
-            "configurable": {
-                "repo": repo_config,
-                "source": "my-trigger",
-                "user_email": "user@example.com",
-            }
+
+async def process(payload: dict) -> None:
+    thread_id = my_trigger_thread_id(payload["id"])
+    await dispatch_agent_run(
+        thread_id=thread_id,
+        content=payload["description"],
+        source="my-trigger",
+        configurable={
+            "repo": {"owner": "my-org", "name": "my-repo"},
+            "user_email": "user@example.com",
         },
-        if_not_exists="create",
     )
 ```
 
@@ -445,16 +474,19 @@ The key fields in `config.configurable` are:
 
 ## 5. System prompt
 
-The system prompt is assembled in `agent/prompt.py` from modular sections. You can customize behavior by editing individual sections:
+The system prompt is assembled in `agent/prompt.py` — `SYSTEM_PROMPT_TEMPLATE` concatenates the sections, `construct_system_prompt()` fills in the per-run ones, and `PrepareAgentRunMiddleware` calls it on every run (the factory passes `system_prompt=""`). You can customize behavior by editing individual sections:
 
 | Section | What it controls |
 |---|---|
-| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints |
+| `WORKING_ENV_SECTION` / `DESKTOP_WORKING_ENV_SECTION` | Sandbox (or local checkout) paths and execution constraints |
+| `SOURCE_GUIDANCE_SECTION` | How to communicate back on Slack / Linear / GitHub / the dashboard |
+| `PLAN_MODE_GUIDANCE_SECTION`, `PLAN_MODE_SECTION` | When to plan first, and what plan mode allows |
+| `REPO_SETUP_SECTION` | Cloning and preparing the repository |
 | `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) |
-| `CODING_STANDARDS_SECTION` | Code style, testing, and quality rules |
+| `DEPENDENCY_SECTION` | Adding and pinning dependencies |
+| `EXTERNAL_UNTRUSTED_COMMENTS_SECTION` | How untrusted comment text is treated |
 | `COMMIT_PR_SECTION` | PR title/body format and commit conventions |
-| `CODE_REVIEW_GUIDELINES_SECTION` | How the agent reviews code changes |
-| `COMMUNICATION_SECTION` | Formatting and messaging guidelines |
+| `ADMIN_ENVIRONMENT_SECTION` | Managed-environment rules, admin threads only |
 
 ### Default prompt file
 
@@ -503,18 +535,32 @@ Drop an `AGENTS.md` file in the root of any repository to add repo-specific inst
 
 ## 6. Middleware
 
-Middleware hooks run around the agent loop. Open SWE includes:
+Middleware hooks run around the agent loop. Each one is a module in `agent/middleware/`, registered in that package's `__init__.py`; the *ordering* is not written in any graph factory but in the builders in `agent/middleware/stack.py`:
+
+- `core_stack(*prepare, call_limit=…, extras=…)` returns a graph's whole list — the `prepare` middleware first, then the fixed `SanitizeToolInputsMiddleware` → `ModelCallLimitMiddleware` → `ToolErrorMiddleware` trio, then this graph's `extras`, then `model_guard_middleware()`.
+- `model_guard_middleware()` is the innermost block: the provider-shaped sanitizers, closed by `ModelCallTimeoutMiddleware`.
+
+Lists are outermost-first: the first entry wraps everything, the last sits closest to the provider call. The entries you are most likely to care about when forking:
 
 | Middleware | Type | Purpose |
 |---|---|---|
-| `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
+| `PrepareAgentRunMiddleware` | Before agent | First entry. Awaits the sandbox, renders the system prompt, records the turn checkpoint |
+| `SanitizeToolInputsMiddleware` | Tool call wrapper | Normalizes tool inputs before they reach a tool |
+| `ModelCallLimitMiddleware` | Before model | Caps model calls per run; ends the run instead of looping |
+| `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors; notifies the user when the sandbox is unreachable |
+| `PullRequestCreationGuardMiddleware` | Tool call wrapper | Blocks `gh pr create` and friends so PRs go through `open_pull_request` |
+| `WorkflowPushGuardMiddleware` | Tool call wrapper | Requires approval before pushing `.github/workflows` changes |
 | `check_message_queue_before_model` | Before model | Injects follow-up messages that arrived mid-run |
-| `ensure_no_empty_msg` | After model | Re-injects a tool call when the model stops without one, so runs don't end prematurely |
 | `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
+| `ModelCallTimeoutMiddleware` | Around model | Innermost. Caps a single provider call so a stall escalates to the fallback model |
+
+The reviewer, chat, and analyzer graphs call the same builders with their own `prepare` and `extras`, so they inherit the ordering rather than repeating it.
+
+Nothing re-injects a tool call when the model stops without one: a model turn with no tool call ends the run. The system prompt is what asks the agent to keep calling tools until it is genuinely finished.
 
 There is intentionally no after-agent middleware that opens a PR for the agent. The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
 
-Add custom middleware by appending to the middleware list in `get_agent()`. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
+Add custom middleware by putting it in the `extras` you pass to `core_stack()`, at the position its ordering needs. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
 
 **Example — adding a CI check after agent completion:**
 
@@ -530,14 +576,32 @@ async def run_ci_check(state: AgentState, runtime: Runtime):
     ...
 ```
 
-Then add it to the middleware list:
+Then add it to `extras` in `get_agent()`. An after-agent hook has no ordering constraints against the model-call wrappers, so append it after the existing after-agent entry:
 
 ```python
-middleware = [
-    ToolErrorMiddleware(),
-    check_message_queue_before_model,
-    ensure_no_empty_msg,
-    notify_step_limit_reached,
-    run_ci_check,  # new middleware
-]
+middleware = core_stack(
+    PrepareAgentRunMiddleware(...),
+    call_limit=MODEL_CALL_RECURSION_LIMIT,
+    extras=[
+        ...,
+        notify_step_limit_reached,
+        run_ci_check,  # new middleware
+    ],
+)
 ```
+
+You never append `ModelCallTimeoutMiddleware` yourself — `core_stack` closes the list with `model_guard_middleware()`, which keeps it innermost. Something that must see every tool call (a guard, an audit hook) goes early in `extras`, near `WorkflowPushGuardMiddleware`, so it still sits outside the provider sanitizers.
+
+---
+
+## 7. Settings
+
+Everything Open SWE persists about *how* it should behave — team defaults, per-user profiles, per-repo and per-user instructions, enabled repos, environments and snapshots, review styles, third-party OAuth tokens — lives in `agent/settings/`, one module per concern. Those modules are store-backed (via `agent/store.py`) and deliberately free of FastAPI, so a graph, a tool, or a webhook reads them directly and the dashboard is just another caller.
+
+To add a setting of your own:
+
+1. Add a module to `agent/settings/` that reads and writes through `agent/store.py`. Its rule is that a missing item reads as `None` and every other failure raises — so an outage never looks like an empty record. If your call site genuinely must survive an outage, wrap that call yourself and say why in a comment.
+2. Read it wherever it applies — `get_agent()`, a middleware, a tool.
+3. Expose it, if the UI needs it, by adding a route to the matching router in `agent/dashboard/routes/`. Keep the logic in the settings module; the route should only authorize and serialize.
+
+Environment variables are for deployment-level configuration only, and every one of them is an accessor function in `agent/config.py` (never a module-level constant, so a rotated value is picked up without a restart). Anything a user or admin should be able to change at runtime belongs in `agent/settings/` instead.

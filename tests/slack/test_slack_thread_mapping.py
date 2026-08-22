@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 
-from agent.utils.slack import (
+from agent.slack.threads import (
     SlackThreadMappingError,
     bind_slack_thread_id,
     delete_slack_thread_associations,

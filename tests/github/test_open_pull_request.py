@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import agent.tools.open_pull_request  # noqa: F401
+from agent.github import api as github_api
+from agent.github import run_references
+from agent.settings import agent_usage
 
 opr = sys.modules["agent.tools.open_pull_request"]
 
@@ -15,81 +18,81 @@ class _FakeResponse:
         self.status_code = status_code
         self._payload = payload
         self.text = text
+        self.headers: dict[str, str] = {}
 
     def json(self) -> Any:
         return self._payload
 
 
 class _FakeClient:
+    """Records every request, whichever client instance issued it.
+
+    ``headers`` on a recorded call are the ones baked into the client that made
+    it, since ``github_client`` authenticates once at construction.
+    """
+
     def __init__(self, *, post: _FakeResponse, get: _FakeResponse | None = None) -> None:
-        self._post = post
+        self.post_response = post
         self._get = get
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> "_FakeClient":
-        return self
+    def response_for(self, _url: str) -> _FakeResponse:
+        return self._get if self._get is not None else _FakeResponse(200, {"name": "ok"})
 
-    async def __aexit__(self, *_exc: object) -> None:
-        return None
-
-    async def post(
-        self, url: str, *, headers: dict[str, str], json: dict[str, Any]
-    ) -> _FakeResponse:
-        self.post_calls.append({"url": url, "headers": headers, "json": json})
-        return self._post
-
-    async def get(
-        self, url: str, *, headers: dict[str, str], params: dict[str, str] | None = None
-    ) -> _FakeResponse:
-        self.get_calls.append({"url": url, "headers": headers, "params": params})
-        if self._get is not None:
-            return self._get
-        return _FakeResponse(200, {"name": "ok"})
+    def bind(self, headers: dict[str, str]) -> "_BoundClient":
+        return _BoundClient(self, headers)
 
 
-class _RoutingClient:
+class _RoutingClient(_FakeClient):
     """Fake httpx client that routes GETs by URL substring."""
 
     def __init__(self, *, post: _FakeResponse, get_routes: dict[str, _FakeResponse]) -> None:
-        self._post = post
+        super().__init__(post=post)
         self._get_routes = get_routes
-        self.post_calls: list[dict[str, Any]] = []
-        self.get_calls: list[dict[str, Any]] = []
 
-    async def __aenter__(self) -> "_RoutingClient":
-        return self
-
-    async def __aexit__(self, *_exc: object) -> None:
-        return None
-
-    async def post(
-        self, url: str, *, headers: dict[str, str], json: dict[str, Any]
-    ) -> _FakeResponse:
-        self.post_calls.append({"url": url, "headers": headers, "json": json})
-        return self._post
-
-    async def get(
-        self, url: str, *, headers: dict[str, str], params: dict[str, str] | None = None
-    ) -> _FakeResponse:
-        self.get_calls.append({"url": url, "headers": headers, "params": params})
+    def response_for(self, url: str) -> _FakeResponse:
         for needle, resp in self._get_routes.items():
             if needle in url:
                 return resp
         return _FakeResponse(200, {"name": "ok"})
 
 
+class _BoundClient:
+    def __init__(self, recorder: _FakeClient, headers: dict[str, str]) -> None:
+        self._recorder = recorder
+        self._headers = headers
+
+    async def __aenter__(self) -> "_BoundClient":
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+    async def post(self, url: str, *, json: dict[str, Any]) -> _FakeResponse:
+        self._recorder.post_calls.append({"url": url, "headers": self._headers, "json": json})
+        return self._recorder.post_response
+
+    async def get(self, url: str, *, params: dict[str, str] | None = None) -> _FakeResponse:
+        self._recorder.get_calls.append({"url": url, "headers": self._headers, "params": params})
+        return self._recorder.response_for(url)
+
+
 def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _RoutingClient) -> None:
-    monkeypatch.setattr(opr.httpx, "AsyncClient", lambda **_kwargs: client)
+    monkeypatch.setattr(
+        github_api.httpx,
+        "AsyncClient",
+        lambda **kwargs: client.bind(dict(kwargs.get("headers") or {})),
+    )
 
 
 def _set_config(monkeypatch: pytest.MonkeyPatch, configurable: dict[str, Any]) -> None:
-    monkeypatch.setattr(opr, "get_config", lambda: {"configurable": configurable})
+    monkeypatch.setattr(run_references, "get_config", lambda: {"configurable": configurable})
 
 
 def _open() -> dict[str, Any]:
     return asyncio.run(
-        opr._open_pull_request(
+        opr.open_pull_request(
             owner="langchain-ai",
             repo="open-swe",
             head="open-swe/feature",
@@ -104,13 +107,13 @@ def _open() -> dict[str, Any]:
 def test_uses_user_token_for_slack_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from agent.settings import github_tokens
 
     async def fake_user_token(login: str, **_kw: Any) -> str | None:
         assert login == "johannes117"
         return "user-tok"
 
-    monkeypatch.setattr(profiles, "get_valid_access_token", fake_user_token)
+    monkeypatch.setattr(github_tokens, "get_valid_access_token", fake_user_token)
 
     async def fail_bot() -> str | None:
         raise AssertionError("bot token should not be used when a user token exists")
@@ -162,13 +165,13 @@ def test_profile_draft_preference_overrides_tool_argument(monkeypatch: pytest.Mo
 def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "linear", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from agent.settings import github_tokens
 
     async def fake_user_token(login: str, **_kw: Any) -> str | None:
         assert login == "johannes117"
         return "user-tok"
 
-    monkeypatch.setattr(profiles, "get_valid_access_token", fake_user_token)
+    monkeypatch.setattr(github_tokens, "get_valid_access_token", fake_user_token)
 
     async def fail_bot() -> str | None:
         raise AssertionError("bot token should not be used when a user token exists")
@@ -196,12 +199,12 @@ def test_uses_user_token_for_linear_with_login(monkeypatch: pytest.MonkeyPatch) 
 def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "github", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from agent.settings import github_tokens
 
     async def fail_user_token(login: str, **_kw: Any) -> str | None:
         raise AssertionError("user token should not be resolved for github source")
 
-    monkeypatch.setattr(profiles, "get_valid_access_token", fail_user_token)
+    monkeypatch.setattr(github_tokens, "get_valid_access_token", fail_user_token)
 
     async def fake_bot() -> str | None:
         return "bot-tok"
@@ -224,12 +227,12 @@ def test_falls_back_to_bot_for_github_source(monkeypatch: pytest.MonkeyPatch) ->
 def test_falls_back_to_bot_when_user_token_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from agent.settings import github_tokens
 
     async def no_user_token(login: str, **_kw: Any) -> str | None:
         return None
 
-    monkeypatch.setattr(profiles, "get_valid_access_token", no_user_token)
+    monkeypatch.setattr(github_tokens, "get_valid_access_token", no_user_token)
 
     async def fake_bot() -> str | None:
         return "bot-tok"
@@ -245,9 +248,11 @@ def test_falls_back_to_bot_when_user_token_missing(monkeypatch: pytest.MonkeyPat
 def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from agent.settings import github_tokens
 
-    monkeypatch.setattr(profiles, "get_valid_access_token", lambda *_a, **_k: _coro("user-tok"))
+    monkeypatch.setattr(
+        github_tokens, "get_valid_access_token", lambda *_a, **_k: _coro("user-tok")
+    )
     monkeypatch.setattr(opr, "get_github_app_installation_token", lambda: _coro("bot"))
 
     client = _FakeClient(
@@ -273,9 +278,11 @@ def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_error_surfaced_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from agent.settings import github_tokens
 
-    monkeypatch.setattr(profiles, "get_valid_access_token", lambda *_a, **_k: _coro("user-tok"))
+    monkeypatch.setattr(
+        github_tokens, "get_valid_access_token", lambda *_a, **_k: _coro("user-tok")
+    )
     monkeypatch.setattr(opr, "get_github_app_installation_token", lambda: _coro("bot"))
 
     client = _FakeClient(post=_FakeResponse(403, {"message": "Resource not accessible"}))
@@ -349,7 +356,7 @@ async def _coro(value: Any) -> Any:
 
 def _open_with_body(body: str) -> dict[str, Any]:
     return asyncio.run(
-        opr._open_pull_request(
+        opr.open_pull_request(
             owner="langchain-ai",
             repo="open-swe",
             head="open-swe/feature",
@@ -362,11 +369,11 @@ def _open_with_body(body: str) -> dict[str, Any]:
 
 
 def _stub_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda: _coro(("tok", "user")))
+    monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a: _coro(("tok", "user")))
 
 
 def _stub_plan(monkeypatch: pytest.MonkeyPatch, plan: dict[str, Any] | None) -> None:
-    monkeypatch.setattr(opr, "get_plan_content", lambda *_a, **_k: _coro(plan))
+    monkeypatch.setattr(run_references, "get_plan_content", lambda *_a, **_k: _coro(plan))
 
 
 def test_appends_slack_reference_for_private_repo(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -379,7 +386,7 @@ def test_appends_slack_reference_for_private_repo(monkeypatch: pytest.MonkeyPatc
     )
     _stub_token(monkeypatch)
     monkeypatch.setattr(
-        opr, "get_slack_permalink", lambda *_a, **_k: _coro("https://slack.example/p1")
+        run_references, "get_slack_permalink", lambda *_a, **_k: _coro("https://slack.example/p1")
     )
 
     client = _RoutingClient(
@@ -413,7 +420,7 @@ def test_uses_stored_slack_permalink_reference(monkeypatch: pytest.MonkeyPatch) 
     async def fail_permalink(*_args: Any, **_kwargs: Any) -> str:
         raise AssertionError("stored permalink should be used")
 
-    monkeypatch.setattr(opr, "get_slack_permalink", fail_permalink)
+    monkeypatch.setattr(run_references, "get_slack_permalink", fail_permalink)
     client = _RoutingClient(
         post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
         get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": True})},
@@ -486,7 +493,7 @@ def test_omits_plan_reference_when_store_lookup_fails(monkeypatch: pytest.Monkey
     async def fail_plan(*_a: Any, **_k: Any) -> Any:
         raise RuntimeError("store down")
 
-    monkeypatch.setattr(opr, "get_plan_content", fail_plan)
+    monkeypatch.setattr(run_references, "get_plan_content", fail_plan)
 
     client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
     _install_client(monkeypatch, client)
@@ -521,7 +528,7 @@ def test_plan_reference_survives_source_reference_failure(
     async def fail_permalink(*_args: Any, **_kwargs: Any) -> str:
         raise RuntimeError("slack failed")
 
-    monkeypatch.setattr(opr, "get_slack_permalink", fail_permalink)
+    monkeypatch.setattr(run_references, "get_slack_permalink", fail_permalink)
     client = _FakeClient(post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}))
     _install_client(monkeypatch, client)
 
@@ -542,7 +549,7 @@ def test_omits_slack_reference_for_public_repo(monkeypatch: pytest.MonkeyPatch) 
     )
     _stub_token(monkeypatch)
     monkeypatch.setattr(
-        opr, "get_slack_permalink", lambda *_a, **_k: _coro("https://slack.example/p1")
+        run_references, "get_slack_permalink", lambda *_a, **_k: _coro("https://slack.example/p1")
     )
 
     client = _RoutingClient(
@@ -577,7 +584,7 @@ def test_public_repo_appends_plan_but_not_slack_reference(
         },
     )
     monkeypatch.setattr(
-        opr, "get_slack_permalink", lambda *_a, **_k: _coro("https://slack.example/p1")
+        run_references, "get_slack_permalink", lambda *_a, **_k: _coro("https://slack.example/p1")
     )
 
     client = _RoutingClient(
@@ -689,8 +696,8 @@ async def test_thread_pull_requests_seeds_legacy_metadata() -> None:
         }
     )
 
-    with patch.object(opr, "get_client", return_value=fake_client):
-        records = await opr._thread_pull_requests("thread-1")
+    with patch.object(agent_usage, "get_client", return_value=fake_client):
+        records = await agent_usage._thread_pull_requests("thread-1")
 
     assert records == [
         {
@@ -723,7 +730,7 @@ def test_upsert_pull_request_keeps_multiple_repositories() -> None:
         "title": "LangChain",
     }
 
-    assert opr._upsert_pull_request([first], second) == [first, second]
+    assert agent_usage._upsert_pull_request([first], second) == [first, second]
 
 
 def test_upsert_pull_request_replaces_duplicate_and_moves_it_latest() -> None:
@@ -740,20 +747,20 @@ def test_upsert_pull_request_replaces_duplicate_and_moves_it_latest() -> None:
     }
     updated = {**first, "state": "open"}
 
-    assert opr._upsert_pull_request([first, other], updated) == [other, updated]
+    assert agent_usage._upsert_pull_request([first, other], updated) == [other, updated]
 
 
 def test_derive_pr_state_prefers_merged() -> None:
-    assert opr.derive_pr_state(state="closed", merged=True, draft=True) == "merged"
+    assert agent_usage.derive_pr_state(state="closed", merged=True, draft=True) == "merged"
 
 
 def test_derive_pr_state_closed_over_draft() -> None:
-    assert opr.derive_pr_state(state="closed", merged=False, draft=True) == "closed"
+    assert agent_usage.derive_pr_state(state="closed", merged=False, draft=True) == "closed"
 
 
 def test_derive_pr_state_draft() -> None:
-    assert opr.derive_pr_state(state="open", merged=False, draft=True) == "draft"
+    assert agent_usage.derive_pr_state(state="open", merged=False, draft=True) == "draft"
 
 
 def test_derive_pr_state_open() -> None:
-    assert opr.derive_pr_state(state="open", merged=False, draft=False) == "open"
+    assert agent_usage.derive_pr_state(state="open", merged=False, draft=False) == "open"

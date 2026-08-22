@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from ..dashboard import skills as store
+from ..settings import skills as store
 from .admin_gate import require_admin
 
 _ACTION = "manage organization skills"

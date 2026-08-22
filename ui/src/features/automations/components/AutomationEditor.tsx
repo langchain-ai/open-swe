@@ -3,10 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { ClockIcon, TrashIcon } from "@phosphor-icons/react"
 
 import type { ModelOption } from "@/lib/api"
-import type {
-  AgentSchedule,
-  SlackNotificationMode,
-} from "@/features/agents/lib/types"
+import type { AgentSchedule, SlackNotificationMode } from "@/lib/agentTypes"
 import type { AutomationTemplate } from "@/features/automations/lib/automation-templates"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"

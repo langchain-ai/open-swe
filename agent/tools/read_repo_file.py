@@ -11,9 +11,8 @@ from typing import Any
 import httpx
 from langgraph.config import get_config
 
-from ..utils.github_checks import github_headers
+from ..github.api import github_client, github_request, github_url
 
-_GITHUB_API = "https://api.github.com"
 _MAX_FILE_BYTES = 256 * 1024
 
 
@@ -64,11 +63,10 @@ async def read_repo_file(path: str, ref: str | None = None) -> dict[str, Any]:
     clean_path = path.strip().lstrip("/")
     resolved_ref = (ref or head_sha or "").strip()
     params = {"ref": resolved_ref} if resolved_ref else None
-    url = f"{_GITHUB_API}/repos/{owner}/{repo}/contents/{clean_path}"
-    headers = github_headers(token)
+    url = github_url(f"/repos/{owner}/{repo}/contents/{clean_path}")
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.get(url, headers=headers, params=params)
+        async with github_client(token=token) as client:
+            response = await github_request(client, "GET", url, params=params)
     except httpx.HTTPError as exc:
         return {"success": False, "error": f"GitHub request failed: {exc!s}"}
 

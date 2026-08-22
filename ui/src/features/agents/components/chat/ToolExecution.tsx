@@ -7,11 +7,11 @@ import {
   useState,
 } from "react"
 import { MultiFileDiff } from "@pierre/diffs/react"
-import { DiffView } from "./DiffView"
 import { formatToolDisplay } from "./toolExecutionDisplay"
-import type { ToolExecutionChunk } from "@/features/agents/lib/types"
-import { useDiffOptions } from "@/features/agents/utils/diffUtils"
-import { countLineChanges } from "@/features/agents/utils/diffStats"
+import type { ToolExecutionChunk } from "@/lib/agentTypes"
+import { DiffView } from "@/components/diff/DiffView"
+import { useDiffOptions } from "@/components/diff/diffUtils"
+import { countLineChanges } from "@/components/diff/diffStats"
 
 interface ToolExecutionProps {
   chunk: ToolExecutionChunk

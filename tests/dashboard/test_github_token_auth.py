@@ -8,7 +8,8 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from agent.dashboard import github_token_auth, oauth, routes
+from agent.dashboard import authz, github_token_auth, oauth
+from agent.dashboard.github_token_auth import GithubIdentity
 
 
 def _request(
@@ -108,9 +109,9 @@ async def test_admin_token_accepted_for_configured_admin(monkeypatch: pytest.Mon
     monkeypatch.setenv("CONFIGURED_ADMINS", "octo")
     with patch.object(
         github_token_auth,
-        "_github_identity",
+        "fetch_github_identity",
         new_callable=AsyncMock,
-        return_value=("octo", None),
+        return_value=GithubIdentity("octo", None, None),
     ):
         session = await github_token_auth.admin_session_for_github_token("gh-tok")
 
@@ -123,9 +124,9 @@ async def test_admin_token_rejected_for_non_admin(monkeypatch: pytest.MonkeyPatc
     with (
         patch.object(
             github_token_auth,
-            "_github_identity",
+            "fetch_github_identity",
             new_callable=AsyncMock,
-            return_value=("intruder", None),
+            return_value=GithubIdentity("intruder", None, None),
         ),
         pytest.raises(HTTPException) as exc,
     ):
@@ -140,11 +141,11 @@ async def test_admin_dep_prefers_bearer_over_missing_cookie(
     monkeypatch.setenv("CONFIGURED_ADMINS", "octo")
     with patch.object(
         github_token_auth,
-        "_github_identity",
+        "fetch_github_identity",
         new_callable=AsyncMock,
-        return_value=("octo", "octo@example.com"),
+        return_value=GithubIdentity("octo", "octo@example.com", None),
     ):
-        session = await routes._admin_session_or_ci_token(_request(authorization="Bearer gh-tok"))
+        session = await authz.admin_session_or_ci_token(_request(authorization="Bearer gh-tok"))
 
     assert session["sub"] == "octo"
 
@@ -152,16 +153,18 @@ async def test_admin_dep_prefers_bearer_over_missing_cookie(
 async def test_admin_dep_routes_oidc_tokens_to_oidc_verifier() -> None:
     """An Actions OIDC token must never be treated as a user token."""
     with (
-        patch.object(routes, "is_actions_oidc_token", return_value=True),
+        patch.object(authz, "is_actions_oidc_token", return_value=True),
         patch.object(
-            routes,
+            authz,
             "admin_session_for_actions_oidc",
             new_callable=AsyncMock,
             return_value={"sub": "actions:acme/images", "auth": "actions_oidc"},
         ) as verify_oidc,
-        patch.object(github_token_auth, "_github_identity", new_callable=AsyncMock) as user_lookup,
+        patch.object(
+            github_token_auth, "fetch_github_identity", new_callable=AsyncMock
+        ) as user_lookup,
     ):
-        session = await routes._admin_session_or_ci_token(_request(authorization="Bearer oidc-jwt"))
+        session = await authz.admin_session_or_ci_token(_request(authorization="Bearer oidc-jwt"))
 
     assert session["auth"] == "actions_oidc"
     verify_oidc.assert_awaited_once_with("oidc-jwt")
@@ -170,7 +173,7 @@ async def test_admin_dep_routes_oidc_tokens_to_oidc_verifier() -> None:
 
 async def test_admin_dep_requires_a_credential() -> None:
     with pytest.raises(HTTPException) as exc:
-        await routes._admin_session_or_ci_token(_request())
+        await authz.admin_session_or_ci_token(_request())
 
     assert exc.value.status_code == 401
 

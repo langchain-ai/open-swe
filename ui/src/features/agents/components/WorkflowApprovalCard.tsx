@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { ShieldCheck } from "lucide-react"
 
-import type { WorkflowPushApproval } from "@/features/agents/lib/types"
+import type { WorkflowPushApproval } from "@/lib/agentTypes"
 import {
   useWorkflowApprovalDecision,
   useWorkflowApprovals,

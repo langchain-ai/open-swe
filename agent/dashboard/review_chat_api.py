@@ -4,31 +4,34 @@ A dedicated, sandbox-less ``chat`` graph (``agent/chat.py``) answers questions
 about one PR. This module mints a per-user chat thread, seeds the PR diff,
 review findings, and an overview as virtual files on the first run, and proxies
 the LangGraph stream/commands/state/history protocol the frontend SDK speaks —
-the chat counterpart of ``thread_api``'s agent proxy, pinned to assistant
-``chat`` and scoped to the review's PR.
+the chat counterpart of the agent proxy in ``threads.runs``, pinned to assistant
+``chat`` and scoped to the review's PR. The hop itself is ``threads.proxy``;
+what is specific to chat is the enrichment and the per-viewer access rule below.
 """
 
 import json
 import logging
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
 from typing import Any
 
-import httpx
 from fastapi import HTTPException
 
+from ..config import langgraph_client
+from ..github.app import get_github_app_installation_token
 from ..review.diff import fetch_pr_diff
 from ..review.findings import REVIEWER_THREAD_KIND
-from ..utils.github_app import get_github_app_installation_token
+from ..settings.options import normalize_model_choice
+from ..store import now_ms
+from ..threads.ids import reviewer_thread_id
 from ..utils.json_types import as_json_object
-from ..utils.thread_ops import langgraph_client, langgraph_url
-from .options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
-from .review_api import classify_finding, get_pr_head_sha, get_review, reviewer_thread_id
-from .thread_api import (
-    _DASHBOARD_STREAM_MODES,
-    _langgraph_proxy_headers,
-    _require_json_content_type,
-    _stream_thread_events,
+from .authz import thread_identifies_user
+from .review_api import classify_finding, get_pr_head_sha, get_review
+from .threads.proxy import (
+    PROXY_STREAM_MODES,
+    passthrough,
+    proxy_commands,
+    require_json_content_type,
+    stream_thread_events,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,14 +40,7 @@ _CHAT_ASSISTANT_ID = "chat"
 _CHAT_SOURCE = "review_chat"
 # Sentinel: caller did not pre-fetch the thread metadata, so fetch it here.
 _UNFETCHED = object()
-_PROXY_REQUEST_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 _MAX_DIFF_CHARS = 400_000
-
-
-def _now_ms() -> int:
-    return int(datetime.now(UTC).timestamp() * 1000)
-
-
 _TITLE_MAX_CHARS = 60
 
 
@@ -271,7 +267,10 @@ async def assert_chat_thread_access(
         return None
     owns = (
         metadata.get("kind") == _CHAT_SOURCE
-        and metadata.get("github_login") == login
+        # The shared owner rule, so chat cannot drift from the rest of the
+        # dashboard. Its email half never fires here: a chat thread records only
+        # the login of the viewer who minted it.
+        and thread_identifies_user(metadata, login)
         and metadata.get("repo_owner") == owner
         and metadata.get("repo_name") == repo
         and metadata.get("pr_number") == pr_number
@@ -284,7 +283,7 @@ async def assert_chat_thread_access(
 async def _create_chat_thread(
     thread_id: str, owner: str, repo: str, pr_number: int, login: str, *, title: str
 ) -> None:
-    now_ms = _now_ms()
+    created_at_ms = now_ms()
     metadata = {
         "kind": _CHAT_SOURCE,
         "source": _CHAT_SOURCE,
@@ -293,28 +292,12 @@ async def _create_chat_thread(
         "repo_name": repo,
         "pr_number": pr_number,
         "title": title,
-        "created_at_ms": now_ms,
-        "updated_at_ms": now_ms,
+        "created_at_ms": created_at_ms,
+        "updated_at_ms": created_at_ms,
     }
     await langgraph_client().threads.create(
         thread_id=thread_id, metadata=metadata, if_exists="do_nothing"
     )
-
-
-def _normalize_chat_model(configurable: dict[str, Any]) -> tuple[str | None, str | None]:
-    model_id = configurable.get("chat_model_id")
-    effort = configurable.get("chat_effort")
-    if (
-        isinstance(model_id, str)
-        and model_id in SUPPORTED_MODEL_IDS
-        and isinstance(effort, str)
-        and model_supports_effort(model_id, effort)
-    ):
-        return model_id, effort
-    canonical = canonical_model_pair(model_id, effort)
-    if canonical is not None:
-        return canonical
-    return None, None
 
 
 async def _enrich_chat_command(
@@ -363,7 +346,9 @@ async def _enrich_chat_command(
         "chat_pr_number": pr_number,
         "reviewer_thread_id": reviewer_thread_id(owner, repo, pr_number),
     }
-    model_id, effort = _normalize_chat_model(client_configurable)
+    model_id, effort = normalize_model_choice(
+        client_configurable.get("chat_model_id"), client_configurable.get("chat_effort")
+    )
     if model_id and effort:
         configurable["chat_model_id"] = model_id
         configurable["chat_effort"] = effort
@@ -431,7 +416,7 @@ async def _enrich_chat_command(
         configurable["chat_head_sha"] = stored_head
 
     params["assistant_id"] = _CHAT_ASSISTANT_ID
-    params.setdefault("stream_mode", list(_DASHBOARD_STREAM_MODES))
+    params.setdefault("stream_mode", list(PROXY_STREAM_MODES))
     params.setdefault("stream_resumable", True)
     params["config"] = {**client_config, "configurable": configurable}
     command["params"] = params
@@ -449,31 +434,22 @@ async def proxy_review_chat_commands(
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
     # Reject threads the caller doesn't own; a missing thread is created lazily
-    # below on the first `run.start` (with the caller as owner). Reuse the
-    # fetched metadata to avoid a second thread read during enrichment.
+    # on the first `run.start` (with the caller as owner). Reuse the fetched
+    # metadata to avoid a second thread read during enrichment.
     metadata = await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    _require_json_content_type(content_type)
-    try:
-        parsed = json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(400, "command body must be a JSON object") from exc
-    if not isinstance(parsed, dict):
-        raise HTTPException(400, "command body must be a JSON object")
 
-    enriched = await _enrich_chat_command(
-        parsed,
-        owner=owner,
-        repo=repo,
-        pr_number=pr_number,
-        login=login,
-        thread_id=thread_id,
-        thread_metadata=metadata,
-    )
-    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
-    headers = _langgraph_proxy_headers(content_type=content_type)
-    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
-        response = await client.post(url, content=json.dumps(enriched).encode(), headers=headers)
-    return response.status_code, response.content, response.headers.get("content-type")
+    async def enrich(command: dict[str, Any]) -> dict[str, Any]:
+        return await _enrich_chat_command(
+            command,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            login=login,
+            thread_id=thread_id,
+            thread_metadata=metadata,
+        )
+
+    return await proxy_commands(thread_id, body, enrich=enrich, content_type=content_type)
 
 
 async def proxy_review_chat_stream_events(
@@ -487,30 +463,15 @@ async def proxy_review_chat_stream_events(
     content_type: str = "application/json",
 ) -> AsyncIterator[bytes]:
     await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    _require_json_content_type(content_type)
-    return _stream_thread_events(thread_id, body, content_type)
-
-
-async def _proxy_passthrough(
-    method: str, thread_id: str, suffix: str, body: bytes | None, content_type: str
-) -> tuple[int, bytes, str | None]:
-    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/{suffix}"
-    headers = _langgraph_proxy_headers(content_type=content_type)
-    async with httpx.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
-        if method == "GET":
-            response = await client.get(url, headers=headers)
-        else:
-            response = await client.post(url, content=body or b"{}", headers=headers)
-    return response.status_code, response.content, response.headers.get("content-type")
+    require_json_content_type(content_type)
+    return stream_thread_events(thread_id, body, content_type)
 
 
 async def proxy_review_chat_state(
     owner: str, repo: str, pr_number: int, login: str, thread_id: str
 ) -> tuple[int, bytes, str | None]:
     await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    status_code, content, media_type = await _proxy_passthrough(
-        "GET", thread_id, "state", None, "application/json"
-    )
+    status_code, content, media_type = await passthrough("GET", thread_id, "state")
     # The chat thread is created lazily on the first run, so an initial getState
     # hits a missing thread. Return an empty idle state so the SDK hydrates a
     # fresh thread instead of surfacing the 404 as a hard error.
@@ -531,9 +492,9 @@ async def proxy_review_chat_history(
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
     await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    _require_json_content_type(content_type)
-    status_code, content, media_type = await _proxy_passthrough(
-        "POST", thread_id, "history", body, content_type
+    require_json_content_type(content_type)
+    status_code, content, media_type = await passthrough(
+        "POST", thread_id, "history", body=body or b"{}", content_type=content_type
     )
     # The thread is created lazily on the first run; before then, hydration
     # history reads hit a missing thread. Return an empty list so the SDK

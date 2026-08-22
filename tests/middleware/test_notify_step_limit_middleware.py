@@ -25,7 +25,7 @@ class TestNotifyStepLimitReached:
                 },
             ),
             patch(
-                "agent.middleware.notify_step_limit.post_slack_thread_reply",
+                "agent.utils.source_channel.post_slack_thread_reply",
                 new_callable=AsyncMock,
             ) as mock_post,
         ):
@@ -59,7 +59,7 @@ class TestNotifyStepLimitReached:
                 },
             ),
             patch(
-                "agent.middleware.notify_step_limit.post_slack_thread_reply",
+                "agent.utils.source_channel.post_slack_thread_reply",
                 new_callable=AsyncMock,
             ) as mock_post,
         ):
@@ -73,7 +73,7 @@ class TestNotifyStepLimitReached:
         state: AgentState = {"messages": [HumanMessage(content="keep going")]}
 
         with patch(
-            "agent.middleware.notify_step_limit.post_slack_thread_reply",
+            "agent.utils.source_channel.post_slack_thread_reply",
             new_callable=AsyncMock,
         ) as mock_post:
             result = await notify_step_limit_reached.aafter_agent(state, self._make_runtime())
@@ -93,7 +93,7 @@ class TestNotifyStepLimitReached:
                 return_value={"configurable": {}},
             ),
             patch(
-                "agent.middleware.notify_step_limit.post_slack_thread_reply",
+                "agent.utils.source_channel.post_slack_thread_reply",
                 new_callable=AsyncMock,
             ) as mock_post,
         ):

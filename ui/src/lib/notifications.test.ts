@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/lib/agentTypes"
 import {
   NOTIFICATIONS_PREF_KEY,
   showRunNotification,

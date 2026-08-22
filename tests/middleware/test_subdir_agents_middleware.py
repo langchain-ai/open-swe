@@ -7,7 +7,7 @@ import pytest
 from langchain_core.messages import ToolMessage
 
 from agent.middleware.subdir_agents import SubdirAgentsReadMiddleware
-from agent.utils import sandbox_state
+from agent.sandboxes import registry as sandbox_registry
 
 
 class FakeReadResult:
@@ -51,16 +51,11 @@ def _tool_result(result: object) -> ToolMessage:
 
 @pytest.fixture
 def register_backend():
-    registered: list[str] = []
-
     def _register(thread_id: str, backend: Any) -> Any:
-        sandbox_state.SANDBOX_BACKENDS[thread_id] = backend
-        registered.append(thread_id)
+        sandbox_registry.SANDBOX_BACKENDS[thread_id] = backend
         return backend
 
-    yield _register
-    for thread_id in registered:
-        sandbox_state.SANDBOX_BACKENDS.pop(thread_id, None)
+    return _register
 
 
 async def test_read_file_appends_applicable_agents_in_root_to_leaf_order(register_backend) -> None:

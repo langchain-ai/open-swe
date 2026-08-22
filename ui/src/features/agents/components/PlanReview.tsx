@@ -3,9 +3,9 @@ import { useNavigate } from "@tanstack/react-router"
 
 import type { PlanData } from "@/lib/plan"
 import { approvePlan } from "@/lib/plan"
+import { Markdown } from "@/components/markdown/Markdown"
 import { Button } from "@/components/ui/button"
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
-import { Markdown } from "@/features/agents/components/chat/Markdown"
 
 async function copyToClipboard(text: string): Promise<boolean> {
   const nav = navigator as { clipboard?: Clipboard }

@@ -4,12 +4,13 @@ from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
+    "core_stack": ".stack",
     "DynamicContextMiddleware": ".dynamic_context",
     "DynamicToolMiddleware": ".dynamic_tools",
-    "ensure_no_empty_msg": ".ensure_no_empty_msg",
     "ExcludeToolsMiddleware": ".exclude_tools",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
     "ModelFallbackMiddleware": ".model_fallback",
+    "model_guard_middleware": ".stack",
     "notify_step_limit_reached": ".notify_step_limit",
     "PlanModeMiddleware": ".plan_mode",
     "PrepareRunState": ".prepare_run",
@@ -17,7 +18,6 @@ _MIDDLEWARE_MODULES = {
     "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
-    "SandboxCircuitBreakerMiddleware": ".sandbox_circuit_breaker",
     "SanitizeFireworksMessagesMiddleware": ".sanitize_fireworks_messages",
     "SanitizeOpenAIResponsesMiddleware": ".sanitize_openai_responses",
     "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
@@ -50,9 +50,9 @@ __all__ = [
     "ToolErrorMiddleware",
     "TimeoutWrapupMiddleware",
     "WorkflowPushGuardMiddleware",
-    "SandboxCircuitBreakerMiddleware",
     "check_message_queue_before_model",
-    "ensure_no_empty_msg",
+    "core_stack",
+    "model_guard_middleware",
     "notify_step_limit_reached",
     "refresh_github_proxy_before_model",
     "settle_review_check_on_exit",
@@ -64,7 +64,6 @@ if TYPE_CHECKING:
     from .check_message_queue import check_message_queue_before_model
     from .dynamic_context import DynamicContextMiddleware
     from .dynamic_tools import DynamicToolMiddleware
-    from .ensure_no_empty_msg import ensure_no_empty_msg
     from .exclude_tools import ExcludeToolsMiddleware
     from .model_call_timeout import ModelCallTimeoutMiddleware
     from .model_fallback import ModelFallbackMiddleware
@@ -74,12 +73,12 @@ if TYPE_CHECKING:
     from .prepare_run import BasePrepareRunMiddleware, PrepareRunState
     from .refresh_github_proxy import refresh_github_proxy_before_model
     from .repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
-    from .sandbox_circuit_breaker import SandboxCircuitBreakerMiddleware
     from .sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
     from .sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
     from .sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
     from .sanitize_tool_inputs import SanitizeToolInputsMiddleware
     from .settle_review_check import settle_review_check_on_exit
+    from .stack import core_stack, model_guard_middleware
     from .subdir_agents import SubdirAgentsReadMiddleware
     from .task_retry import task_on_failure, task_retry_on
     from .timeout_wrapup import TimeoutWrapupMiddleware

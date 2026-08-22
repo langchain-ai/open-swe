@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent import session_cost
-from agent.utils import langsmith as ls_utils
+from agent.langsmith import api as ls_api
 
 
 class _LangSmithThreads:
@@ -39,12 +39,10 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
         [SimpleNamespace(end_time=root_end)],
         SimpleNamespace(total_cost=1.234, last_end_time=root_end + timedelta(seconds=1)),
     )
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: client)
-    monkeypatch.setattr(
-        ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
-    )
+    monkeypatch.setattr(ls_api, "_build_prod_langsmith_client", lambda: client)
+    monkeypatch.setattr(ls_api, "_resolve_project_id_by_name", AsyncMock(return_value="project-id"))
 
-    result = await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1")
+    result = await ls_api.get_langsmith_thread_cost("thread-1", "prepare-1")
 
     assert result is not None
     assert result.total_cost == 1.234
@@ -69,12 +67,10 @@ async def test_langsmith_cost_waits_for_thread_stats_freshness(
         [SimpleNamespace(end_time=root_end)],
         SimpleNamespace(total_cost=2.0, last_end_time=root_end - timedelta(seconds=1)),
     )
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: client)
-    monkeypatch.setattr(
-        ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
-    )
+    monkeypatch.setattr(ls_api, "_build_prod_langsmith_client", lambda: client)
+    monkeypatch.setattr(ls_api, "_resolve_project_id_by_name", AsyncMock(return_value="project-id"))
 
-    assert await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1") is None
+    assert await ls_api.get_langsmith_thread_cost("thread-1", "prepare-1") is None
 
 
 async def test_refresh_updates_exact_mapped_slack_message_in_place(
@@ -151,7 +147,6 @@ class _Client:
 
 def _state(attempt: int) -> dict[str, Any]:
     return {
-        "task": "session_cost",
         "agent_thread_id": "thread-1",
         "run_id": "run-1",
         "prepare_run_id": "prepare-1",
@@ -182,6 +177,17 @@ async def test_refresh_schedules_bounded_stateless_retry(monkeypatch: pytest.Mon
     assert created["after_seconds"] == 30
     assert created["on_completion"] == "delete"
     assert "webhook" not in created
+    assert created["input"] == {
+        "task": "session_cost",
+        "payload": {
+            "agent_thread_id": "thread-1",
+            "run_id": "run-1",
+            "prepare_run_id": "prepare-1",
+            "channel_id": "C1",
+            "thread_ts": "1.0",
+            "attempt": 1,
+        },
+    }
 
 
 async def test_refresh_stops_after_final_attempt(monkeypatch: pytest.MonkeyPatch) -> None:

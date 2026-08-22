@@ -1,12 +1,12 @@
 import pytest
 
-from agent.utils import langsmith as ls_utils
-from agent.utils.tracing import AGENT_TRACING_PROJECT, REVIEW_TRACING_PROJECT
+from agent.langsmith import api as ls_api
+from agent.langsmith.tracing import AGENT_TRACING_PROJECT, REVIEW_TRACING_PROJECT
 
 
 @pytest.fixture(autouse=True)
 def _clear_cache() -> None:
-    ls_utils._PROJECT_ID_CACHE.clear()
+    ls_api._PROJECT_ID_CACHE.clear()
 
 
 def _resolver(ids: dict[str, str], *, default: str | None = None):
@@ -25,13 +25,13 @@ def _set_env(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_trace_url_resolves_project_id_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_env(monkeypatch)
     monkeypatch.setattr(
-        ls_utils,
+        ls_api,
         "_resolve_project_id_by_name",
         _resolver({AGENT_TRACING_PROJECT: "agent-pid"}, default="review-pid"),
     )
 
-    agent_url = await ls_utils.get_langsmith_trace_url("t1")
-    review_url = await ls_utils.get_langsmith_trace_url("t2", project_name=REVIEW_TRACING_PROJECT)
+    agent_url = await ls_api.get_langsmith_trace_url("t1")
+    review_url = await ls_api.get_langsmith_trace_url("t2", project_name=REVIEW_TRACING_PROJECT)
 
     assert agent_url == "https://smith.example/o/tenant-1/projects/p/agent-pid/t/t1"
     assert review_url == "https://smith.example/o/tenant-1/projects/p/review-pid/t/t2"
@@ -40,18 +40,18 @@ async def test_trace_url_resolves_project_id_by_name(monkeypatch: pytest.MonkeyP
 async def test_trace_url_falls_back_to_env_project_id(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_env(monkeypatch)
     monkeypatch.setenv("LANGSMITH_TRACING_PROJECT_ID_PROD", "env-pid")
-    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}))
+    monkeypatch.setattr(ls_api, "_resolve_project_id_by_name", _resolver({}))
 
-    url = await ls_utils.get_langsmith_trace_url("t3")
+    url = await ls_api.get_langsmith_trace_url("t3")
 
     assert url == "https://smith.example/o/tenant-1/projects/p/env-pid/t/t3"
 
 
 async def test_trace_url_none_when_unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_env(monkeypatch)
-    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}))
+    monkeypatch.setattr(ls_api, "_resolve_project_id_by_name", _resolver({}))
 
-    assert await ls_utils.get_langsmith_trace_url("t4") is None
+    assert await ls_api.get_langsmith_trace_url("t4") is None
 
 
 async def test_resolve_project_id_caches_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -71,10 +71,10 @@ async def test_resolve_project_id_caches_success(monkeypatch: pytest.MonkeyPatch
             calls.append(project_name)
             return _FakeProject()
 
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: _FakeClient())
+    monkeypatch.setattr(ls_api, "_build_prod_langsmith_client", lambda: _FakeClient())
 
-    first = await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT)
-    second = await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT)
+    first = await ls_api._resolve_project_id_by_name(AGENT_TRACING_PROJECT)
+    second = await ls_api._resolve_project_id_by_name(AGENT_TRACING_PROJECT)
 
     assert first == "pid-123"
     assert second == "pid-123"
@@ -97,10 +97,10 @@ async def test_resolve_project_id_retries_transient_failure(
             calls.append(project_name)
             raise RuntimeError("403 Forbidden")
 
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", lambda: _FakeClient())
+    monkeypatch.setattr(ls_api, "_build_prod_langsmith_client", lambda: _FakeClient())
 
-    assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
-    assert await ls_utils._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
+    assert await ls_api._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
+    assert await ls_api._resolve_project_id_by_name(AGENT_TRACING_PROJECT) is None
     assert calls == [AGENT_TRACING_PROJECT, AGENT_TRACING_PROJECT]
 
 
@@ -110,6 +110,6 @@ async def test_trace_url_none_when_tenant_unset(monkeypatch: pytest.MonkeyPatch)
     def _boom() -> None:
         raise AssertionError("must not build a client when the tenant id is unset")
 
-    monkeypatch.setattr(ls_utils, "_build_prod_langsmith_client", _boom)
+    monkeypatch.setattr(ls_api, "_build_prod_langsmith_client", _boom)
 
-    assert await ls_utils.get_langsmith_trace_url("t5") is None
+    assert await ls_api.get_langsmith_trace_url("t5") is None

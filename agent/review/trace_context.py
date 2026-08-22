@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import posixpath
 import uuid
 from dataclasses import dataclass
@@ -11,10 +10,11 @@ from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from ..dashboard.team_credentials import get_langsmith_credentials
-from ..dashboard.team_settings import get_team_review_tracing_project
 from ..integrations.langsmith_tools import _client
-from ..utils.langsmith import get_langsmith_trace_url
+from ..langsmith.api import get_langsmith_trace_url
+from ..settings.team_credentials import get_langsmith_credentials
+from ..settings.team_settings import get_team_review_tracing_project
+from ..utils.timestamps import parse_expiry
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +225,7 @@ async def _resolve_session(
         thread_id=thread_id,
         evidence=evidence,
         confidence=confidence,
-        trace_url=await _trace_url(thread_id, project),
+        trace_url=await get_langsmith_trace_url(thread_id, project_name=project),
         runs=runs,
     )
     return session, "Resolved.", project
@@ -432,25 +432,13 @@ def _string_or_none(value: Any) -> str | None:
 
 
 def _run_time(run: Any, field_name: str) -> datetime | None:
-    return _parse_time(_get(run, field_name))
+    return parse_expiry(_get(run, field_name))
 
 
 def _get(obj: Any, name: str) -> Any:
     if isinstance(obj, dict):
         return obj.get(name)
     return getattr(obj, name, None)
-
-
-def _parse_time(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _format_time(value: datetime | None) -> str | None:
@@ -464,17 +452,6 @@ def _is_specific_branch(branch: str) -> bool:
     if normalized.startswith(("refs/heads/", "origin/")):
         normalized = normalized.rsplit("/", 1)[-1]
     return normalized not in _GENERIC_BRANCHES
-
-
-async def _trace_url(thread_id: str, project: str) -> str | None:
-    resolved = await get_langsmith_trace_url(thread_id, project_name=project)
-    if resolved:
-        return resolved
-    tenant_id = os.environ.get("LANGSMITH_TENANT_ID_PROD")
-    if tenant_id and _looks_uuid(project):
-        host_url = os.environ.get("LANGSMITH_URL_PROD", "https://smith.langchain.com")
-        return f"{host_url}/o/{tenant_id}/projects/p/{project}/t/{thread_id}"
-    return None
 
 
 def _looks_uuid(value: str) -> bool:

@@ -1,5 +1,5 @@
 import { SubagentCard } from "./SubagentCard"
-import type { ToolExecutionChunk } from "@/features/agents/lib/types"
+import type { ToolExecutionChunk } from "@/lib/agentTypes"
 
 /** Maximum number of subagent cards rendered per row. */
 const MAX_SUBAGENT_COLUMNS = 4

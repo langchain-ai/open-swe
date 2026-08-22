@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router"
 import { ArrowSquareOutIcon, CircleNotchIcon } from "@phosphor-icons/react"
 import { IoLogoSlack } from "react-icons/io5"
 
-import type { AgentStatus, AgentThread } from "@/features/agents/lib/types"
+import type { AgentStatus, AgentThread } from "@/lib/agentTypes"
 import { Button } from "@/components/ui/button"
 import { useThreadsPage } from "@/features/agents/lib/queries"
 import { cn, formatRelativeTime } from "@/lib/utils"

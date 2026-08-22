@@ -1,44 +1,27 @@
-from typing import Any
+from collections.abc import Callable
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from cryptography.fernet import Fernet
+from support.langgraph_fakes import FakeLangGraphClient, FakeStore
 
-from agent.dashboard import notion_oauth as no
-
-
-class _FakeStore:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-
-    async def get_item(self, namespace: list[str], key: str):
-        value = self.items.get((tuple(namespace), key))
-        return {"value": value} if value is not None else None
-
-    async def put_item(self, namespace: list[str], key: str, value: dict[str, Any]) -> None:
-        self.items[(tuple(namespace), key)] = value
-
-    async def delete_item(self, namespace: list[str], key: str) -> None:
-        self.items.pop((tuple(namespace), key), None)
-
-
-class _FakeClient:
-    def __init__(self, store: _FakeStore) -> None:
-        self.store = store
+from agent.settings import notion_oauth as no
+from agent.utils.pkce import s256_challenge
 
 
 @pytest.fixture()
-def fake_store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
-    store = _FakeStore()
-    monkeypatch.setattr(no, "_client", lambda: _FakeClient(store))
+def fake_store(
+    patched_langgraph_client: Callable[..., FakeLangGraphClient],
+    monkeypatch: pytest.MonkeyPatch,
+) -> FakeStore:
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    return store
+    return patched_langgraph_client().store
 
 
 def test_code_challenge_matches_rfc7636_vector() -> None:
     verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-    assert no.code_challenge_for_verifier(verifier) == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+    assert s256_challenge(verifier) == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
 
 
 def test_build_notion_authorize_url() -> None:
@@ -73,7 +56,7 @@ def test_build_notion_authorize_url_rejects_other_hosts() -> None:
 
 @pytest.mark.asyncio
 async def test_store_and_pop_notion_oauth_flow(
-    fake_store: _FakeStore,
+    fake_store: FakeStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(

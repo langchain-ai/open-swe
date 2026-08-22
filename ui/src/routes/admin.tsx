@@ -6,11 +6,11 @@ import { useEffect, useMemo, useState } from "react"
 import type {
   DatadogConnectBody,
   LangSmithConnectBody,
-  ModelOption,
-  PRTraceResolutionResult,
   TeamSettings,
-  UserMapping,
-} from "@/lib/api"
+} from "@/features/admin/lib/api"
+import type { PRTraceResolutionResult } from "@/features/reviews/lib/api"
+import type { UserMapping } from "@/features/settings/lib/api"
+import type { ModelOption } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -23,6 +23,8 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { adminApi } from "@/features/admin/lib/api"
+import { reviewsApi } from "@/features/reviews/lib/api"
 import { api } from "@/lib/api"
 import {
   useAdminCancelAgentThread,
@@ -209,7 +211,7 @@ function TriggerReviewSection() {
   const trigger = useMutation({
     mutationFn: () => {
       if (!parsed) throw new Error("invalid PR URL")
-      return api.reReview(parsed.owner, parsed.repo, parsed.number)
+      return reviewsApi.reReview(parsed.owner, parsed.repo, parsed.number)
     },
     onSuccess: (result) => {
       setError(null)
@@ -228,7 +230,7 @@ function TriggerReviewSection() {
   const resolveTrace = useMutation({
     mutationFn: () => {
       if (!parsed) throw new Error("invalid PR URL")
-      return api.resolveTrace(parsed.owner, parsed.repo, parsed.number)
+      return reviewsApi.resolveTrace(parsed.owner, parsed.repo, parsed.number)
     },
     onSuccess: (result) => {
       setError(null)
@@ -337,7 +339,7 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
 
   const mappings = useQuery({
     queryKey: ["adminUserMappings", page],
-    queryFn: () => api.adminListUserMappings(page, PAGE_SIZE),
+    queryFn: () => adminApi.listUserMappings(page, PAGE_SIZE),
     enabled,
   })
 
@@ -351,7 +353,7 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
   }, [mappings.isFetching, page, pageCount])
 
   const remove = useMutation({
-    mutationFn: (gh: string) => api.adminDeleteUserMapping(gh),
+    mutationFn: (gh: string) => adminApi.deleteUserMapping(gh),
     onSuccess: () => void mappings.refetch(),
     onError: (e: Error) => setError(e.message),
   })
@@ -433,7 +435,7 @@ function ObservabilityCredentialsSection() {
   const qc = useQueryClient()
   const creds = useQuery({
     queryKey: ["teamCredentials"],
-    queryFn: api.getTeamCredentials,
+    queryFn: adminApi.getTeamCredentials,
   })
   const [error, setError] = useState<string | null>(null)
 
@@ -445,14 +447,14 @@ function ObservabilityCredentialsSection() {
 
   const onError = (e: Error) => setError(e.message)
   const onSuccess = (
-    saved: Awaited<ReturnType<typeof api.getTeamCredentials>>
+    saved: Awaited<ReturnType<typeof adminApi.getTeamCredentials>>
   ) => {
     qc.setQueryData(["teamCredentials"], saved)
     setError(null)
   }
 
   const connectDd = useMutation({
-    mutationFn: (body: DatadogConnectBody) => api.connectDatadog(body),
+    mutationFn: (body: DatadogConnectBody) => adminApi.connectDatadog(body),
     onSuccess: (saved) => {
       onSuccess(saved)
       setDdApiKey("")
@@ -461,12 +463,12 @@ function ObservabilityCredentialsSection() {
     onError,
   })
   const disconnectDd = useMutation({
-    mutationFn: () => api.disconnectDatadog(),
+    mutationFn: () => adminApi.disconnectDatadog(),
     onSuccess,
     onError,
   })
   const connectLs = useMutation({
-    mutationFn: (body: LangSmithConnectBody) => api.connectLangSmith(body),
+    mutationFn: (body: LangSmithConnectBody) => adminApi.connectLangSmith(body),
     onSuccess: (saved) => {
       onSuccess(saved)
       setLsApiKey("")
@@ -474,7 +476,7 @@ function ObservabilityCredentialsSection() {
     onError,
   })
   const disconnectLs = useMutation({
-    mutationFn: () => api.disconnectLangSmith(),
+    mutationFn: () => adminApi.disconnectLangSmith(),
     onSuccess,
     onError,
   })
@@ -613,7 +615,7 @@ function PRTraceResolutionSection() {
   const qc = useQueryClient()
   const settings = useQuery({
     queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryFn: adminApi.getTeamSettings,
   })
   const [projectDraft, setProjectDraft] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -623,7 +625,7 @@ function PRTraceResolutionSection() {
   }, [settings.data?.review_tracing_project])
 
   const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    mutationFn: (body: TeamSettings) => adminApi.saveTeamSettings(body),
     onSuccess: (saved) => {
       qc.setQueryData(["teamSettings"], saved)
       setError(null)
@@ -696,12 +698,12 @@ function LLMGatewaySection() {
   const qc = useQueryClient()
   const settings = useQuery({
     queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryFn: adminApi.getTeamSettings,
   })
   const [error, setError] = useState<string | null>(null)
 
   const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    mutationFn: (body: TeamSettings) => adminApi.saveTeamSettings(body),
     onSuccess: (saved) => {
       qc.setQueryData(["teamSettings"], saved)
       setError(null)
@@ -761,7 +763,7 @@ function DictationSection() {
   const qc = useQueryClient()
   const settings = useQuery({
     queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryFn: adminApi.getTeamSettings,
   })
   const [error, setError] = useState<string | null>(null)
   const [customModel, setCustomModel] = useState<string | null>(null)
@@ -770,7 +772,7 @@ function DictationSection() {
     (model) => model.value === selectedModel
   )
   const save = useMutation({
-    mutationFn: api.saveTranscriptionModel,
+    mutationFn: adminApi.saveTranscriptionModel,
     onSuccess: (saved) => {
       qc.setQueryData(["teamSettings"], saved)
       setError(null)
@@ -845,11 +847,11 @@ function FableSection() {
   const qc = useQueryClient()
   const settings = useQuery({
     queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryFn: adminApi.getTeamSettings,
   })
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    mutationFn: (body: TeamSettings) => adminApi.saveTeamSettings(body),
     onSuccess: (saved) => {
       qc.setQueryData(["teamSettings"], saved)
       qc.invalidateQueries({ queryKey: ["options"] }) // refresh pickers so Fable appears/disappears
@@ -887,7 +889,7 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
   const qc = useQueryClient()
   const settings = useQuery({
     queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryFn: adminApi.getTeamSettings,
   })
   const [error, setError] = useState<string | null>(null)
   const [defaultRepoDraft, setDefaultRepoDraft] = useState("")
@@ -897,7 +899,7 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
   }, [settings.data?.default_repo])
 
   const save = useMutation({
-    mutationFn: (body: TeamSettings) => api.saveTeamSettings(body),
+    mutationFn: (body: TeamSettings) => adminApi.saveTeamSettings(body),
     onSuccess: (saved) => {
       qc.setQueryData(["teamSettings"], saved)
       setError(null)

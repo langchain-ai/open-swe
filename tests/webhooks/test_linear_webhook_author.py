@@ -59,29 +59,25 @@ def _run_process(
         return "zhen" if email == "zhen@example.com" else None
 
     with (
-        patch.object(linear_webhook.common, "react_to_linear_comment", new_callable=AsyncMock),
+        patch.object(linear_webhook, "react_to_linear_comment", new_callable=AsyncMock),
+        patch.object(linear_webhook, "linear_issue_thread_id", return_value="thread-1"),
         patch.object(
-            linear_webhook.common, "generate_thread_id_from_issue", return_value="thread-1"
-        ),
-        patch.object(
-            linear_webhook.common,
-            "fetch_linear_issue_details",
+            linear_webhook,
+            "fetch_issue_details",
             new_callable=AsyncMock,
             return_value=full_issue
             or _full_issue(user_email=issue_data.get("comment_author", {}).get("email")),
         ),
         patch.object(
-            linear_webhook.common, "resolve_login_from_email_async", side_effect=fake_resolve_login
+            linear_webhook, "resolve_login_from_email_async", side_effect=fake_resolve_login
         ),
-        patch.object(linear_webhook.common, "dispatch_agent_run", side_effect=fake_dispatch),
+        patch.object(linear_webhook, "dispatch_agent_run", side_effect=fake_dispatch),
+        patch.object(linear_webhook, "upsert_agent_thread_owner_metadata", side_effect=fake_upsert),
+        patch.object(linear_webhook, "post_linear_trace_comment", new_callable=AsyncMock),
+        patch.object(linear_webhook, "resolve_agent_model_id", new_callable=AsyncMock),
+        patch.object(linear_webhook, "model_supports_images", return_value=True),
         patch.object(
-            linear_webhook.common, "upsert_agent_thread_owner_metadata", side_effect=fake_upsert
-        ),
-        patch.object(linear_webhook.common, "post_linear_trace_comment", new_callable=AsyncMock),
-        patch.object(linear_webhook.common, "resolve_agent_model_id", new_callable=AsyncMock),
-        patch.object(linear_webhook.common, "model_supports_images", return_value=True),
-        patch.object(
-            linear_webhook.common,
+            linear_webhook,
             "fetch_image_block",
             new_callable=AsyncMock,
             side_effect=lambda url, _client: {"type": "image_url", "image_url": {"url": url}},

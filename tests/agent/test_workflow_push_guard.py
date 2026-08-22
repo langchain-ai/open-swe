@@ -7,7 +7,7 @@ from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 
 from agent.middleware import workflow_push_guard as guard
-from agent.utils.sandbox_state import SandboxBackendProxy
+from agent.sandboxes.proxy import SandboxBackendProxy
 
 
 class _Response:
@@ -79,13 +79,6 @@ class _Request:
         return next_request
 
 
-@pytest.fixture(autouse=True)
-def _clear_backend_cache() -> Any:
-    guard.SANDBOX_BACKENDS.clear()
-    yield
-    guard.SANDBOX_BACKENDS.clear()
-
-
 def test_parse_git_push_supports_git_c_and_cd() -> None:
     assert guard._parse_git_push("git -C /repo push origin feature") == guard.ParsedGitPush(
         repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
@@ -127,7 +120,7 @@ async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
 
 
 def test_workflow_approval_response_serializes_review_fields() -> None:
-    from agent.dashboard.workflow_approval import workflow_push_approval_response
+    from agent.settings.workflow_approval import workflow_push_approval_response
 
     response = workflow_push_approval_response(
         {
@@ -186,6 +179,7 @@ async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
 async def test_unapproved_workflow_push_blocks_and_posts_slack(
     monkeypatch: pytest.MonkeyPatch, tool_name: str
 ) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend()), thread_id="thread-1"
     )

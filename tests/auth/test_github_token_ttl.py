@@ -15,9 +15,12 @@ from typing import Any
 import httpx
 import pytest
 
-from agent.utils import github_comments, github_token
-from agent.webhooks import common as webhook_common
+from agent.github import comments as github_comments
+from agent.github import token as github_token
+from agent.utils.timestamps import is_expired
 from agent.webhooks import github as github_webhooks
+
+_SKEW = github_token._GITHUB_TOKEN_EXPIRY_SKEW_SECONDS
 
 
 @pytest.fixture(autouse=True)
@@ -31,21 +34,29 @@ def _clear_token_cache() -> None:
 def test_is_expired_handles_iso_zulu_strings() -> None:
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
     future = (datetime.now(UTC) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
-    assert github_token._is_expired(past) is True
-    assert github_token._is_expired(future) is False
+    assert is_expired(past, skew_seconds=_SKEW) is True
+    assert is_expired(future, skew_seconds=_SKEW) is False
 
 
 def test_is_expired_handles_unix_timestamps() -> None:
     past = (datetime.now(UTC) - timedelta(hours=1)).timestamp()
     future = (datetime.now(UTC) + timedelta(hours=1)).timestamp()
-    assert github_token._is_expired(past) is True
-    assert github_token._is_expired(future) is False
+    assert is_expired(past, skew_seconds=_SKEW) is True
+    assert is_expired(future, skew_seconds=_SKEW) is False
 
 
 def test_is_expired_treats_unparseable_as_not_expired() -> None:
-    assert github_token._is_expired(None) is False
-    assert github_token._is_expired("") is False
-    assert github_token._is_expired("not-a-date") is False
+    assert is_expired(None, skew_seconds=_SKEW) is False
+    assert is_expired("", skew_seconds=_SKEW) is False
+    assert is_expired("not-a-date", skew_seconds=_SKEW) is False
+
+
+def test_is_expired_applies_the_skew_window() -> None:
+    """A token expiring inside the skew window is already unusable."""
+    inside = (datetime.now(UTC) + timedelta(seconds=_SKEW - 10)).isoformat()
+    outside = (datetime.now(UTC) + timedelta(seconds=_SKEW + 30)).isoformat()
+    assert is_expired(inside, skew_seconds=_SKEW) is True
+    assert is_expired(outside, skew_seconds=_SKEW) is False
 
 
 def test_get_github_token_returns_none_for_expired_cache() -> None:
@@ -288,14 +299,14 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     async def fake_trigger_or_queue_run(*args: Any, **kwargs: Any) -> None:
         return None
 
-    monkeypatch.setattr(webhook_common, "extract_pr_context", fake_extract_pr_context)
-    monkeypatch.setattr(webhook_common, "_get_or_resolve_thread_github_token", fake_get_or_resolve)
-    monkeypatch.setattr(webhook_common, "invalidate_cached_github_token", fake_invalidate)
-    monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react)
-    monkeypatch.setattr(webhook_common, "fetch_pr_comments_since_last_tag", fake_fetch_pr_comments)
-    monkeypatch.setattr(webhook_common, "_trigger_or_queue_run", fake_trigger_or_queue_run)
+    monkeypatch.setattr(github_webhooks, "extract_pr_context", fake_extract_pr_context)
+    monkeypatch.setattr(github_webhooks, "_get_or_resolve_thread_github_token", fake_get_or_resolve)
+    monkeypatch.setattr(github_webhooks, "invalidate_cached_github_token", fake_invalidate)
+    monkeypatch.setattr(github_webhooks, "react_to_github_comment", fake_react)
+    monkeypatch.setattr(github_webhooks, "fetch_pr_comments_since_last_tag", fake_fetch_pr_comments)
+    monkeypatch.setattr(github_webhooks, "_trigger_or_queue_run", fake_trigger_or_queue_run)
     monkeypatch.setattr(
-        webhook_common,
+        github_webhooks,
         "email_for_login",
         lambda login: asyncio.sleep(0, result="octo@example.com" if login == "octo" else None),
     )
@@ -343,7 +354,7 @@ async def test_publish_review_invalidates_cached_token_on_401(
     )
     monkeypatch.setattr(publish_review_module, "get_github_token", lambda: "revoked-token")
     monkeypatch.setattr(publish_review_module, "invalidate_cached_github_token", fake_invalidate)
-    monkeypatch.setattr(publish_review_module, "_publish_review_async", fake_publish)
+    monkeypatch.setattr(publish_review_module, "publish_review_flow", fake_publish)
     monkeypatch.setattr(publish_review_module, "get_thread_id_from_runtime", lambda: "thread-xyz")
 
     result = await publish_review_module.publish_review()

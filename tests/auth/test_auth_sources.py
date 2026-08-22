@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from agent.utils import auth
+from agent.github import auth
 
 
 def test_leave_failure_comment_posts_generic_token_free_slack_notice(
@@ -63,7 +63,7 @@ def _stub_dashboard_store(
     expires_at: str | None = "2099-01-01T00:00:00Z",
     cached: tuple[str | None, str | None] = (None, None),
 ) -> None:
-    from agent.dashboard import profiles
+    from agent.settings import github_tokens
 
     async def fake_get_from_thread(thread_id: str):
         return cached
@@ -71,12 +71,12 @@ def _stub_dashboard_store(
     async def fake_get_valid(login: str):
         return token
 
-    async def fake_get_value(namespace, key):
+    async def fake_get_record(login: str):
         return {"token_expires_at": expires_at}
 
     monkeypatch.setattr(auth, "get_github_token_from_thread", fake_get_from_thread)
-    monkeypatch.setattr(profiles, "get_valid_access_token", fake_get_valid)
-    monkeypatch.setattr(profiles, "_get_value", fake_get_value)
+    monkeypatch.setattr(github_tokens, "get_valid_access_token", fake_get_valid)
+    monkeypatch.setattr(github_tokens, "get_oauth_token_record", fake_get_record)
 
 
 def test_resolve_github_token_slack_uses_dashboard_store(

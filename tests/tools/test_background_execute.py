@@ -109,7 +109,7 @@ async def test_monitor_enqueues_one_claimed_completion() -> None:
     client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-1"}}
 
     with (
-        patch("agent.background_tasks._client", return_value=client),
+        patch("agent.background_tasks.in_process_langgraph_client", return_value=client),
         patch("agent.background_tasks.create_sandbox", AsyncMock(return_value=backend)),
         patch(
             "agent.background_tasks._list_tasks",

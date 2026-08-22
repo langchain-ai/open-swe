@@ -1,9 +1,15 @@
-"""Dashboard backend: OAuth, profiles, and admin endpoints for the open-swe UI.
+"""The web layer for the open-swe UI: OAuth, HTTP endpoints, thread APIs.
 
-``router`` is loaded lazily (PEP 562): importing any dashboard submodule
-(e.g. ``agent.dashboard.options`` from middleware) executes this __init__,
-and it must NOT drag in routes.py + FastAPI + every API/job module. Only the
-webapp, which actually mounts the router, pays that cost.
+What the dashboard *stores* lives in :mod:`agent.settings`; this package only
+speaks HTTP. A few in-graph modules still call the thread/plan/approval APIs
+directly (``agent.tools.threads``, ``agent.webhooks.slack``), so ``router`` is
+still loaded lazily (PEP 562): importing one of those submodules executes this
+__init__, and it must NOT drag in the ``routes`` package + FastAPI + every API
+module. Only the webapp, which actually mounts the router, pays that cost.
+
+Those remaining callers are enumerated in
+``tests/agent/test_import_hygiene.py::test_the_graphs_and_their_callers_do_not_grow_new_dashboard_edges``.
+When that list empties, this lazy attribute can go with it.
 """
 
 from typing import TYPE_CHECKING, Any

@@ -1,9 +1,10 @@
 from typing import Any
 
 from langgraph.config import get_config
-from langgraph_sdk import get_client
 
-from ..utils.slack import LANGGRAPH_URL, add_slack_reaction, get_active_slack_thread
+from ..config import langgraph_client
+from ..slack.api import add_slack_reaction
+from ..slack.threads import get_active_slack_thread
 
 
 async def slack_add_reaction(
@@ -13,7 +14,7 @@ async def slack_add_reaction(
     """Commit to acting on a Slack message by adding a context-appropriate reaction.
 
     Use this only when work will continue and always follow up with the outcome; never react to
-    a message you will handle with `no_op`. Prefer `saluting_face` for taking ownership,
+    a message you are going to stay silent on. Prefer `saluting_face` for taking ownership,
     `thinking_face` for investigation, and `tada` for genuine wins. Never use
     `white_check_mark`, because teams use it to indicate that a pull request is approved.
     To target a specific message, pass its `message_ts` identifier shown in Slack context.
@@ -25,7 +26,7 @@ async def slack_add_reaction(
     slack_thread = configurable.get("slack_thread", {})
     thread_id = configurable.get("thread_id")
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
+        langgraph_client(),
         thread_id if isinstance(thread_id, str) else None,
         slack_thread if isinstance(slack_thread, dict) else None,
     )

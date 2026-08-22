@@ -15,8 +15,8 @@ from typing import Any
 import httpx
 from langchain_core.tools import BaseTool, StructuredTool
 
-from ..dashboard.user_credentials import CURRENTS_API_BASE, get_currents_api_key
-from ..utils.thread_participants import resolve_participant
+from ..settings.user_credentials import CURRENTS_API_BASE, get_currents_api_key
+from ..threads.participants import resolve_participant
 
 logger = logging.getLogger(__name__)
 

@@ -1,11 +1,12 @@
+import contextlib
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
 
-from agent.dashboard import routes
-from agent.dashboard.repo_snapshots import (
+from agent.dashboard.routes import repo_snapshots as repo_snapshot_routes
+from agent.settings.repo_snapshots import (
     RepoSnapshotConfigError,
     RepoSnapshotUpdate,
     create_repo_snapshot,
@@ -34,62 +35,59 @@ def test_generate_dockerfile_template_requires_base_image() -> None:
 @pytest.mark.asyncio
 async def test_template_endpoint_returns_configuration_error() -> None:
     with patch.object(
-        routes,
+        repo_snapshot_routes,
         "generate_dockerfile_template",
         side_effect=RepoSnapshotConfigError("base image missing"),
     ):
         with pytest.raises(HTTPException) as exc:
-            await routes.api_repo_snapshot_template("acme/repo", _admin={"sub": "octo"})
+            await repo_snapshot_routes.api_repo_snapshot_template(
+                "acme/repo", _admin={"sub": "octo"}
+            )
     assert exc.value.status_code == 500
     assert "base image missing" in exc.value.detail
 
 
 @pytest.mark.asyncio
 async def test_create_endpoint_returns_configuration_error() -> None:
-    body = routes.RepoSnapshotCreate(full_name="acme/repo")
+    body = repo_snapshot_routes.RepoSnapshotCreate(full_name="acme/repo")
     with patch.object(
-        routes,
+        repo_snapshot_routes,
         "create_repo_snapshot",
         new_callable=AsyncMock,
         side_effect=RepoSnapshotConfigError("base image missing"),
     ):
         with pytest.raises(HTTPException) as exc:
-            await routes.api_create_repo_snapshot(body, _admin={"sub": "octo"})
+            await repo_snapshot_routes.api_create_repo_snapshot(body, _admin={"sub": "octo"})
     assert exc.value.status_code == 500
     assert "base image missing" in exc.value.detail
 
 
+def _fake_store_client(stored: dict[str, object] | None) -> MagicMock:
+    client = MagicMock()
+    client.store.get_item = AsyncMock(return_value={"value": stored} if stored else None)
+    client.store.put_item = AsyncMock()
+    return client
+
+
 @pytest.mark.asyncio
 async def test_resolve_returns_snapshot_id_when_ready() -> None:
-    with patch(
-        "agent.dashboard.repo_snapshots._get_value",
-        new_callable=AsyncMock,
-        return_value={"status": "ready", "snapshot_id": "snap-123"},
-    ):
-        result = await resolve_repo_snapshot_id("acme", "repo")
-    assert result == "snap-123"
+    client = _fake_store_client({"status": "ready", "snapshot_id": "snap-123"})
+    with patch("agent.store.store_client", return_value=client):
+        assert await resolve_repo_snapshot_id("acme", "repo") == "snap-123"
 
 
 @pytest.mark.asyncio
 async def test_resolve_returns_none_when_not_ready() -> None:
-    with patch(
-        "agent.dashboard.repo_snapshots._get_value",
-        new_callable=AsyncMock,
-        return_value={"status": "building", "snapshot_id": "snap-123"},
-    ):
-        result = await resolve_repo_snapshot_id("acme", "repo")
-    assert result is None
+    client = _fake_store_client({"status": "building", "snapshot_id": "snap-123"})
+    with patch("agent.store.store_client", return_value=client):
+        assert await resolve_repo_snapshot_id("acme", "repo") is None
 
 
 @pytest.mark.asyncio
 async def test_resolve_returns_none_without_record() -> None:
-    with patch(
-        "agent.dashboard.repo_snapshots._get_value",
-        new_callable=AsyncMock,
-        return_value=None,
-    ):
-        result = await resolve_repo_snapshot_id("acme", "repo")
-    assert result is None
+    client = _fake_store_client(None)
+    with patch("agent.store.store_client", return_value=client):
+        assert await resolve_repo_snapshot_id("acme", "repo") is None
 
 
 @pytest.mark.asyncio
@@ -100,71 +98,47 @@ async def test_resolve_returns_none_without_owner_or_name() -> None:
 
 @pytest.mark.asyncio
 async def test_resolve_swallows_errors() -> None:
-    with patch(
-        "agent.dashboard.repo_snapshots._get_value",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("store down"),
-    ):
+    client = MagicMock()
+    client.store.get_item = AsyncMock(side_effect=RuntimeError("store down"))
+    with patch("agent.store.store_client", return_value=client):
         assert await resolve_repo_snapshot_id("acme", "repo") is None
 
 
 @pytest.mark.asyncio
 async def test_create_repo_snapshot_puts_new_record() -> None:
-    mock_put = AsyncMock()
+    client = _fake_store_client(None)
     with (
         patch.dict("os.environ", {"REPO_SNAPSHOT_BASE_IMAGE": "ghcr.io/acme/base:1"}),
-        patch(
-            "agent.dashboard.repo_snapshots.get_repo_snapshot",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-        patch("agent.dashboard.repo_snapshots._client") as mock_client,
+        patch("agent.store.store_client", return_value=client),
     ):
-        mock_client.return_value.store.put_item = mock_put
         record = await create_repo_snapshot("acme/repo", "octo")
     assert record["full_name"] == "acme/repo"
     assert record["status"] == "none"
     assert "FROM" in record["dockerfile"]
-    mock_put.assert_awaited_once()
+    client.store.put_item.assert_awaited_once_with(["repo_snapshots"], "acme/repo", record)
 
 
 @pytest.mark.asyncio
 async def test_update_repo_snapshot_persists_fields() -> None:
-    mock_put = AsyncMock()
-    with (
-        patch(
-            "agent.dashboard.repo_snapshots.get_repo_snapshot",
-            new_callable=AsyncMock,
-            return_value={"full_name": "acme/repo", "status": "none"},
-        ),
-        patch("agent.dashboard.repo_snapshots._client") as mock_client,
-    ):
-        mock_client.return_value.store.put_item = mock_put
+    client = _fake_store_client({"full_name": "acme/repo", "status": "none"})
+    with patch("agent.store.store_client", return_value=client):
         record = await update_repo_snapshot(
             "acme/repo",
             RepoSnapshotUpdate(dockerfile="FROM python:3.12-slim\n", vcpus=4),
         )
     assert record["dockerfile"] == "FROM python:3.12-slim\n"
     assert record["vcpus"] == 4
-    mock_put.assert_awaited_once()
+    client.store.put_item.assert_awaited_once_with(["repo_snapshots"], "acme/repo", record)
 
 
 @pytest.mark.asyncio
 async def test_mark_building_sets_status() -> None:
-    mock_put = AsyncMock()
-    with (
-        patch(
-            "agent.dashboard.repo_snapshots.get_repo_snapshot",
-            new_callable=AsyncMock,
-            return_value={"full_name": "acme/repo", "status": "ready"},
-        ),
-        patch("agent.dashboard.repo_snapshots._client") as mock_client,
-    ):
-        mock_client.return_value.store.put_item = mock_put
+    client = _fake_store_client({"full_name": "acme/repo", "status": "ready"})
+    with patch("agent.store.store_client", return_value=client):
         record = await mark_repo_snapshot_building("acme/repo")
     assert record["status"] == "building"
     assert record["build_started_at"]
-    mock_put.assert_awaited_once()
+    client.store.put_item.assert_awaited_once_with(["repo_snapshots"], "acme/repo", record)
 
 
 def test_building_record_without_started_at_is_stale() -> None:
@@ -190,9 +164,11 @@ async def test_build_endpoint_blocks_non_stale_build() -> None:
         "dockerfile": "FROM x",
         "build_started_at": datetime.now(UTC).isoformat(),
     }
-    with patch.object(routes, "get_repo_snapshot", new_callable=AsyncMock, return_value=record):
+    with patch.object(
+        repo_snapshot_routes, "get_repo_snapshot", new_callable=AsyncMock, return_value=record
+    ):
         with pytest.raises(HTTPException) as exc:
-            await routes.api_build_repo_snapshot(
+            await repo_snapshot_routes.api_build_repo_snapshot(
                 "acme/repo", BackgroundTasks(), _admin={"sub": "octo"}
             )
     assert exc.value.status_code == 409
@@ -209,15 +185,17 @@ async def test_build_endpoint_allows_stale_build_retry() -> None:
     }
     building = {**stale, "build_started_at": datetime.now(UTC).isoformat()}
     with (
-        patch.object(routes, "get_repo_snapshot", new_callable=AsyncMock, return_value=stale),
         patch.object(
-            routes,
+            repo_snapshot_routes, "get_repo_snapshot", new_callable=AsyncMock, return_value=stale
+        ),
+        patch.object(
+            repo_snapshot_routes,
             "mark_repo_snapshot_building",
             new_callable=AsyncMock,
             return_value=building,
         ) as mark_building,
     ):
-        result = await routes.api_build_repo_snapshot(
+        result = await repo_snapshot_routes.api_build_repo_snapshot(
             "acme/repo", BackgroundTasks(), _admin={"sub": "octo"}
         )
     assert result is building
@@ -233,15 +211,15 @@ async def test_run_snapshot_build_success_marks_ready() -> None:
 
     with (
         patch(
-            "agent.dashboard.repo_snapshots.get_repo_snapshot",
+            "agent.settings.repo_snapshots.get_repo_snapshot",
             new_callable=AsyncMock,
             return_value={"full_name": "acme/repo", "dockerfile": "FROM x"},
         ),
         patch(
-            "agent.dashboard.repo_snapshots._build_snapshot_sync",
+            "agent.settings.repo_snapshots._build_snapshot_sync",
             return_value=("snap-new", "build log"),
         ),
-        patch("agent.dashboard.repo_snapshots._set_status", side_effect=fake_set_status),
+        patch("agent.settings.repo_snapshots._set_status", side_effect=fake_set_status),
     ):
         await run_snapshot_build("acme/repo")
 
@@ -260,50 +238,68 @@ async def test_run_snapshot_build_failure_marks_failed() -> None:
 
     with (
         patch(
-            "agent.dashboard.repo_snapshots.get_repo_snapshot",
+            "agent.settings.repo_snapshots.get_repo_snapshot",
             new_callable=AsyncMock,
             return_value={"full_name": "acme/repo", "dockerfile": "FROM x"},
         ),
         patch(
-            "agent.dashboard.repo_snapshots._build_snapshot_sync",
+            "agent.settings.repo_snapshots._build_snapshot_sync",
             side_effect=RuntimeError("boom"),
         ),
-        patch("agent.dashboard.repo_snapshots._set_status", side_effect=fake_set_status),
+        patch("agent.settings.repo_snapshots._set_status", side_effect=fake_set_status),
     ):
         await run_snapshot_build("acme/repo")
 
     assert statuses[-1] == "failed"
 
 
-async def test_create_langsmith_sandbox_uses_repo_snapshot_override() -> None:
+def _langsmith_create_patches(create_with_retry: AsyncMock):
+    """Everything ``LangSmithProvider.create`` touches outside the create call itself."""
     from agent.integrations import langsmith
 
-    fake_backend = MagicMock()
-    fake_backend.id = "box-1"
-    provider = MagicMock()
-    provider.get_or_create = AsyncMock(return_value=fake_backend)
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    return (
+        patch.dict(
+            "os.environ",
+            {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-default", "LANGSMITH_API_KEY": "ls-key"},
+            clear=True,
+        ),
+        patch.object(langsmith, "AsyncSandboxClient", return_value=client),
+        patch.object(langsmith, "_install_create_extra_fields"),
+        patch.object(langsmith, "_create_sandbox_with_retry", create_with_retry),
+        patch.object(langsmith, "TimeoutLangSmithSandbox", MagicMock(return_value="backend")),
+    )
 
-    with (
-        patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-default"}, clear=True),
-        patch.object(langsmith, "LangSmithProvider", return_value=provider),
-    ):
-        await langsmith.create_langsmith_sandbox(snapshot_id="repo-snap")
 
-    assert provider.get_or_create.call_args.kwargs["snapshot_id"] == "repo-snap"
+async def test_langsmith_create_uses_repo_snapshot_override() -> None:
+    from agent.integrations.langsmith import LangSmithProvider
+
+    create_with_retry = AsyncMock(return_value=MagicMock())
+    with contextlib.ExitStack() as stack:
+        for context in _langsmith_create_patches(create_with_retry):
+            stack.enter_context(context)
+        await LangSmithProvider().create(snapshot_id="repo-snap")
+
+    assert create_with_retry.await_args_list[0].kwargs["snapshot_id"] == "repo-snap"
 
 
-async def test_create_langsmith_sandbox_falls_back_to_default() -> None:
-    from agent.integrations import langsmith
+async def test_langsmith_create_falls_back_to_the_default_snapshot() -> None:
+    from agent.integrations.langsmith import LangSmithProvider
 
-    fake_backend = MagicMock()
-    fake_backend.id = "box-2"
-    provider = MagicMock()
-    provider.get_or_create = AsyncMock(return_value=fake_backend)
+    create_with_retry = AsyncMock(return_value=MagicMock())
+    with contextlib.ExitStack() as stack:
+        for context in _langsmith_create_patches(create_with_retry):
+            stack.enter_context(context)
+        await LangSmithProvider().create()
 
-    with (
-        patch.dict("os.environ", {"DEFAULT_SANDBOX_SNAPSHOT_ID": "env-default"}, clear=True),
-        patch.object(langsmith, "LangSmithProvider", return_value=provider),
-    ):
-        await langsmith.create_langsmith_sandbox()
+    assert create_with_retry.await_args_list[0].kwargs["snapshot_id"] == "env-default"
 
-    assert provider.get_or_create.call_args.kwargs["snapshot_id"] == "env-default"
+
+async def test_langsmith_create_without_any_snapshot_is_refused() -> None:
+    from agent.integrations.langsmith import LangSmithProvider
+
+    with patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-key"}, clear=True):
+        with pytest.raises(ValueError, match="No base snapshot configured"):
+            await LangSmithProvider().create()

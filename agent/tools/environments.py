@@ -1,14 +1,14 @@
 """Admin-thread tools for managing environments.
 
-Wired into the agent only for admin threads (see ``agent/server.py``). Every tool
-re-checks the triggering user against ``CONFIGURED_ADMINS`` so a thread whose
-metadata says "admin" cannot act on behalf of someone who is not one.
+Wired into the agent only for admin threads (see ``agent/graphs/agent.py``).
+Every tool re-checks the triggering user against ``CONFIGURED_ADMINS`` so a
+thread whose metadata says "admin" cannot act on behalf of someone who is not one.
 """
 
 import logging
 from typing import Any
 
-from ..dashboard import environments as store
+from ..settings import environments as store
 from .admin_gate import configurable as _configurable
 from .admin_gate import require_admin
 
@@ -187,7 +187,8 @@ async def capture_environment_snapshot(name: str) -> dict[str, Any]:
         return {"ok": False, "error": "no thread_id in the current run config"}
 
     try:
-        from ..utils.sandbox_state import get_sandbox_backend, unwrap_sandbox_backend
+        from ..sandboxes.proxy import unwrap_sandbox_backend
+        from ..sandboxes.registry import get_sandbox_backend
 
         # ready() reconnects through the provider, which starts a stopped/idle box
         # before handing it back — so the capture always targets a running sandbox.

@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from langgraph.config import get_config
 
-from ..utils.sandbox_state import SANDBOX_BACKENDS
+from ..sandboxes.registry import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
 

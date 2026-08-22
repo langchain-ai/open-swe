@@ -6,7 +6,7 @@ This file provides guidance to Coding Agents when working with code in this repo
 
 Open SWE is an open-source coding-agent framework built on **LangGraph** + **Deep Agents** (`deepagents.create_deep_agent`). It runs as a LangGraph app: each thread spawns its own isolated cloud sandbox, and the agent is invoked from Slack, Linear, or GitHub (PR comments, plus auto-review on opened / ready-for-review).
 
-A separate **reviewer** graph runs read-only code reviews on PRs, and a **review-style analyzer** graph learns per-repo review style from historical PRs.
+Four smaller graphs sit alongside it: a read-only PR **reviewer**, a review-style **analyzer** that learns per-repo review style, a sandbox-less **chat** agent for the review UI, and a **scheduler** that fans cron ticks into runs.
 
 ## Commands
 
@@ -14,91 +14,101 @@ Dependencies are managed with **uv**. Tests use pytest (`asyncio_mode = "auto"`)
 
 ```bash
 make install            # uv sync --extra dev (pytest, ruff, …)
-make dev                # uv run langgraph dev — serves all three graphs + the FastAPI app from langgraph.json
+make dev                # uv run langgraph dev — serves every graph + the FastAPI app from langgraph.json
 make run                # uvicorn agent.webapp:app --reload --port 8000 (FastAPI only, no LangGraph runtime)
 make test               # uv run pytest -vvv tests/
 make test TEST_FILE=tests/github/test_open_pull_request.py    # single test file
 uv run pytest -vvv tests/github/test_open_pull_request.py::test_name  # single test
 make lint               # ruff check + ruff format --diff
 make format             # ruff format + ruff check --fix
-make typecheck          # basedpyright agent tests
+make typecheck          # basedpyright agent evals scripts tests
 ```
 
-`langgraph.json` declares three graph entrypoints and the FastAPI app, all served together by `langgraph dev`:
+`langgraph.json` declares five graph entrypoints and the FastAPI app, all served together by `langgraph dev`. Every factory lives in the module its entrypoint names, under `agent/graphs/`.
 
 | Graph | Entrypoint | Purpose |
 |---|---|---|
-| `agent` | `agent.server:get_agent` | Main coding agent (Slack/Linear/GitHub-triggered). |
-| `reviewer` | `agent.reviewer:get_reviewer_agent` | Read-only PR reviewer. Findings model + `publish_review`. |
-| `analyzer` | `agent.analyzer:get_analyzer` | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
-| `scheduler` | `agent.scheduler:get_scheduler` | Fans deterministic cron tasks into scheduled agent runs, reconciliation, and `/baby-sit` PR checks. |
+| `agent` | `agent.graphs.agent:traced_agent` | Main coding agent (Slack/Linear/GitHub/dashboard-triggered). |
+| `reviewer` | `agent.graphs.reviewer:traced_reviewer_agent` | Read-only PR reviewer. Findings model + `publish_review`. |
+| `analyzer` | `agent.graphs.analyzer:traced_analyzer` | Learns per-repo reviewer style from historical PRs and this reviewer's own finding outcomes. |
+| `chat` | `agent.graphs.chat:traced_chat_agent` | Sandbox-less "chat with this PR" agent for the review UI. |
+| `scheduler` | `agent.graphs.scheduler:get_scheduler` | Fans cron ticks into scheduled agent runs, `/baby-sit` checks, stale-run reconciliation, and cost refreshes. |
 
-The FastAPI app is `agent.webapp:app`.
-
-Opt-in PR CI monitoring lives in `agent/baby_sit.py` and the bundled `/baby-sit` skill. Signed GitHub CI webhooks trigger immediate evaluation of active watches, while per-watch scheduler crons provide a deterministic 10-minute fallback without invoking a model for unchanged state. New failures resume the originating agent thread for confidence-gated diagnosis; flake reruns are capped and deduplicated, and terminal outcomes are posted directly to the originating Slack thread.
+The FastAPI app is `agent.webapp:app`, a re-export of `agent/api/app.py:app`.
 
 ## Architecture
 
 ### Entrypoints
 
-- **`agent/server.py` → `get_agent(config)`** — main graph factory. Called per-thread. Resolves the GitHub token, gets-or-creates the sandbox for the thread, resolves the team/profile/per-thread model + effort, then constructs a fresh `create_deep_agent(...)` with the curated tool list and middleware stack. The agent itself is stateless — all per-thread state lives in the sandbox + thread metadata.
-- **`agent/reviewer.py` → `get_reviewer_agent(config)`** — reviewer graph factory. Shares `ensure_sandbox_for_thread` with the main agent but wires a reviewer-only toolset (`add_finding`, `update_finding`, `list_findings`, `publish_review`, `web_search`, `fetch_url`, `http_request`) and a different system prompt that pins the single-evolving-findings model and the diff-anchored bar for filing a finding. Read-only: no commit/push/PR-opening tools.
-- **`agent/analyzer.py` → `get_analyzer(config)`** — small graph that emits a per-repo style prompt via the `save_review_style_prompt` tool, consumed by the reviewer as a "repository-specific review style" appendix. It runs in one of two modes (`analyzer_mode` in `configurable`): **bootstrap** (cold-start: crawl historical PR reviews) and **continual** (nightly: refine using this reviewer's own finding outcomes via `read_finding_outcomes`). Each mode's procedure lives in a deepagents **skill** (`agent/skills/bootstrap-repo-analysis/`, `agent/skills/continual-learning/`) served as virtual files via a `CompositeBackend` `/skills/` route + `StateBackend` (seeded into the run's `files` channel by the launcher — never written to the sandbox). Launchers and the per-repo nightly cron live in `agent/dashboard/review_style_jobs.py` and `agent/dashboard/analyzer_cron.py`; the cron is registered when bootstrap completes.
-- **`agent/webapp.py`** — custom FastAPI routes mounted alongside the LangGraph server. Webhooks land here (GitHub, Linear, Slack). Each webhook resolves a deterministic `thread_id` (so follow-up messages route to the same agent run) and triggers/streams a run via the `langgraph_sdk` client. Also auto-reviews PRs on `opened` / `ready_for_review` events when the repo+author opt in.
-- **`agent/dashboard/`** — `router` mounted under the FastAPI app at startup (`app.include_router(dashboard_router)`). Owns GitHub OAuth, per-user profiles, admin endpoints, team defaults, enabled-repo lists, review-style management, and the Agents chat thread API used by the UI in `ui/`.
+- **`agent/graphs/agent.py` → `get_agent(config)`** — main graph factory. Called per-thread. Resolves a `RunEnvironment` (`agent/graphs/run_environment.py` — cloud or desktop; every "where does this run execute" decision is a method on it rather than a branch in the factory), starts the thread's sandbox in the background, resolves the team/profile/per-thread model + effort, loads the optional integration tools, then constructs a fresh `create_deep_agent(...)` with the tool list and the stack `agent/middleware/stack.py:core_stack` builds. It passes `system_prompt=""`: the prompt is rendered per run by `PrepareAgentRunMiddleware` (same file), which is also where the sandbox is awaited, the GitHub token resolved, and the turn checkpoint recorded. The agent itself is stateless — all per-thread state lives in the sandbox + thread metadata.
+- **`agent/graphs/reviewer.py` → `get_reviewer_agent(config)`** — reviewer graph factory. Shares `ensure_sandbox_for_thread` with the main agent but wires a reviewer-only toolset (`fetch_review_diff`, `add_finding`, `update_finding`, `list_findings`, `publish_review`, `resolve_finding_thread`, `reply_to_finding_thread`, `web_search`, `fetch_url`, `http_request`) and a different system prompt that pins the single-evolving-findings model and the diff-anchored bar for filing a finding. Read-only: no commit/push/PR-opening tools. The findings, publishing and dispatch logic it drives lives in `agent/review/`.
+- **`agent/graphs/analyzer.py` → `get_analyzer(config)`** — small graph that emits a per-repo style prompt via the `save_review_style_prompt` tool, consumed by the reviewer as a "repository-specific review style" appendix. It runs in one of two modes (`analyzer_mode` in `configurable`): **bootstrap** (cold-start: crawl historical PR reviews) and **continual** (nightly: refine using this reviewer's own finding outcomes via `read_finding_outcomes`). Each mode's procedure lives in a deepagents **skill** (`agent/skills/bootstrap-repo-analysis/`, `agent/skills/continual-learning/`) served as virtual files on the `/skills/` route (`agent/utils/analyzer_skills.py`) and seeded into the run's `files` channel by the launcher — never written to the sandbox. Launchers and the per-repo nightly cron live in `agent/review/style_jobs.py` and `agent/review/analyzer_cron.py`; the cron is registered when bootstrap completes.
+- **`agent/graphs/_assembly.py`** — what every factory in that package assembles from: config isolation, the placeholder graph, the deferred-model fallback, the gateway lookup, and the model-gate-then-provider-kwargs step.
+- **`agent/api/app.py` → `create_app()`** — the FastAPI app served alongside the LangGraph runtime. It only composes routers: dashboard, plan, workflow-approval, health, and the three webhook routers. `agent/webapp.py` re-exports `app` for `langgraph.json` and `make run`.
+- **`agent/webhooks/`** — one route module per surface (`github_routes.py`, `slack_routes.py`, `linear_routes.py`) holding just the request plumbing, with every signature check in `signatures.py`; the event handling lives beside it in `github.py` / `slack.py` / `linear.py` (plus `slack_events.py`, `slack_stop.py`, `slack_feedback.py`), and the one repo-resolution step Slack and Linear share in `repo_config.py`. Thread-id derivation is in `agent/threads/ids.py`. GitHub `opened` / `ready_for_review` events also start a reviewer run when the repo+author opt in.
+- **`agent/dispatch.py` → `dispatch_agent_run()`** — the single way a run is started, from webhooks and the dashboard alike. Runs are durable: `multitask_strategy="interrupt"` so a follow-up preempts the active run and resumes with full history, `durability="sync"` so a crash resumes from the last checkpoint, `stream_resumable=True` so a client that attaches later can replay, and a completion webhook so a run that dies still ends with a signal. That webhook lands on `POST /webhooks/run-complete` (`agent/api/health.py`) and is handled by `agent/completion.py`; `agent/reconcile.py` sweeps runs that ended without any signal at all.
+- **`agent/dashboard/`** — `router` mounted under the FastAPI app at startup (`app.include_router(dashboard_router)`). The web layer only: GitHub OAuth (`oauth.py`, `oauth_flow.py`), request authorization (`authz.py`), one router per resource in `routes/*.py` composed by `routes/__init__.py`, the thread API split across `threads/{serialize,listing,runs,proxy,sandbox}.py`, and the standalone `plan_api`, `review_api`, `review_chat_api`, `workflow_approval_api`, `repo_access`, `cloud_terminal`, `admin`, `run_diffs`, `pr_diff`, `schedules` modules. What it reads and writes lives in `agent/settings/`.
+- **`agent/settings/`** — everything Open SWE persists about *how* it should behave: models and effort (`options.py`, `team_settings.py`, `profiles.py`, `agent_overrides.py`), per-repo and per-user instructions, third-party credentials and OAuth tokens (`token_vault.py`, `github_tokens.py`), enabled repos, environments and snapshots, plans, skills, review styles, usage. Store-backed via `agent/store.py` and free of FastAPI, so graphs, tools and webhooks read it directly and the dashboard is just another caller.
+
+### Layers
+
+Foundation, below everything else: `agent/config.py` (the only reader of the process environment) and `agent/store.py` (the only LangGraph Store client); the per-integration packages `agent/github/` (`api.py` is the one GitHub HTTP layer, plus `app`, `auth`, `token`, `proxy`, `comments`, `checks`, `ci`, `pr`, `refs`, `org_membership`, `authorship`, `agents_md`, `run_references`), `agent/slack/` (`api`, `format`, `threads`), `agent/linear/` (`api`, `team_repo_map`) and `agent/langsmith/` (`api`, `tracing`, `run_usage`); what a run executes on — `agent/models/` (`factory`, `gateway`, `deferred`), `agent/sandboxes/` (`providers`, `registry`, `proxy`, `paths`, `repo_prep`, `turn_checkpoint`, `recovery_patch`, `read_only_backend`) and `agent/runtime/` (the sandbox lifecycle plus shared execution); `agent/threads/` (`ids`, `ops`, `participants`, `settings`, `run_metadata`); `agent/settings/`; and `agent/utils/`, which holds generic helpers only (`ttl_cache`, `timing`, `json_types`, `http`, `url_safety`, `event_loop`, `user_messages`, `multimodal`, `timestamps`, `pkce`, `source_channel`, `dashboard_links`, …).
+
+Above it: `agent/review/` (the reviewer domain — `findings`, `publish_flow`, `thread_resolution`, `dispatch`, `diff`, `publish`, `reconcile`, `groups`, the `eval_*` and `style_*` modules, `outcomes`, `trace_context`), `agent/scheduling/` (`crons`, `tasks`, `agent_schedules`), and the app layers `agent/api/`, `agent/webhooks/`, `agent/graphs/` with `agent/middleware/`, `agent/tools/`, `agent/dashboard/`.
 
 ### Sandbox lifecycle (the tricky part)
 
-`SANDBOX_BACKENDS` (in `agent/utils/sandbox_state.py`) is an in-process dict keyed by `thread_id`. Thread metadata persists `sandbox_id` across processes. `ensure_sandbox_for_thread` handles three cases:
+`SANDBOX_BACKENDS` (in `agent/sandboxes/registry.py`) is an in-process dict keyed by `thread_id`. Thread metadata persists `sandbox_id` across processes. `ensure_sandbox_for_thread` (`agent/runtime/sandbox.py`) handles three cases:
 
-1. Sandbox cached in memory → ping it (`echo ok`), then refresh the GitHub proxy.
+1. Sandbox cached in memory → refresh the GitHub proxy.
 2. Metadata has an id but no cache → reconnect, then refresh the GitHub proxy.
 3. No sandbox at all → create one and persist the id.
 
-Only case 3 creates. An existing sandbox that can't be reached raises `SandboxUnreachableError` (`agent/utils/sandbox_state.py`) rather than being replaced: a replacement is empty, so swapping one in would destroy uncommitted work while looking like a recovery. The main agent catches that in `PrepareAgentRunMiddleware` and notifies the user via `post_sandbox_unreachable_notification`.
+Nothing pings the box first: the proxy refresh has to reach it anyway, and raises the same unreachable error when it cannot.
 
-`allow_replacement=True` opts out of that protection and is passed **only** by the reviewer (`agent/reviewer.py:_ensure_reviewer_sandbox_for_thread`), whose sandbox holds nothing but a checkout `prepare_review_repo` re-derives every run. Reviewer threads are one-per-PR and outlive their sandbox, so without this a deleted sandbox bricks reviews on that PR permanently.
+Only case 3 creates. An existing sandbox that can't be reached raises `SandboxUnreachableError` (`agent/sandboxes/providers.py`) rather than being replaced: a replacement is empty, so swapping one in would destroy uncommitted work while looking like a recovery. The main agent catches that in `PrepareAgentRunMiddleware` and notifies the user via `post_sandbox_unreachable_notification`. A *deleted* sandbox (`SandboxGoneError`, raised by the provider's `connect` when — and only when — the platform reports not-found) is always replaced: it holds nothing, and the stale id in thread metadata is what every later run reconnects to, so refusing would brick the thread.
 
-For `SANDBOX_TYPE=langsmith` (default), every sandbox creation/refresh also calls `_configure_github_proxy` with a fresh GitHub App installation token (`get_github_app_installation_token`). The proxy injects Basic auth for `github.com` git traffic and Bearer auth for `api.github.com`, so sandbox commands run plain `gh ...` with no real token in the sandbox. Other providers (modal, daytona, runloop, e2b, local) skip the proxy step. Provider is selected via `SANDBOX_TYPE`; factory is `agent/utils/sandbox.py:create_sandbox` (`SANDBOX_FACTORIES` maps each provider name to a creator in `agent/integrations/`).
+`allow_replacement=True` opts out of that protection and is passed **only** by the reviewer (`agent/graphs/reviewer.py:_ensure_reviewer_sandbox_for_thread`), whose sandbox holds nothing but a checkout `prepare_review_repo` re-derives every run. Reviewer threads are one-per-PR and outlive their sandbox, so without this a deleted sandbox bricks reviews on that PR permanently.
+
+A platform is one `SandboxProvider` subclass (the protocol is in `agent/sandboxes/providers.py`) per `agent/integrations/<provider>.py`, selected by `SANDBOX_TYPE` through the `_PROVIDERS` registry in the same module and reached via `create_sandbox` / `current_sandbox_provider`. The provider answers what the rest of the codebase would otherwise branch on the provider's *name* to answer: `connect` / `create`, `uses_github_proxy`, `supports_snapshots`, `work_dir`, `validate_startup_config`. It has no `delete` on purpose — the sandbox holds the agent's only working tree, so reclamation is left to the platform's idle TTL and delete-after-stop.
+
+Where a provider `uses_github_proxy` (LangSmith does; modal, daytona, runloop, e2b and local do not), every creation and refresh calls `configure_proxy_for_sandbox` (`agent/github/proxy.py`) with a fresh GitHub App installation token. The proxy injects Basic auth for `github.com` git traffic and Bearer auth for `api.github.com`, so sandbox commands run plain `gh ...` with no real token in the sandbox.
 
 Every run re-applies `git config --global user.name/email` for the bot identity, because reused/reconnected sandboxes can lose `--global` config and Vercel preview deploys reject commits whose author email doesn't resolve to a GitHub account.
 
-`PrepareAgentRunMiddleware` also snapshots the worktree into `refs/open-swe/turns/<user-message-id>` at run start (`utils/turn_checkpoint.py`), recording the refs in thread metadata. `GET /threads/{id}/run-diff` reads them back so the dashboard's changed-files views come from git rather than from replaying edit tool calls — which is the only way to catch edits made through `execute` and to drop files that were later reverted.
+`PrepareAgentRunMiddleware` also snapshots the worktree into `refs/open-swe/turns/<user-message-id>` at run start (`agent/sandboxes/turn_checkpoint.py`), recording the refs in thread metadata. `GET /threads/{id}/run-diff` reads them back so the dashboard's changed-files views come from git rather than from replaying edit tool calls — which is the only way to catch edits made through `execute` and to drop files that were later reverted.
 
 ### Middleware stack (order matters)
 
-Configured in `agent/server.py:get_agent`, runs around every model call (in this order):
+Every graph's stack comes from the builders in `agent/middleware/stack.py`, and the lists they return are outermost-first: the first entry wraps every later one, the last sits closest to the provider call.
 
-1. `SanitizeToolInputsMiddleware` — strips/normalizes tool inputs before they reach tools.
-2. `ModelCallLimitMiddleware` (from `langchain.agents.middleware`) — caps model calls at `MODEL_CALL_RECURSION_LIMIT` (~half of `DEFAULT_RECURSION_LIMIT`); `exit_behavior="end"`.
-3. `ToolErrorMiddleware` — catches tool exceptions and surfaces them as tool messages.
-4. `SubdirAgentsReadMiddleware` — appends applicable ancestor `AGENTS.md` instructions to `read_file` results once per run, so scoped rules are visible before edits.
-5. `check_message_queue_before_model` — pulls Linear comments / Slack messages that arrived mid-run from the thread queue and injects them as user messages before the next LLM call. This is what makes "message the agent while it's working" work.
-6. `ensure_no_empty_msg` — after-model hook; when the model emits a message with no tool call (and hasn't already messaged the user or confirmed completion) it re-injects a synthetic `no_op` / `confirming_completion` tool call so the run continues instead of ending prematurely.
-7. `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
-8. `SandboxCircuitBreakerMiddleware` — trips the agent out of repeated sandbox failures instead of looping.
-9. `ModelFallbackMiddleware` (optional) — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
-10. `SanitizeThinkingBlocksMiddleware` — strips malformed empty Anthropic thinking blocks immediately before provider calls.
-11. `ModelCallTimeoutMiddleware` — innermost. Caps a single model call at `OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS` (default 15 min) so a stalled provider connection raises instead of parking the run; the timeout escalates outward to `ModelFallbackMiddleware`. Complements the per-request `timeout` `agent/utils/model.py` sets on every provider. Subagents compile into their own graphs, so each `SubAgent` spec carries its own instance (`_subagent_model_timeout_middleware`) — parent middleware never wraps a delegated `task`'s model calls, and a wedged one escalates via `ToolRetryMiddleware`'s `task` retry.
+- `core_stack(*prepare, call_limit=…, extras=…)` returns the whole list — `prepare` first, so everything after it runs against a prepared run; then the fixed trio `SanitizeToolInputsMiddleware` → `ModelCallLimitMiddleware` → `ToolErrorMiddleware`; then this graph's `extras`; then `model_guard_middleware()`.
+- `model_guard_middleware()` is the provider-shaped guards, innermost: the Fireworks / OpenAI-Responses / Anthropic-thinking sanitizers, closed by `ModelCallTimeoutMiddleware` so the deadline covers the provider call itself and a timeout escalates outward to the fallback model. Subagents compile into their own graphs, so a parent's stack never wraps their model calls — every subagent spec installs this block itself.
 
-The system prompt instructs the agent to call a tool every turn, and `ensure_no_empty_msg` re-injects a tool call when it doesn't — together these keep runs from stopping partway through a task.
+The load-bearing entries:
 
-Other middleware exists in `agent/middleware/` (`ExcludeToolsMiddleware`) but isn't wired into the default agent. The reviewer uses a leaner stack: `SanitizeToolInputsMiddleware`, `ModelCallLimitMiddleware`, `ToolErrorMiddleware`, `SanitizeThinkingBlocksMiddleware`.
+- `PrepareAgentRunMiddleware` (`agent/graphs/agent.py`) — the main agent's `prepare`: awaits the sandbox, renders the system prompt, records the turn checkpoint.
+- `ModelCallLimitMiddleware` (from `langchain.agents.middleware`) — caps model calls at `MODEL_CALL_RECURSION_LIMIT` (~half of `DEFAULT_RECURSION_LIMIT`, both in `agent/runtime/constants.py`); `exit_behavior="end"`.
+- `ToolErrorMiddleware` — catches tool exceptions and surfaces them as tool messages; it is also what notices an unreachable sandbox.
+- `PullRequestCreationGuardMiddleware` / `WorkflowPushGuardMiddleware` — wrap tool calls to block `gh pr create`-style fallbacks and unapproved `.github/workflows` pushes.
+- `SubdirAgentsReadMiddleware` — appends the applicable ancestor `AGENTS.md` instructions to `read_file` results, so scoped rules are visible before an edit.
+- `check_message_queue_before_model` — pulls Linear comments / Slack messages that arrived mid-run from the thread queue and injects them as user messages before the next LLM call. This is what makes "message the agent while it's working" work.
+- `notify_step_limit_reached` — after-agent hook that posts a Slack reply when the agent hits the step limit, so the user gets a clear signal instead of silence.
+- `ModelFallbackMiddleware` — added only when `LLM_FALLBACK_MODEL_ID` or the per-model default fallback differs from the primary model.
 
-There is intentionally no after-agent safety net that opens a PR for the agent. The agent itself is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel — all via `gh` and `slack_thread_reply` / `linear_comment`.
+Two opt-outs are deliberate and documented in place: `RepairOrphanedToolCallsMiddleware` is reviewer-only, because `create_deep_agent` adds its own `PatchToolCallsMiddleware` and made the main agent's copy redundant (`tests/agent/test_agent_assembly_context.py` pins that it is not re-added); and `ExcludeToolsMiddleware` is added only where a run must not see part of the tool list — stop-summary runs and the chat graph.
+
+The system prompt instructs the agent to call a tool every turn; nothing re-injects one. A model turn with no tool call ends the run, which is also how a run that should stay silent (an untagged Slack message not addressed to the agent) is meant to end.
+
+There is intentionally no after-agent safety net that opens a PR for the agent. The agent itself is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel — via `gh` and `git` in the sandbox, the `open_pull_request` tool for creating the PR (`PullRequestCreationGuardMiddleware` blocks `gh pr create` so the PR is attributed to the triggering user), and `slack_thread_reply` / `linear_comment`.
 
 ### Tools
 
-All tools live in `agent/tools/` and are flat-imported via `agent/tools/__init__.py`. The set is intentionally small and curated — see README "Tools — Curated, Not Accumulated".
+All tools live in `agent/tools/` and are re-exported lazily through `_TOOL_MODULES` in `agent/tools/__init__.py`. The set is curated, not accumulated — see README "Tools — Curated, Not Accumulated".
 
-Agent/UI parity is a product principle: anything users can do in the dashboard UI should generally also be possible through an agent tool, subject to the same authorization and safety boundaries. When adding a UI capability, add or extend the corresponding curated tool unless there is a documented reason not to.
+The authoritative list is `static_tools` in `agent/graphs/agent.py:get_agent`; read it there rather than trusting a copy. It is roughly three dozen tools in these categories: web/HTTP research, Slack, Linear, GitHub/PR (`open_pull_request`, `request_pr_review`, `manage_baby_sit`), planning (`enter_plan_mode`, `save_plan`, `approve_plan`), thread discovery and scheduling, sandbox/environment (background execution, sandbox recreation, file downloads), and user settings/skills. Parts of it are conditional: Slack tools are dropped without trusted Slack context, environment tools are added only for admin threads, and stop-summary and desktop runs get a cut-down list (`RunEnvironment.static_tools`). Integration tools (Corridor, observability, Currents, Notion) are loaded per run and exposed through `DynamicToolMiddleware`; browser automation is a subagent, not a tool.
 
-Wired into `get_agent`:
-`http_request`, `fetch_url`, `web_search`, `approve_plan`, `enter_plan_mode`, `save_plan`, `save_user_instructions`, `list_threads`, `get_thread`, `manage_thread`, `manage_baby_sit`, `linear_comment`, `linear_create_issue`, `linear_delete_issue`, `linear_get_issue`, `linear_get_issue_comments`, `linear_list_teams`, `linear_search_issues`, `linear_update_issue`, `open_pull_request`, `request_pr_review`, `report_platform_issue`, `schedule_thread_wakeup`, `slack_add_reaction`, `slack_read_thread_messages`, `slack_start_new_thread`, `slack_thread_reply`.
-
-`list_threads`, `get_thread`, and `manage_thread` are parent-agent-only; `manage_thread` is unavailable during plan mode while the two read-only tools remain available.
-
-Reviewer-only tools (in `agent/reviewer.py`): `add_finding`, `update_finding`, `list_findings`, `publish_review`. The review-style analyzer uses `save_review_style` (exported as `save_review_style_prompt`).
+The reviewer, analyzer, and chat graphs each wire their own short list in their own factory: the reviewer's is findings-centric (`add_finding`, `update_finding`, `publish_review`, …), the analyzer's is `save_review_style_prompt` plus `read_finding_outcomes`, and the chat graph's is `read_repo_file`, `search_repo_code`, `list_review_findings`, `web_search`, `fetch_url`.
 
 Built-in deepagents tools (`read_file`, `write_file`, `edit_file`, `delete`, `ls`, `glob`, `grep`, `execute`, `task` for subagent spawning, …) are added by `create_deep_agent` itself; don't duplicate them.
 
@@ -106,34 +116,42 @@ Built-in deepagents tools (`read_file`, `write_file`, `edit_file`, `delete`, `ls
 
 Model + reasoning effort are resolved per run in this precedence (highest wins):
 
-1. Per-thread config (`agent_model_id` + `agent_effort` in `configurable`) — set by webhooks/UI.
-2. Per-user dashboard profile override (`agent/dashboard/agent_overrides.py:load_profile`), keyed by resolved GitHub login.
-3. Team default model (`agent/dashboard/team_settings.py:get_team_default_model("agent")`).
+1. Per-run config (`agent_model_id` + `agent_effort` in `configurable`) — set by webhooks/UI. This is the only thing allowed to move a thread off its stored settings, and the new choice is stored in turn.
+2. Settings already stored on the thread (`agent/threads/settings.py`), frozen on the thread's first run.
+3. Per-user dashboard profile override (`agent/settings/agent_overrides.py:load_profile`), keyed by resolved GitHub login.
+4. Team default (`agent/settings/team_settings.py:get_team_default_model_pair("agent")`, which resolves the main and subagent models together).
 
-Custom instructions come from two stores: per-repo instructions (`agent/dashboard/agent_instructions.py`) are layered into the system prompt, while per-user instructions (`agent/dashboard/user_instructions.py`) are attached to each triggering user's message so multi-party threads do not inherit another participant's preferences. Repo instructions and `AGENTS.md` win over user-level ones on conflict.
-
-Supported model IDs and per-model effort/reasoning rules live in `agent/dashboard/options.py`. Profile preferences also control draft PRs and CI automation. Model construction goes through `agent/utils/model.py` (`make_model`, `provider_model_kwargs`, `fallback_model_id_for`).
+Supported model IDs and per-model effort/reasoning rules live in `agent/settings/options.py`. A `(model_id, effort)` pair a surface did not choose itself — a browser configurable, a schedule record, a chat request — goes through `normalize_model_choice`, which keeps the pair only when both halves are supported together, migrates a retired id onto its replacement, and otherwise returns `(None, None)` so the caller resolves its own default rather than half-honouring the request. Profile preferences also control draft PRs and CI automation. Model construction goes through `agent/models/factory.py` (`make_model`, `provider_model_kwargs`, `fallback_model_id_for`), with gateway routing in `agent/models/gateway.py`.
 
 ### Auth
 
-- **GitHub**: dual-mode. User OAuth tokens are encrypted at rest in the dashboard OAuth store and cached only in process during a run (`utils/auth.py:resolve_github_token`, `utils/github_token.py`). When no user token is available, falls back to a GitHub App installation token (`utils/github_app.py`). The installation token is also what configures the LangSmith sandbox's GitHub proxy.
-- **Webhooks**: GitHub signatures verified in `utils/github_comments.py:verify_github_signature`; Slack/Linear handled in their respective utils.
-- **Dashboard / UI**: GitHub OAuth login lives in `agent/dashboard/oauth.py` and `routes.py` (`/auth/login`, `/auth/callback`, `/auth/logout`, `/me`).
+- **GitHub**: dual-mode. User OAuth tokens are encrypted at rest in the shared vault (`agent/settings/token_vault.py`, with GitHub's records in `agent/settings/github_tokens.py`) and cached only in process during a run (`github/auth.py:resolve_github_token`, `github/token.py`). When no user token is available, falls back to a GitHub App installation token (`github/app.py`). The installation token is also what configures the LangSmith sandbox's GitHub proxy.
+- **Webhooks**: GitHub, Slack and Linear signatures are all verified in `webhooks/signatures.py`.
+- **Dashboard / UI**: GitHub OAuth login lives in `agent/dashboard/oauth.py` + `oauth_flow.py` and `agent/dashboard/routes/auth.py` (`/auth/login`, `/auth/callback`, `/auth/logout`, `/me`); per-request authorization is `agent/dashboard/authz.py`.
 
 ### Thread-id derivation
 
-Webhooks compute deterministic thread ids so the same Linear issue / Slack thread / PR routes back to the same running agent. See `utils/github_comments.py:get_thread_id_from_branch` and the equivalents in `utils/linear.py` / `utils/slack.py`. Reviewer threads have their own deterministic ids and are tagged with `REVIEWER_THREAD_KIND` metadata so the FastAPI side can find them.
+Webhooks compute deterministic thread ids so the same Linear issue / Slack thread / PR routes back to the same running agent. Every derivation lives in `agent/threads/ids.py` (`reviewer_thread_id`, `pr_comment_thread_id`, `review_style_thread_id`, `slack_thread_id`, `baby_sit_lock_thread_id`, `linear_issue_thread_id`, `github_issue_thread_id`, `thread_id_from_branch`), with `tests/threads/test_thread_ids.py` pinning each formula — these ids are persisted, so changing one orphans live threads. `resolve_slack_thread_id` (`agent/slack/threads.py`) resolves through a stored mapping rather than hashing. Reviewer threads are tagged with `REVIEWER_THREAD_KIND` metadata so the FastAPI side can find them.
 
 ## Conventions
 
-- Tests are unit-only by default (`tests/`). Integration tests would go under `tests/integration_tests/` (currently empty — `make integration_tests` no-ops if missing).
-- New sandbox providers: add a module under `agent/integrations/` and wire it into `SANDBOX_FACTORIES` in `agent/utils/sandbox.py`. See `docs/CUSTOMIZATION.md`.
-- New tools: add to `agent/tools/`, export from `agent/tools/__init__.py`, add to the `tools=[...]` list in `server.py:get_agent` (or `reviewer.py` for reviewer-only tools).
-- New middleware: add to `agent/middleware/`, export from `agent/middleware/__init__.py`, add to the `middleware=[...]` list in `server.py:get_agent` — order is significant (see the stack above).
-- Async-only: this app runs exclusively async, so do not add sync/async dual implementations. Implement only the async variant (`awrap_*`, `_arun`, etc.); the sync counterpart is never invoked. Omit the sync method entirely when the interface allows it (e.g. `AgentMiddleware` already raises `NotImplementedError` on the sync path). Only when a type/ABC requires the sync method to exist (e.g. `BaseTool._run` is abstract), define it with a bare `raise NotImplementedError` rather than a real sync implementation.
-- New dashboard endpoints: add to `agent/dashboard/routes.py`. The router is auto-mounted on the FastAPI app.
-- New graphs: register the entrypoint in `langgraph.json` under `graphs`.
+- Tests are unit-only by default (`tests/`); shared doubles live in `tests/support/`. Integration tests would go under `tests/integration_tests/` (currently empty — `make integration_tests` no-ops if missing).
+- **Layering.** The foundation packages listed above must not import `agent.api`, `agent.dashboard`, `agent.graphs`, `agent.tools` or `agent.webhooks`: importing a setting would otherwise drag FastAPI and the agent stack in with it, and the layers could no longer be loaded or reasoned about separately. They must not import `agent.review` either (`agent.settings` is the one grandfathered exception, pending a split of three readers). `agent.review` is a domain the app layers drive, so it must not import them back. A lazy import inside a function is the same edge. `tests/agent/test_import_hygiene.py` enforces all of it, together with the import closures that keep `agent.webapp` and `agent.runtime` cheap to load.
+- **LangGraph clients.** Two factories, both in `agent/config.py`. Out-of-process callers — `agent/webhooks/`, `agent/dispatch.py`, dashboard jobs that launch runs — use `langgraph_client()` (HTTP, against `langgraph_url()`). Code running inside a graph — graph factories, middleware, tools, `agent/store.py`, `agent/runtime/`, scheduler task handlers — uses `in_process_langgraph_client()`, the SDK's in-process loopback: no network hop, no API-key auth. Never convert one into the other; a test patches whichever factory the module under test actually calls.
+- **The store.** Every LangGraph Store read and write goes through `agent/store.py`, whose rule is: a missing item reads as `None`, any other failure raises. A call site that must survive an outage wraps its own call and says why in a comment, so the swallow stays visible where the choice is made.
+- **The environment.** Only `agent/config.py` reads env vars for application config, and every setting is a function rather than a module constant so a rotated or late-hydrated value is picked up. The exceptions are genuinely process-level (`HOME`/`PATH` handed to a shell, `GIT_CONFIG_GLOBAL` probes, the background queue's own loop switch).
+- **GitHub HTTP.** Every GitHub call goes through `agent/github/api.py`, so timeouts, retries, rate-limit handling and media types are shared. `tests/github/test_api_centralization.py` pins the exact set of modules allowed to spell `api.github.com` or the `vnd.github+json` media type.
+- New tools: add to `agent/tools/`, register the name in `_TOOL_MODULES`/`__all__`/the `TYPE_CHECKING` block of `agent/tools/__init__.py`, then add it to `static_tools` in `agent/graphs/agent.py:get_agent` (or the graph's own `tools=[…]` list for reviewer/analyzer/chat-only tools).
+- New middleware: add to `agent/middleware/`, register it in `_MIDDLEWARE_MODULES`/`__all__`/the `TYPE_CHECKING` block of `agent/middleware/__init__.py`, then pass it to `core_stack` — as a `prepare` entry, or in `extras` at the position its ordering needs. Don't hand-write a stack: the builders in `agent/middleware/stack.py` *are* the ordering.
+- New sandbox providers: add a `SandboxProvider` subclass in `agent/integrations/<provider>.py` and register its module + class name in `_PROVIDERS` in `agent/sandboxes/providers.py`. Any env vars it needs become accessors in `agent/config.py`, checked in its `validate_startup_config`. See `docs/CUSTOMIZATION.md`.
+- New settings: add a store-backed module to `agent/settings/`, reading and writing through `agent/store.py`. Keep it free of FastAPI so graphs, tools and webhooks can read it directly.
+- New dashboard endpoints: add them to the matching router in `agent/dashboard/routes/`, or to a new module included from `routes/__init__.py` (path matching runs in registration order). The composed router is auto-mounted on the FastAPI app. What the endpoint reads or writes belongs in `agent/settings/` or the relevant domain package, not in the route.
+- New webhook handlers: `agent/webhooks/<source>_routes.py` for the plumbing plus `agent/webhooks/<source>.py` for the event handling; verify the signature in `agent/webhooks/signatures.py`, derive the thread id in `agent/threads/ids.py`, start the run through `dispatch_agent_run`, and include the router from `agent/api/app.py:create_app()`.
+- New scheduler tasks: define the payload type and handler next to the job they belong to, then register the kind in `HANDLERS` in `agent/scheduling/tasks.py`. The scheduler graph only forwards `(task, payload)`, so adding a kind never touches it; register the cron through `agent/scheduling/crons.py`.
+- New graphs: add the factory module under `agent/graphs/`, assemble it from `_assembly.py` + `agent/middleware/stack.py`, and register the entrypoint in `langgraph.json` under `graphs`.
+- Async-only: this app runs exclusively async, so do not add sync/async dual implementations. Implement only the async variant; the sync counterpart is never invoked. Omit the sync method entirely when the interface allows it (e.g. `AgentMiddleware` already raises `NotImplementedError` on the sync path). Only when a type or ABC requires the sync method to exist (e.g. `BaseTool._run` is abstract), define it with a bare `raise NotImplementedError`.
 - Minimal-to-no code comments — only when the *why* isn't obvious from the code.
+- Do not add feature documentation to this file. Shipping a feature earns it **no** line here — not a section, not a pointer, not a resolution order or a list of which module wins. Anyone can read that from the code. Feature detail belongs in the code, its docstrings, and the PR description. Only edit this file when asked to, or when something it already claims has become wrong.
 
 <!-- OPENWIKI:START -->
 

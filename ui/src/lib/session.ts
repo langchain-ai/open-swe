@@ -1,5 +1,6 @@
 import { queryOptions, useQuery } from "@tanstack/react-query"
-import { ApiError, api } from "./api"
+import { api } from "./api"
+import { ApiError } from "./apiClient"
 import type { SessionUser } from "./api"
 
 export const sessionQueryOptions = queryOptions<SessionUser | null>({

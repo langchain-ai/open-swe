@@ -15,9 +15,11 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
-from agent.server import _registered_tool_name, get_agent
-from agent.utils.read_only_backend import ReadOnlyBackend
-from agent.utils.sandbox_state import SandboxBackendProxy, clear_sandbox_backend
+from agent.graphs.agent import _registered_tool_name, get_agent
+from agent.graphs.run_environment import DesktopRunEnvironment
+from agent.sandboxes.proxy import SandboxBackendProxy
+from agent.sandboxes.read_only_backend import ReadOnlyBackend
+from agent.sandboxes.registry import clear_sandbox_backend
 
 
 class _DummyAgent:
@@ -54,36 +56,40 @@ async def _capture_create_deep_agent_kwargs(
     clear_sandbox_backend(thread_id)
     with (
         patch(
-            "agent.server.resolve_github_token",
+            "agent.graphs.agent.resolve_github_token",
             new_callable=AsyncMock,
             return_value=("ghp", None),
         ),
-        patch("agent.server.resolve_triggering_user_identity", return_value=None),
+        patch("agent.graphs.agent.resolve_triggering_user_identity", return_value=None),
         patch(
-            "agent.server.ensure_sandbox_for_thread",
+            "agent.graphs.run_environment.ensure_sandbox_for_thread",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ),
         patch(
-            "agent.server.aresolve_sandbox_work_dir",
+            "agent.graphs.agent.aresolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model_pair",
+            "agent.graphs.run_environment.get_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
-        patch("agent.server.load_profile", new_callable=AsyncMock, return_value=profile),
         patch(
-            "agent.server.load_thread_settings",
+            "agent.graphs.run_environment.load_profile",
+            new_callable=AsyncMock,
+            return_value=profile,
+        ),
+        patch(
+            "agent.graphs.run_environment.load_thread_settings",
             new_callable=AsyncMock,
             return_value=thread_settings or {},
         ),
-        patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.make_model", side_effect=[MagicMock(), MagicMock()]),
-        patch("agent.server.construct_system_prompt", return_value="prompt"),
-        patch("agent.server.create_deep_agent", side_effect=fake_create_deep_agent),
+        patch("agent.graphs.agent.fallback_model_id_for", return_value=None),
+        patch("agent.graphs._assembly.make_model", side_effect=[MagicMock(), MagicMock()]),
+        patch("agent.graphs.agent.construct_system_prompt", return_value="prompt"),
+        patch("agent.graphs.agent.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
         await get_agent(config)
 
@@ -128,18 +134,39 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
 
     clear_sandbox_backend("thread-ctx")
     with (
-        patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
-        patch("agent.server._cached_team_default_model_pair", side_effect=load_defaults),
-        patch("agent.server._cached_gateway_enabled", new_callable=AsyncMock, return_value=False),
-        patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
-        patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=True),
-        patch("agent.server._observability_authorized", new_callable=AsyncMock, return_value=False),
-        patch("agent.server._allowed_org_member", new_callable=AsyncMock, return_value=False),
-        patch("agent.server._load_corridor_mcp_tools", new_callable=AsyncMock, return_value=[]),
-        patch("agent.server.load_browser_tools", return_value=[]),
-        patch("agent.server.make_model", return_value=MagicMock()),
-        patch("agent.server.fallback_model_id_for", return_value=None),
-        patch("agent.server.create_deep_agent", return_value=_DummyAgent()),
+        patch("agent.graphs.run_environment.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
+        patch(
+            "agent.graphs.run_environment._cached_team_default_model_pair",
+            side_effect=load_defaults,
+        ),
+        patch(
+            "agent.graphs.run_environment.cached_gateway_enabled",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "agent.graphs.run_environment.cached_profile",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "agent.graphs.run_environment._cached_fable_enabled",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "agent.graphs.agent._observability_authorized",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch("agent.graphs.agent._allowed_org_member", new_callable=AsyncMock, return_value=False),
+        patch(
+            "agent.graphs.agent._load_corridor_mcp_tools", new_callable=AsyncMock, return_value=[]
+        ),
+        patch("agent.graphs.agent.load_browser_tools", return_value=[]),
+        patch("agent.graphs._assembly.make_model", return_value=MagicMock()),
+        patch("agent.graphs.agent.fallback_model_id_for", return_value=None),
+        patch("agent.graphs.agent.create_deep_agent", return_value=_DummyAgent()),
     ):
         agent_task = asyncio.create_task(get_agent(_base_config()))
         await asyncio.wait_for(started.wait(), timeout=1)
@@ -187,7 +214,7 @@ async def test_desktop_agent_loads_snapshotted_and_bundled_skills() -> None:
     config.setdefault("configurable", {}).update(
         {"source": "desktop", "local_project_path": "/tmp"}
     )
-    with patch("agent.server.create_desktop_backend", return_value=MagicMock()):
+    with patch.object(DesktopRunEnvironment, "make_backend", AsyncMock(return_value=MagicMock())):
         captured = await _capture_create_deep_agent_kwargs(config)
 
     assert captured["skills"] == ["/skills/", "/bundled-skills/"]

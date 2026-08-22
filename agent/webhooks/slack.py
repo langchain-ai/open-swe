@@ -1,18 +1,26 @@
-"""Slack webhook handler — moved out of common.py (behavior-identical).
+"""Slack webhook handling: repo/channel resolution and the mention-triggered run."""
 
-Helpers and constants stay in common.py; they are accessed through the module
-object (``common.X``) so tests that monkeypatch them keep working.
-"""
-
+import logging
 import re
 from datetime import UTC, datetime
 from typing import Any, cast
 
 import httpx
+from fastapi import HTTPException
 from langchain_core.messages.content import create_text_block
+from langgraph_sdk.client import LangGraphClient
 
-from agent.dashboard.environments import get_environment, parse_environment_tag
-from agent.input_messages import (
+from ..config import (
+    agent_version_metadata,
+    langgraph_client,
+    slack_bot_username,
+    slack_repo_name,
+    slack_repo_owner,
+)
+from ..dispatch import dispatch_agent_run
+from ..github.auth import is_bot_token_only_mode
+from ..github.refs import extract_repo_from_text
+from ..input_messages import (
     InputMessageContext,
     MessageKind,
     PersonIdentity,
@@ -24,15 +32,65 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
-from agent.utils import slack as slack_utils
-from agent.utils.json_types import as_json_object
-from agent.utils.langsmith import get_langsmith_trace_url
-
+from ..langsmith.api import get_langsmith_trace_url
+from ..settings.agent_overrides import resolve_agent_model_id
+from ..settings.environments import get_environment, parse_environment_tag
+from ..settings.github_tokens import get_valid_access_token, has_access_token_record
+from ..settings.options import default_vision_model_pair, model_supports_images
+from ..settings.team_settings import get_team_default_repo
+from ..settings.user_mappings import login_for_email, login_for_slack_id
+from ..settings.user_mappings import refresh_cache as refresh_user_mapping_cache
+from ..slack.api import (
+    fetch_slack_thread_messages,
+    get_slack_channel_context,
+    get_slack_channel_description,
+    get_slack_channel_info,
+    get_slack_user_info,
+    get_slack_user_names,
+    post_slack_thread_reply,
+    resolve_slack_links_in_context,
+)
+from ..slack.format import (
+    format_slack_messages_for_prompt,
+    get_slack_channel_context_description,
+    is_own_slack_message,
+    is_slack_channel_named,
+    normalize_slack_channel_context,
+    parse_slack_ts,
+    select_slack_context_messages,
+    slack_message_bot_id,
+    slack_message_bot_name,
+    strip_bot_mention,
+)
+from ..slack.threads import (
+    lookup_slack_thread_id,
+    resolve_slack_thread_id,
+    store_slack_run_mapping,
+)
+from ..threads.ops import (
+    fetch_thread_metadata,
+    get_thread_environment,
+    get_thread_plan_mode,
+    is_not_found_error,
+    thread_exists,
+    upsert_agent_thread_owner_metadata,
+)
+from ..utils.dashboard_links import build_settings_url, dashboard_thread_url
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
+from ..utils.json_types import ThreadLike, as_json_object, as_thread_dict
+from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from ..utils.user_messages import warning
-from . import common
+from .repo_config import profile_default_repo_for_email
+
+logger = logging.getLogger(__name__)
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60
+
+DOCS_PLZ_SLACK_CHANNEL_NAME = "docs-plz"
+DOCS_PLZ_SLACK_GATE_REPLY = (
+    "Please don't use Open SWE here, instead ask the Fleet docs-plz agent to implement the docs"
+)
 
 _MENTION_PREAMBLE = "You were mentioned in Slack.\n\n"
 
@@ -43,9 +101,9 @@ _UNTAGGED_REPLY_PREAMBLE = (
     "conversation, answers to your questions, and follow-up instructions are addressed to you. "
     "Someone thinking out loud, talking to another person, or commenting on the thread without "
     "expecting you to act is not.\n\n"
-    "If it is not addressed to you, call `no_op` and post nothing, including no reaction. Staying "
-    "silent is the right outcome; an unwanted reply or reaction from an untagged message is worse "
-    "than no reply. If it is "
+    "If it is not addressed to you, end your turn without calling any tool and post nothing, "
+    "including no reaction. Staying silent is the right outcome; an unwanted reply or reaction "
+    "from an untagged message is worse than no reply. If it is "
     "addressed to you, handle it exactly as you would a direct mention.\n\n"
 )
 
@@ -54,6 +112,232 @@ _MESSAGE_UPDATE_PREAMBLE = (
     "below as the current version and as an explicit correction to the earlier message. Do not "
     "repeat completed work unless the update requires it.\n\n"
 )
+
+
+async def resolve_slack_channel_context(channel_id: str) -> dict[str, str]:
+    """Fetch Slack channel context without blocking Slack-triggered runs on failure."""
+    try:
+        return await get_slack_channel_context(channel_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to resolve Slack channel context")
+        return normalize_slack_channel_context(channel_id, None)
+
+
+async def is_docs_plz_slack_channel(
+    channel_id: str, channel_context: dict[str, Any] | None = None
+) -> bool:
+    """Check whether a Slack channel is the docs-plz handoff channel."""
+    if channel_context is not None:
+        return is_slack_channel_named(channel_context, DOCS_PLZ_SLACK_CHANNEL_NAME)
+    try:
+        channel = await get_slack_channel_info(channel_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to resolve Slack channel info for docs-plz gate")
+        return False
+    return is_slack_channel_named(
+        normalize_slack_channel_context(channel_id, channel), DOCS_PLZ_SLACK_CHANNEL_NAME
+    )
+
+
+def _extract_repo_config_from_thread(thread: ThreadLike) -> dict[str, str] | None:
+    """Extract repo config from persisted thread data."""
+    thread = as_thread_dict(thread)
+    metadata = thread.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+
+    repo = metadata.get("repo")
+    if isinstance(repo, dict):
+        owner = repo.get("owner")
+        name = repo.get("name")
+        if isinstance(owner, str) and owner and isinstance(name, str) and name:
+            return {"owner": owner, "name": name}
+
+    owner = metadata.get("repo_owner")
+    name = metadata.get("repo_name")
+    if isinstance(owner, str) and owner and isinstance(name, str) and name:
+        return {"owner": owner, "name": name}
+
+    return None
+
+
+async def get_slack_repo_config(
+    channel_id: str,
+    thread_ts: str,
+    slack_user_id: str | None = None,
+    channel_context: dict[str, Any] | None = None,
+    thread_id: str | None = None,
+) -> dict[str, str]:
+    """Resolve repository configuration for Slack-triggered runs.
+
+    Priority:
+        1. Repo carried over from the existing Slack thread's metadata.
+        2. A ``repo:owner/name`` token in the channel's topic/purpose.
+        3. The triggering user's dashboard ``default_repo`` (if they have a
+           profile and their Slack email maps to a known GitHub login).
+        4. Team default repo.
+        5. ``SLACK_REPO_*`` env defaults.
+    """
+    default_owner = slack_repo_owner()
+    default_name = slack_repo_name()
+    client = langgraph_client()
+
+    repo_config: dict[str, str] | None = None
+
+    try:
+        resolved_thread_id = thread_id or await resolve_slack_thread_id(
+            client, channel_id, thread_ts
+        )
+        thread = await client.threads.get(resolved_thread_id)
+        thread_repo_config = _extract_repo_config_from_thread(thread)
+        if thread_repo_config:
+            repo_config = thread_repo_config
+    except Exception as exc:  # noqa: BLE001
+        if not is_not_found_error(exc):
+            logger.debug("Failed to fetch Slack thread %s for repo resolution", thread_id)
+
+    if not repo_config:
+        try:
+            if channel_context is not None:
+                channel_description = get_slack_channel_context_description(channel_context)
+            else:
+                channel_description = await get_slack_channel_description(channel_id)
+            if channel_description:
+                channel_repo_config = extract_repo_from_text(
+                    channel_description, default_owner=default_owner
+                )
+                if channel_repo_config:
+                    logger.info(
+                        "Applying repo from Slack channel %s description: %s/%s",
+                        channel_id,
+                        channel_repo_config["owner"],
+                        channel_repo_config["name"],
+                    )
+                    repo_config = channel_repo_config
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to resolve repo from Slack channel description")
+
+    if not repo_config and slack_user_id:
+        slack_user = await get_slack_user_info(slack_user_id)
+        slack_email = (
+            (slack_user or {}).get("profile", {}).get("email")
+            if isinstance(slack_user, dict)
+            else None
+        )
+        repo_config = await profile_default_repo_for_email(slack_email, channel="Slack")
+
+    if not repo_config:
+        repo_config = await get_team_default_repo()
+
+    if not repo_config and default_owner and default_name:
+        repo_config = {"owner": default_owner, "name": default_name}
+
+    if not repo_config:
+        raise HTTPException(400, "no default repository configured")
+
+    return repo_config
+
+
+async def upsert_slack_thread_repo_metadata(
+    thread_id: str, repo_config: dict[str, str], client: LangGraphClient
+) -> None:
+    """Persist the selected repo config on the thread metadata."""
+    try:
+        await client.threads.update(thread_id=thread_id, metadata={"repo": repo_config})
+    except Exception as exc:  # noqa: BLE001
+        if is_not_found_error(exc):
+            try:
+                await client.threads.create(
+                    thread_id=thread_id,
+                    if_exists="do_nothing",
+                    metadata={"repo": repo_config},
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed to create Slack thread %s while persisting repo metadata",
+                    thread_id,
+                )
+            return
+        logger.exception(
+            "Failed to persist Slack thread repo metadata for thread %s",
+            thread_id,
+        )
+
+
+async def slack_user_is_thread_owner(thread_id: str, slack_user_id: str) -> bool:
+    """Whether the clicking Slack user is the user who requested the plan.
+
+    Plan approval is owner-only (mirrors the dashboard plan API's
+    ``_user_owns_thread`` gate). The original requester's Slack id is stored in
+    ``source_context.slack_thread.triggering_user_id`` when the run is created.
+    Fails closed when ownership can't be determined.
+    """
+    if not slack_user_id:
+        return False
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception:  # noqa: BLE001
+        return False
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    if not isinstance(metadata, dict):
+        return False
+    source_context = metadata.get("source_context")
+    slack_thread = source_context.get("slack_thread") if isinstance(source_context, dict) else None
+    owner_id = slack_thread.get("triggering_user_id") if isinstance(slack_thread, dict) else None
+    return isinstance(owner_id, str) and bool(owner_id) and owner_id == slack_user_id
+
+
+async def post_account_link_prompt(
+    channel_id: str,
+    thread_ts: str,
+    user_id: str,
+    user_email: str | None,
+    reason: str = "unlinked",
+    agent_thread_id: str | None = None,
+) -> None:
+    """Prompt a Slack user to connect their account via the dashboard.
+
+    ``reason`` is ``"unlinked"`` (never signed in with GitHub) or ``"revoked"``
+    (signed in before, but the stored GitHub authorization is no longer usable).
+    Open SWE opens PRs as the triggering user, so it cannot start until the user
+    has signed in with GitHub and connected their Slack account in the dashboard.
+
+    Posts a plain, token-free dashboard link as a visible threaded reply. The
+    link carries no per-user identity, so it's safe to show in a shared channel:
+    the user signs in with GitHub from their own session and connects Slack via
+    verified OIDC on the settings page.
+    """
+    settings_url = build_settings_url()
+    if not settings_url:
+        logger.debug(
+            "Dashboard settings URL unavailable (DASHBOARD_BASE_URL unset); skipping prompt"
+        )
+        return
+    if reason == "revoked":
+        text = (
+            "🔐 Your GitHub sign-in is no longer valid, so I can't resolve your GitHub "
+            f"account. Re-connect it in <{settings_url}|your Open SWE settings>, then tag me again."
+        )
+    else:
+        text = (
+            "👋 I couldn't resolve your GitHub account from Slack. Sign in with GitHub and "
+            f"connect your Slack account in <{settings_url}|your Open SWE settings>, then tag me "
+            "again."
+        )
+    try:
+        await post_slack_thread_reply(channel_id, thread_ts, text, agent_thread_id=agent_thread_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
+
+
+def _run_id_for_logging(run: Any) -> str:
+    """Extract a run id from SDK response shapes for log messages."""
+    if isinstance(run, dict):
+        run_id = run.get("run_id")
+    else:
+        run_id = getattr(run, "run_id", None)
+    return run_id if isinstance(run_id, str) and run_id else "<unknown>"
 
 
 def _slack_prompt_preamble(untagged_reply: bool, message_update: bool = False) -> str:
@@ -78,7 +362,7 @@ def _is_explicit_slack_request(
     return not message_update and bool(
         treat_all_messages_as_mentions
         or (bot_user_id and f"<@{bot_user_id}>" in text)
-        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+        or bool((username := slack_bot_username()) and f"@{username}" in text)
     )
 
 
@@ -98,14 +382,14 @@ async def _slack_thread_allows_untagged_reply(
     if any(user_id != bot_user_id for user_id in mentioned):
         return False
 
-    messages = await common.fetch_slack_thread_messages(channel_id, thread_ts)
+    messages = await fetch_slack_thread_messages(channel_id, thread_ts)
     bot_last_ts = 0.0
-    current_ts = common._parse_ts(now_ts)
+    current_ts = parse_slack_ts(now_ts)
     latest_ts = current_ts
     last_message_ts: dict[str, float] = {}
     human_messages: list[tuple[float, str, str]] = []
     for message in messages:
-        message_ts = common._parse_ts(message.get("ts"))
+        message_ts = parse_slack_ts(message.get("ts"))
         latest_ts = max(latest_ts, message_ts)
         author = message.get("user")
         if author == bot_user_id:
@@ -136,8 +420,8 @@ async def _slack_thread_allows_untagged_reply(
         ):
             timeline.append((current_ts, sender, text))
         mention_tokens = [f"<@{bot_user_id}>"]
-        if common.SLACK_BOT_USERNAME:
-            mention_tokens.append(f"@{common.SLACK_BOT_USERNAME}")
+        if bot_username := slack_bot_username():
+            mention_tokens.append(f"@{bot_username}")
         mention_index = next(
             (
                 index
@@ -174,13 +458,13 @@ async def _dispatch_or_queue_slack_run(
     if isinstance(run_input, list):
         run_input = {"messages": cast(list[Any], run_input)}
     return as_json_object(
-        await common.dispatch_agent_run(
+        await dispatch_agent_run(
             thread_id,
             None,
             configurable,
             source="slack",
             input=run_input,
-            metadata=common._AGENT_VERSION_METADATA,
+            metadata=agent_version_metadata(),
             client=client,
             multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
         )
@@ -192,21 +476,22 @@ async def _slack_user_can_reply_to_ready_plan(
 ) -> bool:
     if not channel_id or not thread_ts or not slack_user_id:
         return False
-    from agent.dashboard.plan_api import _thread_metadata
-
     try:
-        thread_id = await common.lookup_slack_thread_id(
-            common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
-        )
+        thread_id = await lookup_slack_thread_id(langgraph_client(), channel_id, thread_ts)
     except Exception:  # noqa: BLE001
         return False
     if not thread_id:
         return False
+    # A brand-new thread has no metadata; an untagged message there simply
+    # isn't a plan reply. A metadata read that fails outright is treated the
+    # same way on purpose: this decides whether an *untagged* message wakes the
+    # agent, so the safe answer to "don't know" is not to.
     try:
-        metadata = await _thread_metadata(thread_id)
+        metadata = await fetch_thread_metadata(thread_id)
     except Exception:  # noqa: BLE001
-        # A brand-new thread has no metadata (_thread_metadata raises 404); an
-        # untagged message there simply isn't a plan reply — don't abort the gate.
+        logger.warning("Failed to read plan metadata for thread %s", thread_id, exc_info=True)
+        return False
+    if metadata is None:
         return False
     return metadata.get("plan_mode") is True and metadata.get("plan_status") == "ready"
 
@@ -229,7 +514,7 @@ def _format_slack_thread_section(
         lines.append(f"- Channel name: #{channel_name}")
     lines.append(f"- Thread TS: {thread_ts}")
     lines.append(f"- Context starts at: {context_source}")
-    channel_description = common.get_slack_channel_context_description(channel_context)
+    channel_description = get_slack_channel_context_description(channel_context)
     if channel_description:
         lines.append(
             "- Slack-provided channel description (topic/purpose; may specify the repository "
@@ -242,7 +527,7 @@ def _format_slack_thread_section(
 
 
 async def _format_slack_run_links_section(thread_id: str) -> str:
-    dashboard_url = common.dashboard_thread_url(thread_id)
+    dashboard_url = dashboard_thread_url(thread_id)
     trace_url = await get_langsmith_trace_url(thread_id)
     lines = ["## Open SWE Links"]
     if dashboard_url:
@@ -262,7 +547,7 @@ async def _slack_logins_by_user_id(user_ids: list[str]) -> dict[str, str]:
     """Map Slack user ids to the GitHub logins of linked Open SWE accounts."""
     logins: dict[str, str] = {}
     for user_id in {value for value in user_ids if value}:
-        login = await common.login_for_slack_id(user_id)
+        login = await login_for_slack_id(user_id)
         if login:
             logins[user_id] = login
     return logins
@@ -292,19 +577,19 @@ def _slack_sender(
     Open SWE posts with a bot token, so its own replies carry a ``user`` id as well as a
     ``bot_id``; keying off ``user`` alone attributes them to a person.
     """
-    if slack_utils.is_own_slack_message(message, bot_user_id):
+    if is_own_slack_message(message, bot_user_id):
         identity: SystemIdentity = {
             "id": _OPEN_SWE_SENDER_ID,
-            "display_name": common.SLACK_BOT_USERNAME or "Open SWE",
+            "display_name": slack_bot_username() or "Open SWE",
             "platform": "slack",
             "sender_type": "self",
         }
         return identity["id"], identity, "system"
-    bot_id = slack_utils.slack_message_bot_id(message)
+    bot_id = slack_message_bot_id(message)
     if bot_id:
         bot: SystemIdentity = {
             "id": f"system:slack-bot-{bot_id}",
-            "display_name": slack_utils.slack_message_bot_name(message),
+            "display_name": slack_message_bot_name(message),
             "platform": "slack",
             "sender_type": "bot",
         }
@@ -317,8 +602,8 @@ def _slack_sender(
 
 
 def _slack_message_text(message: dict[str, Any], bot_user_id: str) -> str:
-    forwarded = common.format_slack_messages_for_prompt(
-        [message], {}, bot_user_id=bot_user_id, bot_username=common.SLACK_BOT_USERNAME
+    forwarded = format_slack_messages_for_prompt(
+        [message], {}, bot_user_id=bot_user_id, bot_username=slack_bot_username()
     )
     _, separator, content = forwarded.partition(": ")
     return content if separator else forwarded
@@ -424,15 +709,15 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     try:
         await _process_slack_mention_impl(event_data, repo_config)
     except Exception:  # noqa: BLE001
-        common.logger.exception("Unexpected error while processing Slack mention")
+        logger.exception("Unexpected error while processing Slack mention")
         await _notify_slack_processing_error(event_data, repo_config)
 
 
 async def process_slack_plan_approval(
     event_data: dict[str, Any], repo_config: dict[str, str]
 ) -> None:
-    from agent.dashboard.plan_api import approve_plan_for_thread
-    from agent.dashboard.plan_store import make_plan_approver
+    from ..dashboard.plan_api import approve_plan_for_thread
+    from ..settings.plan_store import make_plan_approver
 
     try:
         user_id = str(event_data.get("user_id") or "")
@@ -446,7 +731,7 @@ async def process_slack_plan_approval(
             ),
         )
     except Exception:  # noqa: BLE001
-        common.logger.exception("Unexpected error while processing Slack plan approval")
+        logger.exception("Unexpected error while processing Slack plan approval")
         await _notify_slack_processing_error(event_data, repo_config)
 
 
@@ -465,19 +750,17 @@ async def _notify_slack_processing_error(
     thread_id = event_data.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         try:
-            thread_id = await common.lookup_slack_thread_id(
-                common.get_client(url=common.LANGGRAPH_URL), channel_id, thread_ts
-            )
+            thread_id = await lookup_slack_thread_id(langgraph_client(), channel_id, thread_ts)
         except Exception:  # noqa: BLE001
             thread_id = None
     if not thread_id:
         return
     try:
         clean_text = (
-            common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
+            strip_bot_mention(text, bot_user_id, bot_username=slack_bot_username())
             or "Slack request"
         )
-        await common.upsert_agent_thread_owner_metadata(
+        await upsert_agent_thread_owner_metadata(
             thread_id,
             source="slack",
             repo_config=repo_config,
@@ -492,12 +775,12 @@ async def _notify_slack_processing_error(
             },
         )
     except Exception:  # noqa: BLE001
-        common.logger.warning(
+        logger.warning(
             "Could not persist Slack error metadata for thread %s", thread_id, exc_info=True
         )
 
     try:
-        await common.get_client(url=common.LANGGRAPH_URL).threads.update(
+        await langgraph_client().threads.update(
             thread_id=thread_id,
             metadata={
                 "latest_run_status": "error",
@@ -505,9 +788,9 @@ async def _notify_slack_processing_error(
             },
         )
     except Exception:  # noqa: BLE001
-        common.logger.warning("Could not mark Slack thread %s as errored", thread_id, exc_info=True)
+        logger.warning("Could not mark Slack thread %s as errored", thread_id, exc_info=True)
 
-    dashboard_url = common.dashboard_thread_url(thread_id)
+    dashboard_url = dashboard_thread_url(thread_id)
     message = warning(
         "Open SWE hit an unexpected error while handling this Slack thread. "
         "Send another message and it will try again."
@@ -515,11 +798,9 @@ async def _notify_slack_processing_error(
     if dashboard_url:
         message += f" You can view the error in <{dashboard_url}|Open SWE Web>."
     try:
-        await common.post_slack_thread_reply(
-            channel_id, thread_ts, message, agent_thread_id=thread_id
-        )
+        await post_slack_thread_reply(channel_id, thread_ts, message, agent_thread_id=thread_id)
     except Exception:  # noqa: BLE001
-        common.logger.warning(
+        logger.warning(
             "Could not post Slack error notification for thread %s", thread_id, exc_info=True
         )
 
@@ -542,11 +823,11 @@ async def _process_slack_mention_impl(
     channel_context = (
         channel_context_raw
         if isinstance(channel_context_raw, dict)
-        else common.normalize_slack_channel_context(channel_id, None)
+        else normalize_slack_channel_context(channel_id, None)
     )
 
     if not channel_id or not thread_ts or not event_ts:
-        common.logger.warning(
+        logger.warning(
             "Missing Slack event fields (channel_id=%s, thread_ts=%s, event_ts=%s)",
             channel_id,
             thread_ts,
@@ -554,22 +835,22 @@ async def _process_slack_mention_impl(
         )
         return
 
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    client = langgraph_client()
     thread_id = event_data.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
-        thread_id = await common.resolve_slack_thread_id(langgraph_client, channel_id, thread_ts)
+        thread_id = await resolve_slack_thread_id(client, channel_id, thread_ts)
 
     # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
     try:
-        await common.refresh_user_mapping_cache()
+        await refresh_user_mapping_cache()
     except Exception:  # noqa: BLE001
-        common.logger.debug("Could not refresh user mapping cache for Slack mention", exc_info=True)
+        logger.debug("Could not refresh user mapping cache for Slack mention", exc_info=True)
 
     user_email = None
     user_name = ""
     user_timezone = ""
     if user_id:
-        slack_user = await common.get_slack_user_info(user_id)
+        slack_user = await get_slack_user_info(user_id)
         if slack_user:
             profile = slack_user.get("profile", {})
             if isinstance(profile, dict):
@@ -586,7 +867,7 @@ async def _process_slack_mention_impl(
                 user_timezone = timezone_value.strip()
 
     thread_messages = (
-        [] if message_update else await common.fetch_slack_thread_messages(channel_id, thread_ts)
+        [] if message_update else await fetch_slack_thread_messages(channel_id, thread_ts)
     )
     current_message = next(
         (message for message in thread_messages if str(message.get("ts")) == original_message_ts),
@@ -606,11 +887,11 @@ async def _process_slack_mention_impl(
 
     treat_all_messages_as_mentions = bool(event_data.get("treat_all_messages_as_mentions"))
     untagged_reply = bool(event_data.get("untagged_reply"))
-    context_messages, context_mode = common.select_slack_context_messages(
+    context_messages, context_mode = select_slack_context_messages(
         thread_messages,
         event_ts,
         bot_user_id,
-        common.SLACK_BOT_USERNAME,
+        slack_bot_username(),
         treat_all_messages_as_mentions=treat_all_messages_as_mentions,
     )
     source_messages = (
@@ -623,7 +904,7 @@ async def _process_slack_mention_impl(
         for value in (message.get("user") for message in context_messages)
         if isinstance(value, str) and value
     ]
-    user_names_by_id = await common.get_slack_user_names(context_user_ids)
+    user_names_by_id = await get_slack_user_names(context_user_ids)
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
     logins_by_user_id = await _slack_logins_by_user_id([*context_user_ids, user_id])
@@ -635,10 +916,10 @@ async def _process_slack_mention_impl(
             else "the previous message where I was tagged"
         )
     clean_text = (
-        common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
+        strip_bot_mention(text, bot_user_id, bot_username=slack_bot_username())
         or "(no text in mention)"
     )
-    is_first_mention = not await common._thread_exists(thread_id)
+    is_first_mention = not await thread_exists(thread_id)
     # `env:<name>` on the message that opens a thread picks the environment its
     # sandbox boots from. Only the opening message can: the sandbox is created
     # once, so honoring a later tag would change the prompt but not the image. The
@@ -651,7 +932,7 @@ async def _process_slack_mention_impl(
             environment_slug = tagged_slug
             clean_text = text_without_tag or "(no text in mention)"
         elif tagged_slug:
-            common.logger.info(
+            logger.info(
                 "Slack thread %s tagged unknown environment %s; using the default",
                 thread_id,
                 tagged_slug,
@@ -662,7 +943,7 @@ async def _process_slack_mention_impl(
     )
 
     # Auto-resolve cross-posted Slack message links in context
-    resolved_links_section, image_urls_from_links = await common.resolve_slack_links_in_context(
+    resolved_links_section, image_urls_from_links = await resolve_slack_links_in_context(
         source_messages, user_names_by_id
     )
 
@@ -681,8 +962,8 @@ async def _process_slack_mention_impl(
     )
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
 
-    image_urls = common.dedupe_urls(
-        [url for msg in source_messages for url in common.extract_image_urls(msg.get("text", ""))]
+    image_urls = dedupe_urls(
+        [url for msg in source_messages for url in extract_image_urls(msg.get("text", ""))]
         + [
             f["url_private"]
             for msg in source_messages
@@ -694,16 +975,16 @@ async def _process_slack_mention_impl(
         + image_urls_from_links
     )
 
-    mapped_login = await common.login_for_slack_id(user_id)
+    mapped_login = await login_for_slack_id(user_id)
     if not mapped_login and user_email:
-        mapped_login = await common.login_for_email(user_email)
+        mapped_login = await login_for_email(user_email)
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login)
-        if not common.model_supports_images(resolved_model_id):
-            fallback_model_id, fallback_effort = common.default_vision_model_pair()
-            common.logger.info(
+        resolved_model_id = await resolve_agent_model_id(mapped_login)
+        if not model_supports_images(resolved_model_id):
+            fallback_model_id, fallback_effort = default_vision_model_pair()
+            logger.info(
                 "Using vision fallback model %s for %d Slack image(s); configured model %s "
                 "does not support images",
                 fallback_model_id,
@@ -712,10 +993,10 @@ async def _process_slack_mention_impl(
             )
             resolved_model_id = fallback_model_id
             image_model_override = (fallback_model_id, fallback_effort)
-        common.logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
-        async with httpx.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as http_client:
+        logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
             for image_url in image_urls:
-                image_block = await common.fetch_image_block(image_url, http_client)
+                image_block = await fetch_image_block(image_url, http_client)
                 if image_block:
                     content_blocks.append(cast(dict[str, Any], image_block))
 
@@ -727,9 +1008,9 @@ async def _process_slack_mention_impl(
     user_token: str | None = None
     if mapped_login:
         try:
-            user_token = await common.get_valid_access_token(mapped_login)
+            user_token = await get_valid_access_token(mapped_login)
         except Exception:  # noqa: BLE001
-            common.logger.debug(
+            logger.debug(
                 "Failed to resolve GitHub token for %s; treating as unauthenticated",
                 mapped_login,
                 exc_info=True,
@@ -737,7 +1018,7 @@ async def _process_slack_mention_impl(
             user_token = None
     has_valid_user_token = bool(user_token)
 
-    if not has_valid_user_token and not common.is_bot_token_only_mode():
+    if not has_valid_user_token and not is_bot_token_only_mode():
         # A stored-but-unusable token means "sign in again"; no record at all
         # means the user has never connected GitHub + Slack via the dashboard.
         # Guard the store read like token resolution above so a transient
@@ -745,21 +1026,21 @@ async def _process_slack_mention_impl(
         has_token_record = False
         if mapped_login:
             try:
-                has_token_record = await common.has_access_token_record(mapped_login)
+                has_token_record = await has_access_token_record(mapped_login)
             except Exception:  # noqa: BLE001
-                common.logger.debug(
+                logger.debug(
                     "Failed to check GitHub token record for %s; prompting sign-in",
                     mapped_login,
                     exc_info=True,
                 )
         reason = "revoked" if has_token_record else "unlinked"
-        common.logger.info(
+        logger.info(
             "Blocking Slack run for thread %s: no valid user GitHub token (%s)",
             thread_id,
             reason,
         )
         if user_id:
-            await common._post_account_link_prompt(
+            await post_account_link_prompt(
                 channel_id,
                 thread_ts,
                 user_id,
@@ -793,24 +1074,24 @@ async def _process_slack_mention_impl(
     # Later mentions carry no tag, so the thread's environment comes back from
     # metadata — a follow-up must not be told about `default` while its sandbox
     # was built from the environment the opening message picked.
-    thread_environment = environment_slug or await common._get_thread_environment(thread_id)
+    thread_environment = environment_slug or await get_thread_environment(thread_id)
     if thread_environment:
         configurable["environment"] = thread_environment
     if image_model_override:
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
 
-    thread_plan_mode = await common._get_thread_plan_mode(thread_id)
+    thread_plan_mode = await get_thread_plan_mode(thread_id)
     if thread_plan_mode is not None:
         configurable["plan_mode"] = thread_plan_mode
 
-    is_first_mention = not await common._thread_exists(thread_id)
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    await common._upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
+    is_first_mention = not await thread_exists(thread_id)
+    client = langgraph_client()
+    await upsert_slack_thread_repo_metadata(thread_id, repo_config, client)
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
-    await common.upsert_agent_thread_owner_metadata(
+    await upsert_agent_thread_owner_metadata(
         thread_id,
         source="slack",
         repo_config=repo_config,
@@ -841,41 +1122,30 @@ async def _process_slack_mention_impl(
         operational_context=operational_context,
     )
     run = await _dispatch_or_queue_slack_run(
-        langgraph_client,
+        client,
         thread_id,
         run_input,
         configurable,
         explicitly_tagged=explicitly_tagged,
     )
-    common.logger.info(
+    logger.info(
         "Slack LangGraph run %s dispatched for thread %s",
-        common._run_id_for_logging(run),
+        _run_id_for_logging(run),
         thread_id,
     )
     run_id = run.get("run_id")
-    if is_first_mention:
-        if isinstance(run_id, str) and run_id:
-            await common.store_slack_run_mapping(
-                langgraph_client,
-                channel_id,
-                thread_ts,
-                run_id,
-                message_ts=original_message_ts,
-                triggering_user_id=user_id,
-                agent_thread_id=thread_id,
-            )
-    else:
-        common.logger.info(
+    if not is_first_mention:
+        logger.info(
             "Skipping Slack trace reply for thread %s — agent will reply when run completes",
             thread_id,
         )
-        if isinstance(run_id, str) and run_id:
-            await common.store_slack_run_mapping(
-                langgraph_client,
-                channel_id,
-                thread_ts,
-                run_id,
-                message_ts=original_message_ts,
-                triggering_user_id=user_id,
-                agent_thread_id=thread_id,
-            )
+    if isinstance(run_id, str) and run_id:
+        await store_slack_run_mapping(
+            client,
+            channel_id,
+            thread_ts,
+            run_id,
+            message_ts=original_message_ts,
+            triggering_user_id=user_id,
+            agent_thread_id=thread_id,
+        )

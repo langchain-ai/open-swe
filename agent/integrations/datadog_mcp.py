@@ -10,12 +10,12 @@ dashboards, monitors, incidents, hosts, services, events). Override via
 """
 
 import logging
-import os
 from datetime import timedelta
 
 from langchain_core.tools import BaseTool
 
-from ..dashboard.team_credentials import DatadogCredentials, get_datadog_credentials
+from ..config import datadog_mcp_toolsets
+from ..settings.team_credentials import DatadogCredentials, get_datadog_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +24,7 @@ _MCP_TIMEOUT_SECONDS = 30.0
 
 
 def _toolsets() -> str:
-    return os.environ.get("DATADOG_MCP_TOOLSETS", DEFAULT_DATADOG_TOOLSETS).strip() or (
-        DEFAULT_DATADOG_TOOLSETS
-    )
+    return datadog_mcp_toolsets(DEFAULT_DATADOG_TOOLSETS)
 
 
 async def _build_mcp_tools(creds: DatadogCredentials) -> list[BaseTool]:

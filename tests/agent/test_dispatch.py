@@ -1,8 +1,8 @@
 import importlib
-from typing import Any
 from xml.etree import ElementTree
 
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient
 
 dispatch = importlib.import_module("agent.dispatch")
 
@@ -22,69 +22,51 @@ def test_is_loopback_webhook_absolute() -> None:
     assert dispatch._is_loopback_webhook(_ABSOLUTE) is False
 
 
-def test_resolve_no_secret_attaches_nothing() -> None:
-    assert dispatch._resolve_completion_webhook_url(_ABSOLUTE, None) is None
-    assert dispatch._resolve_completion_webhook_url(_ABSOLUTE, "") is None
+def test_resolve_no_secret_attaches_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COMPLETION_WEBHOOK_URL", _ABSOLUTE)
+    monkeypatch.delenv("RUN_COMPLETE_WEBHOOK_SECRET", raising=False)
+    assert dispatch.completion_webhook_url() is None
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "")
+    assert dispatch.completion_webhook_url() is None
 
 
-def test_resolve_relative_url_degrades_to_none() -> None:
+def test_resolve_relative_url_degrades_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
     # Secret set but a loopback URL would 422 every run — attach nothing instead.
-    assert dispatch._resolve_completion_webhook_url("/webhooks/run-complete", "s3cret") is None
+    monkeypatch.delenv("COMPLETION_WEBHOOK_URL", raising=False)
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
+    assert dispatch.completion_webhook_url() is None
 
 
-def test_resolve_localhost_url_degrades_to_none() -> None:
-    assert dispatch._resolve_completion_webhook_url("http://localhost/x", "s3cret") is None
+def test_resolve_localhost_url_degrades_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COMPLETION_WEBHOOK_URL", "http://localhost/x")
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
+    assert dispatch.completion_webhook_url() is None
 
 
-def test_resolve_absolute_url_appends_token() -> None:
-    assert (
-        dispatch._resolve_completion_webhook_url(_ABSOLUTE, "s3cret") == f"{_ABSOLUTE}?token=s3cret"
-    )
+def test_resolve_absolute_url_appends_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COMPLETION_WEBHOOK_URL", _ABSOLUTE)
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
+    assert dispatch.completion_webhook_url() == f"{_ABSOLUTE}?token=s3cret"
 
 
-def test_resolve_absolute_url_with_existing_query_left_as_is() -> None:
+def test_resolve_absolute_url_with_existing_query_left_as_is(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     url = f"{_ABSOLUTE}?token=preset"
-    assert dispatch._resolve_completion_webhook_url(url, "s3cret") == url
+    monkeypatch.setenv("COMPLETION_WEBHOOK_URL", url)
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
+    assert dispatch.completion_webhook_url() == url
 
 
-class _FakeRuns:
-    def __init__(self) -> None:
-        self.created: list[dict[str, Any]] = []
-        self.fail_next = False
-
-    async def create(self, thread_id: str, assistant_id: str, **kwargs: Any) -> dict[str, str]:
-        self.created.append({"thread_id": thread_id, "assistant_id": assistant_id, **kwargs})
-        if self.fail_next:
-            self.fail_next = False
-            raise RuntimeError("dispatch failed")
-        return {"run_id": "run-1"}
-
-
-class _FakeThreads:
-    def __init__(self) -> None:
-        self.metadata: dict[str, Any] = {}
-        self.messages: list[dict[str, Any]] = []
-
-    async def get(self, thread_id: str) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": self.metadata}
-
-    async def get_state(self, thread_id: str) -> dict[str, Any]:
-        return {"values": {"messages": self.messages}}
-
-    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
-        self.metadata = metadata
-
-
-class _FakeClient:
-    def __init__(self) -> None:
-        self.runs = _FakeRuns()
-        self.threads = _FakeThreads()
+def _client() -> FakeLangGraphClient:
+    return FakeLangGraphClient(thread_metadata={})
 
 
 @pytest.mark.asyncio
 async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _FakeClient()
-    monkeypatch.setattr(dispatch, "COMPLETION_WEBHOOK_URL", "https://app/webhooks/run-complete")
+    client = _client()
+    monkeypatch.setenv("COMPLETION_WEBHOOK_URL", "https://app/webhooks/run-complete")
+    monkeypatch.setenv("RUN_COMPLETE_WEBHOOK_SECRET", "s3cret")
 
     run = await dispatch.create_durable_run(
         "thread-1",
@@ -100,7 +82,7 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["durability"] == "sync"
     assert created["multitask_strategy"] == "interrupt"
     assert created["if_not_exists"] == "create"
-    assert created["webhook"] == "https://app/webhooks/run-complete"
+    assert created["webhook"] == "https://app/webhooks/run-complete?token=s3cret"
     # Resumable by default so the dashboard can join (and stop) a run it did not start.
     assert created["stream_resumable"] is True
     # The Protocol v2 run shape, so the dashboard gets `tools` events and subagent
@@ -129,8 +111,8 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
 async def test_create_durable_run_preserves_existing_prepare_id_and_resumable_opt_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient()
-    monkeypatch.setattr(dispatch, "COMPLETION_WEBHOOK_URL", None)
+    client = _client()
+    monkeypatch.delenv("RUN_COMPLETE_WEBHOOK_SECRET", raising=False)
 
     await dispatch.create_durable_run(
         "thread-1",
@@ -162,7 +144,7 @@ def test_prepare_run_config_marks_every_run_as_protocol_v2() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_accepts_prebuilt_input(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _FakeClient()
+    client = _client()
     run_input = {"messages": [{"role": "user", "content": "structured"}]}
 
     await dispatch.dispatch_agent_run(

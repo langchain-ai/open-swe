@@ -4,30 +4,14 @@ from typing import Any, cast
 import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
+from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.utils import slack_feedback
-from agent.utils.slack_feedback import (
+from agent.webhooks import slack_feedback, slack_routes
+from agent.webhooks.slack_feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
-from agent.webhooks import common as webhook_common
-from agent.webhooks import slack_routes
-
-
-class _FakeStore:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-
-    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
-        return self.items.get((namespace, key))
-
-    async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
-        self.items[(namespace, key)] = {"value": value}
-
-
-class _FakeClient:
-    def __init__(self) -> None:
-        self.store = _FakeStore()
+from agent.webhooks.slack_stop import process_slack_stop_reaction
 
 
 class _FakeBackgroundTasks:
@@ -48,7 +32,7 @@ class _FakeRequest:
 
 
 def _store_message_mapping(
-    client: _FakeClient,
+    client: FakeLangGraphClient,
     channel_id: str,
     message_ts: str,
     *,
@@ -57,7 +41,7 @@ def _store_message_mapping(
     value: dict[str, Any] = {"run_id": "run-1", "thread_ts": "1.000"}
     if triggering_user_id:
         value["triggering_user_id"] = triggering_user_id
-    client.store.items[(("slack_run_map", channel_id), f"message:{message_ts}")] = {"value": value}
+    client.store.items[(("slack_run_map", channel_id), f"message:{message_ts}")] = value
 
 
 def _reaction_event(reaction: str = "thumbsup") -> dict[str, Any]:
@@ -71,7 +55,7 @@ def _reaction_event(reaction: str = "thumbsup") -> dict[str, Any]:
 
 @pytest.mark.asyncio
 async def test_reaction_added_creates_feedback(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _FakeClient()
+    client = FakeLangGraphClient()
     _store_message_mapping(client, "C123", "2.000")
     created: dict[str, Any] = {}
 
@@ -94,7 +78,7 @@ async def test_reaction_added_creates_feedback(monkeypatch: pytest.MonkeyPatch) 
         )
         return True
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_feedback, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fake_create_feedback)
 
     await process_slack_reaction_added(_reaction_event(), event_id="Ev1")
@@ -108,14 +92,14 @@ async def test_reaction_added_creates_feedback(monkeypatch: pytest.MonkeyPatch) 
 
 @pytest.mark.asyncio
 async def test_reaction_added_skips_duplicate_event(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _FakeClient()
+    client = FakeLangGraphClient()
     _store_message_mapping(client, "C123", "2.000")
-    client.store.items[(("slack_reaction_events", "C123"), "Ev1")] = {"value": {"event_id": "Ev1"}}
+    client.store.items[(("slack_reaction_events", "C123"), "Ev1")] = {"event_id": "Ev1"}
 
     async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("duplicate event should not create feedback")
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_feedback, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
 
     await process_slack_reaction_added(_reaction_event(), event_id="Ev1")
@@ -125,15 +109,13 @@ async def test_reaction_added_skips_duplicate_event(monkeypatch: pytest.MonkeyPa
 async def test_reaction_removed_deletes_feedback_when_last_reaction_removed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient()
+    client = FakeLangGraphClient()
     _store_message_mapping(client, "C123", "2.000")
     client.store.items[(("slack_reaction_state", "C123"), "run-1:U123:2.000")] = {
-        "value": {
-            "run_id": "run-1",
-            "user_id": "U123",
-            "message_ts": "2.000",
-            "reactions": ["thumbsup"],
-        }
+        "run_id": "run-1",
+        "user_id": "U123",
+        "message_ts": "2.000",
+        "reactions": ["thumbsup"],
     }
     deleted: dict[str, str] = {}
 
@@ -142,26 +124,26 @@ async def test_reaction_removed_deletes_feedback_when_last_reaction_removed(
         deleted["key"] = key
         return True
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_feedback, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_feedback, "delete_langsmith_feedback", fake_delete_feedback)
 
     await process_slack_reaction_removed(_reaction_event(), event_id="Ev2")
 
     assert deleted == {"run_id": "run-1", "key": "slack_reaction:C123:U123:2.000"}
     state = client.store.items[(("slack_reaction_state", "C123"), "run-1:U123:2.000")]
-    assert state["value"]["reactions"] == []
+    assert state["reactions"] == []
 
 
 @pytest.mark.asyncio
 async def test_reaction_without_message_mapping_is_ignored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient()
+    client = FakeLangGraphClient()
 
     async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("unmapped message should not create feedback")
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_feedback, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
 
     await process_slack_reaction_added(_reaction_event(), event_id="Ev1")
@@ -171,13 +153,13 @@ async def test_reaction_without_message_mapping_is_ignored(
 async def test_reaction_from_non_triggering_user_is_ignored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient()
+    client = FakeLangGraphClient()
     _store_message_mapping(client, "C123", "2.000", triggering_user_id="UTRIGGER")
 
     async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("non-triggering user should not create feedback")
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_feedback, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
 
     await process_slack_reaction_added(_reaction_event(), event_id="Ev1")
@@ -187,15 +169,13 @@ async def test_reaction_from_non_triggering_user_is_ignored(
 async def test_conflicting_reactions_clear_feedback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _FakeClient()
+    client = FakeLangGraphClient()
     _store_message_mapping(client, "C123", "2.000")
     client.store.items[(("slack_reaction_state", "C123"), "run-1:U123:2.000")] = {
-        "value": {
-            "run_id": "run-1",
-            "user_id": "U123",
-            "message_ts": "2.000",
-            "reactions": ["thumbsup"],
-        }
+        "run_id": "run-1",
+        "user_id": "U123",
+        "message_ts": "2.000",
+        "reactions": ["thumbsup"],
     }
     deleted: dict[str, str] = {}
 
@@ -207,7 +187,7 @@ async def test_conflicting_reactions_clear_feedback(
         deleted["key"] = key
         return True
 
-    monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_feedback, "langgraph_client", lambda: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
     monkeypatch.setattr(slack_feedback, "delete_langsmith_feedback", fake_delete_feedback)
 
@@ -224,7 +204,7 @@ async def test_slack_webhook_queues_reaction_added(monkeypatch: pytest.MonkeyPat
     payload = {"type": "event_callback", "event_id": "Ev1", "event": event}
     background_tasks = _FakeBackgroundTasks()
 
-    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
+    monkeypatch.setattr(slack_routes, "verify_slack_signature", lambda **kwargs: True)
 
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(payload)),
@@ -232,7 +212,7 @@ async def test_slack_webhook_queues_reaction_added(monkeypatch: pytest.MonkeyPat
     )
 
     assert response == {"status": "accepted", "message": "Reaction feedback queued"}
-    assert background_tasks.tasks == [(webhook_common.process_slack_reaction_added, (event, "Ev1"))]
+    assert background_tasks.tasks == [(process_slack_reaction_added, (event, "Ev1"))]
 
 
 @pytest.mark.asyncio
@@ -241,7 +221,7 @@ async def test_slack_webhook_queues_stop_reaction(monkeypatch: pytest.MonkeyPatc
     payload = {"type": "event_callback", "event_id": "EvStop", "event": event}
     background_tasks = _FakeBackgroundTasks()
 
-    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
+    monkeypatch.setattr(slack_routes, "verify_slack_signature", lambda **kwargs: True)
 
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(payload)),
@@ -249,9 +229,7 @@ async def test_slack_webhook_queues_stop_reaction(monkeypatch: pytest.MonkeyPatc
     )
 
     assert response == {"status": "accepted", "message": "Stop reaction queued"}
-    assert background_tasks.tasks == [
-        (webhook_common.process_slack_stop_reaction, (event, "EvStop"))
-    ]
+    assert background_tasks.tasks == [(process_slack_stop_reaction, (event, "EvStop"))]
 
 
 @pytest.mark.asyncio
@@ -260,7 +238,7 @@ async def test_slack_webhook_queues_reaction_removed(monkeypatch: pytest.MonkeyP
     payload = {"type": "event_callback", "event_id": "Ev2", "event": event}
     background_tasks = _FakeBackgroundTasks()
 
-    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
+    monkeypatch.setattr(slack_routes, "verify_slack_signature", lambda **kwargs: True)
 
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(payload)),
@@ -268,9 +246,7 @@ async def test_slack_webhook_queues_reaction_removed(monkeypatch: pytest.MonkeyP
     )
 
     assert response == {"status": "accepted", "message": "Reaction removal queued"}
-    assert background_tasks.tasks == [
-        (webhook_common.process_slack_reaction_removed, (event, "Ev2"))
-    ]
+    assert background_tasks.tasks == [(process_slack_reaction_removed, (event, "Ev2"))]
 
 
 @pytest.mark.asyncio
@@ -279,7 +255,7 @@ async def test_slack_webhook_ignores_untracked_reaction(monkeypatch: pytest.Monk
     payload = {"type": "event_callback", "event_id": "Ev3", "event": event}
     background_tasks = _FakeBackgroundTasks()
 
-    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **kwargs: True)
+    monkeypatch.setattr(slack_routes, "verify_slack_signature", lambda **kwargs: True)
 
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(payload)),

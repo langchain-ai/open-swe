@@ -12,7 +12,7 @@ from langgraph.types import Command
 from langgraph_sdk import get_client
 from typing_extensions import TypedDict
 
-from ..dashboard.plan_store import (
+from ..settings.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_SHARED,
     get_plan_content,
@@ -20,6 +20,7 @@ from ..dashboard.plan_store import (
     make_plan_approver,
     set_plan_status,
 )
+from ..utils.json_types import JsonObject, thread_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -79,12 +80,8 @@ async def approve_plan(
     )
 
 
-async def _thread_metadata(thread_id: str) -> dict[str, Any]:
-    thread = await get_client().threads.get(thread_id)
-    metadata = (
-        thread.get("metadata") if isinstance(thread, dict) else getattr(thread, "metadata", None)
-    )
-    return metadata if isinstance(metadata, dict) else {}
+async def _thread_metadata(thread_id: str) -> JsonObject:
+    return thread_metadata(await get_client().threads.get(thread_id))
 
 
 def _active_plan_mode(

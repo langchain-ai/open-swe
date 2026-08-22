@@ -15,8 +15,9 @@ The reviewer needs three things from a PR diff:
 import hashlib
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
@@ -226,23 +227,48 @@ async def fetch_pr_diff(
     """
     import httpx
 
-    from ..utils.github_http import github_client, github_request
+    from ..github.api import GITHUB_DIFF_ACCEPT, github_client, github_request, github_url
 
-    url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
+    url = github_url(f"/repos/{owner}/{repo}/pulls/{pr_number}")
     try:
-        async with github_client(token=token) as client:
-            response = await github_request(
-                client,
-                "GET",
-                url,
-                headers={"Accept": "application/vnd.github.diff"},
-                timeout=timeout,
-            )
+        async with github_client(token=token, accept=GITHUB_DIFF_ACCEPT) as client:
+            response = await github_request(client, "GET", url, timeout=timeout)
             response.raise_for_status()
     except httpx.HTTPError:
         logger.exception("Failed to fetch PR diff for %s/%s#%s", owner, repo, pr_number)
         return None
     return response.text
+
+
+async def resolve_diff_context(
+    *,
+    state: Mapping[str, Any] | None,
+    configurable: Mapping[str, Any] | None,
+    owner: str | None,
+    repo: str | None,
+    pr_number: int | None,
+    token: str | None,
+) -> tuple[dict[str, Any] | None, str]:
+    """The PR's ``(diff_line_set, diff_text)`` for this reviewer run.
+
+    Reviewer runs clear ``diff_line_set`` from the run config before the agent
+    starts (so ``add_finding`` trusts the agent's anchors), which means neither
+    the anchor check nor the publish-time retry can rely on it being there:
+    prefer injected state, then the config, then fetch the PR's unified diff and
+    recompute. ``(None, "")`` means the diff is simply unknown.
+    """
+    for source in (state, configurable):
+        if isinstance(source, Mapping):
+            line_set = source.get("diff_line_set")
+            if isinstance(line_set, dict):
+                diff_text = source.get("diff_text")
+                return line_set, diff_text if isinstance(diff_text, str) else ""
+    if not owner or not repo or not isinstance(pr_number, int) or not token:
+        return None, ""
+    diff_text = await fetch_pr_diff(owner=owner, repo=repo, pr_number=pr_number, token=token)
+    if diff_text is None:
+        return None, ""
+    return compute_diff_line_set(diff_text), diff_text
 
 
 async def fetch_pr_metadata(
@@ -262,9 +288,9 @@ async def fetch_pr_metadata(
     """
     import httpx
 
-    from ..utils.github_http import github_client, github_request
+    from ..github.api import github_client, github_request, github_url
 
-    url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
+    url = github_url(f"/repos/{owner}/{repo}/pulls/{pr_number}")
     try:
         async with github_client(token=token) as client:
             response = await github_request(client, "GET", url, timeout=timeout)

@@ -1,25 +1,21 @@
-import os
 import re
 from collections.abc import Mapping
 from typing import Any
 
 from langgraph.config import get_config
-from langgraph_sdk import get_client
 
-from ..utils.dashboard_links import dashboard_thread_url
-from ..utils.slack import (
-    append_slack_web_link_footer,
+from ..config import langgraph_client
+from ..slack.api import post_slack_top_level_message_with_ts
+from ..slack.format import append_slack_web_link_footer
+from ..slack.threads import (
     bind_slack_thread_id,
     delete_slack_thread_associations,
     get_active_slack_thread,
     lookup_slack_thread_run_mapping,
-    post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
+from ..utils.dashboard_links import dashboard_thread_url
 
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
 _MESSAGE_MAX_CHARS = 2800
 _CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 
@@ -96,7 +92,7 @@ async def slack_move_thread(
             "actual_chars": len(clean_message),
         }
 
-    client = get_client(url=LANGGRAPH_URL)
+    client = langgraph_client()
     active = await get_active_slack_thread(client, thread_id, configured_slack)
     if not active:
         return {"success": False, "error": "Current Slack location is unavailable"}

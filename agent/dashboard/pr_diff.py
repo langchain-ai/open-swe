@@ -15,7 +15,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import HTTPException
 
-_GITHUB_API = "https://api.github.com"
+from ..github.api import GITHUB_RAW_JSON_ACCEPT, github_request, github_url
 
 PR_DIFF_MAX_FILES = 50
 PR_DIFF_MAX_FILE_BYTES = 200_000
@@ -30,10 +30,12 @@ async def _fetch_file_at_ref(
     ref: str,
 ) -> str | None:
     async with semaphore:
-        response = await client.get(
-            f"{_GITHUB_API}/repos/{full_name}/contents/{quote(path, safe='/')}",
+        response = await github_request(
+            client,
+            "GET",
+            github_url(f"/repos/{full_name}/contents/{quote(path, safe='/')}"),
             params={"ref": ref},
-            headers={"Accept": "application/vnd.github.raw+json"},
+            headers={"Accept": GITHUB_RAW_JSON_ACCEPT},
         )
     if response.status_code == 404:
         return ""
@@ -58,7 +60,9 @@ async def build_pr_diff_files(
     for binary/oversized blobs, flagged via ``unrenderable``). ``client`` must
     already be configured with auth headers.
     """
-    pull_response = await client.get(f"{_GITHUB_API}/repos/{full_name}/pulls/{pr_number}")
+    pull_response = await github_request(
+        client, "GET", github_url(f"/repos/{full_name}/pulls/{pr_number}")
+    )
     if pull_response.status_code == 404:
         raise HTTPException(404, "pull request not found")
     if pull_response.status_code != 200:
@@ -69,8 +73,10 @@ async def build_pr_diff_files(
     if not isinstance(base_sha, str) or not isinstance(head_sha, str):
         raise HTTPException(502, "github API returned an unexpected pull request payload")
 
-    files_response = await client.get(
-        f"{_GITHUB_API}/repos/{full_name}/pulls/{pr_number}/files",
+    files_response = await github_request(
+        client,
+        "GET",
+        github_url(f"/repos/{full_name}/pulls/{pr_number}/files"),
         params={"per_page": 100},
     )
     if files_response.status_code != 200:
@@ -101,7 +107,9 @@ async def build_compare_diff_files(
     """
     base = quote(base_ref, safe="")
     head = quote(head_ref, safe="")
-    response = await client.get(f"{_GITHUB_API}/repos/{full_name}/compare/{base}...{head}")
+    response = await github_request(
+        client, "GET", github_url(f"/repos/{full_name}/compare/{base}...{head}")
+    )
     if response.status_code == 404:
         raise HTTPException(404, "branch not found on GitHub")
     if response.status_code != 200:

@@ -2,7 +2,7 @@ import { useState } from "react"
 import { ChevronDown, Download } from "lucide-react"
 
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
-import type { OutputIframeDisplay } from "@/features/agents/lib/types"
+import type { OutputIframeDisplay } from "@/lib/agentTypes"
 import { IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 

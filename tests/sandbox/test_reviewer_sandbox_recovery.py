@@ -11,37 +11,38 @@ import pytest
 from langchain_core.runnables import RunnableConfig
 from langsmith.sandbox import SandboxClientError
 
-from agent.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
-from agent.server import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-from agent.utils.sandbox import SandboxGoneError
-from agent.utils.sandbox_state import SandboxUnreachableError, set_sandbox_backend
+from agent.graphs.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
+from agent.runtime.sandbox import ensure_sandbox_for_thread
+from agent.sandboxes.providers import SandboxGoneError, SandboxUnreachableError
+from agent.sandboxes.registry import set_sandbox_backend
 
 
 @pytest.mark.asyncio
 async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
     thread_id = "thread-reviewer-dead-sandbox"
-    SANDBOX_BACKENDS.clear()
     replacement = MagicMock()
     replacement.id = "sandbox-replacement"
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.runtime.sandbox.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-deleted",
         ),
         patch(
-            "agent.server.create_sandbox",
+            "agent.runtime.sandbox.create_sandbox",
             new_callable=AsyncMock,
             side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
         ),
         patch(
-            "agent.server._create_sandbox_with_proxy",
+            "agent.runtime.sandbox._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=replacement,
         ) as create_replacement,
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
-        patch("agent.server.client.threads.update", new_callable=AsyncMock) as update_thread,
+        patch("agent.runtime.sandbox._configure_git_identity", new_callable=AsyncMock),
+        patch(
+            "agent.runtime.sandbox.client.threads.update", new_callable=AsyncMock
+        ) as update_thread,
     ):
         result = await ensure_sandbox_for_thread(
             thread_id,
@@ -63,13 +64,11 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
         "thread_id": thread_id,
         "metadata": {"sandbox_id": "sandbox-replacement"},
     }
-    SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
 async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() -> None:
     thread_id = "thread-reviewer-dead-cache"
-    SANDBOX_BACKENDS.clear()
     dead = MagicMock()
     dead.id = "sandbox-cached-dead"
     proxy = set_sandbox_backend(thread_id, dead)
@@ -78,22 +77,22 @@ async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() ->
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.runtime.sandbox.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-cached-dead",
         ),
         patch(
-            "agent.server._refresh_github_proxy",
+            "agent.runtime.sandbox.configure_proxy_for_sandbox",
             new_callable=AsyncMock,
             side_effect=SandboxClientError("sandbox is gone"),
         ),
         patch(
-            "agent.server._create_sandbox_with_proxy",
+            "agent.runtime.sandbox._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=replacement,
         ) as create_replacement,
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
-        patch("agent.server.client.threads.update", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox.client.threads.update", new_callable=AsyncMock),
     ):
         result = await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
 
@@ -101,32 +100,29 @@ async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() ->
     # Replaced in place, so handles already built around the proxy stay valid.
     assert result is proxy
     assert proxy.current is replacement
-    SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
 async def test_failed_replacement_still_raises_sandbox_unreachable() -> None:
     thread_id = "thread-reviewer-replacement-fails"
-    SANDBOX_BACKENDS.clear()
-
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.runtime.sandbox.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-deleted",
         ),
         patch(
-            "agent.server.create_sandbox",
+            "agent.runtime.sandbox.create_sandbox",
             new_callable=AsyncMock,
             side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
         ),
         patch(
-            "agent.server._create_sandbox_with_proxy",
+            "agent.runtime.sandbox._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             side_effect=RuntimeError("sandbox API outage"),
         ),
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
-        patch("agent.server.client.threads.update", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox.client.threads.update", new_callable=AsyncMock),
         pytest.raises(SandboxUnreachableError) as excinfo,
     ):
         await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
@@ -134,37 +130,33 @@ async def test_failed_replacement_still_raises_sandbox_unreachable() -> None:
     # Typed, so the reviewer still recognizes it and notifies on the PR.
     assert excinfo.value.sandbox_id == "sandbox-deleted"
     assert "sandbox API outage" in str(excinfo.value)
-    SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
 async def test_unreachable_sandbox_still_fails_by_default() -> None:
     thread_id = "thread-agent-dead-sandbox"
-    SANDBOX_BACKENDS.clear()
-
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.runtime.sandbox.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-deleted",
         ),
         patch(
-            "agent.server.create_sandbox",
+            "agent.runtime.sandbox.create_sandbox",
             new_callable=AsyncMock,
             side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
         ),
         patch(
-            "agent.server._create_sandbox_with_proxy",
+            "agent.runtime.sandbox._create_sandbox_with_proxy",
             new_callable=AsyncMock,
         ) as create_replacement,
-        patch("agent.server._configure_git_identity", new_callable=AsyncMock),
-        patch("agent.server.client.threads.update", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox._configure_git_identity", new_callable=AsyncMock),
+        patch("agent.runtime.sandbox.client.threads.update", new_callable=AsyncMock),
         pytest.raises(SandboxUnreachableError),
     ):
         await ensure_sandbox_for_thread(thread_id)
 
     create_replacement.assert_not_awaited()
-    SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
@@ -172,7 +164,7 @@ async def test_reviewer_opts_into_replacement() -> None:
     sandbox_backend = MagicMock()
 
     with patch(
-        "agent.reviewer.ensure_sandbox_for_thread",
+        "agent.graphs.reviewer.ensure_sandbox_for_thread",
         new_callable=AsyncMock,
         return_value=sandbox_backend,
     ) as ensure:
@@ -197,12 +189,12 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
 
     with (
         patch(
-            "agent.reviewer._ensure_reviewer_sandbox_for_thread",
+            "agent.graphs.reviewer._ensure_reviewer_sandbox_for_thread",
             new_callable=AsyncMock,
             side_effect=SandboxUnreachableError("thread-reviewer", "sandbox-deleted", "not found"),
         ),
         patch(
-            "agent.reviewer.post_sandbox_unreachable_notification",
+            "agent.graphs.reviewer.post_sandbox_unreachable_notification",
             new_callable=AsyncMock,
         ) as notify,
         pytest.raises(SandboxUnreachableError),
@@ -220,34 +212,33 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
 @pytest.mark.asyncio
 async def test_deleted_sandbox_is_replaced_without_opting_in() -> None:
     thread_id = "thread-agent-gone-sandbox"
-    SANDBOX_BACKENDS.clear()
     replacement = MagicMock()
     replacement.id = "sandbox-replacement"
     order: list[str] = []
 
     with (
         patch(
-            "agent.server.get_sandbox_id_from_metadata",
+            "agent.runtime.sandbox.get_sandbox_id_from_metadata",
             new_callable=AsyncMock,
             return_value="sandbox-deleted",
         ),
         patch(
-            "agent.server.create_sandbox",
+            "agent.runtime.sandbox.create_sandbox",
             new_callable=AsyncMock,
             side_effect=SandboxGoneError("Sandbox 'sandbox-deleted' not found"),
         ),
         patch(
-            "agent.server._create_sandbox_with_proxy",
+            "agent.runtime.sandbox._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=replacement,
         ) as create_replacement,
         patch(
-            "agent.server._configure_git_identity",
+            "agent.runtime.sandbox._configure_git_identity",
             new_callable=AsyncMock,
             side_effect=lambda *_: order.append("init"),
         ),
         patch(
-            "agent.server.client.threads.update",
+            "agent.runtime.sandbox.client.threads.update",
             new_callable=AsyncMock,
             side_effect=lambda **_: order.append("bind"),
         ) as update_thread,
@@ -262,4 +253,3 @@ async def test_deleted_sandbox_is_replaced_without_opting_in() -> None:
     }
     # The thread binds to the sandbox only once it is initialized.
     assert order == ["init", "bind"]
-    SANDBOX_BACKENDS.clear()

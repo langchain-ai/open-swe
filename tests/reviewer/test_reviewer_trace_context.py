@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.dashboard.team_credentials import LangSmithCredentials
 from agent.review.trace_context import (
     prepare_pr_trace_context,
     resolve_pr_trace,
 )
+from agent.settings.team_credentials import LangSmithCredentials
 
 
 def _run(

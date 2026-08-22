@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { api } from "@/lib/api"
+import { adminApi } from "@/features/admin/lib/api"
 import {
   buildProfileUpdate,
   useOptions,
@@ -38,7 +38,7 @@ export function PullRequestsSection() {
   const save = useSaveProfile()
   const teamSettings = useQuery({
     queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+    queryFn: adminApi.getTeamSettings,
   })
   const [error, setError] = useState<string | null>(null)
 

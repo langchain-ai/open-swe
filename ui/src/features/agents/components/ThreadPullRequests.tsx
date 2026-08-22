@@ -8,10 +8,7 @@ import {
   Wrench,
 } from "lucide-react"
 
-import type {
-  AgentPullRequest,
-  AgentPullRequestHealth,
-} from "@/features/agents/lib/types"
+import type { AgentPullRequest, AgentPullRequestHealth } from "@/lib/agentTypes"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"

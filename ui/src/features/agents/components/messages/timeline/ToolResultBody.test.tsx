@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ToolResultBody } from "./ToolResultBody"
 
-vi.mock("@/features/agents/components/chat/CodeBlock", () => ({
+vi.mock("@/components/markdown/CodeBlock", () => ({
   CodeBlock: ({ text, language }: { text: string; language?: string }) => (
     <code data-language={language}>{text}</code>
   ),

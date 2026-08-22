@@ -1,20 +1,18 @@
 import logging
-import os
 import shlex
 from importlib import resources
 from pathlib import Path
 
-from .utils.authorship import (
+from .config import allowed_github_orgs, default_prompt_path
+from .github.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,
     build_pr_attribution_footer,
 )
-from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
+from .github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_PROMPT_PATH = os.environ.get("DEFAULT_PROMPT_PATH")
 
 
 def _load_default_prompt() -> str:
@@ -22,9 +20,10 @@ def _load_default_prompt() -> str:
 
     Returns empty string if the file doesn't exist or can't be read.
     """
+    prompt_path = default_prompt_path()
     try:
-        if DEFAULT_PROMPT_PATH:
-            content = Path(DEFAULT_PROMPT_PATH).read_text().strip()
+        if prompt_path:
+            content = Path(prompt_path).read_text().strip()
         else:
             content = (
                 resources.files("agent.resources")
@@ -42,7 +41,7 @@ def _load_default_prompt() -> str:
     except Exception:
         logger.warning(
             "Failed to read default prompt from %s",
-            DEFAULT_PROMPT_PATH or "agent.resources/default_prompt.md",
+            prompt_path or "agent.resources/default_prompt.md",
         )
     return ""
 
@@ -159,7 +158,7 @@ SLACK_SOURCE_GUIDANCE = """This run was triggered from Slack.
 - `slack_thread_reply` is the canonical user-facing output. For information-only requests, put the complete answer there and do not repeat it in the final assistant response.
 - Keep every `slack_thread_reply` as concise as possible: default to one sentence with only the outcome/status and link, or one blocking question. Omit greetings, preambles, headings, recaps, implementation details, and redundant context; use bullets only when multiple items are essential.
 - Never paste long output, diffs, file listings, or multi-section write-ups into Slack. Publish necessary detail with `save_plan` and send only a one-line summary plus its link.
-- For follow-ups that require action, use `slack_add_reaction` instead of a perfunctory status reply, then follow up with the outcome. A reaction commits you to taking action: never react to a message you will handle with `no_op`. Never use `white_check_mark`, because teams use it to indicate that a pull request is approved.
+- For follow-ups that require action, use `slack_add_reaction` instead of a perfunctory status reply, then follow up with the outcome. A reaction commits you to taking action: never react to a message you are going to stay silent on. Never use `white_check_mark`, because teams use it to indicate that a pull request is approved.
 - When asked to move or continue the current thread in another Slack thread, use `slack_move_thread` with a concise, non-sensitive message to preserve history and detach the original thread.
 - When asked to break out work, use `slack_start_new_thread` with a headline-only title and self-contained instructions.
 - When a plan is ready, send its review link with `slack_thread_reply`, pass `options=["Approve & implement", "Request changes"]`, and invite manual feedback too; use these options rather than constructing custom Block Kit."""
@@ -273,11 +272,7 @@ Do not create, edit, delete, commit, push, or open/update pull requests in any r
 
 def _render_repository_scope_section() -> str:
     """Render the configured organization boundary for repository edits."""
-    orgs = dict.fromkeys(
-        org.strip().lower()
-        for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
-        if org.strip()
-    )
+    orgs = sorted(allowed_github_orgs())
     if not orgs:
         return ""
     allowed_orgs = ", ".join(f"`{org}`" for org in orgs)
@@ -549,6 +544,7 @@ def construct_system_prompt(
     source: str = "dashboard",
     slack_context: bool = False,
     sandbox_file_downloads: bool = False,
+    local_workspace: bool = False,
 ) -> str:
     default_prompt_section = _load_default_prompt()
     if default_repo and default_repo.get("owner") and default_repo.get("name"):
@@ -559,9 +555,11 @@ def construct_system_prompt(
         default_prompt_section += f"\n\n{repo_line}"
     prompt = SYSTEM_PROMPT_TEMPLATE.format(
         working_dir=working_dir,
+        # Substituted values are not re-scanned by str.format, so this section
+        # has to resolve its own placeholder before it becomes one.
         working_environment_section=(
-            DESKTOP_WORKING_ENV_SECTION if source == "desktop" else WORKING_ENV_SECTION
-        ),
+            DESKTOP_WORKING_ENV_SECTION if local_workspace else WORKING_ENV_SECTION
+        ).format(working_dir=working_dir),
         dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
         source_guidance=_render_source_guidance(source, slack_context),
         linear_project_id=linear_project_id or "<PROJECT_ID>",
@@ -578,7 +576,7 @@ def construct_system_prompt(
             _render_repository_scope_section() if source in {"dashboard", "slack"} else ""
         ),
         corridor_prompt_section=CORRIDOR_PROMPT if corridor_enabled else "",
-        commit_pr_section=COMMIT_PR_SECTION + (DESKTOP_PR_SECTION if source == "desktop" else ""),
+        commit_pr_section=COMMIT_PR_SECTION + (DESKTOP_PR_SECTION if local_workspace else ""),
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         environment_section=_render_environment_section(environment_name, environment_instructions),
         admin_environment_section=ADMIN_ENVIRONMENT_SECTION if admin_environments else "",

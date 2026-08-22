@@ -3,11 +3,15 @@ from typing import Any
 from .findings import (
     Finding,
     FindingInteraction,
-    _coerce_surface,
+    comment_ids_for_finding,
     list_findings,
+    mark_surfaced,
     replace_findings,
+    resolved_thread_ids_for_finding,
+    set_surface_state,
+    thread_ids_for_finding,
 )
-from .publish import parse_review_comment_marker
+from .publish import fetch_pr_review_threads, parse_review_comment_marker
 
 ReviewThread = dict[str, Any]
 ReviewThreadMatch = tuple[ReviewThread, int | None]
@@ -15,18 +19,6 @@ ReviewThreadMatch = tuple[ReviewThread, int | None]
 
 def _is_open_swe_bot_comment(comment: ReviewThread) -> bool:
     return comment.get("author") in {"open-swe", "open-swe[bot]"}
-
-
-def _int_list(value: Any) -> list[int]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, int)]
-
-
-def _str_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str) and item]
 
 
 def _human_replies_after_bot_comment(
@@ -98,18 +90,17 @@ def _find_review_threads_for_finding(
         if marker_match:
             return marker_match
 
-    github_thread_id = finding.get("github_review_thread_id")
-    if isinstance(github_thread_id, str) and github_thread_id:
-        review_thread = by_thread_id.get(github_thread_id)
+    thread_ids = thread_ids_for_finding(finding)
+    comment_ids = comment_ids_for_finding(finding)
+    if thread_ids:
+        review_thread = by_thread_id.get(thread_ids[0])
         if review_thread is not None:
-            comment_id = finding.get("github_review_comment_id")
-            return [(review_thread, comment_id if isinstance(comment_id, int) else None)]
+            return [(review_thread, comment_ids[0] if comment_ids else None)]
 
-    github_comment_id = finding.get("github_review_comment_id")
-    if isinstance(github_comment_id, int):
-        review_thread = by_comment_id.get(github_comment_id)
+    if comment_ids:
+        review_thread = by_comment_id.get(comment_ids[0])
         if review_thread is not None:
-            return [(review_thread, github_comment_id)]
+            return [(review_thread, comment_ids[0])]
     return []
 
 
@@ -119,37 +110,19 @@ def _sync_publication_identity(
     comment_id: int | None,
 ) -> bool:
     updated = False
-    if isinstance(comment_id, int) and not isinstance(finding.get("github_review_comment_id"), int):
-        finding["github_review_comment_id"] = comment_id
-        updated = True
-    comment_ids = _int_list(finding.get("github_review_comment_ids"))
+    comment_ids = comment_ids_for_finding(finding)
     if isinstance(comment_id, int) and comment_id not in comment_ids:
         comment_ids.append(comment_id)
         finding["github_review_comment_ids"] = comment_ids
         updated = True
 
-    github_thread_id = finding.get("github_review_thread_id")
     new_thread_id = review_thread.get("id")
-    if not isinstance(github_thread_id, str) or not github_thread_id:
-        if isinstance(new_thread_id, str) and new_thread_id:
-            finding["github_review_thread_id"] = new_thread_id
-            updated = True
-    thread_ids = _str_list(finding.get("github_review_thread_ids"))
+    thread_ids = thread_ids_for_finding(finding)
     if isinstance(new_thread_id, str) and new_thread_id and new_thread_id not in thread_ids:
         thread_ids.append(new_thread_id)
         finding["github_review_thread_ids"] = thread_ids
         updated = True
-    if isinstance(finding.get("id"), str):
-        surface = _coerce_surface(finding, str(finding["id"]))
-        if isinstance(comment_id, int):
-            surface["github_review_comment_id"] = comment_id
-        if isinstance(new_thread_id, str) and new_thread_id:
-            surface["github_review_thread_id"] = new_thread_id
-        if surface.get("state") in {None, "not_surfaced"}:
-            surface["state"] = "surfaced"
-        finding["surface"] = surface
-        updated = True
-    return updated
+    return mark_surfaced(finding) or updated
 
 
 def _is_terminal_thread(review_thread: ReviewThread) -> bool:
@@ -161,34 +134,25 @@ def _sync_thread_status(finding: Finding, matches: list[ReviewThreadMatch]) -> b
         return False
 
     updated = False
-    resolved_thread_ids = _str_list(finding.get("github_resolved_thread_ids"))
+    resolved_thread_ids = resolved_thread_ids_for_finding(finding)
     all_resolved = True
     for review_thread, _comment_id in matches:
         thread_id = review_thread.get("id")
         if review_thread.get("is_resolved") and isinstance(thread_id, str) and thread_id:
             if thread_id not in resolved_thread_ids:
                 resolved_thread_ids.append(thread_id)
+                finding["github_resolved_thread_ids"] = resolved_thread_ids
                 updated = True
         else:
             all_resolved = False
 
-    if resolved_thread_ids != _str_list(finding.get("github_resolved_thread_ids")):
-        finding["github_resolved_thread_ids"] = resolved_thread_ids
     if not all_resolved:
         return updated
 
     if finding.get("status") == "open":
         finding["status"] = "resolved"
         updated = True
-    if not finding.get("github_thread_resolved"):
-        finding["github_thread_resolved"] = True
-        updated = True
-    if isinstance(finding.get("id"), str):
-        surface = _coerce_surface(finding, str(finding["id"]))
-        surface["state"] = "resolved"
-        finding["surface"] = surface
-        updated = True
-    return updated
+    return set_surface_state(finding, "resolved") or updated
 
 
 def _sync_latest_human_reply(
@@ -197,11 +161,13 @@ def _sync_latest_human_reply(
     *,
     comment_id: int | None,
 ) -> bool:
-    github_comment_id = (
-        comment_id if isinstance(comment_id, int) else finding.get("github_review_comment_id")
-    )
-    if not isinstance(github_comment_id, int):
-        return False
+    if isinstance(comment_id, int):
+        github_comment_id = comment_id
+    else:
+        recorded = comment_ids_for_finding(finding)
+        if not recorded:
+            return False
+        github_comment_id = recorded[0]
 
     replies = _human_replies_after_bot_comment(review_thread, bot_comment_id=github_comment_id)
     if not replies:
@@ -279,3 +245,31 @@ async def reconcile_findings_with_review_threads(
     if updated:
         await replace_findings(reviewer_thread_id, findings)
     return findings
+
+
+async def sync_findings_with_github(
+    reviewer_thread_id: str,
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> list[Finding]:
+    """Fetch the PR's review threads and reconcile the tracked findings against them.
+
+    The publish flow and the finding-resolution tools both need the same
+    recovery: a finding whose comment was posted but whose ids were never
+    recorded is re-identified from the marker embedded in its GitHub comment.
+    """
+    findings = await list_findings(reviewer_thread_id)
+    if not findings:
+        return findings
+    review_threads = await fetch_pr_review_threads(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+    )
+    if not review_threads:
+        return findings
+    return await reconcile_findings_with_review_threads(reviewer_thread_id, review_threads)

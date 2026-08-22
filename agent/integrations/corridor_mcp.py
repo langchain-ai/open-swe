@@ -6,7 +6,6 @@ LangGraph server process. The sandbox never holds Corridor credentials.
 """
 
 import logging
-import os
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, cast
@@ -14,22 +13,15 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from langchain_core.tools import BaseTool
 
+from ..config import corridor_mcp_token, corridor_mcp_url
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_CORRIDOR_MCP_URL = "https://app.corridor.dev/api/mcp"
 _CORRIDOR_HOST = "app.corridor.dev"
 _CORRIDOR_PATH = "/api/mcp"
 _MCP_TIMEOUT_SECONDS = 30.0
-_TOKEN_ENV_NAMES = (
-    "CORRIDOR_API_TOKEN",
-    "CORRIDOR_MCP_TOKEN",
-    "CORRIDOR_TOKEN",
-)
 _TOKEN_QUERY_PARAMS = frozenset({"token", "api_key"})
-_URL_ENV_NAMES = (
-    "CORRIDOR_MCP_URL",
-    "CORRIDOR_MCP_SERVER_URL",
-)
 _ALLOWED_TOOL_NAMES = frozenset({"analyzePlan"})
 
 
@@ -37,14 +29,6 @@ _ALLOWED_TOOL_NAMES = frozenset({"analyzePlan"})
 class CorridorMCPConfig:
     url: str
     token: str
-
-
-def _first_env_value(names: tuple[str, ...]) -> str:
-    for name in names:
-        value = os.environ.get(name, "").strip()
-        if value:
-            return value
-    return ""
 
 
 def _extract_token_from_query(url: str) -> tuple[str, str]:
@@ -71,8 +55,8 @@ def _is_corridor_mcp_url(url: str) -> bool:
 
 def load_corridor_mcp_config() -> CorridorMCPConfig | None:
     """Return Corridor MCP config when the environment contains valid settings."""
-    url = _first_env_value(_URL_ENV_NAMES) or DEFAULT_CORRIDOR_MCP_URL
-    token = _first_env_value(_TOKEN_ENV_NAMES)
+    url = corridor_mcp_url() or DEFAULT_CORRIDOR_MCP_URL
+    token = corridor_mcp_token()
     query_token, url = _extract_token_from_query(url)
     if not token:
         token = query_token

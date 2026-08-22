@@ -5,24 +5,27 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from ..review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
+from ..github.token import get_github_token
+from ..review.diff import is_range_in_diff, resolve_diff_context
 from ..review.findings import (
+    CONFIDENCES,
     DEFAULT_FINDING_TITLE,
+    DIFF_SIDES,
     MAX_SUGGESTION_LINES,
-    Confidence,
-    DiffSide,
+    SEVERITIES,
     Finding,
     ReviewerThreadMissingError,
-    Severity,
     append_finding,
     clip_suggestion,
+    coerce_confidence,
+    coerce_severity,
+    coerce_side,
     get_thread_id_from_runtime,
     new_finding,
     normalize_finding_title,
     resolve_review_head_sha,
     thread_missing_tool_result,
 )
-from ..utils.github_token import get_github_token
 
 
 async def add_finding(
@@ -104,21 +107,30 @@ async def add_finding(
     if normalized_title == DEFAULT_FINDING_TITLE:
         return {"success": False, "error": "title must be a non-empty generated headline"}
 
-    if severity not in {"low", "medium", "high", "critical"}:
+    if severity not in SEVERITIES:
         return {"success": False, "error": f"Invalid severity: {severity}"}
-    if confidence not in {"low", "medium", "high"}:
+    if confidence not in CONFIDENCES:
         return {"success": False, "error": f"Invalid confidence: {confidence}"}
-    if side not in {"LEFT", "RIGHT"}:
+    if side not in DIFF_SIDES:
         return {"success": False, "error": f"Invalid side: {side}"}
     if start_line is not None and end_line is not None and end_line < start_line:
         return {"success": False, "error": "end_line must be >= start_line"}
 
     config = get_config()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
-    diff_line_set, diff_text = await _resolve_diff_context(state, configurable)
+    repo_config = configurable.get("repo") if isinstance(configurable, dict) else None
+    pr_number = configurable.get("pr_number") if isinstance(configurable, dict) else None
+    diff_line_set, diff_text = await resolve_diff_context(
+        state=state,
+        configurable=configurable if isinstance(configurable, dict) else None,
+        owner=repo_config.get("owner") if isinstance(repo_config, dict) else None,
+        repo=repo_config.get("name") if isinstance(repo_config, dict) else None,
+        pr_number=pr_number if isinstance(pr_number, int) else None,
+        token=get_github_token(config),
+    )
 
     in_diff = not isinstance(diff_line_set, dict) or is_range_in_diff(
-        diff_line_set, file, start_line, end_line, side=_cast_side(side)
+        diff_line_set, file, start_line, end_line, side=coerce_side(side)
     )
     if not in_diff:
         return {
@@ -146,8 +158,8 @@ async def add_finding(
         return thread_missing_tool_result(exc)
 
     finding: Finding = new_finding(
-        severity=_cast_severity(severity),
-        confidence=_cast_confidence(confidence),
+        severity=coerce_severity(severity),
+        confidence=coerce_confidence(confidence),
         category=category,
         file=file,
         start_line=start_line,
@@ -155,7 +167,7 @@ async def add_finding(
         description=description,
         sha=head_sha,
         title=normalized_title,
-        side=_cast_side(side),
+        side=coerce_side(side),
         suggestion=clipped_suggestion,
         diff_hunk=diff_hunk,
         in_diff=in_diff,
@@ -178,50 +190,3 @@ async def add_finding(
             "include `suggestion` for small, obvious fixes."
         )
     return result
-
-
-async def _resolve_diff_context(
-    state: dict[str, Any] | None,
-    configurable: dict[str, Any] | Any,
-) -> tuple[dict[str, Any] | None, str]:
-    if isinstance(state, dict):
-        state_line_set = state.get("diff_line_set")
-        state_diff_text = state.get("diff_text")
-        if isinstance(state_line_set, dict):
-            return state_line_set, state_diff_text if isinstance(state_diff_text, str) else ""
-    if isinstance(configurable, dict):
-        config_line_set = configurable.get("diff_line_set")
-        config_diff_text = configurable.get("diff_text")
-        if isinstance(config_line_set, dict):
-            return config_line_set, config_diff_text if isinstance(config_diff_text, str) else ""
-        repo_config = configurable.get("repo")
-        pr_number = configurable.get("pr_number")
-        token = get_github_token()
-        if (
-            isinstance(repo_config, dict)
-            and isinstance(repo_config.get("owner"), str)
-            and isinstance(repo_config.get("name"), str)
-            and isinstance(pr_number, int)
-            and token
-        ):
-            diff_text = await fetch_pr_diff(
-                owner=repo_config["owner"],
-                repo=repo_config["name"],
-                pr_number=pr_number,
-                token=token,
-            )
-            if diff_text is not None:
-                return compute_diff_line_set(diff_text), diff_text
-    return None, ""
-
-
-def _cast_severity(value: str) -> Severity:
-    return value  # type: ignore[return-value]
-
-
-def _cast_confidence(value: str) -> Confidence:
-    return value  # type: ignore[return-value]
-
-
-def _cast_side(value: str) -> DiffSide:
-    return value  # type: ignore[return-value]

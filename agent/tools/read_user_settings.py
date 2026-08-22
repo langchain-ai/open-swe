@@ -6,14 +6,14 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..dashboard.profiles import get_profile, normalize_profile_for_response
-from ..dashboard.user_credentials import (
+from ..settings.profiles import get_profile, normalize_profile_for_response
+from ..settings.user_credentials import (
     get_currents_status,
     get_langsmith_status,
     get_notion_status,
 )
-from ..dashboard.user_instructions import get_user_instructions
-from ..utils.thread_participants import resolve_thread_participant_logins
+from ..settings.user_instructions import get_user_instructions
+from ..threads.participants import resolve_thread_participant_logins
 
 _PROFILE_SETTING_KEYS = (
     "default_model",

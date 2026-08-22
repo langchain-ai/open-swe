@@ -1,6 +1,5 @@
-import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
-import type { AgentPullRequest, ImageChunk } from "@/features/agents/lib/types"
-import type { Skill } from "@/lib/api"
+import type { Skill, ThreadPrDiffFile } from "@/features/agents/lib/api"
+import type { AgentPullRequest, ImageChunk } from "@/lib/agentTypes"
 
 export type DesktopCommandId =
   | "new-thread"

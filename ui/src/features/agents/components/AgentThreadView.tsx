@@ -2,11 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { CircleAlert as CircleAlertIcon, FolderOpen } from "lucide-react"
 
-import type {
-  AgentThread,
-  ImageChunk,
-  Message,
-} from "@/features/agents/lib/types"
+import type { AgentThread, ImageChunk, Message } from "@/lib/agentTypes"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"

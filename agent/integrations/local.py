@@ -1,7 +1,16 @@
+"""Local shell "sandbox" provider: the host machine, with no isolation."""
+
+import asyncio
 import os
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from deepagents.backends import LocalShellBackend
+from deepagents.backends.protocol import SandboxBackendProtocol
+
+from ..config import local_sandbox_root_dir
+from ..sandboxes.providers import SandboxProvider, SandboxResources
 
 SANDBOX_GITCONFIG = ".gitconfig-sandbox"
 LOCAL_SHELL_ENV_EXCLUDE = {
@@ -32,32 +41,58 @@ def _scoped_git_config_env(root_dir: str) -> dict[str, str]:
     return {"GIT_CONFIG_GLOBAL": str(scoped)}
 
 
-def create_local_sandbox(sandbox_id: str | None = None):
-    """Create a local shell sandbox with no isolation.
+class LocalProvider(SandboxProvider):
+    """The host machine.
 
-    WARNING: This runs commands directly on the host machine with no sandboxing.
-    Only use for local development with human-in-the-loop enabled.
+    WARNING: runs commands directly on the host with no sandboxing. Only for
+    local development with human-in-the-loop enabled.
 
-    The root directory defaults to the current working directory and can be
-    overridden via the LOCAL_SANDBOX_ROOT_DIR environment variable. It is
-    created if it does not already exist.
-
-    Args:
-        sandbox_id: Ignored for local sandboxes; accepted for interface compatibility.
-
-    Returns:
-        LocalShellBackend instance implementing SandboxBackendProtocol.
+    There is nothing to connect to and nothing to boot: every call builds a
+    backend over the same root directory, which is why a local sandbox is never
+    gone and never snapshot-booted. The root defaults to the current working
+    directory, can be overridden with ``LOCAL_SANDBOX_ROOT_DIR``, and is created
+    if it does not exist.
     """
-    root_dir = os.getenv("LOCAL_SANDBOX_ROOT_DIR", os.getcwd())
-    os.makedirs(root_dir, exist_ok=True)
 
-    env = {key: value for key, value in os.environ.items() if key not in LOCAL_SHELL_ENV_EXCLUDE}
-    if not os.getenv("GIT_CONFIG_GLOBAL"):
-        env.update(_scoped_git_config_env(root_dir))
+    async def connect(self, sandbox_id: str) -> SandboxBackendProtocol:
+        return await asyncio.to_thread(self._backend)
 
-    return LocalShellBackend(
-        root_dir=root_dir,
-        virtual_mode=True,
-        inherit_env=False,
-        env=env,
-    )
+    async def create(
+        self,
+        *,
+        snapshot_id: str | None = None,
+        resources: SandboxResources | None = None,
+        create_params: Mapping[str, Any] | None = None,
+    ) -> SandboxBackendProtocol:
+        if snapshot_id is not None:
+            msg = f"The local sandbox is the host filesystem; it cannot boot {snapshot_id!r}"
+            raise ValueError(msg)
+        self._reject_sizing("Local", resources, create_params)
+        return await asyncio.to_thread(self._backend)
+
+    async def work_dir(self, backend: SandboxBackendProtocol) -> str | None:
+        if not isinstance(backend, LocalShellBackend):
+            return None
+        return str(backend.cwd)
+
+    @staticmethod
+    def _backend() -> LocalShellBackend:
+        root_dir = local_sandbox_root_dir() or os.getcwd()
+        os.makedirs(root_dir, exist_ok=True)
+
+        # The host's own process environment, minus the server's credentials:
+        # the agent runs shell commands here and must not be able to read them.
+        env = {
+            key: value for key, value in os.environ.items() if key not in LOCAL_SHELL_ENV_EXCLUDE
+        }
+        # A process-level git setting, not app config: when the host already
+        # scopes git's global file we leave it alone.
+        if not os.environ.get("GIT_CONFIG_GLOBAL"):
+            env.update(_scoped_git_config_env(root_dir))
+
+        return LocalShellBackend(
+            root_dir=root_dir,
+            virtual_mode=True,
+            inherit_env=False,
+            env=env,
+        )

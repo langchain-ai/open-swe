@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AutomationRuns } from "./AutomationRuns"
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/lib/agentTypes"
 import { useThreadsPage } from "@/features/agents/lib/queries"
 
 vi.mock("@tanstack/react-router", () => ({

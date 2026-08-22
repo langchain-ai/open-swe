@@ -1,15 +1,20 @@
-"""Linear webhook handler — moved out of common.py (behavior-identical).
+"""Linear webhook handling: repo resolution and the issue-triggered run."""
 
-Helpers and constants stay in common.py; they are accessed through the module
-object (``common.X``) so tests that monkeypatch them keep working.
-"""
-
+import logging
+from collections.abc import Sequence
 from typing import Any, cast
 
 import httpx
 from langchain_core.messages.content import create_text_block
 
-from agent.input_messages import (
+from ..config import (
+    agent_version_metadata,
+    default_repo_name,
+    default_repo_owner,
+)
+from ..dispatch import dispatch_agent_run
+from ..github.refs import extract_repo_from_text
+from ..input_messages import (
     PersonIdentity,
     RunInput,
     human_input,
@@ -17,8 +22,113 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from ..linear.api import fetch_issue_details, post_linear_trace_comment, react_to_linear_comment
+from ..linear.team_repo_map import LINEAR_TEAM_TO_REPO
+from ..settings.agent_overrides import resolve_agent_model_id, resolve_login_from_email_async
+from ..settings.options import default_vision_model_pair, model_supports_images
+from ..settings.team_settings import get_team_default_repo
+from ..threads.ids import linear_issue_thread_id
+from ..threads.ops import upsert_agent_thread_owner_metadata
+from ..utils.http import DEFAULT_HTTP_TIMEOUT
+from ..utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
+from .bot_messages import is_own_bot_message
+from .repo_config import profile_default_repo_for_email
 
-from . import common
+logger = logging.getLogger(__name__)
+
+
+def get_repo_config_from_team_mapping(
+    team_identifier: str, project_name: str = ""
+) -> dict[str, str]:
+    """Look up repository configuration from the ``LINEAR_TEAM_TO_REPO`` mapping."""
+    default_name = default_repo_name()
+    fallback = {"owner": default_repo_owner(), "name": default_name} if default_name else {}
+
+    if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
+        return fallback
+
+    config = LINEAR_TEAM_TO_REPO[team_identifier]
+
+    if "owner" in config and "name" in config:
+        return config
+
+    projects = config.get("projects")
+    if isinstance(projects, dict) and project_name:
+        project_config = projects.get(project_name)
+        if isinstance(project_config, dict):
+            return project_config
+
+    default = config.get("default")
+    if isinstance(default, dict):
+        return default
+
+    return fallback
+
+
+async def get_linear_repo_config(
+    comment_body: str, *, comment_user_email: str | None, issue: dict[str, Any]
+) -> dict[str, str] | None:
+    """Resolve the repository a Linear comment trigger operates on.
+
+    Priority:
+        1. A ``repo:owner/name`` token in the comment body.
+        2. The commenting user's dashboard ``default_repo``.
+        3. The ``LINEAR_TEAM_TO_REPO`` team/project mapping.
+        4. Team default repo.
+    """
+    repo_config = extract_repo_from_text(comment_body, default_owner=default_repo_owner())
+    if repo_config:
+        logger.debug(
+            "Using repo from comment body: %s/%s", repo_config["owner"], repo_config["name"]
+        )
+        return repo_config
+
+    profile_repo = await profile_default_repo_for_email(comment_user_email, channel="Linear")
+    if profile_repo:
+        return profile_repo
+
+    team = issue.get("team") or {}
+    project = issue.get("project") or {}
+    team_identifier = str(team.get("name") or "").strip()
+    project_key = str(project.get("name") or "").strip()
+    repo_config = get_repo_config_from_team_mapping(team_identifier, project_key)
+    logger.debug(
+        "Team/project lookup result",
+        extra={
+            "team_name": team_identifier,
+            "project_name": project_key,
+            "repo_config": repo_config,
+        },
+    )
+    if repo_config:
+        return repo_config
+
+    return await get_team_default_repo()
+
+
+def _recent_comments(comments: Sequence[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """Comments posted since the last agent response, oldest first, or None if there are none."""
+    if not comments:
+        return None
+
+    sorted_comments = sorted(
+        comments,
+        key=lambda comment: comment.get("createdAt", ""),
+        reverse=True,
+    )
+
+    recent_user_comments: list[dict[str, Any]] = []
+    for comment in sorted_comments:
+        body = comment.get("body", "")
+        if is_own_bot_message(body):
+            break  # Everything after this is from before the last agent response
+        recent_user_comments.append(comment)
+
+    if not recent_user_comments:
+        return None
+
+    recent_user_comments.reverse()
+    return recent_user_comments
 
 
 async def process_linear_issue(  # noqa: PLR0912, PLR0915
@@ -31,7 +141,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         repo_config: The repo configuration with owner and name.
     """
     issue_id = issue_data.get("id", "")
-    common.logger.info(
+    logger.info(
         "Processing Linear issue %s for repo %s/%s",
         issue_id,
         repo_config.get("owner"),
@@ -40,11 +150,11 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
     triggering_comment_id = issue_data.get("triggering_comment_id", "")
     if triggering_comment_id:
-        await common.react_to_linear_comment(triggering_comment_id, "👀")
+        await react_to_linear_comment(triggering_comment_id, "👀")
 
-    thread_id = common.generate_thread_id_from_issue(issue_id)
+    thread_id = linear_issue_thread_id(issue_id)
 
-    full_issue = await common.fetch_linear_issue_details(issue_id)
+    full_issue = await fetch_issue_details(issue_id)
     if not full_issue:
         full_issue = issue_data
 
@@ -65,15 +175,15 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             user_email = assignee.get("email")
             user_name = user_name or assignee.get("name")
 
-    common.logger.info("User email for issue %s: %s", issue_id, user_email)
+    logger.info("User email for issue %s: %s", issue_id, user_email)
 
     title = full_issue.get("title", "No title")
     description = full_issue.get("description") or "No description"
     image_urls: list[str] = []
-    description_image_urls = common.extract_image_urls(description)
+    description_image_urls = extract_image_urls(description)
     if description_image_urls:
         image_urls.extend(description_image_urls)
-        common.logger.debug(
+        logger.debug(
             "Found %d image URL(s) in issue description",
             len(description_image_urls),
         )
@@ -83,16 +193,6 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     image_urls_by_comment_id: dict[str, list[str]] = {}
     triggering_comment = issue_data.get("triggering_comment", "")
     triggering_comment_id = issue_data.get("triggering_comment_id", "")
-
-    bot_message_prefixes = (
-        "🔐 **GitHub Authentication Required**",
-        "✅ **Pull Request Created**",
-        "✅ **Pull Request Updated**",
-        "**Pull Request Created**",
-        "**Pull Request Updated**",
-        "🤖 **Agent Response**",
-        "❌ **Agent Error**",
-    )
 
     comment_ids: set[str] = set()
     comment_id_to_index: dict[str, int] = {}
@@ -109,39 +209,39 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             trigger_index = comment_id_to_index.get(triggering_comment_id)
         if trigger_index is not None:
             relevant_comments = comments[trigger_index:]
-            common.logger.debug(
+            logger.debug(
                 "Using triggering comment index %d to build relevant comments",
                 trigger_index,
             )
         else:
-            relevant_comments = common.get_recent_comments(comments, bot_message_prefixes)
+            relevant_comments = _recent_comments(comments)
 
         if relevant_comments:
             for comment in relevant_comments:
                 user = comment.get("user") or {}
                 author = user.get("name", "User")
                 body = comment.get("body", "")
-                body_image_urls = common.extract_image_urls(body)
+                body_image_urls = extract_image_urls(body)
                 if body_image_urls:
                     image_urls.extend(body_image_urls)
                     image_urls_by_comment_id[str(comment.get("id", ""))] = body_image_urls
-                    common.logger.debug(
+                    logger.debug(
                         "Found %d image URL(s) in comment by %s",
                         len(body_image_urls),
                         author,
                     )
-                if any(body.startswith(prefix) for prefix in bot_message_prefixes):
+                if is_own_bot_message(body):
                     continue
                 included_comments.append(comment)
 
     if triggering_comment and triggering_comment_id not in comment_ids:
         trigger_author = comment_author.get("name", "Unknown")
         trigger_body = triggering_comment
-        trigger_image_urls = common.extract_image_urls(trigger_body)
+        trigger_image_urls = extract_image_urls(trigger_body)
         if trigger_image_urls:
             image_urls.extend(trigger_image_urls)
             image_urls_by_comment_id[str(triggering_comment_id)] = trigger_image_urls
-            common.logger.debug(
+            logger.debug(
                 "Found %d image URL(s) in triggering comment by %s",
                 len(trigger_image_urls),
                 trigger_author,
@@ -153,7 +253,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                 "user": comment_author,
             }
         )
-        common.logger.debug(
+        logger.debug(
             "Appended triggering comment %s not present in issue comments list",
             triggering_comment_id or "<missing-id>",
         )
@@ -189,15 +289,15 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     # Resolve the GitHub login from the Linear email via the same user-mapping
     # store Slack uses, so PRs open *as the triggering user* and the thread is
     # tagged for the dashboard.
-    mapped_login = await common.resolve_login_from_email_async(user_email) if user_email else None
+    mapped_login = await resolve_login_from_email_async(user_email) if user_email else None
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
-        image_urls = common.dedupe_urls(image_urls)
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login)
-        if not common.model_supports_images(resolved_model_id):
-            fallback_model_id, fallback_effort = common.default_vision_model_pair()
-            common.logger.info(
+        image_urls = dedupe_urls(image_urls)
+        resolved_model_id = await resolve_agent_model_id(mapped_login)
+        if not model_supports_images(resolved_model_id):
+            fallback_model_id, fallback_effort = default_vision_model_pair()
+            logger.info(
                 "Using vision fallback model %s for %d Linear image(s); configured model %s "
                 "does not support images",
                 fallback_model_id,
@@ -206,20 +306,20 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             )
             resolved_model_id = fallback_model_id
             image_model_override = (fallback_model_id, fallback_effort)
-        common.logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
-        common.logger.debug("Image URLs: %s", image_urls)
+        logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
+        logger.debug("Image URLs: %s", image_urls)
 
-        async with httpx.AsyncClient(timeout=common.DEFAULT_HTTP_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
             for image_url in image_urls:
-                image_block = await common.fetch_image_block(image_url, client)
+                image_block = await fetch_image_block(image_url, client)
                 if image_block:
                     image_blocks_by_url[image_url] = cast(dict[str, Any], image_block)
         description_blocks.extend(
             image_blocks_by_url[url]
-            for url in common.dedupe_urls(description_image_urls)
+            for url in dedupe_urls(description_image_urls)
             if url in image_blocks_by_url
         )
-        common.logger.info("Built %d description content block(s)", len(description_blocks))
+        logger.info("Built %d description content block(s)", len(description_blocks))
 
     linear_project_id = ""
     linear_issue_number = ""
@@ -248,7 +348,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
 
-    await common.upsert_agent_thread_owner_metadata(
+    await upsert_agent_thread_owner_metadata(
         thread_id,
         source="linear",
         repo_config=repo_config,
@@ -296,9 +396,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         body = str(comment.get("body", ""))
         comment_image_blocks = [
             image_blocks_by_url[url]
-            for url in common.dedupe_urls(
-                image_urls_by_comment_id.get(str(comment.get("id", "")), [])
-            )
+            for url in dedupe_urls(image_urls_by_comment_id.get(str(comment.get("id", "")), []))
             if url in image_blocks_by_url
         ]
         blocks: str | list[dict[str, Any]] = body
@@ -319,17 +417,17 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             )
         )
     run_input: RunInput = {"messages": run_messages}
-    run = await common.dispatch_agent_run(
+    run = await dispatch_agent_run(
         thread_id,
         None,
         configurable,
         source="linear",
         input=run_input,
-        metadata=common._AGENT_VERSION_METADATA,
+        metadata=agent_version_metadata(),
     )
-    common.logger.info(
+    logger.info(
         "LangGraph run dispatched for thread %s (run=%s)",
         thread_id,
         run.get("run_id") if isinstance(run, dict) else None,
     )
-    await common.post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)
+    await post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)

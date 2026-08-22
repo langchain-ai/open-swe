@@ -4,7 +4,7 @@ from typing import TypedDict
 
 import pytest
 
-from agent.webhooks import common as webhook_common
+from agent.webhooks import slack as slack_webhooks
 
 
 class _Reply(TypedDict):
@@ -31,10 +31,10 @@ def test_account_link_prompt_posts_generic_token_free_link(
         calls["reply"] = {"channel_id": channel_id, "thread_ts": thread_ts, "text": text}
         return True
 
-    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", fake_reply)
+    monkeypatch.setattr(slack_webhooks, "post_slack_thread_reply", fake_reply)
 
     asyncio.run(
-        webhook_common._post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="unlinked")
+        slack_webhooks.post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="unlinked")
     )
     reply = calls["reply"]
     assert reply["channel_id"] == "C1"
@@ -54,10 +54,10 @@ def test_account_link_prompt_revoked_wording(monkeypatch: pytest.MonkeyPatch) ->
         calls["text"] = text
         return True
 
-    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", fake_reply)
+    monkeypatch.setattr(slack_webhooks, "post_slack_thread_reply", fake_reply)
 
     asyncio.run(
-        webhook_common._post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="revoked")
+        slack_webhooks.post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="revoked")
     )
     text = calls["text"]
     assert "no longer valid" in text
@@ -77,9 +77,9 @@ def test_account_link_prompt_skips_when_dashboard_url_unset(
         posted = True
         return True
 
-    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", fake_reply)
+    monkeypatch.setattr(slack_webhooks, "post_slack_thread_reply", fake_reply)
 
     asyncio.run(
-        webhook_common._post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="unlinked")
+        slack_webhooks.post_account_link_prompt("C1", "1.1", "U1", "d@x.com", reason="unlinked")
     )
     assert posted is False

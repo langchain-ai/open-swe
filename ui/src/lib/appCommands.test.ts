@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 import type { DesktopLocalThreadSummary } from "@/desktop"
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/lib/agentTypes"
 import type { AppCommand } from "./appCommands"
 import { buildPaletteResults } from "@/components/AppCommandPalette"
 import { createNewThreadCommand, resolveAppCommands } from "./appCommands"

@@ -2,11 +2,11 @@ import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 
-import type { ReviewerEvalStatus } from "@/lib/api"
+import type { ReviewerEvalStatus } from "@/features/admin/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
+import { adminApi } from "@/features/admin/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
@@ -43,7 +43,7 @@ function ReviewerEvalPage() {
 function useReviewerEvalStatus() {
   return useQuery({
     queryKey: ["reviewerEval"],
-    queryFn: api.getReviewerEval,
+    queryFn: adminApi.getReviewerEval,
     refetchInterval: (query) =>
       query.state.data?.status === "running" ? 5000 : false,
   })

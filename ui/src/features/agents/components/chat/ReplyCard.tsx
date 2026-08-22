@@ -1,9 +1,9 @@
 import { memo } from "react"
 import { MessageCircle } from "lucide-react"
 import { SlackMrkdwn } from "../messages/SlackMrkdwn"
-import { Markdown } from "./Markdown"
 import type { ReactNode } from "react"
-import type { ToolExecutionChunk } from "@/features/agents/lib/types"
+import type { ToolExecutionChunk } from "@/lib/agentTypes"
+import { Markdown } from "@/components/markdown/Markdown"
 
 interface ReplyCardProps {
   chunk: ToolExecutionChunk

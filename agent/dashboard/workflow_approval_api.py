@@ -4,14 +4,15 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from .oauth import require_same_origin_for_mutations, require_session
-from .plan_api import _dispatch_followup, _thread_metadata
-from .thread_api import _thread_is_readable, _user_owns_thread
-from .workflow_approval import (
+from ..settings.workflow_approval import (
     decide_workflow_push_approval,
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from .authz import thread_is_readable, user_owns_thread
+from .oauth import require_same_origin_for_mutations, require_session
+from .plan_api import thread_metadata_or_404
+from .threads.runs import dispatch_thread_followup
 
 workflow_approval_router = APIRouter(
     prefix="/dashboard/api/workflow-approval",
@@ -25,10 +26,10 @@ _SESSION_DEP = Depends(require_session)
 async def list_workflow_push_approvals(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _thread_is_readable(metadata):
+    metadata = await thread_metadata_or_404(thread_id)
+    if not thread_is_readable(metadata):
         raise HTTPException(404, "thread not found")
-    is_owner = _user_owns_thread(metadata, session["sub"], session.get("email"))
+    is_owner = user_owns_thread(metadata, session["sub"], session.get("email"))
     approvals = await get_workflow_push_approvals(thread_id)
     return {
         "threadId": thread_id,
@@ -41,15 +42,15 @@ async def list_workflow_push_approvals(
 async def approve_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _user_owns_thread(metadata, session["sub"], session.get("email")):
+    metadata = await thread_metadata_or_404(thread_id)
+    if not user_owns_thread(metadata, session["sub"], session.get("email")):
         raise HTTPException(403, "only the thread owner can approve workflow pushes")
     record = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=True, actor=session["sub"]
     )
     if record is None:
         raise HTTPException(404, "workflow push approval not found")
-    await _dispatch_followup(
+    await dispatch_thread_followup(
         thread_id,
         metadata,
         "The workflow-file push approval was approved. Retry the blocked git push now; do not alter workflow files before pushing.",
@@ -62,8 +63,8 @@ async def approve_workflow_push(
 async def reject_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    metadata = await _thread_metadata(thread_id)
-    if not _user_owns_thread(metadata, session["sub"], session.get("email")):
+    metadata = await thread_metadata_or_404(thread_id)
+    if not user_owns_thread(metadata, session["sub"], session.get("email")):
         raise HTTPException(403, "only the thread owner can reject workflow pushes")
     record = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=False, actor=session["sub"]

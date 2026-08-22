@@ -8,22 +8,12 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, AnyMessage
 from langchain_openai import ChatOpenAI
 
+from ..models.factory import unwrap_chat_model
+
 
 def _is_stateless_chat_openai(model: object) -> bool:
-    seen: set[int] = set()
-    current = model
-    for _ in range(10):
-        if isinstance(current, ChatOpenAI):
-            return current.store is False
-        current_id = id(current)
-        if current_id in seen:
-            return False
-        seen.add(current_id)
-        bound = getattr(current, "bound", None)
-        if bound is None or bound is current:
-            return False
-        current = bound
-    return False
+    chat_model = unwrap_chat_model(model, ChatOpenAI)
+    return chat_model is not None and chat_model.store is False
 
 
 def _sanitize_messages(messages: list[AnyMessage]) -> list[AnyMessage]:

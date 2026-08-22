@@ -7,8 +7,11 @@ import httpx
 import pytest
 from langgraph_sdk.errors import ConflictError
 
-from agent import baby_sit, scheduler
-from agent.utils.slack import GitHubPrRef
+from agent import baby_sit
+from agent import store as agent_store
+from agent.github.refs import GitHubPrRef
+from agent.scheduling import tasks
+from agent.utils import source_channel
 
 
 class _Store:
@@ -81,10 +84,15 @@ class _Client:
         self.threads = _Threads(active_threads if active_threads is not None else set())
 
 
+def _use_client(monkeypatch: pytest.MonkeyPatch, client: _Client) -> None:
+    monkeypatch.setattr(baby_sit, "in_process_langgraph_client", lambda: client)
+    monkeypatch.setattr(agent_store, "store_client", lambda: client)
+
+
 @pytest.fixture
 def watch_client(monkeypatch: pytest.MonkeyPatch) -> _Client:
     client = _Client()
-    monkeypatch.setattr(baby_sit, "_client", lambda: client)
+    _use_client(monkeypatch, client)
     return client
 
 
@@ -121,7 +129,12 @@ async def test_watch_lifecycle_creates_and_deletes_ten_minute_cron(
     assert watch_client.crons.created[0]["schedule"] == "*/10 * * * *"
     assert watch_client.crons.created[0]["input"] == {
         "task": "baby_sit",
-        "watch_key": "acme/repo#7",
+        "payload": {"watch_key": "acme/repo#7"},
+    }
+    assert watch_client.crons.created[0]["config"] is None
+    assert watch_client.crons.created[0]["metadata"] == {
+        "kind": "baby_sit",
+        "key": "acme/repo#7",
     }
 
     assert await baby_sit.stop_watch(watch["key"]) is True
@@ -183,7 +196,7 @@ async def test_failure_dispatch_is_deduplicated_until_retry_is_recorded(
     assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
     assert dispatch.await_count == 1
 
-    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", AsyncMock(return_value=True))
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", AsyncMock(return_value=True))
     await baby_sit.record_retry(
         "acme/repo#7",
         thread_id="thread-1",
@@ -200,7 +213,7 @@ async def test_concurrent_failure_evaluations_dispatch_once(
     shared_watch_clients: tuple[_Client, _Client], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     first_client, second_client = shared_watch_clients
-    monkeypatch.setattr(baby_sit, "_client", lambda: first_client)
+    _use_client(monkeypatch, first_client)
     await _start_watch(first_client)
     monkeypatch.setattr(baby_sit, "get_github_app_installation_token", AsyncMock(return_value="t"))
     monkeypatch.setattr(
@@ -231,13 +244,13 @@ async def test_concurrent_failure_evaluations_dispatch_once(
 
     first = asyncio.create_task(baby_sit.evaluate_watch("acme/repo#7"))
     await dispatch_started.wait()
-    monkeypatch.setattr(baby_sit, "_client", lambda: second_client)
+    _use_client(monkeypatch, second_client)
     assert await baby_sit.evaluate_watch("acme/repo#7") == "busy"
     release_dispatch.set()
 
     assert await first == "dispatched"
     dispatch.assert_awaited_once()
-    monkeypatch.setattr(baby_sit, "_client", lambda: first_client)
+    _use_client(monkeypatch, first_client)
     assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
 
 
@@ -262,7 +275,7 @@ async def test_success_waits_for_stable_check_set_before_notifying(
     )
     monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
     notify = AsyncMock(return_value=True)
-    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", notify)
 
     now = datetime(2026, 1, 1, tzinfo=UTC)
     monkeypatch.setattr(baby_sit, "_now", lambda: now)
@@ -309,7 +322,7 @@ async def test_record_retry_caps_attempts_and_deduplicates_flake_alert(
 ) -> None:
     await _start_watch(watch_client)
     notify = AsyncMock(return_value=True)
-    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", notify)
 
     for expected in range(1, 4):
         result = await baby_sit.record_retry(
@@ -338,7 +351,7 @@ async def test_new_head_resets_retry_budget(
     watch_client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _start_watch(watch_client)
-    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", AsyncMock(return_value=True))
+    monkeypatch.setattr(source_channel, "post_slack_thread_reply", AsyncMock(return_value=True))
     for _ in range(3):
         await baby_sit.record_retry(
             "acme/repo#7",
@@ -403,12 +416,9 @@ async def test_failed_webhook_matches_active_head_and_deduplicates_delivery(
 
 async def test_scheduler_routes_baby_sit_task(monkeypatch: pytest.MonkeyPatch) -> None:
     evaluate = AsyncMock(return_value="pending")
-    monkeypatch.setattr(scheduler, "evaluate_watch", evaluate)
+    monkeypatch.setattr(tasks, "evaluate_watch", evaluate)
 
-    result = await scheduler._launch(
-        {"task": "baby_sit", "watch_key": "acme/repo#7"},
-        {"configurable": {}},
-    )
+    result = await tasks.run_scheduler_task("baby_sit", {"watch_key": "acme/repo#7"})
 
-    assert result == {"result": {"status": "pending"}}
+    assert result == {"status": "pending"}
     evaluate.assert_awaited_once_with("acme/repo#7")

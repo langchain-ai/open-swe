@@ -1,4 +1,4 @@
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/lib/agentTypes"
 
 export const NOTIFICATIONS_PREF_KEY = "open-swe-notifications-enabled"
 

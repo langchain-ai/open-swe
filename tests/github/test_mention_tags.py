@@ -1,24 +1,8 @@
 """Mention-handle matching, which keeps parallel deployments from double-firing."""
 
-import importlib
-
 import pytest
 
-from agent.utils import github_comments
-
-
-@pytest.fixture
-def reload_tags(monkeypatch):
-    def _reload(value: str | None):
-        if value is None:
-            monkeypatch.delenv("OPEN_SWE_MENTION_TAGS", raising=False)
-        else:
-            monkeypatch.setenv("OPEN_SWE_MENTION_TAGS", value)
-        return importlib.reload(github_comments)
-
-    yield _reload
-    monkeypatch.delenv("OPEN_SWE_MENTION_TAGS", raising=False)
-    importlib.reload(github_comments)
+from agent.github import comments as github_comments
 
 
 @pytest.mark.parametrize(
@@ -50,13 +34,13 @@ def test_ignores_longer_handles_and_empty(body: str | None) -> None:
     assert not github_comments.mentions_open_swe(body)
 
 
-def test_env_overrides_handles(reload_tags) -> None:
-    module = reload_tags("@openswe-preview")
-    assert module.OPEN_SWE_TAGS == ("@openswe-preview",)
-    assert module.mentions_open_swe("@openswe-preview ship it")
-    assert not module.mentions_open_swe("@openswe ship it")
+def test_env_overrides_handles(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPEN_SWE_MENTION_TAGS", "@openswe-preview")
+    assert github_comments.open_swe_tags() == ("@openswe-preview",)
+    assert github_comments.mentions_open_swe("@openswe-preview ship it")
+    assert not github_comments.mentions_open_swe("@openswe ship it")
 
 
-def test_blank_env_falls_back_to_defaults(reload_tags) -> None:
-    module = reload_tags("  ,  ")
-    assert module.OPEN_SWE_TAGS == module._DEFAULT_OPEN_SWE_TAGS
+def test_blank_env_falls_back_to_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPEN_SWE_MENTION_TAGS", "  ,  ")
+    assert github_comments.open_swe_tags() == github_comments._DEFAULT_OPEN_SWE_TAGS

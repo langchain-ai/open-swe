@@ -2,18 +2,18 @@
 
 import hashlib
 import logging
-import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any, TypedDict, cast
 
-from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
 
+from .config import in_process_langgraph_client
 from .dispatch import dispatch_agent_run
-from .utils.github_app import get_github_app_installation_token
-from .utils.github_ci import (
+from .github.app import get_github_app_installation_token
+from .github.ci import (
     FAILING_CONCLUSIONS,
     branch_from_check_payload,
     fetch_pr,
@@ -22,14 +22,16 @@ from .utils.github_ci import (
     list_check_runs,
     list_commit_statuses,
 )
-from .utils.github_comments import post_github_comment
-from .utils.linear import comment_on_linear_issue
-from .utils.slack import GitHubPrRef, post_slack_thread_reply
+from .github.refs import GitHubPrRef
+from .scheduling.crons import delete_cron, ensure_scheduler_cron
+from .store import delete_value, get_value, now_iso, put_value, search_all_values
+from .threads.ids import baby_sit_lock_thread_id
+from .utils.source_channel import notify_source_channel, source_context_from_watch
 
 logger = logging.getLogger(__name__)
 
 WATCH_NAMESPACE = ["baby_sit_watches"]
-WATCH_CRON_KIND = "baby_sit_watch"
+WATCH_TASK = "baby_sit"
 WATCH_SCHEDULE = "*/10 * * * *"
 MAX_RETRIES_PER_HEAD = 3
 MAX_DISPATCH_KEYS = 30
@@ -42,8 +44,8 @@ WATCH_LOCK_TTL_MINUTES = 5
 
 @asynccontextmanager
 async def _watch_lock(key: str) -> AsyncIterator[bool]:
-    client = _client()
-    lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:baby-sit-lock:{key}"))
+    client = in_process_langgraph_client()
+    lock_id = baby_sit_lock_thread_id(key)
     try:
         await client.threads.create(
             thread_id=lock_id, if_exists="raise", ttl=WATCH_LOCK_TTL_MINUTES
@@ -62,6 +64,10 @@ async def _watch_lock(key: str) -> AsyncIterator[bool]:
             await client.threads.delete(lock_id)
         except Exception:
             logger.warning("Failed to release baby-sit lock for %s", key, exc_info=True)
+
+
+class BabySitPayload(TypedDict):
+    watch_key: str
 
 
 class BabySitWatch(TypedDict):
@@ -89,10 +95,6 @@ class BabySitWatch(TypedDict):
     updated_at: str
 
 
-def _client():
-    return get_client()
-
-
 def watch_key(owner: str, repo: str, pr_number: int) -> str:
     return f"{owner.strip().lower()}/{repo.strip().lower()}#{pr_number}"
 
@@ -101,25 +103,14 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _now_iso() -> str:
-    return _now().isoformat()
-
-
-def _value(item: object) -> BabySitWatch | None:
-    if isinstance(item, dict):
-        value = item.get("value")
-    else:
-        value = getattr(item, "value", None)
-    return cast(BabySitWatch, value) if isinstance(value, dict) else None
-
-
 async def get_watch(key: str) -> BabySitWatch | None:
-    return _value(await _client().store.get_item(WATCH_NAMESPACE, key))
+    value = await get_value(WATCH_NAMESPACE, key)
+    return cast(BabySitWatch, value) if value is not None else None
 
 
 async def _put_watch(watch: BabySitWatch) -> BabySitWatch:
-    updated: BabySitWatch = {**watch, "updated_at": _now_iso()}
-    await _client().store.put_item(WATCH_NAMESPACE, updated["key"], updated)
+    updated: BabySitWatch = {**watch, "updated_at": now_iso()}
+    await put_value(WATCH_NAMESPACE, updated["key"], updated)
     return updated
 
 
@@ -131,60 +122,19 @@ async def list_active_watches(
         filter["owner"] = owner.strip().lower()
     if repo:
         filter["repo"] = repo.strip().lower()
-
-    watches: list[BabySitWatch] = []
-    offset = 0
-    while True:
-        result = await _client().store.search_items(
-            WATCH_NAMESPACE,
-            filter=filter,
-            limit=100,
-            offset=offset,
-        )
-        items = result.get("items") if isinstance(result, dict) else getattr(result, "items", [])
-        if not items:
-            break
-        watches.extend(value for item in items if (value := _value(item)) is not None)
-        if len(items) < 100:
-            break
-        offset += len(items)
-    return watches
-
-
-async def _create_watch_cron(key: str) -> str:
-    cron = await _client().crons.create(
-        "scheduler",
-        schedule=WATCH_SCHEDULE,
-        input={"task": "baby_sit", "watch_key": key},
-        config={"configurable": {"task": "baby_sit", "watch_key": key}},
-        metadata={"kind": WATCH_CRON_KIND, "watch_key": key},
-        timezone="UTC",
-    )
-    cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
-    if not isinstance(cron_id, str) or not cron_id:
-        raise RuntimeError("baby-sit cron creation did not return a cron_id")
-    return cron_id
+    values = await search_all_values(WATCH_NAMESPACE, filter=filter)
+    return [cast(BabySitWatch, value) for value in values]
 
 
 async def _ensure_watch_cron(key: str) -> str:
-    crons = await _client().crons.search(
-        assistant_id="scheduler",
-        metadata={"kind": WATCH_CRON_KIND, "watch_key": key},
-        limit=10,
+    payload: BabySitPayload = {"watch_key": key}
+    return await ensure_scheduler_cron(
+        in_process_langgraph_client(),
+        kind=WATCH_TASK,
+        key=key,
+        schedule=WATCH_SCHEDULE,
+        payload=payload,
     )
-    cron_ids = [
-        cron_id
-        for cron in crons or []
-        if isinstance(cron, dict) and isinstance((cron_id := cron.get("cron_id")), str) and cron_id
-    ]
-    if cron_ids:
-        for duplicate in cron_ids[1:]:
-            try:
-                await _client().crons.delete(duplicate)
-            except Exception:
-                logger.warning("Failed to delete duplicate baby-sit cron %s", duplicate)
-        return cron_ids[0]
-    return await _create_watch_cron(key)
 
 
 async def start_watch(
@@ -202,7 +152,7 @@ async def start_watch(
     if existing and existing.get("active") and existing.get("thread_id") != thread_id:
         raise ValueError("This pull request is already monitored from another agent thread")
 
-    now = _now_iso()
+    now = now_iso()
     same_head = existing is not None and existing.get("head_sha") == head_sha
     watch: BabySitWatch = {
         "key": key,
@@ -237,12 +187,10 @@ async def start_watch(
     except Exception:
         if existing is None:
             cron_id = watch.get("cron_id")
-            if isinstance(cron_id, str) and cron_id:
-                try:
-                    await _client().crons.delete(cron_id)
-                except Exception:
-                    logger.warning("Failed to roll back baby-sit cron %s", cron_id)
-            await _client().store.delete_item(WATCH_NAMESPACE, key)
+            await delete_cron(
+                in_process_langgraph_client(), cron_id if isinstance(cron_id, str) else None
+            )
+            await delete_value(WATCH_NAMESPACE, key)
         raise
 
 
@@ -251,15 +199,15 @@ async def stop_watch(key: str) -> bool:
     if not watch:
         return False
     cron_id = watch.get("cron_id")
-    if isinstance(cron_id, str) and cron_id:
-        try:
-            await _client().crons.delete(cron_id)
-        except Exception:
-            logger.warning("Failed to delete baby-sit cron %s", cron_id, exc_info=True)
-            watch["active"] = False
-            await _put_watch(watch)
-            return True
-    await _client().store.delete_item(WATCH_NAMESPACE, key)
+    if not await delete_cron(
+        in_process_langgraph_client(), cron_id if isinstance(cron_id, str) else None
+    ):
+        # Keep the record so the still-firing cron evaluates an inactive watch
+        # and retries the delete, rather than an already-forgotten one.
+        watch["active"] = False
+        await _put_watch(watch)
+        return True
+    await delete_value(WATCH_NAMESPACE, key)
     return True
 
 
@@ -270,46 +218,19 @@ async def _watch_token(watch: BabySitWatch) -> str | None:
     return await get_github_app_installation_token(installation_id=installation_id)
 
 
-def _slack_thread(watch: BabySitWatch) -> tuple[str, str] | None:
-    source_context = watch.get("source_context")
-    slack_thread = source_context.get("slack_thread") if isinstance(source_context, dict) else None
-    if not isinstance(slack_thread, dict):
-        return None
-    channel_id = slack_thread.get("channel_id")
-    thread_ts = slack_thread.get("thread_ts")
-    if isinstance(channel_id, str) and channel_id and isinstance(thread_ts, str) and thread_ts:
-        return channel_id, thread_ts
-    return None
-
-
 async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
-    source_context = watch.get("source_context")
-    source_context = source_context if isinstance(source_context, dict) else {}
-    destination = _slack_thread(watch)
-    try:
-        if destination is not None:
-            return await post_slack_thread_reply(destination[0], destination[1], message)
-        linear_issue = source_context.get("linear_issue")
-        issue_id = linear_issue.get("id") if isinstance(linear_issue, dict) else None
-        if isinstance(issue_id, str) and issue_id:
-            return await comment_on_linear_issue(issue_id, message)
-        github_issue = source_context.get("github_issue")
-        issue_number = github_issue.get("number") if isinstance(github_issue, dict) else None
-        if not isinstance(issue_number, int):
-            configured_number = (watch.get("run_config") or {}).get("pr_number")
-            issue_number = configured_number if isinstance(configured_number, int) else None
-        token = await _watch_token(watch)
-        if isinstance(issue_number, int) and token:
-            return await post_github_comment(
-                {"owner": watch["owner"], "name": watch["repo"]},
-                issue_number,
-                message,
-                token=token,
-            )
-    except Exception:
-        logger.warning("Failed to notify source for %s", watch.get("key"), exc_info=True)
-        return False
-    return False
+    """Report on the channel the watch was started from.
+
+    Runs from a cron outside any user's run, so the only GitHub credential is
+    the watch's own installation token, and the stored ``source_context`` is
+    the only Slack location on record.
+    """
+    return await notify_source_channel(
+        source_context_from_watch(watch),
+        message,
+        github_token=partial(_watch_token, watch),
+        agent_thread_id=watch["thread_id"],
+    )
 
 
 async def _finish_watch(watch: BabySitWatch, message: str) -> str:
@@ -376,16 +297,16 @@ def _check_set_key(check_runs: list[dict[str, Any]], statuses: list[dict[str, An
 def _check_set_settled(watch: BabySitWatch, key: str) -> bool:
     if watch.get("settled_check_key") != key:
         watch["settled_check_key"] = key
-        watch["settled_check_at"] = _now_iso()
+        watch["settled_check_at"] = _now().isoformat()
         return False
     raw = watch.get("settled_check_at")
     if not isinstance(raw, str) or not raw:
-        watch["settled_check_at"] = _now_iso()
+        watch["settled_check_at"] = _now().isoformat()
         return False
     try:
         first_seen = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
-        watch["settled_check_at"] = _now_iso()
+        watch["settled_check_at"] = _now().isoformat()
         return False
     return _now() - first_seen >= timedelta(minutes=CHECK_SET_SETTLE_MINUTES)
 

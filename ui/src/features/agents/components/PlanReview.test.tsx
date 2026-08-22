@@ -35,7 +35,7 @@ vi.mock("@/features/agents/components/PlanArtifactFrame", () => ({
     </div>
   ),
 }))
-vi.mock("@/features/agents/components/chat/Markdown", () => ({
+vi.mock("@/components/markdown/Markdown", () => ({
   Markdown: ({ content }: { content: string }) => <div>{content}</div>,
 }))
 

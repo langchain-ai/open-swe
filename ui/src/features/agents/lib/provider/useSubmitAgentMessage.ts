@@ -2,8 +2,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 
 import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
-import type { AgentThread } from "@/features/agents/lib/types"
-import { AgentsApiError, agentsApi } from "@/features/agents/lib/api"
+import type { AgentThread } from "@/lib/agentTypes"
+import { ApiError } from "@/lib/apiClient"
+import { agentsApi } from "@/features/agents/lib/api"
 import {
   agentThreadKeys,
   setAgentThreadStatus,
@@ -110,16 +111,14 @@ export function useSubmitAgentMessage(threadId: string) {
         if (!optimistic) showQueued()
       }
 
-      if (stream.isLoading) {
-        await queue(true)
-        return
-      }
-
       try {
-        await queue(false)
+        await queue(stream.isLoading)
         return
       } catch (error) {
-        if (!(error instanceof AgentsApiError) || error.status !== 409) {
+        // 409 = the thread is idle. Either it always was, or the run this
+        // client is streaming finished between its last event and this send —
+        // start a run rather than dropping the message on the floor.
+        if (!(error instanceof ApiError) || error.status !== 409) {
           throw error
         }
       }

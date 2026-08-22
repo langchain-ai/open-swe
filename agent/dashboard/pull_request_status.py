@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from ..utils.github_http import GITHUB_API_BASE, GITHUB_GRAPHQL, github_client, github_request
+from ..github.api import GITHUB_GRAPHQL_PATH, github_client, github_request, github_url
 
 _OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
@@ -102,7 +102,7 @@ def _live_state(pull: Mapping[str, Any]) -> str | None:
 async def _fetch_pull_request(
     client: httpx.AsyncClient, owner: str, repo: str, number: int
 ) -> dict[str, Any] | None:
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}"
+    url = github_url(f"/repos/{owner}/{repo}/pulls/{number}")
     try:
         response = await github_request(client, "GET", url)
         response.raise_for_status()
@@ -115,7 +115,7 @@ async def _fetch_pull_request(
 async def _fetch_check_runs(
     client: httpx.AsyncClient, owner: str, repo: str, sha: str
 ) -> list[dict[str, Any]] | None:
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{sha}/check-runs"
+    url = github_url(f"/repos/{owner}/{repo}/commits/{sha}/check-runs")
     runs: list[dict[str, Any]] = []
     page = 1
     try:
@@ -142,7 +142,7 @@ async def _fetch_check_runs(
 async def _fetch_commit_statuses(
     client: httpx.AsyncClient, owner: str, repo: str, sha: str
 ) -> list[dict[str, Any]] | None:
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{sha}/status"
+    url = github_url(f"/repos/{owner}/{repo}/commits/{sha}/status")
     statuses: list[dict[str, Any]] = []
     page = 1
     try:
@@ -232,7 +232,7 @@ async def _fetch_unresolved_review_threads(
             response = await github_request(
                 client,
                 "POST",
-                GITHUB_GRAPHQL,
+                github_url(GITHUB_GRAPHQL_PATH),
                 json={
                     "query": _REVIEW_THREADS_QUERY,
                     "variables": {

@@ -315,11 +315,10 @@ async def test_resolve_finding_thread_resolves_all_known_threads() -> None:
         ),
         patch("agent.tools.resolve_finding_thread.get_github_token", return_value="token"),
         patch("agent.tools.resolve_finding_thread.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.resolve_finding_thread.get_finding", AsyncMock(return_value=finding)),
-        patch("agent.tools.resolve_finding_thread.resolve_review_thread", resolve),
-        patch("agent.tools.resolve_finding_thread.reply_to_review_comment", reply),
-        patch("agent.tools.resolve_finding_thread.update_finding_fields", update),
-        patch("agent.tools.resolve_finding_thread.update_finding_surface", AsyncMock()),
+        patch("agent.review.thread_resolution.get_finding", AsyncMock(return_value=finding)),
+        patch("agent.review.thread_resolution.resolve_review_thread", resolve),
+        patch("agent.review.thread_resolution.reply_to_review_comment", reply),
+        patch("agent.review.thread_resolution.update_finding_fields", update),
     ):
         result = await resolve_finding_thread(
             "f1", status="resolved", note="Fixed in the latest commit"
@@ -337,7 +336,8 @@ async def test_resolve_finding_thread_resolves_all_known_threads() -> None:
     )
     assert update.await_args is not None
     updates = update.await_args.args[2]
-    assert updates["github_thread_resolved"] is True
+    assert updates["surface_state"] == "resolved"
+    assert updates["github_review_thread_ids"] == ["THREAD_1", "THREAD_2"]
     assert updates["github_resolved_thread_ids"] == ["THREAD_1", "THREAD_2"]
     assert updates["github_posted_resolution_comment_ids"] == [11, 12]
     assert updates["resolution_note"] == "Fixed in the latest commit"
@@ -582,17 +582,16 @@ async def test_update_finding_resolves_github_thread_when_pr_context_available()
         patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch(
             "agent.tools.update_finding.list_findings",
-            AsyncMock(return_value=[_existing_finding(github_review_thread_id="THREAD_1")]),
+            AsyncMock(return_value=[_existing_finding(github_review_thread_ids=["THREAD_1"])]),
         ),
-        patch("agent.tools.resolve_finding_thread.get_config", return_value=cfg),
-        patch("agent.tools.resolve_finding_thread.get_github_token", return_value="token"),
+        patch("agent.tools.update_finding.get_github_token", return_value="token"),
         patch("agent.tools.update_finding.update_finding_fields", AsyncMock()) as update,
         patch(
-            "agent.tools.resolve_finding_thread._resolve_finding_thread_async",
+            "agent.tools.update_finding.resolve_finding_on_github",
             new_callable=AsyncMock,
             return_value={
                 "success": True,
-                "finding": {"id": "f_a", "status": "resolved", "github_thread_resolved": True},
+                "finding": {"id": "f_a", "status": "resolved", "surface_state": "resolved"},
                 "resolved_thread_count": 1,
             },
         ) as resolve_async,
@@ -605,7 +604,7 @@ async def test_update_finding_resolves_github_thread_when_pr_context_available()
 
     assert result["success"] is True
     assert result["github_resolution"]["success"] is True
-    assert result["finding"]["github_thread_resolved"] is True
+    assert result["finding"]["surface_state"] == "resolved"
     resolve_async.assert_awaited_once()
     update.assert_not_awaited()
 
@@ -617,13 +616,12 @@ async def test_update_finding_leaves_open_when_github_resolution_fails() -> None
         patch("agent.tools.update_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch(
             "agent.tools.update_finding.list_findings",
-            AsyncMock(return_value=[_existing_finding(github_review_thread_id="THREAD_1")]),
+            AsyncMock(return_value=[_existing_finding(github_review_thread_ids=["THREAD_1"])]),
         ),
-        patch("agent.tools.resolve_finding_thread.get_config", return_value=cfg),
-        patch("agent.tools.resolve_finding_thread.get_github_token", return_value="token"),
+        patch("agent.tools.update_finding.get_github_token", return_value="token"),
         patch("agent.tools.update_finding.update_finding_fields", AsyncMock()) as update,
         patch(
-            "agent.tools.resolve_finding_thread._resolve_finding_thread_async",
+            "agent.tools.update_finding.resolve_finding_on_github",
             new_callable=AsyncMock,
             return_value={
                 "success": False,
@@ -661,7 +659,7 @@ async def test_update_finding_resolves_hidden_finding_locally() -> None:
         ),
         patch("agent.tools.update_finding.update_finding_fields", side_effect=fake_update),
         patch(
-            "agent.tools.resolve_finding_thread._resolve_finding_thread_async",
+            "agent.tools.update_finding.resolve_finding_on_github",
             new_callable=AsyncMock,
         ) as resolve_async,
     ):

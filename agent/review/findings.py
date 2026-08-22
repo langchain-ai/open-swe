@@ -16,12 +16,14 @@ import json
 import logging
 import uuid
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, TypedDict, cast
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError as LangGraphSDKNotFoundError
+
+from ..settings.agent_usage import record_reviewer_finding_state
 
 logger = logging.getLogger(__name__)
 _FINDING_MUTATION_LOCKS: weakref.WeakValueDictionary[tuple[str, int], asyncio.Lock] = (
@@ -82,7 +84,7 @@ Severity = Literal["low", "medium", "high", "critical"]
 Confidence = Literal["low", "medium", "high"]
 FindingStatus = Literal["open", "resolved", "dismissed"]
 DiffSide = Literal["LEFT", "RIGHT"]
-SurfaceState = Literal["not_surfaced", "surfaced", "resolve_pending", "resolved", "error"]
+SurfaceState = Literal["not_surfaced", "surfaced", "resolve_pending", "resolved"]
 InteractionKind = Literal["human_reply", "bot_reply"]
 
 SEVERITY_ORDER: dict[Severity, int] = {
@@ -90,6 +92,37 @@ SEVERITY_ORDER: dict[Severity, int] = {
     "medium": 1,
     "high": 2,
     "critical": 3,
+}
+
+# The accepted values for the literal types above, for tools validating agent
+# input before narrowing it with the ``coerce_*`` helpers below.
+SEVERITIES: frozenset[str] = frozenset(SEVERITY_ORDER)
+CONFIDENCES: frozenset[str] = frozenset({"low", "medium", "high"})
+FINDING_STATUSES: frozenset[str] = frozenset({"open", "resolved", "dismissed"})
+TERMINAL_FINDING_STATUSES: frozenset[str] = frozenset({"resolved", "dismissed"})
+DIFF_SIDES: frozenset[str] = frozenset({"LEFT", "RIGHT"})
+
+
+def coerce_severity(value: str) -> Severity:
+    """Narrow an already-validated string to the ``Severity`` literal."""
+    return cast(Severity, value)
+
+
+def coerce_confidence(value: str) -> Confidence:
+    return cast(Confidence, value)
+
+
+def coerce_side(value: str) -> DiffSide:
+    return cast(DiffSide, value)
+
+
+# Surface states only ever move forward, so normalization of a legacy record can
+# reconcile contradictory leftovers by taking the furthest-along state.
+SURFACE_STATE_ORDER: dict[SurfaceState, int] = {
+    "not_surfaced": 0,
+    "surfaced": 1,
+    "resolve_pending": 2,
+    "resolved": 3,
 }
 
 # Confidence is recorded on every finding for post-hoc calibration analysis
@@ -100,8 +133,11 @@ SEVERITY_ORDER: dict[Severity, int] = {
 class Finding(TypedDict):
     """A single review finding.
 
-    Core fields are required for newly-created findings. Legacy and
-    publication-only fields remain optional while old thread metadata ages out.
+    Where a finding surfaced on GitHub is recorded exactly once, by the
+    ``github_*_ids`` lists plus ``surface_state``. Records persisted by older
+    revisions carry flat singulars and a nested ``surface`` record instead;
+    :func:`coerce_finding` folds those into the canonical fields on read, so
+    nothing outside this module ever sees the legacy shape.
     """
 
     id: str
@@ -120,14 +156,12 @@ class Finding(TypedDict):
     first_seen_sha: str
     last_confirmed_sha: str
     github_review_id: int | None
-    github_review_comment_id: int | None
-    github_review_comment_ids: list[int]
-    github_review_thread_id: str | None
-    github_review_thread_ids: list[str]
     github_review_run_id: str | None
-    github_thread_resolved: bool
+    github_review_comment_ids: list[int]
+    github_review_thread_ids: list[str]
     github_resolved_thread_ids: list[str]
     github_posted_resolution_comment_ids: list[int]
+    surface_state: SurfaceState
     last_human_reply_at: str | None
     last_human_reply_author: str | None
     last_human_reply_body: str | None
@@ -135,33 +169,12 @@ class Finding(TypedDict):
     resolution_note: str | None
     diff_hunk: str | None
     fingerprint: str
-    anchor: "FindingAnchor | None"
-    surface: "FindingSurface | None"
     interactions: "list[FindingInteraction]"
 
 
 class AppendFindingResult(TypedDict):
     finding: Finding
     created: bool
-
-
-class FindingAnchor(TypedDict):
-    file: str
-    start_line: int | None
-    end_line: int | None
-    side: DiffSide
-
-
-class FindingSurface(TypedDict, total=False):
-    finding_id: str
-    state: SurfaceState
-    github_review_id: int | None
-    github_review_comment_id: int | None
-    github_review_thread_id: str | None
-    severity_threshold_at_publish: Severity | None
-    surfaced_at_sha: str | None
-    last_github_sync_at: str | None
-    last_error: str | None
 
 
 class FindingInteraction(TypedDict, total=False):
@@ -224,23 +237,6 @@ def new_finding(
 ) -> Finding:
     """Construct a fully-populated ``Finding`` ready to persist."""
     resolved_id = finding_id or new_finding_id()
-    anchor: FindingAnchor = {
-        "file": file,
-        "start_line": start_line,
-        "end_line": end_line,
-        "side": side,
-    }
-    surface: FindingSurface = {
-        "finding_id": resolved_id,
-        "state": "not_surfaced",
-        "github_review_id": None,
-        "github_review_comment_id": None,
-        "github_review_thread_id": None,
-        "severity_threshold_at_publish": None,
-        "surfaced_at_sha": None,
-        "last_github_sync_at": None,
-        "last_error": None,
-    }
     finding: Finding = {
         "id": resolved_id,
         "severity": severity,
@@ -258,14 +254,12 @@ def new_finding(
         "first_seen_sha": sha,
         "last_confirmed_sha": sha,
         "github_review_id": None,
-        "github_review_comment_id": None,
-        "github_review_comment_ids": [],
-        "github_review_thread_id": None,
-        "github_review_thread_ids": [],
         "github_review_run_id": None,
-        "github_thread_resolved": False,
+        "github_review_comment_ids": [],
+        "github_review_thread_ids": [],
         "github_resolved_thread_ids": [],
         "github_posted_resolution_comment_ids": [],
+        "surface_state": "not_surfaced",
         "last_human_reply_at": None,
         "last_human_reply_author": None,
         "last_human_reply_body": None,
@@ -273,8 +267,6 @@ def new_finding(
         "resolution_note": None,
         "diff_hunk": diff_hunk,
         "fingerprint": _finding_fingerprint(file, side, start_line, end_line, description),
-        "anchor": anchor,
-        "surface": surface,
         "interactions": [],
     }
     return finding
@@ -299,20 +291,154 @@ def _finding_fingerprint(
     return f"v{FINDING_FINGERPRINT_VERSION}:{hashlib.sha256(encoded).hexdigest()}"
 
 
-def _coerce_finding(value: Any) -> Finding | None:
+def _int_list(value: Any) -> list[int]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, int) and not isinstance(item, bool)]
+
+
+def _str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item]
+
+
+# Read accessors take a plain mapping so callers holding a raw persisted record
+# (dashboard serializers, usage rollups) can use them without a cast.
+FindingLike = Mapping[str, Any]
+
+
+def comment_ids_for_finding(finding: FindingLike) -> list[int]:
+    """GitHub review comment ids this finding was posted as, oldest first."""
+    return _int_list(finding.get("github_review_comment_ids"))
+
+
+def thread_ids_for_finding(finding: FindingLike) -> list[str]:
+    """GitHub review thread node ids this finding lives in, oldest first."""
+    return _str_list(finding.get("github_review_thread_ids"))
+
+
+def resolved_thread_ids_for_finding(finding: FindingLike) -> list[str]:
+    return _str_list(finding.get("github_resolved_thread_ids"))
+
+
+def posted_resolution_comment_ids_for_finding(finding: FindingLike) -> list[int]:
+    return _int_list(finding.get("github_posted_resolution_comment_ids"))
+
+
+def review_id_for_finding(finding: FindingLike) -> int | None:
+    review_id = finding.get("github_review_id")
+    return review_id if isinstance(review_id, int) and not isinstance(review_id, bool) else None
+
+
+def surface_state_of(finding: FindingLike) -> SurfaceState:
+    state = finding.get("surface_state")
+    return state if state in SURFACE_STATE_ORDER else "not_surfaced"
+
+
+def is_surfaced(finding: FindingLike) -> bool:
+    """True once this finding has been posted to the PR."""
+    return surface_state_of(finding) != "not_surfaced"
+
+
+def is_thread_resolved(finding: FindingLike) -> bool:
+    """True once every GitHub review thread for this finding is resolved."""
+    return surface_state_of(finding) == "resolved"
+
+
+def mark_surfaced(finding: Finding) -> bool:
+    """Record that the finding is now on GitHub. Returns True when it changed."""
+    if is_surfaced(finding):
+        return False
+    finding["surface_state"] = "surfaced"
+    return True
+
+
+def set_surface_state(finding: Finding, state: SurfaceState) -> bool:
+    """Set the surface state outright. Returns True when it changed."""
+    if surface_state_of(finding) == state:
+        return False
+    finding["surface_state"] = state
+    return True
+
+
+def _legacy_surface_state(record: dict[str, Any], surface: dict[str, Any]) -> SurfaceState:
+    if record.get("github_thread_resolved") is True:
+        return "resolved"
+    if (
+        _int_list(record.get("github_review_comment_ids"))
+        or _str_list(record.get("github_review_thread_ids"))
+        or isinstance(record.get("github_review_id"), int)
+        or isinstance(surface.get("github_review_comment_id"), int)
+        or isinstance(surface.get("github_review_thread_id"), str)
+    ):
+        return "surfaced"
+    return "not_surfaced"
+
+
+def _normalize_publication_identity(record: dict[str, Any]) -> None:
+    """Fold legacy GitHub-identity fields into the canonical ones, in place.
+
+    Records written before the identity fields were unified carry flat
+    singulars (``github_review_comment_id``, …), a ``github_thread_resolved``
+    flag and a nested ``surface`` record. Every read passes through here, so
+    the rest of the codebase — and every subsequent write — only ever deals
+    with the lists plus ``surface_state``.
+    """
+    surface = record.pop("surface", None)
+    surface = surface if isinstance(surface, dict) else {}
+    record.pop("anchor", None)
+
+    comment_ids = _int_list(record.get("github_review_comment_ids"))
+    for legacy_comment_id in (
+        record.pop("github_review_comment_id", None),
+        surface.get("github_review_comment_id"),
+    ):
+        if isinstance(legacy_comment_id, int) and legacy_comment_id not in comment_ids:
+            comment_ids.insert(0, legacy_comment_id)
+    record["github_review_comment_ids"] = comment_ids
+
+    thread_ids = _str_list(record.get("github_review_thread_ids"))
+    for legacy_thread_id in (
+        record.pop("github_review_thread_id", None),
+        surface.get("github_review_thread_id"),
+    ):
+        if isinstance(legacy_thread_id, str) and legacy_thread_id not in ("", *thread_ids):
+            thread_ids.insert(0, legacy_thread_id)
+    record["github_review_thread_ids"] = thread_ids
+
+    if not isinstance(record.get("github_review_id"), int):
+        legacy_review_id = surface.get("github_review_id")
+        record["github_review_id"] = legacy_review_id if isinstance(legacy_review_id, int) else None
+
+    states: list[SurfaceState] = [_legacy_surface_state(record, surface)]
+    for candidate in (record.get("surface_state"), surface.get("state")):
+        if candidate in SURFACE_STATE_ORDER:
+            states.append(cast(SurfaceState, candidate))
+    record.pop("github_thread_resolved", None)
+    record["surface_state"] = max(states, key=lambda state: SURFACE_STATE_ORDER[state])
+
+
+def coerce_finding(value: Any) -> Finding | None:
+    """Normalize one persisted record into a canonical ``Finding``.
+
+    Returns ``None`` when the value isn't a finding record at all.
+    """
     if not isinstance(value, dict):
         return None
-    if "id" not in value or not isinstance(value["id"], str):
+    if not isinstance(value.get("id"), str):
         return None
+    _normalize_publication_identity(value)
     return cast(Finding, value)
 
 
-def _coerce_findings_list(value: Any) -> list[Finding]:
+def coerce_findings(value: Any) -> list[Finding]:
+    """Normalize a persisted findings blob into canonical ``Finding`` records."""
     if not isinstance(value, list):
         return []
     out: list[Finding] = []
     for entry in value:
-        finding = _coerce_finding(entry)
+        finding = coerce_finding(entry)
         if finding is not None:
             out.append(finding)
     return out
@@ -377,7 +503,7 @@ async def resolve_review_head_sha(thread_id: str, configurable: dict[str, Any]) 
 async def list_findings(thread_id: str) -> list[Finding]:
     """Return all findings persisted on the reviewer thread."""
     metadata = await get_thread_metadata(thread_id)
-    return _coerce_findings_list(metadata.get("findings"))
+    return coerce_findings(metadata.get("findings"))
 
 
 async def get_finding(thread_id: str, finding_id: str) -> Finding | None:
@@ -393,7 +519,7 @@ async def replace_findings(thread_id: str, findings: list[Finding]) -> None:
     """Merge a findings snapshot without dropping concurrently-added records."""
     async with _finding_mutation_lock(thread_id):
         metadata = await _get_thread_metadata_strict(thread_id)
-        latest = _coerce_findings_list(metadata.get("findings"))
+        latest = coerce_findings(metadata.get("findings"))
         incoming_by_id = {finding["id"]: finding for finding in findings}
         merged = [incoming_by_id.pop(finding["id"], finding) for finding in latest]
         merged.extend(incoming_by_id.values())
@@ -406,8 +532,6 @@ async def _replace_findings_unlocked(thread_id: str, findings: list[Finding]) ->
         await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
     except LangGraphSDKNotFoundError as exc:
         raise ReviewerThreadMissingError(thread_id, exc) from exc
-    from ..dashboard.agent_usage import record_reviewer_finding_state
-
     results = await asyncio.gather(
         *(record_reviewer_finding_state(thread_id, finding) for finding in findings),
         return_exceptions=True,
@@ -448,7 +572,7 @@ async def mutate_findings(
     """
     async with _finding_mutation_lock(thread_id):
         metadata = await _get_thread_metadata_strict(thread_id)
-        findings = _coerce_findings_list(metadata.get("findings"))
+        findings = coerce_findings(metadata.get("findings"))
         if mutator(findings):
             await _replace_findings_unlocked(thread_id, findings)
         return findings
@@ -514,30 +638,6 @@ async def update_finding_fields(
     return captured.get("finding")
 
 
-async def update_finding_surface(
-    thread_id: str,
-    finding_id: str,
-    updates: dict[str, Any],
-) -> Finding | None:
-    """Apply updates to the nested surface record and legacy GitHub fields."""
-    captured: dict[str, Finding] = {}
-
-    def _apply(findings: list[Finding]) -> bool:
-        for finding in findings:
-            if finding.get("id") != finding_id:
-                continue
-            surface = _coerce_surface(finding, finding_id)
-            surface.update(cast(FindingSurface, updates))
-            finding["surface"] = surface
-            _sync_legacy_surface_fields(finding, surface)
-            captured["finding"] = finding
-            return True
-        return False
-
-    await mutate_findings(thread_id, _apply)
-    return captured.get("finding")
-
-
 async def append_finding_interaction(
     thread_id: str,
     finding_id: str,
@@ -567,51 +667,6 @@ async def append_finding_interaction(
 
     await mutate_findings(thread_id, _apply)
     return captured.get("finding")
-
-
-def _coerce_surface(finding: Finding, finding_id: str) -> FindingSurface:
-    surface = finding.get("surface")
-    coerced: FindingSurface
-    if isinstance(surface, dict):
-        coerced = cast(FindingSurface, dict(surface))
-    else:
-        coerced = {"finding_id": finding_id}
-    if not coerced.get("state"):
-        if finding.get("github_thread_resolved"):
-            coerced["state"] = "resolved"
-        elif isinstance(finding.get("github_review_comment_id"), int):
-            coerced["state"] = "surfaced"
-        else:
-            coerced["state"] = "not_surfaced"
-    if "github_review_id" not in coerced:
-        coerced["github_review_id"] = finding.get("github_review_id")
-    if "github_review_comment_id" not in coerced:
-        coerced["github_review_comment_id"] = finding.get("github_review_comment_id")
-    if "github_review_thread_id" not in coerced:
-        coerced["github_review_thread_id"] = finding.get("github_review_thread_id")
-    if "severity_threshold_at_publish" not in coerced:
-        coerced["severity_threshold_at_publish"] = None
-    if "surfaced_at_sha" not in coerced:
-        coerced["surfaced_at_sha"] = None
-    if "last_github_sync_at" not in coerced:
-        coerced["last_github_sync_at"] = None
-    if "last_error" not in coerced:
-        coerced["last_error"] = None
-    return coerced
-
-
-def _sync_legacy_surface_fields(finding: Finding, surface: FindingSurface) -> None:
-    review_id = surface.get("github_review_id")
-    if isinstance(review_id, int) or review_id is None:
-        finding["github_review_id"] = review_id
-    comment_id = surface.get("github_review_comment_id")
-    if isinstance(comment_id, int) or comment_id is None:
-        finding["github_review_comment_id"] = comment_id
-    thread_id = surface.get("github_review_thread_id")
-    if isinstance(thread_id, str) or thread_id is None:
-        finding["github_review_thread_id"] = thread_id
-    if surface.get("state") == "resolved":
-        finding["github_thread_resolved"] = True
 
 
 async def set_reviewer_thread_metadata(

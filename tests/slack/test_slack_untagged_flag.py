@@ -8,10 +8,8 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.utils import slack_events
-from agent.webhooks import common as webhook_common
 from agent.webhooks import slack as slack_service
-from agent.webhooks import slack_routes
+from agent.webhooks import slack_events, slack_routes
 
 
 class _FakeThreads:
@@ -107,12 +105,12 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
-    monkeypatch.setattr(slack_events, "get_client", lambda url: _FakeClient())
-    monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
-    monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
-    monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(return_value="t1"))
+    monkeypatch.setattr(slack_events, "langgraph_client", lambda: _FakeClient())
+    monkeypatch.setattr(slack_routes, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(slack_routes, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
+    monkeypatch.setattr(slack_routes, "lookup_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(
-        webhook_common,
+        slack_routes,
         "lookup_slack_run_mapping",
         AsyncMock(
             return_value={
@@ -123,12 +121,12 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
             }
         ),
     )
-    monkeypatch.setattr(webhook_common, "_thread_exists", AsyncMock(return_value=True))
-    monkeypatch.setattr(webhook_common, "_get_slack_channel_context", channel_context)
-    monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", not_docs_plz)
-    monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
+    monkeypatch.setattr(slack_routes, "thread_exists", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_service, "resolve_slack_channel_context", channel_context)
+    monkeypatch.setattr(slack_service, "is_docs_plz_slack_channel", not_docs_plz)
+    monkeypatch.setattr(slack_service, "get_slack_repo_config", repo_config)
+    monkeypatch.setenv("SLACK_BOT_USER_ID", "BOT")
+    monkeypatch.setenv("SLACK_BOT_USERNAME", "openswe")
     # The two-party gate would admit these messages on its own.
     monkeypatch.setattr(
         slack_service, "_slack_thread_allows_untagged_reply", AsyncMock(return_value=True)
@@ -186,7 +184,7 @@ async def test_root_message_update_uses_original_message_as_thread() -> None:
     payload = _message_update_payload()
     del payload["event"]["message"]["thread_ts"]
     del payload["event"]["previous_message"]["thread_ts"]
-    lookup_run = cast(AsyncMock, webhook_common.lookup_slack_run_mapping)
+    lookup_run = cast(AsyncMock, slack_routes.lookup_slack_run_mapping)
     lookup_run.return_value = {
         "run_id": "run-1",
         "thread_ts": "1786573369.551099",
@@ -204,7 +202,7 @@ async def test_root_message_update_uses_original_message_as_thread() -> None:
     assert response["status"] == "accepted"
     event_data = background_tasks.tasks[0][1][0]
     assert event_data["thread_ts"] == "1786573369.551099"
-    lookup = cast(AsyncMock, webhook_common.lookup_slack_thread_id)
+    lookup = cast(AsyncMock, slack_routes.lookup_slack_thread_id)
     lookup.assert_awaited_once()
     await_args = lookup.await_args
     assert await_args is not None
@@ -215,7 +213,7 @@ async def test_root_message_update_uses_original_message_as_thread() -> None:
     ("patch_name", "patch_value"),
     [
         ("lookup_slack_thread_id", None),
-        ("_thread_exists", False),
+        ("thread_exists", False),
         ("lookup_slack_run_mapping", None),
     ],
 )
@@ -224,7 +222,7 @@ async def test_message_update_background_task_requires_delivered_message(
     patch_name: str,
     patch_value: object,
 ) -> None:
-    monkeypatch.setattr(webhook_common, patch_name, AsyncMock(return_value=patch_value))
+    monkeypatch.setattr(slack_routes, patch_name, AsyncMock(return_value=patch_value))
     monkeypatch.setattr(slack_routes, "_MESSAGE_UPDATE_RETRY_DELAYS", ())
     process = AsyncMock()
     monkeypatch.setattr(slack_service, "process_slack_mention", process)
@@ -249,7 +247,7 @@ async def test_message_update_background_task_rejects_mismatched_delivery_mappin
     field: str,
     value: str,
 ) -> None:
-    lookup_run = cast(AsyncMock, webhook_common.lookup_slack_run_mapping)
+    lookup_run = cast(AsyncMock, slack_routes.lookup_slack_run_mapping)
     delivered = dict(lookup_run.return_value)
     delivered[field] = value
     lookup_run.return_value = delivered
@@ -283,7 +281,7 @@ async def test_message_update_retries_until_delivery_mapping_exists(
     )
     sleep = AsyncMock()
     process = AsyncMock()
-    monkeypatch.setattr(webhook_common, "lookup_slack_run_mapping", lookup_run)
+    monkeypatch.setattr(slack_routes, "lookup_slack_run_mapping", lookup_run)
     monkeypatch.setattr(slack_routes, "_MESSAGE_UPDATE_RETRY_DELAYS", (0.1,))
     monkeypatch.setattr(slack_routes.asyncio, "sleep", sleep)
     monkeypatch.setattr(slack_service, "process_slack_mention", process)
@@ -305,12 +303,12 @@ async def test_message_update_retries_until_delivery_mapping_exists(
 async def test_unassociated_message_update_does_not_trigger_docs_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(webhook_common, "lookup_slack_run_mapping", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_routes, "lookup_slack_run_mapping", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_routes, "_MESSAGE_UPDATE_RETRY_DELAYS", ())
     is_docs_plz = AsyncMock(return_value=True)
     post_reply = AsyncMock()
-    monkeypatch.setattr(webhook_common, "_is_docs_plz_slack_channel", is_docs_plz)
-    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
+    monkeypatch.setattr(slack_service, "is_docs_plz_slack_channel", is_docs_plz)
+    monkeypatch.setattr(slack_routes, "post_slack_thread_reply", post_reply)
     background_tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(

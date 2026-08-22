@@ -2,8 +2,10 @@ import asyncio
 from typing import Any
 
 import pytest
+from support.langgraph_fakes import FakeLangGraphClient
 
-from agent.dashboard import thread_api
+from agent.dashboard.threads import runs as thread_runs
+from agent.dashboard.threads import serialize as thread_serialize
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -11,17 +13,17 @@ async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
 
 
 def test_resolve_repo_config_parses_request_repo() -> None:
-    assert thread_api._resolve_repo_config("octo/repo") == {"owner": "octo", "name": "repo"}
+    assert thread_runs.resolve_repo_config("octo/repo") == {"owner": "octo", "name": "repo"}
 
 
 def test_resolve_repo_config_returns_empty_when_no_repo_given() -> None:
-    assert thread_api._resolve_repo_config(None) == {}
-    assert thread_api._resolve_repo_config("") == {}
-    assert thread_api._resolve_repo_config("not-a-repo") == {}
+    assert thread_runs.resolve_repo_config(None) == {}
+    assert thread_runs.resolve_repo_config("") == {}
+    assert thread_runs.resolve_repo_config("not-a-repo") == {}
 
 
 async def test_thread_summary_blanks_repo_when_absent() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_serialize.thread_summary(
         {"thread_id": "t1", "metadata": {"source": "dashboard", "title": "no repo run"}}
     )
     assert summary["repo"] == ""
@@ -29,7 +31,7 @@ async def test_thread_summary_blanks_repo_when_absent() -> None:
 
 
 async def test_thread_summary_keeps_repo_when_present() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_serialize.thread_summary(
         {
             "thread_id": "t2",
             "metadata": {
@@ -45,7 +47,7 @@ async def test_thread_summary_keeps_repo_when_present() -> None:
 
 
 async def test_thread_summary_classifies_legacy_schedule_metadata() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_serialize.thread_summary(
         {
             "thread_id": "scheduled",
             "metadata": {
@@ -64,7 +66,7 @@ async def test_thread_summary_classifies_legacy_schedule_metadata() -> None:
 
 
 async def test_thread_summary_marks_automation_actions_posted_to_slack() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_serialize.thread_summary(
         {
             "thread_id": "scheduled-action",
             "metadata": {
@@ -79,7 +81,7 @@ async def test_thread_summary_marks_automation_actions_posted_to_slack() -> None
 
 
 async def test_thread_summary_derives_issue_category_from_source_context() -> None:
-    summary = await thread_api._thread_summary(
+    summary = await thread_serialize.thread_summary(
         {
             "thread_id": "linear",
             "metadata": {
@@ -95,57 +97,19 @@ async def test_thread_summary_derives_issue_category_from_source_context() -> No
 
 async def test_thread_summary_includes_trace_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        thread_api,
+        thread_serialize,
         "get_langsmith_trace_url",
         _fake_trace_url,
     )
-    summary = await thread_api._thread_summary(
+    summary = await thread_serialize.thread_summary(
         {"thread_id": "t3", "metadata": {"source": "dashboard", "title": "traced run"}}
     )
     assert summary["traceUrl"] == "https://smith.example/t/t3"
 
 
-class _FakeThreadsClient:
-    async def create(
-        self, *, thread_id: str, metadata: dict[str, Any], if_exists: str
-    ) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": metadata, "if_exists": if_exists}
-
-    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": metadata}
-
-    async def get(self, thread_id: str) -> dict[str, Any]:
-        return {"thread_id": thread_id, "metadata": {}}
-
-
-class _FakeRunsClient:
-    def __init__(self) -> None:
-        self.configurable: dict[str, Any] | None = None
-
-    async def create(
-        self,
-        thread_id: str,
-        assistant_id: str,
-        *,
-        input: dict[str, Any],
-        config: dict[str, Any],
-        if_not_exists: str = "reject",
-        stream_mode: list[str] | None = None,
-        stream_resumable: bool = False,
-    ) -> dict[str, str]:
-        self.configurable = config["configurable"]
-        return {"run_id": "run-id"}
-
-
-class _FakeLangGraphClient:
-    def __init__(self) -> None:
-        self.threads = _FakeThreadsClient()
-        self.runs = _FakeRunsClient()
-
-
 @pytest.fixture
-def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClient:
-    client = _FakeLangGraphClient()
+def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> FakeLangGraphClient:
+    client = FakeLangGraphClient(thread_metadata={})
 
     async def fake_get_profile(login: str) -> dict[str, Any]:
         return {}
@@ -156,22 +120,22 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClien
     async def fake_resolve_email(login: str, profile: dict[str, Any]) -> str:
         return "octo@example.com"
 
-    monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
-    monkeypatch.setattr(thread_api, "get_profile", fake_get_profile)
-    monkeypatch.setattr(thread_api, "_ensure_dashboard_github_token", fake_ensure_token)
-    monkeypatch.setattr(thread_api, "_resolve_run_email", fake_resolve_email)
+    monkeypatch.setattr(thread_runs, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_runs, "get_profile", fake_get_profile)
+    monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", fake_ensure_token)
+    monkeypatch.setattr(thread_runs, "resolve_run_email", fake_resolve_email)
     return client
 
 
 def test_create_thread_record_omits_repo_less_marker_when_repo_unset(
-    dashboard_run_client: _FakeLangGraphClient,
+    dashboard_run_client: FakeLangGraphClient,
 ) -> None:
     # Runs now start client-side via the stream commands endpoint, so the run
     # configurable is assembled from thread metadata by
-    # ``_build_dashboard_configurable``. The thread record must not persist a
+    # ``build_thread_configurable``. The thread record must not persist a
     # repo-less marker when the repo is simply unset (not explicitly cleared).
     asyncio.run(
-        thread_api._create_dashboard_thread_record(
+        thread_runs.create_dashboard_thread_record(
             "thread-id",
             login="octo",
             repo_config={},
@@ -180,17 +144,17 @@ def test_create_thread_record_omits_repo_less_marker_when_repo_unset(
     )
 
     configurable = asyncio.run(
-        thread_api._build_dashboard_configurable("thread-id", "octo", {"source": "dashboard"})
+        thread_runs.build_thread_configurable("thread-id", "octo", {"source": "dashboard"})
     )
     assert "repo_explicitly_none" not in configurable
     assert "repo" not in configurable
 
 
 def test_build_configurable_marks_repo_less_config_when_explicit(
-    dashboard_run_client: _FakeLangGraphClient,
+    dashboard_run_client: FakeLangGraphClient,
 ) -> None:
     configurable = asyncio.run(
-        thread_api._build_dashboard_configurable(
+        thread_runs.build_thread_configurable(
             "thread-id",
             "octo",
             {"source": "dashboard", "repo_explicitly_none": True},
@@ -201,10 +165,10 @@ def test_build_configurable_marks_repo_less_config_when_explicit(
 
 
 def test_build_configurable_includes_repo_when_configured(
-    dashboard_run_client: _FakeLangGraphClient,
+    dashboard_run_client: FakeLangGraphClient,
 ) -> None:
     configurable = asyncio.run(
-        thread_api._build_dashboard_configurable(
+        thread_runs.build_thread_configurable(
             "thread-id",
             "octo",
             {"source": "dashboard", "repo_owner": "octo", "repo_name": "repo"},

@@ -1,7 +1,7 @@
-import type { Chunk } from "@/features/agents/lib/types"
+import type { Chunk } from "@/lib/agentTypes"
 import type { ApprovalCallbacks } from "./types"
-import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
-import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { CodeBlock } from "@/components/markdown/CodeBlock"
+import { Markdown } from "@/components/markdown/Markdown"
 import { ToolExecution } from "@/features/agents/components/chat/ToolExecution"
 
 export function ChunkRenderer({

@@ -5,7 +5,9 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import pull_request_status, thread_api
+from agent.dashboard import pull_request_status
+from agent.dashboard.threads import sandbox as thread_sandbox
+from agent.github.api import GITHUB_GRAPHQL
 
 
 def _response(status: int, payload: object) -> httpx.Response:
@@ -96,7 +98,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                     "head": {"sha": "a" * 40},
                 },
             )
-        if url == pull_request_status.GITHUB_GRAPHQL:
+        if url == GITHUB_GRAPHQL:
             cursor = kwargs["json"]["variables"]["cursor"]
             graphql_pages.append(cursor)
             if cursor is None:
@@ -248,7 +250,7 @@ async def test_one_inaccessible_pull_request_does_not_fail_the_response(
     monkeypatch.setattr(pull_request_status, "github_client", _client)
 
     async def request(client, method, url, **kwargs):
-        if url == pull_request_status.GITHUB_GRAPHQL:
+        if url == GITHUB_GRAPHQL:
             return _response(200, {"errors": [{"message": "not found"}]})
         return _response(404, {"message": "Not Found"})
 
@@ -288,7 +290,7 @@ async def test_partial_check_failure_cannot_appear_green(
                     "head": {"sha": "b" * 40},
                 },
             )
-        if url == pull_request_status.GITHUB_GRAPHQL:
+        if url == GITHUB_GRAPHQL:
             return _response(
                 200,
                 {
@@ -338,9 +340,9 @@ async def test_thread_status_authorizes_read_access_before_token_or_metadata_use
         {"repo_full_name": "o/two", "number": 2},
     ]
 
-    async def readable(thread_id: str, *, login: str | None = None, email: str | None = None):
+    async def readable(thread_id: str):
         order.append("readable")
-        assert (thread_id, login, email) == ("thread-1", "teammate", "teammate@example.com")
+        assert thread_id == "thread-1"
         return {"pull_requests": records}
 
     async def token(login: str):
@@ -349,11 +351,11 @@ async def test_thread_status_authorizes_read_access_before_token_or_metadata_use
         return "oauth-token"
 
     statuses = AsyncMock(return_value=[{"number": 1}, {"number": 2}])
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", readable)
-    monkeypatch.setattr(thread_api, "_github_token_for_login", token)
-    monkeypatch.setattr(thread_api, "get_pull_request_statuses", statuses)
+    monkeypatch.setattr(thread_sandbox, "get_readable_thread_metadata", readable)
+    monkeypatch.setattr(thread_sandbox, "_github_token_for_login", token)
+    monkeypatch.setattr(thread_sandbox, "get_pull_request_statuses", statuses)
 
-    result = await thread_api.get_dashboard_thread_pull_request_status(
+    result = await thread_sandbox.get_dashboard_thread_pull_request_status(
         "thread-1", "teammate", email="teammate@example.com"
     )
 
@@ -362,14 +364,33 @@ async def test_thread_status_authorizes_read_access_before_token_or_metadata_use
     assert result == {"pullRequests": [{"number": 1}, {"number": 2}]}
 
 
+async def test_thread_status_falls_back_to_the_legacy_pr_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def readable(thread_id: str):
+        return {"pr_url": "https://github.com/o/r/pull/9"}
+
+    statuses = AsyncMock(return_value=[{"number": 9}])
+    monkeypatch.setattr(thread_sandbox, "get_readable_thread_metadata", readable)
+    monkeypatch.setattr(
+        thread_sandbox, "_github_token_for_login", AsyncMock(return_value="oauth-token")
+    )
+    monkeypatch.setattr(thread_sandbox, "get_pull_request_statuses", statuses)
+
+    result = await thread_sandbox.get_dashboard_thread_pull_request_status("thread-1", "owner")
+
+    statuses.assert_awaited_once_with([{"repo_full_name": "o/r", "number": 9}], "oauth-token")
+    assert result == {"pullRequests": [{"number": 9}]}
+
+
 async def test_thread_status_requires_the_users_oauth_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     token = AsyncMock(return_value=None)
-    monkeypatch.setattr(thread_api, "get_valid_access_token", token)
+    monkeypatch.setattr(thread_sandbox, "get_valid_access_token", token)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api._github_token_for_login("owner")
+        await thread_sandbox._github_token_for_login("owner")
 
     assert exc_info.value.status_code == 401
     token.assert_awaited_once_with("owner")
@@ -382,11 +403,11 @@ async def test_thread_status_read_denial_does_not_resolve_oauth_token(
         raise HTTPException(403, "thread is not readable")
 
     token = AsyncMock(return_value="oauth-token")
-    monkeypatch.setattr(thread_api, "_readable_thread_metadata", denied)
-    monkeypatch.setattr(thread_api, "_github_token_for_login", token)
+    monkeypatch.setattr(thread_sandbox, "get_readable_thread_metadata", denied)
+    monkeypatch.setattr(thread_sandbox, "_github_token_for_login", token)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_pull_request_status("thread-1", "intruder")
+        await thread_sandbox.get_dashboard_thread_pull_request_status("thread-1", "intruder")
 
     assert exc_info.value.status_code == 403
     token.assert_not_awaited()

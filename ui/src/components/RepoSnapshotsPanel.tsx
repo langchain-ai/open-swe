@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
-import type { RepoSnapshot, RepoSnapshotStatus } from "@/lib/api"
+import type { RepoSnapshot, RepoSnapshotStatus } from "@/features/admin/lib/api"
 import { Button } from "@/components/ui/button"
 import {
   Combobox,
@@ -15,7 +15,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
-import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import { adminApi } from "@/features/admin/lib/api"
+import { isGithubReauthError } from "@/lib/apiClient"
+import { loginUrl } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
 
@@ -49,16 +51,16 @@ export function RepoSnapshotsPanel() {
 
   const snapshots = useQuery({
     queryKey: ["repoSnapshots"],
-    queryFn: api.listRepoSnapshots,
+    queryFn: adminApi.listRepoSnapshots,
   })
 
   const sandboxSettings = useQuery({
     queryKey: ["sandboxSettings"],
-    queryFn: api.getSandboxSettings,
+    queryFn: adminApi.getSandboxSettings,
   })
 
   const saveBase = useMutation({
-    mutationFn: (value: string | null) => api.saveSandboxSettings(value),
+    mutationFn: (value: string | null) => adminApi.saveSandboxSettings(value),
     onSuccess: (settings) => {
       qc.setQueryData(["sandboxSettings"], settings)
       setBaseDraft(null)
@@ -71,7 +73,7 @@ export function RepoSnapshotsPanel() {
 
   const detail = useQuery({
     queryKey: ["repoSnapshot", selected],
-    queryFn: () => api.getRepoSnapshot(selected!),
+    queryFn: () => adminApi.getRepoSnapshot(selected!),
     enabled: !!selected,
     // Poll while a build is running so status + logs update live.
     refetchInterval: (query) =>
@@ -83,7 +85,7 @@ export function RepoSnapshotsPanel() {
   }, [detail.data?.dockerfile, detail.data?.full_name])
 
   const create = useMutation({
-    mutationFn: (full_name: string) => api.createRepoSnapshot(full_name),
+    mutationFn: (full_name: string) => adminApi.createRepoSnapshot(full_name),
     onSuccess: (record) => {
       void qc.invalidateQueries({ queryKey: ["repoSnapshots"] })
       setSelected(record.full_name)
@@ -94,7 +96,7 @@ export function RepoSnapshotsPanel() {
 
   const save = useMutation({
     mutationFn: ({ full_name, value }: { full_name: string; value: string }) =>
-      api.saveRepoSnapshot(full_name, { dockerfile: value }),
+      adminApi.saveRepoSnapshot(full_name, { dockerfile: value }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["repoSnapshots"] })
       void qc.invalidateQueries({ queryKey: ["repoSnapshot", selected] })
@@ -104,7 +106,7 @@ export function RepoSnapshotsPanel() {
   })
 
   const build = useMutation({
-    mutationFn: (full_name: string) => api.buildRepoSnapshot(full_name),
+    mutationFn: (full_name: string) => adminApi.buildRepoSnapshot(full_name),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["repoSnapshots"] })
       void qc.invalidateQueries({ queryKey: ["repoSnapshot", selected] })
@@ -114,7 +116,7 @@ export function RepoSnapshotsPanel() {
   })
 
   const remove = useMutation({
-    mutationFn: (full_name: string) => api.deleteRepoSnapshot(full_name),
+    mutationFn: (full_name: string) => adminApi.deleteRepoSnapshot(full_name),
     onSuccess: (_data, full_name) => {
       void qc.invalidateQueries({ queryKey: ["repoSnapshots"] })
       if (selected === full_name) {

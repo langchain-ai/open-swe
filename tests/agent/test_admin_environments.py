@@ -1,11 +1,12 @@
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from langgraph.graph.state import RunnableConfig
 
-from agent import server
+from agent.graphs import agent as agent_graph
 from agent.prompt import construct_sender_context, construct_system_prompt
+from agent.runtime import sandbox
 from agent.tools import admin_gate
 from agent.tools import environments as env_tools
 
@@ -19,50 +20,36 @@ def _config(**configurable: object) -> RunnableConfig:
 # --- snapshot precedence ---
 
 
+def _snapshot_sources(environment: dict[str, Any] | None) -> Any:
+    return patch.multiple(
+        sandbox,
+        resolve_environment=AsyncMock(return_value=environment),
+        resolve_repo_snapshot_id=AsyncMock(return_value="repo-snap"),
+        get_admin_base_snapshot_id=AsyncMock(return_value="admin-snap"),
+    )
+
+
 @pytest.mark.asyncio
 async def test_default_environment_snapshot_wins_over_repo_and_base() -> None:
-    with (
-        patch.object(server, "resolve_environment", new_callable=AsyncMock, return_value=_READY),
-        patch.object(
-            server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
-        ),
-        patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
-        ),
-    ):
-        assert await server._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "env-snap"
+    with _snapshot_sources(_READY):
+        config = await sandbox._resolve_sandbox_create_config({"owner": "acme", "name": "repo"})
+    assert config.snapshot_id == "env-snap"
 
 
 @pytest.mark.asyncio
 async def test_environment_without_ready_snapshot_falls_back_to_repo() -> None:
-    capturing = {**_READY, "snapshot_status": "capturing"}
-    with (
-        patch.object(server, "resolve_environment", new_callable=AsyncMock, return_value=capturing),
-        patch.object(
-            server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
-        ),
-        patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
-        ),
-    ):
-        assert await server._resolve_snapshot_id({"owner": "acme", "name": "repo"}) == "repo-snap"
+    with _snapshot_sources({**_READY, "snapshot_status": "capturing"}):
+        config = await sandbox._resolve_sandbox_create_config({"owner": "acme", "name": "repo"})
+    assert config.snapshot_id == "repo-snap"
 
 
 @pytest.mark.asyncio
 async def test_snapshot_resolution_passes_the_threads_environment() -> None:
-    resolve = AsyncMock(return_value={**_READY, "slug": "staging", "snapshot_id": "staging-snap"})
-    with (
-        patch.object(server, "resolve_environment", resolve),
-        patch.object(
-            server, "resolve_repo_snapshot_id", new_callable=AsyncMock, return_value="repo-snap"
-        ),
-        patch.object(
-            server, "get_admin_base_snapshot_id", new_callable=AsyncMock, return_value="admin-snap"
-        ),
-    ):
-        snapshot_id = await server._resolve_snapshot_id(None, "staging")
+    with _snapshot_sources({**_READY, "slug": "staging", "snapshot_id": "staging-snap"}):
+        config = await sandbox._resolve_sandbox_create_config(None, "staging")
+        resolve = cast(AsyncMock, sandbox.resolve_environment)
 
-    assert snapshot_id == "staging-snap"
+    assert config.snapshot_id == "staging-snap"
     resolve.assert_awaited_once_with("staging")
 
 
@@ -75,27 +62,39 @@ async def test_environment_sandbox_sizing_is_resolved_with_snapshot() -> None:
         "fs_capacity_bytes": 512 * 1024**3,
         "create_params": {"_internal_runtime": "v2"},
     }
-    with patch.object(
-        server, "resolve_environment", new_callable=AsyncMock, return_value=environment
-    ):
-        snapshot_id, resources, create_params = await server._resolve_sandbox_create_config(
-            None, "base"
-        )
+    with _snapshot_sources(environment):
+        config = await sandbox._resolve_sandbox_create_config(None, "base")
 
-    assert snapshot_id == "env-snap"
-    assert resources == {
-        "mem_bytes": 32 * 1024**3,
-        "vcpus": 16,
-        "fs_capacity_bytes": 512 * 1024**3,
-    }
-    assert create_params == {"_internal_runtime": "v2"}
+    assert config == sandbox.SandboxCreateConfig(
+        snapshot_id="env-snap",
+        resources={
+            "mem_bytes": 32 * 1024**3,
+            "vcpus": 16,
+            "fs_capacity_bytes": 512 * 1024**3,
+        },
+        create_params={"_internal_runtime": "v2"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_sizing_is_passed_through_where_snapshots_are_not() -> None:
+    environment = {**_READY, "vcpus": 16, "create_params": {"_internal_runtime": "v2"}}
+    with (
+        _snapshot_sources(environment),
+        patch.object(sandbox, "sandbox_provider_supports_snapshots", return_value=False),
+    ):
+        config = await sandbox._resolve_sandbox_create_config(None, "base")
+
+    assert config == sandbox.SandboxCreateConfig(
+        snapshot_id=None, resources={"vcpus": 16}, create_params={"_internal_runtime": "v2"}
+    )
 
 
 def test_environment_slug_reads_the_run_config() -> None:
-    assert server._environment_slug({"environment": "staging"}) == "staging"
-    assert server._environment_slug({"environment": "  "}) is None
-    assert server._environment_slug({}) is None
-    assert server._environment_slug(None) is None
+    assert sandbox.environment_slug({"environment": "staging"}) == "staging"
+    assert sandbox.environment_slug({"environment": "  "}) is None
+    assert sandbox.environment_slug({}) is None
+    assert sandbox.environment_slug(None) is None
 
 
 # --- admin thread gate ---
@@ -108,21 +107,21 @@ async def test_admin_thread_requires_flag_and_configured_admin(
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramon.nogueira@langchain.dev")
     admin_config = _config(admin_thread=True, user_email="ramon.nogueira@langchain.dev")
 
-    assert await server._admin_thread(admin_config, None) is True
+    assert await agent_graph._admin_thread(admin_config, None) is True
     # Same user, no flag: an ordinary thread never gets the tools.
     assert (
-        await server._admin_thread(_config(user_email="ramon.nogueira@langchain.dev"), None)
+        await agent_graph._admin_thread(_config(user_email="ramon.nogueira@langchain.dev"), None)
         is False
     )
     # Flag set by a thread whose current requester is not an admin.
     non_admin = _config(admin_thread=True, user_email="someone@else.dev")
-    assert await server._admin_thread(non_admin, None) is False
+    assert await agent_graph._admin_thread(non_admin, None) is False
 
 
 @pytest.mark.asyncio
 async def test_admin_thread_accepts_configured_login(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    assert await server._admin_thread(_config(admin_thread=True), "ramonn") is True
+    assert await agent_graph._admin_thread(_config(admin_thread=True), "ramonn") is True
 
 
 @pytest.mark.asyncio
@@ -131,9 +130,9 @@ async def test_workspace_admin_resolves_email_for_github_login(
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramon@langchain.dev")
     with patch.object(
-        server, "email_for_login", new_callable=AsyncMock, return_value="ramon@langchain.dev"
+        agent_graph, "email_for_login", new_callable=AsyncMock, return_value="ramon@langchain.dev"
     ):
-        assert await server._workspace_admin(_config(github_login="ramonn"), None) is True
+        assert await agent_graph._workspace_admin(_config(github_login="ramonn"), None) is True
 
 
 # --- tool gate ---

@@ -12,34 +12,33 @@ from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from ..config import langgraph_client
 from ..dashboard import plan_api, workflow_approval_api
-from ..dashboard.admin import is_admin
-from ..dashboard.agent_overrides import resolve_login_from_email_async
 from ..dashboard.oauth import enforce_org_login_gate
-from ..dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
-from ..dashboard.plan_store import get_plan_content, list_plan_comments
-from ..dashboard.thread_api import (
+from ..dashboard.threads.listing import get_dashboard_thread, list_dashboard_threads_page
+from ..dashboard.threads.runs import (
     ThreadMessageBody,
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     delete_dashboard_thread,
-    get_dashboard_thread,
-    list_dashboard_threads_page,
     proxy_dashboard_thread_commands,
     resolve_dashboard_thread,
     send_dashboard_message,
 )
-from ..dashboard.workflow_approval import (
+from ..input_messages import input_message_text, message_sender_id
+from ..langsmith.api import LangSmithCostUnavailable, get_langsmith_thread_cost
+from ..settings.admin import is_admin
+from ..settings.agent_overrides import resolve_login_from_email_async
+from ..settings.options import normalize_model_choice
+from ..settings.plan_store import get_plan_content, list_plan_comments
+from ..settings.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
-from ..input_messages import input_message_text, message_sender_id
+from ..threads.participants import PARTICIPANT_LOGINS_KEY
 from ..utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from ..utils.json_types import as_json_object, thread_metadata
-from ..utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
-from ..utils.thread_ops import langgraph_client
-from ..utils.thread_participants import PARTICIPANT_LOGINS_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -502,14 +501,9 @@ async def _send_message(
     if bool(model_id) != bool(effort):
         return _failure("model_id and effort must be provided together")
     if model_id and effort:
-        normalized = (
-            (model_id, effort)
-            if model_id in SUPPORTED_MODEL_IDS and model_supports_effort(model_id, effort)
-            else canonical_model_pair(model_id, effort)
-        )
-        if normalized is None:
+        model_id, effort = normalize_model_choice(model_id, effort)
+        if model_id is None:
             return _failure("model_id and effort are not a supported combination")
-        model_id, effort = normalized
 
     summary = await get_dashboard_thread(
         thread_id,

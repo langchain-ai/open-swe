@@ -1,13 +1,9 @@
-import type {
-  AcpToolStatus,
-  Chunk,
-  ToolExecutionChunk,
-} from "@/features/agents/lib/types"
+import type { AcpToolStatus, Chunk, ToolExecutionChunk } from "@/lib/agentTypes"
+import { countLineChanges } from "@/components/diff/diffStats"
 import {
   formatPathDisplayParts,
   formatToolDisplayParts,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
-import { countLineChanges } from "@/features/agents/utils/diffStats"
 import { formatJsonToolResult } from "./toolResultJson"
 
 export type WorkEntryIconName =

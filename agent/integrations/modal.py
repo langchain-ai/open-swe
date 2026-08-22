@@ -1,25 +1,47 @@
-import os
+"""Modal sandbox provider."""
+
+from collections.abc import Mapping
+from typing import Any
 
 import modal
+from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_modal import ModalSandbox
 
-MODAL_APP_NAME = os.getenv("MODAL_APP_NAME", "open-swe")
+from ..config import modal_app_name
+from ..sandboxes.providers import SandboxGoneError, SandboxProvider, SandboxResources
 
 
-async def create_modal_sandbox(sandbox_id: str | None = None):
-    """Create or reconnect to a Modal sandbox.
+class ModalProvider(SandboxProvider):
+    """Modal sandboxes.
 
-    Args:
-        sandbox_id: Optional existing sandbox ID to reconnect to.
-            If None, creates a new sandbox.
+    Cannot boot from an Open SWE snapshot: a Modal sandbox's filesystem comes
+    from the image its app defines, not from a captured box.
 
-    Returns:
-        ModalSandbox instance implementing SandboxBackendProtocol.
+    Says nothing about the work dir — Modal takes it from the image, so the
+    sandbox's own shell is the only thing that knows it.
     """
-    if sandbox_id:
-        sandbox = await modal.Sandbox.from_id.aio(sandbox_id)
-    else:
-        app = await modal.App.lookup.aio(MODAL_APP_NAME)
-        sandbox = await modal.Sandbox.create.aio(app=app)
 
-    return ModalSandbox(sandbox=sandbox)
+    async def connect(self, sandbox_id: str) -> SandboxBackendProtocol:
+        try:
+            sandbox = await modal.Sandbox.from_id.aio(sandbox_id)
+        except modal.exception.NotFoundError as e:
+            msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
+            raise SandboxGoneError(msg) from e
+        return ModalSandbox(sandbox=sandbox)
+
+    async def create(
+        self,
+        *,
+        snapshot_id: str | None = None,
+        resources: SandboxResources | None = None,
+        create_params: Mapping[str, Any] | None = None,
+    ) -> SandboxBackendProtocol:
+        if snapshot_id is not None:
+            msg = (
+                f"Modal cannot boot from snapshot {snapshot_id!r}; its filesystem comes from the "
+                f"image of app {modal_app_name()!r}"
+            )
+            raise ValueError(msg)
+        self._reject_sizing("Modal", resources, create_params)
+        app = await modal.App.lookup.aio(modal_app_name())
+        return ModalSandbox(sandbox=await modal.Sandbox.create.aio(app=app))

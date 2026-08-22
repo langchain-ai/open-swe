@@ -13,11 +13,14 @@ directly comparable to martian's published numbers.
 import json
 import os
 import threading
+from collections.abc import Sequence
 from functools import cache
 from typing import Any, NotRequired, TypedDict
 from uuid import UUID
 
-from langchain_anthropic import ChatAnthropic
+from langchain.chat_models import init_chat_model
+from langchain_core.language_models import BaseChatModel
+from langsmith.evaluation import EvaluationResult, EvaluationResults
 from langsmith.schemas import Example, Run
 
 from agent.review.findings import REVIEW_FINDING_CAP
@@ -49,7 +52,7 @@ Respond with ONLY a JSON object:
 {{"reasoning": "brief explanation", "match": true/false, "confidence": 0.0-1.0}}"""
 
 
-_judge: ChatAnthropic | None = None
+_judge: BaseChatModel | None = None
 
 
 class ReviewComment(TypedDict):
@@ -87,7 +90,7 @@ class ExampleCounts(TypedDict):
     is_synthetic: bool
 
 
-def _get_judge() -> ChatAnthropic:
+def _get_judge() -> BaseChatModel:
     global _judge
     if _judge is None:
         api_key = os.environ.get("JUDGE_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
@@ -96,8 +99,9 @@ def _get_judge() -> ChatAnthropic:
                 "No Anthropic API key for the judge. Set JUDGE_ANTHROPIC_API_KEY or "
                 "ANTHROPIC_API_KEY (the judge calls Anthropic directly, not via a gateway)."
             )
-        _judge = ChatAnthropic(
+        _judge = init_chat_model(
             model=JUDGE_MODEL,
+            model_provider="anthropic",
             temperature=0.0,
             max_tokens=512,
             base_url=JUDGE_BASE_URL,
@@ -109,21 +113,22 @@ def _get_judge() -> ChatAnthropic:
 
 def _format_candidate(c: ReviewComment) -> str:
     parts = []
-    if c.get("file"):
-        loc = c["file"]
-        if c.get("line") is not None:
-            loc += f":{c['line']}"
-        parts.append(f"Location: {loc}")
-    if c.get("severity"):
-        parts.append(f"Severity: {c['severity']}")
+    file = c.get("file")
+    if file:
+        line = c.get("line")
+        parts.append(f"Location: {file}" + (f":{line}" if line is not None else ""))
+    severity = c.get("severity")
+    if severity:
+        parts.append(f"Severity: {severity}")
     parts.append(f"Comment: {c.get('body') or c.get('comment') or ''}")
     return "\n".join(parts)
 
 
 def _format_golden(g: ReviewComment) -> str:
     parts = []
-    if g.get("severity"):
-        parts.append(f"Severity: {g['severity']}")
+    severity = g.get("severity")
+    if severity:
+        parts.append(f"Severity: {severity}")
     parts.append(f"Comment: {g.get('comment', '')}")
     return "\n".join(parts)
 
@@ -377,7 +382,7 @@ def _f1(p: float, r: float) -> float:
     return 2 * p * r / (p + r) if (p + r) else 0.0
 
 
-def aggregate_pr(runs: list[Run], examples: list[Example]) -> dict[str, Any]:
+def aggregate_pr(runs: Sequence[Run], examples: Sequence[Example]) -> EvaluationResults:
     """Summary evaluator: micro/macro precision-recall-F1 across the experiment.
 
     Reads the per-example counts that ``judge_match`` stashed in the
@@ -406,7 +411,7 @@ def _aggregate_metrics(
     *,
     key_prefix: str = "",
     field_prefix: str = "",
-) -> list[dict[str, Any]]:
+) -> list[EvaluationResult]:
     tp_key = f"{field_prefix}tp"
     fp_key = f"{field_prefix}fp"
     fn_key = f"{field_prefix}fn"
@@ -420,22 +425,22 @@ def _aggregate_metrics(
     micro_recall = micro_tp / (micro_tp + micro_fn) if micro_tp + micro_fn else 0.0
     count = len(counts)
     return [
-        {"key": f"{key_prefix}micro_precision", "score": micro_precision},
-        {"key": f"{key_prefix}micro_recall", "score": micro_recall},
-        {"key": f"{key_prefix}micro_f1", "score": _f1(micro_precision, micro_recall)},
-        {
-            "key": f"{key_prefix}macro_precision",
-            "score": sum(float(item[precision_key]) for item in counts) / count,
-        },
-        {
-            "key": f"{key_prefix}macro_recall",
-            "score": sum(float(item[recall_key]) for item in counts) / count,
-        },
-        {
-            "key": f"{key_prefix}macro_f1",
-            "score": sum(float(item[f1_key]) for item in counts) / count,
-        },
-        {"key": f"{key_prefix}total_tp", "score": micro_tp},
-        {"key": f"{key_prefix}total_fp", "score": micro_fp},
-        {"key": f"{key_prefix}total_fn", "score": micro_fn},
+        EvaluationResult(key=f"{key_prefix}micro_precision", score=micro_precision),
+        EvaluationResult(key=f"{key_prefix}micro_recall", score=micro_recall),
+        EvaluationResult(key=f"{key_prefix}micro_f1", score=_f1(micro_precision, micro_recall)),
+        EvaluationResult(
+            key=f"{key_prefix}macro_precision",
+            score=sum(float(item[precision_key]) for item in counts) / count,
+        ),
+        EvaluationResult(
+            key=f"{key_prefix}macro_recall",
+            score=sum(float(item[recall_key]) for item in counts) / count,
+        ),
+        EvaluationResult(
+            key=f"{key_prefix}macro_f1",
+            score=sum(float(item[f1_key]) for item in counts) / count,
+        ),
+        EvaluationResult(key=f"{key_prefix}total_tp", score=micro_tp),
+        EvaluationResult(key=f"{key_prefix}total_fp", score=micro_fp),
+        EvaluationResult(key=f"{key_prefix}total_fn", score=micro_fn),
     ]

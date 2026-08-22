@@ -81,7 +81,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Install dependencies
-        run: uv sync --locked
+        run: uv sync --locked --extra dev
       - name: Run reviewer eval
         # Inputs are passed via env and referenced as quoted "$VARS" — never
         # interpolated into the script — so dispatcher-supplied text is treated
@@ -92,17 +92,19 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LANGGRAPH_URL: ${{ secrets.LANGGRAPH_URL || vars.LANGGRAPH_URL }}
           REVIEWER_EVAL_REPORT_STORE: "1"
-          INPUT_MODEL_ID: ${{ inputs.model_id }}
-          INPUT_REASONING_EFFORT: ${{ inputs.reasoning_effort }}
-          INPUT_DATASET_NAME: ${{ inputs.dataset_name }}
-          INPUT_EXPERIMENT_PREFIX: ${{ inputs.experiment_prefix }}
-          INPUT_MAX_CONCURRENCY: ${{ inputs.max_concurrency }}
-          INPUT_SCORE_MODE: ${{ inputs.score_mode }}
-          INPUT_SEVERITY_THRESHOLD: ${{ inputs.severity_threshold }}
-          INPUT_CAP: ${{ inputs.cap }}
+          # run_eval resolves every knob from these (agent/review/eval_config.py owns
+          # the name → env var mapping), so there is no CLI plumbing to keep in sync.
+          REVIEWER_EVAL_MODEL_ID: ${{ inputs.model_id }}
+          REVIEWER_EVAL_REASONING_EFFORT: ${{ inputs.reasoning_effort }}
+          REVIEWER_EVAL_DATASET_NAME: ${{ inputs.dataset_name }}
+          REVIEWER_EVAL_EXPERIMENT_PREFIX: ${{ inputs.experiment_prefix }}
+          REVIEWER_EVAL_MAX_CONCURRENCY: ${{ inputs.max_concurrency }}
+          REVIEWER_EVAL_SCORE_MODE: ${{ inputs.score_mode }}
+          REVIEWER_EVAL_SEVERITY_THRESHOLD: ${{ inputs.severity_threshold }}
+          REVIEWER_EVAL_CAP: ${{ inputs.cap }}
+          LANGSMITH_PROJECT: ${{ inputs.langsmith_project }}
+          REVIEWER_ASSISTANT_ID: ${{ inputs.assistant_id }}
           INPUT_LIMIT: ${{ inputs.limit }}
-          INPUT_LANGSMITH_PROJECT: ${{ inputs.langsmith_project }}
-          INPUT_ASSISTANT_ID: ${{ inputs.assistant_id }}
         run: |
           set -euo pipefail
           limit_args=()
@@ -113,15 +115,4 @@ jobs:
             fi
             limit_args=(--limit "${INPUT_LIMIT}")
           fi
-          uv run python -m evals.reviewer.run_eval \
-            --model-id "${INPUT_MODEL_ID}" \
-            --reasoning-effort "${INPUT_REASONING_EFFORT}" \
-            --dataset-name "${INPUT_DATASET_NAME}" \
-            --experiment-prefix "${INPUT_EXPERIMENT_PREFIX}" \
-            --max-concurrency "${INPUT_MAX_CONCURRENCY}" \
-            --score-mode "${INPUT_SCORE_MODE}" \
-            --severity-threshold "${INPUT_SEVERITY_THRESHOLD}" \
-            --cap "${INPUT_CAP}" \
-            --langsmith-project "${INPUT_LANGSMITH_PROJECT}" \
-            --assistant-id "${INPUT_ASSISTANT_ID}" \
-            "${limit_args[@]}"
+          uv run python -m evals.reviewer.run_eval "${limit_args[@]}"

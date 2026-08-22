@@ -208,6 +208,17 @@ def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
     return {"role": "user", "content": serialized}
 
 
+def github_person(login: str, user_id: object = None) -> PersonIdentity:
+    """Identity for a GitHub actor, keyed on the numeric id when the payload carries one."""
+    stable = str(user_id) if user_id not in (None, "") else login or "unknown"
+    person: PersonIdentity = {"id": f"github:{stable}", "platform": "github"}
+    if login:
+        person["display_name"] = login
+        person["handle"] = login
+        person["github_login"] = login
+    return person
+
+
 def person_introduction(person: PersonIdentity) -> RunMessage:
     return _entity_message(person, "person")
 
