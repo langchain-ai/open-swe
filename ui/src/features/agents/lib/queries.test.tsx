@@ -367,7 +367,7 @@ describe("useSidebarThreads", () => {
     })
   })
 
-  it("keeps an opened resolved thread visible when resolved threads are hidden", async () => {
+  it("hides an opened resolved thread when resolved threads are hidden", async () => {
     vi.spyOn(agentsApi, "listThreadsPage").mockResolvedValue({
       items: [],
       limit: SIDEBAR_PAGE_SIZE,
@@ -394,11 +394,12 @@ describe("useSidebarThreads", () => {
       </QueryClientProvider>
     )
 
-    await waitFor(() => expect(sidebar?.data.active.items).toEqual([opened]))
+    await waitFor(() => expect(getThread).toHaveBeenCalledTimes(1))
+    expect(sidebar?.data.active.items).toEqual([])
     expect(getThread).toHaveBeenCalledWith(opened.id, { markViewed: false })
   })
 
-  it("keeps the opened thread visible while resolving it", async () => {
+  it("hides the opened thread after resolving it", async () => {
     const opened = {
       id: "opened-thread",
       status: "idle",
@@ -453,7 +454,7 @@ describe("useSidebarThreads", () => {
 
     await waitFor(() => expect(listThreads).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(getThread).toHaveBeenCalledTimes(1))
-    expect(sidebar?.data.active.items).toEqual([resolved])
+    expect(sidebar?.data.active.items).toEqual([])
     await act(async () => {
       finishGetThread?.(resolved)
       await getThreadRequest
