@@ -8,7 +8,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
 
 import { agentsApi } from "./api"
-import type { InfiniteData, QueryClient } from "@tanstack/react-query"
+import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
   SidebarThreads,
@@ -117,6 +117,45 @@ function updateThreadPageResolved(
     items: page.items.map((item) =>
       item.id === threadId ? { ...item, resolved } : item
     ),
+  }
+}
+
+type AgentThreadQuerySnapshot = [QueryKey, unknown, boolean]
+
+function snapshotAgentThreadQueries(
+  queryClient: QueryClient,
+  threadId: string
+): Array<AgentThreadQuerySnapshot> {
+  const directKeys = [
+    agentThreadKeys.detail(threadId),
+    agentThreadKeys.sidebarActive(threadId),
+  ]
+  const direct = directKeys.map((key): AgentThreadQuerySnapshot => {
+    const state = queryClient.getQueryState(key)
+    return [key, state?.data, Boolean(state)]
+  })
+  const lists = [
+    ...queryClient.getQueriesData({
+      queryKey: ["agent-threads", "lists", "infinite-pages"],
+    }),
+    ...queryClient.getQueriesData({
+      queryKey: ["agent-threads", "lists", "page"],
+    }),
+  ].map(([key, data]): AgentThreadQuerySnapshot => [key, data, true])
+  return [...direct, ...lists]
+}
+
+function restoreAgentThreadQueries(
+  queryClient: QueryClient,
+  snapshots: Array<AgentThreadQuerySnapshot>,
+  optimistic: Map<QueryKey, number | undefined>
+): void {
+  for (const [key, data, existed] of snapshots) {
+    if (queryClient.getQueryState(key)?.dataUpdatedAt !== optimistic.get(key)) {
+      continue
+    }
+    if (existed) queryClient.setQueryData(key, data)
+    else queryClient.removeQueries({ queryKey: key, exact: true })
   }
 }
 
@@ -759,25 +798,39 @@ export function useResolveAgentThread() {
     mutationFn: (vars: { threadId: string; resolved: boolean }) =>
       agentsApi.resolveThread(vars.threadId, vars.resolved),
     onMutate: async (vars) => {
-      await queryClient.cancelQueries({ queryKey: ["agent-threads"] })
-      const previous = queryClient.getQueriesData({
-        queryKey: ["agent-threads"],
-      })
-      const hadSidebarActive = Boolean(
-        queryClient.getQueryState(agentThreadKeys.sidebarActive(vars.threadId))
-      )
-      setAgentThreadResolved(queryClient, vars.threadId, vars.resolved)
-      return { previous, hadSidebarActive }
-    },
-    onError: (_error, vars, context) => {
-      for (const [key, data] of context?.previous ?? []) {
-        queryClient.setQueryData(key, data)
-      }
-      if (context && !context.hadSidebarActive) {
-        queryClient.removeQueries({
+      await Promise.all([
+        queryClient.cancelQueries({
+          queryKey: agentThreadKeys.detail(vars.threadId),
+          exact: true,
+        }),
+        queryClient.cancelQueries({
           queryKey: agentThreadKeys.sidebarActive(vars.threadId),
           exact: true,
-        })
+        }),
+        queryClient.cancelQueries({
+          queryKey: ["agent-threads", "lists", "infinite-pages"],
+        }),
+        queryClient.cancelQueries({
+          queryKey: ["agent-threads", "lists", "page"],
+        }),
+      ])
+      const previous = snapshotAgentThreadQueries(queryClient, vars.threadId)
+      setAgentThreadResolved(queryClient, vars.threadId, vars.resolved)
+      const optimistic = new Map<QueryKey, number | undefined>(
+        previous.map(([key]) => [
+          key,
+          queryClient.getQueryState(key)?.dataUpdatedAt,
+        ])
+      )
+      return { previous, optimistic }
+    },
+    onError: (_error, _vars, context) => {
+      if (context) {
+        restoreAgentThreadQueries(
+          queryClient,
+          context.previous,
+          context.optimistic
+        )
       }
     },
     onSuccess: (thread, vars) => {

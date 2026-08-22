@@ -471,7 +471,9 @@ describe("useSidebarThreads", () => {
     )
     const client = testClient()
     const key = agentThreadKeys.page({ resolved: false })
+    const unrelated = { ...opened, id: "unrelated-thread", title: "Before" }
     client.setQueryData(agentThreadKeys.detail(opened.id), opened)
+    client.setQueryData(agentThreadKeys.detail(unrelated.id), unrelated)
     client.setQueryData(key, {
       items: [opened],
       limit: 25,
@@ -500,6 +502,10 @@ describe("useSidebarThreads", () => {
     expect(
       client.getQueryData<AgentThread>(agentThreadKeys.detail(opened.id))
     ).toMatchObject({ resolved: true })
+    client.setQueryData(agentThreadKeys.detail(unrelated.id), {
+      ...unrelated,
+      title: "After",
+    })
 
     act(() => failResolve?.(new Error("request failed")))
     await waitFor(() =>
@@ -511,5 +517,8 @@ describe("useSidebarThreads", () => {
     expect(
       client.getQueryData(agentThreadKeys.sidebarActive(opened.id))
     ).toBeUndefined()
+    expect(
+      client.getQueryData<AgentThread>(agentThreadKeys.detail(unrelated.id))
+    ).toMatchObject({ title: "After" })
   })
 })
