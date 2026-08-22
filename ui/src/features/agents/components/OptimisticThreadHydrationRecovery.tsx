@@ -32,7 +32,7 @@ export function OptimisticThreadHydrationRecovery({
       }, RETRY_DELAYS_MS[retry])
     }
 
-    void stream.hydrationPromise.then(schedule, () => undefined)
+    void stream.hydrationPromise.then(schedule, schedule)
     return () => {
       cancelled = true
       if (timer) clearTimeout(timer)

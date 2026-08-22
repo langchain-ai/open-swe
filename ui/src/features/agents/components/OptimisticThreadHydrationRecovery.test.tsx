@@ -36,6 +36,8 @@ afterEach(() => {
 
 describe("OptimisticThreadHydrationRecovery", () => {
   it("retries hydration after an optimistic thread races server creation", async () => {
+    mocks.stream.hydrationPromise = Promise.reject(new Error("not found"))
+
     render(
       <OptimisticThreadHydrationRecovery threadId="thread-1" enabled={true} />
     )
