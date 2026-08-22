@@ -27,16 +27,23 @@ function load(): Map<string, string> {
   return cache
 }
 
-function persist(map: Map<string, string>): void {
-  if (typeof window === "undefined") return
-  try {
-    const entries = [...map.entries()]
-    const trimmed =
-      entries.length > MAX_ENTRIES ? entries.slice(-MAX_ENTRIES) : entries
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed))
-  } catch {
-    // Quota/serialization failure — timestamps stay in memory only.
-  }
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+
+// Coalesced: hydrating a large thread stamps hundreds of ids in one pass, and
+// serializing the full map synchronously per id would stall the render path.
+function schedulePersist(map: Map<string, string>): void {
+  if (typeof window === "undefined" || persistTimer !== null) return
+  persistTimer = setTimeout(() => {
+    persistTimer = null
+    try {
+      const entries = [...map.entries()]
+      const trimmed =
+        entries.length > MAX_ENTRIES ? entries.slice(-MAX_ENTRIES) : entries
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed))
+    } catch {
+      // Quota/serialization failure — timestamps stay in memory only.
+    }
+  }, 1000)
 }
 
 /**
@@ -52,7 +59,7 @@ export function messageArrivalTimestamp(messageId: string): string {
   if (existing) return existing
   const iso = new Date().toISOString()
   map.set(messageId, iso)
-  persist(map)
+  schedulePersist(map)
   return iso
 }
 

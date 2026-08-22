@@ -1,3 +1,4 @@
+import { formatJsonToolResult } from "./toolResultJson"
 import type {
   AcpToolStatus,
   Chunk,
@@ -8,7 +9,6 @@ import {
   formatToolDisplayParts,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
-import { formatJsonToolResult } from "./toolResultJson"
 
 export type WorkEntryIconName =
   | "bot"
@@ -137,7 +137,28 @@ export function latestDiff(chunk: ToolExecutionChunk) {
     : chunk.diffData
 }
 
+/**
+ * Chunk identities are stable across stream flushes (the projector reuses
+ * untouched chunks), so the description — including the line-diff behind
+ * `diffStats` — is computed once per chunk instead of on every render.
+ */
+const workEntryCache = new WeakMap<
+  ToolExecutionChunk,
+  { projectPath?: string; view: WorkEntryView }
+>()
+
 export function describeWorkEntry(
+  chunk: ToolExecutionChunk,
+  projectPath?: string
+): WorkEntryView {
+  const cached = workEntryCache.get(chunk)
+  if (cached && cached.projectPath === projectPath) return cached.view
+  const view = buildWorkEntry(chunk, projectPath)
+  workEntryCache.set(chunk, { projectPath, view })
+  return view
+}
+
+function buildWorkEntry(
   chunk: ToolExecutionChunk,
   projectPath?: string
 ): WorkEntryView {

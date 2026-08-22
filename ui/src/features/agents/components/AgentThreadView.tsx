@@ -22,7 +22,7 @@ import {
 import { Messages } from "@/features/agents/components/messages"
 import { OptimisticThreadHydrationRecovery } from "@/features/agents/components/OptimisticThreadHydrationRecovery"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
-import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import { createUiMessageProjector } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
@@ -147,14 +147,18 @@ export function AgentThreadView({
     [handlePanelCollapsedChange]
   )
 
+  // Incremental: unchanged turns keep their Message identity across stream
+  // flushes, so the memoized message components below re-render only the turn
+  // that is actually streaming.
+  const [projectMessages] = useState(() => createUiMessageProjector())
   const baseMessages = useMemo<Array<Message>>(() => {
     if (thread.messages.length > 0) return thread.messages
-    return streamMessagesToUi(
+    return projectMessages(
       stream.messages,
       stream.toolCalls,
       messageArrivalTimestamp
     )
-  }, [stream.messages, stream.toolCalls, thread.messages])
+  }, [projectMessages, stream.messages, stream.toolCalls, thread.messages])
 
   const isStreaming =
     thread.status === "running" ||

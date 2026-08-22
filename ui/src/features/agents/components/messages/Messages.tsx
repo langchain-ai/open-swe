@@ -1,5 +1,6 @@
 import {
   memo,
+  startTransition,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -20,6 +21,14 @@ import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtif
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
 const BOTTOM_LOCK_THRESHOLD_PX = 24
+
+/**
+ * How many trailing messages the first render mounts. The rest of a large
+ * thread mounts in a transition immediately after, above a viewport that is
+ * already pinned to the bottom — so first paint stays fast at any thread size
+ * and the reader never sees the older turns stream in.
+ */
+const INITIAL_MOUNT_MESSAGES = 16
 
 function QueuedMessages({
   queuedMessages,
@@ -225,6 +234,15 @@ export const Messages = memo(function MessagesComponent({
     () => messages.filter((message) => !message.hidden),
     [messages]
   )
+  const [tailOnly, setTailOnly] = useState(
+    () => visibleMessages.length > INITIAL_MOUNT_MESSAGES
+  )
+  useEffect(() => {
+    if (tailOnly) startTransition(() => setTailOnly(false))
+  }, [tailOnly])
+  const renderedMessages = tailOnly
+    ? visibleMessages.slice(-INITIAL_MOUNT_MESSAGES)
+    : visibleMessages
   const liveMarkdownMessageId = useLiveMarkdownMessageId(
     visibleMessages,
     streamIsLoading,
@@ -250,7 +268,7 @@ export const Messages = memo(function MessagesComponent({
   }, [onShowScrollToBottomChange, showScrollToBottom])
 
   const projectPath = project?.path
-  const lastAgentIndex = visibleMessages.findLastIndex(
+  const lastAgentIndex = renderedMessages.findLastIndex(
     (message) => message.author === "agent"
   )
   const activityLabel = useMemo(() => {
@@ -274,8 +292,8 @@ export const Messages = memo(function MessagesComponent({
             className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
             style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
           >
-            {visibleMessages.map((message, index) => {
-              const isLastMessage = index === visibleMessages.length - 1
+            {renderedMessages.map((message, index) => {
+              const isLastMessage = index === renderedMessages.length - 1
               const messageIsStreaming = isStreaming && isLastMessage
               const messageIsMarkdownLive = message.id === liveMarkdownMessageId
 
@@ -313,7 +331,7 @@ export const Messages = memo(function MessagesComponent({
                 !(
                   isStreaming &&
                   lastAgentIndex >= 0 &&
-                  lastAgentIndex === visibleMessages.length - 1
+                  lastAgentIndex === renderedMessages.length - 1
                 )
               }
               settingUpSandbox={settingUpSandbox}

@@ -33,7 +33,7 @@ function getFileName(path: string): string {
   return parts[parts.length - 1] || path
 }
 
-const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
+const InlineDiffCollapsible = memo(function InlineDiffCollapsibleComponent({
   filePath,
   fileName,
   originalContent,
@@ -143,7 +143,7 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   )
 })
 
-export const ToolExecution = memo(function ToolExecution({
+export const ToolExecution = memo(function ToolExecutionComponent({
   chunk,
   projectPath,
 }: ToolExecutionProps) {
@@ -166,13 +166,17 @@ export const ToolExecution = memo(function ToolExecution({
     ? stripProjectPath(diffData.filePath, projectPath)
     : ""
   const editedFileName = editedFilePath ? getFileName(editedFilePath) : ""
-  const diffStats = diffData
-    ? countLineChanges(
-        diffData.originalContent,
-        diffData.newContent,
-        diffData.filePath
-      )
-    : null
+  const diffStats = useMemo(
+    () =>
+      diffData
+        ? countLineChanges(
+            diffData.originalContent,
+            diffData.newContent,
+            diffData.filePath
+          )
+        : null,
+    [diffData]
+  )
 
   if (isCompletedEditOp && diffStats) {
     return (
