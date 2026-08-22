@@ -201,6 +201,7 @@ from .utils.sandbox_state import (
     set_sandbox_backend,
     unwrap_sandbox_backend,
 )
+from .utils.startup_trace import aphase
 from .utils.thread_settings import (
     ThreadSettings,
     load_thread_settings,
@@ -353,34 +354,38 @@ async def _create_sandbox_with_proxy(
     environment_slug: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
-    snapshot_id, resources, create_params = await _resolve_sandbox_create_config(
-        repo, environment_slug
-    )
-    if create_params:
-        sandbox_backend = await create_sandbox(
-            snapshot_id=snapshot_id,
-            create_params=create_params,
-            **resources,
+    async with aphase(thread_id, "sandbox.resolve_snapshot"):
+        snapshot_id, resources, create_params = await _resolve_sandbox_create_config(
+            repo, environment_slug
         )
-    else:
-        sandbox_backend = await create_sandbox(snapshot_id=snapshot_id, **resources)
+    async with aphase(thread_id, "sandbox.boot", snapshot_id=snapshot_id):
+        if create_params:
+            sandbox_backend = await create_sandbox(
+                snapshot_id=snapshot_id,
+                create_params=create_params,
+                **resources,
+            )
+        else:
+            sandbox_backend = await create_sandbox(snapshot_id=snapshot_id, **resources)
 
     sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
     if sandbox_type == "langsmith":
-        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
+        async with aphase(thread_id, "sandbox.proxy_token"):
+            token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
         if not token:
             msg = "Cannot configure proxy: GitHub App installation token is unavailable"
             logger.error(msg)
             raise ValueError(msg)
         proxy_config = _get_sandbox_proxy_config(create_params)
-        if proxy_config is not None:
-            await _configure_github_proxy(
-                sandbox_backend.id,
-                token,
-                base_proxy_config=proxy_config,
-            )
-        else:
-            await _configure_github_proxy(sandbox_backend.id, token)
+        async with aphase(thread_id, "sandbox.proxy_configure"):
+            if proxy_config is not None:
+                await _configure_github_proxy(
+                    sandbox_backend.id,
+                    token,
+                    base_proxy_config=proxy_config,
+                )
+            else:
+                await _configure_github_proxy(sandbox_backend.id, token)
         record_proxy_token_expiry(
             thread_id,
             expires_at,
@@ -404,7 +409,8 @@ async def _refresh_github_proxy(
     if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
         return
 
-    token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
+    async with aphase(thread_id, "sandbox.proxy_token"):
+        token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
     if not token:
         logger.warning(
             "Skipping GitHub proxy refresh for sandbox %s: installation token unavailable",
@@ -413,14 +419,15 @@ async def _refresh_github_proxy(
         return
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
-    if base_proxy_config is not None:
-        await _configure_github_proxy(
-            current_backend.id,
-            token,
-            base_proxy_config=base_proxy_config,
-        )
-    else:
-        await _configure_github_proxy(current_backend.id, token)
+    async with aphase(thread_id, "sandbox.proxy_refresh"):
+        if base_proxy_config is not None:
+            await _configure_github_proxy(
+                current_backend.id,
+                token,
+                base_proxy_config=base_proxy_config,
+            )
+        else:
+            await _configure_github_proxy(current_backend.id, token)
     record_proxy_token_expiry(
         thread_id,
         expires_at,
@@ -485,7 +492,8 @@ async def _connect_existing_sandbox(
     else:
         logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
-            sandbox_backend = await create_sandbox(str(sandbox_id))
+            async with aphase(thread_id, "sandbox.reconnect", sandbox_id=sandbox_id):
+                sandbox_backend = await create_sandbox(str(sandbox_id))
         except SandboxGoneError:
             raise
         except Exception as exc:
@@ -544,8 +552,9 @@ async def ensure_sandbox_for_thread(
         if cached_proxy is not None and cached_proxy.has_backend
         else None
     )
-    sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-    sandbox_metadata = await get_sandbox_metadata(thread_id) if sandbox_id is not None else {}
+    async with aphase(thread_id, "sandbox.thread_metadata"):
+        sandbox_id = await get_sandbox_id_from_metadata(thread_id)
+        sandbox_metadata = await get_sandbox_metadata(thread_id) if sandbox_id is not None else {}
     metadata_proxy_config = sandbox_metadata.get(_SANDBOX_PROXY_CONFIG_METADATA_KEY)
     base_proxy_config = (
         metadata_proxy_config
@@ -608,7 +617,8 @@ async def ensure_sandbox_for_thread(
                 ) from create_exc
             logger.info("Replacement sandbox created: %s", sandbox_backend.id)
 
-    await _configure_git_identity(sandbox_backend)
+    async with aphase(thread_id, "sandbox.git_identity"):
+        await _configure_git_identity(sandbox_backend)
 
     # Bind the thread only once the sandbox is created and initialized: a run
     # that dies earlier leaves no id to reconnect to, so the next run creates
@@ -617,7 +627,8 @@ async def ensure_sandbox_for_thread(
         sandbox_metadata: dict[str, Any] = {"sandbox_id": sandbox_backend.id}
         if created_proxy_config is not None:
             sandbox_metadata[_SANDBOX_PROXY_CONFIG_METADATA_KEY] = created_proxy_config
-        await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
+        async with aphase(thread_id, "sandbox.bind_thread"):
+            await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
 
     # Publishing last is what makes a failure above visible. Callers reach the
     # proxy's cached backend without awaiting the startup task that produced it,
@@ -1178,8 +1189,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         if is_desktop_run(configurable):
-            sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
-            work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+            async with aphase(self._thread_id, "prepare.await_sandbox"):
+                sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
+            async with aphase(self._thread_id, "prepare.work_dir"):
+                work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
             return {
                 "work_dir": work_dir,
                 "rendered_system_prompt": construct_system_prompt(
@@ -1187,8 +1200,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     source="desktop",
                 ),
             }
-        github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
-        prompt_default_repo = await _resolve_prompt_default_repo(configurable)
+        async with aphase(self._thread_id, "prepare.github_token"):
+            github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
+        async with aphase(self._thread_id, "prepare.default_repo"):
+            prompt_default_repo = await _resolve_prompt_default_repo(configurable)
         triggering_user_identity_task = asyncio.create_task(
             asyncio.to_thread(
                 resolve_triggering_user_identity, as_json_object(self._config), github_token
@@ -1198,10 +1213,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             get_or_create_sandbox_backend_proxy(self._thread_id).ready()
         )
         try:
-            triggering_user_identity, sandbox_backend = await asyncio.gather(
-                triggering_user_identity_task,
-                sandbox_task,
-            )
+            async with aphase(self._thread_id, "prepare.await_sandbox"):
+                triggering_user_identity, sandbox_backend = await asyncio.gather(
+                    triggering_user_identity_task,
+                    sandbox_task,
+                )
         except SandboxUnreachableError as exc:
             # The run is about to die with no sandbox; make sure the user hears
             # why rather than getting silence.
@@ -1210,48 +1226,53 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
             raise
         del github_token
-        work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
-        environment = await resolve_environment(_environment_slug(configurable))
-        sender_instructions = await _resolve_user_custom_instructions(self._profile_login)
-        sender_context = construct_sender_context(
-            triggering_user_identity,
-            user_custom_instructions=sender_instructions,
-            draft_prs=self._draft_prs,
-            thread_url=dashboard_thread_url(self._thread_id),
-            workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
-        )
+        async with aphase(self._thread_id, "prepare.work_dir"):
+            work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+        async with aphase(self._thread_id, "prepare.environment"):
+            environment = await resolve_environment(_environment_slug(configurable))
+        async with aphase(self._thread_id, "prepare.sender_context"):
+            sender_instructions = await _resolve_user_custom_instructions(self._profile_login)
+            sender_context = construct_sender_context(
+                triggering_user_identity,
+                user_custom_instructions=sender_instructions,
+                draft_prs=self._draft_prs,
+                thread_url=dashboard_thread_url(self._thread_id),
+                workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
+            )
         sender_message = self._sender_context_message(state, sender_context)
         preferred_repo_path = (
             posixpath.join(work_dir, prompt_default_repo["name"])
             if prompt_default_repo and prompt_default_repo.get("name")
             else None
         )
-        turn_checkpoints = await self._record_turn_checkpoint(
-            state, sandbox_backend, work_dir, preferred_repo_path
-        )
-        try:
-            await client.threads.update(
-                thread_id=self._thread_id,
-                metadata={
-                    "agent_kind": "agent",
-                    "model": self._model_id,
-                    "effort": self._effort,
-                    "source": self._source,
-                    "plan_mode": self._plan_mode,
-                    **({"turn_checkpoints": turn_checkpoints} if turn_checkpoints else {}),
-                },
+        async with aphase(self._thread_id, "prepare.turn_checkpoint"):
+            turn_checkpoints = await self._record_turn_checkpoint(
+                state, sandbox_backend, work_dir, preferred_repo_path
             )
-            prepare_run_id = configurable.get("prepare_run_id")
-            if isinstance(prepare_run_id, str):
-                await record_agent_run_usage(
-                    run_id=prepare_run_id,
+        try:
+            async with aphase(self._thread_id, "prepare.record_run"):
+                await client.threads.update(
                     thread_id=self._thread_id,
-                    github_login=self._profile_login,
-                    user_email=self._user_email,
-                    model_id=self._model_id,
-                    effort=self._effort,
-                    source=self._source,
+                    metadata={
+                        "agent_kind": "agent",
+                        "model": self._model_id,
+                        "effort": self._effort,
+                        "source": self._source,
+                        "plan_mode": self._plan_mode,
+                        **({"turn_checkpoints": turn_checkpoints} if turn_checkpoints else {}),
+                    },
                 )
+                prepare_run_id = configurable.get("prepare_run_id")
+                if isinstance(prepare_run_id, str):
+                    await record_agent_run_usage(
+                        run_id=prepare_run_id,
+                        thread_id=self._thread_id,
+                        github_login=self._profile_login,
+                        user_email=self._user_email,
+                        model_id=self._model_id,
+                        effort=self._effort,
+                        source=self._source,
+                    )
         except Exception:
             logger.debug(
                 "Failed to record agent usage for thread %s", self._thread_id, exc_info=True
@@ -1300,7 +1321,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     ) -> SandboxBackendProtocol:
         if is_desktop_run(_configurable):
             return create_desktop_backend(_configurable)
-        prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
+        async with aphase(_thread_id, "sandbox.default_repo"):
+            prompt_default_repo = await _resolve_prompt_default_repo(_configurable)
         return await ensure_sandbox_for_thread(
             _thread_id,
             repo=prompt_default_repo,
@@ -1316,9 +1338,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     # owner's profile on the first run and frozen there afterwards.
     local_run = is_desktop_run(configurable)
     profile_login = resolve_github_login(as_json_object(config))
-    thread_settings, settings_changed = normalize_thread_settings(
-        {} if local_run else await load_thread_settings(client, thread_id)
-    )
+    async with aphase(thread_id, "factory.thread_settings"):
+        thread_settings, settings_changed = normalize_thread_settings(
+            {} if local_run else await load_thread_settings(client, thread_id)
+        )
     settings_login = thread_settings.get("owner_login") or profile_login
     # Team/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
@@ -1331,13 +1354,20 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         profile = None
         fable_enabled = False
     else:
-        team_defaults, title_defaults, use_gateway, profile, fable_enabled = await asyncio.gather(
-            _cached_team_default_model_pair("agent"),
-            _cached_thread_title_model(),
-            _cached_gateway_enabled(),
-            _cached_profile(None if thread_settings.get("model_id") else settings_login),
-            _cached_fable_enabled(),
-        )
+        async with aphase(thread_id, "factory.settings_defaults"):
+            (
+                team_defaults,
+                title_defaults,
+                use_gateway,
+                profile,
+                fable_enabled,
+            ) = await asyncio.gather(
+                _cached_team_default_model_pair("agent"),
+                _cached_thread_title_model(),
+                _cached_gateway_enabled(),
+                _cached_profile(None if thread_settings.get("model_id") else settings_login),
+                _cached_fable_enabled(),
+            )
 
     linear_issue = as_json_object(configurable.get("linear_issue"))
     linear_project_id = linear_issue.get("linear_project_id", "")
@@ -1404,19 +1434,21 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagent_model_id = per_thread_model
         subagent_effort = per_thread_effort
 
-    sender_profile = (
-        profile
-        if profile_login == settings_login and profile is not None
-        else await _cached_profile(profile_login)
-    )
+    async with aphase(thread_id, "factory.sender_profile"):
+        sender_profile = (
+            profile
+            if profile_login == settings_login and profile is not None
+            else await _cached_profile(profile_login)
+        )
     sender_draft_prs = profile_draft_prs(sender_profile)
     configurable["draft_prs"] = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
         repo_instructions = thread_settings.get("repo_instructions")
     else:
-        repo_instructions = await _resolve_repo_custom_instructions(
-            await _resolve_prompt_default_repo(configurable)
-        )
+        async with aphase(thread_id, "factory.repo_instructions"):
+            repo_instructions = await _resolve_repo_custom_instructions(
+                await _resolve_prompt_default_repo(configurable)
+            )
     # Stored before the Fable gate so a deployment-wide toggle still applies on
     # every run rather than being frozen into the thread.
     resolved_settings: ThreadSettings = {
@@ -1430,7 +1462,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if not local_run and (
         settings_changed or {**thread_settings, **resolved_settings} != thread_settings
     ):
-        await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
+        async with aphase(thread_id, "factory.store_settings"):
+            await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
 
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -1489,7 +1522,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         PlanModeMiddleware(excluded=PLAN_MODE_EXCLUDED_TOOLS, initial=plan_mode)
     ]
 
-    admin_thread = await _admin_thread(config, profile_login)
+    async with aphase(thread_id, "factory.admin_thread"):
+        admin_thread = await _admin_thread(config, profile_login)
     if admin_thread:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
@@ -1501,29 +1535,32 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     currents_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run:
-        observability_authorized = await _observability_authorized(config, profile_login)
-        if observability_authorized:
-            observability_tools = await _load_observability_tools(True, profile_login)
-        elif await _allowed_org_member(config, profile_login):
-            observability_tools = await load_langsmith_tools(profile_login)
-        else:
-            observability_tools = await load_langsmith_tools(profile_login, allow_team=False)
-        corridor_tools = await _load_corridor_mcp_tools()
+        async with aphase(thread_id, "factory.observability_tools"):
+            observability_authorized = await _observability_authorized(config, profile_login)
+            if observability_authorized:
+                observability_tools = await _load_observability_tools(True, profile_login)
+            elif await _allowed_org_member(config, profile_login):
+                observability_tools = await load_langsmith_tools(profile_login)
+            else:
+                observability_tools = await load_langsmith_tools(profile_login, allow_team=False)
+        async with aphase(thread_id, "factory.corridor_tools"):
+            corridor_tools = await _load_corridor_mcp_tools()
         browser_tools = load_browser_tools()
 
         if profile_login:
-            currents_tools, notion_tools = await asyncio.gather(
-                _cached_tool_loader(
-                    f"tools:currents:{profile_login}",
-                    300,
-                    lambda: load_currents_tools(profile_login),
-                ),
-                _cached_tool_loader(
-                    f"tools:notion:{profile_login}",
-                    300,
-                    lambda: load_notion_tools(profile_login),
-                ),
-            )
+            async with aphase(thread_id, "factory.integration_tools"):
+                currents_tools, notion_tools = await asyncio.gather(
+                    _cached_tool_loader(
+                        f"tools:currents:{profile_login}",
+                        300,
+                        lambda: load_currents_tools(profile_login),
+                    ),
+                    _cached_tool_loader(
+                        f"tools:notion:{profile_login}",
+                        300,
+                        lambda: load_notion_tools(profile_login),
+                    ),
+                )
 
     slack_tools = [
         slack_add_reaction,
