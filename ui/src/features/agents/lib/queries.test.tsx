@@ -398,7 +398,7 @@ describe("useSidebarThreads", () => {
     expect(getThread).toHaveBeenCalledWith(opened.id, { markViewed: false })
   })
 
-  it("keeps the opened thread visible while resolving it", async () => {
+  it("keeps the opened thread visible while resolving it optimistically", async () => {
     const opened = {
       id: "opened-thread",
       status: "idle",
@@ -419,14 +419,12 @@ describe("useSidebarThreads", () => {
         offset: 0,
         hasMore: false,
       })
-    vi.spyOn(agentsApi, "resolveThread").mockResolvedValue(resolved)
-    let finishGetThread: ((thread: AgentThread) => void) | undefined
-    const getThreadRequest = new Promise<AgentThread>((resolve) => {
-      finishGetThread = resolve
+    let finishResolve: ((thread: AgentThread) => void) | undefined
+    const resolveRequest = new Promise<AgentThread>((resolve) => {
+      finishResolve = resolve
     })
-    const getThread = vi
-      .spyOn(agentsApi, "getThread")
-      .mockReturnValue(getThreadRequest)
+    vi.spyOn(agentsApi, "resolveThread").mockReturnValue(resolveRequest)
+    const getThread = vi.spyOn(agentsApi, "getThread")
     const client = testClient()
     let sidebar: ReturnType<typeof useSidebarThreads> | undefined
     let resolveThread: ReturnType<typeof useResolveAgentThread> | undefined
@@ -444,19 +442,83 @@ describe("useSidebarThreads", () => {
     )
 
     await waitFor(() => expect(sidebar?.data.active.items).toEqual([opened]))
-    await act(async () => {
-      await resolveThread?.mutateAsync({
-        threadId: opened.id,
-        resolved: true,
-      })
+    act(() => {
+      resolveThread?.mutate({ threadId: opened.id, resolved: true })
     })
 
-    await waitFor(() => expect(listThreads).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(getThread).toHaveBeenCalledTimes(1))
-    expect(sidebar?.data.active.items).toEqual([resolved])
+    await waitFor(() => expect(sidebar?.data.active.items).toEqual([resolved]))
+    expect(resolveThread?.isPending).toBe(true)
+    expect(getThread).not.toHaveBeenCalled()
+
     await act(async () => {
-      finishGetThread?.(resolved)
-      await getThreadRequest
+      finishResolve?.(resolved)
+      await resolveRequest
     })
+    await waitFor(() => expect(listThreads).toHaveBeenCalledTimes(2))
+  })
+
+  it("rolls back an optimistic resolution when the request fails", async () => {
+    const opened = {
+      id: "opened-thread",
+      status: "idle",
+      resolved: false,
+    } as AgentThread
+    let failResolve: ((error: Error) => void) | undefined
+    vi.spyOn(agentsApi, "resolveThread").mockReturnValue(
+      new Promise<AgentThread>((_resolve, reject) => {
+        failResolve = reject
+      })
+    )
+    const client = testClient()
+    const key = agentThreadKeys.page({ resolved: false })
+    const unrelated = { ...opened, id: "unrelated-thread", title: "Before" }
+    client.setQueryData(agentThreadKeys.detail(opened.id), opened)
+    client.setQueryData(agentThreadKeys.detail(unrelated.id), unrelated)
+    client.setQueryData(key, {
+      items: [opened],
+      limit: 25,
+      offset: 0,
+      hasMore: false,
+    })
+    let resolveThread: ReturnType<typeof useResolveAgentThread> | undefined
+
+    function Probe() {
+      resolveThread = useResolveAgentThread()
+      return null
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <Probe />
+      </QueryClientProvider>
+    )
+
+    act(() => {
+      resolveThread?.mutate({ threadId: opened.id, resolved: true })
+    })
+    await waitFor(() =>
+      expect(client.getQueryData<ThreadsPage>(key)?.items).toEqual([])
+    )
+    expect(
+      client.getQueryData<AgentThread>(agentThreadKeys.detail(opened.id))
+    ).toMatchObject({ resolved: true })
+    client.setQueryData(agentThreadKeys.detail(unrelated.id), {
+      ...unrelated,
+      title: "After",
+    })
+
+    act(() => failResolve?.(new Error("request failed")))
+    await waitFor(() =>
+      expect(client.getQueryData<ThreadsPage>(key)?.items).toEqual([opened])
+    )
+    expect(
+      client.getQueryData<AgentThread>(agentThreadKeys.detail(opened.id))
+    ).toEqual(opened)
+    expect(
+      client.getQueryData(agentThreadKeys.sidebarActive(opened.id))
+    ).toBeUndefined()
+    expect(
+      client.getQueryData<AgentThread>(agentThreadKeys.detail(unrelated.id))
+    ).toMatchObject({ title: "After" })
   })
 })
