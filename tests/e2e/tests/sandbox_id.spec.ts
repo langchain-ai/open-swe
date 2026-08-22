@@ -1,4 +1,4 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 // Exercises the sidebar's "Copy sandbox ID" action against the REAL dashboard
 // UI and a REAL (local-provider) sandbox: the Slack flow runs the agent, which
@@ -39,13 +39,8 @@ async function createThreadWithSandbox(page: Page): Promise<string> {
 const copyItem = (page: Page) =>
   page.getByRole("menuitem", { name: "Copy sandbox ID" });
 
-// The kebab sits beside the row Link (not inside the anchor), so reach it via
-// their shared wrapper — the Link's parent.
-const kebabFor = (row: Locator) =>
-  row.locator("..").getByRole("button", { name: "Thread actions" });
-
 test.describe("thread sandbox id (real dashboard UI)", () => {
-  test("desktop: kebab menu copies the real sandbox id", async ({
+  test("desktop: context menu copies the real sandbox id", async ({
     page,
     baseURL,
   }) => {
@@ -59,9 +54,7 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
 
     const row = page.locator(`a[href$="/agents/${threadId}"]`).first();
     await expect(row).toBeVisible();
-    // The kebab is revealed on hover on pointer devices.
-    await row.hover();
-    await kebabFor(row).click();
+    await row.click({ button: "right" });
 
     await expect(copyItem(page)).toBeEnabled();
     await copyItem(page).click();
@@ -70,13 +63,12 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
     expect(clip.length).toBeGreaterThan(0);
   });
 
-  test("iPad: kebab copies the sandbox id without navigating", async ({
+  test("iPad: long press copies the sandbox id without navigating", async ({
     browser,
     baseURL,
   }) => {
-    // iPad-class device: Chromium in mobile mode reports (hover: none), which
-    // gates the touch-only kebab. 834px is wider than the 767px mobile
-    // breakpoint, so the sidebar renders inline.
+    // 834px is wider than the 767px mobile breakpoint, so the sidebar renders
+    // inline while Chromium still emits touch events for the long press.
     const context = await browser.newContext({
       baseURL,
       viewport: { width: 834, height: 1112 },
@@ -98,9 +90,30 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
     const rowA = page.locator(`a[href$="/agents/${threadA}"]`).first();
     await expect(rowA).toBeVisible();
 
-    const kebab = kebabFor(rowA);
-    await expect(kebab).toBeVisible();
-    await kebab.tap();
+    await rowA.evaluate((element) => {
+      const touch = new Touch({
+        identifier: 0,
+        target: element,
+        clientX: 20,
+        clientY: 20,
+        radiusX: 1,
+        radiusY: 1,
+        rotationAngle: 0,
+        force: 1,
+      });
+      element.dispatchEvent(
+        new TouchEvent("touchstart", {
+          bubbles: true,
+          cancelable: true,
+          touches: [touch],
+          targetTouches: [touch],
+          changedTouches: [touch],
+        }),
+      );
+    });
+    await expect(copyItem(page)).toBeVisible();
+    await rowA.dispatchEvent("touchend", { changedTouches: [] });
+    await rowA.dispatchEvent("click");
 
     await expect(copyItem(page)).toBeEnabled();
     await copyItem(page).tap();
@@ -108,7 +121,6 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     expect(clip.length).toBeGreaterThan(0);
 
-    // Tapping the kebab must open the menu, not follow A's Link — we stay on B.
     await expect(page).toHaveURL(new RegExp(`/agents/${threadB}$`));
 
     await context.close();
@@ -133,8 +145,7 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
 
     const row = bobPage.locator(`a[href$="/agents/${threadId}"]`).first();
     await expect(row).toBeVisible();
-    await row.hover();
-    await kebabFor(row).click();
+    await row.press("Shift+F10");
     await expect(copyItem(bobPage)).toBeEnabled();
 
     const screenshotPath = testInfo.outputPath(

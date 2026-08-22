@@ -683,6 +683,10 @@ export function useResolveAgentThread() {
       agentsApi.resolveThread(vars.threadId, vars.resolved),
     onSuccess: (thread, vars) => {
       queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
+      queryClient.setQueryData(
+        agentThreadKeys.sidebarActive(vars.threadId),
+        thread
+      )
       invalidateAgentThreadLists(queryClient)
     },
   })

@@ -187,7 +187,8 @@ function sortedByCreation(threads: Array<AgentThread>): Array<AgentThread> {
 /** Split threads into ordered, labelled sections according to the group mode. */
 export function groupThreadsByMode(
   threads: Array<AgentThread>,
-  mode: SidebarGroupMode
+  mode: SidebarGroupMode,
+  pinnedThread?: AgentThread
 ): Array<ThreadGroupSection> {
   if (threads.length === 0) return []
 
@@ -203,7 +204,14 @@ export function groupThreadsByMode(
   }
 
   if (mode === "focus") {
-    return groupThreadsForView(threads, "focus").map((group) => ({
+    const groupedThreads = pinnedThread
+      ? threads.map((thread) =>
+          thread.id === pinnedThread.id
+            ? { ...thread, ...pinnedThread }
+            : thread
+        )
+      : threads
+    return groupThreadsForView(groupedThreads, "focus").map((group) => ({
       ...group,
       threads: sortedByCreation(group.threads),
       defaultCollapsed: false,
