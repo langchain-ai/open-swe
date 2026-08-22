@@ -27,7 +27,9 @@ describe("local graph proxy", () => {
   it("removes only the public graph prefix and retains the query", () => {
     expect(
       localGraphTarget(
-        new URL("http://127.0.0.1:3000/local-graph/threads/id/runs?stream=true"),
+        new URL(
+          "http://127.0.0.1:3000/local-graph/threads/id/runs?stream=true"
+        ),
         "http://127.0.0.1:2024"
       )
     ).toBe("http://127.0.0.1:2024/threads/id/runs?stream=true")

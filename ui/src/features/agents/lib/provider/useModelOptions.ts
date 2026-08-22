@@ -93,10 +93,10 @@ export function useModelOptions(): ModelOptionsResult {
   const defaultSelection = localMode
     ? (storedSelection(models, selectionLogin) ?? firstSelection)
     : optionsQuery.data
-    ? (storedSelection(models, session.data?.login ?? "") ??
-      teamDefaultSelection ??
-      firstSelection)
-    : null
+      ? (storedSelection(models, session.data?.login ?? "") ??
+        teamDefaultSelection ??
+        firstSelection)
+      : null
 
   return {
     models,

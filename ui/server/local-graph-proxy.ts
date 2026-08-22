@@ -16,7 +16,9 @@ export function localGraphConfiguration(
     origin.search ||
     origin.hash
   ) {
-    throw new Error("OPEN_SWE_LOCAL_GRAPH_ORIGIN must be a loopback HTTP origin")
+    throw new Error(
+      "OPEN_SWE_LOCAL_GRAPH_ORIGIN must be a loopback HTTP origin"
+    )
   }
   const token = environment.OPEN_SWE_LOCAL_GRAPH_TOKEN
   if (!token) throw new Error("OPEN_SWE_LOCAL_GRAPH_TOKEN is not configured")
@@ -24,7 +26,8 @@ export function localGraphConfiguration(
 }
 
 export function localGraphTarget(requestUrl: URL, origin: string): string {
-  const pathname = requestUrl.pathname.replace(/^\/local-graph(?=\/|$)/, "") || "/"
+  const pathname =
+    requestUrl.pathname.replace(/^\/local-graph(?=\/|$)/, "") || "/"
   return `${origin}${pathname}${requestUrl.search}`
 }
 
