@@ -3,17 +3,13 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-const NODE_VERSION = "24.18.1"
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const desktopRoot = path.resolve(scriptDirectory, "..")
 const repositoryRoot = path.resolve(desktopRoot, "..")
 const outputRoot = path.join(desktopRoot, "resources", "local-backend")
-const packagedRuntime = path.join(
-  outputRoot,
-  "runtime",
-  process.platform === "win32" ? "node.exe" : "bin/node"
-)
-const developmentRuntime = path.join(
+// The packaged server runs on the Electron binary in Node mode, so nothing but
+// a Node for this build is needed — and none is copied into the app.
+const buildRuntime = path.join(
   desktopRoot,
   "node_modules",
   "node",
@@ -46,26 +42,21 @@ function forbiddenRuntimeFiles(root: string): string[] {
   return found
 }
 
+function runtimeOnPath(): string {
+  return fs.existsSync(buildRuntime) ? buildRuntime : process.execPath
+}
+
 function run(args: string[]): void {
   const result = spawnSync(packageManager, args, {
     cwd: repositoryRoot,
     stdio: "inherit",
     env: {
       ...process.env,
-      PATH: `${path.dirname(developmentRuntime)}${path.delimiter}${process.env.PATH || ""}`,
+      PATH: `${path.dirname(runtimeOnPath())}${path.delimiter}${process.env.PATH || ""}`,
     },
   })
   if (result.error) throw result.error
   if (result.status !== 0) process.exit(result.status || 1)
-}
-
-if (process.versions.node !== NODE_VERSION) {
-  throw new Error(
-    `Local backend packaging requires Node ${NODE_VERSION}; received ${process.versions.node}`
-  )
-}
-if (!fs.existsSync(developmentRuntime)) {
-  throw new Error(`Node ${NODE_VERSION} runtime is not installed: ${developmentRuntime}`)
 }
 
 run(["run", "build:graphs"])
@@ -77,10 +68,6 @@ run([
   "--prod",
   outputRoot,
 ])
-fs.mkdirSync(path.dirname(packagedRuntime), { recursive: true })
-fs.copyFileSync(developmentRuntime, packagedRuntime)
-if (process.platform !== "win32") fs.chmodSync(packagedRuntime, 0o755)
-
 const forbidden = forbiddenRuntimeFiles(outputRoot)
 if (forbidden.length > 0) {
   throw new Error(

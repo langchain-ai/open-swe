@@ -14,7 +14,7 @@ test("recognizes forbidden runtime paths inside archives", () => {
   assert.equal(isForbiddenRuntimePath("/node_modules/tool/helper.py"), true);
   assert.equal(isForbiddenRuntimePath("/runtime/bin/python3.12"), true);
   assert.equal(isForbiddenRuntimePath("/runtime/bin/uv"), true);
-  assert.equal(isForbiddenRuntimePath("/dist/server.js"), false);
+  assert.equal(isForbiddenRuntimePath("/dist/bin.js"), false);
 });
 
 test("rejects Python and uv files from packaged resources", (t) => {
@@ -45,18 +45,22 @@ test("local packaging disables macOS signing identity discovery", () => {
   assert.match(source, /CSC_IDENTITY_AUTO_DISCOVERY:\s*"false"/);
 });
 
+test("rejects a packaged local backend without its entrypoint", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-local-backend-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "dist"), { recursive: true });
+
+  assert.throws(
+    () => verifyLocalBackend(root),
+    /missing local backend file.*dist\/bin\.js/,
+  );
+});
+
 test("rejects a packaged local backend without runtime dependencies", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-local-backend-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const runtime = path.join(
-    root,
-    "runtime",
-    process.platform === "win32" ? "node.exe" : "bin/node",
-  );
-  fs.mkdirSync(path.dirname(runtime), { recursive: true });
   fs.mkdirSync(path.join(root, "dist"), { recursive: true });
-  fs.copyFileSync(process.execPath, runtime);
-  fs.writeFileSync(path.join(root, "dist", "server.js"), "");
+  fs.writeFileSync(path.join(root, "dist", "bin.js"), "");
 
   assert.throws(
     () => verifyLocalBackend(root),

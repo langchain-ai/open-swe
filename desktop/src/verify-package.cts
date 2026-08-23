@@ -44,20 +44,16 @@ exports.isForbiddenRuntimePath = isForbiddenRuntimePath;
 exports.forbiddenRuntimeFiles = forbiddenRuntimeFiles;
 
 function verifyLocalBackend(localBackendRoot) {
-  const runtime = path.join(
-    localBackendRoot,
-    "runtime",
-    process.platform === "win32" ? "node.exe" : "bin/node",
-  );
-  const entrypoint = path.join(localBackendRoot, "dist", "server.js");
-  for (const required of [runtime, entrypoint]) {
-    if (!fs.existsSync(required)) {
-      throw new Error(`Desktop package is missing local backend file: ${required}`);
-    }
+  const entrypoint = path.join(localBackendRoot, "dist", "bin.js");
+  if (!fs.existsSync(entrypoint)) {
+    throw new Error(`Desktop package is missing local backend file: ${entrypoint}`);
   }
 
+  // The packaged server runs on the Electron binary in Node mode, which is what
+  // resolves the dependency graph at runtime — so that is what has to resolve it
+  // here too. No Node is bundled beside the app any more.
   const result = spawnSync(
-    runtime,
+    process.execPath,
     [
       "--input-type=module",
       "--eval",
@@ -66,6 +62,7 @@ function verifyLocalBackend(localBackendRoot) {
     {
       cwd: localBackendRoot,
       encoding: "utf8",
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
     },
   );
   if (result.error) throw result.error;
