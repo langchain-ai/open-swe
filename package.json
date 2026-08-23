@@ -9,6 +9,7 @@
     "dev": "turbo run dev --filter=open-swe-dashboard",
     "desktop:dev": "pnpm --dir desktop run build && pnpm --dir desktop exec electron . --dev",
     "desktop:dev:full": "pnpm --dir desktop run dev:full",
+    "serve": "pnpm run build:graphs && node apps/graphs/dist/bin.js",
     "dev:mock": "bash tests/e2e/dev-mock.sh",
     "build": "turbo run build",
     "build:graphs": "turbo run build --filter=@open-swe/graphs",
