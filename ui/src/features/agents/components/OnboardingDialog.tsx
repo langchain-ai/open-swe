@@ -49,7 +49,7 @@ export function OnboardingDialog() {
   const [effort, setEffort] = useState("")
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // oxlint-disable-next-line react/set-state-in-effect
     if (!modelId && defaultModel) setModelId(defaultModel)
   }, [modelId, defaultModel])
 
@@ -59,7 +59,7 @@ export function OnboardingDialog() {
   useEffect(() => {
     if (!currentModel) return
     if (!effort || !currentModel.efforts.includes(effort)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      // oxlint-disable-next-line react/set-state-in-effect
       setEffort(currentModel.default_effort)
     }
   }, [currentModel, effort])
