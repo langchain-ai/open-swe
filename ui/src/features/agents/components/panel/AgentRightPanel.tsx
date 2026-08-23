@@ -315,7 +315,8 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       }
       onCloseAllSurfaces={() => closeAllSurfaces(threadRef)}
       onCopyFilePath={(relativePath) => {
-        void navigator.clipboard.writeText(relativePath)
+        const nav = navigator as { clipboard?: Clipboard }
+        if (nav.clipboard) void nav.clipboard.writeText(relativePath)
       }}
       onAddTerminal={handleAddTerminal}
       onAddDiff={handleAddDiff}

@@ -103,7 +103,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
       - name: Run tests
-        run: pnpm run test
+        run: pnpm --filter open-swe-dashboard run test
 
   desktop:
     name: Desktop checks
