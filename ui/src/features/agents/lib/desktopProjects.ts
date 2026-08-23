@@ -1,42 +1,54 @@
-import { useCallback, useEffect, useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import type { DesktopProject } from "@/desktop"
-import { localProjectsApi } from "@/features/agents/lib/localProjectsApi"
+import type {LocalProject} from "@/features/agents/lib/localQueries";
+import {
+  addLocalProject,
+  removeLocalProject,
+} from "@/features/agents/lib/localFunctions"
+import {
+  
+  localKeys,
+  localProjectsQuery
+} from "@/features/agents/lib/localQueries"
+
+const NO_PROJECTS: Array<LocalProject> = []
 
 /**
  * Projects come from the local server rather than Electron IPC, so the desktop
  * app and a plain `open-swe` server behave the same.
  */
 export function useDesktopProjects() {
-  const [projects, setProjects] = useState<Array<DesktopProject>>([])
+  const queryClient = useQueryClient()
+  const projects = useQuery(localProjectsQuery())
 
-  useEffect(() => {
-    let cancelled = false
-    void localProjectsApi
-      .list()
-      .then((value) => !cancelled && setProjects(value))
-      .catch(() => undefined)
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const add = useMutation({
+    mutationFn: (cwd: string) => addLocalProject({ data: cwd }),
+    onSuccess: (project) =>
+      queryClient.setQueryData<Array<LocalProject>>(
+        localKeys.projects,
+        (current = NO_PROJECTS) => [
+          project,
+          ...current.filter((item) => item.cwd !== project.cwd),
+        ]
+      ),
+  })
 
-  const addProject = useCallback(async (cwd: string) => {
-    const project = await localProjectsApi.add(cwd)
-    setProjects((current) => [
-      project,
-      ...current.filter((item) => item.cwd !== project.cwd),
-    ])
-    return project
-  }, [])
+  const remove = useMutation({
+    mutationFn: (cwd: string) => removeLocalProject({ data: cwd }),
+    onSuccess: ({ removed }, cwd) => {
+      if (!removed) return
+      queryClient.setQueryData<Array<LocalProject>>(
+        localKeys.projects,
+        (current = NO_PROJECTS) =>
+          current.filter((project) => project.cwd !== cwd)
+      )
+    },
+  })
 
-  const removeProject = useCallback(async (cwd: string) => {
-    const { removed } = await localProjectsApi.remove(cwd)
-    if (removed) {
-      setProjects((current) => current.filter((project) => project.cwd !== cwd))
-    }
-    return removed
-  }, [])
-
-  return { projects, addProject, removeProject }
+  return {
+    projects: projects.data ?? NO_PROJECTS,
+    addProject: add.mutateAsync,
+    removeProject: async (cwd: string) =>
+      (await remove.mutateAsync(cwd)).removed,
+  }
 }

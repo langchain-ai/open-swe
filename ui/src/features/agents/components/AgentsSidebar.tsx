@@ -62,7 +62,7 @@ import {
   useRefreshLocalThreads,
 } from "@/features/agents/lib/desktopLocal"
 import { ProjectPicker } from "@/features/agents/components/ProjectPicker"
-import { localThreadsApi } from "@/features/agents/lib/localProjectsApi"
+import { deleteLocalThread } from "@/features/agents/lib/localFunctions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { Kbd } from "@/components/ui/kbd"
@@ -186,7 +186,7 @@ export function AgentsSidebar({
   const activity = useLocalThreadActivity()
   const refreshLocalThreads = useRefreshLocalThreads()
   const deleteLocalSession = async (sessionId: string) => {
-    const deleted = (await localThreadsApi.remove(sessionId)).deleted
+    const deleted = (await deleteLocalThread({ data: sessionId })).deleted
     if (deleted) refreshLocalThreads()
     return deleted
   }

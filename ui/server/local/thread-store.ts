@@ -6,7 +6,7 @@ const MUTABLE_FIELDS = new Set(["title", "modelId", "effort", "viewed"])
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 interface LocalImage {
-  kind: string
+  kind: "image"
   base64: string
   mimeType: string
   fileName?: string
@@ -80,7 +80,7 @@ function cleanImages(value: unknown): Array<LocalImage> {
       continue
     }
     images.push({
-      kind: typeof candidate.kind === "string" ? candidate.kind : "image",
+      kind: "image",
       base64: candidate.base64,
       mimeType: candidate.mimeType,
       ...(typeof candidate.fileName === "string"

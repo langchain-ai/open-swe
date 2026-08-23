@@ -10,6 +10,42 @@ const MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 const MAX_GH_OUTPUT_BYTES = 1024 * 1024
 const CHECKPOINT_NAMESPACE = "refs/open-swe/local"
 
+export interface PullRequestSummary {
+  number: number
+  title: string
+  state: "draft" | "open" | "merged" | "closed"
+  headRef: string
+  baseRef: string
+  url: string
+  repoFullName: string
+  author: string | null
+  authorAvatarUrl: string | null
+  createdAt: string | null
+  diffStats: { files: number; additions: number; deletions: number }
+}
+
+export interface DiffFile {
+  path: string
+  previousPath: string | null
+  status: string
+  additions: number
+  deletions: number
+  originalContent: string | null
+  modifiedContent: string | null
+  unrenderable: boolean
+}
+
+export interface RepositoryMetadata {
+  branch: string | null
+  pr: PullRequestSummary | null
+}
+
+export interface Diff {
+  status: "ready" | "missing" | "error"
+  truncated: boolean
+  files: Array<DiffFile>
+}
+
 // The project is whatever directory the user picked, so never let its git config
 // start helper processes of its own on our behalf.
 const HARDENED = [
@@ -105,7 +141,7 @@ function repoFullNameFromUrl(url: URL) {
   return owner && repo ? `${owner}/${repo}` : null
 }
 
-function parsePullRequest(raw: string) {
+function parsePullRequest(raw: string): PullRequestSummary | null {
   try {
     const value = JSON.parse(raw)
     const url = new URL(value.url)
@@ -130,7 +166,7 @@ function parsePullRequest(raw: string) {
       state:
         value.state === "OPEN" && value.isDraft
           ? "draft"
-          : value.state.toLowerCase(),
+          : (value.state.toLowerCase() as PullRequestSummary["state"]),
       headRef: value.headRefName,
       baseRef: value.baseRefName,
       url: url.href,
@@ -190,7 +226,7 @@ async function repositoryMetadata(
   repo: string,
   env?: NodeJS.ProcessEnv,
   threadBranch: string | null = null
-) {
+): Promise<RepositoryMetadata> {
   const named = await validBranchName(repo, threadBranch)
   const branch = named ?? (await currentBranch(repo))
   return { branch, pr: branch ? await pullRequest(repo, env, named) : null }
@@ -412,7 +448,7 @@ async function readBlobs(
   )
 }
 
-function decode(blob: Buffer | false | null) {
+function decode(blob: Buffer | false | null): [string | null, boolean] {
   if (blob === false) return [null, true]
   if (!Buffer.isBuffer(blob)) return [null, false]
   const content = blob.toString("utf8")
@@ -427,7 +463,7 @@ async function readDiff(
   repo: string,
   base: string,
   headish: string | null = null
-) {
+): Promise<Diff> {
   const head = headish ?? (await writeWorktreeTree(repo))
   const range = ["--no-renames", "--no-ext-diff", "--no-textconv", base, head]
   const numstat = (
@@ -512,8 +548,8 @@ async function readBranchDiff(
   repo: string,
   baseRef: string,
   headRef: string | null = null
-) {
-  const missing = { status: "missing", files: [], truncated: false }
+): Promise<Diff> {
+  const missing: Diff = { status: "missing", files: [], truncated: false }
   const base = await resolveBaseRef(repo, baseRef)
   if (!base) return missing
   const named = await validBranchName(repo, headRef)

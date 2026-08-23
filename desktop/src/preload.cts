@@ -20,30 +20,12 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.on("desktop:command", listener)
     return () => ipcRenderer.removeListener("desktop:command", listener)
   },
-  listProjects: () => ipcRenderer.invoke("desktop:projects"),
-  addProject: () => ipcRenderer.invoke("desktop:add-project"),
-  removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
   resolveLocalProjectPath: (input) =>
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
   localModelCredentialStatus: (modelId) =>
     ipcRenderer.invoke("desktop:local-model-credential-status", modelId),
   signInLocalOpenAI: () => ipcRenderer.invoke("desktop:local-openai-sign-in"),
-  startLocalThread: (input) => ipcRenderer.invoke("desktop:start-local-thread", input),
-  getLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:get-local-prompt", threadId),
-  clearLocalPrompt: (threadId) => ipcRenderer.invoke("desktop:clear-local-prompt", threadId),
-  getLocalThread: (threadId) => ipcRenderer.invoke("desktop:get-local-thread", threadId),
-  listLocalThreads: () => ipcRenderer.invoke("desktop:list-local-threads"),
-  localActivity: () => ipcRenderer.invoke("desktop:local-activity"),
-  updateLocalThread: (input) => ipcRenderer.invoke("desktop:update-local-thread", input),
-  deleteLocalThread: (threadId) => ipcRenderer.invoke("desktop:delete-local-thread", threadId),
-  getLocalDiff: (threadId) => ipcRenderer.invoke("desktop:get-local-diff", threadId),
-  getLocalPrDiff: (threadId) => ipcRenderer.invoke("desktop:get-local-pr-diff", threadId),
-  onProjectsChanged: (callback) => {
-    const listener = (_event, projects) => callback(projects)
-    ipcRenderer.on("desktop:projects-changed", listener)
-    return () => ipcRenderer.removeListener("desktop:projects-changed", listener)
-  },
   terminal: {
     attach: (input) => ipcRenderer.invoke("desktop:terminal-attach", { ...input }),
     open: (input) => ipcRenderer.invoke("desktop:terminal-attach", { ...input }),

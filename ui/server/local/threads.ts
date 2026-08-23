@@ -1,6 +1,8 @@
 import { graphRequest } from "./graph"
 import { projectsFile, readProjects } from "./project-store"
 import {
+  
+  
   captureCheckpoint,
   checkpointRef,
   currentBranch,
@@ -8,12 +10,17 @@ import {
   readBranchDiff,
   readDiff,
   repoRoot,
-  repositoryMetadata,
+  repositoryMetadata
 } from "./git-diff"
-import {  threadStore } from "./thread-store"
-import type {LocalThread} from "./thread-store";
+import { threadStore } from "./thread-store"
+import type {Diff, RepositoryMetadata} from "./git-diff";
+import type { LocalThread } from "./thread-store"
 
-const NO_DIFF = { status: "missing" as const, files: [], truncated: false }
+export interface LocalDiff extends Diff {
+  repository?: RepositoryMetadata
+}
+
+const NO_DIFF: LocalDiff = { status: "missing", files: [], truncated: false }
 const THREAD_STATUS = { busy: "running", error: "error" } as const
 
 /** Only a directory the user added as a project may be an agent's cwd. */
@@ -115,7 +122,7 @@ async function refreshedThread(id: string) {
   return store.setCheckpoint(thread.id, { ...thread.checkpoint, branch })
 }
 
-export async function checkpointDiff(id: string) {
+export async function checkpointDiff(id: string): Promise<LocalDiff> {
   const thread = await refreshedThread(id)
   if (!thread?.checkpoint.repo || !thread.checkpoint.ref) return NO_DIFF
   try {
@@ -129,11 +136,11 @@ export async function checkpointDiff(id: string) {
     ])
     return { ...diff, repository }
   } catch {
-    return { status: "error" as const, files: [], truncated: false }
+    return { status: "error", files: [], truncated: false }
   }
 }
 
-export async function branchDiff(id: string) {
+export async function branchDiff(id: string): Promise<LocalDiff> {
   const thread = await refreshedThread(id)
   if (!thread?.checkpoint.repo) return NO_DIFF
   try {
@@ -150,6 +157,6 @@ export async function branchDiff(id: string) {
     )
     return { ...diff, repository }
   } catch {
-    return { status: "error" as const, files: [], truncated: false }
+    return { status: "error", files: [], truncated: false }
   }
 }

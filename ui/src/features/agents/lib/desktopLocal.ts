@@ -1,20 +1,21 @@
 import { useEffect } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
-import type { DesktopLocalActivity, DesktopLocalThreadSummary } from "@/desktop"
-import { localThreadsApi } from "@/features/agents/lib/localProjectsApi"
+import type { DesktopLocalActivity } from "@/desktop"
+import type {LocalThread} from "@/features/agents/lib/localQueries";
+import {
+  
+  localActivityQuery,
+  localBranchDiffQuery,
+  localDiffQuery,
+  localKeys,
+  localThreadQuery,
+  localThreadsQuery
+} from "@/features/agents/lib/localQueries"
+import { getLocalThread } from "@/features/agents/lib/localFunctions"
 import { isLocalRuntime } from "@/lib/desktop-local-mode"
 
 const NO_ACTIVITY: DesktopLocalActivity = {}
-
-export const localThreadKeys = {
-  all: ["local-threads"] as const,
-  activity: ["local-thread-activity"] as const,
-  detail: (threadId: string) => ["local-threads", threadId] as const,
-  ready: (threadId: string) => ["local-thread-ready", threadId] as const,
-  diff: (threadId: string) => ["local-thread-diff", threadId] as const,
-  prDiff: (threadId: string) => ["local-thread-pr-diff", threadId] as const,
-}
 
 export async function ensureDesktopModelCredential(
   modelId?: string
@@ -39,12 +40,11 @@ export async function ensureDesktopModelCredential(
 export function useReadyDesktopLocalThread(threadId: string) {
   const queryClient = useQueryClient()
   return useQuery({
-    queryKey: localThreadKeys.ready(threadId),
+    queryKey: localKeys.threadReady(threadId),
     enabled: isLocalRuntime(),
     queryFn: async () => {
-      const thread = await localThreadsApi.get(threadId)
-      if (thread)
-        queryClient.setQueryData(localThreadKeys.detail(threadId), thread)
+      const thread = await getLocalThread({ data: threadId })
+      if (thread) queryClient.setQueryData(localKeys.thread(threadId), thread)
       return thread
     },
     refetchOnMount: "always",
@@ -54,34 +54,33 @@ export function useReadyDesktopLocalThread(threadId: string) {
 export function useDesktopLocalThread(threadId: string) {
   const queryClient = useQueryClient()
   return useQuery({
-    queryKey: localThreadKeys.detail(threadId),
-    queryFn: () => localThreadsApi.get(threadId),
+    ...localThreadQuery(threadId),
     initialData: () =>
       queryClient
-        .getQueryData<Array<DesktopLocalThreadSummary>>(localThreadKeys.all)
+        .getQueryData<Array<LocalThread>>(localKeys.threads)
         ?.find((thread) => thread.id === threadId),
     initialDataUpdatedAt: 0,
   })
 }
 
 export function useDesktopLocalThreads(options: { enabled?: boolean } = {}) {
-  return useQuery({
-    queryKey: localThreadKeys.all,
-    queryFn: () => localThreadsApi.list(),
-    enabled: options.enabled,
-    refetchInterval: options.enabled === false ? false : 1000,
-  })
+  return useQuery(localThreadsQuery(options.enabled))
 }
 
 export function useLocalThreadActivity(): DesktopLocalActivity {
-  return (
-    useQuery({
-      queryKey: localThreadKeys.activity,
-      queryFn: () => localThreadsApi.activity(),
-      enabled: isLocalRuntime(),
-      refetchInterval: 1000,
-    }).data ?? NO_ACTIVITY
-  )
+  return useQuery(localActivityQuery()).data ?? NO_ACTIVITY
+}
+
+/** A settled thread stops polling, so its final diff needs one explicit refetch. */
+function useSettledRefetch(
+  query: { refetch: () => unknown },
+  enabled: boolean,
+  isRunning: boolean
+) {
+  const { refetch } = query
+  useEffect(() => {
+    if (enabled && !isRunning) void refetch()
+  }, [enabled, isRunning, refetch])
 }
 
 export function useLocalThreadDiff(
@@ -89,53 +88,28 @@ export function useLocalThreadDiff(
   enabled: boolean,
   isRunning: boolean
 ) {
-  const query = useQuery({
-    queryKey: localThreadKeys.diff(threadId),
-    queryFn: () => localThreadsApi.diff(threadId),
-    enabled,
-    refetchInterval: isRunning ? 5000 : false,
-  })
-
-  const { refetch } = query
-  useEffect(() => {
-    if (enabled && !isRunning) void refetch()
-  }, [enabled, isRunning, refetch])
-
+  const query = useQuery(localDiffQuery(threadId, enabled, isRunning))
+  useSettledRefetch(query, enabled, isRunning)
   return query
 }
 
-/**
- * What the thread's branch has committed on top of its pull request's base.
- * Unlike the checkpoint diff this ignores the worktree, which every session in
- * the project shares.
- */
 export function useLocalThreadPrDiff(
   threadId: string,
   enabled: boolean,
   isRunning: boolean
 ) {
-  const query = useQuery({
-    queryKey: localThreadKeys.prDiff(threadId),
-    queryFn: () => localThreadsApi.prDiff(threadId),
-    enabled,
-    refetchInterval: isRunning ? 5000 : false,
-  })
-
-  const { refetch } = query
-  useEffect(() => {
-    if (enabled && !isRunning) void refetch()
-  }, [enabled, isRunning, refetch])
-
+  const query = useQuery(localBranchDiffQuery(threadId, enabled, isRunning))
+  useSettledRefetch(query, enabled, isRunning)
   return query
 }
 
 export function useRefreshLocalThreads() {
   const queryClient = useQueryClient()
   return (threadId?: string) => {
-    void queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
+    void queryClient.invalidateQueries({ queryKey: localKeys.threads })
     if (threadId) {
       void queryClient.invalidateQueries({
-        queryKey: localThreadKeys.detail(threadId),
+        queryKey: localKeys.thread(threadId),
       })
     }
   }

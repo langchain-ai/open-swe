@@ -140,12 +140,6 @@ declare global {
     openSweDesktop?: {
       isDesktop: true
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
-      listProjects: () => Promise<Array<DesktopProject>>
-      addProject: () => Promise<DesktopProject | null>
-      removeProject: (cwd: string) => Promise<boolean>
-      onProjectsChanged: (
-        callback: (projects: Array<DesktopProject>) => void
-      ) => () => void
       openExternal: (url: string) => Promise<boolean>
       resolveLocalProjectPath: (input: {
         localSessionId: string
@@ -157,33 +151,6 @@ declare global {
         canSignIn?: boolean
       }>
       signInLocalOpenAI: () => Promise<{ signedIn: boolean }>
-      startLocalThread: (
-        input: DesktopLocalPromptInput & {
-          cwd: string
-          modelId?: string
-          effort?: string
-        }
-      ) => Promise<DesktopLocalThreadSummary>
-      getLocalPrompt: (
-        threadId: string
-      ) => Promise<DesktopLocalPromptInput | null>
-      clearLocalPrompt: (
-        threadId: string
-      ) => Promise<DesktopLocalThreadSummary | null>
-      getLocalThread: (
-        threadId: string
-      ) => Promise<DesktopLocalThreadSummary | null>
-      listLocalThreads: () => Promise<Array<DesktopLocalThreadSummary>>
-      localActivity: () => Promise<DesktopLocalActivity>
-      updateLocalThread: (input: {
-        threadId: string
-        viewed?: boolean
-        modelId?: string
-        effort?: string
-      }) => Promise<DesktopLocalThreadSummary | null>
-      deleteLocalThread: (threadId: string) => Promise<boolean>
-      getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
-      getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
       terminal: DesktopTerminalBridge
     }
   }

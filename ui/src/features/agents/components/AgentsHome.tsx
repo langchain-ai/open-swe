@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { isLocalRuntime } from "@/lib/desktop-local-mode"
 
@@ -25,15 +25,16 @@ import {
   useModelOptions,
 } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
+import { ensureDesktopModelCredential } from "@/features/agents/lib/desktopLocal"
 import {
-  ensureDesktopModelCredential,
-  localThreadKeys,
-} from "@/features/agents/lib/desktopLocal"
+  localBranchesQuery,
+  localKeys,
+} from "@/features/agents/lib/localQueries"
 import { ProjectPicker } from "@/features/agents/components/ProjectPicker"
 import {
-  localProjectsApi,
-  localThreadsApi,
-} from "@/features/agents/lib/localProjectsApi"
+  checkoutLocalBranch,
+  startLocalThread,
+} from "@/features/agents/lib/localFunctions"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
@@ -43,6 +44,7 @@ import {
 } from "@/lib/notifications"
 
 const LAST_LOCAL_PROJECT_KEY = "open-swe.desktop.last-project"
+const NO_BRANCHES: Array<string> = []
 
 function promptContent(text: string, images: Array<ImageChunk>) {
   const trimmed = text.trim()
@@ -95,14 +97,9 @@ export function AgentsHome() {
       : "local"
     : "cloud"
   const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
-  const localProjectPathRef = useRef(localProjectPath)
-  localProjectPathRef.current = localProjectPath
-  const [localProjectBranch, setLocalProjectBranch] = useState<string | null>(
-    null
-  )
-  const [localProjectBranches, setLocalProjectBranches] = useState<
-    Array<string>
-  >([])
+  const branches = useQuery(localBranchesQuery(localProjectPath))
+  const localProjectBranch = branches.data?.current ?? null
+  const localProjectBranches = branches.data?.branches ?? NO_BRANCHES
   const [localError, setLocalError] = useState<string | null>(null)
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const {
@@ -148,26 +145,6 @@ export function AgentsHome() {
     setLocalProjectPath(selected?.cwd ?? localProjects[0]?.cwd ?? null)
   }, [isDesktop, localProjectPath, localProjects])
 
-  const refreshLocalProjectBranch = useCallback(async () => {
-    const cwd = localProjectPathRef.current
-    const result = cwd
-      ? await localProjectsApi.branches(cwd).catch(() => undefined)
-      : undefined
-    if (localProjectPathRef.current === cwd) {
-      setLocalProjectBranch(result?.current ?? null)
-      setLocalProjectBranches(result?.branches ?? [])
-    }
-  }, [])
-
-  useEffect(() => {
-    void refreshLocalProjectBranch()
-  }, [localProjectPath, refreshLocalProjectBranch])
-
-  useEffect(() => {
-    window.addEventListener("focus", refreshLocalProjectBranch)
-    return () => window.removeEventListener("focus", refreshLocalProjectBranch)
-  }, [refreshLocalProjectBranch])
-
   const handleRunTargetChange = (next: RunTarget) => {
     setDesktopThreadSource(next)
     setLocalError(null)
@@ -184,8 +161,10 @@ export function AgentsHome() {
     if (!localProjectPath) return
     setLocalError(null)
     try {
-      await localProjectsApi.checkout(localProjectPath, branch, create)
-      await refreshLocalProjectBranch()
+      await checkoutLocalBranch({
+        data: { cwd: localProjectPath, branch, create },
+      })
+      await branches.refetch()
     } catch (error) {
       setLocalError(
         error instanceof Error ? error.message : "Could not checkout branch"
@@ -224,7 +203,7 @@ export function AgentsHome() {
       setSubmitting(true)
       setLocalError(null)
       window.localStorage.setItem(LAST_LOCAL_PROJECT_KEY, localProjectPath)
-      await refreshLocalProjectBranch()
+      await branches.refetch()
       try {
         const credentialError = await ensureDesktopModelCredential(
           activeSelection?.modelId
@@ -237,26 +216,28 @@ export function AgentsHome() {
         const managedSkills = cloudEnabled
           ? await skills.refetch()
           : { personal: [], organization: [] }
-        const localSession = await localThreadsApi.create({
-          cwd: localProjectPath,
-          prompt,
-          images,
-          skills: [
-            ...new Map(
-              [...managedSkills.personal, ...managedSkills.organization].map(
-                (skill) => [skill.name, skill]
-              )
-            ).values(),
-          ],
-          modelId: activeSelection?.modelId,
-          effort: activeSelection?.effort,
+        const localSession = await startLocalThread({
+          data: {
+            cwd: localProjectPath,
+            prompt,
+            images,
+            skills: [
+              ...new Map(
+                [...managedSkills.personal, ...managedSkills.organization].map(
+                  (skill) => [skill.name, skill]
+                )
+              ).values(),
+            ],
+            modelId: activeSelection?.modelId,
+            effort: activeSelection?.effort,
+          },
         })
         queryClient.setQueryData(
-          localThreadKeys.detail(localSession.id),
+          localKeys.thread(localSession.id),
           localSession
         )
         queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-          localThreadKeys.all,
+          localKeys.threads,
           (current = []) => [
             localSession,
             ...current.filter((thread) => thread.id !== localSession.id),
@@ -346,7 +327,7 @@ export function AgentsHome() {
             onSelectLocalProject={handleSelectLocalProject}
             onAddLocalProject={() => void handleAddLocalProject()}
             onRemoveLocalProject={(cwd) => void handleRemoveLocalProject(cwd)}
-            onRefreshLocalProjectBranch={() => void refreshLocalProjectBranch()}
+            onRefreshLocalProjectBranch={() => void branches.refetch()}
             onSelectLocalProjectBranch={(branch) =>
               void checkoutLocalProjectBranch(branch)
             }

@@ -14,26 +14,11 @@ const { LocalGraphClient } = require("./local-graph-client.cjs");
 const { ApplicationSupervisor } = require("./application-supervisor.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
-  captureCheckpoint,
-  checkpointRef,
-  currentBranch,
-  deleteRefs,
-  readBranchDiff,
-  readDiff,
-  repoRoot,
-  repositoryMetadata,
-  staleRefs,
-} = require("./git-diff.cjs");
-const {
   closeAllTerminals,
   configureTerminalIpc,
   closeThreadTerminals,
 } = require("./terminal-manager.cjs");
-const {
-  addProject,
-  readProjects,
-  removeProject,
-} = require("./project-store.cjs");
+const { readProjects } = require("./project-store.cjs");
 const { beginLogin } = require("./login-server.cjs");
 const { OpenAiOAuthManager } = require("./openai-oauth.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
@@ -72,7 +57,6 @@ let setupWindow = null;
 let loginFlow = null;
 let quitting = false;
 let localThreadStore = null;
-let lastActivity = {};
 let backendSupervisor = null;
 let applicationSupervisor = null;
 let openAiOAuth = null;
@@ -95,12 +79,6 @@ function projectsPath() {
 
 function listProjects() {
   return readProjects(projectsPath());
-}
-
-function sendProjectsChanged() {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("desktop:projects-changed", listProjects());
-  }
 }
 
 function pathIsInside(root, candidate) {
@@ -146,83 +124,8 @@ function resolveLocalProjectPath(localSessionId, value) {
   }
 }
 
-async function recordLocalCheckpoint(thread) {
-  const repo = await repoRoot(thread.cwd);
-  if (!repo) return thread;
-  const ref = checkpointRef(thread.id);
-  await captureCheckpoint(repo, ref);
-  const branch = await currentBranch(repo);
-  return localThreadStore.setCheckpoint(thread.id, { repo, ref, branch });
-}
-
-/**
- * Remember which branch this thread is working on. Sessions share one worktree,
- * so the checked-out branch only belongs to a thread while that thread has it:
- * record it then, and read the recorded value afterwards.
- */
-async function syncThreadBranch(thread) {
-  if (!thread?.checkpoint.repo) return thread;
-  const branch = await currentBranch(thread.checkpoint.repo);
-  if (!branch || branch === thread.checkpoint.branch) return thread;
-  return (
-    localThreadStore.setCheckpoint(thread.id, {
-      ...thread.checkpoint,
-      branch,
-    }) ?? thread
-  );
-}
-
 /** A running thread owns the checkout, so its branch can still be changing. */
-async function diffThread(threadId) {
-  const thread = localThreadStore.get(threadId);
-  if (!thread) return thread;
-  const activity = await backendSupervisor.threadActivity();
-  return activity?.[threadId] === "running" ? syncThreadBranch(thread) : thread;
-}
-
 function configureDesktopIpc() {
-  ipcMain.handle("desktop:projects", (event) => {
-    requireTrustedDesktopIpc(event);
-    return listProjects();
-  });
-
-  ipcMain.handle("desktop:add-project", async (event) => {
-    requireTrustedDesktopIpc(event);
-    const options = {
-      title: "Add a project from This Mac",
-      properties: ["openDirectory", "createDirectory"],
-    };
-    const result = mainWindow
-      ? await dialog.showOpenDialog(mainWindow, options)
-      : await dialog.showOpenDialog(options);
-    if (result.canceled || !result.filePaths[0]) return null;
-    const project = addProject(projectsPath(), result.filePaths[0]);
-    sendProjectsChanged();
-    return project;
-  });
-
-  ipcMain.handle("desktop:remove-project", async (event, cwd) => {
-    requireTrustedDesktopIpc(event);
-    const project = listProjects().find((item) => item.cwd === cwd);
-    if (!project) return false;
-    const options = {
-      type: "warning",
-      title: "Remove project",
-      message: `Remove “${project.name}” from Open SWE?`,
-      detail: `${project.cwd}\n\nThis does not delete files from your Mac.`,
-      buttons: ["Cancel", "Remove"],
-      defaultId: 0,
-      cancelId: 0,
-    };
-    const result = mainWindow
-      ? await dialog.showMessageBox(mainWindow, options)
-      : await dialog.showMessageBox(options);
-    if (result.response !== 1) return false;
-    const removed = removeProject(projectsPath(), project.cwd);
-    if (removed) sendProjectsChanged();
-    return removed;
-  });
-
   ipcMain.handle("desktop:open-external", async (event, value) => {
     requireTrustedDesktopIpc(event);
     if (typeof value !== "string" || value.length > 8_192) return false;
@@ -249,131 +152,6 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     if (!openAiOAuth) throw new Error("OpenAI sign-in is unavailable");
     return openAiOAuth.login((url) => shell.openExternal(url));
-  });
-  ipcMain.handle("desktop:start-local-thread", async (event, input) => {
-    requireTrustedDesktopIpc(event);
-    const cwd =
-      typeof input?.cwd === "string" ? registeredProject(input.cwd) : null;
-    if (!cwd)
-      throw new Error(
-        "Add a valid project to Open SWE before starting a local agent",
-      );
-    await applicationSupervisor.start();
-    let thread = localThreadStore.create({ ...input, cwd });
-    try {
-      thread = await recordLocalCheckpoint(thread);
-      await backendSupervisor.createThread(thread.id);
-    } catch (error) {
-      localThreadStore.delete(thread.id);
-      if (thread.checkpoint.repo && thread.checkpoint.ref)
-        deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref]);
-      throw error;
-    }
-    return thread;
-  });
-  ipcMain.handle("desktop:get-local-prompt", (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    return localThreadStore.pendingPrompt(threadId);
-  });
-  ipcMain.handle("desktop:clear-local-prompt", (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    return localThreadStore.clearPrompt(threadId);
-  });
-  ipcMain.handle("desktop:get-local-thread", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(threadId);
-    if (!thread) return null;
-    await backendSupervisor.createThread(thread.id);
-    return thread;
-  });
-  ipcMain.handle("desktop:list-local-threads", (event) => {
-    requireTrustedDesktopIpc(event);
-    return localThreadStore.list();
-  });
-  ipcMain.handle("desktop:local-activity", async (event) => {
-    requireTrustedDesktopIpc(event);
-    const activity = await backendSupervisor.threadActivity();
-    if (!activity) throw new Error("Could not read local agent activity");
-    for (const [threadId, status] of Object.entries(lastActivity)) {
-      if (status === "running" && activity[threadId] !== "running")
-        localThreadStore.update(threadId, { viewed: false });
-    }
-    lastActivity = activity;
-    return activity;
-  });
-  ipcMain.handle("desktop:update-local-thread", async (event, input) => {
-    requireTrustedDesktopIpc(event);
-    const updated = localThreadStore.update(input?.threadId, {
-      ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
-      ...(typeof input?.modelId === "string" ? { modelId: input.modelId } : {}),
-      ...(typeof input?.effort === "string" ? { effort: input.effort } : {}),
-    });
-    return syncThreadBranch(updated);
-  });
-  ipcMain.handle("desktop:delete-local-thread", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(threadId);
-    if (!thread) return false;
-    const activity = await backendSupervisor.threadActivity();
-    if (!activity || activity[threadId] === "running")
-      throw new Error("Stop the local agent before deleting it");
-    await closeThreadTerminals(threadId);
-    try {
-      await backendSupervisor.deleteThread(threadId);
-    } catch (error) {
-      console.warn("Could not delete local LangGraph thread", error);
-    }
-    localThreadStore.delete(threadId);
-    if (thread.checkpoint.repo && thread.checkpoint.ref)
-      deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref]);
-    return true;
-  });
-  ipcMain.handle("desktop:get-local-diff", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const thread = await diffThread(threadId);
-    if (
-      !thread ||
-      !registeredProject(thread.cwd) ||
-      !thread.checkpoint.repo ||
-      !thread.checkpoint.ref
-    )
-      return { status: "missing", files: [], truncated: false };
-    try {
-      const [diff, repository] = await Promise.all([
-        readDiff(thread.checkpoint.repo, thread.checkpoint.ref),
-        repositoryMetadata(
-          thread.checkpoint.repo,
-          undefined,
-          thread.checkpoint.branch,
-        ),
-      ]);
-      return { ...diff, repository };
-    } catch {
-      return { status: "error", files: [], truncated: false };
-    }
-  });
-  ipcMain.handle("desktop:get-local-pr-diff", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const thread = await diffThread(threadId);
-    if (!thread || !registeredProject(thread.cwd) || !thread.checkpoint.repo)
-      return { status: "missing", files: [], truncated: false };
-    try {
-      const repository = await repositoryMetadata(
-        thread.checkpoint.repo,
-        undefined,
-        thread.checkpoint.branch,
-      );
-      if (!repository.pr)
-        return { status: "missing", files: [], truncated: false, repository };
-      const diff = await readBranchDiff(
-        thread.checkpoint.repo,
-        repository.pr.baseRef,
-        thread.checkpoint.branch,
-      );
-      return { ...diff, repository };
-    } catch {
-      return { status: "error", files: [], truncated: false };
-    }
   });
 }
 

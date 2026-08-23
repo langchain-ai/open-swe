@@ -3,11 +3,10 @@ import { createServerFn } from "@tanstack/react-start"
 import { assertLocalRequest } from "../../../../server/local/guard"
 import { listDirectories } from "../../../../server/local/browse"
 import {
-  
   addProject,
   projectsFile,
   readProjects,
-  removeProject
+  removeProject,
 } from "../../../../server/local/project-store"
 import {
   checkoutBranch,
@@ -22,7 +21,7 @@ import {
   threadActivity,
 } from "../../../../server/local/threads"
 import { threadStore } from "../../../../server/local/thread-store"
-import type {LocalProject} from "../../../../server/local/project-store";
+import type { LocalProject } from "../../../../server/local/project-store"
 
 /** The project file is required: without one there is nowhere to record a project. */
 function requireProjectsFile(): string {

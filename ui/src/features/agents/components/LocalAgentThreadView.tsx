@@ -4,12 +4,10 @@ import { useQueryClient } from "@tanstack/react-query"
 import { CircleAlert, FolderOpen, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
-import type {
-  DesktopLocalPromptInput,
-  DesktopLocalThreadSummary,
-} from "@/desktop"
+import type { DesktopLocalPromptInput } from "@/desktop"
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
+import type { LocalThread } from "@/features/agents/lib/localQueries"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
@@ -31,17 +29,21 @@ import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
   ensureDesktopModelCredential,
-  localThreadKeys,
   useDesktopLocalThread,
   useLocalThreadActivity,
   useLocalThreadDiff,
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
+import { localKeys } from "@/features/agents/lib/localQueries"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
-import { localThreadsApi } from "@/features/agents/lib/localProjectsApi"
+import {
+  clearLocalThreadPrompt,
+  localThreadPrompt,
+  updateLocalThread,
+} from "@/features/agents/lib/localFunctions"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -195,17 +197,21 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const rememberSelection = useCallback(
     async (model?: ModelSelection | null) => {
       if (!model) return
-      const updated = await localThreadsApi.update(sessionId, {
-        viewed: true,
-        modelId: model.modelId,
-        effort: model.effort,
+      const updated = await updateLocalThread({
+        data: {
+          id: sessionId,
+          patch: {
+            viewed: true,
+            modelId: model.modelId,
+            effort: model.effort,
+          },
+        },
       })
-      if (!updated) return
-      queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-      queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-        localThreadKeys.all,
+      queryClient.setQueryData(localKeys.thread(sessionId), updated)
+      queryClient.setQueryData<Array<LocalThread>>(
+        localKeys.threads,
         (threads = []) =>
-          threads.map((thread) => (thread.id === sessionId ? updated : thread))
+          threads.map((item) => (item.id === sessionId ? updated : item))
       )
     },
     [queryClient, sessionId]
@@ -218,17 +224,16 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     }
     if (!thread || acknowledgedRef.current === sessionId) return
     acknowledgedRef.current = sessionId
-    void window.openSweDesktop
-      ?.updateLocalThread({ threadId: sessionId, viewed: true })
-      .then((updated) => {
-        if (!updated) return
-        queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-        queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-          localThreadKeys.all,
-          (threads = []) =>
-            threads.map((item) => (item.id === sessionId ? updated : item))
-        )
-      })
+    void updateLocalThread({
+      data: { id: sessionId, patch: { viewed: true } },
+    }).then((updated) => {
+      queryClient.setQueryData(localKeys.thread(sessionId), updated)
+      queryClient.setQueryData<Array<LocalThread>>(
+        localKeys.threads,
+        (threads = []) =>
+          threads.map((item) => (item.id === sessionId ? updated : item))
+      )
+    })
   }, [isRunning, queryClient, sessionId, thread])
 
   const submit = useCallback(
@@ -282,13 +287,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       return
     initialPromptRef.current = sessionId
     void stream.hydrationPromise
-      .then(() => localThreadsApi.prompt(sessionId))
+      .then(() => localThreadPrompt({ data: sessionId }))
       .then(async (pending) => {
         if (!pending) return
         if (await submit(pending.prompt, pending.images, pending.skills)) {
-          const updated = await localThreadsApi.clearPrompt(sessionId)
+          const updated = await clearLocalThreadPrompt({ data: sessionId })
           if (updated)
-            queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+            queryClient.setQueryData(localKeys.thread(sessionId), updated)
         } else {
           initialPromptRef.current = null
         }

@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { ChevronUp, Folder, GitBranch } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Sheet, SheetPopup } from "@/components/ui/sheet"
-import {
-  localProjectsApi,
-  type DirectoryListing,
-} from "@/features/agents/lib/localProjectsApi"
+import { localBrowseQuery } from "@/features/agents/lib/localQueries"
 
 /**
  * Picks a directory on the machine running the server. A browser has no native
@@ -23,42 +21,17 @@ export function ProjectPicker({
   onClose: () => void
   onChoose: (cwd: string) => void
 }) {
-  const [listing, setListing] = useState<DirectoryListing | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState(false)
+  const [path, setPath] = useState<string | null>(null)
+  const {
+    data: listing,
+    error,
+    isFetching,
+  } = useQuery(localBrowseQuery(path, open))
 
+  // Each opening starts from the server's default directory.
   useEffect(() => {
-    if (!open) return
-    setError(null)
-    setPending(true)
-    localProjectsApi
-      .browse()
-      .then(setListing)
-      .catch((cause: unknown) =>
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Could not read that directory"
-        )
-      )
-      .finally(() => setPending(false))
+    if (!open) setPath(null)
   }, [open])
-
-  const go = (path: string) => {
-    setPending(true)
-    setError(null)
-    localProjectsApi
-      .browse(path)
-      .then(setListing)
-      .catch((cause: unknown) =>
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Could not read that directory"
-        )
-      )
-      .finally(() => setPending(false))
-  }
 
   return (
     <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
@@ -70,14 +43,20 @@ export function ProjectPicker({
           </p>
         </div>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <p className="text-sm text-destructive">
+            {error instanceof Error
+              ? error.message
+              : "Could not read that directory"}
+          </p>
+        )}
 
         <ScrollArea className="min-h-0 flex-1 rounded border">
           <div className="flex flex-col p-1">
             {listing?.parent && (
               <button
                 type="button"
-                onClick={() => go(listing.parent!)}
+                onClick={() => setPath(listing.parent)}
                 className="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
               >
                 <ChevronUp className="size-4 shrink-0" />
@@ -88,7 +67,7 @@ export function ProjectPicker({
               <button
                 key={entry.path}
                 type="button"
-                onClick={() => go(entry.path)}
+                onClick={() => setPath(entry.path)}
                 className="flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
               >
                 {entry.isRepository ? (
@@ -112,7 +91,7 @@ export function ProjectPicker({
             Cancel
           </Button>
           <Button
-            disabled={!listing || pending}
+            disabled={!listing || isFetching}
             onClick={() => listing && onChoose(listing.path)}
           >
             Use this folder
