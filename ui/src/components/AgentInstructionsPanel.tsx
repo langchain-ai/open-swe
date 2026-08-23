@@ -45,7 +45,7 @@ export function AgentInstructionsPanel() {
   })
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // oxlint-disable-next-line react/set-state-in-effect
     if (detail.data) setDraft(detail.data.instructions)
   }, [detail.data?.instructions, detail.data?.full_name])
 

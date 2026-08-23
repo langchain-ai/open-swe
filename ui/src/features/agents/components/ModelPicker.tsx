@@ -164,7 +164,7 @@ export function ModelPicker({
 
   useEffect(() => {
     if (!open) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // oxlint-disable-next-line react/set-state-in-effect
     setPane("main")
     setQuery("")
     setFocusedModelId(null)

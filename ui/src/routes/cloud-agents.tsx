@@ -81,7 +81,7 @@ function CloudAgentsPage() {
     const hasModel = !!profile.data.default_model || !!defaultAgentModel
     if (!hasModel) return
     initialized.current = true
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // oxlint-disable-next-line react/set-state-in-effect
     setModelId(profile.data.default_model ?? defaultAgentModel)
     setEffort(profile.data.reasoning_effort ?? defaultAgentEffort)
     setSubagentModelId(

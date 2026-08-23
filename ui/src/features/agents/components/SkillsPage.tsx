@@ -36,7 +36,7 @@ export function SkillsPage() {
 
   useEffect(() => {
     if (selected) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      // oxlint-disable-next-line react/set-state-in-effect
       setDraft({
         description: selected.description,
         instructions: selected.instructions,

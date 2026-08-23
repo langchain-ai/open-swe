@@ -278,7 +278,7 @@ export function useAttachedTerminal(
       let exited = false
       pendingRef.current = []
       cloudConnectingRef.current = true
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      // oxlint-disable-next-line react/set-state-in-effect
       setState({ ...EMPTY_TERMINAL_SESSION, status: "starting" })
 
       const reconnect = () => {
@@ -462,7 +462,7 @@ export function useAttachedTerminal(
 
   useEffect(() => {
     if (!clearRequest || target.kind === "local") return
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // oxlint-disable-next-line react/set-state-in-effect
     setState((current) => ({
       ...current,
       buffer: "",

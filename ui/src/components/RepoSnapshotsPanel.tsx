@@ -79,7 +79,7 @@ export function RepoSnapshotsPanel() {
   })
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // oxlint-disable-next-line react/set-state-in-effect
     if (detail.data) setDraft(detail.data.dockerfile)
   }, [detail.data?.dockerfile, detail.data?.full_name])
 

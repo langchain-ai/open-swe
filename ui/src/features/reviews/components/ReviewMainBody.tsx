@@ -870,7 +870,7 @@ function ReviewBodyInner({
   // diff scroller and surface it as the active agenda row (Google-Docs outline).
   useEffect(() => {
     if (view !== "ai" || !groupedView || groupedView.length === 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      // oxlint-disable-next-line react/set-state-in-effect
       setActiveGroup(null)
       return
     }
@@ -2209,7 +2209,7 @@ function InlineComment({
     },
   })
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // oxlint-disable-next-line react/set-state-in-effect
     setBody(comment.body)
     setDraft(comment.body)
     setEditing(false)

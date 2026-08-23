@@ -61,7 +61,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
 
   useEffect(() => {
     let cancelled = false
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // oxlint-disable-next-line react/set-state-in-effect
     setTokens(null)
 
     if (normalizedLanguage === "text") return
