@@ -344,16 +344,14 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
   const total = mappings.data?.total ?? 0
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
-  useEffect(() => {
-    if (!mappings.isFetching && page > pageCount) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setPage(pageCount)
-    }
-  }, [mappings.isFetching, page, pageCount])
-
   const remove = useMutation({
     mutationFn: (gh: string) => api.adminDeleteUserMapping(gh),
-    onSuccess: () => void mappings.refetch(),
+    onSuccess: () => {
+      setPage((current) =>
+        Math.min(current, Math.max(1, Math.ceil((total - 1) / PAGE_SIZE)))
+      )
+      void mappings.refetch()
+    },
     onError: (e: Error) => setError(e.message),
   })
 

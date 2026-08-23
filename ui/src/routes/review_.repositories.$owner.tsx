@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 
 import { AppShell } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
@@ -51,9 +51,11 @@ function RepositoriesOwnerPage() {
     [autoReview.data?.repos]
   )
 
-  const [page, setPage] = useState(0)
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setPage(0), [owner])
+  const [pagePosition, setPagePosition] = useState({ owner, page: 0 })
+  const page = pagePosition.owner === owner ? pagePosition.page : 0
+  const setPage = (next: (current: number) => number) => {
+    setPagePosition({ owner, page: next(page) })
+  }
 
   const totalPages = Math.max(1, Math.ceil(ownerRepos.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages - 1)

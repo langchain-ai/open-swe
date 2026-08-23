@@ -86,9 +86,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     defaultSelection,
     isLoading: modelsLoading,
   } = useModelOptions()
-  const [selection, setSelection] = useState<ModelSelection | null>(null)
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setSelection(null), [sessionId])
+  const [sessionSelection, setSessionSelection] = useState<{
+    sessionId: string
+    selection: ModelSelection | null
+  }>({ sessionId, selection: null })
+  const selection =
+    sessionSelection.sessionId === sessionId ? sessionSelection.selection : null
+  const setSelection = (next: ModelSelection | null) =>
+    setSessionSelection({ sessionId, selection: next })
   const threadModelId = thread?.modelId
   const threadEffort = thread?.effort
   const threadSelection = useMemo<ModelSelection | null>(() => {

@@ -42,9 +42,9 @@ function CloudAgentsPage() {
   const save = useSaveProfile()
 
   const [modelId, setModelId] = useState("")
-  const [effort, setEffort] = useState("")
+  const [effortChoice, setEffort] = useState("")
   const [subagentModelId, setSubagentModelId] = useState("")
-  const [subagentEffort, setSubagentEffort] = useState("")
+  const [subagentEffortChoice, setSubagentEffort] = useState("")
   const [defaultRepo, setDefaultRepo] = useState("")
   const [baseBranch, setBaseBranch] = useState("")
   const [branchPrefix, setBranchPrefix] = useState("")
@@ -66,6 +66,15 @@ function CloudAgentsPage() {
     options.data?.models.find((m) => m.id === modelId) ?? firstModel
   const currentSubagentModel: ModelOption | undefined =
     options.data?.models.find((m) => m.id === subagentModelId) ?? firstModel
+  const effort =
+    currentModel && !currentModel.efforts.includes(effortChoice)
+      ? currentModel.default_effort
+      : effortChoice
+  const subagentEffort =
+    currentSubagentModel &&
+    !currentSubagentModel.efforts.includes(subagentEffortChoice)
+      ? currentSubagentModel.default_effort
+      : subagentEffortChoice
 
   useEffect(() => {
     if (!profile.data || initialized.current) return
@@ -95,23 +104,6 @@ function CloudAgentsPage() {
     defaultSubagentModel,
     defaultSubagentEffort,
   ])
-
-  useEffect(() => {
-    if (currentModel && !currentModel.efforts.includes(effort)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setEffort(currentModel.default_effort)
-    }
-  }, [currentModel, effort])
-
-  useEffect(() => {
-    if (
-      currentSubagentModel &&
-      !currentSubagentModel.efforts.includes(subagentEffort)
-    ) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSubagentEffort(currentSubagentModel.default_effort)
-    }
-  }, [currentSubagentModel, subagentEffort])
 
   if (session.isLoading) {
     return (
