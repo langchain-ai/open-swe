@@ -3,7 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import type { Readable } from "node:stream"
 
-import { reservePort } from "./backend-supervisor.cjs"
+import { reservePort } from "./local-runtime.cjs"
 
 const HOST = "127.0.0.1"
 const START_TIMEOUT_MS = 60_000
@@ -12,11 +12,8 @@ const STOP_TIMEOUT_MS = 5_000
 interface ApplicationTarget {
   command: string
   args: string[]
+  uiEntrypoint: string
   cwd: string
-}
-
-interface GraphRuntime {
-  start(): Promise<{ origin: string; token: string }>
 }
 
 interface ApplicationChild {
@@ -41,10 +38,10 @@ type SpawnApplication = (
 ) => ApplicationChild
 
 interface ApplicationSupervisorOptions {
-  graph: GraphRuntime
   isPackaged?: boolean
   repoRoot?: string
   resourcesPath?: string
+  stateDir?: string
   backendUrl?: string | null
   env?: NodeJS.ProcessEnv
   startTimeoutMs?: number
@@ -54,39 +51,27 @@ interface ApplicationSupervisorOptions {
   reservePort?: (host?: string) => Promise<number>
 }
 
-export function devApplicationTarget(
-  repoRoot: string,
-  platform: NodeJS.Platform = process.platform
-): ApplicationTarget {
-  const outputRoot = path.join(repoRoot, "ui", ".output")
+/**
+ * The combined server runs on the Electron binary in Node mode, so the app
+ * ships one runtime instead of bundling a second copy of Node beside it.
+ */
+export function devApplicationTarget(repoRoot: string): ApplicationTarget {
   return {
-    command: path.join(
-      repoRoot,
-      "desktop",
-      "node_modules",
-      "node",
-      "bin",
-      platform === "win32" ? "node.exe" : "node"
-    ),
-    args: [path.join(outputRoot, "server", "index.mjs")],
-    cwd: outputRoot,
+    command: process.execPath,
+    args: [path.join(repoRoot, "apps", "graphs", "dist", "bin.js")],
+    uiEntrypoint: path.join(repoRoot, "ui", ".output", "server", "index.mjs"),
+    cwd: repoRoot,
   }
 }
 
 export function packagedApplicationTarget(
-  resourcesPath: string,
-  platform: NodeJS.Platform = process.platform
+  resourcesPath: string
 ): ApplicationTarget {
-  const outputRoot = path.join(resourcesPath, "ui")
   return {
-    command: path.join(
-      resourcesPath,
-      "local-backend",
-      "runtime",
-      platform === "win32" ? "node.exe" : "bin/node"
-    ),
-    args: [path.join(outputRoot, "server", "index.mjs")],
-    cwd: outputRoot,
+    command: process.execPath,
+    args: [path.join(resourcesPath, "local-backend", "dist", "bin.js")],
+    uiEntrypoint: path.join(resourcesPath, "ui", "server", "index.mjs"),
+    cwd: resourcesPath,
   }
 }
 
@@ -132,38 +117,49 @@ export class ApplicationSupervisor {
   private async startOnce(): Promise<{ appUrl: string }> {
     this.closing = false
     this.logs = ""
-    const graph = await this.options.graph.start()
     const port = await this.reservePort(HOST)
     this.appUrl = `http://${HOST}:${port}`
     const target = this.options.isPackaged
       ? packagedApplicationTarget(this.options.resourcesPath || "")
       : devApplicationTarget(this.options.repoRoot || process.cwd())
-    if (!fs.existsSync(target.command) || !fs.existsSync(target.args[0]!)) {
-      throw new Error(`TanStack application server is missing: ${target.args[0]}`)
+    for (const required of [target.args[0]!, target.uiEntrypoint]) {
+      if (!fs.existsSync(required)) {
+        throw new Error(`Local server is missing: ${required}`)
+      }
     }
 
-    const child = this.spawn(target.command, target.args, {
-      cwd: target.cwd,
-      env: {
-        ...process.env,
-        ...this.options.env,
-        NODE_ENV: "production",
+    const child = this.spawn(
+      target.command,
+      [
+        ...target.args,
+        "--host",
         HOST,
-        PORT: String(port),
-        OPEN_SWE_LOCAL_GRAPH_ORIGIN: graph.origin,
-        OPEN_SWE_LOCAL_GRAPH_TOKEN: graph.token,
-        ...(this.backendUrl
-          ? { DASHBOARD_API_URL: this.backendUrl }
-          : {}),
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    })
+        "--port",
+        String(port),
+        "--state-dir",
+        this.options.stateDir || target.cwd,
+        "--ui-entrypoint",
+        target.uiEntrypoint,
+        ...(this.backendUrl ? ["--backend-url", this.backendUrl] : []),
+      ],
+      {
+        cwd: target.cwd,
+        env: {
+          ...process.env,
+          ...this.options.env,
+          // Run the Electron binary as plain Node for the server child.
+          ELECTRON_RUN_AS_NODE: "1",
+          NODE_ENV: "production",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      }
+    )
     this.child = child
     const append = (chunk: Buffer | string): void => {
       this.logs = `${this.logs}${chunk.toString()}`.slice(-16_000)
       if (process.env.OPEN_SWE_LOCAL_SERVER_LOGS === "1") {
-        process.stderr.write(`[tanstack] ${chunk.toString()}`)
+        process.stderr.write(`[server] ${chunk.toString()}`)
       }
     }
     child.stdout?.on("data", append)
@@ -185,7 +181,7 @@ export class ApplicationSupervisor {
       })
       child.once("exit", (code, signal) => {
         const reason = signal ? `signal ${signal}` : `exit code ${code}`
-        markExited(new Error(`TanStack application server stopped with ${reason}`))
+        markExited(new Error(`Local server stopped with ${reason}`))
       })
     })
     const deadline = Date.now() + (this.options.startTimeoutMs || START_TIMEOUT_MS)
@@ -205,7 +201,7 @@ export class ApplicationSupervisor {
       const error = startupError as Error
       throw new Error(`${error.message}${detail ? `\n${detail}` : ""}`)
     }
-    throw new Error(`TanStack application server did not become healthy${detail ? `\n${detail}` : ""}`)
+    throw new Error(`Local server did not become healthy${detail ? `\n${detail}` : ""}`)
   }
 
   isTrustedUrl(value: string): boolean {

@@ -10,7 +10,7 @@ const {
   session,
   shell,
 } = require("electron");
-const { BackendSupervisor } = require("./backend-supervisor.cjs");
+const { LocalGraphClient } = require("./local-graph-client.cjs");
 const { ApplicationSupervisor } = require("./application-supervisor.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
@@ -281,7 +281,7 @@ function configureDesktopIpc() {
       throw new Error(
         "Add a valid project to Open SWE before starting a local agent",
       );
-    await backendSupervisor.start();
+    await applicationSupervisor.start();
     let thread = localThreadStore.create({ ...input, cwd });
     try {
       thread = await recordLocalCheckpoint(thread);
@@ -896,21 +896,21 @@ if (!hasSingleInstanceLock) {
     await openAiOAuth.startBroker().catch((error) => {
       console.warn("Could not start the local OpenAI credential broker", error);
     });
-    backendSupervisor = new BackendSupervisor({
+    backendSupervisor = new LocalGraphClient({
+      origin: () => applicationSupervisor?.origin() ?? null,
+      env: () => openAiOAuth?.backendEnv() || {},
+      openAiOAuthAvailable: () => openAiOAuth?.status().signedIn === true,
+    });
+    applicationSupervisor = new ApplicationSupervisor({
       isPackaged: app.isPackaged,
       repoRoot: path.resolve(__dirname, "../.."),
       resourcesPath: process.resourcesPath,
       stateDir: path.join(app.getPath("userData"), "local-backend"),
-      projectsFile: projectsPath(),
-      providerEnv: () => openAiOAuth?.backendEnv() || {},
-      openAiOAuthAvailable: () => openAiOAuth?.status().signedIn === true,
-    });
-    applicationSupervisor = new ApplicationSupervisor({
-      graph: backendSupervisor,
-      isPackaged: app.isPackaged,
-      repoRoot: path.resolve(__dirname, "../.."),
-      resourcesPath: process.resourcesPath,
       backendUrl,
+      env: {
+        OPEN_SWE_LOCAL_PROJECTS_FILE: projectsPath(),
+        ...(openAiOAuth?.backendEnv() || {}),
+      },
     });
     configurePermissions();
     configureDesktopIpc();

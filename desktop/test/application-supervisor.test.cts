@@ -10,41 +10,21 @@ import {
   packagedApplicationTarget,
 } from "../build/application-supervisor.cjs"
 
-test("development application target runs the built TanStack server with Node 24", () => {
+test("both application targets run the combined entry on the Electron binary", () => {
   const repoRoot = path.resolve("/work/open-swe")
-  expectTarget(devApplicationTarget(repoRoot), {
-    command: path.join(repoRoot, "desktop/node_modules/node/bin/node"),
-    script: path.join(repoRoot, "ui/.output/server/index.mjs"),
-    cwd: path.join(repoRoot, "ui/.output"),
-  })
-})
-
-test("packaged application target shares the bundled Node 24 runtime", () => {
-  const resources = path.resolve("/Applications/Open SWE.app/Contents/Resources")
-  expectTarget(packagedApplicationTarget(resources), {
-    command: path.join(resources, "local-backend/runtime/bin/node"),
-    script: path.join(resources, "ui/server/index.mjs"),
-    cwd: path.join(resources, "ui"),
-  })
-})
-
-test("application targets select the Windows runtime executables", () => {
-  const repoRoot = path.resolve("/work/open-swe")
-  expectTarget(devApplicationTarget(repoRoot, "win32"), {
-    command: path.join(repoRoot, "desktop/node_modules/node/bin/node.exe"),
-    script: path.join(repoRoot, "ui/.output/server/index.mjs"),
-    cwd: path.join(repoRoot, "ui/.output"),
-  })
+  const development = devApplicationTarget(repoRoot)
+  assert.equal(development.command, process.execPath)
+  assert.equal(development.args[0], path.join(repoRoot, "apps/graphs/dist/bin.js"))
+  assert.equal(development.uiEntrypoint, path.join(repoRoot, "ui/.output/server/index.mjs"))
 
   const resources = path.resolve("/Applications/Open SWE.app/Contents/Resources")
-  expectTarget(packagedApplicationTarget(resources, "win32"), {
-    command: path.join(resources, "local-backend/runtime/node.exe"),
-    script: path.join(resources, "ui/server/index.mjs"),
-    cwd: path.join(resources, "ui"),
-  })
+  const packaged = packagedApplicationTarget(resources)
+  assert.equal(packaged.command, process.execPath)
+  assert.equal(packaged.args[0], path.join(resources, "local-backend/dist/bin.js"))
+  assert.equal(packaged.uiEntrypoint, path.join(resources, "ui/server/index.mjs"))
 })
 
-test("restarts after the TanStack server exits after becoming healthy", async (t) => {
+test("restarts after the local server exits after becoming healthy", async (t) => {
   const harness = createSupervisorHarness()
   t.after(() => harness.close())
 
@@ -63,20 +43,17 @@ test("restarts with a changed hosted backend URL", async (t) => {
   t.after(() => harness.close())
 
   await harness.supervisor.start()
-  assert.equal(harness.environments[0].DASHBOARD_API_URL, "https://old.example/")
+  assert.deepEqual(backendUrlArgument(harness.invocations[0]), "https://old.example/")
+  assert.equal(harness.environments[0].ELECTRON_RUN_AS_NODE, "1")
 
   await harness.supervisor.setBackendUrl("https://new.example/")
   await harness.supervisor.start()
-  assert.equal(harness.environments[1].DASHBOARD_API_URL, "https://new.example/")
+  assert.deepEqual(backendUrlArgument(harness.invocations[1]), "https://new.example/")
 })
 
-function expectTarget(
-  actual: { command: string; args: string[]; cwd: string },
-  expected: { command: string; script: string; cwd: string }
-): void {
-  assert.equal(actual.command, expected.command)
-  assert.deepEqual(actual.args, [expected.script])
-  assert.equal(actual.cwd, expected.cwd)
+function backendUrlArgument(args: string[]): string | undefined {
+  const index = args.indexOf("--backend-url")
+  return index < 0 ? undefined : args[index + 1]
 }
 
 class FakeChild extends EventEmitter {
@@ -92,29 +69,28 @@ class FakeChild extends EventEmitter {
 
 function createSupervisorHarness(backendUrl: string | null = null) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-application-supervisor-"))
-  const command = path.join(root, "desktop", "node_modules", "node", "bin", "node")
-  const script = path.join(root, "ui", ".output", "server", "index.mjs")
-  fs.mkdirSync(path.dirname(command), { recursive: true })
-  fs.mkdirSync(path.dirname(script), { recursive: true })
-  fs.writeFileSync(command, "")
-  fs.writeFileSync(script, "")
+  const entry = path.join(root, "apps", "graphs", "dist", "bin.js")
+  const ui = path.join(root, "ui", ".output", "server", "index.mjs")
+  fs.mkdirSync(path.dirname(entry), { recursive: true })
+  fs.mkdirSync(path.dirname(ui), { recursive: true })
+  fs.writeFileSync(entry, "")
+  fs.writeFileSync(ui, "")
 
   const children: FakeChild[] = []
   const environments: NodeJS.ProcessEnv[] = []
+  const invocations: string[][] = []
   let port = 41_000
   const { ApplicationSupervisor } = require("../build/application-supervisor.cjs")
   const supervisor = new ApplicationSupervisor({
-    graph: {
-      start: async () => ({ origin: "http://127.0.0.1:42000", token: "test-token" }),
-    },
     repoRoot: root,
     backendUrl,
     reservePort: async () => port++,
     fetch: async () => new Response(null, { status: 200 }),
-    spawn: (_command, _args, options) => {
+    spawn: (_command, args, options) => {
       const child = new FakeChild()
       children.push(child)
       environments.push(options.env)
+      invocations.push([...args])
       return child
     },
     stopTimeoutMs: 100,
@@ -124,6 +100,7 @@ function createSupervisorHarness(backendUrl: string | null = null) {
     supervisor,
     children,
     environments,
+    invocations,
     close: async () => {
       await supervisor.close()
       fs.rmSync(root, { recursive: true, force: true })
