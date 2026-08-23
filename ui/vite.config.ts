@@ -211,6 +211,14 @@ const config = defineConfig({
           route: "/local/browse",
           handler: "./server/local-browse.ts",
         },
+        {
+          route: "/local/threads",
+          handler: "./server/local-threads.ts",
+        },
+        {
+          route: "/local/threads/**",
+          handler: "./server/local-threads.ts",
+        },
       ],
       // Nitro gives every node_modules package its own server chunk. The
       // LangGraph SDK reaches CJS-only `eventemitter3` through `p-queue`, and

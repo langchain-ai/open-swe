@@ -41,6 +41,7 @@ import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
+import { localThreadsApi } from "@/features/agents/lib/localProjectsApi"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -194,8 +195,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const rememberSelection = useCallback(
     async (model?: ModelSelection | null) => {
       if (!model) return
-      const updated = await window.openSweDesktop?.updateLocalThread({
-        threadId: sessionId,
+      const updated = await localThreadsApi.update(sessionId, {
         viewed: true,
         modelId: model.modelId,
         effort: model.effort,
@@ -282,12 +282,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       return
     initialPromptRef.current = sessionId
     void stream.hydrationPromise
-      .then(() => window.openSweDesktop?.getLocalPrompt(sessionId))
+      .then(() => localThreadsApi.prompt(sessionId))
       .then(async (pending) => {
         if (!pending) return
         if (await submit(pending.prompt, pending.images, pending.skills)) {
-          const updated =
-            await window.openSweDesktop?.clearLocalPrompt(sessionId)
+          const updated = await localThreadsApi.clearPrompt(sessionId)
           if (updated)
             queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
         } else {

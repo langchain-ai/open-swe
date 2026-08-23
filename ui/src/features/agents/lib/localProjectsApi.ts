@@ -1,4 +1,8 @@
-import type { DesktopProject } from "@/desktop"
+import type {
+  DesktopLocalPromptInput,
+  DesktopLocalThreadSummary,
+  DesktopProject,
+} from "@/desktop"
 
 export interface DirectoryEntry {
   name: string
@@ -43,5 +47,45 @@ export const localProjectsApi = {
   browse: (path?: string) =>
     local<DirectoryListing>(
       path ? `/local/browse?path=${encodeURIComponent(path)}` : "/local/browse"
+    ),
+}
+
+export interface LocalThreadPrompt {
+  prompt: string
+  images: Array<unknown>
+  skills: Array<unknown>
+}
+
+/** Local threads, served by the same local server that serves this page. */
+export const localThreadsApi = {
+  list: () => local<Array<DesktopLocalThreadSummary>>("/local/threads"),
+  get: (id: string) =>
+    local<DesktopLocalThreadSummary | null>(
+      `/local/threads/${encodeURIComponent(id)}`
+    ).catch(() => null),
+  create: (input: Record<string, unknown>) =>
+    local<DesktopLocalThreadSummary>("/local/threads", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, patch: Record<string, unknown>) =>
+    local<DesktopLocalThreadSummary>(
+      `/local/threads/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) }
+    ),
+  remove: (id: string) =>
+    local<{ deleted: boolean }>(`/local/threads/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  activity: () =>
+    local<Record<string, "running" | "error">>("/local/threads/activity"),
+  prompt: (id: string) =>
+    local<DesktopLocalPromptInput | null>(
+      `/local/threads/${encodeURIComponent(id)}/prompt`
+    ),
+  clearPrompt: (id: string) =>
+    local<DesktopLocalThreadSummary | null>(
+      `/local/threads/${encodeURIComponent(id)}/prompt`,
+      { method: "DELETE" }
     ),
 }

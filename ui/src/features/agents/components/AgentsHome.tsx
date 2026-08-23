@@ -30,6 +30,7 @@ import {
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
 import { ProjectPicker } from "@/features/agents/components/ProjectPicker"
+import { localThreadsApi } from "@/features/agents/lib/localProjectsApi"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
@@ -217,9 +218,8 @@ export function AgentsHome() {
       if (perm === "granted") setNotificationsPref(true)
     })
     if (runTarget === "local") {
-      const desktop = window.openSweDesktop
-      if (!desktop || !localProjectPath) {
-        setLocalError("Choose or add a project from This Mac before sending.")
+      if (!localProjectPath) {
+        setLocalError("Choose or add a project before sending.")
         return
       }
       setSubmitting(true)
@@ -238,7 +238,7 @@ export function AgentsHome() {
         const managedSkills = cloudEnabled
           ? await skills.refetch()
           : { personal: [], organization: [] }
-        const localSession = await desktop.startLocalThread({
+        const localSession = await localThreadsApi.create({
           cwd: localProjectPath,
           prompt,
           images,

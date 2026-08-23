@@ -86,6 +86,14 @@ process.env.OPEN_SWE_LOCAL_GRAPH_TOKEN = graphToken
 process.env.HOST = HOST
 // Unlocks the `/local/**` routes, which only a local server may serve.
 process.env.OPEN_SWE_LOCAL_MODE = "1"
+process.env.OPEN_SWE_LOCAL_THREADS_FILE ||= path.join(
+  options.stateDirectory,
+  "local-threads.json"
+)
+process.env.OPEN_SWE_LOCAL_PROJECTS_FILE ||= path.join(
+  options.stateDirectory,
+  "projects.json"
+)
 process.env.PORT = String(options.port)
 process.env.NODE_ENV ||= "production"
 if (options.backendUrl) process.env.DASHBOARD_API_URL = options.backendUrl

@@ -6,6 +6,8 @@ import type {
   DesktopLocalDiff,
   DesktopLocalThreadSummary,
 } from "@/desktop"
+import { localThreadsApi } from "@/features/agents/lib/localProjectsApi"
+import { isLocalRuntime } from "@/lib/desktop-local-mode"
 
 const NO_ACTIVITY: DesktopLocalActivity = {}
 
@@ -48,10 +50,9 @@ export function useReadyDesktopLocalThread(threadId: string) {
   const queryClient = useQueryClient()
   return useQuery({
     queryKey: localThreadKeys.ready(threadId),
-    enabled: typeof window !== "undefined" && Boolean(window.openSweDesktop),
+    enabled: isLocalRuntime(),
     queryFn: async () => {
-      const thread =
-        (await window.openSweDesktop?.getLocalThread(threadId)) ?? null
+      const thread = await localThreadsApi.get(threadId)
       if (thread)
         queryClient.setQueryData(localThreadKeys.detail(threadId), thread)
       return thread
@@ -64,7 +65,7 @@ export function useDesktopLocalThread(threadId: string) {
   const queryClient = useQueryClient()
   return useQuery({
     queryKey: localThreadKeys.detail(threadId),
-    queryFn: () => window.openSweDesktop?.getLocalThread(threadId) ?? null,
+    queryFn: () => localThreadsApi.get(threadId),
     initialData: () =>
       queryClient
         .getQueryData<Array<DesktopLocalThreadSummary>>(localThreadKeys.all)
@@ -76,7 +77,7 @@ export function useDesktopLocalThread(threadId: string) {
 export function useDesktopLocalThreads(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: localThreadKeys.all,
-    queryFn: () => window.openSweDesktop?.listLocalThreads() ?? [],
+    queryFn: () => localThreadsApi.list(),
     enabled: options.enabled,
     refetchInterval: options.enabled === false ? false : 1000,
   })
@@ -86,8 +87,8 @@ export function useLocalThreadActivity(): DesktopLocalActivity {
   return (
     useQuery({
       queryKey: localThreadKeys.activity,
-      queryFn: () => window.openSweDesktop?.localActivity() ?? NO_ACTIVITY,
-      enabled: typeof window !== "undefined" && Boolean(window.openSweDesktop),
+      queryFn: () => localThreadsApi.activity(),
+      enabled: isLocalRuntime(),
       refetchInterval: 1000,
     }).data ?? NO_ACTIVITY
   )

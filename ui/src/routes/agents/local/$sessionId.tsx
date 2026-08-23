@@ -4,6 +4,7 @@ import { LocalAgentThreadView } from "@/features/agents/components/LocalAgentThr
 import { AgentThreadStreamProvider } from "@/features/agents/lib/AgentThreadStreamProvider"
 import { useReadyDesktopLocalThread } from "@/features/agents/lib/desktopLocal"
 import { Skeleton } from "@/components/ui/skeleton"
+import { isLocalRuntime } from "@/lib/desktop-local-mode"
 
 export const Route = createFileRoute("/agents/local/$sessionId")({
   component: LocalAgentThreadPage,
@@ -12,7 +13,7 @@ export const Route = createFileRoute("/agents/local/$sessionId")({
 function LocalAgentThreadPage() {
   const { sessionId } = Route.useParams()
   const threadQuery = useReadyDesktopLocalThread(sessionId)
-  if (typeof window === "undefined" || !window.openSweDesktop) {
+  if (!isLocalRuntime()) {
     return <Navigate to="/agents" />
   }
   if (threadQuery.isPending) {
