@@ -30,7 +30,10 @@ import {
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
 import { ProjectPicker } from "@/features/agents/components/ProjectPicker"
-import { localThreadsApi } from "@/features/agents/lib/localProjectsApi"
+import {
+  localProjectsApi,
+  localThreadsApi,
+} from "@/features/agents/lib/localProjectsApi"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
@@ -148,7 +151,7 @@ export function AgentsHome() {
   const refreshLocalProjectBranch = useCallback(async () => {
     const cwd = localProjectPathRef.current
     const result = cwd
-      ? await window.openSweDesktop?.getProjectBranches(cwd)
+      ? await localProjectsApi.branches(cwd).catch(() => undefined)
       : undefined
     if (localProjectPathRef.current === cwd) {
       setLocalProjectBranch(result?.current ?? null)
@@ -181,11 +184,7 @@ export function AgentsHome() {
     if (!localProjectPath) return
     setLocalError(null)
     try {
-      await window.openSweDesktop?.checkoutProjectBranch({
-        cwd: localProjectPath,
-        branch,
-        create,
-      })
+      await localProjectsApi.checkout(localProjectPath, branch, create)
       await refreshLocalProjectBranch()
     } catch (error) {
       setLocalError(

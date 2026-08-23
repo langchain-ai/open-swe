@@ -1,8 +1,27 @@
 import type {
+  DesktopLocalDiff,
   DesktopLocalPromptInput,
   DesktopLocalThreadSummary,
   DesktopProject,
 } from "@/desktop"
+import {
+  addLocalProject,
+  browseLocalDirectories,
+  checkoutLocalBranch,
+  clearLocalThreadPrompt,
+  deleteLocalThread,
+  getLocalThread,
+  listLocalBranches,
+  listLocalProjects,
+  listLocalThreads,
+  localThreadActivity,
+  localThreadBranchDiff,
+  localThreadDiff,
+  localThreadPrompt,
+  removeLocalProject,
+  startLocalThread,
+  updateLocalThread,
+} from "@/features/agents/lib/localFunctions"
 
 export interface DirectoryEntry {
   name: string
@@ -16,38 +35,22 @@ export interface DirectoryListing {
   entries: Array<DirectoryEntry>
 }
 
-async function local<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { "content-type": "application/json", ...(init.headers ?? {}) },
-  })
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "")
-    throw new Error(detail || `Request failed (${response.status})`)
-  }
-  return (await response.json()) as T
-}
-
 /**
- * The local project list, served over HTTP so the desktop app and a plain
- * `open-swe` server share one implementation.
+ * The local project list. Served by the same local server that serves this page,
+ * so the desktop app and a plain `open-swe` server share one implementation.
  */
 export const localProjectsApi = {
-  list: () => local<Array<DesktopProject>>("/local/projects"),
+  list: () => listLocalProjects() as Promise<Array<DesktopProject>>,
   add: (cwd: string) =>
-    local<DesktopProject>("/local/projects", {
-      method: "POST",
-      body: JSON.stringify({ cwd }),
-    }),
-  remove: (cwd: string) =>
-    local<{ removed: boolean }>(
-      `/local/projects?cwd=${encodeURIComponent(cwd)}`,
-      { method: "DELETE" }
-    ),
+    addLocalProject({ data: cwd }) as Promise<DesktopProject>,
+  remove: (cwd: string) => removeLocalProject({ data: cwd }),
   browse: (path?: string) =>
-    local<DirectoryListing>(
-      path ? `/local/browse?path=${encodeURIComponent(path)}` : "/local/browse"
-    ),
+    browseLocalDirectories({
+      data: path ?? null,
+    }) as Promise<DirectoryListing>,
+  branches: (cwd: string) => listLocalBranches({ data: cwd }),
+  checkout: (cwd: string, branch: string, create = false) =>
+    checkoutLocalBranch({ data: { cwd, branch, create } }),
 }
 
 export interface LocalThreadPrompt {
@@ -56,36 +59,28 @@ export interface LocalThreadPrompt {
   skills: Array<unknown>
 }
 
-/** Local threads, served by the same local server that serves this page. */
 export const localThreadsApi = {
-  list: () => local<Array<DesktopLocalThreadSummary>>("/local/threads"),
+  list: () => listLocalThreads() as Promise<Array<DesktopLocalThreadSummary>>,
   get: (id: string) =>
-    local<DesktopLocalThreadSummary | null>(
-      `/local/threads/${encodeURIComponent(id)}`
+    (
+      getLocalThread({ data: id }) as Promise<DesktopLocalThreadSummary | null>
     ).catch(() => null),
   create: (input: Record<string, unknown>) =>
-    local<DesktopLocalThreadSummary>("/local/threads", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
+    startLocalThread({ data: input }) as Promise<DesktopLocalThreadSummary>,
   update: (id: string, patch: Record<string, unknown>) =>
-    local<DesktopLocalThreadSummary>(
-      `/local/threads/${encodeURIComponent(id)}`,
-      { method: "PATCH", body: JSON.stringify(patch) }
-    ),
-  remove: (id: string) =>
-    local<{ deleted: boolean }>(`/local/threads/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    }),
-  activity: () =>
-    local<Record<string, "running" | "error">>("/local/threads/activity"),
+    updateLocalThread({
+      data: { id, patch },
+    }) as Promise<DesktopLocalThreadSummary>,
+  remove: (id: string) => deleteLocalThread({ data: id }),
+  diff: (id: string) =>
+    localThreadDiff({ data: id }) as Promise<DesktopLocalDiff>,
+  prDiff: (id: string) =>
+    localThreadBranchDiff({ data: id }) as Promise<DesktopLocalDiff>,
+  activity: () => localThreadActivity(),
   prompt: (id: string) =>
-    local<DesktopLocalPromptInput | null>(
-      `/local/threads/${encodeURIComponent(id)}/prompt`
-    ),
+    localThreadPrompt({ data: id }) as Promise<DesktopLocalPromptInput | null>,
   clearPrompt: (id: string) =>
-    local<DesktopLocalThreadSummary | null>(
-      `/local/threads/${encodeURIComponent(id)}/prompt`,
-      { method: "DELETE" }
-    ),
+    clearLocalThreadPrompt({
+      data: id,
+    }) as Promise<DesktopLocalThreadSummary | null>,
 }

@@ -22,7 +22,7 @@ export function projectsFile(
   return environment.OPEN_SWE_LOCAL_PROJECTS_FILE || null
 }
 
-export function readProjects(filePath: string): LocalProject[] {
+export function readProjects(filePath: string): Array<LocalProject> {
   try {
     const value: unknown = JSON.parse(fs.readFileSync(filePath, "utf8"))
     if (!Array.isArray(value)) return []
@@ -58,7 +58,7 @@ export function readProjects(filePath: string): LocalProject[] {
   }
 }
 
-function writeProjects(filePath: string, projects: LocalProject[]): void {
+function writeProjects(filePath: string, projects: Array<LocalProject>): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true })
   const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`
   try {

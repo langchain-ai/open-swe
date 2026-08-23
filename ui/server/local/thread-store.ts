@@ -20,8 +20,8 @@ interface LocalSkill {
 
 interface PendingPrompt {
   prompt: string
-  images: LocalImage[]
-  skills: LocalSkill[]
+  images: Array<LocalImage>
+  skills: Array<LocalSkill>
 }
 
 interface LocalCheckpoint {
@@ -66,9 +66,9 @@ function stringOrNull(value: unknown, maximum = 512): string | null {
   return typeof value === "string" && value.length <= maximum ? value : null
 }
 
-function cleanImages(value: unknown): LocalImage[] {
+function cleanImages(value: unknown): Array<LocalImage> {
   if (!Array.isArray(value)) return []
-  const images: LocalImage[] = []
+  const images: Array<LocalImage> = []
   for (const candidate of value) {
     if (
       !isRecord(candidate) ||
@@ -91,9 +91,9 @@ function cleanImages(value: unknown): LocalImage[] {
   return images
 }
 
-function cleanSkills(value: unknown): LocalSkill[] {
+function cleanSkills(value: unknown): Array<LocalSkill> {
   if (!Array.isArray(value)) return []
-  const skills: LocalSkill[] = []
+  const skills: Array<LocalSkill> = []
   for (const candidate of value) {
     if (
       !isRecord(candidate) ||
@@ -200,7 +200,7 @@ export class LocalThreadStore {
   }
 
   private load(): void {
-    let values: unknown[] = []
+    let values: Array<unknown> = []
     try {
       const parsed: unknown = JSON.parse(
         this.fs.readFileSync(this.filePath, "utf8")
@@ -217,7 +217,7 @@ export class LocalThreadStore {
     atomicWrite(this.filePath, [...this.threads.values()], this.fs)
   }
 
-  list(): LocalThread[] {
+  list(): Array<LocalThread> {
     return [...this.threads.values()]
       .sort(
         (left, right) =>

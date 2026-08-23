@@ -84,7 +84,7 @@ process.env.OPEN_SWE_LOCAL_AUTH_TOKEN = graphToken
 process.env.OPEN_SWE_LOCAL_GRAPH_ORIGIN = `http://${HOST}:${graphPort}`
 process.env.OPEN_SWE_LOCAL_GRAPH_TOKEN = graphToken
 process.env.HOST = HOST
-// Unlocks the `/local/**` routes, which only a local server may serve.
+// Unlocks the local server functions, which only a local server may serve.
 process.env.OPEN_SWE_LOCAL_MODE = "1"
 process.env.OPEN_SWE_LOCAL_THREADS_FILE ||= path.join(
   options.stateDirectory,
