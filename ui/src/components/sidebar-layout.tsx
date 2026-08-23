@@ -9,6 +9,7 @@ import {
 import { SidebarSimpleIcon } from "@phosphor-icons/react"
 
 import { cn } from "@/lib/utils"
+import { isLocalRuntime } from "@/lib/desktop-local-mode"
 
 const STORAGE_WIDTH = "open-swe.sidebar.width"
 const STORAGE_COLLAPSED = "open-swe.sidebar.collapsed"
@@ -114,8 +115,7 @@ export function SidebarFrame({
   className,
   children,
 }: SidebarFrameProps) {
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const isDesktop = isLocalRuntime()
 
   if (collapsed) {
     return (
@@ -220,8 +220,7 @@ export function SidebarCollapseButton({
   onToggle,
   className,
 }: SidebarCollapseButtonProps) {
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const isDesktop = isLocalRuntime()
 
   return (
     <button

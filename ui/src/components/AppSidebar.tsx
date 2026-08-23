@@ -17,6 +17,7 @@ import {
   useSidebarLayout,
 } from "@/components/sidebar-layout"
 import { cn } from "@/lib/utils"
+import { isLocalRuntime } from "@/lib/desktop-local-mode"
 
 type IconType = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -59,8 +60,7 @@ const LINK_CLASS =
 
 export function AppSidebar({ user }: { user: SessionUser }) {
   const layout = useSidebarLayout()
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const isDesktop = isLocalRuntime()
 
   return (
     <SidebarFrame

@@ -32,10 +32,20 @@ function reservePort(host: string): Promise<number> {
   })
 }
 
-const options = parseAppServerOptions(process.argv.slice(2))
 const applicationRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   ".."
+)
+// Running from a checkout, the dashboard build is where the workspace puts it.
+const repositoryUi = path.resolve(
+  applicationRoot,
+  "../../ui/.output/server/index.mjs"
+)
+const options = parseAppServerOptions(
+  process.argv.slice(2),
+  process.env,
+  process.cwd(),
+  fs.existsSync(repositoryUi) ? repositoryUi : undefined
 )
 
 fs.mkdirSync(options.stateDirectory, { recursive: true })

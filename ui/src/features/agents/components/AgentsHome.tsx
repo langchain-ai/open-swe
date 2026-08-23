@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useStreamContext as useAgentThreadStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
+import { isLocalRuntime } from "@/lib/desktop-local-mode"
 
 import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { ImageChunk } from "@/features/agents/lib/types"
@@ -28,6 +29,7 @@ import {
   ensureDesktopModelCredential,
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
+import { ProjectPicker } from "@/features/agents/components/ProjectPicker"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
@@ -81,8 +83,7 @@ export function AgentsHome() {
       ? defaultEnvironmentSlug
       : null)
   const [submitting, setSubmitting] = useState(false)
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const isDesktop = isLocalRuntime()
   const [desktopThreadSource, setDesktopThreadSource] = useDesktopThreadSource()
   const runTarget: RunTarget = isDesktop
     ? cloudEnabled
@@ -99,6 +100,7 @@ export function AgentsHome() {
     Array<string>
   >([])
   const [localError, setLocalError] = useState<string | null>(null)
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const {
     projects: localProjects,
     addProject,
@@ -191,9 +193,18 @@ export function AgentsHome() {
     }
   }
 
-  const handleAddLocalProject = async () => {
-    const project = await addProject()
-    if (project) handleSelectLocalProject(project.cwd)
+  const handleAddLocalProject = () => setProjectPickerOpen(true)
+
+  const handleChooseLocalProject = async (cwd: string) => {
+    setProjectPickerOpen(false)
+    try {
+      const project = await addProject(cwd)
+      handleSelectLocalProject(project.cwd)
+    } catch (error) {
+      setLocalError(
+        error instanceof Error ? error.message : "Could not add the project"
+      )
+    }
   }
 
   const handleRemoveLocalProject = async (cwd: string) => {
@@ -360,6 +371,11 @@ export function AgentsHome() {
           />
         </div>
       </div>
+      <ProjectPicker
+        open={projectPickerOpen}
+        onClose={() => setProjectPickerOpen(false)}
+        onChoose={handleChooseLocalProject}
+      />
     </div>
   )
 }

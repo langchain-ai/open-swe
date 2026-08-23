@@ -19,7 +19,10 @@ import {
 } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
-import { enableDesktopLocalMode } from "@/lib/desktop-local-mode"
+import {
+  enableDesktopLocalMode,
+  isLocalRuntime,
+} from "@/lib/desktop-local-mode"
 
 type LoginSearch = { redirect?: string }
 
@@ -45,8 +48,7 @@ function Login() {
     () => (session.data ? consumeAuthRedirect(redirectParam) : null),
     [redirectParam, session.data]
   )
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const isDesktop = isLocalRuntime()
 
   if (session.isLoading) {
     return (

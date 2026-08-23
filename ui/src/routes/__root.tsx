@@ -17,6 +17,7 @@ import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
 import { ThemeSync } from "@/lib/ThemeSync"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
+import { localRuntimeScript } from "@/lib/local-runtime"
 
 const themeInitScript = `(function(){try{var t=localStorage.getItem("open-swe-theme");var d=t==="dark"||((!t||t==="system")&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}})();`
 
@@ -61,6 +62,13 @@ function RootDocument({ children }: { children: React.ReactNode }) {
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        {localRuntimeScript() && (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: "window.__OPEN_SWE_LOCAL__=true",
+            }}
+          />
+        )}
         {warmupScript && (
           <script dangerouslySetInnerHTML={{ __html: warmupScript }} />
         )}

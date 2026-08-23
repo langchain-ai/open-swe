@@ -17,6 +17,7 @@ import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { useDesktopLocalThreads } from "@/features/agents/lib/desktopLocal"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
+import { isLocalRuntime } from "@/lib/desktop-local-mode"
 
 interface CommandResult {
   id: string
@@ -111,8 +112,7 @@ export function AppCommandPalette({
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
   const [activeIndex, setActiveIndex] = useState(0)
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const isDesktop = isLocalRuntime()
 
   useEffect(() => {
     if (!open) {

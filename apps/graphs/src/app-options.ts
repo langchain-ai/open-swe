@@ -24,7 +24,9 @@ function optionValue(
 export function parseAppServerOptions(
   arguments_: readonly string[],
   environment: NodeJS.ProcessEnv = process.env,
-  currentDirectory = process.cwd()
+  currentDirectory = process.cwd(),
+  /** Where the dashboard build sits when the caller does not say. */
+  defaultUiEntrypoint?: string
 ): AppServerOptions {
   const rawPort =
     optionValue(arguments_, "--port") ?? environment.PORT ?? "3100"
@@ -35,7 +37,8 @@ export function parseAppServerOptions(
 
   const uiEntrypoint =
     optionValue(arguments_, "--ui-entrypoint") ??
-    environment.OPEN_SWE_UI_ENTRYPOINT
+    environment.OPEN_SWE_UI_ENTRYPOINT ??
+    defaultUiEntrypoint
   if (!uiEntrypoint) {
     throw new Error(
       "--ui-entrypoint (or OPEN_SWE_UI_ENTRYPOINT) must point at the built dashboard server"

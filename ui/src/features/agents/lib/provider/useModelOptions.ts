@@ -1,6 +1,7 @@
 import type { ModelOption } from "@/lib/api"
 import { useOptions } from "@/lib/profile"
 import { useSession } from "@/lib/session"
+import { isLocalRuntime } from "@/lib/desktop-local-mode"
 
 export interface ModelSelection {
   modelId: string
@@ -74,10 +75,7 @@ function toSupportedSelection(
 
 export function useModelOptions(): ModelOptionsResult {
   const session = useSession()
-  const localMode =
-    typeof window !== "undefined" &&
-    Boolean(window.openSweDesktop) &&
-    !session.data
+  const localMode = isLocalRuntime() && !session.data
   const optionsQuery = useOptions(!localMode)
   const models = localMode ? LOCAL_MODELS : (optionsQuery.data?.models ?? [])
   const teamDefaultSelection = toSupportedSelection(

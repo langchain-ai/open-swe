@@ -1,31 +1,37 @@
 import { useCallback, useEffect, useState } from "react"
 
 import type { DesktopProject } from "@/desktop"
+import { localProjectsApi } from "@/features/agents/lib/localProjectsApi"
 
+/**
+ * Projects come from the local server rather than Electron IPC, so the desktop
+ * app and a plain `open-swe` server behave the same.
+ */
 export function useDesktopProjects() {
   const [projects, setProjects] = useState<Array<DesktopProject>>([])
 
   useEffect(() => {
-    const desktop = window.openSweDesktop
-    if (!desktop) return
-    const unsubscribe = desktop.onProjectsChanged(setProjects)
-    void desktop.listProjects().then(setProjects)
-    return unsubscribe
+    let cancelled = false
+    void localProjectsApi
+      .list()
+      .then((value) => !cancelled && setProjects(value))
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
   }, [])
 
-  const addProject = useCallback(async () => {
-    const project = await window.openSweDesktop?.addProject()
-    if (project) {
-      setProjects((current) => [
-        project,
-        ...current.filter((item) => item.cwd !== project.cwd),
-      ])
-    }
-    return project ?? null
+  const addProject = useCallback(async (cwd: string) => {
+    const project = await localProjectsApi.add(cwd)
+    setProjects((current) => [
+      project,
+      ...current.filter((item) => item.cwd !== project.cwd),
+    ])
+    return project
   }, [])
 
   const removeProject = useCallback(async (cwd: string) => {
-    const removed = (await window.openSweDesktop?.removeProject(cwd)) ?? false
+    const { removed } = await localProjectsApi.remove(cwd)
     if (removed) {
       setProjects((current) => current.filter((project) => project.cwd !== cwd))
     }

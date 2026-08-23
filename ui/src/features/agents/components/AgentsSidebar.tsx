@@ -61,6 +61,7 @@ import {
   useLocalThreadActivity,
   useRefreshLocalThreads,
 } from "@/features/agents/lib/desktopLocal"
+import { ProjectPicker } from "@/features/agents/components/ProjectPicker"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { Kbd } from "@/components/ui/kbd"
@@ -194,6 +195,7 @@ export function AgentsSidebar({
     addProject: addLocalProject,
     removeProject: removeLocalProject,
   } = useDesktopProjects()
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const localGroups = groupLocalProjects(localProjects, localSessions)
   const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(
     null
@@ -370,8 +372,18 @@ export function AgentsSidebar({
               projects={localProjects}
               selectedProjectPath={activeProjectPath}
               onSelectProject={setSelectedProjectPath}
-              onAddProject={() => void addLocalProject()}
+              onAddProject={() => setProjectPickerOpen(true)}
               onRemoveProject={(cwd) => void removeLocalProject(cwd)}
+            />
+            <ProjectPicker
+              open={projectPickerOpen}
+              onClose={() => setProjectPickerOpen(false)}
+              onChoose={(cwd) => {
+                setProjectPickerOpen(false)
+                void addLocalProject(cwd).then((project) =>
+                  setSelectedProjectPath(project.cwd)
+                )
+              }}
             />
             <div className="min-h-0 flex-1 overflow-y-auto">
               {activeProjectPath

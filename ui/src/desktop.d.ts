@@ -135,6 +135,8 @@ export interface DesktopTerminalBridge {
 
 declare global {
   interface Window {
+    /** Set by a local runtime's server render; the desktop app sets it too. */
+    __OPEN_SWE_LOCAL__?: boolean
     openSweDesktop?: {
       isDesktop: true
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
