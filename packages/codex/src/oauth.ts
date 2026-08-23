@@ -1,3 +1,5 @@
+import { z } from "zod"
+
 import {
   RESPONSES_LITE_HEADER,
   adaptCodexPayload,
@@ -13,10 +15,11 @@ export const CHATGPT_API_BASE_URL = "https://chatgpt.com/backend-api/codex"
 export const CODEX_ORIGINATOR =
   process.env.OPEN_SWE_CODEX_ORIGINATOR || "langchain"
 
-interface OAuthBrokerCredentials {
-  access_token: string
-  account_id: string
-}
+/** What the loopback broker returns; validated because it crosses a process boundary. */
+const BrokerCredentials = z.object({
+  access_token: z.string().min(1),
+  account_id: z.string().min(1),
+})
 
 function oauthBrokerConfig(env: NodeJS.ProcessEnv): {
   url: URL
@@ -74,15 +77,16 @@ export function createOpenAiOAuthFetch(
     if (!credentialResponse.ok) {
       throw new Error("The local OpenAI session is unavailable; sign in again")
     }
-    const credentials =
-      (await credentialResponse.json()) as Partial<OAuthBrokerCredentials>
-    if (!credentials.access_token || !credentials.account_id) {
+    const credentials = BrokerCredentials.safeParse(
+      await credentialResponse.json()
+    )
+    if (!credentials.success) {
       throw new Error("The local OpenAI session returned incomplete credentials")
     }
     const request = new Request(input, init)
     const headers = new Headers(request.headers)
-    headers.set("authorization", `Bearer ${credentials.access_token}`)
-    headers.set("chatgpt-account-id", credentials.account_id)
+    headers.set("authorization", `Bearer ${credentials.data.access_token}`)
+    headers.set("chatgpt-account-id", credentials.data.account_id)
     headers.set("originator", CODEX_ORIGINATOR)
 
     const payload = await readJsonBody(request)

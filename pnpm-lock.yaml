@@ -130,6 +130,10 @@ importers:
         version: 4.1.10(@types/node@24.13.3)(jsdom@27.4.0(@noble/hashes@2.3.0)(supports-color@10.2.2))(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.49.2)(tsx@4.21.0)(yaml@2.9.0))
 
   packages/codex:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^24.10.0
@@ -7787,7 +7791,9 @@ snapshots:
       - ws
       - zod
 
-  '@open-swe/codex@file:packages/codex': {}
+  '@open-swe/codex@file:packages/codex':
+    dependencies:
+      zod: 4.4.3
 
   '@open-swe/workspace@file:packages/workspace(@langchain/core@1.2.9(openai@7.5.0(ws@8.21.3)(zod@4.4.3))(ws@8.21.3))(@langchain/langgraph-checkpoint@1.1.5(@langchain/core@1.2.9(openai@7.5.0(ws@8.21.3)(zod@4.4.3))(ws@8.21.3)))(@langchain/langgraph-sdk@1.9.29(@langchain/core@1.2.9(openai@7.5.0(ws@8.21.3)(zod@4.4.3))(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(langchain@1.5.10(@langchain/core@1.2.9(openai@7.5.0(ws@8.21.3)(zod@4.4.3))(ws@8.21.3))(openai@7.5.0(ws@8.21.3)(zod@4.4.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(ws@8.21.3))(langsmith@0.8.9(openai@7.5.0(ws@8.21.3)(zod@4.4.3))(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(zod@4.4.3)':
     dependencies:

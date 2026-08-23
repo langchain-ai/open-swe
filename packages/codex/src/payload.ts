@@ -4,9 +4,21 @@
  * which has no JavaScript counterpart.
  */
 
+import { z } from "zod"
+
 export const RESPONSES_LITE_HEADER = "x-openai-internal-codex-responses-lite"
 
-const INSTRUCTION_ROLES = new Set(["system", "developer"])
+/**
+ * An input turn Codex refuses to accept as a turn. Matched with `safeParse`
+ * rather than used to rewrite the payload: anything not recognized here has to
+ * survive untouched, since this adapter sits in front of every request.
+ */
+const InstructionItem = z.object({
+  role: z.enum(["system", "developer"]),
+  content: z.unknown(),
+})
+
+const TextPart = z.object({ text: z.string() })
 
 /**
  * Codex serves these models only over its responses-lite protocol; the older
@@ -26,11 +38,7 @@ function itemText(content: unknown): string {
   if (typeof content === "string") return content
   if (!Array.isArray(content)) return ""
   return content
-    .map((part) =>
-      part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
-        ? (part as { text: string }).text
-        : ""
-    )
+    .map((part) => TextPart.safeParse(part).data?.text ?? "")
     .filter(Boolean)
     .join("\n")
 }
@@ -45,24 +53,17 @@ export function adaptCodexPayload(
   const input = payload.input
   if (!Array.isArray(input)) return payload
 
-  const isInstruction = (item: unknown): boolean =>
-    Boolean(
-      item &&
-        typeof item === "object" &&
-        INSTRUCTION_ROLES.has(String((item as { role?: unknown }).role))
-    )
+  const instructions = input.map((item) => InstructionItem.safeParse(item))
+  if (!instructions.some((result) => result.success)) return payload
 
-  const instructionItems = input.filter(isInstruction)
-  if (!instructionItems.length) return payload
-
-  const lifted = instructionItems
-    .map((item) => itemText((item as { content?: unknown }).content))
+  const lifted = instructions
+    .map((result) => (result.success ? itemText(result.data.content) : ""))
     .filter(Boolean)
     .join("\n\n")
 
   return {
     ...payload,
     instructions: payload.instructions ?? lifted,
-    input: input.filter((item) => !isInstruction(item)),
+    input: input.filter((_, index) => !instructions[index]!.success),
   }
 }
