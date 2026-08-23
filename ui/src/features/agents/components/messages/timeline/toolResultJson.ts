@@ -9,7 +9,7 @@ export function formatJsonToolResult(value: string): string | null {
   }
 
   try {
-    return JSON.stringify(JSON.parse(value), null, 2) ?? null
+    return JSON.stringify(JSON.parse(value), null, 2)
   } catch {
     return null
   }

@@ -83,7 +83,9 @@ function TerminalViewport({
     restartRequest
   )
   const latestStateRef = useRef(state)
-  latestStateRef.current = state
+  useEffect(() => {
+    latestStateRef.current = state
+  }, [state])
 
   useEffect(() => {
     const mount = mountRef.current

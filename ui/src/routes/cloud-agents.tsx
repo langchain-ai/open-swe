@@ -72,6 +72,7 @@ function CloudAgentsPage() {
     const hasModel = !!profile.data.default_model || !!defaultAgentModel
     if (!hasModel) return
     initialized.current = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setModelId(profile.data.default_model ?? defaultAgentModel)
     setEffort(profile.data.reasoning_effort ?? defaultAgentEffort)
     setSubagentModelId(
@@ -97,6 +98,7 @@ function CloudAgentsPage() {
 
   useEffect(() => {
     if (currentModel && !currentModel.efforts.includes(effort)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEffort(currentModel.default_effort)
     }
   }, [currentModel, effort])
@@ -106,6 +108,7 @@ function CloudAgentsPage() {
       currentSubagentModel &&
       !currentSubagentModel.efforts.includes(subagentEffort)
     ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSubagentEffort(currentSubagentModel.default_effort)
     }
   }, [currentSubagentModel, subagentEffort])

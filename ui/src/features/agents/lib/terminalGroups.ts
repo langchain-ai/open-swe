@@ -54,7 +54,9 @@ export function useTerminalGroups(
     target.kind === "local"
   )
   const stateRef = useRef(state)
-  stateRef.current = state
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
 
   const commit = useCallback(
     (next: TerminalUiState) => {
@@ -67,6 +69,7 @@ export function useTerminalGroups(
   )
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null)
     commit(readTerminalState(localSessionId))
   }, [commit, localSessionId])

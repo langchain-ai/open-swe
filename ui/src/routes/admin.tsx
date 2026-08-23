@@ -346,6 +346,7 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
 
   useEffect(() => {
     if (!mappings.isFetching && page > pageCount) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPage(pageCount)
     }
   }, [mappings.isFetching, page, pageCount])
@@ -619,6 +620,7 @@ function PRTraceResolutionSection() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setProjectDraft(settings.data?.review_tracing_project ?? "")
   }, [settings.data?.review_tracing_project])
 
@@ -893,6 +895,7 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
   const [defaultRepoDraft, setDefaultRepoDraft] = useState("")
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDefaultRepoDraft(settings.data?.default_repo ?? "")
   }, [settings.data?.default_repo])
 
@@ -1106,6 +1109,7 @@ function RolePicker({
   const [localEffort, setLocalEffort] = useState<string>(effort ?? "")
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalModel(model ?? inheritFallback)
     setLocalEffort(effort ?? "")
   }, [model, effort, inheritFallback])

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
+
+import { useIsHydrated } from "@/lib/hydration"
 
 export interface HotkeyOptions {
   enabled?: boolean
@@ -128,9 +130,8 @@ export function formatShortcut(
 }
 
 export function useShortcutLabel(shortcut: string): string {
-  const [label, setLabel] = useState(() => formatShortcut(shortcut, "other"))
-  useEffect(() => setLabel(formatShortcut(shortcut)), [shortcut])
-  return label
+  const hydrated = useIsHydrated()
+  return hydrated ? formatShortcut(shortcut) : formatShortcut(shortcut, "other")
 }
 
 function closestElement(target: EventTarget | null): Element | null {
@@ -181,7 +182,9 @@ export function useHotkey(
     ignoreRepeat = true,
   } = options
   const handlerRef = useRef(handler)
-  handlerRef.current = handler
+  useEffect(() => {
+    handlerRef.current = handler
+  }, [handler])
 
   const comboKey = Array.isArray(combo) ? combo.join("\u0000") : combo
 

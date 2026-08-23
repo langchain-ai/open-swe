@@ -53,9 +53,7 @@ function tokenIsValid(token: string, key: string): boolean {
   }
 }
 
-export default async function operationsRestart(event: {
-  req: Request
-}): Promise<Response> {
+export default function operationsRestart(event: { req: Request }): Response {
   if (event.req.method !== "POST") {
     return new Response("method not allowed\n", { status: 405 })
   }

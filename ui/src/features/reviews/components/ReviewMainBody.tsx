@@ -670,7 +670,9 @@ function ReviewBodyInner({
     [detail.findings, expandedId]
   )
   const expandedFindingRef = useRef(expandedFinding)
-  expandedFindingRef.current = expandedFinding
+  useEffect(() => {
+    expandedFindingRef.current = expandedFinding
+  }, [expandedFinding])
 
   const viewedStorageKey = `open-swe.review.viewed.${detail.owner}/${detail.repo}/${detail.number}.${detail.head_sha}`
   const [viewed, setViewed] = useState<Set<string>>(() => {
@@ -683,9 +685,11 @@ function ReviewBodyInner({
     }
   })
   const viewedRef = useRef(viewed)
-  viewedRef.current = viewed
   const expandedRef = useRef(expandedFiles)
-  expandedRef.current = expandedFiles
+  useEffect(() => {
+    viewedRef.current = viewed
+    expandedRef.current = expandedFiles
+  }, [viewed, expandedFiles])
 
   const toggleViewed = useCallback(
     (path: string) => {
@@ -866,6 +870,7 @@ function ReviewBodyInner({
   // diff scroller and surface it as the active agenda row (Google-Docs outline).
   useEffect(() => {
     if (view !== "ai" || !groupedView || groupedView.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveGroup(null)
       return
     }
@@ -902,7 +907,9 @@ function ReviewBodyInner({
     [diffFiles]
   )
   const filesByPathRef = useRef(filesByPath)
-  filesByPathRef.current = filesByPath
+  useEffect(() => {
+    filesByPathRef.current = filesByPath
+  }, [filesByPath])
 
   // The Virtualizer doesn't forward a ref; grab its scroll element (the
   // grandparent of this hidden probe, which lives in its content div) so
@@ -976,7 +983,9 @@ function ReviewBodyInner({
 
   // ⌘L / Ctrl+L adds the current line selection to the chat (Cursor-style).
   const userSelectionRef = useRef(userSelection)
-  userSelectionRef.current = userSelection
+  useEffect(() => {
+    userSelectionRef.current = userSelection
+  }, [userSelection])
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
@@ -1071,7 +1080,9 @@ function ReviewBodyInner({
   // center (mirrors openFromPanel). Comments whose file/line aren't in the
   // current diff (e.g. outdated) have no inline anchor, so fall back to GitHub.
   const closeOpenCommentRef = useRef(onCloseOpenComment)
-  closeOpenCommentRef.current = onCloseOpenComment
+  useEffect(() => {
+    closeOpenCommentRef.current = onCloseOpenComment
+  }, [onCloseOpenComment])
   useEffect(() => {
     if (!openComment) return
     const { path, line } = openComment
@@ -1628,26 +1639,16 @@ const FileDiffCard = memo(function FileDiffCard({
     if (pointer) setPopup({ range, x: pointer.x, y: pointer.y })
   }, [selectable, file.path, onSelectLines])
 
+  const visiblePopup = selectedLines && !commentDraftRange ? popup : null
+
   const addPopupToChat = useCallback(() => {
-    if (popup) onAddToChat?.(file.path, popup.range)
+    if (visiblePopup) onAddToChat?.(file.path, visiblePopup.range)
     setPopup(null)
     // Clear the lingering native highlight once added.
     readDiffSelection(
       diffWrapperRef.current?.querySelector("diffs-container")
     )?.removeAllRanges()
-  }, [popup, onAddToChat, file.path])
-
-  // Drop the popup once the selection clears (e.g. added via ⌘L, or a finding
-  // took focus) so it can't add the same range twice.
-  useEffect(() => {
-    if (!selectedLines) setPopup(null)
-  }, [selectedLines])
-
-  // Opening a comment draft owns the "+"; never show "Add to Chat" alongside it
-  // (a single "+" click can otherwise both open the composer and arm the popup).
-  useEffect(() => {
-    if (commentDraftRange) setPopup(null)
-  }, [commentDraftRange])
+  }, [visiblePopup, onAddToChat, file.path])
 
   const oldFile = useMemo<FileContents>(
     () => ({
@@ -1779,10 +1780,10 @@ const FileDiffCard = memo(function FileDiffCard({
               selectedLines={selectedLines}
               renderAnnotation={renderAnnotation}
             />
-            {popup && !commentDraftRange && (
+            {visiblePopup && (
               <AddToChatPopup
-                x={popup.x}
-                y={popup.y}
+                x={visiblePopup.x}
+                y={visiblePopup.y}
                 onAdd={addPopupToChat}
                 onDismiss={() => setPopup(null)}
               />
@@ -2208,6 +2209,7 @@ function InlineComment({
     },
   })
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setBody(comment.body)
     setDraft(comment.body)
     setEditing(false)

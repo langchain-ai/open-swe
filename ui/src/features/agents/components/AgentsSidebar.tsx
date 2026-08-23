@@ -245,6 +245,7 @@ export function AgentsSidebar({
   const [pinnedAttentionThread, setPinnedAttentionThread] =
     useState<AgentThread>()
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPinnedAttentionThread((current) =>
       reconcilePinnedAttentionThread(
         current,

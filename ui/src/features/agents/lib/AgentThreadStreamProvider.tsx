@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import { StreamProvider } from "@langchain/react"
 import { Client, overrideFetchImplementation } from "@langchain/langgraph-sdk"
 import { useQueryClient } from "@tanstack/react-query"
@@ -76,7 +76,9 @@ export function AgentThreadStreamProvider({
   // they must be stable. Read the live thread id from a ref instead of
   // closing over the (changing) prop.
   const threadIdRef = useRef<string | null>(threadId)
-  threadIdRef.current = threadId
+  useEffect(() => {
+    threadIdRef.current = threadId
+  }, [threadId])
 
   const onCreated = useCallback(() => {
     if (transport === "cloud") invalidateAgentThreadLists(queryClient)

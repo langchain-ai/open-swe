@@ -52,6 +52,7 @@ function RepositoriesOwnerPage() {
   )
 
   const [page, setPage] = useState(0)
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setPage(0), [owner])
 
   const totalPages = Math.max(1, Math.ceil(ownerRepos.length / PAGE_SIZE))

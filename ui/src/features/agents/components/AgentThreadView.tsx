@@ -184,6 +184,7 @@ export function AgentThreadView({
   const [hydrateRejected, setHydrateRejected] = useState(false)
   useEffect(() => {
     let active = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHydrateRejected(false)
     stream.hydrationPromise.catch(() => {
       if (active) setHydrateRejected(true)

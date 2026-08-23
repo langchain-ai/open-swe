@@ -91,7 +91,9 @@ export function AgentsHome() {
     : "cloud"
   const [localProjectPath, setLocalProjectPath] = useState<string | null>(null)
   const localProjectPathRef = useRef(localProjectPath)
-  localProjectPathRef.current = localProjectPath
+  useEffect(() => {
+    localProjectPathRef.current = localProjectPath
+  }, [localProjectPath])
   const [localProjectBranch, setLocalProjectBranch] = useState<string | null>(
     null
   )
@@ -139,6 +141,7 @@ export function AgentsHome() {
     const selected = localProjects.find(
       (project) => project.cwd === localProjectPath || project.cwd === stored
     )
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalProjectPath(selected?.cwd ?? localProjects[0]?.cwd ?? null)
   }, [isDesktop, localProjectPath, localProjects])
 

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { useRepos } from "./profile"
 import { writeCachedRepos } from "./repoCache"
+import type * as ApiModule from "./api"
 import type { ReposPayload } from "./api"
 
 const sessionLogin = vi.hoisted(() => ({ current: "octocat" }))
@@ -17,7 +18,7 @@ vi.mock("./session", () => ({
 const reposMock = vi.hoisted(() => vi.fn())
 
 vi.mock("./api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./api")>()),
+  ...(await importOriginal<typeof ApiModule>()),
   api: { repos: reposMock },
 }))
 
