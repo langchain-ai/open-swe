@@ -1,7 +1,6 @@
 import path from "node:path"
 
 export interface AppServerOptions {
-  host: string
   port: number
   stateDirectory: string
   uiEntrypoint: string
@@ -49,7 +48,6 @@ export function parseAppServerOptions(
     optionValue(arguments_, "--backend-url") ?? environment.DASHBOARD_API_URL
 
   return {
-    host: optionValue(arguments_, "--host") ?? environment.HOST ?? "127.0.0.1",
     port,
     stateDirectory: path.resolve(
       currentDirectory,

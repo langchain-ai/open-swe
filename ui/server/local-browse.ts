@@ -2,15 +2,9 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import {
-  createError,
-  getRequestHeader,
-  getRequestURL,
-  type proxyRequest,
-} from "h3"
+import { createError, getRequestURL, type proxyRequest } from "h3"
 
-import { isSameOriginRequest } from "./local-graph-proxy"
-import { projectsFile } from "./local/project-store"
+import { requireLocalMode } from "./local/guard"
 
 type Event = Parameters<typeof proxyRequest>[0]
 
@@ -46,21 +40,7 @@ export function listDirectories(
  * server enumerates them and the UI renders the chooser.
  */
 export default async function localBrowse(event: Event) {
-  if (
-    !isSameOriginRequest(
-      getRequestHeader(event, "origin"),
-      getRequestHeader(event, "sec-fetch-site"),
-      getRequestURL(event).origin
-    )
-  ) {
-    throw createError({ statusCode: 403, statusMessage: "Forbidden" })
-  }
-  if (!projectsFile()) {
-    throw createError({
-      statusCode: 503,
-      statusMessage: "This server has no local project store",
-    })
-  }
+  requireLocalMode(event)
 
   try {
     return listDirectories(getRequestURL(event).searchParams.get("path"))

@@ -132,8 +132,6 @@ export class ApplicationSupervisor {
       target.command,
       [
         ...target.args,
-        "--host",
-        HOST,
         "--port",
         String(port),
         "--state-dir",

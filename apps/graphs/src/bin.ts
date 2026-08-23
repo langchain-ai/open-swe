@@ -17,6 +17,9 @@ import { startServer } from "@langchain/langgraph-api/server"
 
 import { parseAppServerOptions } from "./app-options.js"
 
+/** Loopback only: these routes read and write the machine the server runs on. */
+const HOST = "127.0.0.1"
+
 function reservePort(host: string): Promise<number> {
   return new Promise<number>((resolve, reject) => {
     const probe = http.createServer()
@@ -51,11 +54,11 @@ const options = parseAppServerOptions(
 fs.mkdirSync(options.stateDirectory, { recursive: true })
 process.chdir(applicationRoot)
 
-const graphPort = await reservePort(options.host)
+const graphPort = await reservePort(HOST)
 const graphToken = crypto.randomBytes(32).toString("base64url")
 
 const { cleanup } = await startServer({
-  host: options.host,
+  host: HOST,
   port: graphPort,
   nWorkers: 10,
   cwd: options.stateDirectory,
@@ -78,9 +81,11 @@ const { cleanup } = await startServer({
 // The dashboard reads these on first request, so they have to be set before its
 // entry is imported — importing it is what starts it listening.
 process.env.OPEN_SWE_LOCAL_AUTH_TOKEN = graphToken
-process.env.OPEN_SWE_LOCAL_GRAPH_ORIGIN = `http://${options.host}:${graphPort}`
+process.env.OPEN_SWE_LOCAL_GRAPH_ORIGIN = `http://${HOST}:${graphPort}`
 process.env.OPEN_SWE_LOCAL_GRAPH_TOKEN = graphToken
-process.env.HOST = options.host
+process.env.HOST = HOST
+// Unlocks the `/local/**` routes, which only a local server may serve.
+process.env.OPEN_SWE_LOCAL_MODE = "1"
 process.env.PORT = String(options.port)
 process.env.NODE_ENV ||= "production"
 if (options.backendUrl) process.env.DASHBOARD_API_URL = options.backendUrl

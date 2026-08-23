@@ -1,12 +1,6 @@
-import {
-  createError,
-  getRequestHeader,
-  getRequestURL,
-  readBody,
-  type proxyRequest,
-} from "h3"
+import { createError, getRequestURL, readBody, type proxyRequest } from "h3"
 
-import { isSameOriginRequest } from "./local-graph-proxy"
+import { requireLocalMode } from "./local/guard"
 import {
   addProject,
   projectsFile,
@@ -22,15 +16,7 @@ type Event = Parameters<typeof proxyRequest>[0]
  * same — the browser is the client in both cases.
  */
 export default async function localProjects(event: Event) {
-  if (
-    !isSameOriginRequest(
-      getRequestHeader(event, "origin"),
-      getRequestHeader(event, "sec-fetch-site"),
-      getRequestURL(event).origin
-    )
-  ) {
-    throw createError({ statusCode: 403, statusMessage: "Forbidden" })
-  }
+  requireLocalMode(event)
 
   const file = projectsFile()
   if (!file) {
