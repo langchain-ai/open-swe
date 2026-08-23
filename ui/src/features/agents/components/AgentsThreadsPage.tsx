@@ -11,7 +11,7 @@ import {
   KanbanIcon,
   ListBulletsIcon,
 } from "@phosphor-icons/react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import type {
   AgentSource,
@@ -113,26 +113,8 @@ export function AgentsThreadsPage({
   filters: ThreadsPageFilters
   onFiltersChange: (next: ThreadsPageFilters) => void
 }) {
-  const filterQuery = filters.q ?? ""
-  const [searchInput, setSearchInput] = useState({
-    filterQuery,
-    value: filterQuery,
-  })
-  const search =
-    searchInput.filterQuery === filterQuery ? searchInput.value : filterQuery
-  const setSearch = (value: string) => setSearchInput({ filterQuery, value })
-
-  const orderKey = `${filters.group}\u0000${filters.order ?? ""}`
-  const [orderInput, setOrderInput] = useState<{
-    key: string
-    order: string | undefined
-  }>({ key: orderKey, order: filters.order })
-  const personalOrder =
-    orderInput.key === orderKey
-      ? orderInput.order
-      : (filters.order ?? storedColumnOrder(filters.group))
-  const setPersonalOrder = (order: string | undefined) =>
-    setOrderInput({ key: orderKey, order })
+  const [search, setSearch] = useState(filters.q ?? "")
+  const [personalOrder, setPersonalOrder] = useState(filters.order)
   const pageSize = filters.layout === "board" ? BOARD_PAGE_SIZE : LIST_PAGE_SIZE
   const offset = (filters.page - 1) * pageSize
   const query = useThreadsPage(
@@ -148,6 +130,13 @@ export function AgentsThreadsPage({
     },
     { staleWhileRevalidate: true }
   )
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => setSearch(filters.q ?? ""), [filters.q])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPersonalOrder(filters.order ?? storedColumnOrder(filters.group))
+  }, [filters.group, filters.order])
 
   const data = query.data
   const items = data?.items ?? []

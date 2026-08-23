@@ -1,6 +1,6 @@
 import { Dialog } from "@base-ui/react/dialog"
 import { useQuery } from "@tanstack/react-query"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
 
 import type { ModelOption } from "@/lib/api"
@@ -45,19 +45,24 @@ export function OnboardingDialog() {
     options.data?.default_agent_reasoning_effort ??
     firstModel?.default_effort ??
     ""
-  const [modelChoice, setModelId] = useState("")
-  const [effortChoice, setEffort] = useState("")
+  const [modelId, setModelId] = useState("")
+  const [effort, setEffort] = useState("")
 
-  const modelId = modelChoice || defaultModel
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!modelId && defaultModel) setModelId(defaultModel)
+  }, [modelId, defaultModel])
 
   const currentModel: ModelOption | undefined =
     options.data?.models.find((m) => m.id === modelId) ?? firstModel
 
-  const effort =
-    currentModel &&
-    (!effortChoice || !currentModel.efforts.includes(effortChoice))
-      ? currentModel.default_effort
-      : effortChoice
+  useEffect(() => {
+    if (!currentModel) return
+    if (!effort || !currentModel.efforts.includes(effort)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setEffort(currentModel.default_effort)
+    }
+  }, [currentModel, effort])
 
   const slackEnabled = session.data?.slack_oauth_enabled ?? false
   const slackConnected = !!mapping.data?.slack_user_id
