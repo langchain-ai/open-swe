@@ -710,7 +710,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .filter({ hasText: prompt });
     await expect(userMessage).toContainText(prompt);
     await expect(userMessage).not.toContainText("sender_context");
-    await waitForStateToContain(page, threadId, "sender_context");
+    await waitForStateToContain(page, threadId, "system:sender-context");
 
     await page.reload();
     await expect(userMessage).toContainText(prompt);
