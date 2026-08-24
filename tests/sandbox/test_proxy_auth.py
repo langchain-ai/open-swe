@@ -28,7 +28,7 @@ class TestSandboxFactoryLoading:
             patch.dict("os.environ", {"SANDBOX_TYPE": "local"}),
         ):
             module = MagicMock()
-            module.create_local_sandbox.return_value = MagicMock(id="local")
+            module.create_local_sandbox.return_value = MagicMock(id="local", aexecute=AsyncMock())
             mock_import_module.return_value = module
 
             from agent.utils.sandbox import create_sandbox
@@ -45,7 +45,9 @@ class TestSandboxFactoryLoading:
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             module = MagicMock()
-            module.create_langsmith_sandbox = AsyncMock(return_value=MagicMock(id="langsmith"))
+            module.create_langsmith_sandbox = AsyncMock(
+                return_value=MagicMock(id="langsmith", aexecute=AsyncMock())
+            )
             mock_import_module.return_value = module
 
             from agent.utils.sandbox import create_sandbox
@@ -400,7 +402,7 @@ class TestCreateSandboxWithProxy:
             patch("agent.server._configure_github_proxy", new_callable=AsyncMock) as mock_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith", "LANGSMITH_API_KEY": "ls-key"}),
         ):
-            mock_create.return_value = MagicMock(id="sandbox-123")
+            mock_create.return_value = MagicMock(id="sandbox-123", aexecute=AsyncMock())
 
             from agent.server import _create_sandbox_with_proxy
 
@@ -438,7 +440,7 @@ class TestCreateSandboxWithProxy:
             ) as mock_configure_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
-            mock_create.return_value = MagicMock(id="sandbox-123")
+            mock_create.return_value = MagicMock(id="sandbox-123", aexecute=AsyncMock())
 
             from agent.server import _create_sandbox_with_proxy
 
@@ -470,7 +472,7 @@ class TestCreateSandboxWithProxy:
             patch("agent.server._configure_github_proxy", new_callable=AsyncMock),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith", "LANGSMITH_API_KEY": "ls-key"}),
         ):
-            mock_create.return_value = MagicMock(id="sandbox-123")
+            mock_create.return_value = MagicMock(id="sandbox-123", aexecute=AsyncMock())
 
             from agent.server import _create_sandbox_with_proxy
 
@@ -487,7 +489,7 @@ class TestCreateSandboxWithProxy:
             patch("agent.server._configure_github_proxy", new_callable=AsyncMock) as mock_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "daytona"}),
         ):
-            mock_create.return_value = MagicMock(id="sandbox-456")
+            mock_create.return_value = MagicMock(id="sandbox-456", aexecute=AsyncMock())
 
             from agent.server import _create_sandbox_with_proxy
 
@@ -508,7 +510,7 @@ class TestCreateSandboxWithProxy:
             ),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
-            mock_create.return_value = MagicMock(id="sandbox-789")
+            mock_create.return_value = MagicMock(id="sandbox-789", aexecute=AsyncMock())
 
             from agent.server import _create_sandbox_with_proxy
 
@@ -542,7 +544,7 @@ class TestRefreshProxyOnSandboxReuse:
     async def test_refreshes_proxy_for_cached_langsmith_sandbox(self) -> None:
         """Cached sandboxes should get a fresh proxy token before git operations."""
         config = self._execution_config()
-        mock_sandbox = MagicMock(id="sandbox-cached")
+        mock_sandbox = MagicMock(id="sandbox-cached", aexecute=AsyncMock())
         mock_sandbox.aexecute = AsyncMock()
         base_proxy_config = {"rules": [{"name": "public-api", "match_hosts": ["example.com"]}]}
         captured: dict[str, object] = {}
@@ -615,7 +617,7 @@ class TestRefreshProxyOnSandboxReuse:
     async def test_refreshes_proxy_when_reconnecting_to_existing_langsmith_sandbox(self) -> None:
         """Reconnected sandboxes should also get a fresh proxy token."""
         config = self._execution_config()
-        mock_sandbox = MagicMock(id="sandbox-existing")
+        mock_sandbox = MagicMock(id="sandbox-existing", aexecute=AsyncMock())
         mock_sandbox.aexecute = AsyncMock()
         captured: dict[str, object] = {}
 
@@ -681,7 +683,7 @@ class TestRefreshProxyOnSandboxReuse:
         Replacing it would hand the agent an empty filesystem and discard any
         work the old sandbox still held.
         """
-        mock_sandbox = MagicMock(id="sandbox-stale")
+        mock_sandbox = MagicMock(id="sandbox-stale", aexecute=AsyncMock())
         request = httpx.Request(
             "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-stale"
         )

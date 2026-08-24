@@ -12,6 +12,7 @@ import logging
 import os
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -374,31 +375,37 @@ async def _create_sandbox_with_proxy(
         else:
             sandbox_backend = await create_sandbox(snapshot_id=snapshot_id, **resources)
 
-    sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
-    if sandbox_type == "langsmith":
-        async with aphase(thread_id, "sandbox.proxy_token"):
-            token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
-        if not token:
-            msg = "Cannot configure proxy: GitHub App installation token is unavailable"
-            logger.error(msg)
-            raise ValueError(msg)
-        proxy_config = _get_sandbox_proxy_config(create_params)
-        async with aphase(thread_id, "sandbox.proxy_configure"):
-            if proxy_config is not None:
-                await _configure_github_proxy(
-                    sandbox_backend.id,
-                    token,
-                    base_proxy_config=proxy_config,
-                )
-            else:
-                await _configure_github_proxy(sandbox_backend.id, token)
-        record_proxy_token_expiry(
-            thread_id,
-            expires_at,
-            repositories=github_proxy_repositories,
-            permissions=permissions,
-            base_proxy_config=proxy_config,
-        )
+    identity = _start_git_identity(thread_id, sandbox_backend)
+    failed = True
+    try:
+        sandbox_type = os.getenv("SANDBOX_TYPE", "langsmith")
+        if sandbox_type == "langsmith":
+            async with aphase(thread_id, "sandbox.proxy_token"):
+                token, expires_at, permissions = await _resolve_proxy_token(github_proxy_token)
+            if not token:
+                msg = "Cannot configure proxy: GitHub App installation token is unavailable"
+                logger.error(msg)
+                raise ValueError(msg)
+            proxy_config = _get_sandbox_proxy_config(create_params)
+            async with aphase(thread_id, "sandbox.proxy_configure"):
+                if proxy_config is not None:
+                    await _configure_github_proxy(
+                        sandbox_backend.id,
+                        token,
+                        base_proxy_config=proxy_config,
+                    )
+                else:
+                    await _configure_github_proxy(sandbox_backend.id, token)
+            record_proxy_token_expiry(
+                thread_id,
+                expires_at,
+                repositories=github_proxy_repositories,
+                permissions=permissions,
+                base_proxy_config=proxy_config,
+            )
+        failed = False
+    finally:
+        await _settle_git_identity(identity, failed=failed)
 
     return sandbox_backend
 
@@ -477,6 +484,33 @@ async def _configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> No
     )
 
 
+def _start_git_identity(
+    thread_id: str | None, sandbox_backend: SandboxBackendProtocol
+) -> asyncio.Task[None]:
+    """Write the bot identity while the proxy is being configured.
+
+    The identity needs the box, not the proxy, and the cost is the round trip
+    rather than the two `git config` calls — on a cold sandbox that round trip
+    is over a second of the critical path before the first model call.
+    """
+
+    async def run() -> None:
+        async with aphase(thread_id, "sandbox.git_identity"):
+            await _configure_git_identity(sandbox_backend)
+
+    return asyncio.create_task(run())
+
+
+async def _settle_git_identity(task: asyncio.Task[None], *, failed: bool) -> None:
+    """Join the identity write, or drop it when its sandbox is already lost."""
+    if failed:
+        task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await task
+        return
+    await task
+
+
 async def _connect_existing_sandbox(
     thread_id: str,
     *,
@@ -505,13 +539,20 @@ async def _connect_existing_sandbox(
         except Exception as exc:
             logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
             raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
-    return await _refresh_github_proxy_or_fail(
-        sandbox_backend,
-        thread_id,
-        github_proxy_token,
-        github_proxy_repositories,
-        base_proxy_config,
-    )
+    identity = _start_git_identity(thread_id, sandbox_backend)
+    failed = True
+    try:
+        refreshed = await _refresh_github_proxy_or_fail(
+            sandbox_backend,
+            thread_id,
+            github_proxy_token,
+            github_proxy_repositories,
+            base_proxy_config,
+        )
+        failed = False
+    finally:
+        await _settle_git_identity(identity, failed=failed)
+    return refreshed
 
 
 async def ensure_sandbox_for_thread(
@@ -622,9 +663,6 @@ async def ensure_sandbox_for_thread(
                     thread_id, sandbox_id, str(create_exc)
                 ) from create_exc
             logger.info("Replacement sandbox created: %s", sandbox_backend.id)
-
-    async with aphase(thread_id, "sandbox.git_identity"):
-        await _configure_git_identity(sandbox_backend)
 
     # Bind the thread only once the sandbox is created and initialized: a run
     # that dies earlier leaves no id to reconnect to, so the next run creates
