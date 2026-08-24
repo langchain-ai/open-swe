@@ -98,11 +98,6 @@ export interface ThreadTurnDiff {
   files: Array<ThreadPrDiffFile>
 }
 
-export interface ThreadTurnDiffOptions {
-  maxFiles?: number
-  includeContent?: boolean
-}
-
 export interface ThreadRecoveryPatch {
   blob: Blob
   filename: string
@@ -361,22 +356,6 @@ export const agentsApi = {
     agentsRequest<ThreadTurnDiff>(
       `/threads/${encodeURIComponent(threadId)}/working-tree-diff`
     ),
-  getThreadRunDiff: (
-    threadId: string,
-    turnKey: string,
-    options: ThreadTurnDiffOptions = {}
-  ) => {
-    const params = new URLSearchParams({ turn_key: turnKey })
-    if (options.maxFiles != null) {
-      params.set("max_files", String(options.maxFiles))
-    }
-    if (options.includeContent != null) {
-      params.set("include_content", String(options.includeContent))
-    }
-    return agentsRequest<ThreadTurnDiff>(
-      `/threads/${encodeURIComponent(threadId)}/run-diff?${params.toString()}`
-    )
-  },
   downloadThreadRecoveryPatch: (threadId: string) =>
     agentsBlobRequest(
       `/threads/${encodeURIComponent(threadId)}/recovery.patch`

@@ -10,10 +10,8 @@ the agent itself is stateless.
 
 import logging
 import os
-import posixpath
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -39,7 +37,7 @@ from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
-from langchain.agents.middleware.types import AgentMiddleware, AgentState
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
@@ -67,7 +65,6 @@ from .dashboard.options import (
     model_supports_effort,
 )
 from .dashboard.repo_snapshots import resolve_repo_snapshot_id
-from .dashboard.run_diffs import THREAD_DIFF_KEY, save_run_diff
 from .dashboard.sandbox_settings import get_admin_base_snapshot_id
 from .dashboard.skills import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from .dashboard.team_settings import (
@@ -214,7 +211,6 @@ from .utils.thread_settings import (
     store_thread_settings,
 )
 from .utils.tracing import AGENT_TRACING_PROJECT, traced_graph_factory
-from .utils.turn_checkpoint import merge_checkpoint, read_turn_diff, record_turn_checkpoint
 
 client = get_client()
 
@@ -1112,97 +1108,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
     @staticmethod
-    def _turn_key(state: Mapping[str, Any]) -> str | None:
-        return next(
-            (
-                message.id
-                for message in reversed(state.get("messages") or [])
-                if isinstance(message, HumanMessage) and message.id
-            ),
-            None,
-        )
-
-    async def aafter_agent(self, state: AgentState, runtime: Runtime) -> None:  # noqa: ARG002
-        turn_key = self._turn_key(state)
-        if not turn_key:
-            return None
-        try:
-            thread = await client.threads.get(thread_id=self._thread_id)
-            checkpoints = (thread.get("metadata") or {}).get("turn_checkpoints") or []
-            checkpoint = next(
-                entry
-                for entry in reversed(checkpoints)
-                if isinstance(entry, Mapping) and entry.get("key") == turn_key
-            )
-            first = next(entry for entry in checkpoints if isinstance(entry, Mapping))
-            if checkpoint.get("repo_path") != first.get("repo_path"):
-                return None
-            backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
-            plan_ref = checkpoint.get("plan_ref")
-            head = plan_ref if isinstance(plan_ref, str) else None
-            repo_path = (
-                checkpoint.get("repo_path")
-                if isinstance(checkpoint.get("repo_path"), str)
-                else None
-            )
-            diff = await read_turn_diff(
-                backend, None, str(checkpoint["ref"]), head, repo_path=repo_path
-            )
-            cumulative = (
-                diff
-                if first["ref"] == checkpoint["ref"]
-                else await read_turn_diff(
-                    backend, None, str(first["ref"]), head, repo_path=repo_path
-                )
-            )
-            if diff.get("status") == "ready":
-                await save_run_diff(self._thread_id, turn_key, diff)
-            if cumulative.get("status") == "ready":
-                await save_run_diff(self._thread_id, THREAD_DIFF_KEY, cumulative)
-        except Exception:
-            logger.debug("Could not persist run diff for %s", self._thread_id, exc_info=True)
-        return None
-
-    async def _record_turn_checkpoint(
-        self,
-        state: PrepareRunState,
-        sandbox_backend: Any,
-        work_dir: str,
-        preferred_repo_path: str | None,
-    ) -> list[dict[str, Any]] | None:
-        """Snapshot the worktree so the dashboard can diff this turn from git.
-
-        Keyed by the user message that opened the turn, which is the same id the
-        client groups an assistant turn under.
-        """
-        turn_key = self._turn_key(state)
-        if not turn_key:
-            return None
-        checkpoint = await record_turn_checkpoint(
-            sandbox_backend,
-            work_dir,
-            turn_key,
-            repo_path=preferred_repo_path,
-        )
-        if checkpoint is None:
-            return None
-        ref, repo_path = checkpoint
-        try:
-            thread = await client.threads.get(thread_id=self._thread_id)
-            existing = (thread.get("metadata") or {}).get("turn_checkpoints")
-        except Exception:
-            logger.debug("Could not read turn checkpoints for %s", self._thread_id, exc_info=True)
-            existing = None
-        return merge_checkpoint(
-            existing,
-            turn_key,
-            ref,
-            datetime.now(UTC).isoformat(),
-            repo_path=repo_path,
-            plan_mode=self._plan_mode,
-        )
-
-    @staticmethod
     def _sender_context_message(state: PrepareRunState, sender_context: str) -> HumanMessage | None:
         message = next(
             (
@@ -1295,15 +1200,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
             )
         sender_message = self._sender_context_message(state, sender_context)
-        preferred_repo_path = (
-            posixpath.join(work_dir, prompt_default_repo["name"])
-            if prompt_default_repo and prompt_default_repo.get("name")
-            else None
-        )
-        async with aphase(self._thread_id, "prepare.turn_checkpoint"):
-            turn_checkpoints = await self._record_turn_checkpoint(
-                state, sandbox_backend, work_dir, preferred_repo_path
-            )
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(
@@ -1314,7 +1210,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         "effort": self._effort,
                         "source": self._source,
                         "plan_mode": self._plan_mode,
-                        **({"turn_checkpoints": turn_checkpoints} if turn_checkpoints else {}),
                     },
                 )
                 prepare_run_id = configurable.get("prepare_run_id")
