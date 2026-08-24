@@ -22,7 +22,6 @@ from ..input_messages import (
     build_input_messages,
     dynamic_context_hashes_from_messages,
 )
-from ..prompt import replace_source_guidance
 from ..utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from ..utils.http import DEFAULT_HTTP_TIMEOUT
 from ..utils.multimodal import fetch_image_block, vision_not_supported_warning
@@ -35,7 +34,6 @@ class LinearNotifyState(AgentState):
 
     linear_messages_sent_count: int
     plan_approval_blocked: NotRequired[bool]
-    rendered_system_prompt: NotRequired[str | None]
 
 
 async def _resolve_thread_model_id(thread_id: str) -> str | None:
@@ -142,7 +140,6 @@ def _message_update(
     thread_id: str,
     *,
     plan_approval_blocked: bool | None = None,
-    rendered_system_prompt: str | None = None,
 ) -> dict[str, Any] | None:
     if not queued:
         return None
@@ -154,8 +151,6 @@ def _message_update(
     update: dict[str, Any] = {"messages": queued}
     if plan_approval_blocked is not None:
         update["plan_approval_blocked"] = plan_approval_blocked
-    if rendered_system_prompt is not None:
-        update["rendered_system_prompt"] = rendered_system_prompt
     return update
 
 
@@ -226,7 +221,6 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         content_blocks: list[dict[str, Any]] = []
         injected = dynamic_context_hashes_from_messages(state.get("messages"))
         plan_approval_blocked: bool | None = None
-        dashboard_handoff = False
         pending_autofix = await _consume_pending_autofix_event(store, thread_id)
         if pending_autofix:
             content_blocks.append({"type": "text", "text": pending_autofix})
@@ -272,7 +266,6 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         for msg in queued_messages:
             content = msg.get("content")
             if _is_dashboard_queued_message(content):
-                dashboard_handoff = True
                 handoff = build_input_messages(
                     DASHBOARD_HANDOFF_BODY,
                     {
@@ -333,17 +326,11 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                 logger.debug("Queued message contains text content")
                 content_blocks.append({"type": "text", "text": content})
 
-        rendered_prompt = state.get("rendered_system_prompt")
-        if dashboard_handoff and isinstance(rendered_prompt, str):
-            rendered_prompt = replace_source_guidance(rendered_prompt, "dashboard")
-        else:
-            rendered_prompt = None
         _flush_blocks(queued_updates, content_blocks, injected)
         return _message_update(
             queued_updates,
             thread_id,
             plan_approval_blocked=plan_approval_blocked,
-            rendered_system_prompt=rendered_prompt,
         )  # noqa: TRY300
     except Exception:
         logger.exception("Error in check_message_queue_before_model")

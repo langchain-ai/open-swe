@@ -76,7 +76,11 @@ from .dashboard.team_settings import (
 )
 from .dashboard.user_mappings import email_for_login
 from .desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
-from .input_messages import append_message_data
+from .input_messages import (
+    SystemIdentity,
+    build_input_messages,
+    dynamic_context_hashes_from_messages,
+)
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
@@ -895,6 +899,13 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
     )
 
 
+_SENDER_CONTEXT_SYSTEM: SystemIdentity = {
+    "id": "system:sender-context",
+    "display_name": "Sender context",
+    "platform": "open-swe",
+}
+
+
 # Added to an admin thread's tools; see the admin-thread section of the prompt.
 ADMIN_TOOLS = (
     sandbox_reset,
@@ -1169,36 +1180,33 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
     @staticmethod
-    def _sender_context_message(state: PrepareRunState, sender_context: str) -> HumanMessage | None:
-        message = next(
-            (
-                candidate
-                for candidate in reversed(state.get("messages") or [])
-                if isinstance(candidate, HumanMessage)
+    def _sender_context_messages(state: PrepareRunState, sender_context: str) -> list[Any]:
+        """Sender context as its own message, appended after the run's input.
+
+        Splicing it into the triggering message rewrote history: that message is
+        already cached from the run that received it, so every later run sent a
+        different byte sequence for it. The transcript renders one envelope per
+        message, so this arrives as a collapsed context pill rather than markup
+        inside the user's own text.
+        """
+        if not any(
+            isinstance(candidate, HumanMessage) for candidate in state.get("messages") or []
+        ):
+            return []
+        injected = dynamic_context_hashes_from_messages(state.get("messages"))
+        return cast(
+            list[Any],
+            build_input_messages(
+                sender_context,
+                {
+                    "sender_id": _SENDER_CONTEXT_SYSTEM["id"],
+                    "surface": "automation",
+                    "kind": "system",
+                },
+                systems=[_SENDER_CONTEXT_SYSTEM],
+                injected_dynamic_context_hashes=injected,
             ),
-            None,
         )
-        if message is None:
-            return None
-        content = message.content
-        # Inside the envelope, not after it: a trailing sibling makes the whole
-        # message unparseable and the transcript renders it as raw markup.
-        spliced = (
-            append_message_data(content, "sender_context", sender_context)
-            if isinstance(content, (str, list))
-            else None
-        )
-        if spliced is not None:
-            return message.model_copy(update={"content": spliced})
-        wrapped = f"<sender_context>\n{sender_context}\n</sender_context>"
-        updated_content: Any
-        if isinstance(content, str):
-            updated_content = f"{content}\n\n{wrapped}"
-        elif isinstance(content, list):
-            updated_content = [*content, {"type": "text", "text": wrapped}]
-        else:
-            updated_content = [content, {"type": "text", "text": wrapped}]
-        return message.model_copy(update={"content": updated_content})
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         schedule_thread_title_generation(
@@ -1260,7 +1268,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 thread_url=dashboard_thread_url(self._thread_id),
                 workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
             )
-        sender_message = self._sender_context_message(state, sender_context)
+        sender_messages = self._sender_context_messages(state, sender_context)
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(
@@ -1291,7 +1299,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
         return {
             "work_dir": work_dir,
-            **({"messages": [sender_message]} if sender_message else {}),
+            **({"messages": sender_messages} if sender_messages else {}),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
                 dashboard_base_url=dashboard_base_url(),
