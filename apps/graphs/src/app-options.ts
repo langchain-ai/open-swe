@@ -47,6 +47,10 @@ export function parseAppServerOptions(
   const backendUrl =
     optionValue(arguments_, "--backend-url") ?? environment.DASHBOARD_API_URL
 
+  const graphEntrypoint =
+    optionValue(arguments_, "--graph-entrypoint") ??
+    environment.OPEN_SWE_LOCAL_GRAPH_ENTRYPOINT
+
   return {
     port,
     stateDirectory: path.resolve(
@@ -54,13 +58,8 @@ export function parseAppServerOptions(
       optionValue(arguments_, "--state-dir") ?? currentDirectory
     ),
     uiEntrypoint: path.resolve(currentDirectory, uiEntrypoint),
-    ...(optionValue(arguments_, "--graph-entrypoint")
-      ? {
-          graphEntrypoint: path.resolve(
-            currentDirectory,
-            optionValue(arguments_, "--graph-entrypoint")!
-          ),
-        }
+    ...(graphEntrypoint
+      ? { graphEntrypoint: path.resolve(currentDirectory, graphEntrypoint) }
       : {}),
     ...(backendUrl ? { backendUrl } : {}),
   }

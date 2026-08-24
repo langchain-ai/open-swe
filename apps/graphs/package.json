@@ -18,7 +18,6 @@
   },
   "scripts": {
     "build": "tsx ../../scripts/build-typescript-package.ts",
-    "start": "node dist/server.js",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
