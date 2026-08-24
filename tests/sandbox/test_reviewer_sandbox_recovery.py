@@ -239,13 +239,8 @@ async def test_deleted_sandbox_is_replaced_without_opting_in() -> None:
         patch(
             "agent.server._create_sandbox_with_proxy",
             new_callable=AsyncMock,
-            return_value=replacement,
+            side_effect=lambda *_a, **_k: (order.append("init"), replacement)[1],
         ) as create_replacement,
-        patch(
-            "agent.server._configure_git_identity",
-            new_callable=AsyncMock,
-            side_effect=lambda *_: order.append("init"),
-        ),
         patch(
             "agent.server.client.threads.update",
             new_callable=AsyncMock,
@@ -260,6 +255,7 @@ async def test_deleted_sandbox_is_replaced_without_opting_in() -> None:
         "thread_id": thread_id,
         "metadata": {"sandbox_id": "sandbox-replacement"},
     }
-    # The thread binds to the sandbox only once it is initialized.
+    # The thread binds to the sandbox only once it is created and initialized;
+    # the identity write is joined inside the creation step.
     assert order == ["init", "bind"]
     SANDBOX_BACKENDS.clear()
