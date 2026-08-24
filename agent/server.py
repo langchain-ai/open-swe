@@ -819,7 +819,7 @@ def _general_purpose_subagent(
 
 
 BROWSER_SUBAGENT_DESCRIPTION = (
-    "Drives a real browser (Stagehand, running locally or on Browserbase) to "
+    "Drives sandbox-local Chromium with Stagehand to "
     "accomplish tasks that require interacting with live web pages: logging "
     "into dashboards, clicking through flows, filling forms, reading "
     "JS-rendered content, reproducing UI bugs, and extracting structured data. "
