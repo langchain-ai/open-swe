@@ -656,7 +656,7 @@ The `osw_session` cookie has to be set on the dashboard origin too: set `DASHBOA
 
 For the dashboard login to succeed, you need (from steps 3c / 6): `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `DASHBOARD_JWT_SECRET`, `DASHBOARD_API_BASE_URL`, `DASHBOARD_BASE_URL`, and `DASHBOARD_ALLOWED_ORIGINS`. To reach the admin pages (user mappings, etc.), add your GitHub login or email to `CONFIGURED_ADMINS`.
 
-Other root scripts run the same task across the workspace through Turborepo: `pnpm run build`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`. Scope one to a package with `pnpm --filter open-swe-dashboard run <script>`.
+`pnpm run build`, `pnpm run typecheck` and `pnpm run test` run the same task across the workspace through Turborepo; scope one to a package with `pnpm --filter open-swe-dashboard run <script>`. `pnpm run lint` (oxlint) and `pnpm run format` / `pnpm run format:check` (oxfmt) are not Turborepo tasks — they run once from the root over every JS and TS file in the repo, `ui/`, `desktop/` and `tests/e2e/` alike, so there is no per-package variant to scope to.
 
 ### Run the desktop app (optional)
 

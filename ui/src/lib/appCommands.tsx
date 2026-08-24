@@ -141,9 +141,11 @@ export function AppCommandProvider({
     [globalCommands, registrations]
   )
   const commandsRef = useRef(commands)
-  commandsRef.current = commands
   const enabledRef = useRef(enabled)
-  enabledRef.current = enabled
+  useEffect(() => {
+    commandsRef.current = commands
+    enabledRef.current = enabled
+  }, [commands, enabled])
 
   useEffect(() => {
     if (!enabled || paletteOpen || shortcutReferenceOpen) return

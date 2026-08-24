@@ -1,15 +1,10 @@
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   ArrowsInIcon,
   ArrowsOutIcon,
   SidebarSimpleIcon,
 } from "@phosphor-icons/react"
+import type { ReactNode } from "react"
 
 import type {
   PanelThreadRef,
@@ -288,9 +283,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
             <TerminalPanel
               target={terminalTarget}
               cwd={cwd}
-              groupId={
-                surface.kind === "terminal" ? surface.resourceId : surface.id
-              }
+              groupId={surface.resourceId}
               terminals={terminals}
               {...(props.onTerminalOpenFile
                 ? { onOpenFile: props.onTerminalOpenFile }
@@ -322,7 +315,8 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       }
       onCloseAllSurfaces={() => closeAllSurfaces(threadRef)}
       onCopyFilePath={(relativePath) => {
-        void navigator.clipboard?.writeText(relativePath)
+        const nav = navigator as { clipboard?: Clipboard }
+        if (nav.clipboard) void nav.clipboard.writeText(relativePath)
       }}
       onAddTerminal={handleAddTerminal}
       onAddDiff={handleAddDiff}

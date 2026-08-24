@@ -313,7 +313,6 @@ export function useAgentSkills(options: { enabled?: boolean } = {}) {
   const personal = usePersonalAgentSkills(enabled)
   const organization = useOrganizationAgentSkills(enabled)
   return {
-    ...personal,
     personal: personal.data ?? [],
     organization: organization.data ?? [],
     refetch: async () => {
@@ -499,10 +498,10 @@ export function useAgentThread(threadId: string) {
 
   return useQuery({
     queryKey,
-    queryFn: async () => {
+    queryFn: async ({ queryKey: key }) => {
       const thread = await agentsApi.getThread(threadId)
       const queuedMessages =
-        queryClient.getQueryData<AgentThread>(queryKey)?.queuedMessages
+        queryClient.getQueryData<AgentThread>(key)?.queuedMessages
       return thread.status === "running" && queuedMessages?.length
         ? { ...thread, queuedMessages }
         : thread
@@ -887,7 +886,7 @@ export function useInfiniteThreadsPages(
         )
       )
       queryClient.setQueryData<InfiniteData<ThreadsPage>>(
-        queryKey,
+        agentThreadKeys.infinitePages(params),
         (current) => {
           if (!current) return current
           const refreshedByOffset = new Map(

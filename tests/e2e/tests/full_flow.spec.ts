@@ -11,15 +11,23 @@ test.describe("Open SWE full flow", () => {
     await expect(page.locator("#thread")).toContainText("No messages yet");
   });
 
-  test("Slack request → implements → opens PR → links it back in the thread", async ({ page }) => {
-    await page.locator("#text").fill("<@U0BOT> please add a greet() helper and open a PR");
+  test("Slack request → implements → opens PR → links it back in the thread", async ({
+    page,
+  }) => {
+    await page
+      .locator("#text")
+      .fill("<@U0BOT> please add a greet() helper and open a PR");
     await page.locator("#send").click();
 
     // The user's message lands in the thread.
-    await expect(page.locator(".msg").filter({ hasText: "add a greet() helper" })).toBeVisible();
+    await expect(
+      page.locator(".msg").filter({ hasText: "add a greet() helper" }),
+    ).toBeVisible();
 
     // The agent replies in the SAME thread with a link to the PR it opened.
-    const reply = page.locator(".msg.bot").filter({ hasText: "Add greet() helper" });
+    const reply = page
+      .locator(".msg.bot")
+      .filter({ hasText: "Add greet() helper" });
     await expect(reply).toBeVisible();
     const prLink = reply.locator('a[href*="/pull/"]');
     await expect(prLink).toBeVisible();
@@ -29,15 +37,22 @@ test.describe("Open SWE full flow", () => {
     await expect(page.locator("#pr-title")).toContainText("Add greet() helper");
     await expect(page.locator("#pr-state")).toHaveText("open");
     await expect(page.locator("#pr-head")).toHaveText("add-greet");
-    await expect(page.locator('#pr-files li[data-file="greet.py"]')).toBeVisible();
+    await expect(
+      page.locator('#pr-files li[data-file="greet.py"]'),
+    ).toBeVisible();
 
     // The PR list view shows it too.
     await page.goto("/mock/github");
-    await expect(page.locator('.pr[data-pr="1"]')).toContainText("Add greet() helper");
+    await expect(page.locator('.pr[data-pr="1"]')).toContainText(
+      "Add greet() helper",
+    );
     await expect(page.locator('.pr[data-pr="1"]')).toContainText("greet.py");
   });
 
-  test("Slack DM request without a bot mention still starts a run", async ({ page, request }) => {
+  test("Slack DM request without a bot mention still starts a run", async ({
+    page,
+    request,
+  }) => {
     const send = await request.post("/mock/slack/send", {
       data: {
         text: "please add a greet() helper and open a PR",
@@ -46,20 +61,35 @@ test.describe("Open SWE full flow", () => {
       },
     });
     const sent = await send.json();
-    expect(sent.webhook).toMatchObject({ status: "accepted", message: "Slack mention queued" });
+    expect(sent.webhook).toMatchObject({
+      status: "accepted",
+      message: "Slack mention queued",
+    });
 
-    await expect(page.locator(".msg").filter({ hasText: "add a greet() helper" })).toBeVisible();
-    const reply = page.locator(".msg.bot").filter({ hasText: "Add greet() helper" });
+    await expect(
+      page.locator(".msg").filter({ hasText: "add a greet() helper" }),
+    ).toBeVisible();
+    const reply = page
+      .locator(".msg.bot")
+      .filter({ hasText: "Add greet() helper" });
     await expect(reply).toBeVisible();
     await expect(reply.locator('a[href*="/pull/"]')).toBeVisible();
 
     await page.goto("/mock/github");
-    await expect(page.locator('.pr[data-pr="1"]')).toContainText("Add greet() helper");
+    await expect(page.locator('.pr[data-pr="1"]')).toContainText(
+      "Add greet() helper",
+    );
     await expect(page.locator('.pr[data-pr="1"]')).toContainText("greet.py");
   });
 
-  test("Slack breakout request starts a new top-level Open SWE thread", async ({ page }) => {
-    await page.locator("#text").fill("<@U0BOT> please break out adding a greet() helper into a separate thread");
+  test("Slack breakout request starts a new top-level Open SWE thread", async ({
+    page,
+  }) => {
+    await page
+      .locator("#text")
+      .fill(
+        "<@U0BOT> please break out adding a greet() helper into a separate thread",
+      );
     await page.locator("#send").click();
 
     const breakout = page
@@ -69,21 +99,33 @@ test.describe("Open SWE full flow", () => {
     const breakoutThreadTs = await breakout.getAttribute("data-thread-ts");
     expect(breakoutThreadTs).toBeTruthy();
 
-    const breakoutThreadMessages = page.locator(`.msg.bot[data-thread-ts="${breakoutThreadTs}"]`);
-    await expect(breakoutThreadMessages.locator('a[href*="/agents/"]').first()).toBeVisible({
+    const breakoutThreadMessages = page.locator(
+      `.msg.bot[data-thread-ts="${breakoutThreadTs}"]`,
+    );
+    await expect(
+      breakoutThreadMessages.locator('a[href*="/agents/"]').first(),
+    ).toBeVisible({
       timeout: 60_000,
     });
     await expect(
-      page.locator(".msg.bot").filter({ hasText: "I started a separate Open SWE thread" }),
+      page
+        .locator(".msg.bot")
+        .filter({ hasText: "I started a separate Open SWE thread" }),
     ).toBeVisible({ timeout: 60_000 });
   });
 
-  test("a message that does not mention the bot produces no run and no PR", async ({ page }) => {
+  test("a message that does not mention the bot produces no run and no PR", async ({
+    page,
+  }) => {
     await page.locator("#mention").uncheck();
-    await page.locator("#text").fill("just chatting with the team, nothing for the bot");
+    await page
+      .locator("#text")
+      .fill("just chatting with the team, nothing for the bot");
     await page.locator("#send").click();
 
-    await expect(page.locator(".msg").filter({ hasText: "just chatting" })).toBeVisible();
+    await expect(
+      page.locator(".msg").filter({ hasText: "just chatting" }),
+    ).toBeVisible();
     // No agent activity: give the (non-)run a moment, then assert nothing came back.
     await page.waitForTimeout(3000);
     await expect(page.locator(".msg.bot")).toHaveCount(0);

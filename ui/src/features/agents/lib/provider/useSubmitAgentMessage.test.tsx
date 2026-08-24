@@ -6,11 +6,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useSubmitAgentMessage } from "./useSubmitAgentMessage"
 import type { AgentThread } from "@/features/agents/lib/types"
-import { AgentsApiError } from "@/features/agents/lib/api"
 import type { SidebarThreads } from "@/features/agents/lib/api"
+import { AgentsApiError } from "@/features/agents/lib/api"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
 
-const stream = { isLoading: false, submit: vi.fn(async () => undefined) }
+const stream = {
+  isLoading: false,
+  submit: vi.fn(() => Promise.resolve(undefined)),
+}
 
 vi.mock("@langchain/react", () => ({
   useStreamContext: () => stream,
@@ -55,10 +58,10 @@ function setup() {
   )
   const queuedCounts: Array<number> = []
   client.getQueryCache().subscribe(() => {
-    const thread = client.getQueryData<AgentThread>(
+    const current = client.getQueryData<AgentThread>(
       agentThreadKeys.detail(THREAD_ID)
     )
-    queuedCounts.push(thread?.queuedMessages?.length ?? 0)
+    queuedCounts.push(current?.queuedMessages?.length ?? 0)
   })
   const { result } = renderHook(() => useSubmitAgentMessage(THREAD_ID), {
     wrapper: ({ children }: { children: React.ReactNode }) => (

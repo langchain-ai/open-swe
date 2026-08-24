@@ -217,7 +217,8 @@ const shiftedToUnshiftedCharacter = new Map<string, string>([
 ])
 
 let keyboardLayoutMapPromise:
-  Promise<GhosttyKeyboardLayoutMap | undefined> | undefined
+  | Promise<GhosttyKeyboardLayoutMap | undefined>
+  | undefined
 
 export function loadGhosttyKeyboardLayoutMap(): Promise<
   GhosttyKeyboardLayoutMap | undefined

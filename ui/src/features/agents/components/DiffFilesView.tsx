@@ -171,7 +171,9 @@ export function DiffFilesView({
   )
 
   const filesRef = useRef(files)
-  filesRef.current = files
+  useEffect(() => {
+    filesRef.current = files
+  }, [files])
   const selectTreePath = useCallback((path: string) => {
     setSelectedTreePath(path)
     const target = filesRef.current.find((file) => file.treePath === path)

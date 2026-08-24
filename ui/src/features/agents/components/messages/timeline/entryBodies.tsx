@@ -1,7 +1,7 @@
 import { memo } from "react"
 
-import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import { ToolResultBody } from "./ToolResultBody"
+import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 
 export const ShellEntryBody = memo(function ShellEntryBody({
   chunk,

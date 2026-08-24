@@ -9,10 +9,8 @@
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
 
-import {
-  scopedThreadKey,
-  type PanelThreadRef,
-} from "@/features/agents/lib/rightPanelStore"
+import type { PanelThreadRef } from "@/features/agents/lib/rightPanelStore"
+import { scopedThreadKey } from "@/features/agents/lib/rightPanelStore"
 
 export const DIFF_SCOPE_KINDS = ["working-tree", "branch"] as const
 export type DiffScopeKind = (typeof DIFF_SCOPE_KINDS)[number]
@@ -41,7 +39,7 @@ export function migratePersistedDiffPanelState(persistedState: unknown): {
   if (!persistedState || typeof persistedState !== "object")
     return { byThreadKey: {} }
   if (!("byThreadKey" in persistedState)) return { byThreadKey: {} }
-  const raw = (persistedState as { byThreadKey: unknown }).byThreadKey
+  const raw = persistedState.byThreadKey
   if (!raw || typeof raw !== "object") return { byThreadKey: {} }
 
   const byThreadKey: Record<string, DiffPanelSelection> = {}
