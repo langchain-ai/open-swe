@@ -142,6 +142,7 @@ export function AgentsHome() {
     const selected = localProjects.find(
       (project) => project.cwd === localProjectPath || project.cwd === stored
     )
+    // oxlint-disable-next-line react/set-state-in-effect
     setLocalProjectPath(selected?.cwd ?? localProjects[0]?.cwd ?? null)
   }, [isDesktop, localProjectPath, localProjects])
 

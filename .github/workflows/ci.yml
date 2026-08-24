@@ -61,8 +61,8 @@ jobs:
       - name: Run unit tests
         run: make test
 
-  ui-format:
-    name: UI format check
+  js-format:
+    name: JS format check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -70,12 +70,42 @@ jobs:
         with:
           node-version: 24.18.1
       - run: corepack enable
-      # The root package too, for Turborepo — but not desktop, whose Electron
-      # download this job has no use for.
+      # oxfmt reads the files straight off disk, so only the root package's own
+      # devDependencies are needed here.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
       - name: Run format check
         run: pnpm run format:check
+
+  js-lint:
+    name: JS lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24.18.1
+      - run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe
+      - name: Run lint
+        run: pnpm run lint
+
+  js-tests:
+    name: JS unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24.18.1
+      - run: corepack enable
+      - name: Install workspace dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: pnpm install --frozen-lockfile
+      - name: Run tests
+        run: pnpm run test
 
   desktop:
     name: Desktop checks
@@ -120,7 +150,7 @@ jobs:
             exit 0
           fi
 
-          paths=(agent ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json langgraph.desktop.json Makefile .github/workflows/ci.yml)
+          paths=(agent ui apps packages tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json langgraph.desktop.json Makefile .github/workflows/ci.yml)
           if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}"; then
             echo "browser=false" >> "$GITHUB_OUTPUT"
           else

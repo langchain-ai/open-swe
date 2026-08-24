@@ -15,12 +15,14 @@ import { createCodingAgentGraph } from "./coding-agent.js"
 const roots: string[] = []
 
 afterEach(() => {
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
+  for (const root of roots.splice(0))
+    fs.rmSync(root, { recursive: true, force: true })
 })
 
 function runGit(cwd: string, ...args: string[]): string {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" })
-  if (result.status !== 0) throw new Error(result.stderr || `git ${args.join(" ")} failed`)
+  if (result.status !== 0)
+    throw new Error(result.stderr || `git ${args.join(" ")} failed`)
   return result.stdout
 }
 
@@ -32,7 +34,9 @@ async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
 
 describe("coding agent", () => {
   it("inspects, edits, executes, and streams against a real repository", async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-coding-agent-"))
+    const root = fs.mkdtempSync(
+      path.join(os.tmpdir(), "open-swe-coding-agent-")
+    )
     roots.push(root)
     const project = path.join(root, "project")
     const allowlist = path.join(root, "projects.json")
@@ -103,7 +107,9 @@ describe("coding agent", () => {
     ])
     expect(messages.length).toBeGreaterThan(0)
     expect(output.messages.at(-1)?.text).toContain("verified")
-    expect(fs.readFileSync(path.join(project, "message.txt"), "utf8")).toBe("after\n")
+    expect(fs.readFileSync(path.join(project, "message.txt"), "utf8")).toBe(
+      "after\n"
+    )
     expect(runGit(project, "diff", "--", "message.txt")).toContain("+after")
   })
 

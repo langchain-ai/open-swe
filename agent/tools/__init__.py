@@ -44,6 +44,7 @@ _TOOL_MODULES = {
     "save_environment": ".environments",
     "save_organization_skill": ".organization_skills",
     "save_plan": ".save_plan",
+    "sandbox_reset": ".sandbox_reset",
     "save_user_instructions": ".save_user_instructions",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
@@ -100,6 +101,7 @@ __all__ = [
     "save_organization_skill",
     "delete_organization_skill",
     "save_plan",
+    "sandbox_reset",
     "save_user_instructions",
     "save_user_skill",
     "delete_user_skill",
@@ -152,6 +154,7 @@ if TYPE_CHECKING:
     from .report_platform_issue import report_platform_issue
     from .request_pr_review import request_pr_review
     from .resolve_finding_thread import resolve_finding_thread
+    from .sandbox_reset import sandbox_reset
     from .save_plan import save_plan
     from .save_user_instructions import save_user_instructions
     from .schedule_thread_wakeup import schedule_thread_wakeup

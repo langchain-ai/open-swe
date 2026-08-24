@@ -51,12 +51,12 @@ describe("OutputIframe", () => {
   it("downloads through the signed attachment URL", () => {
     let clickedHref = ""
     let clickedRel = ""
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
-      this: HTMLAnchorElement
-    ) {
-      clickedHref = this.href
-      clickedRel = this.rel
-    })
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      function (this: HTMLAnchorElement) {
+        clickedHref = this.href
+        clickedRel = this.rel
+      }
+    )
     render(<OutputIframe display={display} />)
 
     fireEvent.click(screen.getByRole("button", { name: "Download HTML" }))

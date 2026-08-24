@@ -164,7 +164,7 @@ async function agentsRequest<T>(
     headers: {
       "Content-Type": "application/json",
       ...dashboardForwardedHeaders(),
-      ...(init.headers ?? {}),
+      ...init.headers,
     },
   })
   if (!res.ok) {

@@ -1,3 +1,4 @@
+import { formatJsonToolResult } from "./toolResultJson"
 import type {
   AcpToolStatus,
   Chunk,
@@ -8,7 +9,6 @@ import {
   formatToolDisplayParts,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
-import { formatJsonToolResult } from "./toolResultJson"
 
 export type WorkEntryIconName =
   | "bot"

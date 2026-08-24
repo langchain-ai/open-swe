@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "import", "unicorn", "oxc", "vitest"],
+  "jsPlugins": [
+    { "name": "query", "specifier": "@tanstack/eslint-plugin-query" },
+    { "name": "router", "specifier": "@tanstack/eslint-plugin-router" }
+  ],
+  "categories": { "correctness": "error" },
+  "rules": {
+    "react-hooks/exhaustive-deps": "warn",
+    "vitest/require-mock-type-parameters": "off",
+    "query/exhaustive-deps": "error",
+    "query/no-unstable-deps": "error",
+    "query/no-rest-destructuring": "warn",
+    "router/create-route-property-order": "error",
+    "no-shadow": "warn"
+  },
+  "ignorePatterns": [
+    "**/node_modules/**",
+    ".venv/**",
+    "ui/.output/**",
+    "ui/.nitro/**",
+    "ui/.tanstack/**",
+    "ui/dev-dist/**",
+    "ui/dist/**",
+    "ui/public/**",
+    "ui/src/routeTree.gen.ts",
+    "ui/src/components/ui/**",
+    "ui/src/features/agents/experiments/**",
+    "desktop/build/**"
+  ],
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "**/*.test.tsx", "**/*.test.cjs"],
+      "rules": { "react/globals": "off" }
+    }
+  ]
+}

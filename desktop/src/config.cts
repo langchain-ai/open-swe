@@ -1,19 +1,22 @@
-const path = require("node:path")
+const path = require("node:path");
 
-const APP_ORIGIN = "open-swe://app"
-const APP_URL = `${APP_ORIGIN}/`
-const APP_NAME = "Open SWE"
-const DEVELOPMENT_APP_NAME = "Open SWE Development"
-const APP_USER_MODEL_ID = "com.langchain.openswe"
-const DEVELOPMENT_APP_USER_MODEL_ID = "com.langchain.openswe.dev"
-const DEVELOPMENT_USER_DATA_DIRECTORY = "Open SWE Development"
-const ALLOWED_PERMISSIONS = new Set(["clipboard-sanitized-write", "notifications"])
-const SESSION_COOKIE_NAME = "osw_session"
-const LOGIN_PATH = "/dashboard/api/auth/login"
-const DESKTOP_EXCHANGE_PATH = "/dashboard/api/auth/desktop/exchange"
+const APP_ORIGIN = "open-swe://app";
+const APP_URL = `${APP_ORIGIN}/`;
+const APP_NAME = "Open SWE";
+const DEVELOPMENT_APP_NAME = "Open SWE Development";
+const APP_USER_MODEL_ID = "com.langchain.openswe";
+const DEVELOPMENT_APP_USER_MODEL_ID = "com.langchain.openswe.dev";
+const DEVELOPMENT_USER_DATA_DIRECTORY = "Open SWE Development";
+const ALLOWED_PERMISSIONS = new Set([
+  "clipboard-sanitized-write",
+  "notifications",
+]);
+const SESSION_COOKIE_NAME = "osw_session";
+const LOGIN_PATH = "/dashboard/api/auth/login";
+const DESKTOP_EXCHANGE_PATH = "/dashboard/api/auth/desktop/exchange";
 
 function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
-  const isDevelopment = !isPackaged || argv.includes("--dev")
+  const isDevelopment = !isPackaged || argv.includes("--dev");
   return {
     isDevelopment,
     name: isDevelopment ? DEVELOPMENT_APP_NAME : APP_NAME,
@@ -23,51 +26,51 @@ function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
     userDataPath: isDevelopment
       ? path.join(appDataPath, DEVELOPMENT_USER_DATA_DIRECTORY)
       : null,
-  }
+  };
 }
 
 function cliBackendUrl(argv) {
   for (const name of ["--backend-url", "--url"]) {
-    const inline = argv.find((argument) => argument.startsWith(`${name}=`))
-    if (inline) return inline.slice(name.length + 1)
+    const inline = argv.find((argument) => argument.startsWith(`${name}=`));
+    if (inline) return inline.slice(name.length + 1);
 
-    const index = argv.indexOf(name)
-    if (index !== -1) return argv[index + 1]
+    const index = argv.indexOf(name);
+    if (index !== -1) return argv[index + 1];
   }
-  return undefined
+  return undefined;
 }
 
 function validateBackendUrl(value) {
-  const url = new URL(value)
+  const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Backend URL must use http or https")
+    throw new Error("Backend URL must use http or https");
   }
-  return url.toString()
+  return url.toString();
 }
 
-function resolveBackendUrl({ argv, env, isPackaged, storedUrl }) {
+function resolveBackendUrl({ argv, env, storedUrl }) {
   const value =
     cliBackendUrl(argv) ||
     env.OPEN_SWE_BACKEND_URL ||
     env.OPEN_SWE_DESKTOP_URL ||
-    storedUrl
-  return value ? validateBackendUrl(value.trim()) : null
+    storedUrl;
+  return value ? validateBackendUrl(value.trim()) : null;
 }
 
 function isAppUrl(value) {
   try {
-    const url = new URL(value)
-    return url.protocol === "open-swe:" && url.hostname === "app"
+    const url = new URL(value);
+    return url.protocol === "open-swe:" && url.hostname === "app";
   } catch {
-    return false
+    return false;
   }
 }
 
 function isAppLoginUrl(value) {
   try {
-    return isAppUrl(value) && new URL(value).pathname === LOGIN_PATH
+    return isAppUrl(value) && new URL(value).pathname === LOGIN_PATH;
   } catch {
-    return false
+    return false;
   }
 }
 
@@ -76,24 +79,24 @@ function isNavigationAbort(error) {
     error !== null &&
     typeof error === "object" &&
     (error.code === "ERR_ABORTED" || error.errno === -3)
-  )
+  );
 }
 
 function desktopLoginUrl(backendUrl, { challenge, port }) {
-  const target = new URL(LOGIN_PATH, backendUrl)
-  target.searchParams.set("desktop_handoff", challenge)
-  target.searchParams.set("desktop_port", String(port))
-  return target.toString()
+  const target = new URL(LOGIN_PATH, backendUrl);
+  target.searchParams.set("desktop_handoff", challenge);
+  target.searchParams.set("desktop_port", String(port));
+  return target.toString();
 }
 
 function desktopExchangeUrl(backendUrl) {
-  return new URL(DESKTOP_EXCHANGE_PATH, backendUrl).toString()
+  return new URL(DESKTOP_EXCHANGE_PATH, backendUrl).toString();
 }
 
 // Root path, not /dashboard/api: the application server resolves the session
 // while rendering the document, and only cookies matching `/` reach that request.
 function hostedSessionCookieUrl(runtimeOrigin) {
-  return new URL("/", runtimeOrigin).toString()
+  return new URL("/", runtimeOrigin).toString();
 }
 
 function isTrustedPermissionRequest(
@@ -102,66 +105,69 @@ function isTrustedPermissionRequest(
   details: any = {},
   runtimeOrigin = null,
 ) {
-  let trustedRuntime = false
+  let trustedRuntime = false;
   if (runtimeOrigin) {
     try {
-      trustedRuntime = new URL(requestingUrl).origin === runtimeOrigin
+      trustedRuntime = new URL(requestingUrl).origin === runtimeOrigin;
     } catch {}
   }
-  if (!isAppUrl(requestingUrl) && !trustedRuntime) return false
-  if (ALLOWED_PERMISSIONS.has(permission)) return true
-  const mediaTypes = details.mediaTypes ?? [details.mediaType]
+  if (!isAppUrl(requestingUrl) && !trustedRuntime) return false;
+  if (ALLOWED_PERMISSIONS.has(permission)) return true;
+  const mediaTypes = details.mediaTypes ?? [details.mediaType];
   return (
     permission === "media" &&
     mediaTypes.includes("audio") &&
     !mediaTypes.includes("video")
-  )
+  );
 }
 
 function isTrustedProxyRequest(pageUrl) {
-  return isAppUrl(pageUrl)
+  return isAppUrl(pageUrl);
 }
 
 function backendRequestUrl(backendUrl, appRequestUrl) {
-  if (!isAppUrl(appRequestUrl)) throw new Error("Invalid desktop request URL")
-  const source = new URL(appRequestUrl)
-  const target = new URL(`${source.pathname}${source.search}`, backendUrl)
+  if (!isAppUrl(appRequestUrl)) throw new Error("Invalid desktop request URL");
+  const source = new URL(appRequestUrl);
+  const target = new URL(`${source.pathname}${source.search}`, backendUrl);
   if (source.pathname === "/dashboard/api/auth/login") {
-    target.searchParams.set("desktop", "true")
+    target.searchParams.set("desktop", "true");
   }
-  return target.toString()
+  return target.toString();
 }
 
 function localCallbackUrl(navigationUrl, backendUrl) {
   try {
-    const target = new URL(navigationUrl)
-    const backend = new URL(backendUrl)
+    const target = new URL(navigationUrl);
+    const backend = new URL(backendUrl);
     if (
       !["http:", "https:"].includes(target.protocol) ||
       target.origin !== backend.origin ||
-      !/^\/dashboard\/api\/(?:auth|slack|notion)\/callback$/.test(target.pathname)
+      !/^\/dashboard\/api\/(?:auth|slack|notion)\/callback$/.test(
+        target.pathname,
+      )
     ) {
-      return null
+      return null;
     }
-    return `${APP_URL}${target.pathname.slice(1)}${target.search}${target.hash}`
+    return `${APP_URL}${target.pathname.slice(1)}${target.search}${target.hash}`;
   } catch {
-    return null
+    return null;
   }
 }
 
 function appRedirectUrl(location) {
-  const target = new URL(location, APP_URL)
-  return `${APP_URL}${target.pathname.replace(/^\//, "")}${target.search}${target.hash}`
+  const target = new URL(location, APP_URL);
+  return `${APP_URL}${target.pathname.replace(/^\//, "")}${target.search}${target.hash}`;
 }
 
 function staticFilePath(root, appRequestUrl) {
-  if (!isAppUrl(appRequestUrl)) return null
-  const pathname = decodeURIComponent(new URL(appRequestUrl).pathname)
-  const relative = pathname.replace(/^\/+/, "")
-  const rootPath = path.resolve(root)
-  const candidate = path.resolve(rootPath, relative)
-  if (candidate !== rootPath && !candidate.startsWith(`${rootPath}${path.sep}`)) return null
-  return candidate
+  if (!isAppUrl(appRequestUrl)) return null;
+  const pathname = decodeURIComponent(new URL(appRequestUrl).pathname);
+  const relative = pathname.replace(/^\/+/, "");
+  const rootPath = path.resolve(root);
+  const candidate = path.resolve(rootPath, relative);
+  if (candidate !== rootPath && !candidate.startsWith(`${rootPath}${path.sep}`))
+    return null;
+  return candidate;
 }
 
 module.exports = {
@@ -183,4 +189,4 @@ module.exports = {
   resolveBackendUrl,
   staticFilePath,
   validateBackendUrl,
-}
+};

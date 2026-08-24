@@ -1281,7 +1281,8 @@ export class GhosttyTerminalCore {
 
   private selectAt(
     optionsName:
-      "GhosttyTerminalSelectWordOptions" | "GhosttyTerminalSelectLineOptions",
+      | "GhosttyTerminalSelectWordOptions"
+      | "GhosttyTerminalSelectLineOptions",
     operation: "ghostty_terminal_select_word" | "ghostty_terminal_select_line",
     col: number,
     row: number

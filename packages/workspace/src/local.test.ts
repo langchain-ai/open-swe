@@ -14,7 +14,9 @@ import {
 const roots: string[] = []
 
 function temporaryDirectory(): string {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-workspace-"))
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "open-swe-workspace-")
+  )
   roots.push(directory)
   return directory
 }

@@ -180,7 +180,7 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
   if (!persistedState || typeof persistedState !== "object")
     return { byThreadKey: {} }
   if (!("byThreadKey" in persistedState)) return { byThreadKey: {} }
-  const raw = (persistedState as { byThreadKey: unknown }).byThreadKey
+  const raw = persistedState.byThreadKey
   if (!raw || typeof raw !== "object") return { byThreadKey: {} }
 
   const byThreadKey = Object.fromEntries(
@@ -354,7 +354,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                 (
                   surface
                 ): surface is Extract<RightPanelSurface, { kind: "file" }> =>
-                  surface.id === surfaceId && surface.kind === "file"
+                  surface.id === surfaceId
               )
               const surface = fileSurface(
                 relativePath,

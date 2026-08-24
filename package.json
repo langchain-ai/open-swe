@@ -2,29 +2,34 @@
   "name": "open-swe",
   "private": true,
   "packageManager": "pnpm@11.18.0",
-  "engines": {
-    "node": "24.18.1"
-  },
   "scripts": {
     "dev": "turbo run dev --filter=open-swe-dashboard",
-    "desktop:dev": "pnpm --dir desktop run build && pnpm --dir desktop exec electron . --dev",
-    "desktop:dev:full": "pnpm --dir desktop run dev:full",
-    "serve": "pnpm run build:graphs && node apps/graphs/dist/bin.js",
     "dev:mock": "bash tests/e2e/dev-mock.sh",
     "build": "turbo run build",
-    "build:graphs": "turbo run build --filter=@open-swe/graphs",
     "check": "turbo run check",
-    "format:check": "turbo run format:check",
-    "lint": "turbo run lint",
+    "format:check": "oxfmt --check",
+    "lint": "oxlint",
     "test": "turbo run test --filter=!open-swe-e2e",
     "test:e2e": "pnpm --dir tests/e2e run test",
     "test:e2e:desktop": "pnpm --dir tests/e2e run test:desktop",
     "test:e2e:install": "pnpm --dir tests/e2e install --frozen-lockfile && pnpm --dir tests/e2e exec playwright install --with-deps chromium",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "format": "oxfmt",
+    "desktop:dev": "pnpm --dir desktop run build && pnpm --dir desktop exec electron . --dev",
+    "desktop:dev:full": "pnpm --dir desktop run dev:full",
+    "serve": "pnpm run build:graphs && node apps/graphs/dist/bin.js",
+    "build:graphs": "turbo run build --filter=@open-swe/graphs"
   },
   "devDependencies": {
     "@langchain/langgraph-cli": "^1.4.5",
+    "@tanstack/eslint-plugin-query": "^5.102.0",
+    "@tanstack/eslint-plugin-router": "^1.162.0",
+    "oxfmt": "^0.64.0",
+    "oxlint": "^1.79.0",
     "tsx": "4.21.0",
     "turbo": "^2.10.9"
+  },
+  "engines": {
+    "node": "24.18.1"
   }
 }

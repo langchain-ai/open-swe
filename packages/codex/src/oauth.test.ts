@@ -29,8 +29,12 @@ describe("createOpenAiOAuthFetch", () => {
     )
 
     expect(await response.text()).toBe("ok")
-    expect(requests[0]?.headers.get("authorization")).toBe("Bearer broker-token")
-    expect(requests[1]?.headers.get("authorization")).toBe("Bearer access-token")
+    expect(requests[0]?.headers.get("authorization")).toBe(
+      "Bearer broker-token"
+    )
+    expect(requests[1]?.headers.get("authorization")).toBe(
+      "Bearer access-token"
+    )
     expect(requests[1]?.headers.get("chatgpt-account-id")).toBe("example")
     expect(requests[1]?.headers.get("originator")).toBe("langchain")
   })

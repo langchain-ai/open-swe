@@ -1,15 +1,15 @@
-import { AIMessage } from "@langchain/core/messages"
-import { fakeModel } from "@langchain/core/testing"
+import { AIMessage } from "@langchain/core/messages";
+import { fakeModel } from "@langchain/core/testing";
 
-import { createCodingAgentGraph } from "@open-swe/agent"
-import { createLocalWorkspaceBackend } from "@open-swe/workspace"
+import { createCodingAgentGraph } from "@open-swe/agent";
+import { createLocalWorkspaceBackend } from "@open-swe/workspace";
 
 interface GraphConfig {
-  configurable?: Record<string, unknown>
+  configurable?: Record<string, unknown>;
 }
 
 export async function agent(config: GraphConfig = {}) {
-  void config
+  void config;
   const model = fakeModel()
     .respondWithTools([
       { name: "read_file", id: "read", args: { file_path: "README.md" } },
@@ -21,7 +21,7 @@ export async function agent(config: GraphConfig = {}) {
         args: {
           file_path: "greeting.ts",
           content:
-            'export function greet(name: string): string {\n  return `Hello, ${name}!`\n}\n',
+            "export function greet(name: string): string {\n  return `Hello, ${name}!`\n}\n",
         },
       },
     ])
@@ -31,11 +31,18 @@ export async function agent(config: GraphConfig = {}) {
         id: "execute",
         args: {
           command:
-            'node --input-type=module --eval "import { greet } from \'./greeting.ts\'; if (greet(\'TypeScript\') !== \'Hello, TypeScript!\') process.exit(1)"',
+            "node --input-type=module --eval \"import { greet } from './greeting.ts'; if (greet('TypeScript') !== 'Hello, TypeScript!') process.exit(1)\"",
         },
       },
     ])
-    .respond(new AIMessage("Done. I added and verified the TypeScript greeting helper."))
+    .respond(
+      new AIMessage(
+        "Done. I added and verified the TypeScript greeting helper.",
+      ),
+    );
 
-  return createCodingAgentGraph({ model, backend: createLocalWorkspaceBackend() })
+  return createCodingAgentGraph({
+    model,
+    backend: createLocalWorkspaceBackend(),
+  });
 }

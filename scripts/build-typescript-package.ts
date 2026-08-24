@@ -5,7 +5,13 @@ import path from "node:path"
 const packageRoot = process.cwd()
 const outputRoot = path.join(packageRoot, "dist")
 const config = process.argv[2] || "tsconfig.build.json"
-const compiler = path.join(packageRoot, "node_modules", "typescript", "bin", "tsc")
+const compiler = path.join(
+  packageRoot,
+  "node_modules",
+  "typescript",
+  "bin",
+  "tsc"
+)
 
 fs.rmSync(outputRoot, { recursive: true, force: true })
 const result = spawnSync(process.execPath, [compiler, "-p", config], {

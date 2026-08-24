@@ -1,7 +1,6 @@
 import Editor from "@monaco-editor/react"
-import { useEffect, useState } from "react"
-
 import { Textarea } from "@/components/ui/textarea"
+import { useIsHydrated } from "@/lib/hydration"
 
 interface InstructionsEditorProps {
   value: string
@@ -19,11 +18,7 @@ export function InstructionsEditor({
   placeholder,
   language = "markdown",
 }: InstructionsEditorProps) {
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  const mounted = useIsHydrated()
 
   if (!mounted) {
     return (

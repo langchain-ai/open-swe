@@ -80,7 +80,10 @@ export function resolveLocalProject(
     })
   }
 
-  if (!allowlistedPaths(entries).has(project) || !fs.statSync(project).isDirectory()) {
+  if (
+    !allowlistedPaths(entries).has(project) ||
+    !fs.statSync(project).isDirectory()
+  ) {
     throw new Error("local_project_path is not an allowed project directory")
   }
   return project

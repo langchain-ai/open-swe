@@ -18,7 +18,9 @@ test("recognizes forbidden runtime paths inside archives", () => {
 });
 
 test("rejects Python and uv files from packaged resources", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-package-policy-"));
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), "open-swe-package-policy-"),
+  );
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, "nested"));
   fs.writeFileSync(path.join(root, "nested", "server.js"), "");
@@ -46,7 +48,9 @@ test("local packaging disables macOS signing identity discovery", () => {
 });
 
 test("rejects a packaged local backend without its entrypoint", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-local-backend-"));
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), "open-swe-local-backend-"),
+  );
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, "dist"), { recursive: true });
 
@@ -57,7 +61,9 @@ test("rejects a packaged local backend without its entrypoint", (t) => {
 });
 
 test("rejects a packaged local backend without runtime dependencies", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-local-backend-"));
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), "open-swe-local-backend-"),
+  );
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, "dist"), { recursive: true });
   fs.writeFileSync(path.join(root, "dist", "bin.js"), "");

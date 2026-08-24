@@ -81,7 +81,9 @@ export function createOpenAiOAuthFetch(
       await credentialResponse.json()
     )
     if (!credentials.success) {
-      throw new Error("The local OpenAI session returned incomplete credentials")
+      throw new Error(
+        "The local OpenAI session returned incomplete credentials"
+      )
     }
     const request = new Request(input, init)
     const headers = new Headers(request.headers)

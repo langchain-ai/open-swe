@@ -14,7 +14,9 @@ const {
 
 test("desktop auth never invokes operating-system credential storage", () => {
   const source = ["main.cts", "openai-oauth.cts"]
-    .map((name) => fs.readFileSync(path.resolve(__dirname, "../src", name), "utf8"))
+    .map((name) =>
+      fs.readFileSync(path.resolve(__dirname, "../src", name), "utf8"),
+    )
     .join("\n");
 
   assert.doesNotMatch(

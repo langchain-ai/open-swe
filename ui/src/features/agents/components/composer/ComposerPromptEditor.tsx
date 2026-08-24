@@ -51,7 +51,11 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 export type ComposerCommandKey =
-  "ArrowDown" | "ArrowUp" | "Enter" | "Tab" | "Escape"
+  | "ArrowDown"
+  | "ArrowUp"
+  | "Enter"
+  | "Tab"
+  | "Escape"
 
 export interface ComposerPromptEditorHandle {
   focus: () => void
@@ -586,12 +590,12 @@ function ComposerPromptEditorInner({
   }, [editor, skillNamesKey])
 
   const focusAt = useCallback(
-    (cursor: number) => {
+    (offset: number) => {
       const rootElement = editor.getRootElement()
       if (!rootElement) return
       rootElement.focus({ preventScroll: true })
       editor.update(() => {
-        $setSelectionAtOffset(cursor)
+        $setSelectionAtOffset(offset)
       })
     },
     [editor]

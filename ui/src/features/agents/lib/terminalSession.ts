@@ -5,11 +5,12 @@ import type {
   DesktopTerminalSessionSnapshot,
   DesktopTerminalSummary,
 } from "@/desktop"
-import { agentsApi } from "@/features/agents/lib/api"
 import type { CloudTerminalConnection } from "@/features/agents/lib/api"
+import { agentsApi } from "@/features/agents/lib/api"
 
 export type TerminalTarget =
-  { kind: "local"; sessionId: string } | { kind: "cloud"; threadId: string }
+  | { kind: "local"; sessionId: string }
+  | { kind: "cloud"; threadId: string }
 
 export interface TerminalSessionState {
   buffer: string
@@ -228,7 +229,7 @@ export interface AttachedTerminal extends TerminalSessionState {
 
 export function cloudTerminalProtocols(
   connection: CloudTerminalConnection
-): string[] {
+): Array<string> {
   return [connection.protocol, connection.ticket]
 }
 
@@ -278,6 +279,7 @@ export function useAttachedTerminal(
       let exited = false
       pendingRef.current = []
       cloudConnectingRef.current = true
+      // oxlint-disable-next-line react/set-state-in-effect
       setState({ ...EMPTY_TERMINAL_SESSION, status: "starting" })
 
       const reconnect = () => {
@@ -461,6 +463,7 @@ export function useAttachedTerminal(
 
   useEffect(() => {
     if (!clearRequest || target.kind === "local") return
+    // oxlint-disable-next-line react/set-state-in-effect
     setState((current) => ({
       ...current,
       buffer: "",

@@ -690,6 +690,7 @@ function ChatPanel({
     },
     onSettled: invalidateThreads,
   })
+  const { mutate: deleteThreadMutate } = deleteThread
 
   // Open tabs are the client's conversations (titles reconciled from the
   // server). The history dropdown is the full set — open tabs plus every other
@@ -722,11 +723,11 @@ function ChatPanel({
   const handleClose = useCallback(
     (id: string) => {
       if (serverThreads.some((t) => t.thread_id === id)) {
-        deleteThread.mutate(id)
+        deleteThreadMutate(id)
       }
       close(id)
     },
-    [serverThreads, deleteThread, close]
+    [serverThreads, deleteThreadMutate, close]
   )
 
   const handleUserSend = useCallback(

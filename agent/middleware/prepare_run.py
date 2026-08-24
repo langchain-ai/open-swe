@@ -13,6 +13,7 @@ from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
 from ..input_messages import wrap_system_prompt
+from ..utils.startup_trace import flush_phases
 
 
 class PrepareRunState(AgentState):
@@ -56,15 +57,21 @@ class BasePrepareRunMiddleware(AgentMiddleware):
         state: AgentState,
         runtime: Runtime,
     ) -> dict[str, Any] | None:
-        prepared_state = cast(PrepareRunState, state)
-        fingerprint = self._prepare_fingerprint(prepared_state, runtime)
-        if (
-            prepared_state.get("run_prepared")
-            and prepared_state.get("run_prepared_for") == fingerprint
-        ):
-            return None
-        updates = await self._prepare(prepared_state, runtime)
-        return {"run_prepared": True, "run_prepared_for": fingerprint, **updates}
+        try:
+            prepared_state = cast(PrepareRunState, state)
+            fingerprint = self._prepare_fingerprint(prepared_state, runtime)
+            if (
+                prepared_state.get("run_prepared")
+                and prepared_state.get("run_prepared_for") == fingerprint
+            ):
+                return None
+            updates = await self._prepare(prepared_state, runtime)
+            return {"run_prepared": True, "run_prepared_for": fingerprint, **updates}
+        finally:
+            # This hook is the first span the startup work can hang off of. A
+            # resumed invocation latches out of `_prepare` but its graph factory
+            # ran regardless, so the flush has to cover that path too.
+            flush_phases(getattr(self, "_thread_id", None))
 
     def _prepare_fingerprint(self, state: PrepareRunState, runtime: Runtime) -> str:  # noqa: ARG002
         payload = {

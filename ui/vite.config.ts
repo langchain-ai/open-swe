@@ -3,7 +3,6 @@ import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import viteReact from "@vitejs/plugin-react"
-import viteTsConfigPaths from "vite-tsconfig-paths"
 import tailwindcss from "@tailwindcss/vite"
 import { nitro } from "nitro/vite"
 import type { Plugin } from "vite"
@@ -158,6 +157,7 @@ const SHELL_PAGE = {
 
 const config = defineConfig({
   base: "/",
+  resolve: { tsconfigPaths: true },
   optimizeDeps: {
     include: [
       "streamdown",
@@ -222,12 +222,12 @@ const config = defineConfig({
       // gives the cycle a single initialisation order.
       inlineDynamicImports: true,
     }),
-    viteTsConfigPaths({
-      projects: ["./tsconfig.json"],
-    }),
     tailwindcss(),
     tanstackStart({ pages: [SHELL_PAGE] }),
-    viteReact(),
+    // React Compiler via oxc-transform-react, the Rust port. Upstream still
+    // marks it experimental; the fallback is `@rolldown/plugin-babel` with
+    // plugin-react's `reactCompilerPreset()`, which runs the Babel compiler.
+    viteReact({ compiler: true }),
   ],
 })
 

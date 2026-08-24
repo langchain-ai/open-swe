@@ -11,10 +11,10 @@ describe("requiresResponsesLite", () => {
       "gpt-daybreak-blue-latest",
       "codex-auto-review",
     ]) {
-      expect(requiresResponsesLite(model), model).toBe(true)
+      expect(requiresResponsesLite(model)).toBe(true)
     }
     for (const model of ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.2"]) {
-      expect(requiresResponsesLite(model), model).toBe(false)
+      expect(requiresResponsesLite(model)).toBe(false)
     }
     expect(requiresResponsesLite(undefined)).toBe(false)
   })
@@ -61,7 +61,10 @@ describe("adaptCodexPayload", () => {
   })
 
   it("leaves a payload without instruction turns untouched", () => {
-    const payload = { model: "gpt-5.6-sol", input: [{ role: "user", content: "Go." }] }
+    const payload = {
+      model: "gpt-5.6-sol",
+      input: [{ role: "user", content: "Go." }],
+    }
 
     expect(adaptCodexPayload(payload)).toBe(payload)
   })

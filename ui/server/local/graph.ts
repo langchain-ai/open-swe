@@ -34,7 +34,7 @@ export async function graphRequest(
     headers: {
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
-      ...(init.headers ?? {}),
+      ...init.headers,
     },
   })
 }

@@ -266,8 +266,8 @@ class OpenAiOAuthManager {
     return {
       signedIn: Boolean(
         this.credentials &&
-          (this.credentialsSource !== "shared" ||
-            !this.needsRefresh(this.credentials)),
+        (this.credentialsSource !== "shared" ||
+          !this.needsRefresh(this.credentials)),
       ),
     };
   }

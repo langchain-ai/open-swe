@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronUp, Folder, GitBranch } from "lucide-react"
 
@@ -29,12 +29,17 @@ export function ProjectPicker({
   } = useQuery(localBrowseQuery(path, open))
 
   // Each opening starts from the server's default directory.
-  useEffect(() => {
-    if (!open) setPath(null)
-  }, [open])
+  const dismiss = () => {
+    setPath(null)
+    onClose()
+  }
+  const choose = (cwd: string) => {
+    setPath(null)
+    onChoose(cwd)
+  }
 
   return (
-    <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
+    <Sheet open={open} onOpenChange={(next) => !next && dismiss()}>
       <SheetPopup side="right" className="flex w-[28rem] flex-col gap-3 p-4">
         <div className="flex flex-col gap-1">
           <h2 className="text-base font-medium">Choose a project</h2>
@@ -87,12 +92,12 @@ export function ProjectPicker({
         </ScrollArea>
 
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={dismiss}>
             Cancel
           </Button>
           <Button
             disabled={!listing || isFetching}
-            onClick={() => listing && onChoose(listing.path)}
+            onClick={() => listing && choose(listing.path)}
           >
             Use this folder
           </Button>

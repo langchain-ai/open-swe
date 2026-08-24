@@ -131,8 +131,10 @@ export function AgentsThreadsPage({
     { staleWhileRevalidate: true }
   )
 
+  // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => setSearch(filters.q ?? ""), [filters.q])
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     setPersonalOrder(filters.order ?? storedColumnOrder(filters.group))
   }, [filters.group, filters.order])
 

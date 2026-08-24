@@ -16,7 +16,6 @@ const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
   closeAllTerminals,
   configureTerminalIpc,
-  closeThreadTerminals,
 } = require("./terminal-manager.cjs");
 const { readProjects } = require("./project-store.cjs");
 const { beginLogin } = require("./login-server.cjs");
@@ -411,7 +410,8 @@ async function completeExternalLogin(verifier, code) {
     throw new Error("Backend returned no session");
   }
   const runtimeOrigin = applicationSupervisor?.origin();
-  if (!runtimeOrigin) throw new Error("Desktop application server is not running");
+  if (!runtimeOrigin)
+    throw new Error("Desktop application server is not running");
   await session.defaultSession.cookies.set({
     url: hostedSessionCookieUrl(runtimeOrigin),
     name: SESSION_COOKIE_NAME,
@@ -560,8 +560,12 @@ function createSetupWindow() {
         const previousRuntimeOrigin = applicationSupervisor?.origin();
         if (previousUrl) await clearBackendCookies(previousUrl);
         if (previousRuntimeOrigin) {
-          await clearBackendCookies(hostedSessionCookieUrl(previousRuntimeOrigin));
-          await session.defaultSession.clearStorageData({ origin: previousRuntimeOrigin });
+          await clearBackendCookies(
+            hostedSessionCookieUrl(previousRuntimeOrigin),
+          );
+          await session.defaultSession.clearStorageData({
+            origin: previousRuntimeOrigin,
+          });
         }
         await applicationSupervisor?.setBackendUrl(backendUrl);
       }
@@ -664,7 +668,7 @@ if (!hasSingleInstanceLock) {
       backendUrl,
       env: {
         OPEN_SWE_LOCAL_PROJECTS_FILE: projectsPath(),
-        ...(openAiOAuth?.backendEnv() || {}),
+        ...openAiOAuth?.backendEnv(),
       },
     });
     configurePermissions();

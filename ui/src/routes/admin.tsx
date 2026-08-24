@@ -344,15 +344,14 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
   const total = mappings.data?.total ?? 0
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
-  useEffect(() => {
-    if (!mappings.isFetching && page > pageCount) {
-      setPage(pageCount)
-    }
-  }, [mappings.isFetching, page, pageCount])
-
   const remove = useMutation({
     mutationFn: (gh: string) => api.adminDeleteUserMapping(gh),
-    onSuccess: () => void mappings.refetch(),
+    onSuccess: () => {
+      setPage((current) =>
+        Math.min(current, Math.max(1, Math.ceil((total - 1) / PAGE_SIZE)))
+      )
+      void mappings.refetch()
+    },
     onError: (e: Error) => setError(e.message),
   })
 
@@ -619,6 +618,7 @@ function PRTraceResolutionSection() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     setProjectDraft(settings.data?.review_tracing_project ?? "")
   }, [settings.data?.review_tracing_project])
 
@@ -893,6 +893,7 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
   const [defaultRepoDraft, setDefaultRepoDraft] = useState("")
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     setDefaultRepoDraft(settings.data?.default_repo ?? "")
   }, [settings.data?.default_repo])
 
@@ -1106,6 +1107,7 @@ function RolePicker({
   const [localEffort, setLocalEffort] = useState<string>(effort ?? "")
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     setLocalModel(model ?? inheritFallback)
     setLocalEffort(effort ?? "")
   }, [model, effort, inheritFallback])

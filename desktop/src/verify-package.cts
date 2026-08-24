@@ -46,7 +46,9 @@ exports.forbiddenRuntimeFiles = forbiddenRuntimeFiles;
 function verifyLocalBackend(localBackendRoot) {
   const entrypoint = path.join(localBackendRoot, "dist", "bin.js");
   if (!fs.existsSync(entrypoint)) {
-    throw new Error(`Desktop package is missing local backend file: ${entrypoint}`);
+    throw new Error(
+      `Desktop package is missing local backend file: ${entrypoint}`,
+    );
   }
 
   // The packaged server runs on the Electron binary in Node mode, which is what
@@ -86,7 +88,12 @@ exports.default = async function verifyPackage(context) {
   const productName = context.packager.appInfo.productFilename;
   const resourcesRoot =
     context.electronPlatformName === "darwin"
-      ? path.join(context.appOutDir, `${productName}.app`, "Contents", "Resources")
+      ? path.join(
+          context.appOutDir,
+          `${productName}.app`,
+          "Contents",
+          "Resources",
+        )
       : path.join(context.appOutDir, "resources");
   verifyLocalBackend(path.join(resourcesRoot, "local-backend"));
 };

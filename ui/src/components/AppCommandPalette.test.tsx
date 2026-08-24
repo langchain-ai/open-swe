@@ -3,10 +3,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { AppCommandPalette } from "./AppCommandPalette"
 import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "@/lib/appCommands"
-import { AppCommandPalette } from "./AppCommandPalette"
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
