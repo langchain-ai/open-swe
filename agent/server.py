@@ -83,7 +83,11 @@ from .input_messages import append_message_data
 from .integrations.corridor_mcp import load_corridor_tools
 from .integrations.currents_tools import load_currents_tools
 from .integrations.datadog_mcp import load_datadog_tools
-from .integrations.langsmith import _configure_github_proxy, _get_sandbox_proxy_config
+from .integrations.langsmith import (
+    _configure_github_proxy,
+    _get_sandbox_proxy_config,
+    create_langsmith_sandbox_from_params,
+)
 from .integrations.langsmith_tools import load_langsmith_tools
 from .integrations.notion_mcp import load_notion_tools
 from .integrations.stagehand_browser import load_browser_tools
@@ -155,6 +159,7 @@ from .tools import (
     recreate_sandbox,
     report_platform_issue,
     request_pr_review,
+    sandbox_reset,
     save_environment,
     save_organization_skill,
     save_plan,
@@ -637,6 +642,54 @@ async def ensure_sandbox_for_thread(
     return set_sandbox_backend(thread_id, sandbox_backend)
 
 
+async def reset_sandbox_for_thread(
+    thread_id: str,
+    create_params: dict[str, Any],
+) -> tuple[str, str]:
+    """Bind a thread to a fresh sandbox created from raw provider options."""
+    if os.getenv("SANDBOX_TYPE", "langsmith") != "langsmith":
+        raise ValueError("sandbox_reset is only supported by the LangSmith sandbox provider")
+
+    cached = SANDBOX_BACKENDS.get(thread_id)
+    metadata_sandbox_id = await get_sandbox_id_from_metadata(thread_id)
+    old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
+    if not old_sandbox_id:
+        raise ValueError(f"Thread {thread_id} has no sandbox to reset")
+
+    new_sandbox = await create_langsmith_sandbox_from_params(create_params)
+    if new_sandbox.id == old_sandbox_id:
+        raise RuntimeError("Sandbox provider did not create a distinct sandbox")
+
+    proxy_config = _get_sandbox_proxy_config(create_params)
+    token, expires_at, permissions = await _resolve_proxy_token(None)
+    if not token:
+        raise ValueError("Cannot configure proxy: GitHub App installation token is unavailable")
+    if proxy_config is not None:
+        await _configure_github_proxy(new_sandbox.id, token, base_proxy_config=proxy_config)
+    else:
+        await _configure_github_proxy(new_sandbox.id, token)
+    await _configure_git_identity(new_sandbox)
+    sandbox_metadata: dict[str, Any] = {
+        "sandbox_id": new_sandbox.id,
+        _SANDBOX_PROXY_CONFIG_METADATA_KEY: proxy_config,
+    }
+    await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
+    set_sandbox_backend(thread_id, new_sandbox)
+    record_proxy_token_expiry(
+        thread_id,
+        expires_at,
+        permissions=permissions,
+        base_proxy_config=proxy_config,
+    )
+    logger.info(
+        "Reset thread %s from sandbox %s to sandbox %s",
+        thread_id,
+        old_sandbox_id,
+        new_sandbox.id,
+    )
+    return old_sandbox_id, new_sandbox.id
+
+
 async def recreate_sandbox_for_thread(
     thread_id: str,
     *,
@@ -697,6 +750,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "manage_thread",
         "open_pull_request",
         "recreate_sandbox",
+        "sandbox_reset",
         "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
@@ -846,6 +900,7 @@ async def _observability_authorized(config: RunnableConfig, profile_login: str |
 
 # Added to an admin thread's tools; see the admin-thread section of the prompt.
 ADMIN_TOOLS = (
+    sandbox_reset,
     list_environments,
     save_environment,
     capture_environment_snapshot,

@@ -270,6 +270,28 @@ async def test_agent_includes_recreate_sandbox_tool() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_includes_sandbox_reset_only_in_admin_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.tools import sandbox_reset
+
+    captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert sandbox_reset not in tools
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable["admin_thread"] = True
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert sandbox_reset in tools
+
+
+@pytest.mark.asyncio
 async def test_agent_includes_sandbox_file_download_url_tools() -> None:
     from agent.tools import create_sandbox_file_download_url, output_iframe
 

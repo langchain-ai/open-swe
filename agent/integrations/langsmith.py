@@ -441,6 +441,42 @@ async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandbox
         raise
 
 
+async def create_langsmith_sandbox_from_params(
+    create_params: dict[str, Any],
+) -> SandboxBackendProtocol:
+    """Create a ready LangSmith sandbox from an unfiltered create-body object."""
+    params = _merge_sandbox_create_extra_fields(create_params)
+    sdk_keys = {
+        "snapshot_id",
+        "snapshot_name",
+        "name",
+        "timeout",
+        "wait_for_ready",
+        "idle_ttl_seconds",
+        "delete_after_stop_seconds",
+        "vcpus",
+        "mem_bytes",
+        "fs_capacity_bytes",
+        "mount_config",
+        "proxy_config",
+    }
+    sdk_params = {key: value for key, value in params.items() if key in sdk_keys}
+    extra_params = {key: value for key, value in params.items() if key not in sdk_keys}
+    wait_for_ready = sdk_params.get("wait_for_ready", True)
+    timeout = sdk_params.get("timeout", 180)
+    if not isinstance(timeout, int):
+        raise ValueError("timeout must be an integer")
+
+    async with AsyncSandboxClient(
+        api_key=_get_sandbox_api_key(), api_endpoint=_get_sandbox_api_endpoint()
+    ) as client:
+        _install_create_extra_fields(client, extra_params)
+        sandbox = await client.create_sandbox(**sdk_params)
+        if wait_for_ready is False:
+            sandbox = await client.wait_for_sandbox(sandbox.name, timeout=timeout)
+        return TimeoutLangSmithSandbox(sandbox.to_sync())
+
+
 async def create_langsmith_sandbox(
     sandbox_id: str | None = None,
     github_token: str | None = None,
