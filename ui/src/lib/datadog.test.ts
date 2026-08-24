@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { initializeDatadogRum } from "./datadog"
+import { getDatadogSessionLink, initializeDatadogRum } from "./datadog"
 import type { RumInitConfiguration } from "@datadog/browser-rum"
 
-function rumClient() {
-  return { init: vi.fn<(configuration: RumInitConfiguration) => void>() }
+function rumClient(sessionId?: string) {
+  return {
+    init: vi.fn<(configuration: RumInitConfiguration) => void>(),
+    getInternalContext: vi.fn(() =>
+      sessionId ? { session_id: sessionId } : undefined
+    ),
+  }
 }
 
 function rumLoader(rum = rumClient()) {
@@ -21,7 +26,7 @@ describe("initializeDatadogRum", () => {
   })
 
   it("initializes RUM from public environment settings", async () => {
-    const { rum, load } = rumLoader()
+    const { rum, load } = rumLoader(rumClient("session/id"))
 
     await initializeDatadogRum(
       {
@@ -92,6 +97,9 @@ describe("initializeDatadogRum", () => {
       },
       scripts: [{ source_url: "https://example.com/script.js" }],
     })
+    expect(getDatadogSessionLink()).toBe(
+      "https://app.datadoghq.eu/rum/explorer?query=%40session.id%3Asession%2Fid&tab=session"
+    )
   })
 
   it("uses safe defaults for invalid sample rates", async () => {
