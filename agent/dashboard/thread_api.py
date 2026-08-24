@@ -1925,12 +1925,13 @@ async def cancel_dashboard_thread(
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
 
-    queued = await client.store.get_item(("queue", thread_id), "pending_messages")
-    queued_messages = queued.get("value", {}).get("messages", []) if queued else []
     metadata_update: dict[str, Any] = {
         "latest_run_status": "interrupted",
         "updated_at_ms": _now_ms(),
     }
+    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    queued = await client.store.get_item(("queue", thread_id), "pending_messages")
+    queued_messages = queued.get("value", {}).get("messages", []) if queued else []
     if queued_messages:
         try:
             configurable = await _build_dashboard_configurable(thread_id, login, metadata)
@@ -1948,7 +1949,8 @@ async def cancel_dashboard_thread(
         run_id = run.get("run_id") if isinstance(run, dict) else None
         metadata_update.update(latest_run_status="pending", latest_run_id=run_id)
 
-    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    if queued_messages:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     thread = await client.threads.get(thread_id)
     return await _thread_summary(thread)
 
