@@ -20,7 +20,7 @@ import asyncio
 import dataclasses
 import json
 import logging
-from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Annotated, Any, NotRequired, cast
 
@@ -160,15 +160,17 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
         self._group_of: dict[str, str] = {}
         self._resolved: dict[str, _Resolved] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._loading: dict[str, asyncio.Task[Any]] = {}
 
         for group, spec in groups.items():
             entry = spec if isinstance(spec, ToolGroup) else ToolGroup.from_tools(spec)
             names = [name for name in entry.tool_names if name not in self._always_visible]
-            if not names:
+            # A group that cannot name its tools without a remote call still
+            # registers: loading discovers them, and `_register` adds them then.
+            if not names and entry.prebuilt is not None:
                 continue
             self._groups[group] = entry
-            for name in names:
-                self._group_of[name] = group
+            self._register(group, names)
             if entry.prebuilt is not None:
                 # Already built, so full-text search can read their descriptions
                 # without any remote call.
@@ -209,7 +211,29 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
                 tools = []
             resolved.tools = {tool.name: tool for tool in tools}
             resolved.done = True
+            self._register(group, resolved.tools)
         return resolved.tools
+
+    def _register(self, group: str, names: Iterable[str]) -> None:
+        for name in names:
+            if name not in self._always_visible:
+                self._group_of[name] = group
+
+    def start_loading(self) -> None:
+        """Begin building every unbuilt group, without waiting for any of it.
+
+        Nothing on the critical path awaits these. A search matches whatever has
+        landed by the time it runs, which — since loading starts a model call or
+        more earlier — is normally everything, and is how a query reaches a tool
+        whose name it does not already know.
+        """
+        for group in self._groups:
+            if (self._resolved.get(group) or _Resolved()).done:
+                continue
+            task = self._loading.get(group)
+            if task is not None and not task.done():
+                continue
+            self._loading[group] = asyncio.create_task(self._resolve(group))
 
     async def _tool(self, name: str) -> BaseTool | None:
         group = self._group_of.get(name)
@@ -331,25 +355,16 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
         )
 
     async def _search(self, query: str, limit: int) -> list[BaseTool]:
-        """Full-text match over tool name and description.
+        """Full-text match over the name and description of every built tool.
 
-        Groups that are already built are searched directly. A group whose tools
-        still need a remote lookup is built first only when the query names it,
-        so an unrelated search never pays for it.
+        A group still loading is simply absent from this result rather than
+        something to wait on; it will be there for the next search.
         """
         terms = [term for term in query.lower().replace(",", " ").split() if term]
         bounded = max(1, min(int(limit or _DEFAULT_LIMIT), _MAX_LIMIT))
         if not terms:
             return []
-
-        pending = {
-            group
-            for group, entry in self._groups.items()
-            if not (self._resolved.get(group) or _Resolved()).done
-            and self._names_group(group, entry, terms)
-        }
-        if pending:
-            await asyncio.gather(*(self._resolve(group) for group in sorted(pending)))
+        self.start_loading()
 
         scored: list[tuple[int, str, BaseTool]] = []
         for group in sorted(self._groups):
@@ -361,12 +376,6 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
                     scored.append((-score, name, tool))
         scored.sort(key=lambda item: (item[0], item[1]))
         return [tool for _, _, tool in scored[:bounded]]
-
-    @staticmethod
-    def _names_group(group: str, entry: ToolGroup, terms: Sequence[str]) -> bool:
-        """Whether the query points at an unbuilt group by name, summary, or tool name."""
-        haystack = f"{group} {entry.summary} {' '.join(entry.tool_names)}".lower()
-        return any(term in haystack for term in terms)
 
     @staticmethod
     def _score(terms: Sequence[str], name: str, description: str) -> int:
@@ -482,6 +491,11 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
                 status="error",
             )
         return await handler(request.override(tool=tool))
+
+    async def abefore_agent(self, state: ToolSearchState, runtime: Runtime) -> None:  # noqa: ARG002
+        """Start building the tool catalog while the first model call runs."""
+        self.start_loading()
+        return None
 
     async def abefore_model(self, state: ToolSearchState, runtime: Runtime) -> None:  # noqa: ARG002
         """Rebuild the groups a resumed run already searched."""

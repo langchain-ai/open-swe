@@ -1,5 +1,6 @@
 """The model sees two tools; everything downstream sees the real ones."""
 
+import asyncio
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
@@ -141,27 +142,66 @@ async def test_describe_names_what_it_could_not_find() -> None:
     assert "nope" in message.content
 
 
-async def test_a_group_needing_a_remote_call_waits_for_a_query_that_names_it() -> None:
-    builds = 0
+async def test_loading_starts_without_blocking_the_run() -> None:
+    release = asyncio.Event()
 
     async def load() -> list[BaseTool]:
-        nonlocal builds
-        builds += 1
+        await release.wait()
         return [_tool("notion-search", "Search Notion pages")]
 
     middleware = ToolSearchMiddleware(
-        {
-            "Slack": [_tool("slack_thread_reply", "Reply in the Slack thread")],
-            "Notion": ToolGroup(tool_names=("notion-search",), load=load, summary="Notion pages"),
-        }
+        {"Notion": ToolGroup(tool_names=("notion-search",), load=load, summary="Notion pages")}
     )
 
-    await middleware._search("slack reply", 5)
-    assert builds == 0
+    # Returns while the load is still outstanding, so the first model call is
+    # not waiting on a handshake.
+    await asyncio.wait_for(middleware.abefore_agent(cast(Any, {}), cast(Any, None)), timeout=1)
+    assert not release.is_set()
 
-    matches = await middleware._search("notion", 5)
-    assert builds == 1
+    # A search does not wait either; the group is simply not there yet.
+    assert await middleware._search("notion pages", 5) == []
+
+    release.set()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    matches = await middleware._search("notion pages", 5)
     assert [tool.name for tool in matches] == ["notion-search"]
+
+
+async def test_a_loaded_description_is_searchable_without_naming_its_group() -> None:
+    """The point of loading early: reach a tool whose name the query never says."""
+
+    async def load() -> list[BaseTool]:
+        return [_tool("notion-search", "Look up an internal knowledge base article.")]
+
+    middleware = ToolSearchMiddleware(
+        {"Notion": ToolGroup(tool_names=("notion-search",), load=load, summary="Notion pages")}
+    )
+    await middleware.abefore_agent(cast(Any, {}), cast(Any, None))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    matches = await middleware._search("knowledge base article", 5)
+    assert [tool.name for tool in matches] == ["notion-search"]
+
+
+async def test_a_group_that_cannot_name_its_tools_registers_them_once_loaded() -> None:
+    async def load() -> list[BaseTool]:
+        return [_tool("datadog_search_logs", "Search Datadog logs for errors.")]
+
+    middleware = ToolSearchMiddleware(
+        {"Datadog": ToolGroup(tool_names=(), load=load, summary="Datadog metrics and logs")}
+    )
+    assert middleware.proxied_names == frozenset()
+
+    await middleware.abefore_agent(cast(Any, {}), cast(Any, None))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert middleware.proxied_names == {"datadog_search_logs"}
+    assert [tool.name for tool in await middleware._search("datadog errors", 5)] == [
+        "datadog_search_logs"
+    ]
 
 
 async def _forward(middleware: ToolSearchMiddleware, request: _Request, response: ModelResponse):
@@ -287,7 +327,7 @@ async def test_a_proxied_call_is_routed_to_the_real_tool() -> None:
 
 
 @pytest.mark.parametrize("query", ["", "   "])
-async def test_an_empty_query_never_triggers_a_remote_load(query: str) -> None:
+async def test_an_empty_query_returns_nothing(query: str) -> None:
     builds = 0
 
     async def load() -> list[BaseTool]:
