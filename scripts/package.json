@@ -1,0 +1,24 @@
+{
+  "name": "@t3tools/scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@electron/asar": "^3.4.1",
+    "@t3tools/contracts": "workspace:*",
+    "@t3tools/shared": "workspace:*",
+    "@t3tools/tailscale": "workspace:*",
+    "effect": "catalog:",
+    "pngjs": "7.0.0",
+    "yaml": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/pngjs": "6.0.5",
+    "vite-plus": "catalog:"
+  }
+}

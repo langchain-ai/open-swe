@@ -1,0 +1,43 @@
+{
+  "name": "effect-codex-app-server",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts"
+    },
+    "./schema": {
+      "types": "./src/schema.ts",
+      "import": "./src/schema.ts"
+    },
+    "./rpc": {
+      "types": "./src/rpc.ts",
+      "import": "./src/rpc.ts"
+    },
+    "./protocol": {
+      "types": "./src/protocol.ts",
+      "import": "./src/protocol.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vp test run",
+    "generate": "node scripts/generate.ts",
+    "probe": "node test/examples/codex-app-server-probe.ts"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/openapi-generator": "catalog:",
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

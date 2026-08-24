@@ -17,8 +17,6 @@
 
 # production
 /build
-/desktop/build
-/desktop/resources/local-backend/
 /dist
 **/dist
 .turbo/
@@ -82,3 +80,33 @@ logs/
 test-results/
 playwright-report/
 blob-report/
+
+# --- t3code client (apps/, packages/, native/, scripts/) ---
+.bun
+*.log
+*.tsbuildinfo
+apps/*/dist
+packages/*/dist
+.astro
+.logs/
+release/
+release-mock/
+.t3
+.idea/
+apps/web/.playwright
+apps/web/playwright-report
+apps/web/src/components/__screenshots__
+.vitest-*
+__screenshots__/
+.tanstack
+squashfs-root/
+.gstack/
+.plans/
+dist-electron/
+.electron-runtime/
+.showcase/
+artifacts/app-store/screenshots/
+.github/pr-assets/
+native/**/target/
+.alchemy/
+!.env.example
