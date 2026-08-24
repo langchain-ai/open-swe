@@ -227,6 +227,13 @@ def model_supports_effort(model_id: str, effort: str) -> bool:
     return False
 
 
+def default_effort_for(model_id: str) -> str | None:
+    for m in SUPPORTED_MODELS:
+        if m["id"] == model_id:
+            return m["default_effort"]
+    return None
+
+
 def model_supports_images(model_id: str) -> bool:
     for m in SUPPORTED_MODELS:
         if m["id"] == model_id:

@@ -3,6 +3,16 @@ import pytest
 from agent.prompt import construct_system_prompt
 
 
+def test_desktop_prompt_uses_virtual_project_root() -> None:
+    prompt = construct_system_prompt(
+        working_dir="/Users/example/project",
+        source="desktop",
+    )
+
+    assert "address that virtual root as `/`" in prompt
+    assert "never pass the host path or `/workspace`" in prompt
+
+
 def test_prompt_restricts_edits_to_allowed_github_orgs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", " LangChain-AI,anthropics,langchain-ai ")
 

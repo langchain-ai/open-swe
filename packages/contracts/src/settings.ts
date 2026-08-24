@@ -531,6 +531,57 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
 );
 export type OpenCodeSettings = typeof OpenCodeSettings.Type;
 
+export const LangGraphSettings = makeProviderSettingsSchema(
+  {
+    // Off by default like the other non-CLI bindings: the driver attaches to
+    // a LangGraph server the user runs themselves, so there is nothing to
+    // probe on a fresh install until they point it somewhere.
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    serverUrl: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("http://127.0.0.1:2024")),
+      Schema.annotateKey({
+        title: "Server URL",
+        description: "Base URL of the LangGraph server running the agent graph.",
+        providerSettingsForm: {
+          placeholder: "http://127.0.0.1:2024",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    graphId: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("agent")),
+      Schema.annotateKey({
+        title: "Graph",
+        description: "Graph id to run, as declared in langgraph.json.",
+        providerSettingsForm: { placeholder: "agent", clearWhenEmpty: "omit" },
+      }),
+    ),
+    apiKey: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "API key",
+        description: "Sent as both x-api-key and a bearer token. Leave blank for an unauthenticated server. Stored in plain text on disk.",
+        providerSettingsForm: {
+          control: "password",
+          placeholder: "Optional",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    customModels: Schema.Array(Schema.String).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+  },
+  {
+    order: ["serverUrl", "graphId", "apiKey"],
+  },
+);
+export type LangGraphSettings = typeof LangGraphSettings.Type;
+
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
@@ -673,6 +724,7 @@ export const ServerSettings = Schema.Struct({
     cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     grok: GrokSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    langgraph: LangGraphSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // New driver-agnostic instance map. Keyed by `ProviderInstanceId`; values
   // are `ProviderInstanceConfig` envelopes. The driver-specific config blob
@@ -812,6 +864,14 @@ const GrokSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const LangGraphSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  serverUrl: Schema.optionalKey(TrimmedString),
+  graphId: Schema.optionalKey(TrimmedString),
+  apiKey: Schema.optionalKey(TrimmedString),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
 const OpenCodeSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
@@ -861,6 +921,7 @@ export const ServerSettingsPatch = Schema.Struct({
       cursor: Schema.optionalKey(CursorSettingsPatch),
       grok: Schema.optionalKey(GrokSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
+      langgraph: Schema.optionalKey(LangGraphSettingsPatch),
     }),
   ),
   // Whole-map replacement for the new instance config. Patching individual

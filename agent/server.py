@@ -62,6 +62,7 @@ from .dashboard.environments import (
 from .dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
+    default_effort_for,
     gate_fable_model,
     model_supports_effort,
 )
@@ -185,6 +186,7 @@ from .utils.authorship import (
 )
 from .utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
 from .utils.deferred_model import make_deferred_error_model
+from .utils.gateway import gateway_env_default
 from .utils.github_app import get_github_app_installation_token_with_expiry
 from .utils.github_org_membership import is_user_active_org_member
 from .utils.github_proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
@@ -1407,7 +1409,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
         team_defaults = (default_model_pair(), default_model_pair())
         title_defaults = team_defaults[0]
-        use_gateway = False
+        use_gateway = gateway_env_default()
         profile = None
         fable_enabled = False
     else:
@@ -1475,6 +1477,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
     if canonical_per_thread is not None:
         per_thread_model, per_thread_effort = canonical_per_thread
+    # A caller that names a model but no effort still means to choose that model;
+    # give it the model's own default rather than dropping the override and
+    # silently running on the team default model instead.
+    if per_thread_effort is None and isinstance(per_thread_model, str):
+        per_thread_effort = default_effort_for(per_thread_model)
     if (
         isinstance(per_thread_model, str)
         and per_thread_model in SUPPORTED_MODEL_IDS

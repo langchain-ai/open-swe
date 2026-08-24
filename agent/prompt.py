@@ -133,7 +133,7 @@ You are operating in a remote Linux sandbox at `{working_dir}` — use it as you
 
 DESKTOP_WORKING_ENV_SECTION = """### Working Environment
 
-You are operating directly in the selected project at `{working_dir}` on the user's local machine. The project is already available and is your filesystem root. Do not clone it or change its git identity."""
+You are operating directly in the selected project at `{working_dir}` on the user's local machine. The project is already available and is your filesystem root. For file tools, address that virtual root as `/`; never pass the host path or `/workspace`. Do not clone it or change its git identity."""
 
 
 DASHBOARD_CONTEXT_SECTION = """---
