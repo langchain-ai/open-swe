@@ -12,7 +12,6 @@ import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
   SidebarThreads,
-  ThreadTurnDiffOptions,
   ThreadsPage,
   ThreadsPageParams,
 } from "./api"
@@ -43,11 +42,6 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
     ["agent-threads", threadId, "working-tree-diff"] as const,
-  runDiff: (
-    threadId: string,
-    turnKey: string,
-    options: ThreadTurnDiffOptions = {}
-  ) => ["agent-threads", threadId, "run-diff", turnKey, options] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
   page: (params: ThreadsPageParams) =>
@@ -575,21 +569,6 @@ export function useAgentThreadWorkingTreeDiff(
   }, [enabled, pollWhileRunning, refetch])
 
   return query
-}
-
-export function useAgentThreadRunDiff(
-  threadId: string,
-  turnKey: string,
-  enabled: boolean,
-  options: ThreadTurnDiffOptions = {}
-) {
-  return useQuery({
-    queryKey: agentThreadKeys.runDiff(threadId, turnKey, options),
-    queryFn: () => agentsApi.getThreadRunDiff(threadId, turnKey, options),
-    enabled: enabled && Boolean(threadId),
-    staleTime: 30_000,
-    retry: false,
-  })
 }
 
 export function useWorkflowApprovals(
