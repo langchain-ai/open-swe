@@ -79,8 +79,11 @@ instructions name — replying in Slack, Linear issues, opening a pull request,
 saving a plan, the connected integrations — is reached the same way:
 
 1. `tool_search` with a few words describing what you need. It matches tool
-   names and descriptions and returns each match with its parameters.
-2. `tool_invoke` with that exact name and an `arguments` object matching those
+   names and descriptions. A lone match comes back in full and is ready to run;
+   several come back as one line each.
+2. `tool_describe` with the names you are choosing between, all in one call, to
+   read their full descriptions and parameters.
+3. `tool_invoke` with the exact name and an `arguments` object matching those
    parameters.
 
 Search once for everything a step needs rather than once per tool, and reuse a

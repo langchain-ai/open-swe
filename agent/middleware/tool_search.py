@@ -40,8 +40,10 @@ from langgraph.types import Command
 logger = logging.getLogger(__name__)
 
 TOOL_SEARCH_NAME = "tool_search"
+TOOL_DESCRIBE_NAME = "tool_describe"
 TOOL_INVOKE_NAME = "tool_invoke"
 _DEFAULT_LIMIT = 8
+_SUMMARY_CHARS = 200
 _MAX_LIMIT = 25
 
 
@@ -119,9 +121,22 @@ def _schema_of(tool: BaseTool) -> dict[str, Any]:
 
 
 def _render(tool: BaseTool) -> str:
+    """Everything needed to call the tool."""
     schema = _schema_of(tool)
     parameters = json.dumps(schema, sort_keys=True) if schema else "{}"
     return f"### {tool.name}\n{tool.description.strip()}\n\nparameters: {parameters}"
+
+
+def _summarize(tool: BaseTool) -> str:
+    """Enough to choose between candidates, and no more.
+
+    A full render of every match is most of a search result's cost while the
+    model is still deciding which tool it wants.
+    """
+    paragraph = " ".join((tool.description or "").strip().split("\n\n")[0].split())
+    if len(paragraph) > _SUMMARY_CHARS:
+        paragraph = paragraph[:_SUMMARY_CHARS].rsplit(" ", 1)[0].rstrip(" ,.;:") + "…"
+    return f"- {tool.name}: {paragraph}" if paragraph else f"- {tool.name}"
 
 
 class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
@@ -135,7 +150,12 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
         *,
         always_visible: Collection[str] = (),
     ) -> None:
-        self._always_visible = {*always_visible, TOOL_SEARCH_NAME, TOOL_INVOKE_NAME}
+        self._always_visible = {
+            *always_visible,
+            TOOL_SEARCH_NAME,
+            TOOL_DESCRIBE_NAME,
+            TOOL_INVOKE_NAME,
+        }
         self._groups: dict[str, ToolGroup] = {}
         self._group_of: dict[str, str] = {}
         self._resolved: dict[str, _Resolved] = {}
@@ -156,7 +176,7 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
                     tools={tool.name: tool for tool in entry.prebuilt}, done=True
                 )
 
-        self.tools = [self._search_tool(), self._invoke_tool()]
+        self.tools = [self._search_tool(), self._describe_tool(), self._invoke_tool()]
 
     # ---- catalog -------------------------------------------------------
 
@@ -212,8 +232,14 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
                     if self._catalog()
                     else f"No tools matched {query!r}."
                 )
+            elif len(matches) == 1:
+                # Nothing left to choose between, so skip the describe round trip.
+                body = _render(matches[0])
             else:
-                body = "\n\n".join(_render(tool) for tool in matches)
+                body = "\n".join(_summarize(tool) for tool in matches) + (
+                    f"\n\nCall `{TOOL_DESCRIBE_NAME}` with the names you want before "
+                    f"`{TOOL_INVOKE_NAME}`."
+                )
             return Command(
                 update={
                     "searched_tools": [tool.name for tool in matches],
@@ -227,9 +253,53 @@ class ToolSearchMiddleware(AgentMiddleware[ToolSearchState]):
             coroutine=tool_search,
             name=TOOL_SEARCH_NAME,
             description=(
-                "Find the tools available for a task and read their parameters. Search before "
-                "calling anything you have not already seen the parameters for, then run it with "
-                f"`{TOOL_INVOKE_NAME}`.\nAvailable groups:\n" + self._catalog()
+                "Find the tools available for a task. Matches on tool names and descriptions. "
+                "A single match comes back in full and is ready to run; several come back as "
+                f"one line each, so follow up with `{TOOL_DESCRIBE_NAME}` for the ones you want."
+                "\nAvailable groups:\n" + self._catalog()
+            ),
+        )
+
+    def _describe_tool(self) -> BaseTool:
+        async def tool_describe(
+            names: list[str],
+            tool_call_id: Annotated[str, InjectedToolCallId] = "",
+        ) -> Command:
+            found: list[BaseTool] = []
+            missing: list[str] = []
+            for name in names:
+                tool = await self._tool(name)
+                if tool is None:
+                    missing.append(name)
+                else:
+                    found.append(tool)
+            sections = [_render(tool) for tool in found]
+            if missing:
+                sections.append(
+                    f"Not available: {', '.join(sorted(missing))}. "
+                    f"Use `{TOOL_SEARCH_NAME}` to find the right name."
+                )
+            return Command(
+                update={
+                    "searched_tools": [tool.name for tool in found],
+                    "messages": [
+                        ToolMessage(
+                            content="\n\n".join(sections) or "No names given.",
+                            tool_call_id=tool_call_id,
+                            name=TOOL_DESCRIBE_NAME,
+                            status="error" if missing and not found else "success",
+                        )
+                    ],
+                }
+            )
+
+        return StructuredTool.from_function(
+            coroutine=tool_describe,
+            name=TOOL_DESCRIBE_NAME,
+            description=(
+                "Read the full description and parameters of tools found with "
+                f"`{TOOL_SEARCH_NAME}`. Pass every name you are considering at once rather than "
+                "one per turn."
             ),
         )
 

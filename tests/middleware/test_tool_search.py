@@ -10,6 +10,8 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import Command
 
 from agent.middleware.tool_search import (
+    _SUMMARY_CHARS,
+    TOOL_DESCRIBE_NAME,
     TOOL_INVOKE_NAME,
     TOOL_SEARCH_NAME,
     ToolGroup,
@@ -52,7 +54,11 @@ def _middleware(**kwargs: Any) -> ToolSearchMiddleware:
 def test_the_model_only_ever_sees_search_and_invoke() -> None:
     middleware = _middleware()
 
-    assert [tool.name for tool in middleware.tools] == [TOOL_SEARCH_NAME, TOOL_INVOKE_NAME]
+    assert [tool.name for tool in middleware.tools] == [
+        TOOL_SEARCH_NAME,
+        TOOL_DESCRIBE_NAME,
+        TOOL_INVOKE_NAME,
+    ]
     assert middleware.proxied_names == {
         "slack_thread_reply",
         "slack_add_reaction",
@@ -70,7 +76,7 @@ async def test_search_matches_the_description_not_only_the_name() -> None:
     assert [tool.name for tool in by_name] == ["linear_comment"]
 
 
-async def test_search_returns_the_parameters_the_model_needs_to_call() -> None:
+async def test_a_lone_match_comes_back_ready_to_run() -> None:
     middleware = _middleware()
     search = cast(Any, middleware.tools[0]).coroutine
 
@@ -82,6 +88,57 @@ async def test_search_returns_the_parameters_the_model_needs_to_call() -> None:
     assert "slack_add_reaction" in body
     assert "parameters:" in body
     assert update["searched_tools"] == ["slack_add_reaction"]
+
+
+async def test_several_matches_come_back_one_line_each() -> None:
+    middleware = _middleware()
+    search = cast(Any, middleware.tools[0]).coroutine
+
+    command = await search(query="slack", limit=5, tool_call_id="s1")
+
+    body = cast(dict[str, Any], command.update)["messages"][0].content
+    assert "- slack_thread_reply: Reply in the Slack thread" in body
+    assert "- slack_add_reaction: Add an emoji reaction to a message" in body
+    # Choosing does not need the parameters yet.
+    assert "parameters:" not in body
+    assert TOOL_DESCRIBE_NAME in body
+
+
+async def test_a_summary_stops_at_the_first_paragraph_and_200_characters() -> None:
+    long = "First line.\n" + "x" * 40 + "\n\nSecond paragraph should not appear."
+    middleware = ToolSearchMiddleware({"Group": [_tool("wordy", long), _tool("other", "a" * 400)]})
+    search = cast(Any, middleware.tools[0]).coroutine
+
+    command = await search(query="wordy other", limit=5, tool_call_id="s1")
+
+    body = cast(dict[str, Any], command.update)["messages"][0].content
+    assert "Second paragraph" not in body
+    for line in body.splitlines():
+        if line.startswith("- "):
+            assert len(line) <= len("- other: ") + _SUMMARY_CHARS + 1
+
+
+async def test_describe_returns_the_full_entry_for_every_name_at_once() -> None:
+    middleware = _middleware()
+    describe = cast(Any, middleware.tools[1]).coroutine
+
+    command = await describe(names=["slack_add_reaction", "linear_comment"], tool_call_id="d1")
+
+    update = cast(dict[str, Any], command.update)
+    body = update["messages"][0].content
+    assert body.count("parameters:") == 2
+    assert update["searched_tools"] == ["slack_add_reaction", "linear_comment"]
+
+
+async def test_describe_names_what_it_could_not_find() -> None:
+    middleware = _middleware()
+    describe = cast(Any, middleware.tools[1]).coroutine
+
+    command = await describe(names=["nope"], tool_call_id="d1")
+
+    message = cast(dict[str, Any], command.update)["messages"][0]
+    assert message.status == "error"
+    assert "nope" in message.content
 
 
 async def test_a_group_needing_a_remote_call_waits_for_a_query_that_names_it() -> None:
