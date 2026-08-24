@@ -65,17 +65,35 @@ describe("initializeDatadogRum", () => {
       view: {
         id: "view-id",
         url: "https://example.com/agents/thread-id?access=secret#message",
-        referrer: "https://example.com/login?code=secret",
+        referrer:
+          "https://example.com/agents/reviews/langchain-ai/open-swe/2203?tab=files",
       },
       resource: {
         type: "fetch",
-        url: "https://example.com/attachment?token=secret#preview",
+        url: "https://example.com/langchain-ai/open-swe/pull/2203?token=secret#preview",
       },
       performance: {
         lcp: {
-          resource_url: "https://example.com/image?signature=secret",
+          resource_url: "https://cdn.example.com/image?signature=secret",
         },
       },
+      routes: [
+        { url: "/agents/thread-id/plan" },
+        { url: "/agents/local/session-id" },
+        { url: "/agents/automations/schedule-id" },
+        { url: "/review/repositories/langchain-ai" },
+        { url: "/agents/environments" },
+        { url: "/agents/instructions" },
+        { url: "/agents/snapshots" },
+      ],
+      urlClasses: [
+        { url: "https://github.com/langchain-ai/open-swe/pull/2203?tab=files" },
+        { url: "//example.com/agents/another-thread?secret=value" },
+        { url: "assets/image.png?secret=value" },
+        { url: "blob:https://example.com/id?secret=value" },
+        { url: "data:image/png;base64,abc?secret=value" },
+        { url: "not a url?secret=value" },
+      ],
       scripts: [
         { source_url: "https://example.com/script.js?cache=secret#module" },
       ],
@@ -88,13 +106,30 @@ describe("initializeDatadogRum", () => {
     )
     expect(resourceEvent).toMatchObject({
       view: {
-        url: "https://example.com/agents/thread-id",
-        referrer: "https://example.com/login",
+        url: "https://example.com/agents/:threadId",
+        referrer: "https://example.com/agents/reviews/:owner/:repo/:number",
       },
-      resource: { url: "https://example.com/attachment" },
+      resource: { url: "https://example.com/:owner/:repo/pull/:number" },
       performance: {
-        lcp: { resource_url: "https://example.com/image" },
+        lcp: { resource_url: "https://cdn.example.com/image" },
       },
+      routes: [
+        { url: "/agents/:threadId/plan" },
+        { url: "/agents/local/:sessionId" },
+        { url: "/agents/automations/:scheduleId" },
+        { url: "/review/repositories/:owner" },
+        { url: "/agents/environments" },
+        { url: "/agents/instructions" },
+        { url: "/agents/snapshots" },
+      ],
+      urlClasses: [
+        { url: "https://github.com/langchain-ai/open-swe/pull/2203" },
+        { url: "//example.com/agents/:threadId" },
+        { url: "assets/image.png" },
+        { url: "blob:https://example.com/id" },
+        { url: "data:image/png;base64,abc" },
+        { url: "not a url" },
+      ],
       scripts: [{ source_url: "https://example.com/script.js" }],
     })
     expect(getDatadogSessionLink()).toBe(

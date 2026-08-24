@@ -53,12 +53,59 @@ export function subscribeToDatadogInitialization(
   return () => initializationListeners.delete(listener)
 }
 
-function stripUrlDetails(url: string): string {
-  return url.split(/[?#]/, 1)[0] ?? ""
+function templateDashboardPath(pathname: string): string {
+  if (/^\/agents\/reviews\/[^/]+\/[^/]+\/[^/]+\/?$/.test(pathname))
+    return "/agents/reviews/:owner/:repo/:number"
+  if (/^\/agents\/local\/[^/]+\/?$/.test(pathname))
+    return "/agents/local/:sessionId"
+  if (/^\/agents\/automations\/(?!new\/?$)[^/]+\/?$/.test(pathname))
+    return "/agents/automations/:scheduleId"
+  if (/^\/agents\/[^/]+\/plan\/?$/.test(pathname))
+    return "/agents/:threadId/plan"
+  if (
+    /^\/agents\/[^/]+\/?$/.test(pathname) &&
+    !/^\/agents\/(automations|environments|instructions|local|reviews|skills|snapshots|threads)\/?$/.test(
+      pathname
+    )
+  )
+    return "/agents/:threadId"
+  if (/^\/review\/repositories\/[^/]+\/?$/.test(pathname))
+    return "/review/repositories/:owner"
+  if (/^\/[^/]+\/[^/]+\/pull\/[^/]+\/?$/.test(pathname))
+    return "/:owner/:repo/pull/:number"
+  return pathname
+}
+
+function stripUrlDetails(url: string, dashboardOrigin?: string): string {
+  const withoutDetails = url.split(/[?#]/, 1)[0] ?? ""
+  if (withoutDetails.startsWith("/"))
+    return withoutDetails.startsWith("//")
+      ? stripAbsoluteUrlDetails(withoutDetails, dashboardOrigin)
+      : templateDashboardPath(withoutDetails)
+  if (!/^https?:\/\//i.test(withoutDetails)) return withoutDetails
+  return stripAbsoluteUrlDetails(withoutDetails, dashboardOrigin)
+}
+
+function stripAbsoluteUrlDetails(
+  url: string,
+  dashboardOrigin?: string
+): string {
+  try {
+    const parsed = new URL(url, dashboardOrigin)
+    const pathname =
+      parsed.origin === dashboardOrigin
+        ? templateDashboardPath(parsed.pathname)
+        : parsed.pathname
+    const prefix = url.startsWith("//") ? `//${parsed.host}` : parsed.origin
+    return `${prefix}${pathname}`
+  } catch {
+    return url
+  }
 }
 
 function stripEventUrlDetails(
   value: unknown,
+  dashboardOrigin?: string,
   seen = new WeakSet<object>()
 ): void {
   if (!value || typeof value !== "object" || seen.has(value)) return
@@ -73,9 +120,9 @@ function stripEventUrlDetails(
         key === "resource_url" ||
         key === "source_url")
     ) {
-      record[key] = stripUrlDetails(child)
+      record[key] = stripUrlDetails(child, dashboardOrigin)
     } else {
-      stripEventUrlDetails(child, seen)
+      stripEventUrlDetails(child, dashboardOrigin, seen)
     }
   }
 }
@@ -83,7 +130,13 @@ function stripEventUrlDetails(
 function sanitizeEventUrls(
   event: Parameters<NonNullable<RumInitConfiguration["beforeSend"]>>[0]
 ): boolean {
-  stripEventUrlDetails(event)
+  let dashboardOrigin: string | undefined
+  const viewUrl = (event as { view?: { url?: unknown } }).view?.url
+  if (typeof viewUrl === "string" && URL.canParse(viewUrl))
+    dashboardOrigin = new URL(viewUrl).origin
+  dashboardOrigin ??=
+    typeof window === "undefined" ? undefined : window.location.origin
+  stripEventUrlDetails(event, dashboardOrigin)
   return true
 }
 
