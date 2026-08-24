@@ -11,28 +11,30 @@ This page covers only what is specific to running two instances side by side.
 
 | Branch | Contents | Updated by |
 |---|---|---|
-| `preview` | `main` + every open PR labeled `preview` | `.github/workflows/build_preview_branch.yml`, on every push to `main` and on every label/push event for a labeled PR |
+| `preview` | `main` + every open PR labeled `preview` | LangChain's deployment automation, which lives outside this repository and runs on demand |
 | `prod` | Snapshot of `main` | `.github/workflows/promote_main_to_prod.yml`, daily at 08:00 UTC |
 
 `preview` is force-pushed and rebuilt from scratch on every run — never commit to it
 directly, and do not enable branch protection on it. Removing the `preview` label (or
-merging/closing the PR) drops that PR on the next build.
+merging/closing the PR) drops that PR on the next build. Each run also builds the
+dashboard image and deploys the backend revision, so the branch and the running preview
+environment move together.
 
 ### Testing an unmerged PR
 
-Add the `preview` label. Labeled PRs are merged in ascending PR number order; one that
+Add the `preview` label, then ask a maintainer to run a preview deploy — labels no longer
+trigger one on their own. Labeled PRs are merged in ascending PR number order; one that
 fails to merge is skipped and the build continues with the next, so a single conflict
-never blocks the queue. Each labeled PR gets one status comment (merged, conflicting, or
-rejected), updated in place rather than re-posted.
+never blocks the queue. The run's summary lists what was merged and what was skipped.
 
 **Only PRs whose `authorAssociation` is `OWNER` or `MEMBER` are merged.** GitHub computes
 that server-side from organization membership, so it covers private members and cannot be
 set by the PR author.
 
 That gate is a security boundary: code merged into `preview` runs in the preview
-deployment with preview credentials, and a merged `.github/workflows/` change would run
-with repository secrets if it triggers on `preview`. The workflow itself only ever runs
-`main`'s copy of `scripts/build_preview_branch.sh` and never executes PR code in CI.
+deployment with preview credentials. Assembly happens outside this repository, from a
+script this repository does not supply, and no PR's code is executed while the branch is
+built.
 
 ## Keeping the two instances apart
 
@@ -62,15 +64,6 @@ the dashboard runs (the pod environment on Kubernetes, the project settings on V
 It has no default: a fallback would be production's backend, and preview would inherit it
 and drive production's agents, threads, and sandboxes.
 
-The preview image workflow also needs these repository settings:
-
-- Variable `PREVIEW_DASHBOARD_URL` — the preview dashboard's public URL.
-- Actions secret `OPERATIONS_API_JWT_SECRET` — the restart signing secret.
-
-Set `OPERATIONS_API_JWT_SECRET` to the same value in the preview dashboard deployment. The
-workflow signs a short-lived restart token with it after publishing an image, and the dashboard
-uses its deployment secret to verify that token.
-
 Requests stay same-origin — the server proxies `/dashboard/api/*` and `/webhooks/*` to
 that backend — so `DASHBOARD_API_BASE_URL`, the GitHub App callback URL, and the
 `DASHBOARD_ALLOWED_ORIGINS` entry must all point at the dashboard's own domain, not the
@@ -84,4 +77,4 @@ reason, so each instance publishes one hostname rather than leaking its LangGrap
 
 1. Mention `@openswe-preview` on a test PR — only the preview bot replies.
 2. Mention `@openswe` on the same PR — only the production bot replies.
-3. Label an open PR `preview` and confirm the workflow run summary lists it under **Merged**.
+3. Label an open PR `preview` and confirm the next preview deploy lists it under **Merged**.
