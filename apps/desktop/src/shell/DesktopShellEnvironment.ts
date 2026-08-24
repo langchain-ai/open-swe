@@ -67,6 +67,22 @@ export class DesktopShellEnvironment extends Context.Service<
   }
 >()("@t3tools/desktop/shell/DesktopShellEnvironment") {}
 
+const MODEL_PROVIDER_ENV_NAMES = [
+  "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
+  "OPENAI_API_BASE",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_API_URL",
+  "FIREWORKS_API_KEY",
+  "GOOGLE_API_KEY",
+  "GEMINI_API_KEY",
+  "LANGSMITH_GATEWAY_API_KEY",
+  "LANGSMITH_API_KEY_PROD",
+  "LANGSMITH_GATEWAY_ENABLED",
+  "LANGSMITH_GATEWAY_BASE_URL",
+  "LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES",
+] as const;
 const LOGIN_SHELL_ENV_NAMES = [
   "PATH",
   "DBUS_SESSION_BUS_ADDRESS",
@@ -85,6 +101,7 @@ const LOGIN_SHELL_ENV_NAMES = [
   "XDG_SESSION_DESKTOP",
   "XDG_SESSION_TYPE",
   "WAYLAND_DISPLAY",
+  ...MODEL_PROVIDER_ENV_NAMES,
 ] as const;
 const WINDOWS_PROFILE_ENV_NAMES = ["PATH", "FNM_DIR", "FNM_MULTISHELL_PATH"] as const;
 const LOCALE_ENV_NAMES = ["LANG", "LC_ALL", "LC_CTYPE"] as const;
@@ -279,6 +296,17 @@ const extractEnvironment = (output: string, names: ReadonlyArray<string>): Envir
   return environment;
 };
 
+export function applyModelProviderEnvironment(
+  env: NodeJS.ProcessEnv,
+  shellEnvironment: Readonly<EnvironmentPatch>,
+): void {
+  for (const name of MODEL_PROVIDER_ENV_NAMES) {
+    if (env[name] === undefined && shellEnvironment[name]) {
+      env[name] = shellEnvironment[name];
+    }
+  }
+}
+
 const runCommandOutput = Effect.fn("desktop.shellEnvironment.runCommandOutput")(function* (input: {
   readonly probe: DesktopShellEnvironmentProbe;
   readonly command: string;
@@ -433,6 +461,7 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       );
       if (shellEnvironment.PATH) break;
     }
+    applyModelProviderEnvironment(config.env, shellEnvironment);
 
     const launchctlPath =
       config.platform === "darwin" && !shellEnvironment.PATH

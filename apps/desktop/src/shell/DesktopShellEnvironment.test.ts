@@ -100,6 +100,33 @@ function runShellEnvironment(input: {
 }
 
 describe("DesktopShellEnvironment", () => {
+  it("hydrates Kandji-provided model credentials and endpoints", () => {
+    const env: NodeJS.ProcessEnv = {};
+
+    DesktopShellEnvironment.applyModelProviderEnvironment(env, {
+      OPENAI_API_KEY: "managed-test-key",
+      OPENAI_BASE_URL: "https://gateway.example/openai/v1",
+    });
+
+    assert.equal(env.OPENAI_API_KEY, "managed-test-key");
+    assert.equal(env.OPENAI_BASE_URL, "https://gateway.example/openai/v1");
+  });
+
+  it("preserves explicit provider configuration", () => {
+    const env: NodeJS.ProcessEnv = {
+      OPENAI_API_KEY: "explicit-test-key",
+      OPENAI_BASE_URL: "https://explicit.example/openai/v1",
+    };
+
+    DesktopShellEnvironment.applyModelProviderEnvironment(env, {
+      OPENAI_API_KEY: "managed-test-key",
+      OPENAI_BASE_URL: "https://managed.example/openai/v1",
+    });
+
+    assert.equal(env.OPENAI_API_KEY, "explicit-test-key");
+    assert.equal(env.OPENAI_BASE_URL, "https://explicit.example/openai/v1");
+  });
+
   it.effect("hydrates PATH and missing SSH_AUTH_SOCK from the login shell on macOS", () =>
     Effect.gen(function* () {
       const env: NodeJS.ProcessEnv = {
@@ -117,6 +144,8 @@ describe("DesktopShellEnvironment", () => {
             PATH: "/opt/homebrew/bin:/usr/bin",
             SSH_AUTH_SOCK: "/tmp/secretive.sock",
             HOMEBREW_PREFIX: "/opt/homebrew",
+            OPENAI_API_KEY: "managed-test-key",
+            OPENAI_BASE_URL: "https://gateway.example/openai/v1",
           });
         },
       });
@@ -126,6 +155,8 @@ describe("DesktopShellEnvironment", () => {
       assert.equal(env.PATH, "/opt/homebrew/bin:/usr/bin:/Users/test/.local/bin");
       assert.equal(env.SSH_AUTH_SOCK, "/tmp/secretive.sock");
       assert.equal(env.HOMEBREW_PREFIX, "/opt/homebrew");
+      assert.equal(env.OPENAI_API_KEY, "managed-test-key");
+      assert.equal(env.OPENAI_BASE_URL, "https://gateway.example/openai/v1");
     }),
   );
 
