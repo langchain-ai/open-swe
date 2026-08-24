@@ -45,7 +45,8 @@ describe("local graph proxy origin gate", () => {
 
   it("admits the app's own requests", () => {
     expect(isSameOriginRequest(server, "same-origin", server)).toBe(true)
-    expect(isSameOriginRequest(undefined, undefined, server)).toBe(true)
+    // A same-origin GET omits Origin, and Sec-Fetch-Site vouches for it.
+    expect(isSameOriginRequest(undefined, "same-origin", server)).toBe(true)
     expect(isSameOriginRequest(undefined, "none", server)).toBe(true)
   })
 
@@ -56,8 +57,9 @@ describe("local graph proxy origin gate", () => {
     expect(
       isSameOriginRequest("https://evil.example", "cross-site", server)
     ).toBe(false)
-    // A form post omits Origin on some engines; Sec-Fetch-Site still tells.
     expect(isSameOriginRequest(undefined, "cross-site", server)).toBe(false)
+    // Neither header: not a browser bound by the same-origin policy.
+    expect(isSameOriginRequest(undefined, undefined, server)).toBe(false)
     // A different loopback port is a different origin.
     expect(
       isSameOriginRequest("http://127.0.0.1:4000", undefined, server)

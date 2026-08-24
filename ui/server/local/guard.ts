@@ -19,8 +19,9 @@ export function localModeEnabled(
  * their files or start agent runs — code execution on their machine.
  *
  * A cross-origin `fetch` or form post always carries `Origin`; a same-origin
- * GET may omit it, so an absent `Origin` is only trusted when `Sec-Fetch-Site`
- * does not contradict it.
+ * GET may omit it, and is then admitted only on `Sec-Fetch-Site`'s word. That
+ * header has to be *present* to vouch for it: a caller sending neither header
+ * is not a browser holding to the same-origin policy, and gets nothing.
  */
 export function isSameOriginRequest(
   requestOrigin: string | undefined,
@@ -28,7 +29,7 @@ export function isSameOriginRequest(
   serverOrigin: string
 ): boolean {
   if (fetchSite && !["same-origin", "none"].includes(fetchSite)) return false
-  if (requestOrigin === undefined) return true
+  if (requestOrigin === undefined) return fetchSite !== undefined
   return requestOrigin === serverOrigin
 }
 
