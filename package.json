@@ -8,15 +8,20 @@
     "dev:mock": "bash tests/e2e/dev-mock.sh",
     "build": "turbo run build",
     "check": "turbo run check",
-    "format:check": "turbo run format:check",
-    "lint": "turbo run lint",
+    "format:check": "oxfmt --check",
+    "lint": "oxlint",
     "test": "turbo run test",
     "test:e2e": "npm --prefix tests/e2e run test",
     "test:e2e:desktop": "npm --prefix tests/e2e run test:desktop",
     "test:e2e:install": "npm --prefix tests/e2e ci && npm --prefix tests/e2e exec -- playwright install --with-deps chromium",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "format": "oxfmt"
   },
   "devDependencies": {
+    "@tanstack/eslint-plugin-query": "^5.102.0",
+    "@tanstack/eslint-plugin-router": "^1.162.0",
+    "oxfmt": "^0.64.0",
+    "oxlint": "^1.79.0",
     "turbo": "^2.10.9"
   }
 }

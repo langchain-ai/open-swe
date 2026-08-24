@@ -1,0 +1,19 @@
+{
+  "semi": true,
+  "endOfLine": "lf",
+  "singleQuote": false,
+  "tabWidth": 2,
+  "printWidth": 80,
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/*.md",
+    "**/*.json",
+    "**/*.jsonc",
+    "**/*.yaml",
+    "**/*.yml",
+    "**/*.toml",
+    "**/*.css",
+    "**/*.html",
+    "build/**"
+  ]
+}

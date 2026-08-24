@@ -61,8 +61,8 @@ jobs:
       - name: Run unit tests
         run: make test
 
-  ui-format:
-    name: UI format check
+  format:
+    name: Format check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -77,8 +77,8 @@ jobs:
       - name: Run format check
         run: pnpm run format:check
 
-  ui-lint:
-    name: UI lint
+  js-lint:
+    name: JS lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1

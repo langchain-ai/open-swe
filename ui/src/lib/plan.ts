@@ -22,7 +22,12 @@ export interface PlanUser {
 }
 
 export type PlanStatus =
-  "planning" | "ready" | "shared" | "revising" | "approved" | "cancelled"
+  | "planning"
+  | "ready"
+  | "shared"
+  | "revising"
+  | "approved"
+  | "cancelled"
 
 export interface PlanApprover {
   id: string

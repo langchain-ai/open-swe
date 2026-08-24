@@ -6,13 +6,20 @@
       "persistent": true
     },
     "build": {
-      "outputs": [".output/**", ".vercel/output/**", "build/**"],
-      "env": ["DASHBOARD_API_URL", "VERCEL", "E2E_HARNESS", "VITE_*"]
+      "outputs": [
+        ".output/**",
+        ".vercel/output/**",
+        "build/**"
+      ],
+      "env": [
+        "DASHBOARD_API_URL",
+        "VERCEL",
+        "E2E_HARNESS",
+        "VITE_*"
+      ]
     },
     "typecheck": {},
     "test": {},
-    "lint": {},
-    "format:check": {},
     "check": {
       "cache": false
     }

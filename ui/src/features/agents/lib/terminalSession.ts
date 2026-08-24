@@ -9,7 +9,8 @@ import type { CloudTerminalConnection } from "@/features/agents/lib/api"
 import { agentsApi } from "@/features/agents/lib/api"
 
 export type TerminalTarget =
-  { kind: "local"; sessionId: string } | { kind: "cloud"; threadId: string }
+  | { kind: "local"; sessionId: string }
+  | { kind: "cloud"; threadId: string }
 
 export interface TerminalSessionState {
   buffer: string

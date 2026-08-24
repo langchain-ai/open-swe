@@ -51,7 +51,11 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 export type ComposerCommandKey =
-  "ArrowDown" | "ArrowUp" | "Enter" | "Tab" | "Escape"
+  | "ArrowDown"
+  | "ArrowUp"
+  | "Enter"
+  | "Tab"
+  | "Escape"
 
 export interface ComposerPromptEditorHandle {
   focus: () => void
